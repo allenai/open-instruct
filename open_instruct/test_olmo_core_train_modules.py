@@ -515,7 +515,6 @@ class TestLigerGRPOLossConfig(unittest.TestCase):
 
         self.assertTrue(config.use_liger_grpo_loss)
 
-
 class TestComputeTVPOMask(unittest.TestCase):
     def test_in_budget_returns_all_ones(self):
         # ratio = 1 everywhere → per-token TV contribution is 0 → all prompts

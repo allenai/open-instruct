@@ -204,7 +204,7 @@ def patch_hf_lm_head_fp32(model):
         weight = getattr(lm_head, "weight", None)
         if is_zero3_lm_head:
             if args or kwargs:
-                raise RuntimeError("The ZeRO-3 fp32 lm_head patch only supports Linear-style lm_head.forward(input)")
+                return original_forward(hidden_states.float(), *args, **kwargs)
             bias = getattr(lm_head, "bias", None)
             return F.linear(
                 hidden_states.float(),

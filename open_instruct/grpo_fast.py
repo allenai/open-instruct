@@ -308,6 +308,32 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
+        self.liger_grpo_loss = None
+        if args.use_liger_grpo_loss:
+            try:
+                from liger_kernel.chunked_loss import (  # type: ignore[import-not-found]  # noqa: PLC0415
+                    LigerFusedLinearGRPOLoss,
+                )
+            except ImportError as exc:
+                raise ImportError(
+                    "`use_liger_grpo_loss=True` requires liger-kernel. Install the Linux dependency first."
+                ) from exc
+            self.liger_grpo_loss = LigerFusedLinearGRPOLoss(
+                beta=args.beta if args.load_ref_policy else 0.0,
+                compiled=args.liger_grpo_loss_compile,
+                use_ref_model=args.load_ref_policy,
+                chunk_size=args.liger_grpo_loss_chunk_size,
+                epsilon_low=args.clip_lower,
+                epsilon_high=args.clip_higher,
+                loss_type="dapo",
+                temperature=self.streaming_config.temperature,
+            )
+            _, lm_head = grpo_utils.get_causal_lm_backbone_and_lm_head(self.policy)
+            grpo_utils.patch_liger_grpo_lm_head_forward(
+                lm_head,
+                self.liger_grpo_loss,
+                lm_head_fp32=args.lm_head_fp32,
+            )
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
@@ -331,26 +357,6 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         if args.lm_head_fp32:
             patch_hf_lm_head_fp32(self.model)
-        self.liger_grpo_loss = None
-        if args.use_liger_grpo_loss:
-            try:
-                from liger_kernel.chunked_loss import (  # type: ignore[import-not-found]  # noqa: PLC0415
-                    LigerFusedLinearGRPOLoss,
-                )
-            except ImportError as exc:
-                raise ImportError(
-                    "`use_liger_grpo_loss=True` requires liger-kernel. Install the Linux dependency first."
-                ) from exc
-            self.liger_grpo_loss = LigerFusedLinearGRPOLoss(
-                beta=args.beta if args.load_ref_policy else 0.0,
-                compiled=args.liger_grpo_loss_compile,
-                use_ref_model=args.load_ref_policy,
-                chunk_size=args.liger_grpo_loss_chunk_size,
-                epsilon_low=args.clip_lower,
-                epsilon_high=args.clip_higher,
-                loss_type="dapo",
-                temperature=self.streaming_config.temperature,
-            )
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:
@@ -644,25 +650,14 @@ class PolicyTrainerRayProcess(RayProcess):
         flat_old_logprobs = old_logprobs.reshape(-1, 1).contiguous()
         flat_ref_logprobs = ref_logprobs.reshape(-1, 1).contiguous() if ref_logprobs is not None else None
 
-        bias = getattr(lm_head, "bias", None)
-        params = [lm_head.weight]
-        if isinstance(bias, torch.Tensor):
-            params.append(bias)
-        gather_ctx = deepspeed.zero.GatheredParameters(
-            params,
-            enabled=any(hasattr(param, "ds_id") for param in params),
+        loss, metrics = lm_head(
+            flat_hidden_states,
+            selected_token_ids=flat_selected_token_ids,
+            attention_mask=flat_response_mask,
+            advantages=flat_advantages,
+            ref_per_token_logps=flat_ref_logprobs,
+            old_per_token_logps=flat_old_logprobs,
         )
-        with gather_ctx:
-            loss, metrics = self.liger_grpo_loss(
-                _input=flat_hidden_states,
-                lin_weight=lm_head.weight,
-                selected_token_ids=flat_selected_token_ids,
-                attention_mask=flat_response_mask,
-                advantages=flat_advantages,
-                bias=bias,
-                ref_per_token_logps=flat_ref_logprobs,
-                old_per_token_logps=flat_old_logprobs,
-            )
 
         current_global_tokens = response_mask.sum().float().detach()
         dist.all_reduce(current_global_tokens, op=dist.ReduceOp.SUM)

@@ -912,6 +912,57 @@ def get_causal_lm_backbone_and_lm_head(model: torch.nn.Module) -> tuple[torch.nn
     return backbone, lm_head
 
 
+def patch_liger_grpo_lm_head_forward(
+    lm_head: torch.nn.Module,
+    liger_grpo_loss: torch.nn.Module,
+    lm_head_fp32: bool = False,
+) -> bool:
+    """Route explicit GRPO-loss calls through lm_head.forward so ZeRO hooks see normal module execution."""
+    if getattr(lm_head, "_open_instruct_liger_grpo_patch", False):
+        return False
+
+    original_forward = lm_head.forward
+
+    def patched_forward(
+        hidden_states: torch.Tensor,
+        *args,
+        selected_token_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        advantages: torch.Tensor | None = None,
+        ref_per_token_logps: torch.Tensor | None = None,
+        old_per_token_logps: torch.Tensor | None = None,
+        **kwargs,
+    ):
+        if selected_token_ids is None:
+            return original_forward(hidden_states, *args, **kwargs)
+        if args or kwargs:
+            raise RuntimeError("Liger GRPO lm_head forward only supports keyword GRPO inputs.")
+        if attention_mask is None or advantages is None:
+            raise RuntimeError("Liger GRPO lm_head forward requires attention_mask and advantages.")
+
+        weight = lm_head.weight
+        bias = getattr(lm_head, "bias", None)
+        if lm_head_fp32:
+            hidden_states = hidden_states.float()
+            weight = weight.float()
+            bias = bias.float() if isinstance(bias, torch.Tensor) else bias
+
+        return liger_grpo_loss(
+            _input=hidden_states,
+            lin_weight=weight,
+            selected_token_ids=selected_token_ids,
+            attention_mask=attention_mask,
+            advantages=advantages,
+            bias=bias,
+            ref_per_token_logps=ref_per_token_logps,
+            old_per_token_logps=old_per_token_logps,
+        )
+
+    lm_head.forward = patched_forward
+    lm_head._open_instruct_liger_grpo_patch = True
+    return True
+
+
 def forward_for_liger_hidden_states(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
