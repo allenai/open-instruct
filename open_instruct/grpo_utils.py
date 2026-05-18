@@ -218,6 +218,11 @@ class GRPOExperimentConfig(
     """the docker image for evaluation for oe-eval"""
     oe_eval_gpu_multiplier: int | None = None
     """multiply the gpus used for each oe-eval task"""
+    oe_eval_tokenizer_path: str | None = None
+    """If set, evaluation jobs load this tokenizer instead of the checkpoint's
+    own tokenizer files. Use when the saved tokenizer is incompatible with the
+    eval image's transformers version (e.g. point at a pinned old-transformers
+    tokenizer dir on weka)."""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
     eval_workspace: str = "ai2/tulu-3-results"

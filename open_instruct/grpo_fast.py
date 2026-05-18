@@ -910,6 +910,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 eval_workspace=args.eval_workspace,
                 beaker_image=args.oe_eval_beaker_image,
                 oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+                oe_eval_tokenizer_path=args.oe_eval_tokenizer_path,
             )
 
 

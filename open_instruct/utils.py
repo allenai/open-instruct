@@ -1229,6 +1229,7 @@ def launch_ai2_evals_on_weka(
     eval_workspace: str | None = "ai2/tulu-3-results",
     beaker_image: str | None = None,
     oe_eval_gpu_multiplier: int | None = None,
+    oe_eval_tokenizer_path: str | None = None,
 ) -> None:
     command = f"""\
 python scripts/submit_eval_jobs_old.py \
@@ -1258,6 +1259,8 @@ python scripts/submit_eval_jobs_old.py \
         command += f" --beaker_image {beaker_image}"
     if oe_eval_gpu_multiplier is not None:
         command += f" --gpu_multiplier {oe_eval_gpu_multiplier}"
+    if oe_eval_tokenizer_path is not None:
+        command += f" --tokenizer_path {oe_eval_tokenizer_path}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()

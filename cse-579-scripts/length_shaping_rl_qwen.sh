@@ -114,4 +114,5 @@ uv run python mason.py \
         --length_reward_warmup_fraction "$WARMUP_FRACTION" \
         --length_reward_solve_rate_threshold "$SOLVE_RATE_THRESHOLD" \
         --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
+        --oe_eval_tokenizer_path /weka/oe-adapt-default/jacobm/repos/cse-579/tokenizers/qwen3-olmo-thinker-eos-old-transformers \
         --oe_eval_tasks alpaca_eval_v3::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning,ifbench::tulu,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2025_deepseek
