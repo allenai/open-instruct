@@ -799,14 +799,20 @@ class PolicyTrainerRayProcess(RayProcess):
                             )
                         )
                         liger_hidden_states_BT = hidden_states_BT.float() if self.args.lm_head_fp32 else hidden_states_BT
+                        liger_lm_head_params = _z3_params_to_fetch(
+                            [param for param in (lm_head_weight, lm_head_bias) if isinstance(param, torch.Tensor)]
+                        )
                         with torch.no_grad():
-                            local_logprobs_unmasked_BT = grpo_utils.selective_logprobs_from_lm_head(
-                                hidden_states=liger_hidden_states_BT.detach(),
-                                lm_head_weight=lm_head_weight.detach(),
-                                selected_token_ids=selected_token_ids_BT,
-                                bias=lm_head_bias.detach() if lm_head_bias is not None else None,
-                                temperature=self.streaming_config.temperature,
-                            )
+                            with deepspeed.zero.GatheredParameters(
+                                liger_lm_head_params, enabled=len(liger_lm_head_params) > 0
+                            ):
+                                local_logprobs_unmasked_BT = grpo_utils.selective_logprobs_from_lm_head(
+                                    hidden_states=liger_hidden_states_BT.detach(),
+                                    lm_head_weight=lm_head_weight.detach(),
+                                    selected_token_ids=selected_token_ids_BT,
+                                    bias=lm_head_bias.detach() if lm_head_bias is not None else None,
+                                    temperature=self.streaming_config.temperature,
+                                )
                             local_logprobs_BT = grpo_utils.mask_logprobs(
                                 local_logprobs_unmasked_BT, response_mask_BT
                             )
@@ -817,6 +823,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         selected_token_ids_BT = None
                         lm_head_bias = None
                         liger_hidden_states_BT = None
+                        liger_lm_head_params = []
                         local_logprobs_unmasked_BT = None
                         local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
                             self.model,
@@ -932,6 +939,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             tis_mask_kept_tokens += tis_mask_BT.sum()
                             tis_mask_total_tokens += response_mask_BT.sum()
 
+                    backward_done = False
                     if self.args.use_liger_grpo_loss:
                         assert self.liger_grpo_loss is not None
                         assert hidden_states_BT is not None
@@ -958,33 +966,47 @@ class PolicyTrainerRayProcess(RayProcess):
                             else None
                         )
                         flat_tis_weights = combined_tis_BT.reshape(-1, 1) if combined_tis_BT is not None else None
-                        loss, _ = self.liger_grpo_loss(
-                            _input=flat_hidden_states,
-                            lin_weight=lm_head_weight,
-                            selected_token_ids=flat_selected_token_ids,
-                            attention_mask=flat_response_mask,
-                            advantages=flat_advantages,
-                            bias=lm_head_bias,
-                            old_per_token_logps=flat_old_logprobs,
-                            ref_per_token_logps=flat_ref_logprobs,
-                            vllm_is_ratio=flat_tis_weights,
-                        )
-                        liger_normalizer = response_mask_BT.sum().float()
-                        if dist.is_initialized():
-                            dist.all_reduce(liger_normalizer, op=dist.ReduceOp.SUM)
-                            liger_normalizer = liger_normalizer / dist.get_world_size()
-                        liger_normalizer = liger_normalizer.clamp_min(1.0)
-                        loss = loss * (liger_normalizer / float(loss_denominator))
-                        with torch.no_grad():
-                            pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
-                                new_logprobs=new_logprobs_BT,
-                                ratio=ratio_BT,
-                                advantages=advantages_BT,
-                                ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
-                                config=self.args,
-                                tis_weights=combined_tis_BT,
-                                policy_freeze_mask=tvpo_mask_BT,
+                        with deepspeed.zero.GatheredParameters(
+                            liger_lm_head_params, enabled=len(liger_lm_head_params) > 0
+                        ):
+                            loss, _ = self.liger_grpo_loss(
+                                _input=flat_hidden_states,
+                                lin_weight=lm_head_weight,
+                                selected_token_ids=flat_selected_token_ids,
+                                attention_mask=flat_response_mask,
+                                advantages=flat_advantages,
+                                bias=lm_head_bias,
+                                old_per_token_logps=flat_old_logprobs,
+                                ref_per_token_logps=flat_ref_logprobs,
+                                vllm_is_ratio=flat_tis_weights,
                             )
+                            liger_normalizer = response_mask_BT.sum().float()
+                            if dist.is_initialized():
+                                dist.all_reduce(liger_normalizer, op=dist.ReduceOp.SUM)
+                                liger_normalizer = liger_normalizer / dist.get_world_size()
+                            liger_normalizer = liger_normalizer.clamp_min(1.0)
+                            loss = loss * (liger_normalizer / float(loss_denominator))
+                            with torch.no_grad():
+                                pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                                    new_logprobs=new_logprobs_BT,
+                                    ratio=ratio_BT,
+                                    advantages=advantages_BT,
+                                    ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                                    config=self.args,
+                                    tis_weights=combined_tis_BT,
+                                    policy_freeze_mask=tvpo_mask_BT,
+                                )
+
+                            loss *= self.args.world_size // self.args.sequence_parallel_size
+                            torch.cuda.empty_cache()
+                            is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                            self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                            self.model.backward(loss)
+                        if is_accumulation_boundary:
+                            self.model.step()
+                            grad_norms.append(float(self.model.get_global_grad_norm()))
+                        local_step += 1
+                        backward_done = True
                     else:
                         pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                             new_logprobs=new_logprobs_BT,
@@ -1002,18 +1024,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
-                    loss *= self.args.world_size // self.args.sequence_parallel_size
+                    if not backward_done:
+                        loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
-                    torch.cuda.empty_cache()
-                    is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                    # Tell deepspeed whether this backward is the last in the accumulation group.
-                    self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                    self.model.backward(loss)
-                    if is_accumulation_boundary:
-                        self.model.step()
-                        grad_norms.append(float(self.model.get_global_grad_norm()))
-                    local_step += 1
+                        # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
+                        torch.cuda.empty_cache()
+                        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                        # Tell deepspeed whether this backward is the last in the accumulation group.
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        self.model.backward(loss)
+                        if is_accumulation_boundary:
+                            self.model.step()
+                            grad_norms.append(float(self.model.get_global_grad_norm()))
+                        local_step += 1
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
                         i,
