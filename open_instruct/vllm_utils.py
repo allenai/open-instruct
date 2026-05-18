@@ -114,6 +114,59 @@ RESET_FAILURE_ZERO_REWARD_MARKERS = (
 MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
 MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
+
+def _patch_vllm_model_class_lm_head_fp32(model_cls: type) -> bool:
+    """Keep a vLLM model's final projection in fp32."""
+    if getattr(model_cls, "_open_instruct_lm_head_fp32_patch", False):
+        return False
+    if not hasattr(model_cls, "compute_logits"):
+        return False
+
+    original_init = model_cls.__init__
+    original_compute_logits = model_cls.compute_logits
+
+    def patched_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        lm_head = getattr(self, "lm_head", None)
+        if lm_head is not None and hasattr(lm_head, "float"):
+            lm_head.float()
+
+    def patched_compute_logits(self, hidden_states, *args, **kwargs):
+        if isinstance(hidden_states, torch.Tensor):
+            hidden_states = hidden_states.float()
+        return original_compute_logits(self, hidden_states, *args, **kwargs)
+
+    model_cls.__init__ = patched_init
+    model_cls.compute_logits = patched_compute_logits
+    model_cls._open_instruct_lm_head_fp32_patch = True
+    return True
+
+
+def patch_vllm_qwen3_5_lm_head_fp32() -> None:
+    # vLLM's Qwen3.5 implementation keeps the lm_head in the model dtype by
+    # default. This mirrors vLLM's MiniMax fix: do the final projection in fp32
+    # to avoid bf16 rounding in logits/logprobs.
+    patched_classes = []
+    for module_name in (
+        "vllm.model_executor.models.qwen3_5",
+        "vllm.model_executor.models.qwen3_5_mtp",
+    ):
+        try:
+            module = __import__(module_name, fromlist=[""])
+        except ImportError:
+            continue
+
+        for attr_name in dir(module):
+            if not attr_name.startswith("Qwen3_5"):
+                continue
+            model_cls = getattr(module, attr_name)
+            if isinstance(model_cls, type) and _patch_vllm_model_class_lm_head_fp32(model_cls):
+                patched_classes.append(f"{module_name}.{attr_name}")
+
+    if patched_classes:
+        logger.info("Applied vLLM Qwen3.5 fp32 lm_head patch to %s", ", ".join(sorted(patched_classes)))
+
+
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
@@ -590,6 +643,7 @@ class LLMRayActor:
         train_dataset=None,
         eval_dataset=None,
         inference_batch_size: int | None = None,
+        lm_head_fp32: bool = False,
         **kwargs,
     ):
         assert_threaded_actor(self)
@@ -611,6 +665,8 @@ class LLMRayActor:
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+        if lm_head_fp32:
+            patch_vllm_qwen3_5_lm_head_fp32()
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
         if inference_batch_size is not None:
@@ -1399,6 +1455,7 @@ def create_vllm_engines(
     vllm_attention_backend: str | None = None,
     vllm_gdn_prefill_backend: str | None = None,
     inference_batch_size: int | None = None,
+    lm_head_fp32: bool = False,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1487,6 +1544,7 @@ def create_vllm_engines(
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
                 inference_batch_size=inference_batch_size,
+                lm_head_fp32=lm_head_fp32,
                 **({"gdn_prefill_backend": vllm_gdn_prefill_backend} if vllm_gdn_prefill_backend is not None else {}),
             )
         )

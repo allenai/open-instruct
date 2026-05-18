@@ -178,3 +178,29 @@ def patch_qwen3_5_packing():
     modeling_qwen3_5.Qwen3_5GatedDeltaNet.forward = _patched_gated_delta_net_forward
     modeling_qwen3_5.Qwen3_5DecoderLayer.forward = _patched_decoder_layer_forward
     logger.info("Applied Qwen3.5 packing patch for GatedDeltaNet seq_idx/cu_seqlens support")
+
+
+def patch_hf_lm_head_fp32(model):
+    """Keep a Hugging Face causal LM's final projection in fp32."""
+    lm_head = getattr(model, "lm_head", None)
+    if lm_head is None and hasattr(model, "module"):
+        lm_head = getattr(model.module, "lm_head", None)
+    if lm_head is None:
+        logger.warning("Could not apply fp32 lm_head patch because model has no lm_head")
+        return False
+
+    lm_head.float()
+    if getattr(lm_head, "_open_instruct_lm_head_fp32_patch", False):
+        return False
+
+    original_forward = lm_head.forward
+
+    def patched_forward(hidden_states, *args, **kwargs):
+        if isinstance(hidden_states, torch.Tensor):
+            hidden_states = hidden_states.float()
+        return original_forward(hidden_states, *args, **kwargs)
+
+    lm_head.forward = patched_forward
+    lm_head._open_instruct_lm_head_fp32_patch = True
+    logger.info("Applied fp32 lm_head patch to Hugging Face model")
+    return True

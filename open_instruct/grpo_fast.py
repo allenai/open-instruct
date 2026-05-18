@@ -111,7 +111,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.qwen3_5_packing_patch import patch_qwen3_5_packing
+from open_instruct.qwen3_5_packing_patch import patch_hf_lm_head_fp32, patch_qwen3_5_packing
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -297,6 +297,8 @@ class PolicyTrainerRayProcess(RayProcess):
             local_files_only=True,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        if args.lm_head_fp32:
+            patch_hf_lm_head_fp32(self.policy)
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
             core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
@@ -329,6 +331,8 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
+        if args.lm_head_fp32:
+            patch_hf_lm_head_fp32(self.model)
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:
@@ -409,6 +413,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
+            if args.lm_head_fp32:
+                patch_hf_lm_head_fp32(self.ref_policy)
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
 
         if self.mpu is not None:
@@ -1613,6 +1619,7 @@ def create_model_and_optimizer(
         eval_dataset=eval_dataset,
         vllm_attention_backend=vllm_config.vllm_attention_backend,
         vllm_gdn_prefill_backend=vllm_config.vllm_gdn_prefill_backend,
+        lm_head_fp32=args.lm_head_fp32,
     )
     logger.info("======== ✅ vLLM engines and actor_manager initialized =========")
 

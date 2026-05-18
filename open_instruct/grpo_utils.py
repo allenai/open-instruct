@@ -95,6 +95,8 @@ class GRPOExperimentConfig(
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
     model_dtype: str = "bfloat16"
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
+    lm_head_fp32: bool = False
+    """Whether to keep the final LM head projection in fp32 for both HF training and vLLM rollout models."""
 
     # Algorithm
     num_mini_batches: int = 1
