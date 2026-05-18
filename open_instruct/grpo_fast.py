@@ -348,7 +348,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 chunk_size=args.liger_grpo_loss_chunk_size,
                 epsilon_low=args.clip_lower,
                 epsilon_high=args.clip_higher,
-                loss_type=args.loss_fn.value,
+                loss_type=str(args.loss_fn),
                 temperature=self.streaming_config.temperature,
             )
             if args.deepspeed_stage == 3:
