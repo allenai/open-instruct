@@ -31,7 +31,7 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, grpo_utils, logger_utils, utils, vllm_utils
+from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
@@ -126,6 +126,12 @@ def main(
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
+    oc_model_config = olmo_core_utils.ModelConfig(
+        model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
+    )
+    _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
+    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
+
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",
         "runtime_env": {
@@ -185,7 +191,7 @@ def main(
         additive_format_reward=streaming_config.additive_format_reward,
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
-    generation_config = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)["train"]
+    generation_configs = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -193,7 +199,6 @@ def main(
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
-    assert model_config.model_name_or_path is not None, "model_name_or_path must be set"
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
@@ -206,7 +211,7 @@ def main(
         param_prompt_Q=prompt_Q,
         tokenizer=tokenizer,
         config=streaming_config,
-        generation_config=generation_config,
+        generation_config=generation_configs["train"],
         num_training_steps=args.num_training_steps,
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -308,6 +313,21 @@ def main(
             for m in policy_group.models
         ],
         desc="Setting up callbacks",
+    )
+
+    utils.ray_get_with_progress(
+        [
+            m.setup_eval.remote(
+                prompt_Q=prompt_Q,
+                evaluation_inference_results_Q=evaluation_inference_results_Q,
+                eval_dataset=eval_dataset,
+                eval_generation_config=generation_configs["eval"],
+                base_env_config=base_env_config,
+                max_possible_score=streaming_config.max_possible_score,
+            )
+            for m in policy_group.models
+        ],
+        desc="Setting up eval",
     )
 
     utils.ray_get_with_progress(

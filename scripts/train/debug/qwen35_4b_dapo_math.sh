@@ -23,7 +23,6 @@ uv run mason.py \
     --preemptible \
     --num_nodes 1 \
     --gpus 8 \
-    --budget ai2/oe-adapt \
     --artifact_ttl 1d \
     -- \
 source configs/beaker_configs/ray_node_setup.sh \
@@ -35,7 +34,6 @@ source configs/beaker_configs/ray_node_setup.sh \
     --async_steps 4 \
     --active_sampling \
     --inflight_updates \
-    --truncated_importance_sampling_ratio_cap 2.0 \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 8 \
