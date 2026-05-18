@@ -661,6 +661,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         current_global_tokens = response_mask.sum().float().detach()
         dist.all_reduce(current_global_tokens, op=dist.ReduceOp.SUM)
+        # Drain all queued device work through this collective so ranks enter
+        # ZeRO-3 backward with bounded skew.
+        torch.cuda.synchronize()
         dp_world_size = self.args.world_size // self.args.sequence_parallel_size
         scale = current_global_tokens * dp_world_size / (self.args.world_size * float(loss_denominator))
         return loss * scale, tuple(metrics)
