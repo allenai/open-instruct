@@ -958,8 +958,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             else None
                         )
                         flat_tis_weights = combined_tis_BT.reshape(-1, 1) if combined_tis_BT is not None else None
-                        # Liger divides num_items_in_batch by distributed world size internally.
-                        liger_num_items = float(loss_denominator) * self.args.world_size
                         loss, _ = self.liger_grpo_loss(
                             _input=flat_hidden_states,
                             lin_weight=lm_head_weight,
@@ -970,8 +968,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             old_per_token_logps=flat_old_logprobs,
                             ref_per_token_logps=flat_ref_logprobs,
                             vllm_is_ratio=flat_tis_weights,
-                            num_items_in_batch=liger_num_items,
                         )
+                        liger_normalizer = response_mask_BT.sum().float()
+                        if dist.is_initialized():
+                            dist.all_reduce(liger_normalizer, op=dist.ReduceOp.SUM)
+                            liger_normalizer = liger_normalizer / dist.get_world_size()
+                        liger_normalizer = liger_normalizer.clamp_min(1.0)
+                        loss = loss * (liger_normalizer / float(loss_denominator))
                         with torch.no_grad():
                             pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
                                 new_logprobs=new_logprobs_BT,
