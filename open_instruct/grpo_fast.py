@@ -684,6 +684,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.streaming_config.temperature,
                     use_grad=False,
                     cp_contexts=cp_contexts_BT,
+                    use_chunked_lm_head=self.args.lm_head_fp32,
                 )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
@@ -701,6 +702,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         use_grad=False,
                         cp_contexts=cp_contexts_BT,
+                        use_chunked_lm_head=self.args.lm_head_fp32,
                     )
 
                 with torch.no_grad():
@@ -733,6 +735,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         use_grad=False,
                         cp_contexts=cp_contexts_BT,
+                        use_chunked_lm_head=self.args.lm_head_fp32,
                     )
                 else:
                     trace_logprobs_BT = [
@@ -847,16 +850,28 @@ class PolicyTrainerRayProcess(RayProcess):
                         liger_hidden_states_BT = None
                         liger_lm_head_params = []
                         local_logprobs_unmasked_BT = None
-                        local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
-                            self.model,
-                            data_BT.query_responses[i],
-                            None,
-                            data_BT.position_ids[i],
-                            self.pad_token_id,
-                            self.streaming_config.temperature,
-                            return_entropy=self.args.record_entropy,
-                            cp_context=cp_contexts_BT[i],
-                        )
+                        if self.args.lm_head_fp32 and not self.args.record_entropy:
+                            local_logprobs_BT = grpo_utils.forward_for_chunked_lm_head_logprobs(
+                                self.model,
+                                data_BT.query_responses[i],
+                                None,
+                                data_BT.position_ids[i],
+                                self.pad_token_id,
+                                self.streaming_config.temperature,
+                                cp_context=cp_contexts_BT[i],
+                            )
+                            entropy_BT = None
+                        else:
+                            local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
+                                self.model,
+                                data_BT.query_responses[i],
+                                None,
+                                data_BT.position_ids[i],
+                                self.pad_token_id,
+                                self.streaming_config.temperature,
+                                return_entropy=self.args.record_entropy,
+                                cp_context=cp_contexts_BT[i],
+                            )
                         local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 

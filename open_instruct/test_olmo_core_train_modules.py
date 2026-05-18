@@ -147,6 +147,10 @@ class _TinyCausalLM(torch.nn.Module):
         self.model = _TinyBackbone(vocab_size, hidden_size)
         self.lm_head = torch.nn.Linear(hidden_size, vocab_size, bias=False)
 
+    def forward(self, input_ids, attention_mask=None, position_ids=None):
+        hidden_states = self.model(input_ids, attention_mask=attention_mask, position_ids=position_ids).last_hidden_state
+        return SimpleNamespace(logits=self.lm_head(hidden_states))
+
 
 class TestForwardForLigerGRPOLoss(unittest.TestCase):
     def test_returns_hidden_states_and_shifted_labels(self):
@@ -163,6 +167,27 @@ class TestForwardForLigerGRPOLoss(unittest.TestCase):
         self.assertIs(lm_head_weight, model.lm_head.weight)
         self.assertIsNone(bias)
         torch.testing.assert_close(selected_token_ids, torch.tensor([[2, 0, 3]]))
+
+    def test_chunked_lm_head_logprobs_match_full_logits(self):
+        model = _TinyCausalLM(vocab_size=11, hidden_size=5)
+        query_responses = torch.tensor([[1, 2, 0, 3], [4, 5, 6, 7]])
+        attention_mask = torch.ones_like(query_responses)
+        position_ids = torch.arange(query_responses.shape[1]).unsqueeze(0).expand_as(query_responses)
+
+        full_logprobs, _ = grpo_utils.forward_for_logprobs(
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.3
+        )
+        chunked_logprobs = grpo_utils.forward_for_chunked_lm_head_logprobs(
+            model,
+            query_responses,
+            attention_mask,
+            position_ids,
+            pad_token_id=0,
+            temperature=1.3,
+            lm_head_chunk_size=2,
+        )
+
+        torch.testing.assert_close(chunked_logprobs, full_logprobs)
 
 
 class TestDAPOLoss(unittest.TestCase):

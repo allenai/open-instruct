@@ -889,6 +889,18 @@ def forward_for_logprobs(
     return logprob_BT, entropy
 
 
+def _compute_forward_extra_kwargs(
+    position_ids: torch.Tensor, attention_mask: torch.Tensor | None, cp_context: Any = None
+) -> tuple[torch.Tensor | None, dict]:
+    extra_kwargs: dict = {}
+    if (position_ids.diff(dim=-1) < 0).any():
+        attention_mask = None
+        extra_kwargs = _compute_packing_kwargs(position_ids, cp_context=cp_context)
+    elif cp_context is not None:
+        extra_kwargs = {"cp_context": cp_context}
+    return attention_mask, extra_kwargs
+
+
 def _unwrap_deepspeed_model(model: torch.nn.Module) -> torch.nn.Module:
     return getattr(model, "module", model)
 
@@ -919,6 +931,43 @@ def get_causal_lm_backbone_and_head(model: torch.nn.Module) -> tuple[torch.nn.Mo
     return backbone, lm_head
 
 
+def forward_for_chunked_lm_head_logprobs(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    position_ids: torch.Tensor,
+    pad_token_id: int,
+    temperature: float,
+    lm_head_chunk_size: int = 256,
+    cp_context: Any = None,
+) -> torch.Tensor:
+    """Compute selected-token logprobs by running the lm_head over sequence chunks.
+
+    This avoids materializing a full ``[batch, seq, vocab]`` logits tensor while
+    still calling the actual lm_head module, so DeepSpeed hooks and lm_head fp32
+    patches remain active.
+    """
+    attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
+    backbone, lm_head = get_causal_lm_backbone_and_head(model)
+    output = backbone(
+        input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs
+    )
+    hidden_states = getattr(output, "last_hidden_state", output[0] if isinstance(output, tuple) else output)
+    hidden_states = hidden_states[:, :-1, :]
+
+    labels = query_responses[:, 1:].clone().to(hidden_states.device)
+    labels[labels == pad_token_id] = 0
+
+    logprobs: list[torch.Tensor] = []
+    for start in range(0, hidden_states.shape[1], lm_head_chunk_size):
+        end = min(start + lm_head_chunk_size, hidden_states.shape[1])
+        logits = lm_head(hidden_states[:, start:end, :])
+        if temperature != 1.0:
+            logits = logits / temperature
+        logprobs.append(model_utils.log_softmax_and_gather(logits, labels[:, start:end]))
+    return torch.cat(logprobs, dim=1) if len(logprobs) > 1 else logprobs[0]
+
+
 def forward_for_liger_grpo_loss(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
@@ -928,13 +977,7 @@ def forward_for_liger_grpo_loss(
     cp_context: Any = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Forward the backbone only and prepare inputs for Liger's fused GRPO loss."""
-    extra_kwargs: dict = {}
-    if (position_ids.diff(dim=-1) < 0).any():
-        attention_mask = None
-        extra_kwargs = _compute_packing_kwargs(position_ids, cp_context=cp_context)
-    elif cp_context is not None:
-        extra_kwargs = {"cp_context": cp_context}
-
+    attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
     backbone, lm_head = get_causal_lm_backbone_and_head(model)
     output = backbone(
         input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs
@@ -1009,6 +1052,8 @@ def compute_logprobs(
     batch_size: int | None = None,
     cp_context: Any = None,
     cp_contexts: list[Any] | None = None,
+    use_chunked_lm_head: bool = False,
+    lm_head_chunk_size: int = 256,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch.
 
@@ -1048,16 +1093,28 @@ def compute_logprobs(
 
             if len(set(shapes)) != 1 or different_ctx:
                 for i in batch_indices:
-                    single_logprobs, _ = forward_for_logprobs(
-                        model,
-                        data_BT.query_responses[i],
-                        None,
-                        data_BT.position_ids[i],
-                        pad_token_id,
-                        temperature,
-                        False,
-                        cp_context=ctx_for(i),
-                    )
+                    if use_chunked_lm_head:
+                        single_logprobs = forward_for_chunked_lm_head_logprobs(
+                            model,
+                            data_BT.query_responses[i],
+                            None,
+                            data_BT.position_ids[i],
+                            pad_token_id,
+                            temperature,
+                            lm_head_chunk_size=lm_head_chunk_size,
+                            cp_context=ctx_for(i),
+                        )
+                    else:
+                        single_logprobs, _ = forward_for_logprobs(
+                            model,
+                            data_BT.query_responses[i],
+                            None,
+                            data_BT.position_ids[i],
+                            pad_token_id,
+                            temperature,
+                            False,
+                            cp_context=ctx_for(i),
+                        )
 
                     response_mask_BT = data_BT.response_masks[i]
                     single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:].bool())
@@ -1067,16 +1124,28 @@ def compute_logprobs(
             batch_query_responses = torch.cat(query_responses, dim=0)
             batch_position_ids = torch.cat(position_ids, dim=0)
 
-            batch_logprobs, _ = forward_for_logprobs(
-                model,
-                batch_query_responses,
-                None,
-                batch_position_ids,
-                pad_token_id,
-                temperature,
-                False,
-                cp_context=ctx_for(batch_indices[0]),
-            )
+            if use_chunked_lm_head:
+                batch_logprobs = forward_for_chunked_lm_head_logprobs(
+                    model,
+                    batch_query_responses,
+                    None,
+                    batch_position_ids,
+                    pad_token_id,
+                    temperature,
+                    lm_head_chunk_size=lm_head_chunk_size,
+                    cp_context=ctx_for(batch_indices[0]),
+                )
+            else:
+                batch_logprobs, _ = forward_for_logprobs(
+                    model,
+                    batch_query_responses,
+                    None,
+                    batch_position_ids,
+                    pad_token_id,
+                    temperature,
+                    False,
+                    cp_context=ctx_for(batch_indices[0]),
+                )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
             split_logprobs = torch.split(batch_logprobs, sample_sizes, dim=0)
