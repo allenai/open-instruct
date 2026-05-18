@@ -94,6 +94,8 @@ async def get_completion(prompt):
             ],
             max_tokens=8192,
         )
+        if not response.choices or response.choices[0].message is None:
+            raise ValueError("LLM returned empty or filtered response")
         return {"original_prompt": prompt, "openai_response": response.choices[0].message.content, "success": True}
     except Exception as e:
         return {"original_prompt": prompt, "openai_response": str(e), "success": False}

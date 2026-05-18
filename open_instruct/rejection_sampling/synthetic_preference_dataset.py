@@ -144,6 +144,8 @@ def main(args: Args):
             for i in range(MAX_TRIES):
                 try:
                     response = await acompletion(model=model, messages=messages)
+                    if not response.choices or response.choices[0].message is None:
+                        raise ValueError("LLM returned empty or filtered response")
                     r = response.choices[0].message.content
                     comparison = r.split("Comparison:")[1].split("Preferred:")[0].strip()
                     preferred = r.split("Preferred:")[1].strip()

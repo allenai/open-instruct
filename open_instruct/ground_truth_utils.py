@@ -723,6 +723,8 @@ class LMJudgeVerifier(VerifierFunction):
             return reasoning, score
 
         try:
+            if not completion.choices or completion.choices[0].message is None:
+                raise ValueError("LLM returned empty or filtered response")
             # remove anything between <think> and </think> including the tags using regex
             pattern = r"<think>\s*.*?\s*</think>\s*"
             content = re.sub(pattern, "", completion.choices[0].message.content, flags=re.DOTALL)

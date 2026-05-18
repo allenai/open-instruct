@@ -116,6 +116,8 @@ def run_litellm(model_name: str, user_prompt: str, system_prompt: str | None = N
         # if we get an error, return an empty string
         return ""
 
+    if not response.choices or response.choices[0].message is None:
+        return ""
     return response.choices[0].message.content
 
 
@@ -204,4 +206,6 @@ async def run_litellm_async(
         logger.warning(f"Error in run_litellm_async: {e}")
         return ""
 
+    if not response.choices or response.choices[0].message is None:
+        return ""
     return response.choices[0].message.content

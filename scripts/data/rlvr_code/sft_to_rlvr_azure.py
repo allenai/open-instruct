@@ -146,8 +146,10 @@ async def get_completion(prompt, id, semaphore):
                     ],
                     max_tokens=8192,
                 )
+                if not response.choices or response.choices[0].message is None:
+                    raise ValueError("LLM returned empty or filtered response")
                 response_content = response.choices[0].message.content
-                if response.choices[0].message.content and response.usage:
+                if response_content and response.usage:
                     input_tokens = response.usage.prompt_tokens
                     output_tokens = response.usage.completion_tokens
 
