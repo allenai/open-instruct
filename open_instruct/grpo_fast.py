@@ -876,6 +876,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # Bound inter-iteration drift from async backward/ZeRO work
                         # before this rank starts the next sample.
                         torch.cuda.synchronize()
+                        dist.barrier(device_ids=[self.local_rank])
 
                         with torch.no_grad():
                             if self.args.beta != 0.0 and self.args.load_ref_policy:
