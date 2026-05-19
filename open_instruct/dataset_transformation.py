@@ -1184,6 +1184,8 @@ def mask_labels(
 def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
+    if isinstance(messages, str):
+        messages = json.loads(messages)
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = row.get("tools") or None
@@ -1212,6 +1214,8 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
 def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
+    if isinstance(messages, str):
+        messages = json.loads(messages)
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = row.get("tools") or None
