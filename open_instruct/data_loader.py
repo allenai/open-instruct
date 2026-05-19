@@ -510,6 +510,12 @@ class StreamingDataLoaderConfig:
     excluded from the shaping pool) and 0.0 otherwise. Pass an explicit non-negative
     value to override.
     """
+    length_reward_use_raw_group_stats: bool = False
+    """If True, compute the per-prompt group mean/std used to standardize the GRPO
+    advantage from the *raw* verifier rewards instead of the shaped rewards. The
+    shaped reward is still used as the per-response numerator term. This keeps the
+    per-prompt baseline a measure of problem difficulty even when shaping zeroes
+    out longer correct responses. No effect when shaping is "none"."""
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -1455,6 +1461,10 @@ class DataPreparationActor:
             scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
 
             scores_pre_shaping_mean = float(scores_per_prompt.mean()) if scores_per_prompt.size else 0.0
+            # Snapshot raw scores before shaping. Used for group-stats normalization
+            # when length_reward_use_raw_group_stats is set, so the per-prompt
+            # baseline still reflects difficulty rather than shaped reward.
+            raw_scores_per_prompt = scores_per_prompt
             length_reward_warmup_weight = 0.0
             if self.config.length_reward_shaping_method != "none" and len(result.responses) > 0:
                 response_lengths_arr = np.array([len(r) for r in result.responses])
@@ -1479,9 +1489,12 @@ class DataPreparationActor:
                 )
                 scores = scores_per_prompt.reshape(-1)
 
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+            stats_source = (
+                raw_scores_per_prompt if self.config.length_reward_use_raw_group_stats else scores_per_prompt
+            )
+            mean_grouped_rewards = stats_source.mean(axis=-1)
             mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
+            std_grouped_rewards = stats_source.std(axis=-1)
             std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
 
             if self.config.advantage_normalization_type == "standard":
