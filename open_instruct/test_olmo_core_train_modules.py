@@ -354,10 +354,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
 
     def test_rho_mask_tv_divergence(self):
         config = _make_grpo_config(
-            use_rho_correction=True,
-            rho_mask_lower_bound=0.0,
-            rho_mask_upper_bound=2.0,
-            rho_mask_tv_divergence=True,
+            use_rho_correction=True, rho_mask_lower_bound=0.0, rho_mask_upper_bound=2.0, rho_mask_tv_divergence=True
         )
         # Row 0: mean |ρ - 1| = 1.25, below upper=2.0, so it is kept.
         # Row 1: mean |ρ - 1| = 3.0, above upper=2.0, so TV-increasing tokens are dropped.
@@ -370,8 +367,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
 
         torch.testing.assert_close(correction.weights, torch.tensor([[0.25, 1.0, 4.0], [0.0, 0.0, 0.0]]))
         torch.testing.assert_close(
-            correction.metrics["val/rho_drop_high_frac"],
-            torch.tensor([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]),
+            correction.metrics["val/rho_drop_high_frac"], torch.tensor([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
         )
 
     def test_rho_mask_zeroes_loss(self):
