@@ -482,22 +482,22 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     rho_weights: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        clipfrac = (pg_losses2 > pg_losses).float()
+        pg_loss = torch.max(pg_losses, pg_losses2)
     elif config.loss_fn == GRPOLossType.cispo:
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
-        pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
-        pg_losses2 = pg_losses
+        clipfrac = (ratio > 1.0 + config.clip_higher).float()
+        pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    pg_losses = pg_losses * rho_weights
-    pg_losses2 = pg_losses2 * rho_weights
-
-    pg_loss_max = torch.max(pg_losses, pg_losses2)
+    pg_loss *= rho_weights
+    clipfrac *= (rho_weights != 0).float()
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
@@ -507,9 +507,9 @@ def compute_grpo_loss(
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
     else:
-        kl = torch.zeros_like(pg_loss_max)
+        kl = torch.zeros_like(pg_loss)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
+    return pg_loss, clipfrac, kl
 
 
 def forward_for_logprobs(
@@ -673,9 +673,8 @@ def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bo
 def populate_sample_loss_stats(
     loss_stats_B: dict[str, torch.Tensor],
     sample_idx: int,
-    pg_losses: torch.Tensor,
-    pg_losses2: torch.Tensor,
     pg_loss: torch.Tensor,
+    clipfrac: torch.Tensor,
     ratio: torch.Tensor,
     loss: torch.Tensor,
     response_mask: torch.Tensor,
@@ -696,7 +695,7 @@ def populate_sample_loss_stats(
         if rho_metrics is not None:
             for key, value in rho_metrics.items():
                 loss_stats_B[key][sample_idx] = masked_mean(value, response_mask)
-        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
+        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(clipfrac, response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss
         loss_stats_B["val/ratio"][sample_idx] = masked_mean(ratio, response_mask)

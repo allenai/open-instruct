@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Simplify GRPO clip fraction handling by returning the final policy loss and clip fraction directly from `compute_grpo_loss` (https://github.com/allenai/open-instruct/pull/1679).
 - Bring `grpo.py` (OLMo-core GRPO) to feature parity with `grpo_fast.py`: add `EvalCallback`, `setup_eval` actor RPC, unconditional vLLM-sync callback, `ConstantWithWarmup` scheduler support, and `StepTimingCallback` end-to-end step timing (https://github.com/allenai/open-instruct/pull/1672).
 - Remove references to deleted `ppo_vllm_thread_ray_gtrl.py` script: delete broken launch scripts (`scripts/train/debug/ppo.sh`, `scripts/train/rlvr/tulu_rlvr.sh`, `scripts/train/tulu3/ppo_8b.sh`) and add historical-reference notes to `docs/tulu3.md` and `docs/archived_dev_scripts/olmoe_0125.sh` pointing to the deletion commit. Also drop the dead `update_command_args.py` references: delete `scripts/train/benchmark.sh` and its section in `docs/get_started/ai2_internal_setup.md`, and update the README RLVR quickstart to launch `grpo_fast.py` via `scripts/train/build_image_and_launch.sh`.
 - Bump vllm to >=0.19.1 (and refresh `uv.lock`, including compressed-tensors v0.14.0.1 → v0.15.0.1).
