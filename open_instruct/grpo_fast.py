@@ -41,8 +41,8 @@ with contextlib.suppress(Exception):
     from deepspeed.utils import groups
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import data_types, grpo_utils, utils
-from open_instruct.data_loader import accumulate_inference_batches, add_prompt_to_generator
+from open_instruct import grpo_utils, utils
+from open_instruct.data_loader import add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
 
@@ -62,7 +62,6 @@ from typing import Any
 import backoff
 import datasets
 import numpy as np
-import pandas as pd
 import ray
 import torch
 import torch.distributed as dist
@@ -105,7 +104,6 @@ from open_instruct.model_utils import (
     get_olmo3_generation_config,
     load_ref_policy,
     print_rich_single_line_metrics,
-    print_rich_table,
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
@@ -578,24 +576,6 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
-    def calculate_token_counts(
-        self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
-    ) -> dict[int, float]:
-        accumulation_counts: dict[int, float] = {}
-        local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
-        if not local_counts:
-            return accumulation_counts
-
-        counts_tensor = torch.stack(local_counts)
-        dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM)
-
-        for i, count in enumerate(counts_tensor):
-            group_idx = i // accumulation_steps
-            key = int(group_idx * accumulation_steps)
-            accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
-
-        return accumulation_counts
-
     def _compute_loss_metrics(self, loss_stats_B: dict[str, torch.Tensor], token_counts: torch.Tensor) -> None:
         metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
         for k, v in metrics.items():
@@ -672,7 +652,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
-                    accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
+                    accumulation_token_counts = grpo_utils.calculate_token_counts(accumulation_steps, data_BT, device)
                 else:
                     accumulation_token_counts = {
                         int(group_idx * accumulation_steps): float(self.args.loss_denominator)
@@ -1616,7 +1596,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = average_metrics["time/getting_response"]
+    total_generation_time = average_metrics["time/group_generation_max"]
     sp_leader_metrics = [am for r, am in enumerate(array_metrics) if r % args.sequence_parallel_size == 0]
     prompt_lengths = [length for am in sp_leader_metrics for length in am["batch/prompt_lengths"]]
     response_lengths = [length for am in sp_leader_metrics for length in am["batch/response_lengths"]]
@@ -1704,121 +1684,6 @@ def maybe_save_checkpoint(
         save_time = timer.duration
 
     return save_time
-
-
-def maybe_evaluate(
-    args: grpo_utils.GRPOExperimentConfig,
-    training_step: int,
-    evaluation_inference_results_Q: ray_queue.Queue,
-    tokenizer,
-    episode,
-    eval_dataset: Dataset,
-    eval_generation_config,
-    model_dims: utils.ModelDims,
-    base_env_config: EnvConfig,
-    max_possible_score: float,
-    actor_manager=None,
-) -> bool:
-    """Optionally evaluate the model.
-
-    Returns:
-        True if evaluation results were successfully collected, False otherwise.
-    """
-    if eval_dataset is None:
-        return True  # No eval to do, so consider it "successful"
-
-    try:
-        is_final_step = training_step >= args.num_training_steps
-        num_eval_prompts = len(eval_dataset)
-        # On non-final steps, only evaluate when we have a full batch ready.
-        # This avoids partially draining the queue and losing results.
-        if not is_final_step:
-            queued_results = evaluation_inference_results_Q.qsize()
-            if queued_results < num_eval_prompts:
-                logger.info(
-                    "[Main Thread] ⏳ Eval responses pending (%s/%s); deferring evaluation.",
-                    queued_results,
-                    num_eval_prompts,
-                )
-                return False
-
-        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
-        timeout = 100 if is_final_step else 0.01
-
-        # Accumulate evaluation results from all vLLM engines
-        eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
-            evaluation_inference_results_Q,
-            eval_generation_config,
-            num_prompts=num_eval_prompts,
-            model_dims=model_dims,
-            tokenizer=tokenizer,
-            dataset=eval_dataset,
-            base_env_config=base_env_config,
-            actor_manager=actor_manager,
-            timeout=timeout,
-            active_sampling=False,
-            filter_zero_std_samples=False,
-            replenish_prompts=False,
-            max_possible_score=max_possible_score,
-            training_step=training_step,
-        )
-
-        logger.info("[Main Thread] 📊 Evaluation responses received")
-
-        eval_sequence_lengths = np.array([len(response) for response in eval_result.responses])
-        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_result.finish_reasons) / len(
-            eval_result.finish_reasons
-        )
-        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-        eval_pass_at_k_metrics: dict[str, float] = {}
-        scores = np.array(eval_batch.scores)
-        eval_k = eval_generation_config.n
-
-        if scores.size and scores.size % eval_k == 0:
-            scores_per_prompt = scores.reshape(-1, eval_k)
-            correct_per_prompt = scores_per_prompt >= max_possible_score - 1e-8
-            eval_pass_at_k_metrics.update(grpo_utils.compute_pass_at_k_metrics(correct_per_prompt))
-        else:
-            logger.warning(
-                "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
-            )
-        eval_metrics = {
-            "eval/scores": scores.mean(),
-            "eval/sequence_lengths": eval_sequence_lengths.mean(),
-            "eval/sequence_lengths_min": eval_sequence_lengths.min(),
-            "eval/sequence_lengths_max": eval_sequence_lengths.max(),
-            "eval/stop_rate": eval_stop_rate,
-            **eval_reward_metrics,
-            **eval_pass_at_k_metrics,
-        }
-
-        total_tokens = (
-            eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
-        )
-        eval_metrics["eval/actor_tokens_per_second"] = total_tokens / eval_result.token_statistics.generation_time
-
-        print_rich_single_line_metrics(eval_metrics)
-
-        table = {}
-        table["prompt"] = tokenizer.batch_decode(eval_batch.queries if eval_batch else [])
-        table["response"] = eval_batch.decoded_responses
-        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-        table["scores"] = eval_batch.scores
-        table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
-        if eval_batch.active_tools is not None:
-            table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
-        df = pd.DataFrame(table)
-
-        if args.with_tracking:
-            eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
-            wandb.log(eval_metrics, step=training_step)
-        else:
-            print_rich_table(df.iloc[:1])
-        del table
-        return True
-    except Empty:
-        logger.warning("[Main Thread] 🙈 Evaluation responses not received")
-        return False
 
 
 def save_final_model(
@@ -2160,7 +2025,7 @@ def run_training(
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
 
-        last_eval_collected = maybe_evaluate(
+        last_eval_collected = grpo_utils.maybe_evaluate(
             args,
             training_step,
             evaluation_inference_results_Q,
