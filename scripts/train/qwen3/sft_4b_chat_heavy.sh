@@ -6,10 +6,11 @@ python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority high \
-    --budget ai2/oe-omai \
+    --budget ai2/oe-other \
     --num_nodes 1 \
     --gpus 8 \
     --non_resumable \
+    --preemptible \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     -- torchrun \
