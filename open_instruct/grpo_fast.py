@@ -331,8 +331,6 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
-        if args.lm_head_fp32:
-            patch_hf_lm_head_fp32(self.model)
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:
@@ -386,6 +384,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
+        if args.lm_head_fp32:
+            # Apply after checkpoint loading so the wrapper sees the final ZeRO-3
+            # parameter objects/statuses restored by DeepSpeed.
+            patch_hf_lm_head_fp32(self.model)
         self.model.train()
 
         # reference model
