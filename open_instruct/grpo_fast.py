@@ -111,7 +111,11 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.qwen3_5_packing_patch import patch_hf_lm_head_fp32, patch_qwen3_5_packing
+from open_instruct.qwen3_5_packing_patch import (
+    patch_hf_lm_head_fp32,
+    patch_qwen3_5_packing,
+    register_qwen3_5_zero3_external_parameters,
+)
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -384,6 +388,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
+        register_qwen3_5_zero3_external_parameters(self.model)
         if args.lm_head_fp32:
             # Apply after checkpoint loading so the wrapper sees the final ZeRO-3
             # parameter objects/statuses restored by DeepSpeed.
@@ -415,6 +420,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_policy_update_freq=args.ref_policy_update_freq,
                 alpha=args.alpha,
             )
+            register_qwen3_5_zero3_external_parameters(self.ref_policy)
             if args.lm_head_fp32:
                 patch_hf_lm_head_fp32(self.ref_policy)
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)

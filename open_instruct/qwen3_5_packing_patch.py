@@ -13,6 +13,7 @@ Usage:
     # Then load your model as usual.
 """
 
+import deepspeed
 import torch
 import torch.nn.functional as F
 from transformers.models.qwen3_5 import modeling_qwen3_5
@@ -21,6 +22,39 @@ from transformers.models.qwen3_5.modeling_qwen3_5 import apply_mask_to_padding_s
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
+
+_ORIGINAL_GATED_DELTA_NET_INIT = modeling_qwen3_5.Qwen3_5GatedDeltaNet.__init__
+_ZERO3_EXTERNAL_CONV1D_REGISTERED_PARAM_ID = "_open_instruct_zero3_external_conv1d_registered_param_id"
+
+
+def _register_zero3_external_conv1d_parameter(module):
+    """Register the child conv weight read directly by GatedDeltaNet.forward."""
+    weight = module.conv1d.weight
+    if getattr(module, _ZERO3_EXTERNAL_CONV1D_REGISTERED_PARAM_ID, None) == id(weight):
+        return False
+    if not hasattr(weight, "ds_id"):
+        return False
+
+    deepspeed.zero.register_external_parameter(module, weight)
+    setattr(module, _ZERO3_EXTERNAL_CONV1D_REGISTERED_PARAM_ID, id(weight))
+    return True
+
+
+def register_qwen3_5_zero3_external_parameters(model):
+    """Register Qwen3.5 external params after ZeRO-3 init or checkpoint load."""
+    model = getattr(model, "module", model)
+    registered = 0
+    for module in model.modules():
+        if isinstance(module, modeling_qwen3_5.Qwen3_5GatedDeltaNet):
+            registered += int(_register_zero3_external_conv1d_parameter(module))
+    if registered:
+        logger.info(f"Registered {registered} Qwen3.5 conv1d weights as ZeRO-3 external parameters")
+    return registered
+
+
+def _patched_gated_delta_net_init(self, *args, **kwargs):
+    _ORIGINAL_GATED_DELTA_NET_INIT(self, *args, **kwargs)
+    _register_zero3_external_conv1d_parameter(self)
 
 
 def _patched_gated_delta_net_forward(self, hidden_states, cache_params=None, attention_mask=None, **kwargs):
@@ -173,10 +207,15 @@ def _patched_decoder_layer_forward(
     return hidden_states
 
 
+def _set_class_attr(cls, name, value):
+    setattr(cls, name, value)
+
+
 def patch_qwen3_5_packing():
     """Apply the packing fix to Qwen3.5 GatedDeltaNet and DecoderLayer."""
-    modeling_qwen3_5.Qwen3_5GatedDeltaNet.forward = _patched_gated_delta_net_forward
-    modeling_qwen3_5.Qwen3_5DecoderLayer.forward = _patched_decoder_layer_forward
+    _set_class_attr(modeling_qwen3_5.Qwen3_5GatedDeltaNet, "__init__", _patched_gated_delta_net_init)
+    _set_class_attr(modeling_qwen3_5.Qwen3_5GatedDeltaNet, "forward", _patched_gated_delta_net_forward)
+    _set_class_attr(modeling_qwen3_5.Qwen3_5DecoderLayer, "forward", _patched_decoder_layer_forward)
     logger.info("Applied Qwen3.5 packing patch for GatedDeltaNet seq_idx/cu_seqlens support")
 
 
