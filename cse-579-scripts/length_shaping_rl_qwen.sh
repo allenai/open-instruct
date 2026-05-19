@@ -19,6 +19,8 @@
 #   SOLVE_RATE_THRESHOLD                                     (default: 0.3)
 #   GIT_REF            branch in allenai/open-instruct       (default: ian/length-shaping)
 #   EXP_SUFFIX         appended to exp_name                  (default: empty)
+#   USE_RAW_GROUP_STATS true|false: compute GRPO advantage   (default: false)
+#                       group mean/std from raw (not shaped) rewards
 #   SECRETS_WORKSPACE  workspace to read secrets from        (default: ai2/ianm)
 #
 # Example (linear decay, alpha=1.0):
@@ -34,6 +36,7 @@ WARMUP_FRACTION=${WARMUP_FRACTION:-0.25}
 SOLVE_RATE_THRESHOLD=${SOLVE_RATE_THRESHOLD:-0.3}
 GIT_REF=${GIT_REF:-ian/length-shaping}
 EXP_SUFFIX=${EXP_SUFFIX:-}
+USE_RAW_GROUP_STATS=${USE_RAW_GROUP_STATS:-false}
 
 SECRETS_WORKSPACE=${SECRETS_WORKSPACE:-ai2/ianm}
 LAUNCH_WANDB_KEY=$(beaker secret read -w "$SECRETS_WORKSPACE" IANM_WANDB_API_KEY)
@@ -113,6 +116,7 @@ uv run python mason.py \
         --length_reward_warmup_type "$WARMUP_TYPE" \
         --length_reward_warmup_fraction "$WARMUP_FRACTION" \
         --length_reward_solve_rate_threshold "$SOLVE_RATE_THRESHOLD" \
+        --length_reward_use_raw_group_stats "$USE_RAW_GROUP_STATS" \
         --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
         --oe_eval_tokenizer_path /weka/oe-adapt-default/jacobm/repos/cse-579/tokenizers/qwen3-olmo-thinker-eos-old-transformers \
         --oe_eval_tasks alpaca_eval_v3::hamish_zs_reasoning_deepseek,minerva_math_500::hamish_zs_reasoning,ifbench::tulu,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2025_deepseek
