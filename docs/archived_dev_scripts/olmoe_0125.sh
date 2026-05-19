@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# NOTE: This archived script references open_instruct/ppo_vllm_thread_ray_gtrl.py,
+# which was removed in commit bac9393104e4622ea3735d2f201b3c79e5b69c2d (PR #1132).
+# It is preserved here for historical reference and is not runnable as-is.
+
 # 1B full sweep
 for epoch in 2; do
 for lr in 2e-5 1.75e-5; do
