@@ -27,15 +27,15 @@ uv run python mason.py \
     --mixed_precision bf16 \
     --num_processes 8 \
     --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name qwen35_9b_axtree_sft \
+    --exp_name qwen35_9b_axtree_sft_no_offloading_sp_1 \
     --model_name_or_path $MODEL \
     --tokenizer_name $MODEL \
     --use_liger_kernel \
     --max_seq_length 16384 \
-    --sequence_parallel_size 2 \
+    --sequence_parallel_size 1 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
