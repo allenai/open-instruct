@@ -129,7 +129,7 @@ class GRPOExperimentConfig(
     rho_mask_tv_divergence: bool = False
     """If True, applies the TV divergence masking from VACO (https://arxiv.org/abs/2603.01365)
     maintains same rho for correction but masks using bounds and sequence-level TV divergence abs(p_seq - 1)
-    won't mask tokens that purport to decrease TV divergence: advantage * ρ <= 0
+    won't mask tokens that purport to decrease TV divergence: advantage * logprob_diff <= 0
     """
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
