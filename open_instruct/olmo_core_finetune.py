@@ -29,10 +29,15 @@ import dataclasses
 import datetime
 import glob
 import hashlib
+import json
 import os
 import pathlib
 import re
+import sys
 from typing import Any
+
+import numpy as np
+import yaml
 
 import torch
 import torch.distributed as dist
@@ -109,6 +114,94 @@ def _tokenize_to_numpy_dir(
     )
 
 
+def _derive_label_mask_path(token_ids_path: str) -> str:
+    parts = token_ids_path.rsplit("/", 1)
+    if len(parts) == 2:
+        directory, filename = parts
+        return f"{directory}/{filename.replace('token_ids', 'labels_mask')}"
+    return token_ids_path.replace("token_ids", "labels_mask")
+
+
+def _build_numpy_mixture_dataset(
+    numpy_dataset_path: str,
+    tokenizer_config: oc_data.TokenizerConfig,
+    sequence_length: int,
+    work_dir: str,
+) -> oc_data.NumpyPackedFSLDatasetConfig:
+    """Build a NumpyPackedFSLDatasetConfig from a YAML/JSON mixture config.
+
+    The config file should have a ``sources`` key containing a list of entries,
+    each with ``path`` (directory of pre-tokenized numpy files), ``ratio``
+    (target mixing ratio), and optionally ``name`` and ``max_repetition_ratio``.
+    """
+    from olmo_core.data.source_mixture import SourceMixtureConfig, SourceMixtureDatasetConfig, SourceMixtureList
+    from olmo_core.io import get_file_size
+
+    with open(numpy_dataset_path) as f:
+        if numpy_dataset_path.endswith(".json"):
+            data = json.load(f)
+        else:
+            data = yaml.safe_load(f)
+
+    sources = data["sources"] if isinstance(data, dict) else data
+
+    source_configs = []
+    for entry in sources:
+        clean_path = entry["path"].rstrip("/")
+        name = entry.get("name", os.path.basename(clean_path))
+        source_configs.append(
+            SourceMixtureConfig(
+                source_name=name,
+                paths=[f"{clean_path}/token_ids_part_*.npy"],
+                target_ratio=float(entry["ratio"]),
+                max_repetition_ratio=float(entry.get("max_repetition_ratio", 1.02)),
+            )
+        )
+
+    npdtype = np.uint32
+    for dt in (np.uint8, np.uint16, np.uint32, np.uint64):
+        if (tokenizer_config.vocab_size - 1) <= np.iinfo(dt).max:
+            npdtype = dt
+            break
+
+    total_available_tokens = 0
+    for sc in source_configs:
+        for path in sc.resolved_paths:
+            total_available_tokens += get_file_size(path) // npdtype(0).itemsize
+
+    requested_tokens = int(total_available_tokens * 0.99)
+
+    mixture_config = SourceMixtureDatasetConfig(
+        source_list=SourceMixtureList(sources=source_configs),
+        requested_tokens=requested_tokens,
+        global_batch_size=64 * sequence_length,
+        seed=42,
+        processes=min(os.cpu_count() or 1, 16),
+    )
+
+    mixture = mixture_config.build(npdtype=npdtype, sequence_length=sequence_length)
+    token_paths = [str(p) for p in mixture.to_paths()]
+    label_mask_paths = [_derive_label_mask_path(p) for p in token_paths]
+    num_files = len(token_paths)
+
+    logger.info(
+        f"Mixture resolved to {num_files} files from {len(source_configs)} sources, "
+        f"source_group_size={num_files} for cross-source packing"
+    )
+
+    return oc_data.NumpyPackedFSLDatasetConfig(
+        tokenizer=tokenizer_config,
+        work_dir=work_dir,
+        paths=token_paths,
+        expand_glob=False,
+        label_mask_paths=label_mask_paths,
+        generate_doc_lengths=True,
+        long_doc_strategy=oc_data.LongDocStrategy.truncate,
+        sequence_length=sequence_length,
+        source_group_size=num_files,
+    )
+
+
 @dataclasses.dataclass
 class SFTArguments:
     tracking: olmo_core_utils.ExperimentConfig
@@ -117,55 +210,61 @@ class SFTArguments:
     dataset: olmo_core_utils.DatasetConfig
     logging: olmo_core_utils.LoggingConfig
     checkpoint: olmo_core_utils.CheckpointConfig
+    numpy_dataset_path: str | None = None
+    """Path to a YAML/JSON config for pre-tokenized numpy dataset mixing with ratios.
+    When set, skips the HF tokenization pipeline and loads pre-tokenized data directly."""
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
+    use_pretokenized = args.numpy_dataset_path is not None
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
-    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
 
-    dcs = dataset_transformation.load_dataset_configs(
-        dataset_mixer_list=args.dataset.mixer_list,
-        dataset_mixer_list_splits=args.dataset.mixer_list_splits,
-        dataset_transform_fn=args.dataset.transform_fn,
-        transform_fn_args=transform_fn_args,
-        target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
-    )
-    cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
-    seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
-    numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
+    if not use_pretokenized:
+        transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
 
-    if args.dataset.cache_dataset_only:
-        pre_init_rank = int(os.environ.get("RANK", 0))
-        if pre_init_rank == 0:
-            if _numpy_dir_is_populated(numpy_dir):
-                logger.info(f"Numpy SFT files already present at {numpy_dir}; nothing to do.")
-            else:
-                _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
-            logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
-        return
-
-    if not _numpy_dir_is_populated(numpy_dir):
-        mixer = " ".join(args.dataset.mixer_list)
-        raise FileNotFoundError(
-            "Pre-tokenized numpy SFT dataset not found.\n"
-            f"  expected: {numpy_dir}\n"
-            f"  hash:     {cache_hash}\n\n"
-            "Launch a CPU-only tokenization job on a Weka-mounted cluster first, e.g.:\n\n"
-            "  uv run python mason.py \\\n"
-            "      --cluster ai2/jupiter --workspace ai2/open-instruct-dev \\\n"
-            '      --priority urgent --image "$BEAKER_IMAGE" --budget ai2/oe-adapt \\\n'
-            "      --gpus 0 --num_nodes 1 --no_auto_dataset_cache \\\n"
-            "      -- uv run python open_instruct/olmo_core_finetune.py \\\n"
-            f"      --model_name_or_path {args.model.model_name_or_path} \\\n"
-            f"      --tokenizer_name_or_path {tc.tokenizer_name_or_path} \\\n"
-            f"      --max_seq_length {args.training.max_seq_length} \\\n"
-            f"      --mixer_list {mixer} \\\n"
-            f"      --local_cache_dir {args.dataset.local_cache_dir} \\\n"
-            "      --cache_dataset_only\n\n"
-            "Re-launch training once the tokenization job has completed."
+        dcs = dataset_transformation.load_dataset_configs(
+            dataset_mixer_list=args.dataset.mixer_list,
+            dataset_mixer_list_splits=args.dataset.mixer_list_splits,
+            dataset_transform_fn=args.dataset.transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
         )
+        cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
+        seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
+        numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
+
+        if args.dataset.cache_dataset_only:
+            pre_init_rank = int(os.environ.get("RANK", 0))
+            if pre_init_rank == 0:
+                if _numpy_dir_is_populated(numpy_dir):
+                    logger.info(f"Numpy SFT files already present at {numpy_dir}; nothing to do.")
+                else:
+                    _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
+                logger.info("Dataset cached successfully. Exiting because --cache_dataset_only was set.")
+            return
+
+        if not _numpy_dir_is_populated(numpy_dir):
+            mixer = " ".join(args.dataset.mixer_list)
+            raise FileNotFoundError(
+                "Pre-tokenized numpy SFT dataset not found.\n"
+                f"  expected: {numpy_dir}\n"
+                f"  hash:     {cache_hash}\n\n"
+                "Launch a CPU-only tokenization job on a Weka-mounted cluster first, e.g.:\n\n"
+                "  uv run python mason.py \\\n"
+                "      --cluster ai2/jupiter --workspace ai2/open-instruct-dev \\\n"
+                '      --priority urgent --image "$BEAKER_IMAGE" --budget ai2/oe-adapt \\\n'
+                "      --gpus 0 --num_nodes 1 --no_auto_dataset_cache \\\n"
+                "      -- uv run python open_instruct/olmo_core_finetune.py \\\n"
+                f"      --model_name_or_path {args.model.model_name_or_path} \\\n"
+                f"      --tokenizer_name_or_path {tc.tokenizer_name_or_path} \\\n"
+                f"      --max_seq_length {args.training.max_seq_length} \\\n"
+                f"      --mixer_list {mixer} \\\n"
+                f"      --local_cache_dir {args.dataset.local_cache_dir} \\\n"
+                "      --cache_dataset_only\n\n"
+                "Re-launch training once the tokenization job has completed."
+            )
 
     global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
         seed=args.tracking.seed, timeout=datetime.timedelta(hours=_TOKENIZE_BARRIER_TIMEOUT_HOURS)
@@ -199,16 +298,26 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     dp_world_size = world_size // cp_degree
 
     oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc)
-    np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
-        tokenizer=oc_tokenizer_config,
-        work_dir=args.checkpoint.output_dir,
-        paths=[os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)],
-        expand_glob=True,
-        label_mask_paths=[os.path.join(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)],
-        generate_doc_lengths=True,
-        long_doc_strategy=oc_data.LongDocStrategy.truncate,
-        sequence_length=args.training.max_seq_length,
-    )
+
+    if use_pretokenized:
+        np_dataset_config = _build_numpy_mixture_dataset(
+            args.numpy_dataset_path,
+            oc_tokenizer_config,
+            args.training.max_seq_length,
+            args.checkpoint.output_dir,
+        )
+    else:
+        np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
+            tokenizer=oc_tokenizer_config,
+            work_dir=args.checkpoint.output_dir,
+            paths=[os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)],
+            expand_glob=True,
+            label_mask_paths=[os.path.join(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)],
+            generate_doc_lengths=True,
+            long_doc_strategy=oc_data.LongDocStrategy.truncate,
+            sequence_length=args.training.max_seq_length,
+        )
+
     np_dataset = np_dataset_config.build()
     np_dataset.prepare()
 
@@ -311,6 +420,22 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
 
 if __name__ == "__main__":
+    # Pre-parse --numpy_dataset_path before the dataclass parser consumes args,
+    # since it's not part of any shared dataclass config.
+    import argparse as _argparse
+
+    _pre_parser = _argparse.ArgumentParser(add_help=False)
+    _pre_parser.add_argument(
+        "--numpy_dataset_path",
+        type=str,
+        default=None,
+        help="Path to a YAML/JSON config for pre-tokenized numpy dataset mixing. "
+        "When set, skips the HF tokenization pipeline and loads pre-tokenized data directly.",
+    )
+    _pre_args, _remaining = _pre_parser.parse_known_args()
+    numpy_dataset_path = _pre_args.numpy_dataset_path
+    sys.argv = [sys.argv[0]] + _remaining
+
     parser = utils.ArgumentParserPlus(
         (  # ty: ignore[invalid-argument-type]
             olmo_core_utils.ExperimentConfig,
@@ -334,6 +459,7 @@ if __name__ == "__main__":
     )
     tracking, model, training, dataset, logging_cfg, checkpoint, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
     args = SFTArguments(
-        tracking=tracking, model=model, training=training, dataset=dataset, logging=logging_cfg, checkpoint=checkpoint
+        tracking=tracking, model=model, training=training, dataset=dataset, logging=logging_cfg, checkpoint=checkpoint,
+        numpy_dataset_path=numpy_dataset_path,
     )
     main(args, tc)
