@@ -99,11 +99,11 @@ class GRPOExperimentConfig(
     lm_head_fp32: bool = False
     """Whether to keep the final LM head projection in fp32 for both HF training and vLLM rollout models."""
     use_liger_grpo_loss: bool = False
-    """Whether to use Liger's fused linear GRPO loss. Currently supported only for DAPO."""
+    """Whether to use the tiled lm-head GRPO loss path. Currently supported only for DAPO."""
     liger_grpo_loss_chunk_size: int = 1
-    """Batch-dimension chunk size passed to LigerFusedLinearGRPOLoss."""
+    """Number of lm-head loss tiles to use in the tiled GRPO loss path."""
     liger_grpo_loss_compile: bool = True
-    """Whether Liger should torch.compile the GRPO loss math."""
+    """Deprecated; retained for backward-compatible configs."""
 
     # Algorithm
     num_mini_batches: int = 1
@@ -292,7 +292,7 @@ class GRPOExperimentConfig(
                 raise ValueError("`use_liger_grpo_loss` currently requires `loss_denominator=token`.")
             if self.kl_estimator != 2:
                 raise ValueError(
-                    "`use_liger_grpo_loss` matches the default KL estimator and requires `kl_estimator=2`."
+                    "`use_liger_grpo_loss` uses the default KL estimator and requires `kl_estimator=2`."
                 )
             if self.tis_mask_lower > 0.0 or self.tis_mask_upper > 0.0:
                 raise ValueError("`use_liger_grpo_loss` does not support TIS masks.")
@@ -759,6 +759,177 @@ def compute_grpo_loss(
         kl = torch.zeros_like(pg_loss_max)
 
     return pg_losses, pg_losses2, pg_loss_max, kl
+
+
+class TiledGRPOLMHeadLoss(torch.autograd.Function):
+    """Tiled DAPO/GRPO lm-head loss that avoids materializing full logits.
+
+    This follows DeepSpeed's ``TiledFusedLogitsLoss`` pattern: the lm-head
+    projection and scalar loss are recomputed per tile in ``forward`` and
+    ``torch.autograd.backward`` is called per tile to accumulate lm-head grads.
+    The custom ``backward`` then returns the precomputed hidden-state gradient
+    so the outer DeepSpeed backward only traverses the backbone.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        lm_head: torch.nn.Module,
+        hidden_states: torch.Tensor,
+        selected_token_ids: torch.Tensor,
+        response_mask: torch.Tensor,
+        advantages: torch.Tensor,
+        old_logprobs: torch.Tensor,
+        ref_logprobs: torch.Tensor,
+        has_ref_logprobs: bool,
+        temperature: float,
+        beta: float,
+        clip_lower: float,
+        clip_higher: float,
+        shards: int,
+        loss_scale: torch.Tensor,
+        compute_params: list[torch.nn.Parameter],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if hidden_states.dim() != 3:
+            raise ValueError(f"hidden_states must be [B, T, H], got {tuple(hidden_states.shape)}")
+        if selected_token_ids.shape != hidden_states.shape[:2]:
+            raise ValueError("selected_token_ids must match hidden_states batch/sequence dimensions")
+        if response_mask.shape != hidden_states.shape[:2]:
+            raise ValueError("response_mask must match hidden_states batch/sequence dimensions")
+        if shards < 1:
+            raise ValueError(f"shards must be >= 1, got {shards}")
+
+        x_requires_grad = hidden_states.requires_grad
+        batch_size, seq_len, hidden_size = hidden_states.shape
+        x = hidden_states.detach().reshape(-1, hidden_size)
+        x.requires_grad_(x_requires_grad)
+
+        labels = selected_token_ids.reshape(-1)
+        mask = response_mask.reshape(-1).to(dtype=torch.bool)
+        advantages = advantages.reshape(-1)
+        old_logprobs = old_logprobs.reshape(-1)
+        if has_ref_logprobs:
+            ref_logprobs = ref_logprobs.reshape(-1)
+
+        num_tokens = x.shape[0]
+        shards = min(shards, num_tokens)
+        valid = mask.to(dtype=torch.float32)
+        denom = valid.sum().clamp_min(1.0)
+        incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / denom).reshape(())
+
+        x_grad = torch.zeros_like(x) if x_requires_grad else None
+        x_shards = list(torch.chunk(x, chunks=shards, dim=0))
+        label_shards = list(torch.chunk(labels, chunks=shards, dim=0))
+        mask_shards = list(torch.chunk(mask, chunks=shards, dim=0))
+        advantage_shards = list(torch.chunk(advantages, chunks=shards, dim=0))
+        old_logprob_shards = list(torch.chunk(old_logprobs, chunks=shards, dim=0))
+        ref_logprob_shards = list(torch.chunk(ref_logprobs, chunks=shards, dim=0)) if has_ref_logprobs else []
+
+        total_loss_sum = torch.zeros((), dtype=torch.float32, device=hidden_states.device)
+        total_kl_sum = torch.zeros_like(total_loss_sum)
+        total_clip_sum = torch.zeros_like(total_loss_sum)
+        compute_params = [p for p in compute_params if p.requires_grad]
+
+        for shard_idx, x_shard in enumerate(x_shards):
+            if compute_params:
+                grad_is_ready = shard_idx + 1 == len(x_shards)
+                for param in compute_params:
+                    param.ds_grad_is_ready = grad_is_ready
+
+            shard_step = x_shard.shape[0]
+            shard_offset = shard_idx * x_shards[0].shape[0]
+            x_shard.requires_grad_(x_requires_grad)
+            if x_grad is not None:
+                x_shard.grad = x_grad.narrow(0, shard_offset, shard_step).view_as(x_shard)
+
+            with torch.enable_grad():
+                logits = lm_head(x_shard)
+                if temperature != 1.0:
+                    logits = logits / temperature
+                shard_labels = label_shards[shard_idx]
+                new_logprobs = torch.gather(logits, dim=-1, index=shard_labels.unsqueeze(-1)).squeeze(-1)
+                new_logprobs = new_logprobs - torch.logsumexp(logits, dim=-1)
+
+                ratio = torch.exp(new_logprobs - old_logprob_shards[shard_idx])
+                pg_losses = -advantage_shards[shard_idx] * ratio
+                pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(
+                    ratio, 1.0 - clip_lower, 1.0 + clip_higher
+                )
+                pg_loss = torch.max(pg_losses, pg_losses2)
+
+                if has_ref_logprobs:
+                    ref_diff = (new_logprobs - ref_logprob_shards[shard_idx]).clamp(-40.0, 40.0)
+                    kl = torch.expm1(-ref_diff) + ref_diff
+                else:
+                    kl = torch.zeros_like(pg_loss)
+
+                shard_mask = mask_shards[shard_idx].to(dtype=pg_loss.dtype)
+                per_token_loss = pg_loss + beta * kl
+                loss_sum = (per_token_loss * shard_mask).sum()
+
+            total_loss_sum = total_loss_sum + loss_sum.detach().float()
+            total_kl_sum = total_kl_sum + (kl.detach().float() * shard_mask.float()).sum()
+            total_clip_sum = total_clip_sum + ((pg_losses2 > pg_losses).detach().float() * shard_mask.float()).sum()
+            torch.autograd.backward(loss_sum, incoming_grad.to(dtype=loss_sum.dtype))
+
+        if compute_params:
+            for param in compute_params:
+                param.ds_grad_is_ready = True
+
+        if x_grad is None:
+            x_grad = torch.zeros_like(x)
+        ctx.save_for_backward(x_grad.reshape(batch_size, seq_len, hidden_size).detach())
+
+        loss = total_loss_sum / denom * loss_scale.detach().to(dtype=total_loss_sum.dtype)
+        kl_avg = total_kl_sum / denom
+        clipfrac = total_clip_sum / denom
+        return loss, kl_avg, clipfrac
+
+    @staticmethod
+    def backward(ctx, *grads) -> tuple:
+        (x_grad,) = ctx.saved_tensors
+        grad = grads[0]
+        if isinstance(grad, torch.Tensor):
+            x_grad = x_grad * grad.to(dtype=x_grad.dtype)
+        return (None, x_grad, None, None, None, None, None, None, None, None, None, None, None, None, None)
+
+
+def tiled_grpo_lm_head_loss(
+    lm_head: torch.nn.Module,
+    hidden_states: torch.Tensor,
+    selected_token_ids: torch.Tensor,
+    response_mask: torch.Tensor,
+    advantages: torch.Tensor,
+    old_logprobs: torch.Tensor,
+    ref_logprobs: torch.Tensor | None,
+    temperature: float,
+    beta: float,
+    clip_lower: float,
+    clip_higher: float,
+    shards: int,
+    loss_scale: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    has_ref_logprobs = ref_logprobs is not None
+    if ref_logprobs is None:
+        ref_logprobs = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
+    compute_params = list(lm_head.parameters(recurse=False))
+    return TiledGRPOLMHeadLoss.apply(
+        lm_head,
+        hidden_states,
+        selected_token_ids,
+        response_mask,
+        advantages,
+        old_logprobs,
+        ref_logprobs,
+        has_ref_logprobs,
+        temperature,
+        beta,
+        clip_lower,
+        clip_higher,
+        shards,
+        loss_scale,
+        compute_params,
+    )
 
 
 def _compute_packing_kwargs(position_ids: torch.Tensor, cp_context: object | None = None) -> dict:

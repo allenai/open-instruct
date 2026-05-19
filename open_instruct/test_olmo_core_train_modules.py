@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import torch
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_utils
+from open_instruct import data_types, grpo_utils, model_utils
 from open_instruct.utils import INVALID_LOGPROB
 
 
@@ -162,6 +162,64 @@ class TestForwardExtraKwargs(unittest.TestCase):
 
         torch.testing.assert_close(extra_kwargs["seq_idx"], torch.tensor([[0, 0, 1, 1]], dtype=torch.int32))
         torch.testing.assert_close(extra_kwargs["cu_seqlens"], torch.tensor([0, 2, 4], dtype=torch.int32))
+
+
+class TestTiledGRPOLMHeadLoss(unittest.TestCase):
+    def test_matches_dense_dapo_loss_and_grads(self):
+        torch.manual_seed(0)
+        batch_size, seq_len, hidden_size, vocab_size = 2, 5, 4, 11
+        lm_head_dense = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled.load_state_dict(lm_head_dense.state_dict())
+
+        hidden_dense = torch.randn(batch_size, seq_len, hidden_size, requires_grad=True)
+        hidden_tiled = hidden_dense.detach().clone().requires_grad_(True)
+        selected_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+        response_mask = torch.tensor([[True, True, False, True, False], [False, True, True, False, True]])
+        advantages = torch.randn(batch_size, seq_len)
+        old_logprobs = torch.randn(batch_size, seq_len)
+        ref_logprobs = torch.randn(batch_size, seq_len)
+        beta = 0.05
+        clip_lower = 0.2
+        clip_higher = 0.28
+        loss_scale = torch.tensor(0.75)
+
+        logits = lm_head_dense(hidden_dense)
+        new_logprobs = model_utils.log_softmax_and_gather(logits, selected_token_ids)
+        ratio = torch.exp(new_logprobs - old_logprobs)
+        pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            config=_make_grpo_config(beta=beta, clip_lower=clip_lower, clip_higher=clip_higher),
+        )
+        dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
+        dense_loss.backward()
+
+        tiled_loss, tiled_kl, tiled_clipfrac = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head_tiled,
+            hidden_states=hidden_tiled,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref_logprobs,
+            temperature=1.0,
+            beta=beta,
+            clip_lower=clip_lower,
+            clip_higher=clip_higher,
+            shards=3,
+            loss_scale=loss_scale,
+        )
+        tiled_loss.backward()
+
+        torch.testing.assert_close(tiled_loss, dense_loss.detach())
+        torch.testing.assert_close(tiled_kl, (kl * response_mask).sum() / response_mask.sum())
+        torch.testing.assert_close(tiled_clipfrac, ((pg_losses2 > pg_losses).float() * response_mask).sum() / response_mask.sum())
+        torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
+        torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
+        torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
 
 
 class TestDAPOLoss(unittest.TestCase):

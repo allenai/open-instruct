@@ -308,32 +308,8 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        self.liger_grpo_loss = None
         if args.use_liger_grpo_loss:
-            try:
-                from liger_kernel.chunked_loss import (  # type: ignore[import-not-found]  # noqa: PLC0415
-                    LigerFusedLinearGRPOLoss,
-                )
-            except ImportError as exc:
-                raise ImportError(
-                    "`use_liger_grpo_loss=True` requires liger-kernel. Install the Linux dependency first."
-                ) from exc
-            self.liger_grpo_loss = LigerFusedLinearGRPOLoss(
-                beta=args.beta if args.load_ref_policy else 0.0,
-                compiled=args.liger_grpo_loss_compile,
-                use_ref_model=args.load_ref_policy,
-                chunk_size=args.liger_grpo_loss_chunk_size,
-                epsilon_low=args.clip_lower,
-                epsilon_high=args.clip_higher,
-                loss_type="dapo",
-                temperature=self.streaming_config.temperature,
-            )
-            _, lm_head = grpo_utils.get_causal_lm_backbone_and_lm_head(self.policy)
-            grpo_utils.patch_liger_grpo_lm_head_forward(
-                lm_head,
-                self.liger_grpo_loss,
-                lm_head_fp32=args.lm_head_fp32,
-            )
+            logger.info("Using Open Instruct tiled GRPO lm-head loss.")
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
@@ -611,7 +587,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
-    def _compute_liger_dapo_loss(
+    def _compute_tiled_dapo_loss(
         self,
         query_responses: torch.Tensor,
         position_ids: torch.Tensor,
@@ -622,8 +598,6 @@ class PolicyTrainerRayProcess(RayProcess):
         loss_denominator: float,
         cp_context: Any,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
-        if self.liger_grpo_loss is None:
-            raise RuntimeError("Liger GRPO loss was not initialized.")
         hidden_states = grpo_utils.forward_for_liger_hidden_states(
             self.model,
             query_responses,
@@ -643,22 +617,6 @@ class PolicyTrainerRayProcess(RayProcess):
         if ref_logprobs is not None:
             ref_logprobs = torch.where(response_mask, ref_logprobs, torch.zeros_like(ref_logprobs))
 
-        flat_hidden_states = hidden_states.reshape(-1, 1, hidden_states.shape[-1]).contiguous()
-        flat_selected_token_ids = selected_token_ids.reshape(-1, 1).contiguous()
-        flat_response_mask = response_mask.reshape(-1, 1).contiguous()
-        flat_advantages = advantages.reshape(-1).contiguous()
-        flat_old_logprobs = old_logprobs.reshape(-1, 1).contiguous()
-        flat_ref_logprobs = ref_logprobs.reshape(-1, 1).contiguous() if ref_logprobs is not None else None
-
-        loss, metrics = lm_head(
-            flat_hidden_states,
-            selected_token_ids=flat_selected_token_ids,
-            attention_mask=flat_response_mask,
-            advantages=flat_advantages,
-            ref_per_token_logps=flat_ref_logprobs,
-            old_per_token_logps=flat_old_logprobs,
-        )
-
         current_global_tokens = response_mask.sum().float().detach()
         dist.all_reduce(current_global_tokens, op=dist.ReduceOp.SUM)
         # Drain all queued device work through this collective so ranks enter
@@ -666,7 +624,24 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.synchronize()
         dp_world_size = self.args.world_size // self.args.sequence_parallel_size
         scale = current_global_tokens * dp_world_size / (self.args.world_size * float(loss_denominator))
-        return loss * scale, tuple(metrics)
+        loss, kl_avg, clipfrac = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head,
+            hidden_states=hidden_states,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref_logprobs,
+            temperature=self.streaming_config.temperature,
+            beta=self.args.beta if self.args.load_ref_policy else 0.0,
+            clip_lower=self.args.clip_lower,
+            clip_higher=self.args.clip_higher,
+            shards=max(1, int(self.args.liger_grpo_loss_chunk_size)),
+            loss_scale=scale,
+        )
+        if ref_logprobs is not None and self.args.beta != 0.0:
+            return loss, (kl_avg, clipfrac)
+        return loss, (clipfrac,)
 
     def _compute_logprobs(
         self,
@@ -854,7 +829,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     advantages_BT = data_BT.advantages[i][:, 1:]
                     if self.args.use_liger_grpo_loss:
                         vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
-                        loss, liger_metrics = self._compute_liger_dapo_loss(
+                        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        loss, tiled_metrics = self._compute_tiled_dapo_loss(
                             query_responses=data_BT.query_responses[i],
                             position_ids=data_BT.position_ids[i],
                             response_mask=response_mask_BT,
@@ -866,8 +843,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
 
                         torch.cuda.empty_cache()
-                        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                         self.model.backward(loss)
                         if is_accumulation_boundary:
                             self.model.step()
@@ -880,11 +855,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         with torch.no_grad():
                             if self.args.beta != 0.0 and self.args.load_ref_policy:
-                                loss_stats_B["objective/kl2_avg"][i] = liger_metrics[0]
-                                loss_stats_B["loss/kl_avg"][i] = liger_metrics[0] * self.args.beta
-                                clip_metric = liger_metrics[1]
+                                loss_stats_B["objective/kl2_avg"][i] = tiled_metrics[0]
+                                loss_stats_B["loss/kl_avg"][i] = tiled_metrics[0] * self.args.beta
+                                clip_metric = tiled_metrics[1]
                             else:
-                                clip_metric = liger_metrics[0]
+                                clip_metric = tiled_metrics[0]
                             loss_stats_B["policy/clipfrac_avg"][i] = clip_metric
                             loss_stats_B["loss/total_avg"][i] = loss.detach()
                         continue
