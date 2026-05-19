@@ -165,6 +165,7 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "rho_clamp_upper_bound": 0.0,
         "rho_mask_lower_bound": 0.0,
         "rho_mask_upper_bound": 0.0,
+        "rho_mask_tv_divergence": False,
         "use_rho_correction": False,
     }
     defaults.update(kwargs)
@@ -308,7 +309,8 @@ class TestComputeGRPOLoss(unittest.TestCase):
         # In-range tokens are reweighted by ρ, not gated to 1.
         old_logprob = torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
         vllm_logprobs = torch.zeros_like(old_logprob)
-        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, config)
+        advantages = torch.ones_like(old_logprob)
+        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, advantages, config)
         torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 0.5, 1.0, 2.0, 0.0]]))
         torch.testing.assert_close(
             correction.metrics["val/rho_drop_low_frac"], torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0]])
@@ -319,7 +321,9 @@ class TestComputeGRPOLoss(unittest.TestCase):
 
         # Padding tokens (response_mask=False) should always be 0 / not counted as dropped.
         response_mask_with_pad = torch.tensor([[False, True, True, True, False]])
-        correction_pad = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask_with_pad, config)
+        correction_pad = grpo_utils.compute_rho_correction(
+            old_logprob, vllm_logprobs, response_mask_with_pad, advantages, config
+        )
         torch.testing.assert_close(correction_pad.weights, torch.tensor([[0.0, 0.5, 1.0, 2.0, 0.0]]))
         torch.testing.assert_close(correction_pad.metrics["val/rho_drop_low_frac"], torch.zeros((1, 5)))
         torch.testing.assert_close(correction_pad.metrics["val/rho_drop_high_frac"], torch.zeros((1, 5)))
@@ -334,7 +338,8 @@ class TestComputeGRPOLoss(unittest.TestCase):
         old_logprob = torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0], [0.25, 0.25, 0.25]]))
         vllm_logprobs = torch.zeros_like(old_logprob)
         response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
-        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, config)
+        advantages = torch.ones_like(old_logprob)
+        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, advantages, config)
         torch.testing.assert_close(
             correction.weights, torch.tensor([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
         )
