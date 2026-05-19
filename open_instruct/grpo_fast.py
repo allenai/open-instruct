@@ -661,7 +661,7 @@ class PolicyTrainerRayProcess(RayProcess):
             shards=max(1, int(self.args.liger_grpo_loss_chunk_size)),
             loss_scale=scale,
         )
-        if ref_logprobs is not None and self.args.beta != 0.0:
+        if ref_logprobs is not None:
             return loss, (kl_avg, clipfrac, ratio_avg)
         return loss, (clipfrac, ratio_avg)
 
@@ -892,9 +892,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.cuda.synchronize()
 
                         with torch.no_grad():
-                            if self.args.beta != 0.0 and self.args.load_ref_policy:
-                                loss_stats_B["objective/kl2_avg"][i] = tiled_metrics[0]
-                                loss_stats_B["loss/kl_avg"][i] = tiled_metrics[0] * self.args.beta
+                            if self.args.load_ref_policy:
+                                kl_metrics = tiled_metrics[0]
+                                for kl_idx in range(4):
+                                    loss_stats_B[f"objective/kl{kl_idx}_avg"][i] = kl_metrics[kl_idx]
+                                loss_stats_B["loss/kl_avg"][i] = kl_metrics[self.args.kl_estimator] * self.args.beta
                                 clip_metric = tiled_metrics[1]
                                 ratio_metric = tiled_metrics[2]
                             else:

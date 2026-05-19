@@ -215,12 +215,50 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         tiled_loss.backward()
 
         torch.testing.assert_close(tiled_loss, dense_loss.detach())
-        torch.testing.assert_close(tiled_kl, (kl * response_mask).sum() / response_mask.sum())
-        torch.testing.assert_close(tiled_clipfrac, ((pg_losses2 > pg_losses).float() * response_mask).sum() / response_mask.sum())
+        expected_kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40.0, 40.0), ratio)
+        expected_kl = (expected_kl * response_mask).sum(dim=(-2, -1)) / response_mask.sum()
+        torch.testing.assert_close(tiled_kl, expected_kl)
+        expected_clipfrac = ((pg_losses2 > pg_losses).float() * response_mask).sum() / response_mask.sum()
+        torch.testing.assert_close(tiled_clipfrac, expected_clipfrac)
         torch.testing.assert_close(tiled_ratio, (ratio * response_mask).sum() / response_mask.sum())
         torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
         torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
         torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
+
+    def test_returns_kl_metrics_when_beta_is_zero(self):
+        torch.manual_seed(1)
+        batch_size, seq_len, hidden_size, vocab_size = 1, 4, 3, 7
+        lm_head = torch.nn.Linear(hidden_size, vocab_size)
+        hidden_states = torch.randn(batch_size, seq_len, hidden_size, requires_grad=True)
+        selected_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+        response_mask = torch.tensor([[True, True, False, True]])
+        advantages = torch.randn(batch_size, seq_len)
+        old_logprobs = torch.randn(batch_size, seq_len)
+        ref_logprobs = torch.randn(batch_size, seq_len)
+
+        logits = lm_head(hidden_states)
+        new_logprobs = model_utils.log_softmax_and_gather(logits, selected_token_ids)
+        ratio = torch.exp(new_logprobs - old_logprobs)
+        expected_kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40.0, 40.0), ratio)
+        expected_kl = (expected_kl * response_mask).sum(dim=(-2, -1)) / response_mask.sum()
+
+        _, tiled_kl, _, _ = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head,
+            hidden_states=hidden_states.detach().clone().requires_grad_(True),
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref_logprobs,
+            temperature=1.0,
+            beta=0.0,
+            clip_lower=0.2,
+            clip_higher=0.28,
+            shards=2,
+            loss_scale=torch.tensor(1.0),
+        )
+
+        torch.testing.assert_close(tiled_kl, expected_kl)
 
 
 class TestDAPOLoss(unittest.TestCase):

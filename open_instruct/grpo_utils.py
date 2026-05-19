@@ -826,7 +826,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         ref_logprob_shards = list(torch.chunk(ref_logprobs, chunks=shards, dim=0)) if has_ref_logprobs else []
 
         total_loss_sum = torch.zeros((), dtype=torch.float32, device=hidden_states.device)
-        total_kl_sum = torch.zeros_like(total_loss_sum)
+        total_kl_sum = torch.zeros(4, dtype=torch.float32, device=hidden_states.device)
         total_clip_sum = torch.zeros_like(total_loss_sum)
         total_ratio_sum = torch.zeros_like(total_loss_sum)
         compute_params = [p for p in compute_params if p.requires_grad]
@@ -860,16 +860,18 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
 
                 if has_ref_logprobs:
                     ref_diff = (new_logprobs - ref_logprob_shards[shard_idx]).clamp(-40.0, 40.0)
-                    kl = torch.expm1(-ref_diff) + ref_diff
+                    kl_all = model_utils.estimate_kl(ref_diff, ratio)
+                    kl = kl_all[2]
                 else:
                     kl = torch.zeros_like(pg_loss)
+                    kl_all = torch.zeros(4, *pg_loss.shape, dtype=pg_loss.dtype, device=pg_loss.device)
 
                 shard_mask = mask_shards[shard_idx].to(dtype=pg_loss.dtype)
                 per_token_loss = pg_loss + beta * kl
                 loss_sum = (per_token_loss * shard_mask).sum()
 
             total_loss_sum = total_loss_sum + loss_sum.detach().float()
-            total_kl_sum = total_kl_sum + (kl.detach().float() * shard_mask.float()).sum()
+            total_kl_sum = total_kl_sum + (kl_all.detach().float() * shard_mask.float()).sum(dim=-1)
             total_clip_sum = total_clip_sum + ((pg_losses2 > pg_losses).detach().float() * shard_mask.float()).sum()
             total_ratio_sum = total_ratio_sum + (ratio.detach().float() * shard_mask.float()).sum()
             torch.autograd.backward(loss_sum, incoming_grad.to(dtype=loss_sum.dtype))
