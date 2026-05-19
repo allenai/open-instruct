@@ -3,7 +3,7 @@
 # SFT for Qwen3.5-9B on allenai/gemini_axtree_webvoyager_like (axtree agent).
 # 1 node x 8 GPUs = 8 GPUs, SP=2, 16k seq len.
 
-BEAKER_IMAGE="${1:-tanmayg/open_instruct_tg}"
+BEAKER_IMAGE="${1:-tanmayg/open_instruct}"
 MODEL="Qwen/Qwen3.5-9B"
 DATASET="allenai/gemini_axtree_webvoyager_like"
 WANDB_ENTITY="tanmayg"
