@@ -106,7 +106,7 @@ class GRPOExperimentConfig(
     When True, ρ is clamped to [rho_clamp_lower_bound, rho_clamp_upper_bound] and tokens
     whose ρ falls outside [rho_mask_lower_bound, rho_mask_upper_bound] have their
     per-token policy loss zeroed out. This unifies truncated importance sampling
-    (https://arxiv.org/abs/...) and IcePop (https://arxiv.org/abs/2510.18855)."""
+    (https://fengyao.notion.site/off-policy-rl) and IcePop (https://arxiv.org/abs/2510.18855)."""
     rho_clamp_lower_bound: float = 0.0
     """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
     rho_clamp_upper_bound: float = 2.0
