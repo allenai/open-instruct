@@ -789,7 +789,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         shards: int,
         loss_scale: torch.Tensor,
         compute_params: list[torch.nn.Parameter],
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if hidden_states.dim() != 3:
             raise ValueError(f"hidden_states must be [B, T, H], got {tuple(hidden_states.shape)}")
         if selected_token_ids.shape != hidden_states.shape[:2]:
@@ -828,6 +828,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         total_loss_sum = torch.zeros((), dtype=torch.float32, device=hidden_states.device)
         total_kl_sum = torch.zeros_like(total_loss_sum)
         total_clip_sum = torch.zeros_like(total_loss_sum)
+        total_ratio_sum = torch.zeros_like(total_loss_sum)
         compute_params = [p for p in compute_params if p.requires_grad]
 
         for shard_idx, x_shard in enumerate(x_shards):
@@ -870,6 +871,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             total_loss_sum = total_loss_sum + loss_sum.detach().float()
             total_kl_sum = total_kl_sum + (kl.detach().float() * shard_mask.float()).sum()
             total_clip_sum = total_clip_sum + ((pg_losses2 > pg_losses).detach().float() * shard_mask.float()).sum()
+            total_ratio_sum = total_ratio_sum + (ratio.detach().float() * shard_mask.float()).sum()
             torch.autograd.backward(loss_sum, incoming_grad.to(dtype=loss_sum.dtype))
 
         if compute_params:
@@ -883,7 +885,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         loss = total_loss_sum / denom * loss_scale.detach().to(dtype=total_loss_sum.dtype)
         kl_avg = total_kl_sum / denom
         clipfrac = total_clip_sum / denom
-        return loss, kl_avg, clipfrac
+        ratio_avg = total_ratio_sum / denom
+        return loss, kl_avg, clipfrac, ratio_avg
 
     @staticmethod
     def backward(ctx, *grads) -> tuple:
@@ -908,7 +911,7 @@ def tiled_grpo_lm_head_loss(
     clip_higher: float,
     shards: int,
     loss_scale: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     has_ref_logprobs = ref_logprobs is not None
     if ref_logprobs is None:
         ref_logprobs = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)

@@ -197,7 +197,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
         dense_loss.backward()
 
-        tiled_loss, tiled_kl, tiled_clipfrac = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -217,6 +217,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         torch.testing.assert_close(tiled_loss, dense_loss.detach())
         torch.testing.assert_close(tiled_kl, (kl * response_mask).sum() / response_mask.sum())
         torch.testing.assert_close(tiled_clipfrac, ((pg_losses2 > pg_losses).float() * response_mask).sum() / response_mask.sum())
+        torch.testing.assert_close(tiled_ratio, (ratio * response_mask).sum() / response_mask.sum())
         torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
         torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
         torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)

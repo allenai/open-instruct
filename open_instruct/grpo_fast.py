@@ -587,6 +587,28 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
+    def _record_vllm_local_logprob_debug(
+        self,
+        local_logprobs: torch.Tensor,
+        vllm_logprobs: torch.Tensor,
+        response_mask: torch.Tensor,
+    ) -> None:
+        valid_mask = response_mask & ~torch.isnan(vllm_logprobs)
+        logprob_diff = (local_logprobs - vllm_logprobs).abs()
+        masked_diff = torch.masked_fill(logprob_diff, ~valid_mask, 0.0)
+        mean_diff = masked_diff.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+        max_diff = masked_diff.max()
+        std_diff = masked_diff[valid_mask].std() if valid_mask.sum() > 1 else 0.0
+
+        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = float(mean_diff)
+        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = float(max_diff)
+        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = float(std_diff)
+
+        reverse_kl = torch.exp(vllm_logprobs) * (vllm_logprobs - local_logprobs)
+        masked_reverse_kl = torch.masked_fill(reverse_kl, ~valid_mask, 0.0)
+        mean_reverse_kl = masked_reverse_kl.sum() / valid_mask.sum() if valid_mask.sum() > 0 else 0.0
+        self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
+
     def _compute_tiled_dapo_loss(
         self,
         query_responses: torch.Tensor,
@@ -624,7 +646,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.synchronize()
         dp_world_size = self.args.world_size // self.args.sequence_parallel_size
         scale = current_global_tokens * dp_world_size / (self.args.world_size * float(loss_denominator))
-        loss, kl_avg, clipfrac = grpo_utils.tiled_grpo_lm_head_loss(
+        loss, kl_avg, clipfrac, ratio_avg = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head,
             hidden_states=hidden_states,
             selected_token_ids=selected_token_ids,
@@ -640,8 +662,8 @@ class PolicyTrainerRayProcess(RayProcess):
             loss_scale=scale,
         )
         if ref_logprobs is not None and self.args.beta != 0.0:
-            return loss, (kl_avg, clipfrac)
-        return loss, (clipfrac,)
+            return loss, (kl_avg, clipfrac, ratio_avg)
+        return loss, (clipfrac, ratio_avg)
 
     def _compute_logprobs(
         self,
@@ -842,6 +864,22 @@ class PolicyTrainerRayProcess(RayProcess):
                             cp_context=cp_contexts_BT[i],
                         )
 
+                        with torch.no_grad():
+                            debug_logprobs_BT, _ = grpo_utils.forward_for_logprobs(
+                                self.model,
+                                data_BT.query_responses[i],
+                                None,
+                                data_BT.position_ids[i],
+                                self.pad_token_id,
+                                self.streaming_config.temperature,
+                                return_entropy=False,
+                                cp_context=cp_contexts_BT[i],
+                            )
+                            debug_logprobs_BT = grpo_utils.mask_logprobs(debug_logprobs_BT, response_mask_BT)
+                            self._record_vllm_local_logprob_debug(
+                                debug_logprobs_BT, vllm_logprobs_BT, response_mask_BT
+                            )
+
                         torch.cuda.empty_cache()
                         self.model.backward(loss)
                         if is_accumulation_boundary:
@@ -858,10 +896,13 @@ class PolicyTrainerRayProcess(RayProcess):
                                 loss_stats_B["objective/kl2_avg"][i] = tiled_metrics[0]
                                 loss_stats_B["loss/kl_avg"][i] = tiled_metrics[0] * self.args.beta
                                 clip_metric = tiled_metrics[1]
+                                ratio_metric = tiled_metrics[2]
                             else:
                                 clip_metric = tiled_metrics[0]
+                                ratio_metric = tiled_metrics[1]
                             loss_stats_B["policy/clipfrac_avg"][i] = clip_metric
                             loss_stats_B["loss/total_avg"][i] = loss.detach()
+                            loss_stats_B["val/ratio"][i] = ratio_metric
                         continue
 
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
@@ -877,25 +918,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
-                    # Compare vLLM logprobs with local logprobs
                     with torch.no_grad():
-                        valid_mask_BT = response_mask_BT & ~torch.isnan(vllm_logprobs_BT)
-                        logprob_diff_BT = (local_logprobs_BT - vllm_logprobs_BT).abs()
-                        masked_diff_BT = torch.masked_fill(logprob_diff_BT, ~valid_mask_BT, 0.0)
-                        mean_diff = masked_diff_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
-                        max_diff = masked_diff_BT.max()
-                        std_diff = masked_diff_BT[valid_mask_BT].std() if valid_mask_BT.sum() > 1 else 0.0
-
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_mean"] = float(mean_diff)
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_max"] = float(max_diff)
-                        self.local_metrics["debug/vllm_vs_local_logprob_diff_std"] = float(std_diff)
-
-                        reverse_kl_BT = torch.exp(vllm_logprobs_BT) * (vllm_logprobs_BT - local_logprobs_BT)
-                        masked_reverse_kl_BT = torch.masked_fill(reverse_kl_BT, ~valid_mask_BT, 0.0)
-                        mean_reverse_kl = (
-                            masked_reverse_kl_BT.sum() / valid_mask_BT.sum() if valid_mask_BT.sum() > 0 else 0.0
-                        )
-                        self.local_metrics["debug/vllm_local_reverse_kl"] = float(mean_reverse_kl)
+                        self._record_vllm_local_logprob_debug(local_logprobs_BT, vllm_logprobs_BT, response_mask_BT)
 
                     new_logprobs_BT = local_logprobs_BT
 
