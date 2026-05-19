@@ -363,17 +363,17 @@ def _rho_drop_masks(
     return dropped_low, dropped_high
 
 
-def _rho_sequence_level(logprob_diff: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
-    """Per-sequence ρ = exp((1/|o_i|) Σ_t (log π_old - log π_θ)), broadcast to every token.
+def _sequence_level_mean(values: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    """Per-sequence masked mean, broadcast back to every token.
 
-    Sequences are identified with rows of ``logprob_diff`` (shape [B, T]); padding tokens
-    contribute 0 to the sum and are excluded from the count. Empty rows return ρ = 1.
+    Sequences are identified with rows of ``values`` (shape [B, T]); padding tokens
+    are excluded from the count. Empty rows return 0.
     """
     valid = response_mask.float()
-    seq_sum = (logprob_diff * valid).sum(dim=-1, keepdim=True)
+    seq_sum = (values * valid).sum(dim=-1, keepdim=True)
     seq_count = valid.sum(dim=-1, keepdim=True).clamp_min(1.0)
     seq_mean = seq_sum / seq_count
-    return torch.exp(seq_mean).expand_as(logprob_diff)
+    return seq_mean.expand_as(values)
 
 
 @dataclass
@@ -409,11 +409,16 @@ def compute_rho_correction(
     if not config.use_rho_correction:
         return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
 
-    rho_effective = _rho_sequence_level(logprob_diff, response_mask) if config.rho_mask_sequence_level else rho
+    rho_effective = (
+        torch.exp(_sequence_level_mean(logprob_diff, response_mask)) if config.rho_mask_sequence_level else rho
+    )
 
     if config.rho_mask_tv_divergence:
+        # don't change rho_effective as it is our truncated importance sampling
+        # calculate sequence-level TV divergence with abs(rho - 1)
+        # filter if TV divergence > delta and advantage * logprob_diff > 0
         tv_divergence = torch.abs(rho - 1.0)
-        tv_sequence_level = _rho_sequence_level(tv_divergence, response_mask)
+        tv_sequence_level = _sequence_level_mean(tv_divergence, response_mask)
         tv_dropped_low, tv_dropped_high = _rho_drop_masks(
             tv_sequence_level, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
         )
