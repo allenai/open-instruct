@@ -111,6 +111,10 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    rewards: list[torch.Tensor] | None = None
+    """Per-token reward tensor aligned with query_responses. Populated when PPO value training is enabled."""
+    dones: list[torch.Tensor] | None = None
+    """Per-token done markers aligned with query_responses. Populated when PPO value training is enabled."""
     prompt_masks: list[torch.Tensor] | None = None
     rollout_sample_ids: list[torch.Tensor] | None = None
     # Pre-Ulysses-split ``position_ids`` for each sample. Only populated when

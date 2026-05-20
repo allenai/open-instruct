@@ -179,10 +179,7 @@ def concave_length_penalty(x: np.ndarray, k: float, q: float) -> np.ndarray:
 
 
 def _sample_non_submitting_unmask_idxes(
-    submitting_count: int,
-    non_submitting_idxes: list[int],
-    target_fraction: float,
-    rng: np.random.Generator,
+    submitting_count: int, non_submitting_idxes: list[int], target_fraction: float, rng: np.random.Generator
 ) -> set[int]:
     """Sample non-submitting rollouts so they are at most target_fraction of the retained batch."""
     if target_fraction <= 0.0 or submitting_count <= 0 or not non_submitting_idxes:
@@ -677,6 +674,9 @@ class StreamingDataLoaderConfig:
     # Computed at post_init
     max_possible_score: float = 1.0
 
+    # Runtime value-model flags, copied from GRPOExperimentConfig.
+    use_value_model: bool = field(default=False, init=False)
+
     def __post_init__(self):
         if self.eval_response_length is None:
             self.eval_response_length = self.response_length
@@ -847,12 +847,7 @@ class BatchStatistics:
     total_prompts: int
 
 
-def _compute_avg_group_performance(
-    n_solved: int,
-    n_zero: int,
-    n_kept: int,
-    batch_avg_score: float,
-) -> float:
+def _compute_avg_group_performance(n_solved: int, n_zero: int, n_kept: int, batch_avg_score: float) -> float:
     total_groups = n_solved + n_zero + n_kept
     if total_groups == 0:
         return 0.0
@@ -1278,6 +1273,17 @@ def accumulate_inference_batches(
     return combined_result, batch, combined_reward_metrics, batch_stats
 
 
+def populate_value_model_fields(packed_sequences: PackedSequences, scores: np.ndarray) -> None:
+    """Populate per-token PPO rewards from per-rollout scalar scores."""
+    assert packed_sequences.dones is not None
+    lookup_rewards = np.zeros(len(scores) + 1, dtype=np.float32)
+    lookup_rewards[1:] = scores.astype(np.float32)
+    packed_sequences.rewards = [
+        torch.tensor(lookup_rewards[packed_dones.cpu().numpy().astype(np.int64)], dtype=torch.float32)
+        for packed_dones in packed_sequences.dones
+    ]
+
+
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
     dp_world_size: int,
@@ -1316,6 +1322,8 @@ def prepare_collated_data_for_workers(
     assert packed_sequences.position_ids is not None
     assert packed_sequences.advantages is not None
     assert packed_sequences.vllm_logprobs is not None
+    has_rewards = packed_sequences.rewards is not None
+    has_dones = packed_sequences.dones is not None
     for i in range(dp_world_size):
         per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
         per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
@@ -1323,6 +1331,8 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)] if has_rewards else None
+        per_device_packed_dones = packed_sequences.dones[B * i : B * (i + 1)] if has_dones else None
         if packed_sequences.prompt_masks is None:
             per_device_packed_prompt_masks = [
                 torch.zeros_like(t, dtype=torch.long) for t in per_device_packed_query_responses
@@ -1346,6 +1356,8 @@ def prepare_collated_data_for_workers(
         collated_rollout_sample_ids = []
         collated_advantages = []
         collated_vllm_logprobs = []
+        collated_rewards: list[torch.Tensor] | None = [] if has_rewards else None
+        collated_dones: list[torch.Tensor] | None = [] if has_dones else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1372,6 +1384,14 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
+            if collated_rewards is not None:
+                assert per_device_packed_rewards is not None
+                collated_rewards.append(
+                    collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0, pin_memory)
+                )
+            if collated_dones is not None:
+                assert per_device_packed_dones is not None
+                collated_dones.append(collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0, pin_memory))
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1380,6 +1400,8 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                rewards=collated_rewards,
+                dones=collated_dones,
                 prompt_masks=collated_prompt_masks,
                 rollout_sample_ids=collated_rollout_sample_ids,
             )
@@ -1774,6 +1796,8 @@ class DataPreparationActor:
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+            if self.config.use_value_model:
+                populate_value_model_fields(packed_sequences, scores)
 
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id

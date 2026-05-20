@@ -189,6 +189,27 @@ class GRPOExperimentConfig(
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
+    # PPO value model. When enabled, the trainer learns a scalar value function
+    # and replaces group-relative advantages with GAE advantages.
+    use_value_model: bool = False
+    """Whether to train and use a scalar PPO value model alongside the policy."""
+    value_model_name_or_path: str | None = None
+    """Optional path or HF name for initializing the value model. Defaults to the policy model."""
+    value_loss_coef: float = 0.5
+    """Coefficient for the value loss."""
+    value_learning_rate: float | None = None
+    """Value model learning rate. Defaults to the policy learning rate."""
+    vf_clip_range: float = 0.2
+    """PPO-style value-function clipping range. Set to 0 to disable clipping."""
+    gamma: float = 1.0
+    """Discount factor for GAE."""
+    gae_lambda: float = 1.0
+    """Lambda for GAE."""
+    value_num_mini_batches: int | None = None
+    """Optional mini-batch count for the value model. Defaults to num_mini_batches."""
+    whiten_advantages: bool = False
+    """If True, whiten GAE advantages across response tokens before policy training."""
+
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
@@ -291,9 +312,7 @@ class GRPOExperimentConfig(
             if self.loss_denominator != "token":
                 raise ValueError("`use_liger_grpo_loss` currently requires `loss_denominator=token`.")
             if self.kl_estimator != 2:
-                raise ValueError(
-                    "`use_liger_grpo_loss` uses the default KL estimator and requires `kl_estimator=2`."
-                )
+                raise ValueError("`use_liger_grpo_loss` uses the default KL estimator and requires `kl_estimator=2`.")
             if self.tis_mask_lower > 0.0 or self.tis_mask_upper > 0.0:
                 raise ValueError("`use_liger_grpo_loss` does not support TIS masks.")
             if self.liger_grpo_loss_chunk_size <= 0:
@@ -331,6 +350,15 @@ class GRPOExperimentConfig(
                     "Pass `--use_vllm_logprobs True --truncated_importance_sampling_ratio_cap 0` "
                     "alongside `--loss_fn tvpo`."
                 )
+        if self.use_value_model:
+            if self.value_loss_coef < 0.0:
+                raise ValueError(f"`value_loss_coef` must be >= 0, got {self.value_loss_coef}.")
+            if not 0.0 <= self.gamma <= 1.0:
+                raise ValueError(f"`gamma` must be in [0, 1], got {self.gamma}.")
+            if not 0.0 <= self.gae_lambda <= 1.0:
+                raise ValueError(f"`gae_lambda` must be in [0, 1], got {self.gae_lambda}.")
+            if self.value_num_mini_batches is not None and self.value_num_mini_batches <= 0:
+                raise ValueError("`value_num_mini_batches` must be greater than 0 when set.")
         if self.tis_mask_lower < 0.0 or self.tis_mask_upper < 0.0:
             raise ValueError(
                 f"tis_mask_lower and tis_mask_upper must be ≥ 0 "
@@ -853,9 +881,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
 
                 ratio = torch.exp(new_logprobs - old_logprob_shards[shard_idx])
                 pg_losses = -advantage_shards[shard_idx] * ratio
-                pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(
-                    ratio, 1.0 - clip_lower, 1.0 + clip_higher
-                )
+                pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(ratio, 1.0 - clip_lower, 1.0 + clip_higher)
                 pg_loss = torch.max(pg_losses, pg_losses2)
 
                 if has_ref_logprobs:
@@ -1087,9 +1113,7 @@ def get_causal_lm_backbone_and_lm_head(model: torch.nn.Module) -> tuple[torch.nn
 
 
 def patch_liger_grpo_lm_head_forward(
-    lm_head: torch.nn.Module,
-    liger_grpo_loss: torch.nn.Module,
-    lm_head_fp32: bool = False,
+    lm_head: torch.nn.Module, liger_grpo_loss: torch.nn.Module, lm_head_fp32: bool = False
 ) -> bool:
     """Route explicit GRPO-loss calls through lm_head.forward so ZeRO hooks see normal module execution."""
     if getattr(lm_head, "_open_instruct_liger_grpo_patch", False):
@@ -1147,10 +1171,7 @@ def forward_for_liger_hidden_states(
     attention_mask, extra_kwargs = _compute_forward_extra_kwargs(position_ids, attention_mask, cp_context=cp_context)
     backbone, _ = get_causal_lm_backbone_and_lm_head(model)
     output = backbone(
-        input_ids=query_responses,
-        attention_mask=attention_mask,
-        position_ids=position_ids,
-        **extra_kwargs,
+        input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs
     )
     hidden_states = output.last_hidden_state if hasattr(output, "last_hidden_state") else output[0]
     return hidden_states[:, :-1]

@@ -10,7 +10,7 @@ import torch
 import transformers
 from parameterized import parameterized
 
-from open_instruct import rl_utils
+from open_instruct import rl_utils, value_model_utils
 
 PACK_LENGTH = 40
 PROMPT_MAX_LEN = 20
@@ -96,6 +96,19 @@ class TestRLUtils(unittest.TestCase):
             result = silent_function()
 
         self.assertEqual(result, "done")
+
+    def test_value_clipped_mse_loss(self):
+        new_values = torch.tensor([[1.0, 2.5, 3.0]])
+        returns = torch.tensor([[1.0, 3.0, 4.0]])
+        old_values = torch.tensor([[1.0, 2.0, 3.0]])
+        mask = torch.tensor([[True, True, False]])
+
+        per_token, clipfrac = value_model_utils.value_clipped_mse_loss(
+            new_values=new_values, returns=returns, old_values=old_values, mask=mask, clip_range=0.2
+        )
+
+        torch.testing.assert_close(per_token, torch.tensor([[0.0, 0.64, 0.0]]))
+        torch.testing.assert_close(clipfrac, torch.tensor(0.5))
 
     def test_pack_sequences(self):
         """Test that pack_sequences correctly concatenates queries and responses into packed format."""

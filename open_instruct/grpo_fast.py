@@ -37,6 +37,7 @@ from datetime import timedelta
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.ops.adam import DeepSpeedCPUAdam
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
@@ -84,7 +85,7 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
-from open_instruct import logger_utils, model_utils, rl_utils, vllm_utils
+from open_instruct import logger_utils, model_utils, rl_utils, value_model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
@@ -337,6 +338,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         optimization_steps_done = 0
         checkpoint_state = None
+        self.value_model_checkpoint_path = None
         if args.checkpoint_state_dir:
             # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
@@ -385,6 +387,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.ref_policy_checkpoint_path = model_path
                         logger.info(f"{self.rank=}: Will load reference policy from {model_path}")
 
+                if args.use_value_model:
+                    value_model_dir = os.path.join(args.checkpoint_state_dir, "value_model")
+                    if os.path.exists(os.path.join(value_model_dir, "value_model.bin")):
+                        self.value_model_checkpoint_path = value_model_dir
+                        logger.info(f"{self.rank=}: Will load value model from {value_model_dir}")
+                    elif states.get("value_model_saved", False):
+                        logger.warning(
+                            f"{self.rank=}: Checkpoint state says value model was saved, but no file was found at {value_model_dir}"
+                        )
+
                 logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
@@ -424,6 +436,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if args.lm_head_fp32:
                 patch_hf_lm_head_fp32(self.ref_policy)
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
+        self.value_model = None
+        if args.use_value_model:
+            self._init_value_model(args, model_config)
 
         if self.mpu is not None:
             sp_rank = groups._get_sequence_parallel_rank()
@@ -481,6 +496,136 @@ class PolicyTrainerRayProcess(RayProcess):
         self.dataloader = iter(self._streaming_dataloader)
 
         return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
+
+    def _init_value_model(self, args: grpo_utils.GRPOExperimentConfig, model_config: ModelConfig) -> None:
+        """Initialize an independent scalar value model for PPO-style training."""
+        logger.info(f"{self.rank=}: Initializing value model")
+
+        import transformers.integrations.deepspeed as _hf_ds_integration  # noqa: PLC0415
+
+        saved_ds_config = _hf_ds_integration._hf_deepspeed_config_weak_ref
+        _hf_ds_integration._hf_deepspeed_config_weak_ref = None
+        try:
+            value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
+            value_revision = model_config.model_revision if args.value_model_name_or_path is None else None
+            hf_attn = model_utils.olmo_core_attn_to_hf(model_config.attn_implementation)
+
+            self.value_model = AutoModelForCausalLM.from_pretrained(
+                value_model_path, revision=value_revision, dtype=torch.bfloat16, attn_implementation=hf_attn
+            )
+            self.value_model.config.use_cache = False
+            hidden_size = self.value_model.config.hidden_size
+            value_head = torch.nn.Linear(hidden_size, 1, bias=False, dtype=torch.bfloat16)
+            torch.nn.init.normal_(value_head.weight, mean=0.0, std=1.0 / (hidden_size + 1) ** 0.5)
+            self.value_model.lm_head = value_head
+        finally:
+            _hf_ds_integration._hf_deepspeed_config_weak_ref = saved_ds_config
+
+        disable_dropout_in_model(self.value_model)
+
+        if self.value_model_checkpoint_path is not None:
+            model_file = os.path.join(self.value_model_checkpoint_path, "value_model.bin")
+            state_dict = torch.load(model_file, map_location=self.device, weights_only=True)
+            self.value_model.load_state_dict(state_dict)
+            logger.info(f"{self.rank=}: Loaded value model weights from checkpoint {model_file}")
+
+        value_ds_config = get_train_ds_config(
+            offload=args.deepspeed_offload_param,
+            adam_offload=args.deepspeed_offload_optimizer,
+            stage=args.deepspeed_stage,
+            bf16=True,
+            max_norm=args.max_grad_norm if args.max_grad_norm is not None else 0.0,
+            zpg=args.deepspeed_zpg,
+            sequence_parallel_size=args.sequence_parallel_size,
+        )
+        value_ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        value_ds_config["gradient_accumulation_steps"] = 1
+
+        value_lr = args.value_learning_rate if args.value_learning_rate is not None else args.learning_rate
+        if args.set_weight_decay_on_bias_and_norm:
+            value_optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
+        else:
+            value_optim_params = self.value_model.parameters()
+        if args.deepspeed_offload_optimizer:
+            self.value_optimizer = DeepSpeedCPUAdam(value_optim_params, lr=value_lr)
+        else:
+            self.value_optimizer = torch.optim.AdamW(value_optim_params, lr=value_lr, fused=args.fused_optimizer)
+
+        self._value_effective_mini_batches = (
+            args.value_num_mini_batches if args.value_num_mini_batches is not None else args.num_mini_batches
+        )
+        num_value_scheduler_steps = args.num_training_steps * args.num_epochs * self._value_effective_mini_batches
+        value_scheduler = get_scheduler(
+            args.lr_scheduler_type,
+            optimizer=self.value_optimizer,
+            num_warmup_steps=int(num_value_scheduler_steps * args.warmup_ratio),
+            num_training_steps=num_value_scheduler_steps,
+        )
+
+        self.value_model, self.value_optimizer, _, self.value_scheduler = deepspeed.initialize(
+            model=self.value_model,
+            optimizer=self.value_optimizer,
+            config=value_ds_config,
+            lr_scheduler=value_scheduler,
+            dist_init_required=False,
+            mpu=self.mpu,
+        )
+
+        unwrapped = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+        if model_config.gradient_checkpointing and hasattr(unwrapped, "gradient_checkpointing_enable"):
+            unwrapped.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        self.value_model.train()
+        logger.info(
+            f"{self.rank=}: Value model ready (lr={value_lr}, mini_batches={self._value_effective_mini_batches})"
+        )
+
+    @staticmethod
+    def _align_value_predictions(values: torch.Tensor, target_shape: torch.Size, context: str) -> torch.Tensor:
+        if values.shape == target_shape:
+            return values
+        if values.ndim != len(target_shape):
+            raise ValueError(f"{context}: expected {target_shape}, got {tuple(values.shape)}")
+        aligned = values
+        for dim, target in enumerate(target_shape):
+            current = aligned.shape[dim]
+            if current > target:
+                slices = [slice(None)] * aligned.ndim
+                slices[dim] = slice(0, target)
+                aligned = aligned[tuple(slices)]
+            elif current < target:
+                pad_shape = list(aligned.shape)
+                pad_shape[dim] = target - current
+                pad = aligned.new_zeros(pad_shape)
+                aligned = torch.cat([aligned, pad], dim=dim)
+        return aligned
+
+    def forward_value(
+        self, query_responses: torch.Tensor, position_ids: torch.Tensor, response_mask: torch.Tensor
+    ) -> torch.Tensor:
+        assert self.value_model is not None, "value_model is not initialized"
+        output = self.value_model(input_ids=query_responses, position_ids=position_ids)
+        logits = getattr(output, "logits", output)[:, :-1]
+        values = logits.squeeze(-1).float()
+        values = self._align_value_predictions(values, response_mask.shape, "forward_value")
+        return torch.where(response_mask, values, torch.zeros_like(values))
+
+    def _dummy_value_forward(self, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+        dummy = torch.zeros(1, 1, dtype=dtype, device=device)
+        output = self.value_model(input_ids=dummy, attention_mask=dummy, position_ids=dummy)
+        logits = getattr(output, "logits", output)
+        return logits.reshape(-1)[0]
+
+    def _dispatch_gae(
+        self, values_np: np.ndarray, rewards_np: np.ndarray, dones_np: np.ndarray, response_masks_np: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        return rl_utils.calculate_advantages_packed(
+            values=values_np,
+            rewards=rewards_np,
+            gamma=self.args.gamma,
+            lam=self.args.gae_lambda,
+            dones=dones_np,
+            response_masks=response_masks_np,
+        )
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -596,10 +741,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
     def _record_vllm_local_logprob_debug(
-        self,
-        local_logprobs: torch.Tensor,
-        vllm_logprobs: torch.Tensor,
-        response_mask: torch.Tensor,
+        self, local_logprobs: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor
     ) -> None:
         valid_mask = response_mask & ~torch.isnan(vllm_logprobs)
         logprob_diff = (local_logprobs - vllm_logprobs).abs()
@@ -629,11 +771,7 @@ class PolicyTrainerRayProcess(RayProcess):
         cp_context: Any,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
         hidden_states = grpo_utils.forward_for_liger_hidden_states(
-            self.model,
-            query_responses,
-            None,
-            position_ids,
-            cp_context=cp_context,
+            self.model, query_responses, None, position_ids, cp_context=cp_context
         )
         if self.args.lm_head_fp32:
             hidden_states = hidden_states.float()
@@ -674,10 +812,7 @@ class PolicyTrainerRayProcess(RayProcess):
         return loss, (clipfrac, ratio_avg)
 
     def _compute_logprobs(
-        self,
-        model: torch.nn.Module,
-        data_BT: data_types.CollatedBatchData,
-        cp_contexts_BT: list[Any],
+        self, model: torch.nn.Module, data_BT: data_types.CollatedBatchData, cp_contexts_BT: list[Any]
     ) -> list[torch.Tensor]:
         return grpo_utils.compute_logprobs(
             model,
@@ -734,11 +869,7 @@ class PolicyTrainerRayProcess(RayProcess):
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
-                ref_logprobs_BT = self._compute_logprobs(
-                    self.ref_policy,
-                    data_BT,
-                    cp_contexts_BT,
-                )
+                ref_logprobs_BT = self._compute_logprobs(self.ref_policy, data_BT, cp_contexts_BT)
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -748,11 +879,7 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("Old logprobs Calculation", noop=self.rank != 0):
                 local_old_logprobs_BT = None
                 if not self.args.use_vllm_logprobs:
-                    local_old_logprobs_BT = self._compute_logprobs(
-                        self.model,
-                        data_BT,
-                        cp_contexts_BT,
-                    )
+                    local_old_logprobs_BT = self._compute_logprobs(self.model, data_BT, cp_contexts_BT)
 
                 with torch.no_grad():
                     for i in range(len(data_BT.query_responses)):
@@ -777,11 +904,7 @@ class PolicyTrainerRayProcess(RayProcess):
         ):
             with Timer("Trainer logprobs trace save", noop=self.rank != 0), torch.no_grad():
                 if all(x is None for x in old_logprobs_BT):
-                    trace_logprobs_BT = self._compute_logprobs(
-                        self.model,
-                        data_BT,
-                        cp_contexts_BT,
-                    )
+                    trace_logprobs_BT = self._compute_logprobs(self.model, data_BT, cp_contexts_BT)
                 else:
                     trace_logprobs_BT = [
                         lp
@@ -824,6 +947,87 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
+        value_loss_inputs: list[dict[str, torch.Tensor]] | None = None
+        value_step_metrics: dict[str, float] = {}
+        if self.args.use_value_model:
+            assert data_BT.rewards is not None and data_BT.dones is not None, (
+                "use_value_model=True but rewards/dones are missing from CollatedBatchData"
+            )
+            value_loss_inputs = []
+            returns_all: list[float] = []
+            preds_all: list[float] = []
+            with Timer("Value forward (no-grad)", noop=self.rank != 0), torch.no_grad():
+                for i in range(num_samples):
+                    resp_mask = data_BT.response_masks[i][:, 1:].bool()
+                    values_BT = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)
+                    values_BT = self._align_value_predictions(values_BT, resp_mask.shape, "value forward")
+                    rewards = data_BT.rewards[i][:, 1:].float().cpu().numpy()
+                    dones = data_BT.dones[i][:, 1:].long().cpu().numpy()
+                    resp_masks_np = resp_mask.long().cpu().numpy()
+                    adv_np, returns_np = self._dispatch_gae(
+                        values_np=values_BT.float().cpu().numpy(),
+                        rewards_np=rewards,
+                        dones_np=dones,
+                        response_masks_np=resp_masks_np,
+                    )
+
+                    new_adv = torch.zeros_like(data_BT.advantages[i])
+                    new_adv[:, 1:] = torch.from_numpy(adv_np.astype("float32")).to(device)
+                    data_BT.advantages[i] = new_adv
+
+                    value_mask = data_BT.response_masks[i][:, :-1].bool()
+                    returns = torch.from_numpy(returns_np.astype("float32")).to(device)
+                    value_loss_inputs.append(
+                        {
+                            "returns": returns,
+                            "old_values": values_BT.detach(),
+                            "response_mask": resp_mask,
+                            "value_mask": value_mask,
+                        }
+                    )
+                    valid_values = value_mask.cpu().numpy().astype(bool)
+                    if valid_values.any():
+                        returns_all.extend(returns_np[valid_values].tolist())
+                        preds_all.extend(values_BT.float().cpu().numpy()[valid_values].tolist())
+
+            if self.args.whiten_advantages:
+                local_adv = [
+                    data_BT.advantages[i][:, 1:].float()[data_BT.response_masks[i][:, 1:].bool()]
+                    for i in range(num_samples)
+                ]
+                local_adv = [adv for adv in local_adv if adv.numel() > 0]
+                if local_adv:
+                    adv_flat = torch.cat(local_adv)
+                    count = torch.tensor(float(adv_flat.numel()), device=device)
+                    s1 = adv_flat.sum()
+                    s2 = (adv_flat**2).sum()
+                else:
+                    count = torch.zeros((), device=device)
+                    s1 = torch.zeros((), device=device)
+                    s2 = torch.zeros((), device=device)
+                dist.all_reduce(count, op=dist.ReduceOp.SUM)
+                dist.all_reduce(s1, op=dist.ReduceOp.SUM)
+                dist.all_reduce(s2, op=dist.ReduceOp.SUM)
+                mean = s1 / count.clamp(min=1)
+                std = ((s2 / count.clamp(min=1) - mean**2).clamp(min=0) + 1e-8).sqrt()
+                for i in range(num_samples):
+                    mask_i = data_BT.response_masks[i][:, 1:].bool()
+                    adv_i = data_BT.advantages[i][:, 1:]
+                    normed = torch.where(mask_i, (adv_i - mean) / std, torch.zeros_like(adv_i))
+                    new_adv = data_BT.advantages[i].clone()
+                    new_adv[:, 1:] = normed
+                    data_BT.advantages[i] = new_adv
+
+            if returns_all and preds_all:
+                returns_np = np.array(returns_all, dtype="float32")
+                preds_np = np.array(preds_all, dtype="float32")
+                residuals = returns_np - preds_np
+                return_var = float(np.var(returns_np))
+                value_step_metrics["value/returns_mean"] = float(np.mean(returns_np))
+                value_step_metrics["value/returns_std"] = float(np.std(returns_np))
+                value_step_metrics["value/predictions_mean"] = float(np.mean(preds_np))
+                value_step_metrics["value/predictions_std"] = float(np.std(preds_np))
+                value_step_metrics["value/explained_variance"] = 1.0 - float(np.var(residuals)) / (return_var + 1e-8)
         tis_mask_enabled = self.args.tis_mask_lower > 0.0 or self.args.tis_mask_upper > 0.0
         tis_mask_kept_tokens = torch.zeros((), device=device)
         tis_mask_total_tokens = torch.zeros((), device=device)
@@ -1057,6 +1261,53 @@ class PolicyTrainerRayProcess(RayProcess):
                         tis_unclamped=tis_unclamped_BT,
                     )
 
+            if self.args.use_value_model and value_loss_inputs is not None:
+                torch.cuda.empty_cache()
+                with Timer("[Training Processes] Value loss", noop=self.rank != 0):
+                    value_accum_steps = max(
+                        math.ceil(num_samples / max(self._value_effective_mini_batches, 1) - 0.5), 1
+                    )
+                    value_losses: list[float] = []
+                    value_clipfracs: list[float] = []
+                    for i, ctx in enumerate(value_loss_inputs):
+                        resp_mask = ctx["response_mask"]
+                        value_mask = ctx["value_mask"]
+                        returns = ctx["returns"]
+                        old_values = ctx["old_values"]
+                        new_values = self.forward_value(data_BT.query_responses[i], data_BT.position_ids[i], resp_mask)
+                        new_values = self._align_value_predictions(new_values, returns.shape, "value loss forward")
+                        per_tok, v_clipfrac = value_model_utils.value_clipped_mse_loss(
+                            new_values, returns, old_values, value_mask, self.args.vf_clip_range
+                        )
+                        denom = value_mask.sum().clamp(min=1).float()
+                        v_loss = (per_tok.sum() / denom) * self.args.value_loss_coef
+                        v_loss = v_loss * (self.args.world_size // self.args.sequence_parallel_size)
+                        v_loss = v_loss.reshape(-1).sum()
+                        if not v_loss.requires_grad:
+                            v_loss = (
+                                v_loss
+                                + 0.0
+                                * self._dummy_value_forward(data_BT.query_responses[i].dtype, device).reshape(-1).sum()
+                            )
+                        is_value_boundary = (i + 1) % value_accum_steps == 0 or (i + 1) == num_samples
+                        self.value_model.set_gradient_accumulation_boundary(is_value_boundary)
+                        self.value_model.backward(v_loss)
+                        if is_value_boundary:
+                            torch.cuda.empty_cache()
+                            self.value_model.step()
+                        value_losses.append(float(v_loss.detach()))
+                        value_clipfracs.append(float(v_clipfrac.detach()))
+
+                    if value_losses:
+                        self.local_metrics["loss/value_avg"] = sum(value_losses) / len(value_losses)
+                        self.local_metrics["value/clipfrac_avg"] = sum(value_clipfracs) / len(value_clipfracs)
+                        if hasattr(self.value_model, "get_global_grad_norm"):
+                            grad_norm = float(self.value_model.get_global_grad_norm())
+                            if math.isfinite(grad_norm):
+                                self.local_metrics["value/grad_norm"] = grad_norm
+            for key, value in value_step_metrics.items():
+                self.local_metrics[key] = value
+
             batch_metrics = batch_data["metrics"]
             with torch.no_grad():
                 self._compute_loss_metrics(loss_stats_B, token_counts_per_sample)
@@ -1085,7 +1336,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         tvpo_tv_weighted_sum / tvpo_tv_weight if tvpo_tv_weight > 0 else torch.zeros((), device=device)
                     )
                     self.local_metrics["actor/ppo_tv"] = float(tvpo_tv)
-                self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
+                if grad_norms:
+                    self.local_metrics["optim/grad_norm"] = sum(grad_norms) / len(grad_norms)
                 array_metrics = {}
                 for key, value in batch_metrics.items():
                     if value is None:
@@ -1117,6 +1369,27 @@ class PolicyTrainerRayProcess(RayProcess):
         if hasattr(self.model, "optimizer") and hasattr(self.model.optimizer, "parameter_offload"):
             coord = self.model.optimizer.parameter_offload.get_param_coordinator()
             coord._invalidate_trace()
+
+    def _save_value_model(self, output_dir: str | pathlib.Path) -> None:
+        """Save value model weights to output_dir/value_model.bin. All ranks must call this."""
+        assert self.value_model is not None
+        value_to_save = self.value_model.module if hasattr(self.value_model, "module") else self.value_model
+        out_path = pathlib.Path(output_dir)
+        if self.args.deepspeed_stage == 3:
+            if hasattr(value_to_save, "ds_active_sub_modules"):
+                value_to_save.ds_active_sub_modules.clear()
+            gathered: dict[str, torch.Tensor] = {}
+            for key, value in value_to_save.named_parameters():
+                params_to_fetch = _z3_params_to_fetch([value])
+                with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                    if self.rank == 0:
+                        gathered[key] = value.data.detach().cpu()
+            if self.rank == 0:
+                out_path.mkdir(parents=True, exist_ok=True)
+                torch.save(gathered, out_path / "value_model.bin")
+        elif self.rank == 0:
+            out_path.mkdir(parents=True, exist_ok=True)
+            torch.save(value_to_save.state_dict(), out_path / "value_model.bin")
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
         args = self.args
@@ -1155,6 +1428,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 logger.info(f"Saved reference policy model to {ref_policy_dir}")
 
             client_state["ref_policy_saved"] = True
+
+        if self.args.use_value_model and self.value_model is not None:
+            value_dir = os.path.join(checkpoint_state_dir, "value_model")
+            self._save_value_model(value_dir)
+            if self.rank == 0:
+                logger.info(f"Saved value model to {value_dir}")
+            client_state["value_model_saved"] = True
 
         # Save the main model checkpoint with enhanced client state
         # mpu is just used for sequence parallel, so we remove it for saving, and then re-add it after.
@@ -1246,6 +1526,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
             self.tokenizer.save_pretrained(output_dir)
             marker_path.touch()
+
+        if self.args.use_value_model and self.value_model is not None:
+            self._save_value_model(output_path / "value_model")
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
@@ -1402,6 +1685,7 @@ def setup_runtime_variables(
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking and args.wandb_entity is None:
         args.wandb_entity = maybe_use_ai2_wandb_entity()
+    streaming_config.use_value_model = args.use_value_model
     return args
 
 
