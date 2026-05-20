@@ -38,7 +38,7 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
     --dataset_mixer_list \
-        rl-rag-2/sft_ablations_redsearcher_sft 1.0 \
+        hamishivi/sft_ablations_redsearcher_sft 1.0 \
     --dataset_mixer_list_splits \
         train \
     --gradient_checkpointing \
