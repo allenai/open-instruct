@@ -33,6 +33,7 @@ uv run python mason.py \
     --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
     --lr_scheduler_type linear \
+    --use_liger_kernel \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
