@@ -2379,7 +2379,16 @@ def main(
         )
 
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
-            push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+            try:
+                push_folder_to_hub(args.output_dir, args.hf_repo_id, args.hf_repo_revision)
+            except Exception as e:
+                # HF push happens after training has fully completed; checkpoints are
+                # already saved to weka. Failing here (e.g. 403 from a token without
+                # write access to the org repo) shouldn't mark the whole run as failed.
+                logger.warning(
+                    f"push_folder_to_hub failed (training is already complete): {e}. "
+                    "Checkpoints remain on weka; continuing to teardown."
+                )
     except Exception as e:
         if args.send_slack_alerts:
             utils.send_slack_message(f"<!here> A RL job has died. Error message: {e}.")
