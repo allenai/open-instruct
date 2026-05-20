@@ -1,11 +1,26 @@
 import tempfile
 import unittest
+from queue import Queue
+from unittest.mock import Mock
 
+import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
 
 from open_instruct import data_loader
+from open_instruct.data_loader_utils import (
+    compute_grouped_advantages,
+    get_never_give_up_chain_id,
+    get_never_give_up_retry_suffix,
+)
+from open_instruct.data_types import EnvConfig, GenerationResult, RequestInfo, TokenStatistics
+from open_instruct.dataset_transformation import (
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
+    RAW_PROMPT_KEY,
+    VERIFIER_SOURCE_KEY,
+)
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
@@ -77,6 +92,107 @@ class TestWorldAwarePacking(unittest.TestCase):
             if not drop_last:
                 expected_indices = set(range(num_samples))
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
+
+
+class TestGroupedAdvantages(unittest.TestCase):
+    def test_compute_grouped_advantages_anchor_pos_matches_centered_when_baseline_matches_batch(self):
+        scores = np.array([0.0, 0.0, 1.0, 1.0], dtype=np.float32)
+
+        centered = compute_grouped_advantages(
+            scores, prompt_sample_counts=[4], advantage_normalization_type="centered"
+        )
+        anchored = compute_grouped_advantages(
+            scores, prompt_sample_counts=[4], advantage_normalization_type="centered", ngu_count_rescale="anchor_pos"
+        )
+
+        self.assertTrue(np.allclose(anchored, centered))
+
+    def test_compute_grouped_advantages_anchor_pos_rescales_when_ngu_baseline_differs(self):
+        scores = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+        anchored = compute_grouped_advantages(
+            scores,
+            prompt_sample_counts=[3],
+            prompt_baseline_sample_counts=[5],
+            prompt_baseline_reward_sums=[1.0],
+            advantage_normalization_type="centered",
+            ngu_count_rescale="anchor_pos",
+        )
+
+        self.assertTrue(np.allclose(anchored.sum(), 0.0))
+        self.assertTrue(np.allclose(anchored[-1], 0.8))
+
+    def test_get_never_give_up_retry_suffix_increments_existing_suffix(self):
+        self.assertEqual(get_never_give_up_retry_suffix("7_0", epoch_number=7, index=0), "_1")
+        self.assertEqual(get_never_give_up_retry_suffix("7_0_1", epoch_number=7, index=0), "_2")
+
+    def test_get_never_give_up_chain_id_strips_retry_suffix(self):
+        self.assertEqual(get_never_give_up_chain_id("7_0"), "7_0")
+        self.assertEqual(get_never_give_up_chain_id("7_0_1"), "7_0")
+
+    def test_accumulate_inference_batches_merges_never_give_up_retry(self):
+        class MockTokenizer:
+            eos_token_id = 0
+
+            def batch_decode(self, responses, skip_special_tokens=False):
+                return [str(response) for response in responses]
+
+        def make_result(prompt_id, reward_scores):
+            return GenerationResult(
+                responses=[[1], [2]],
+                finish_reasons=["stop", "stop"],
+                masks=[[1], [1]],
+                request_info=RequestInfo(
+                    num_calls=[0, 0],
+                    timeouts=[0, 0],
+                    tool_errors=["", ""],
+                    tool_outputs=["", ""],
+                    tool_runtimes=[0.0, 0.0],
+                    tool_calleds=[False, False],
+                    tool_call_stats=[[], []],
+                    rollout_states=[{}, {}],
+                ),
+                index=0,
+                prompt_id=prompt_id,
+                token_statistics=TokenStatistics(num_prompt_tokens=1, num_response_tokens=2, generation_time=1.0),
+                logprobs=[[0.0], [0.0]],
+                reward_scores=reward_scores,
+                reward_metrics={},
+                model_step=0,
+            )
+
+        inference_results = Queue()
+        inference_results.put(make_result("0_0", [0.0, 0.0]))
+        inference_results.put(make_result("0_0_1", [0.0, 1.0]))
+        generation_config = Mock(n=2)
+        dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: [[10]],
+                GROUND_TRUTHS_KEY: [[11]],
+                VERIFIER_SOURCE_KEY: ["unit"],
+                RAW_PROMPT_KEY: ["prompt"],
+                "index": [0],
+            }
+        )
+
+        result, batch, _, batch_stats = data_loader.accumulate_inference_batches(
+            inference_results,
+            generation_config,
+            num_prompts=1,
+            model_dims=Mock(),
+            tokenizer=MockTokenizer(),
+            dataset=dataset,
+            base_env_config=EnvConfig(),
+            training_step=0,
+            active_sampling=True,
+            filter_zero_std_samples=True,
+            never_give_up_int=1,
+            maintain_pending_ngu_completions=True,
+        )
+
+        self.assertEqual(len(result.responses), 4)
+        self.assertEqual(batch.scores, [0.0, 0.0, 0.0, 1.0])
+        self.assertEqual(batch_stats.prompt_sample_counts, [4])
 
 
 if __name__ == "__main__":
