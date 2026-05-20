@@ -1558,6 +1558,17 @@ def one_training_step(
             desc=f"Running training step {training_step}",
         )
         metrics, array_metrics = zip(*results)
+        # When the data prep actor filtered the entire batch (every prompt group had
+        # no learning signal), PolicyTrainerRayProcess.step() short-circuits and
+        # returns empty metrics. Downstream aggregation and utilization calc assume
+        # well-formed metrics dicts (e.g. batch/prompt_lengths), so skip the rest of
+        # this orchestrator and advance the step counter with 0 tokens processed.
+        if not array_metrics[0]:
+            logger.warning(
+                f"[Main Thread] step {training_step}: skipping aggregation and logging — "
+                "all workers reported an empty (fully filtered) batch."
+            )
+            return 0
         if (
             args.load_ref_policy
             and args.ref_policy_update_freq is not None
