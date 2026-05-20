@@ -592,6 +592,19 @@ class PolicyTrainerRayProcess(RayProcess):
         batch_data = next(self.dataloader)
         data_BT = batch_data["batch"]
 
+        # Aggressive reward shaping can produce batches where every prompt group has
+        # zero learning signal (all-zero or all-solved), so the data prep actor filters
+        # everything out and we get an empty batch. Downstream torch.stack on the empty
+        # response_masks list crashes the trainer. Skip this step and let the next batch
+        # try again.
+        if len(data_BT.query_responses) == 0:
+            if self.rank == 0:
+                logger.warning(
+                    "[trainer] empty training batch (every prompt group was filtered for "
+                    "having no learning signal); skipping update for this step."
+                )
+            return self.local_metrics.get_metrics_list(), {}
+
         # split batch for sequence parallelism. Do before moving data to GPU.
         if self.splitter is not None:
             with Timer("✂️ Splitting batch for SP", noop=self.rank != 0):
