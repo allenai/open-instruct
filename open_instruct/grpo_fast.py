@@ -1642,10 +1642,16 @@ def one_training_step(
             metrics[RUBRIC_TABLE_KEY] = wandb.Table(columns=RUBRIC_TABLE_COLUMNS, data=metrics[RUBRIC_TABLE_KEY])
 
         # Convert array/list metrics to wandb histograms for logging.
+        # Skip histogram if the data range is degenerate (e.g. all values identical
+        # after aggressive length collapse); wandb.Histogram passes bins=64 to
+        # np.histogram which raises "Too many bins for data range" in that case.
         metrics_to_log = {}
         for key, value in metrics.items():
             if (isinstance(value, np.ndarray | list)) and len(value) > 0:
-                metrics_to_log[key] = wandb.Histogram(value)
+                try:
+                    metrics_to_log[key] = wandb.Histogram(value)
+                except ValueError as e:
+                    logger.warning(f"Skipping histogram for metric {key!r}: {e}")
             else:
                 metrics_to_log[key] = value
         wandb.log(metrics_to_log, step=training_step)
