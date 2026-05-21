@@ -431,9 +431,9 @@ class StreamingDataLoaderConfig:
     """Probability in [0.0, 1.0] that a zero-std prompt is requeued as a never-give-up retry."""
     never_give_up_accept_on: Literal["better", "different"] = "better"
     """When to accept a never-give-up retry against the chain's previous best reward."""
-    maintain_pending_ngu_age: int = 2
+    maintain_pending_ngu_age: int = 4
     maintain_pending_ngu_completions: bool = True
-    maintain_pending_ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = None
+    maintain_pending_ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = "anchor_pos"
     """How to adjust grouped advantages when NGU adds pending attempts to the baseline count."""
     no_resampling_pass_rate: float | None = None
     advantage_normalization_type: str = "centered"
