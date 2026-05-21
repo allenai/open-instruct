@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL_NAME=allenai/Olmo-Hybrid-Instruct-DPO-7B
 LR=1e-6

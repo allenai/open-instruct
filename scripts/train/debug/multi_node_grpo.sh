@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Note: This was originally a script that Saurabh came up to run some experiments.
 # Finbarr has been using it a lot for testing, so we thought we'd check it in.
 num_prompts=25376

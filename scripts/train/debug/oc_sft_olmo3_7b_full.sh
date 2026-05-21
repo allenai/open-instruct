@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Full 2-epoch run matching reference experiment 01KNMEJKEZNJKZH9QWQW8CS0JW
 # (jacobm/olmo3-7b-instruct-SFT-rerun-04072026) using open-instruct's
 # olmo_core_finetune.py. Matches the reference's auto-derived parallel layout:

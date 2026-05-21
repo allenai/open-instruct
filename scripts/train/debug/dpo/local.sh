@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 export TORCH_LOGS="graph_breaks,recompiles"
 uv run torchrun --nproc_per_node=1 open_instruct/dpo.py \
     --model_name_or_path allenai/OLMo-2-0425-1B \

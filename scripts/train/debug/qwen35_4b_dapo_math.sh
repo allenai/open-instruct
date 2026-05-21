@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 
 EXP_NAME="${EXP_NAME:-qwen35_4b_dapo_math}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"

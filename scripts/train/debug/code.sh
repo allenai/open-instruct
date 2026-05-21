@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 python open_instruct/grpo_fast.py \
     --exp_name "test" \
     --beta 0.01 \

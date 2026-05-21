@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Beaker experiment for WordleTextEnv + SandboxLM tools — 8 GPUs (4 learners, 4 inference engines)
 #
 # Wordle text environment with sandbox tools available every rollout.

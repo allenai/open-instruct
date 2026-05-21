@@ -1,5 +1,4 @@
 #!/bin/bash
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Beaker experiment for tool use regression test (python+search+browse) on 1 GPU.
 # Usage: bash scripts/train/build_image_and_launch.sh scripts/train/debug/tools/tool_regression_beaker.sh
 
