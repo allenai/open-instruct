@@ -186,7 +186,7 @@ class TestGroupedAdvantages(unittest.TestCase):
             training_step=0,
             active_sampling=True,
             filter_zero_std_samples=True,
-            never_give_up_int=1,
+            never_give_up=1.0,
             maintain_pending_ngu_completions=True,
         )
 

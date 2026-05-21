@@ -65,12 +65,6 @@ def get_never_give_up_chain_id(prompt_id: str) -> str:
     raise ValueError(f"Unexpected prompt_id format for never_give_up retry tracking: {prompt_id}")
 
 
-def should_requeue_never_give_up(never_give_up: float, never_give_up_int: int, resample_number: int) -> bool:
-    if never_give_up_int > 0:
-        return resample_number < never_give_up_int
-    return np.random.random() < never_give_up
-
-
 def pop_pending_never_give_up_state(
     never_give_up_state: NeverGiveUpAccumulationState,
     chain_id: str,
@@ -335,7 +329,6 @@ def compute_grouped_advantages(
     prompt_baseline_reward_sums: list[float] | None = None,
     advantage_normalization_type: str = "centered",
     ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = None,
-    ngu_count_baseline: bool = True,
 ) -> np.ndarray:
     """Compute per-sample advantages from raw scores grouped by prompt."""
     mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(scores, prompt_sample_counts)
@@ -344,8 +337,7 @@ def compute_grouped_advantages(
     if have_ngu_baseline:
         ngu_group_means = [s / c for s, c in zip(prompt_baseline_reward_sums, prompt_baseline_sample_counts)]
         ngu_mean_baseline = _expand_per_group_values(ngu_group_means, prompt_sample_counts, dtype=scores.dtype)
-        if ngu_count_baseline:
-            mean_grouped_rewards = ngu_mean_baseline
+        mean_grouped_rewards = ngu_mean_baseline
 
     if advantage_normalization_type == "standard":
         advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)

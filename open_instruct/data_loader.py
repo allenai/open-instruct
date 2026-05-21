@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import copy
-import logging
 import os
 import threading
 import time
@@ -34,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, logger_utils, padding_free_collator, utils
 from open_instruct.data_loader_utils import (
     NeverGiveUpAccumulationState,
     compute_grouped_advantages,
@@ -43,7 +42,6 @@ from open_instruct.data_loader_utils import (
     merge_generation_results,
     pop_pending_never_give_up_state,
     should_accept_never_give_up_batch,
-    should_requeue_never_give_up,
     store_pending_never_give_up_state,
 )
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
@@ -61,7 +59,7 @@ from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 
@@ -431,15 +429,10 @@ class StreamingDataLoaderConfig:
     filter_zero_std_samples: bool = True
     never_give_up: float = 0.0
     """Probability in [0.0, 1.0] that a zero-std prompt is requeued as a never-give-up retry."""
-    never_give_up_int: int = 0
-    """Maximum number of never-give-up retries per prompt. Mutually exclusive with never_give_up."""
     never_give_up_accept_on: Literal["better", "different"] = "better"
     """When to accept a never-give-up retry against the chain's previous best reward."""
     maintain_pending_ngu_age: int = 2
     maintain_pending_ngu_completions: bool = True
-    maintain_ngu_completions_downsample: bool = False
-    maintain_pending_ngu_counts: bool = False
-    ngu_count_baseline: bool = True
     maintain_pending_ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = None
     """How to adjust grouped advantages when NGU adds pending attempts to the baseline count."""
     no_resampling_pass_rate: float | None = None
@@ -544,15 +537,6 @@ class StreamingDataLoaderConfig:
             raise ValueError(f"`never_give_up` must be a float, got {self.never_give_up!r}.")
         if not 0.0 <= self.never_give_up <= 1.0:
             raise ValueError(f"`never_give_up` float probability must be in [0.0, 1.0], got {self.never_give_up}.")
-        if not isinstance(self.never_give_up_int, int) or isinstance(self.never_give_up_int, bool):
-            raise ValueError(f"`never_give_up_int` must be an int, got {self.never_give_up_int!r}.")
-        if self.never_give_up_int < 0:
-            raise ValueError(f"`never_give_up_int` retry limit must be non-negative, got {self.never_give_up_int}.")
-        if self.never_give_up > 0.0 and self.never_give_up_int > 0:
-            raise ValueError(
-                "`never_give_up` and `never_give_up_int` are mutually exclusive; set at most one of them, got "
-                f"never_give_up={self.never_give_up}, never_give_up_int={self.never_give_up_int}."
-            )
         if self.never_give_up_accept_on not in ("better", "different"):
             raise ValueError(
                 f"`never_give_up_accept_on` must be 'better' or 'different', got {self.never_give_up_accept_on!r}."
@@ -563,10 +547,6 @@ class StreamingDataLoaderConfig:
             raise ValueError(
                 "`maintain_pending_ngu_count_rescale` must be None, 'anchor_pos', 'ratio', or 'count_ratio', "
                 f"got {self.maintain_pending_ngu_count_rescale!r}."
-            )
-        if self.maintain_pending_ngu_count_rescale == "count_ratio" and not self.maintain_pending_ngu_counts:
-            raise ValueError(
-                "`maintain_pending_ngu_count_rescale='count_ratio'` requires `maintain_pending_ngu_counts=True`."
             )
         if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
             raise ValueError(
@@ -816,20 +796,23 @@ class Group:
     baseline_reward_sum: float
 
 
+@dataclass
+class GroupFilterResult:
+    group: Group | None
+    filtered_results: list[data_types.GenerationResult]
+    counted_as_sampled: bool
+    never_give_up: bool
+    prompt_id: str
+    index: int
+
+
 def process_group(
     result: data_types.GenerationResult,
     generation_config: vllm.SamplingParams,
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     max_possible_score: float,
-    no_resampling_pass_rate: float | None,
-    iter_dataloader: HFDataLoader | None,
-    filter_zero_std_samples: bool,
-    replenish_prompts: bool,
-    param_prompt_Q: ray_queue.Queue | None,
-    base_env_config: EnvConfig,
-    ground_truth_overrides: dict[int, Any] | None = None,
-) -> Group | None:
+) -> Group:
     assert result.index is not None
     assert result.reward_scores is not None
     assert result.token_statistics is not None
@@ -846,19 +829,6 @@ def process_group(
     raw_query = example[RAW_PROMPT_KEY]
     sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
-    if replenish_prompts:
-        assert iter_dataloader is not None and param_prompt_Q is not None
-        example = next(iter_dataloader)
-        add_prompt_to_generator(
-            example,
-            iter_dataloader._epoch,
-            param_prompt_Q,
-            generation_config,
-            is_eval=False,
-            base_env_config=base_env_config,
-            ground_truth_overrides=ground_truth_overrides,
-        )
-
     for i in range(len(result.finish_reasons)):
         if result.finish_reasons[i] == "stop" and len(result.responses[i]) == 0:
             result.responses[i].append(tokenizer.eos_token_id)
@@ -868,12 +838,6 @@ def process_group(
     decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
     percent_solved = np.mean(result.reward_scores).item() / max_possible_score
-    if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
-        assert iter_dataloader is not None
-        iter_dataloader.exclude_index(result.index)
-
-    if filter_zero_std_samples and np.std(result.reward_scores) == 0:
-        return None
 
     return Group(
         result=result,
@@ -890,6 +854,170 @@ def process_group(
         sample_count=len(result.responses),
         baseline_sample_count=len(result.responses),
         baseline_reward_sum=float(np.sum(result.reward_scores)),
+    )
+
+
+def maybe_dont_resample_prompt(
+    group: Group, no_resampling_pass_rate: float | None, iter_dataloader: HFDataLoader | None
+) -> bool:
+    if no_resampling_pass_rate is None or group.percent_solved < no_resampling_pass_rate:
+        return False
+
+    assert iter_dataloader is not None
+    iter_dataloader.exclude_index(group.index)
+    return True
+
+
+def maybe_filter_group(
+    group: Group,
+    tokenizer: PreTrainedTokenizer,
+    max_possible_score: float,
+    filter_zero_std_samples: bool,
+    active_sampling: bool,
+    never_give_up: float,
+    never_give_up_accept_on: Literal["better", "different"],
+    never_give_up_state: NeverGiveUpAccumulationState,
+    never_give_up_state_lock: Any,
+    maintain_pending_ngu_age: int,
+    maintain_pending_ngu_completions: bool,
+) -> GroupFilterResult:
+    result = group.result
+    assert result.prompt_id is not None
+    assert result.index is not None
+    prompt_id = result.prompt_id
+    index = result.index
+
+    reward_scores = np.asarray(result.reward_scores, dtype=float)
+    if never_give_up == 0:
+        if filter_zero_std_samples and np.std(reward_scores) == 0:
+            return GroupFilterResult(
+                group=None,
+                filtered_results=[result],
+                counted_as_sampled=not active_sampling,
+                never_give_up=False,
+                prompt_id=prompt_id,
+                index=index,
+            )
+
+        group.sample_count = len(result.responses)
+        group.baseline_sample_count = group.sample_count
+        group.baseline_reward_sum = float(reward_scores.sum())
+        return GroupFilterResult(
+            group=group,
+            filtered_results=[],
+            counted_as_sampled=True,
+            never_give_up=False,
+            prompt_id=prompt_id,
+            index=index,
+        )
+
+    chain_id = get_never_give_up_chain_id(prompt_id)
+    pending_ngu = pop_pending_never_give_up_state(
+        never_give_up_state, chain_id, result.model_step, maintain_pending_ngu_age, never_give_up_state_lock
+    )
+    current_attempt_count = pending_ngu.attempt_count + 1
+
+    current_sample_count = len(result.responses)
+    current_reward_sum = float(reward_scores.sum())
+    current_reward = float(reward_scores.max())
+    accept_this_batch = should_accept_never_give_up_batch(
+        reward_scores, pending_ngu.best_reward, filter_zero_std_samples, never_give_up_accept_on
+    )
+
+    if not accept_this_batch:
+        best_reward = (
+            current_reward if pending_ngu.best_reward is None else max(pending_ngu.best_reward, current_reward)
+        )
+        solved_prompt = best_reward >= max_possible_score or np.isclose(best_reward, max_possible_score)
+        never_give_up_prompt = not solved_prompt and np.random.random() < never_give_up
+
+        filtered_results = []
+        if never_give_up_prompt:
+            if maintain_pending_ngu_completions:
+                pending_ngu.results.append(result)
+                pending_ngu.metrics.append(result.reward_metrics)
+            pending_ngu.response_count += current_sample_count
+            pending_ngu.reward_sum += current_reward_sum
+            store_pending_never_give_up_state(
+                never_give_up_state,
+                chain_id,
+                pending_ngu,
+                best_reward,
+                current_attempt_count,
+                never_give_up_state_lock,
+            )
+            logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", prompt_id)
+        else:
+            filtered_results.extend(pending_ngu.results)
+            filtered_results.append(result)
+
+        return GroupFilterResult(
+            group=None,
+            filtered_results=filtered_results,
+            counted_as_sampled=not active_sampling,
+            never_give_up=never_give_up_prompt,
+            prompt_id=prompt_id,
+            index=index,
+        )
+
+    if pending_ngu.results:
+        pending_ngu.results.append(result)
+        pending_ngu.metrics.append(result.reward_metrics)
+        result, merged_reward_metrics = merge_generation_results(pending_ngu.results, pending_ngu.metrics)
+        assert result.reward_scores is not None
+        group.result = result
+        group.decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
+        group.reward_scores = result.reward_scores
+        group.reward_metrics = merged_reward_metrics
+        group.sample_count = len(result.responses)
+    else:
+        group.sample_count = len(result.responses)
+
+    group.baseline_sample_count = pending_ngu.response_count + current_sample_count
+    group.baseline_reward_sum = pending_ngu.reward_sum + current_reward_sum
+
+    return GroupFilterResult(
+        group=group,
+        filtered_results=[],
+        counted_as_sampled=True,
+        never_give_up=False,
+        prompt_id=prompt_id,
+        index=index,
+    )
+
+
+def maybe_replenish_prompt(
+    filter_result: GroupFilterResult,
+    replenish_prompts: bool,
+    dataset: Dataset,
+    generation_config: vllm.SamplingParams,
+    iter_dataloader: HFDataLoader | None,
+    param_prompt_Q: ray_queue.Queue | None,
+    base_env_config: EnvConfig,
+    ground_truth_overrides: dict[int, Any] | None = None,
+) -> None:
+    if not replenish_prompts:
+        return
+
+    assert iter_dataloader is not None and param_prompt_Q is not None
+    if filter_result.never_give_up:
+        replacement_example = dataset[filter_result.index]
+        prompt_id_suffix = get_never_give_up_retry_suffix(
+            filter_result.prompt_id, iter_dataloader._epoch, filter_result.index
+        )
+    else:
+        replacement_example = next(iter_dataloader)
+        prompt_id_suffix = None
+
+    add_prompt_to_generator(
+        replacement_example,
+        iter_dataloader._epoch,
+        param_prompt_Q,
+        generation_config,
+        is_eval=False,
+        base_env_config=base_env_config,
+        ground_truth_overrides=ground_truth_overrides,
+        prompt_id_suffix=prompt_id_suffix,
     )
 
 
@@ -1075,7 +1203,6 @@ def accumulate_inference_batches(
     active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
     never_give_up: float = 0.0,
-    never_give_up_int: int = 0,
     never_give_up_accept_on: Literal["better", "different"] = "better",
     replenish_prompts: bool = False,
     no_resampling_pass_rate: float | None = None,
@@ -1089,8 +1216,6 @@ def accumulate_inference_batches(
     never_give_up_state_lock: Any = None,
     maintain_pending_ngu_age: int = 2,
     maintain_pending_ngu_completions: bool = True,
-    maintain_ngu_completions_downsample: bool = False,
-    maintain_pending_ngu_counts: bool = False,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1102,6 +1227,9 @@ def accumulate_inference_batches(
         assert param_prompt_Q is not None and iter_dataloader is not None and dataset is not None, (
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
+
+    if never_give_up_state is None:
+        never_give_up_state = NeverGiveUpAccumulationState()
 
     groups: list[Group] = []
     total_filtered_prompts = 0
@@ -1160,86 +1288,50 @@ def accumulate_inference_batches(
             tokenizer=tokenizer,
             dataset=dataset,
             max_possible_score=max_possible_score,
-            no_resampling_pass_rate=no_resampling_pass_rate,
-            iter_dataloader=iter_dataloader,
-            filter_zero_std_samples=False,
-            replenish_prompts=False,
-            param_prompt_Q=param_prompt_Q,
-            base_env_config=base_env_config,
-            ground_truth_overrides=ground_truth_overrides,
         )
 
+        no_resampled_prompt = maybe_dont_resample_prompt(group, no_resampling_pass_rate, iter_dataloader)
+        if no_resampled_prompt:
+            total_no_resampled += 1
+            logger.debug(
+                f"[Data Preparation Thread] Prompt solved at {group.percent_solved}, "
+                f"will be excluded from resampling, total no resampled: {total_no_resampled}"
+            )
+
+        group_filter_result = maybe_filter_group(
+            group=group,
+            tokenizer=tokenizer,
+            max_possible_score=max_possible_score,
+            filter_zero_std_samples=filter_zero_std_samples,
+            active_sampling=active_sampling,
+            never_give_up=never_give_up,
+            never_give_up_accept_on=never_give_up_accept_on,
+            never_give_up_state=never_give_up_state,
+            never_give_up_state_lock=never_give_up_state_lock,
+            maintain_pending_ngu_age=maintain_pending_ngu_age,
+            maintain_pending_ngu_completions=maintain_pending_ngu_completions,
+        )
+
+        for filtered_result in group_filter_result.filtered_results:
+            record_filtered_prompt(filtered_result)
+
+        if group_filter_result.counted_as_sampled:
+            num_prompts_sampled += 1
+            progress_bar.update(1)
+
+        maybe_replenish_prompt(
+            group_filter_result,
+            replenish_prompts,
+            dataset,
+            generation_config,
+            iter_dataloader,
+            param_prompt_Q,
+            base_env_config,
+            ground_truth_overrides,
+        )
+
+        group = group_filter_result.group
         if group is None:
-            continue
-
-        assert result.prompt_id is not None
-        chain_id = get_never_give_up_chain_id(result.prompt_id)
-        pending_ngu = pop_pending_never_give_up_state(
-            never_give_up_state, chain_id, result.model_step, maintain_pending_ngu_age, never_give_up_state_lock
-        )
-        current_attempt_count = pending_ngu.attempt_count + 1
-
-        reward_scores = np.asarray(result.reward_scores, dtype=float)
-        current_reward = float(reward_scores.max())
-        accept_this_batch = should_accept_never_give_up_batch(
-            reward_scores, pending_ngu.best_reward, filter_zero_std_samples, never_give_up_accept_on
-        )
-
-        if not accept_this_batch:
-            best_reward = (
-                current_reward if pending_ngu.best_reward is None else max(pending_ngu.best_reward, current_reward)
-            )
-            solved_prompt = best_reward >= max_possible_score or np.isclose(best_reward, max_possible_score)
-            requeue_same_prompt = not solved_prompt and should_requeue_never_give_up(
-                never_give_up, never_give_up_int, resample_number=current_attempt_count - 1
-            )
-
-            if replenish_prompts:
-                assert iter_dataloader is not None and param_prompt_Q is not None
-                if requeue_same_prompt:
-                    replacement_example = dataset[result.index]
-                    prompt_id_suffix = get_never_give_up_retry_suffix(
-                        result.prompt_id, iter_dataloader._epoch, result.index
-                    )
-                else:
-                    replacement_example = next(iter_dataloader)
-                    prompt_id_suffix = None
-                add_prompt_to_generator(
-                    replacement_example,
-                    iter_dataloader._epoch,
-                    param_prompt_Q,
-                    generation_config,
-                    is_eval=False,
-                    base_env_config=base_env_config,
-                    ground_truth_overrides=ground_truth_overrides,
-                    prompt_id_suffix=prompt_id_suffix,
-                )
-
-            if requeue_same_prompt:
-                if maintain_pending_ngu_completions:
-                    pending_ngu.results.append(result)
-                    pending_ngu.metrics.append(result.reward_metrics)
-                if maintain_pending_ngu_counts:
-                    pending_ngu.response_count += len(result.responses)
-                    pending_ngu.reward_sum += float(reward_scores.sum())
-                if maintain_pending_ngu_completions or maintain_pending_ngu_counts:
-                    store_pending_never_give_up_state(
-                        never_give_up_state,
-                        chain_id,
-                        pending_ngu,
-                        best_reward,
-                        current_attempt_count,
-                        never_give_up_state_lock,
-                    )
-                logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", result.prompt_id)
-            else:
-                for pending_result in pending_ngu.results:
-                    record_filtered_prompt(pending_result)
-                record_filtered_prompt(result)
-
-            if not active_sampling:
-                num_prompts_sampled += 1
-                progress_bar.update(1)
             logger.info(
                 f"[accumulate_inference_batches] training_step={training_step} "
                 f"sampled={num_prompts_sampled}/{num_prompts} "
@@ -1248,62 +1340,10 @@ def accumulate_inference_batches(
             )
             continue
 
-        if replenish_prompts:
-            assert iter_dataloader is not None and param_prompt_Q is not None
-            add_prompt_to_generator(
-                next(iter_dataloader),
-                iter_dataloader._epoch,
-                param_prompt_Q,
-                generation_config,
-                is_eval=False,
-                base_env_config=base_env_config,
-                ground_truth_overrides=ground_truth_overrides,
-            )
-
-        merged_prior_ngu_completions = False
-        if pending_ngu.results:
-            merged_prior_ngu_completions = True
-            pending_ngu.results.append(result)
-            pending_ngu.metrics.append(result.reward_metrics)
-            result, merged_reward_metrics = merge_generation_results(pending_ngu.results, pending_ngu.metrics)
-            assert result.reward_scores is not None
-            reward_scores = np.asarray(result.reward_scores, dtype=float)
-            group.result = result
-            group.decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
-            group.reward_scores = result.reward_scores
-            group.reward_metrics = merged_reward_metrics
-            group.sample_count = len(result.responses)
-        else:
-            group.sample_count = len(result.responses)
-
-        reward_scores_sum = float(reward_scores.sum())
-        if maintain_pending_ngu_counts:
-            if merged_prior_ngu_completions:
-                group.baseline_sample_count = group.sample_count
-                group.baseline_reward_sum = reward_scores_sum
-            else:
-                group.baseline_sample_count = pending_ngu.response_count + group.sample_count
-                group.baseline_reward_sum = pending_ngu.reward_sum + reward_scores_sum
-        else:
-            group.baseline_sample_count = group.sample_count
-            group.baseline_reward_sum = reward_scores_sum
-
-        if maintain_ngu_completions_downsample and merged_prior_ngu_completions:
-            logger.warning("maintain_ngu_completions_downsample is not implemented in this GRPO data path.")
-
-        if no_resampling_pass_rate is not None and group.percent_solved >= no_resampling_pass_rate:
-            total_no_resampled += 1
-            logging.debug(
-                f"[Data Preparation Thread] Prompt solved at {group.percent_solved}, "
-                f"will be excluded from resampling, total no resampled: {total_no_resampled}"
-            )
-
-        num_prompts_sampled += 1
-        progress_bar.update(1)
         groups.append(group)
 
     if len(groups) == 0:
-        logging.warning(
+        logger.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
             f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
@@ -1564,7 +1604,6 @@ class DataPreparationActor:
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
                 never_give_up=self.config.never_give_up,
-                never_give_up_int=self.config.never_give_up_int,
                 never_give_up_accept_on=self.config.never_give_up_accept_on,
                 replenish_prompts=True,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
@@ -1579,8 +1618,6 @@ class DataPreparationActor:
                 never_give_up_state_lock=self.never_give_up_state_lock,
                 maintain_pending_ngu_age=self.config.maintain_pending_ngu_age,
                 maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
-                maintain_ngu_completions_downsample=self.config.maintain_ngu_completions_downsample,
-                maintain_pending_ngu_counts=self.config.maintain_pending_ngu_counts,
             )
             logger.info(
                 f"[DataPreparationActor] Step {self.training_step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
@@ -1626,7 +1663,6 @@ class DataPreparationActor:
                 batch_stats.prompt_baseline_reward_sums,
                 advantage_normalization_type=self.config.advantage_normalization_type,
                 ngu_count_rescale=self.config.maintain_pending_ngu_count_rescale,
-                ngu_count_baseline=self.config.ngu_count_baseline,
             )
 
             if self.config.save_traces and self.config.rollouts_save_path:
