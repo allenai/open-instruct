@@ -45,7 +45,13 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
-from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
+from open_instruct.rl_utils import (
+    PackedSequences,
+    TrackioRolloutLogger,
+    pack_sequences,
+    save_rollout_metadata,
+    save_rollouts_to_disk,
+)
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics
 
@@ -490,6 +496,12 @@ class StreamingDataLoaderConfig:
     # Rollout saving
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
+    trackio_project: str | None = None
+    """Trackio project name for logging rollout traces. Leave unset to disable Trackio trace logging."""
+    trackio_space_id: str | None = None
+    """Optional Hugging Face Space ID for remote Trackio logging."""
+    trackio_max_traces_per_step: int = 32
+    """Maximum rollout traces to log to Trackio per training step. Set to 0 or a negative value to disable."""
 
     # Computed at post_init
     max_possible_score: float = 1.0
@@ -1303,6 +1315,7 @@ class DataPreparationActor:
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
+        self.trackio_rollout_logger: TrackioRolloutLogger | None = None
         self._executor: ThreadPoolExecutor | None = None
         self._prep_future = None
 
@@ -1329,6 +1342,18 @@ class DataPreparationActor:
         if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
             save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
             self.metadata_saved = True
+        if (
+            self.config.trackio_project
+            and self.config.trackio_max_traces_per_step > 0
+            and self.trackio_rollout_logger is None
+        ):
+            self.trackio_rollout_logger = TrackioRolloutLogger(
+                project=self.config.trackio_project,
+                run_name=self.run_name,
+                tokenizer=self.tokenizer,
+                space_id=self.config.trackio_space_id,
+                max_traces_per_step=self.config.trackio_max_traces_per_step,
+            )
 
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
@@ -1380,6 +1405,8 @@ class DataPreparationActor:
             )
 
             if isinstance(result, data_types.ShutdownSentinel):
+                if self.trackio_rollout_logger is not None:
+                    self.trackio_rollout_logger.close()
                 return
 
             if result is None:
@@ -1437,6 +1464,15 @@ class DataPreparationActor:
                     self.total_samples_written,
                 )
                 self.total_samples_written += len(batch.queries)
+
+            if self.trackio_rollout_logger is not None:
+                self.trackio_rollout_logger.log_rollouts(
+                    step=self.training_step,
+                    batch=batch,
+                    result=result,
+                    advantages=advantages,
+                    num_samples_per_prompt=self.config.num_samples_per_prompt_rollout,
+                )
 
             packed_sequences = pack_sequences(
                 queries=batch.queries,
@@ -1532,6 +1568,9 @@ class DataPreparationActor:
                 self.metrics[self.training_step] = step_metrics
                 self.current_prepared_step = self.training_step
             self.training_step += 1
+
+        if self.trackio_rollout_logger is not None:
+            self.trackio_rollout_logger.close()
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""

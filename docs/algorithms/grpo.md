@@ -76,10 +76,30 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | **Saving** | `--output_dir` | Output directory for checkpoints | `output` |
 | | `--save_freq` | Save every N train steps | `200` |
 | | `--with_tracking` | Track experiment with Weights and Biases | `False` |
+| **Trace Logging** | `--trackio_project` | Trackio project name for rollout traces | `None` |
+| | `--trackio_space_id` | Optional Hugging Face Space for Trackio logging | `None` |
+| | `--trackio_max_traces_per_step` | Maximum Trackio rollout traces per training step | `32` |
 
 For details on how GRPO's HSDP sharding works, see [OLMo-core Sharding and Parallelism](olmo_core_sharding.md).
 
 ---
+
+### Trackio Rollout Traces
+
+Open-Instruct can log GRPO rollouts as Trackio traces from the same data preparation path that writes JSONL rollout records. Set `--trackio_project` to enable this. Each trace contains the prompt, generated response, reward, advantage, finish reason, dataset, prompt index, sample index, and tool request metadata when present.
+
+```bash
+python -m open_instruct.grpo_fast \
+  ... \
+  --trackio_project open-instruct-rollouts \
+  --trackio_max_traces_per_step 32
+```
+
+To view local traces:
+
+```bash
+trackio show --project open-instruct-rollouts
+```
 
 
 

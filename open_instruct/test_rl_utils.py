@@ -2,13 +2,14 @@ import shutil
 import tempfile
 import time
 import unittest
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import torch
 import transformers
 from parameterized import parameterized
 
-from open_instruct import rl_utils
+from open_instruct import data_types, model_utils, rl_utils
 
 PACK_LENGTH = 40
 PROMPT_MAX_LEN = 20
@@ -335,6 +336,136 @@ class TestRLUtils(unittest.TestCase):
         # Verify no empty sequences
         for seq in packed_with_min.query_responses:
             self.assertGreater(len(seq), 0)
+
+    @patch("open_instruct.rl_utils.importlib.import_module")
+    def test_trackio_rollout_logger_logs_traces(self, mock_import_module):
+        """Test that rollout batches are logged as Trackio Trace records."""
+        mock_trackio = MagicMock()
+        mock_trackio.Trace.side_effect = lambda messages, metadata: {
+            "_type": "trackio.trace",
+            "messages": messages,
+            "metadata": metadata,
+        }
+        mock_import_module.return_value = mock_trackio
+
+        tokenizer = MagicMock()
+        tokenizer.decode.side_effect = lambda tokens, skip_special_tokens=False: " ".join(
+            str(token) for token in tokens
+        )
+        logger = rl_utils.TrackioRolloutLogger(
+            project="open-instruct-trackio-test",
+            run_name="test-run",
+            tokenizer=tokenizer,
+            space_id="user/space",
+            max_traces_per_step=2,
+        )
+
+        batch = model_utils.Batch(
+            queries=[[1, 2], [3, 4]],
+            ground_truths=[[5], [6]],
+            datasets=["math", "math"],
+            raw_queries=["What is 2 + 2?", "What is 3 + 3?"],
+            decoded_responses=["4", "6"],
+            indices=[10, 11],
+            scores=[1.0, 0.5],
+            model_steps=[7, 7],
+        )
+        result = data_types.GenerationResult(
+            responses=[[5], [6]],
+            finish_reasons=["stop", "length"],
+            masks=[[1], [1]],
+            request_info=data_types.RequestInfo(
+                num_calls=[0, 1],
+                timeouts=[0, 0],
+                tool_errors=["", ""],
+                tool_outputs=["", "tool output"],
+                tool_runtimes=[0.0, 0.2],
+                tool_calleds=[False, True],
+            ),
+            index=None,
+            prompt_id=None,
+        )
+
+        logger.log_rollouts(
+            step=3, batch=batch, result=result, advantages=np.array([0.25, -0.25]), num_samples_per_prompt=2
+        )
+
+        mock_trackio.init.assert_called_once_with(
+            project="open-instruct-trackio-test", name="test-run", space_id="user/space"
+        )
+        self.assertEqual(mock_trackio.Trace.call_count, 2)
+        first_trace = mock_trackio.Trace.call_args_list[0].kwargs
+        self.assertEqual(
+            first_trace["messages"],
+            [{"role": "user", "content": "What is 2 + 2?"}, {"role": "assistant", "content": "4"}],
+        )
+        self.assertEqual(
+            first_trace["metadata"],
+            {
+                "split": "train",
+                "step": 3,
+                "sample_idx": 0,
+                "prompt_idx": 0,
+                "reward": 1.0,
+                "advantage": 0.25,
+                "finish_reason": "stop",
+                "dataset": "math",
+                "dataset_index": 10,
+                "model_step": 7,
+                "request_info": {
+                    "num_calls": 0,
+                    "timeouts": 0,
+                    "tool_errors": "",
+                    "tool_outputs": "",
+                    "tool_runtimes": 0.0,
+                    "tool_calleds": False,
+                    "tool_call_stats": [],
+                    "rollout_state": {},
+                },
+            },
+        )
+        mock_trackio.log.assert_called_once()
+        self.assertEqual(mock_trackio.log.call_args.args[0]["train/rollouts"][0]["messages"], first_trace["messages"])
+        self.assertEqual(mock_trackio.log.call_args.kwargs, {"step": 3})
+
+    @patch("open_instruct.rl_utils.importlib.import_module")
+    def test_trackio_rollout_logger_respects_cap(self, mock_import_module):
+        """Test that Trackio rollout logging respects max_traces_per_step."""
+        mock_trackio = MagicMock()
+        mock_import_module.return_value = mock_trackio
+        logger = rl_utils.TrackioRolloutLogger(
+            project="open-instruct-trackio-test", run_name="test-run", tokenizer=MagicMock(), max_traces_per_step=1
+        )
+        batch = model_utils.Batch(
+            queries=[[1], [2]],
+            ground_truths=[[], []],
+            datasets=["math", "math"],
+            raw_queries=["q1", "q2"],
+            decoded_responses=["a1", "a2"],
+            indices=None,
+            scores=[1.0, 0.0],
+        )
+        result = data_types.GenerationResult(
+            responses=[[3], [4]],
+            finish_reasons=["stop", "stop"],
+            masks=[[1], [1]],
+            request_info=data_types.RequestInfo(
+                num_calls=[0, 0],
+                timeouts=[0, 0],
+                tool_errors=["", ""],
+                tool_outputs=["", ""],
+                tool_runtimes=[0.0, 0.0],
+                tool_calleds=[False, False],
+            ),
+            index=None,
+            prompt_id=None,
+        )
+
+        logger.log_rollouts(
+            step=0, batch=batch, result=result, advantages=np.array([1.0, 0.0]), num_samples_per_prompt=1
+        )
+
+        mock_trackio.Trace.assert_called_once()
 
 
 class TestMaskedMean(unittest.TestCase):
