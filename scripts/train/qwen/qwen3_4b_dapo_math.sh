@@ -4,7 +4,12 @@ EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+if [[ "${1:-}" == "$BEAKER_USER"* ]]; then
+    BEAKER_IMAGE="$1"
+    shift
+fi
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
@@ -43,8 +48,9 @@ uv run open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits "train" \
-    --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 allenai/brumo_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits "train" \
+    --remap_verifier math_aime_2025=math \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 10240 \
