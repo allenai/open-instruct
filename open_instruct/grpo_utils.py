@@ -375,8 +375,6 @@ class GRPOExperimentConfig(
                 "loss_denominator must be 'token', 'sequence', or a valid float greater than 0, "
                 f"got: {self.loss_denominator}"
             )
-        if self.loss_denominator == "sequence" and self.sequence_parallel_size > 1:
-            raise ValueError("`loss_denominator=sequence` is not currently supported with sequence parallelism.")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
@@ -821,6 +819,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         sequence_loss: bool,
         rollout_sample_ids: torch.Tensor,
         has_rollout_sample_ids: bool,
+        sequence_process_group: dist.ProcessGroup | None,
         shards: int,
         loss_scale: torch.Tensor,
         compute_params: list[torch.nn.Parameter],
@@ -851,7 +850,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         shards = min(shards, num_tokens)
         if sequence_loss:
             rollout_ids = rollout_sample_ids if has_rollout_sample_ids else None
-            loss_weights_2d, denom = _sequence_loss_weights(mask_2d, rollout_ids)
+            loss_weights_2d, denom = _sequence_loss_weights(mask_2d, rollout_ids, sequence_process_group)
         else:
             loss_weights_2d = mask_2d.to(dtype=torch.float32)
             denom = loss_weights_2d.sum().clamp_min(1.0)
@@ -955,6 +954,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -974,6 +974,7 @@ def tiled_grpo_lm_head_loss(
     loss_scale: torch.Tensor,
     loss_denominator: str = "token",
     rollout_sample_ids: torch.Tensor | None = None,
+    sequence_process_group: dist.ProcessGroup | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     has_ref_logprobs = ref_logprobs is not None
     if ref_logprobs is None:
@@ -998,6 +999,7 @@ def tiled_grpo_lm_head_loss(
         loss_denominator == "sequence",
         rollout_sample_ids,
         has_rollout_sample_ids,
+        sequence_process_group,
         shards,
         loss_scale,
         compute_params,
@@ -1343,16 +1345,43 @@ def calculate_token_counts(
     return accumulation_counts
 
 
-def _count_sequences(response_mask: torch.Tensor, rollout_sample_ids: torch.Tensor | None = None) -> torch.Tensor:
+def _sequence_id_counts(
+    response_mask: torch.Tensor,
+    rollout_sample_ids: torch.Tensor | None = None,
+    sequence_process_group: dist.ProcessGroup | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
     valid = response_mask.bool()
     if rollout_sample_ids is not None:
         valid = valid & (rollout_sample_ids >= 0)
-        if not valid.any():
-            return torch.zeros((), dtype=torch.float32, device=response_mask.device)
-        return torch.tensor(
-            float(torch.unique(rollout_sample_ids[valid]).numel()), dtype=torch.float32, device=response_mask.device
-        )
-    return valid.any(dim=-1).to(dtype=torch.float32).sum()
+        sequence_ids = rollout_sample_ids
+    else:
+        row_ids = torch.arange(response_mask.shape[0], device=response_mask.device, dtype=torch.long)
+        sequence_ids = row_ids[:, None].expand_as(response_mask)
+
+    has_valid = valid.any()
+    local_max = sequence_ids[valid].max() if has_valid else torch.tensor(-1, dtype=torch.long, device=response_mask.device)
+    if sequence_process_group is not None:
+        dist.all_reduce(local_max, op=dist.ReduceOp.MAX, group=sequence_process_group)
+    if local_max.item() < 0:
+        return torch.zeros(0, dtype=torch.float32, device=response_mask.device), valid
+
+    counts = torch.zeros(int(local_max.item()) + 1, dtype=torch.float32, device=response_mask.device)
+    if has_valid:
+        flat_ids = sequence_ids[valid].long()
+        counts.scatter_add_(0, flat_ids, torch.ones_like(flat_ids, dtype=torch.float32))
+    if sequence_process_group is not None:
+        dist.all_reduce(counts, op=dist.ReduceOp.SUM, group=sequence_process_group)
+
+    return counts, valid
+
+
+def _count_sequences(
+    response_mask: torch.Tensor,
+    rollout_sample_ids: torch.Tensor | None = None,
+    sequence_process_group: dist.ProcessGroup | None = None,
+) -> torch.Tensor:
+    counts, _ = _sequence_id_counts(response_mask, rollout_sample_ids, sequence_process_group)
+    return (counts > 0).to(dtype=torch.float32).sum()
 
 
 def calculate_sequence_counts(
@@ -1360,6 +1389,8 @@ def calculate_sequence_counts(
     data_BT: data_types.CollatedBatchData,
     device: torch.device,
     process_group: dist.ProcessGroup | None = None,
+    sequence_process_group: dist.ProcessGroup | None = None,
+    sequence_group_rank: int = 0,
 ) -> dict[int, float]:
     """Compute sequence counts per accumulation group, all-reduced across DP ranks."""
     accumulation_counts: dict[int, float] = {}
@@ -1367,7 +1398,10 @@ def calculate_sequence_counts(
     for i, response_mask in enumerate(data_BT.response_masks):
         response_mask = response_mask[:, 1:].bool()
         rollout_sample_ids = data_BT.rollout_sample_ids[i][:, 1:] if data_BT.rollout_sample_ids is not None else None
-        local_counts.append(_count_sequences(response_mask, rollout_sample_ids))
+        count = _count_sequences(response_mask, rollout_sample_ids, sequence_process_group)
+        if sequence_process_group is not None and sequence_group_rank != 0:
+            count = torch.zeros_like(count)
+        local_counts.append(count)
     if not local_counts:
         return accumulation_counts
 
@@ -1387,54 +1421,37 @@ def sequence_weighted_mean(
     response_mask: torch.Tensor,
     denominator: float,
     rollout_sample_ids: torch.Tensor | None = None,
+    sequence_process_group: dist.ProcessGroup | None = None,
 ) -> torch.Tensor:
     """Average token losses within each sequence, then average sequences equally."""
-    valid = response_mask.bool()
-    if rollout_sample_ids is not None:
-        valid = valid & (rollout_sample_ids >= 0)
-        if valid.any():
-            flat_values = values[valid]
-            flat_ids = rollout_sample_ids[valid]
-            unique_ids, inverse = torch.unique(flat_ids, return_inverse=True)
-            sequence_sums = torch.zeros(unique_ids.numel(), dtype=values.dtype, device=values.device)
-            sequence_sums.scatter_add_(0, inverse, flat_values)
-            sequence_counts = torch.zeros_like(sequence_sums)
-            sequence_counts.scatter_add_(0, inverse, torch.ones_like(flat_values, dtype=values.dtype))
-            numerator = (sequence_sums / sequence_counts.clamp_min(1.0)).sum()
-        else:
-            numerator = torch.zeros((), dtype=values.dtype, device=values.device)
-    else:
-        sequence_sums = (values * valid).sum(dim=-1)
-        sequence_counts = valid.sum(dim=-1).to(dtype=values.dtype)
-        sequence_means = torch.where(
-            sequence_counts > 0, sequence_sums / sequence_counts.clamp_min(1.0), torch.zeros_like(sequence_sums)
-        )
-        numerator = sequence_means.sum()
+    weights, _ = _sequence_loss_weights(response_mask, rollout_sample_ids, sequence_process_group)
+    numerator = (values * weights.to(dtype=values.dtype)).sum()
 
     return numerator / denominator if denominator > 0 else torch.zeros_like(numerator)
 
 
 def _sequence_loss_weights(
-    response_mask: torch.Tensor, rollout_sample_ids: torch.Tensor | None = None
+    response_mask: torch.Tensor,
+    rollout_sample_ids: torch.Tensor | None = None,
+    sequence_process_group: dist.ProcessGroup | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    valid = response_mask.bool()
+    counts, valid = _sequence_id_counts(response_mask, rollout_sample_ids, sequence_process_group)
+    weights = torch.zeros(response_mask.shape, dtype=torch.float32, device=response_mask.device)
+    if counts.numel() == 0:
+        return weights, torch.zeros((), dtype=torch.float32, device=response_mask.device)
+    sequence_count = (counts > 0).to(dtype=torch.float32).sum()
+    if not valid.any():
+        return weights, sequence_count
+
     if rollout_sample_ids is not None:
-        valid = valid & (rollout_sample_ids >= 0)
         sequence_ids = rollout_sample_ids
     else:
         row_ids = torch.arange(response_mask.shape[0], device=response_mask.device, dtype=torch.long)
         sequence_ids = row_ids[:, None].expand_as(response_mask)
 
-    weights = torch.zeros(response_mask.shape, dtype=torch.float32, device=response_mask.device)
-    if not valid.any():
-        return weights, torch.zeros((), dtype=torch.float32, device=response_mask.device)
-
-    flat_ids = sequence_ids[valid]
-    unique_ids, inverse = torch.unique(flat_ids, return_inverse=True)
-    sequence_counts = torch.zeros(unique_ids.numel(), dtype=torch.float32, device=response_mask.device)
-    sequence_counts.scatter_add_(0, inverse, torch.ones_like(inverse, dtype=torch.float32))
-    weights[valid] = 1.0 / sequence_counts[inverse].clamp_min(1.0)
-    return weights, torch.tensor(float(unique_ids.numel()), dtype=torch.float32, device=response_mask.device)
+    flat_ids = sequence_ids[valid].long()
+    weights[valid] = 1.0 / counts[flat_ids].clamp_min(1.0)
+    return weights, sequence_count
 
 
 _SCALAR_LOSS_STAT_KEYS = [

@@ -736,9 +736,13 @@ class TestGRPOLossDenominatorConfig(unittest.TestCase):
 
         self.assertEqual(config.loss_denominator, "sequence")
 
-    def test_sequence_loss_denominator_rejects_sequence_parallelism(self):
-        with self.assertRaisesRegex(ValueError, "loss_denominator=sequence"):
-            grpo_utils.GRPOExperimentConfig(loss_denominator="sequence", sequence_parallel_size=2)
+    def test_sequence_loss_denominator_accepts_sequence_parallelism(self):
+        config = grpo_utils.GRPOExperimentConfig(
+            loss_denominator="sequence", sequence_parallel_size=2, deepspeed_stage=3
+        )
+
+        self.assertEqual(config.loss_denominator, "sequence")
+        self.assertEqual(config.sequence_parallel_size, 2)
 
 
 class TestComputeTVPOMask(unittest.TestCase):

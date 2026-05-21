@@ -798,7 +798,8 @@ class PolicyTrainerRayProcess(RayProcess):
             ref_logprobs = torch.where(response_mask, ref_logprobs, torch.zeros_like(ref_logprobs))
 
         if loss_denominator_mode == "sequence":
-            current_global_count = grpo_utils._count_sequences(response_mask, rollout_sample_ids)
+            loss_weights, _ = grpo_utils._sequence_loss_weights(response_mask, rollout_sample_ids, self._sp_group)
+            current_global_count = loss_weights.sum().float().detach()
         else:
             current_global_count = response_mask.sum().float().detach()
         dist.all_reduce(current_global_count, op=dist.ReduceOp.SUM)
@@ -823,6 +824,7 @@ class PolicyTrainerRayProcess(RayProcess):
             loss_scale=scale,
             loss_denominator=loss_denominator_mode,
             rollout_sample_ids=rollout_sample_ids,
+            sequence_process_group=self._sp_group,
         )
         if ref_logprobs is not None:
             return loss, (kl_avg, clipfrac, ratio_avg)
@@ -1064,7 +1066,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     accumulation_loss_denominators = self.calculate_token_counts(accumulation_steps, data_BT)
                 elif self.args.loss_denominator == "sequence":
                     accumulation_loss_denominators = grpo_utils.calculate_sequence_counts(
-                        accumulation_steps, data_BT, device
+                        accumulation_steps,
+                        data_BT,
+                        device,
+                        sequence_process_group=self._sp_group,
+                        sequence_group_rank=self._sp_rank,
                     )
                 else:
                     accumulation_loss_denominators = {
@@ -1257,7 +1263,11 @@ class PolicyTrainerRayProcess(RayProcess):
                             data_BT.rollout_sample_ids[i][:, 1:] if data_BT.rollout_sample_ids is not None else None
                         )
                         loss = grpo_utils.sequence_weighted_mean(
-                            per_token_loss_BT, response_mask_BT, loss_denominator, rollout_ids_BT
+                            per_token_loss_BT,
+                            response_mask_BT,
+                            loss_denominator,
+                            rollout_ids_BT,
+                            self._sp_group,
                         )
                     else:
                         loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
