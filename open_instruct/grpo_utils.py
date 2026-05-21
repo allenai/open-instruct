@@ -850,12 +850,13 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         shards = min(shards, num_tokens)
         if sequence_loss:
             rollout_ids = rollout_sample_ids if has_rollout_sample_ids else None
-            loss_weights_2d, denom = _sequence_loss_weights(mask_2d, rollout_ids, sequence_process_group)
+            loss_weights_2d, loss_denom = _sequence_loss_weights(mask_2d, rollout_ids, sequence_process_group)
         else:
             loss_weights_2d = mask_2d.to(dtype=torch.float32)
-            denom = loss_weights_2d.sum().clamp_min(1.0)
+            loss_denom = loss_weights_2d.sum().clamp_min(1.0)
         loss_weights = loss_weights_2d.reshape(-1)
-        incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / denom).reshape(())
+        metric_denom = mask_2d.to(dtype=torch.float32).sum()
+        incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / loss_denom).reshape(())
 
         x_grad = torch.zeros_like(x) if x_requires_grad else None
         x_shards = list(torch.chunk(x, chunks=shards, dim=0))
@@ -919,14 +920,21 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             for param in compute_params:
                 param.ds_grad_is_ready = True
 
+        if sequence_process_group is not None:
+            dist.all_reduce(total_kl_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
+            dist.all_reduce(total_clip_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
+            dist.all_reduce(total_ratio_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
+            dist.all_reduce(metric_denom, op=dist.ReduceOp.SUM, group=sequence_process_group)
+        metric_denom = metric_denom.clamp_min(1.0)
+
         if x_grad is None:
             x_grad = torch.zeros_like(x)
         ctx.save_for_backward(x_grad.reshape(batch_size, seq_len, hidden_size).detach())
 
-        loss = total_loss_sum / denom * loss_scale.detach().to(dtype=total_loss_sum.dtype)
-        kl_avg = total_kl_sum / denom
-        clipfrac = total_clip_sum / denom
-        ratio_avg = total_ratio_sum / denom
+        loss = total_loss_sum / loss_denom * loss_scale.detach().to(dtype=total_loss_sum.dtype)
+        kl_avg = total_kl_sum / metric_denom
+        clipfrac = total_clip_sum / metric_denom
+        ratio_avg = total_ratio_sum / metric_denom
         return loss, kl_avg, clipfrac, ratio_avg
 
     @staticmethod
@@ -1359,7 +1367,9 @@ def _sequence_id_counts(
         sequence_ids = row_ids[:, None].expand_as(response_mask)
 
     has_valid = valid.any()
-    local_max = sequence_ids[valid].max() if has_valid else torch.tensor(-1, dtype=torch.long, device=response_mask.device)
+    local_max = (
+        sequence_ids[valid].max() if has_valid else torch.tensor(-1, dtype=torch.long, device=response_mask.device)
+    )
     if sequence_process_group is not None:
         dist.all_reduce(local_max, op=dist.ReduceOp.MAX, group=sequence_process_group)
     if local_max.item() < 0:

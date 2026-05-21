@@ -282,7 +282,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         logits = lm_head_dense(hidden_dense)
         new_logprobs = model_utils.log_softmax_and_gather(logits, selected_token_ids)
         ratio = torch.exp(new_logprobs - old_logprobs)
-        _, _, pg_loss, kl = grpo_utils.compute_grpo_loss(
+        pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
             ratio=ratio,
             advantages=advantages,
@@ -294,7 +294,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         )
         dense_loss.backward()
 
-        tiled_loss, _, _, _ = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -313,6 +313,12 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         tiled_loss.backward()
 
         torch.testing.assert_close(tiled_loss, dense_loss.detach())
+        expected_kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40.0, 40.0), ratio)
+        expected_kl = (expected_kl * response_mask).sum(dim=(-2, -1)) / response_mask.sum()
+        torch.testing.assert_close(tiled_kl, expected_kl)
+        expected_clipfrac = ((pg_losses2 > pg_losses).float() * response_mask).sum() / response_mask.sum()
+        torch.testing.assert_close(tiled_clipfrac, expected_clipfrac)
+        torch.testing.assert_close(tiled_ratio, (ratio * response_mask).sum() / response_mask.sum())
         torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
         torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
         torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
