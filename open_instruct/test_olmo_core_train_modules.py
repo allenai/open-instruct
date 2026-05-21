@@ -260,6 +260,63 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
 
         torch.testing.assert_close(tiled_kl, expected_kl)
 
+    def test_matches_dense_sequence_weighted_loss_and_grads(self):
+        torch.manual_seed(4)
+        batch_size, seq_len, hidden_size, vocab_size = 2, 5, 4, 11
+        lm_head_dense = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled.load_state_dict(lm_head_dense.state_dict())
+
+        hidden_dense = torch.randn(batch_size, seq_len, hidden_size, requires_grad=True)
+        hidden_tiled = hidden_dense.detach().clone().requires_grad_(True)
+        selected_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+        response_mask = torch.tensor([[True, True, False, False, False], [False, True, True, True, True]])
+        advantages = torch.randn(batch_size, seq_len)
+        old_logprobs = torch.randn(batch_size, seq_len)
+        ref_logprobs = torch.randn(batch_size, seq_len)
+        beta = 0.05
+        clip_lower = 0.2
+        clip_higher = 0.28
+        loss_scale = torch.tensor(0.75)
+
+        logits = lm_head_dense(hidden_dense)
+        new_logprobs = model_utils.log_softmax_and_gather(logits, selected_token_ids)
+        ratio = torch.exp(new_logprobs - old_logprobs)
+        _, _, pg_loss, kl = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            config=_make_grpo_config(beta=beta, clip_lower=clip_lower, clip_higher=clip_higher),
+        )
+        dense_loss = (
+            grpo_utils.sequence_weighted_mean(pg_loss + beta * kl, response_mask, denominator=2.0) * loss_scale
+        )
+        dense_loss.backward()
+
+        tiled_loss, _, _, _ = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head_tiled,
+            hidden_states=hidden_tiled,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref_logprobs,
+            temperature=1.0,
+            beta=beta,
+            clip_lower=clip_lower,
+            clip_higher=clip_higher,
+            shards=3,
+            loss_scale=loss_scale,
+            loss_denominator="sequence",
+        )
+        tiled_loss.backward()
+
+        torch.testing.assert_close(tiled_loss, dense_loss.detach())
+        torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
+        torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
+        torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
+
 
 class TestDAPOLoss(unittest.TestCase):
     def test_negative_advantages_clipping(self):
@@ -661,6 +718,16 @@ class TestLigerGRPOLossConfig(unittest.TestCase):
         )
 
         self.assertTrue(config.use_liger_grpo_loss)
+
+    def test_liger_grpo_loss_accepts_sequence_loss_denominator(self):
+        config = grpo_utils.GRPOExperimentConfig(
+            use_liger_grpo_loss=True,
+            loss_denominator="sequence",
+            use_vllm_logprobs=True,
+            truncated_importance_sampling_ratio_cap=0.0,
+        )
+
+        self.assertEqual(config.loss_denominator, "sequence")
 
 
 class TestGRPOLossDenominatorConfig(unittest.TestCase):

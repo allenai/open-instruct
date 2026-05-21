@@ -778,6 +778,8 @@ class PolicyTrainerRayProcess(RayProcess):
         old_logprobs: torch.Tensor,
         ref_logprobs: torch.Tensor | None,
         loss_denominator: float,
+        loss_denominator_mode: str,
+        rollout_sample_ids: torch.Tensor | None,
         cp_context: Any,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
         hidden_states = grpo_utils.forward_for_liger_hidden_states(
@@ -795,13 +797,16 @@ class PolicyTrainerRayProcess(RayProcess):
         if ref_logprobs is not None:
             ref_logprobs = torch.where(response_mask, ref_logprobs, torch.zeros_like(ref_logprobs))
 
-        current_global_tokens = response_mask.sum().float().detach()
-        dist.all_reduce(current_global_tokens, op=dist.ReduceOp.SUM)
+        if loss_denominator_mode == "sequence":
+            current_global_count = grpo_utils._count_sequences(response_mask, rollout_sample_ids)
+        else:
+            current_global_count = response_mask.sum().float().detach()
+        dist.all_reduce(current_global_count, op=dist.ReduceOp.SUM)
         # Drain all queued device work through this collective so ranks enter
         # ZeRO-3 backward with bounded skew.
         torch.cuda.synchronize()
         dp_world_size = self.args.world_size // self.args.sequence_parallel_size
-        scale = current_global_tokens * dp_world_size / (self.args.world_size * float(loss_denominator))
+        scale = current_global_count * dp_world_size / (self.args.world_size * float(loss_denominator))
         loss, kl_avg, clipfrac, ratio_avg = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head,
             hidden_states=hidden_states,
@@ -816,6 +821,8 @@ class PolicyTrainerRayProcess(RayProcess):
             clip_higher=self.args.clip_higher,
             shards=max(1, int(self.args.liger_grpo_loss_chunk_size)),
             loss_scale=scale,
+            loss_denominator=loss_denominator_mode,
+            rollout_sample_ids=rollout_sample_ids,
         )
         if ref_logprobs is not None:
             return loss, (kl_avg, clipfrac, ratio_avg)
@@ -1085,6 +1092,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             old_logprobs=vllm_logprobs_BT,
                             ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                             loss_denominator=loss_denominator,
+                            loss_denominator_mode=self.args.loss_denominator,
+                            rollout_sample_ids=(
+                                data_BT.rollout_sample_ids[i][:, 1:]
+                                if data_BT.rollout_sample_ids is not None
+                                else None
+                            ),
                             cp_context=cp_contexts_BT[i],
                         )
 

@@ -310,8 +310,8 @@ class GRPOExperimentConfig(
                 raise ValueError("`use_liger_grpo_loss` requires `use_vllm_logprobs=True`.")
             if self.record_entropy:
                 raise ValueError("`use_liger_grpo_loss` does not support `record_entropy=True`.")
-            if self.loss_denominator != "token":
-                raise ValueError("`use_liger_grpo_loss` currently requires `loss_denominator=token`.")
+            if self.loss_denominator not in ("token", "sequence"):
+                raise ValueError("`use_liger_grpo_loss` currently requires `loss_denominator=token` or `sequence`.")
             if self.kl_estimator != 2:
                 raise ValueError("`use_liger_grpo_loss` uses the default KL estimator and requires `kl_estimator=2`.")
             if self.tis_mask_lower > 0.0 or self.tis_mask_upper > 0.0:
@@ -818,6 +818,9 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         beta: float,
         clip_lower: float,
         clip_higher: float,
+        sequence_loss: bool,
+        rollout_sample_ids: torch.Tensor,
+        has_rollout_sample_ids: bool,
         shards: int,
         loss_scale: torch.Tensor,
         compute_params: list[torch.nn.Parameter],
@@ -837,7 +840,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         x.requires_grad_(x_requires_grad)
 
         labels = selected_token_ids.reshape(-1)
-        mask = response_mask.reshape(-1).to(dtype=torch.bool)
+        mask_2d = response_mask.to(dtype=torch.bool)
+        mask = mask_2d.reshape(-1)
         advantages = advantages.reshape(-1)
         old_logprobs = old_logprobs.reshape(-1)
         if has_ref_logprobs:
@@ -845,14 +849,20 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
 
         num_tokens = x.shape[0]
         shards = min(shards, num_tokens)
-        valid = mask.to(dtype=torch.float32)
-        denom = valid.sum().clamp_min(1.0)
+        if sequence_loss:
+            rollout_ids = rollout_sample_ids if has_rollout_sample_ids else None
+            loss_weights_2d, denom = _sequence_loss_weights(mask_2d, rollout_ids)
+        else:
+            loss_weights_2d = mask_2d.to(dtype=torch.float32)
+            denom = loss_weights_2d.sum().clamp_min(1.0)
+        loss_weights = loss_weights_2d.reshape(-1)
         incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / denom).reshape(())
 
         x_grad = torch.zeros_like(x) if x_requires_grad else None
         x_shards = list(torch.chunk(x, chunks=shards, dim=0))
         label_shards = list(torch.chunk(labels, chunks=shards, dim=0))
         mask_shards = list(torch.chunk(mask, chunks=shards, dim=0))
+        loss_weight_shards = list(torch.chunk(loss_weights, chunks=shards, dim=0))
         advantage_shards = list(torch.chunk(advantages, chunks=shards, dim=0))
         old_logprob_shards = list(torch.chunk(old_logprobs, chunks=shards, dim=0))
         ref_logprob_shards = list(torch.chunk(ref_logprobs, chunks=shards, dim=0)) if has_ref_logprobs else []
@@ -898,7 +908,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
 
                 shard_mask = mask_shards[shard_idx].to(dtype=pg_loss.dtype)
                 per_token_loss = pg_loss + beta * kl
-                loss_sum = (per_token_loss * shard_mask).sum()
+                loss_sum = (per_token_loss * loss_weight_shards[shard_idx].to(dtype=per_token_loss.dtype)).sum()
 
             total_loss_sum = total_loss_sum + loss_sum.detach().float()
             total_kl_sum = total_kl_sum + (kl_all.detach().float() * shard_mask.float()).sum(dim=-1)
@@ -926,7 +936,26 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         grad = grads[0]
         if isinstance(grad, torch.Tensor):
             x_grad = x_grad * grad.to(dtype=x_grad.dtype)
-        return (None, x_grad, None, None, None, None, None, None, None, None, None, None, None, None, None)
+        return (
+            None,
+            x_grad,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 def tiled_grpo_lm_head_loss(
@@ -943,10 +972,15 @@ def tiled_grpo_lm_head_loss(
     clip_higher: float,
     shards: int,
     loss_scale: torch.Tensor,
+    loss_denominator: str = "token",
+    rollout_sample_ids: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     has_ref_logprobs = ref_logprobs is not None
     if ref_logprobs is None:
         ref_logprobs = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
+    has_rollout_sample_ids = rollout_sample_ids is not None
+    if rollout_sample_ids is None:
+        rollout_sample_ids = torch.empty(0, dtype=torch.long, device=old_logprobs.device)
     compute_params = list(lm_head.parameters(recurse=False))
     return TiledGRPOLMHeadLoss.apply(
         lm_head,
@@ -961,6 +995,9 @@ def tiled_grpo_lm_head_loss(
         beta,
         clip_lower,
         clip_higher,
+        loss_denominator == "sequence",
+        rollout_sample_ids,
+        has_rollout_sample_ids,
         shards,
         loss_scale,
         compute_params,
@@ -1375,6 +1412,29 @@ def sequence_weighted_mean(
         numerator = sequence_means.sum()
 
     return numerator / denominator if denominator > 0 else torch.zeros_like(numerator)
+
+
+def _sequence_loss_weights(
+    response_mask: torch.Tensor, rollout_sample_ids: torch.Tensor | None = None
+) -> tuple[torch.Tensor, torch.Tensor]:
+    valid = response_mask.bool()
+    if rollout_sample_ids is not None:
+        valid = valid & (rollout_sample_ids >= 0)
+        sequence_ids = rollout_sample_ids
+    else:
+        row_ids = torch.arange(response_mask.shape[0], device=response_mask.device, dtype=torch.long)
+        sequence_ids = row_ids[:, None].expand_as(response_mask)
+
+    weights = torch.zeros(response_mask.shape, dtype=torch.float32, device=response_mask.device)
+    if not valid.any():
+        return weights, torch.zeros((), dtype=torch.float32, device=response_mask.device)
+
+    flat_ids = sequence_ids[valid]
+    unique_ids, inverse = torch.unique(flat_ids, return_inverse=True)
+    sequence_counts = torch.zeros(unique_ids.numel(), dtype=torch.float32, device=response_mask.device)
+    sequence_counts.scatter_add_(0, inverse, torch.ones_like(inverse, dtype=torch.float32))
+    weights[valid] = 1.0 / sequence_counts[inverse].clamp_min(1.0)
+    return weights, torch.tensor(float(unique_ids.numel()), dtype=torch.float32, device=response_mask.device)
 
 
 _SCALAR_LOSS_STAT_KEYS = [
