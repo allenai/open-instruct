@@ -507,11 +507,21 @@ class PolicyTrainerRayProcess(RayProcess):
         _hf_ds_integration._hf_deepspeed_config_weak_ref = None
         try:
             value_model_path = args.value_model_name_or_path or model_config.model_name_or_path
-            value_revision = model_config.model_revision if args.value_model_name_or_path is None else None
+            value_revision = (
+                model_config.model_revision
+                if args.value_model_name_or_path is None
+                or args.value_model_name_or_path == model_config.model_name_or_path
+                else None
+            )
             hf_attn = model_utils.olmo_core_attn_to_hf(model_config.attn_implementation)
 
             self.value_model = AutoModelForCausalLM.from_pretrained(
-                value_model_path, revision=value_revision, dtype=torch.bfloat16, attn_implementation=hf_attn
+                value_model_path,
+                revision=value_revision,
+                dtype=torch.bfloat16,
+                attn_implementation=hf_attn,
+                local_files_only=True,
+                **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
             )
             self.value_model.config.use_cache = False
             hidden_size = self.value_model.config.hidden_size
@@ -3119,6 +3129,12 @@ def main(
         return
 
     utils.ensure_hf_repo_cached(model_config.model_name_or_path, revision=model_config.model_revision)
+    if (
+        args.use_value_model
+        and args.value_model_name_or_path is not None
+        and args.value_model_name_or_path != model_config.model_name_or_path
+    ):
+        utils.ensure_hf_repo_cached(args.value_model_name_or_path)
     if tc.tokenizer_name_or_path and tc.tokenizer_name_or_path != model_config.model_name_or_path:
         utils.ensure_hf_repo_cached(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
 
