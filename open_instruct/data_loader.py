@@ -1337,6 +1337,14 @@ class DataPreparationActor:
         logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
     def _data_preparation_loop(self):
+        try:
+            self._run_data_preparation_loop()
+        finally:
+            if self.trackio_rollout_logger is not None:
+                self.trackio_rollout_logger.close()
+                self.trackio_rollout_logger = None
+
+    def _run_data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
 
         if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
@@ -1405,8 +1413,6 @@ class DataPreparationActor:
             )
 
             if isinstance(result, data_types.ShutdownSentinel):
-                if self.trackio_rollout_logger is not None:
-                    self.trackio_rollout_logger.close()
                 return
 
             if result is None:
@@ -1568,9 +1574,6 @@ class DataPreparationActor:
                 self.metrics[self.training_step] = step_metrics
                 self.current_prepared_step = self.training_step
             self.training_step += 1
-
-        if self.trackio_rollout_logger is not None:
-            self.trackio_rollout_logger.close()
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""

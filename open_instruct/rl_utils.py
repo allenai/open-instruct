@@ -1,6 +1,5 @@
 import contextlib
 import datetime
-import importlib
 import json
 import os
 import time
@@ -10,6 +9,7 @@ from typing import Generic, TypeVar
 
 import numpy as np
 import torch
+import trackio
 
 from open_instruct import data_types, logger_utils, model_utils, utils
 
@@ -168,8 +168,7 @@ class TrackioRolloutLogger:
     ):
         self.tokenizer = tokenizer
         self.max_traces_per_step = max_traces_per_step
-        self.trackio = importlib.import_module("trackio")
-        self.trackio.init(project=project, name=run_name, space_id=space_id)
+        trackio.init(project=project, name=run_name, space_id=space_id)
 
     def log_rollouts(
         self,
@@ -184,10 +183,21 @@ class TrackioRolloutLogger:
         if self.max_traces_per_step <= 0:
             return
 
-        assert batch.scores is not None, "batch.scores must not be None when logging Trackio traces"
+        if batch.scores is None:
+            logger.warning("Skipping Trackio rollout traces because batch.scores is None")
+            return
 
         traces = []
-        for i in range(min(len(batch.queries), self.max_traces_per_step)):
+        num_traces = min(
+            len(batch.queries),
+            len(batch.scores),
+            len(batch.datasets),
+            len(result.responses),
+            len(result.finish_reasons),
+            len(advantages),
+            self.max_traces_per_step,
+        )
+        for i in range(num_traces):
             metadata = {
                 "split": split,
                 "step": step,
@@ -198,9 +208,9 @@ class TrackioRolloutLogger:
                 "finish_reason": result.finish_reasons[i],
                 "dataset": batch.datasets[i],
             }
-            if batch.indices is not None:
+            if batch.indices is not None and i < len(batch.indices):
                 metadata["dataset_index"] = batch.indices[i]
-            if batch.model_steps:
+            if batch.model_steps and i < len(batch.model_steps):
                 metadata["model_step"] = batch.model_steps[i]
             request_info = _get_request_info_for_sample(result.request_info, i)
             if request_info is not None:
@@ -208,27 +218,29 @@ class TrackioRolloutLogger:
 
             prompt = (
                 batch.raw_queries[i]
-                if batch.raw_queries is not None and batch.raw_queries[i] is not None
+                if batch.raw_queries is not None and i < len(batch.raw_queries) and batch.raw_queries[i] is not None
                 else self.tokenizer.decode(batch.queries[i], skip_special_tokens=False)
             )
             response = (
                 batch.decoded_responses[i]
-                if batch.decoded_responses is not None and batch.decoded_responses[i] is not None
+                if batch.decoded_responses is not None
+                and i < len(batch.decoded_responses)
+                and batch.decoded_responses[i] is not None
                 else self.tokenizer.decode(result.responses[i], skip_special_tokens=False)
             )
 
             traces.append(
-                self.trackio.Trace(
+                trackio.Trace(
                     messages=[{"role": "user", "content": prompt}, {"role": "assistant", "content": response}],
                     metadata=metadata,
                 )
             )
 
         if traces:
-            self.trackio.log({f"{split}/rollouts": traces}, step=step)
+            trackio.log({f"{split}/rollouts": traces}, step=step)
 
     def close(self) -> None:
-        self.trackio.finish()
+        trackio.finish()
 
 
 @dataclass

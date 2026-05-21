@@ -337,16 +337,14 @@ class TestRLUtils(unittest.TestCase):
         for seq in packed_with_min.query_responses:
             self.assertGreater(len(seq), 0)
 
-    @patch("open_instruct.rl_utils.importlib.import_module")
-    def test_trackio_rollout_logger_logs_traces(self, mock_import_module):
+    @patch("open_instruct.rl_utils.trackio")
+    def test_trackio_rollout_logger_logs_traces(self, mock_trackio):
         """Test that rollout batches are logged as Trackio Trace records."""
-        mock_trackio = MagicMock()
         mock_trackio.Trace.side_effect = lambda messages, metadata: {
             "_type": "trackio.trace",
             "messages": messages,
             "metadata": metadata,
         }
-        mock_import_module.return_value = mock_trackio
 
         tokenizer = MagicMock()
         tokenizer.decode.side_effect = lambda tokens, skip_special_tokens=False: " ".join(
@@ -428,11 +426,9 @@ class TestRLUtils(unittest.TestCase):
         self.assertEqual(mock_trackio.log.call_args.args[0]["train/rollouts"][0]["messages"], first_trace["messages"])
         self.assertEqual(mock_trackio.log.call_args.kwargs, {"step": 3})
 
-    @patch("open_instruct.rl_utils.importlib.import_module")
-    def test_trackio_rollout_logger_respects_cap(self, mock_import_module):
+    @patch("open_instruct.rl_utils.trackio")
+    def test_trackio_rollout_logger_respects_cap(self, mock_trackio):
         """Test that Trackio rollout logging respects max_traces_per_step."""
-        mock_trackio = MagicMock()
-        mock_import_module.return_value = mock_trackio
         logger = rl_utils.TrackioRolloutLogger(
             project="open-instruct-trackio-test", run_name="test-run", tokenizer=MagicMock(), max_traces_per_step=1
         )
