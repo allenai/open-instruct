@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 uv run python mason.py \

@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Two-node SFT integration test with Ulysses sequence parallelism.
 # Tests multi-node training + SP loss aggregation.
 

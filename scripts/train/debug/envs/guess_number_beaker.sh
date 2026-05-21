@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Beaker experiment for GuessNumberEnv — 50 training steps on 1 GPU.
 # Usage: bash scripts/train/build_image_and_launch.sh scripts/train/debug/envs/guess_number_beaker.sh
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Debug script for testing GRPO with GuessNumberEnv
 #
 # Number guessing game: guess a secret number between 1 and 100.

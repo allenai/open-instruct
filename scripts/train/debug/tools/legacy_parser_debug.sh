@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Local debug script for testing GRPO with tool use
 # Uses hamishivi/tulu_3_rewritten_tools_test which has a 'tools' column
 # for per-sample active tool configuration (search, code, browse)

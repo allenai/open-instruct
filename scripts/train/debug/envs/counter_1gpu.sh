@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Debug script for testing GRPO with CounterEnv
 #
 # Simple counter environment: increment to reach target, then submit.

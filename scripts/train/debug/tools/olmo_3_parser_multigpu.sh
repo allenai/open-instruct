@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Multinode test script for GRPO with tool use using OLMo-3-7B-Instruct-SFT
 # 1 training node (8 GPUs) + 1 inference node (8 GPUs)
 # Note: Currently only 'code' tool is supported with new tools system

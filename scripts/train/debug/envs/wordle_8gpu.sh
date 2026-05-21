@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Beaker experiment for WordleTextEnv — 8 GPUs (2 learners, 6 inference engines)
 #
 # Text-based Wordle environment: model guesses 5-letter words via <guess> tags.

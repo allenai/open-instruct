@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # ==========================================================================
 # End-to-end test script for evolving rubrics (single GPU, no search tools)
 #

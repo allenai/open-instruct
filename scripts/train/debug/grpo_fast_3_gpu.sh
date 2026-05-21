@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # debug script using 3 gpus to specifically test sequence parallelism
 # with minimal gpus (2 for training for seq parallel, 1 for inference)
 # useful for debugging multi-gpu training without too many gpus

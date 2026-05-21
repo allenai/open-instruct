@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 
 # Get the Beaker username to construct the image name
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')

@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 num_prompts=25376
 exp_name=hybrid_rlvr_test_$(date +%s)
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"

@@ -1,4 +1,5 @@
 #!/bin/bash
+export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug
 # Beaker experiment for SandboxLM environment — 8 GPUs (4 learners, 4 inference engines)
 #
 # SandboxLM: Coding environment with execute_bash + str_replace_editor tools.
