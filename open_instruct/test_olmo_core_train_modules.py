@@ -416,6 +416,25 @@ class TestComputeGRPOLoss(unittest.TestCase):
         torch.testing.assert_close(pg_tis, pg_no_tis * 2.0)
         torch.testing.assert_close(pg2_tis, pg2_no_tis * 2.0)
 
+    def test_sequence_weighted_mean_averages_rows_equally(self):
+        per_token_loss = torch.tensor([[1.0, 2.0, 100.0], [4.0, 6.0, 8.0]])
+        response_mask = torch.tensor([[True, True, False], [True, True, True]])
+
+        loss = grpo_utils.sequence_weighted_mean(per_token_loss, response_mask, denominator=2.0)
+
+        torch.testing.assert_close(loss, torch.tensor(3.75))
+
+    def test_sequence_weighted_mean_uses_rollout_sample_ids_for_packed_rows(self):
+        per_token_loss = torch.tensor([[1.0, 2.0, 10.0, 20.0, 100.0]])
+        response_mask = torch.tensor([[True, True, True, True, False]])
+        rollout_sample_ids = torch.tensor([[3, 3, 7, 7, -1]])
+
+        loss = grpo_utils.sequence_weighted_mean(
+            per_token_loss, response_mask, denominator=2.0, rollout_sample_ids=rollout_sample_ids
+        )
+
+        torch.testing.assert_close(loss, torch.tensor(8.25))
+
     def test_invalid_loss_fn(self):
         config = _make_grpo_config(loss_fn="invalid")
         with self.assertRaises(ValueError):
@@ -630,9 +649,7 @@ class TestLigerGRPOLossConfig(unittest.TestCase):
     def test_liger_grpo_loss_requires_vllm_logprobs(self):
         with self.assertRaisesRegex(ValueError, "use_vllm_logprobs"):
             grpo_utils.GRPOExperimentConfig(
-                use_liger_grpo_loss=True,
-                use_vllm_logprobs=False,
-                truncated_importance_sampling_ratio_cap=0.0,
+                use_liger_grpo_loss=True, use_vllm_logprobs=False, truncated_importance_sampling_ratio_cap=0.0
             )
 
     def test_liger_grpo_loss_accepts_dapo_with_vllm_logprobs(self):
@@ -644,6 +661,18 @@ class TestLigerGRPOLossConfig(unittest.TestCase):
         )
 
         self.assertTrue(config.use_liger_grpo_loss)
+
+
+class TestGRPOLossDenominatorConfig(unittest.TestCase):
+    def test_accepts_sequence_loss_denominator(self):
+        config = grpo_utils.GRPOExperimentConfig(loss_denominator="sequence")
+
+        self.assertEqual(config.loss_denominator, "sequence")
+
+    def test_sequence_loss_denominator_rejects_sequence_parallelism(self):
+        with self.assertRaisesRegex(ValueError, "loss_denominator=sequence"):
+            grpo_utils.GRPOExperimentConfig(loss_denominator="sequence", sequence_parallel_size=2)
+
 
 class TestComputeTVPOMask(unittest.TestCase):
     def test_in_budget_returns_all_ones(self):

@@ -395,11 +395,15 @@ class GRPOTrainModule(TransformerTrainModule):
                         old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
         if self.grpo_config.loss_denominator == "token" or self.grpo_config.loss_denominator is None:
-            accumulation_token_counts = grpo_utils.calculate_token_counts(
+            accumulation_loss_denominators = grpo_utils.calculate_token_counts(
+                accumulation_steps, data_BT, self.device, self.trainer.dp_process_group
+            )
+        elif self.grpo_config.loss_denominator == "sequence":
+            accumulation_loss_denominators = grpo_utils.calculate_sequence_counts(
                 accumulation_steps, data_BT, self.device, self.trainer.dp_process_group
             )
         else:
-            accumulation_token_counts = {
+            accumulation_loss_denominators = {
                 int(group_idx * accumulation_steps): float(self.grpo_config.loss_denominator)
                 for group_idx in range((num_samples // accumulation_steps) + 1)
             }
@@ -505,8 +509,19 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
-                loss_denominator = accumulation_token_counts[batch_start]
-                loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
+                loss_denominator = accumulation_loss_denominators[batch_start]
+                per_token_loss = pg_loss + self.grpo_config.beta * kl
+                if self.grpo_config.loss_denominator == "sequence":
+                    rollout_ids = (
+                        data_BT.rollout_sample_ids[sample_idx][:, 1:]
+                        if data_BT.rollout_sample_ids is not None
+                        else None
+                    )
+                    loss = grpo_utils.sequence_weighted_mean(
+                        per_token_loss, response_mask, loss_denominator, rollout_ids
+                    )
+                else:
+                    loss = masked_mean(per_token_loss, response_mask, None, loss_denominator)
 
                 loss = loss * dp_world_size
                 loss.backward()

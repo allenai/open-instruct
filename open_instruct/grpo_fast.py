@@ -1053,12 +1053,14 @@ class PolicyTrainerRayProcess(RayProcess):
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
             for epoch_idx in range(self.args.num_epochs):
-                # Pre-compute total tokens for each accumulation group if using "token" normalization
-                # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
-                    accumulation_token_counts = self.calculate_token_counts(accumulation_steps, data_BT)
+                    accumulation_loss_denominators = self.calculate_token_counts(accumulation_steps, data_BT)
+                elif self.args.loss_denominator == "sequence":
+                    accumulation_loss_denominators = grpo_utils.calculate_sequence_counts(
+                        accumulation_steps, data_BT, device
+                    )
                 else:
-                    accumulation_token_counts = {
+                    accumulation_loss_denominators = {
                         int(group_idx * accumulation_steps): float(self.args.loss_denominator)
                         for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
                     }
@@ -1067,7 +1069,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     response_mask_BT = data_BT.response_masks[i][:, 1:]
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
-                    loss_denominator = accumulation_token_counts[batch_start]
+                    loss_denominator = accumulation_loss_denominators[batch_start]
                     # Pass attention_mask=None so HF constructs the correct 3D intra-document
                     # mask from position_ids internally for packed sequences.
                     advantages_BT = data_BT.advantages[i][:, 1:]
@@ -1237,7 +1239,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
 
                     per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
-                    loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
+                    if self.args.loss_denominator == "sequence":
+                        rollout_ids_BT = (
+                            data_BT.rollout_sample_ids[i][:, 1:] if data_BT.rollout_sample_ids is not None else None
+                        )
+                        loss = grpo_utils.sequence_weighted_mean(
+                            per_token_loss_BT, response_mask_BT, loss_denominator, rollout_ids_BT
+                        )
+                    else:
+                        loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back

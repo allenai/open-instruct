@@ -131,8 +131,9 @@ class GRPOExperimentConfig(
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
-    """Optional constant denominator for masked_mean; can be "token" or a float value.
+    """Optional denominator for the policy loss; can be "token", "sequence", or a float value.
     when "token", the loss is divided by the total number of tokens in the batch (standard LM training).
+    when "sequence", each sequence's token losses are averaged first, then sequences are averaged equally.
     when a float value, the loss is divided by this value (ideally, max tokens in batch, per Dr GRPO).
     """
     alpha: float = 0.6
@@ -369,10 +370,13 @@ class GRPOExperimentConfig(
                 "tis_mask_lower must be less than tis_mask_upper when both mask bounds are enabled, "
                 f"got {self.tis_mask_lower=} and {self.tis_mask_upper=}."
             )
-        if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
+        if self.loss_denominator not in ("token", "sequence") and float(self.loss_denominator) <= 0:
             raise ValueError(
-                f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
+                "loss_denominator must be 'token', 'sequence', or a valid float greater than 0, "
+                f"got: {self.loss_denominator}"
             )
+        if self.loss_denominator == "sequence" and self.sequence_parallel_size > 1:
+            raise ValueError("`loss_denominator=sequence` is not currently supported with sequence parallelism.")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
 
@@ -1300,6 +1304,77 @@ def calculate_token_counts(
         accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
 
     return accumulation_counts
+
+
+def _count_sequences(response_mask: torch.Tensor, rollout_sample_ids: torch.Tensor | None = None) -> torch.Tensor:
+    valid = response_mask.bool()
+    if rollout_sample_ids is not None:
+        valid = valid & (rollout_sample_ids >= 0)
+        if not valid.any():
+            return torch.zeros((), dtype=torch.float32, device=response_mask.device)
+        return torch.tensor(
+            float(torch.unique(rollout_sample_ids[valid]).numel()), dtype=torch.float32, device=response_mask.device
+        )
+    return valid.any(dim=-1).to(dtype=torch.float32).sum()
+
+
+def calculate_sequence_counts(
+    accumulation_steps: int,
+    data_BT: data_types.CollatedBatchData,
+    device: torch.device,
+    process_group: dist.ProcessGroup | None = None,
+) -> dict[int, float]:
+    """Compute sequence counts per accumulation group, all-reduced across DP ranks."""
+    accumulation_counts: dict[int, float] = {}
+    local_counts = []
+    for i, response_mask in enumerate(data_BT.response_masks):
+        response_mask = response_mask[:, 1:].bool()
+        rollout_sample_ids = data_BT.rollout_sample_ids[i][:, 1:] if data_BT.rollout_sample_ids is not None else None
+        local_counts.append(_count_sequences(response_mask, rollout_sample_ids))
+    if not local_counts:
+        return accumulation_counts
+
+    counts_tensor = torch.stack(local_counts).to(device)
+    dist.all_reduce(counts_tensor, op=dist.ReduceOp.SUM, group=process_group)
+
+    for i, count in enumerate(counts_tensor):
+        group_idx = i // accumulation_steps
+        key = int(group_idx * accumulation_steps)
+        accumulation_counts[key] = accumulation_counts.get(key, 0.0) + count.item()
+
+    return accumulation_counts
+
+
+def sequence_weighted_mean(
+    values: torch.Tensor,
+    response_mask: torch.Tensor,
+    denominator: float,
+    rollout_sample_ids: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Average token losses within each sequence, then average sequences equally."""
+    valid = response_mask.bool()
+    if rollout_sample_ids is not None:
+        valid = valid & (rollout_sample_ids >= 0)
+        if valid.any():
+            flat_values = values[valid]
+            flat_ids = rollout_sample_ids[valid]
+            unique_ids, inverse = torch.unique(flat_ids, return_inverse=True)
+            sequence_sums = torch.zeros(unique_ids.numel(), dtype=values.dtype, device=values.device)
+            sequence_sums.scatter_add_(0, inverse, flat_values)
+            sequence_counts = torch.zeros_like(sequence_sums)
+            sequence_counts.scatter_add_(0, inverse, torch.ones_like(flat_values, dtype=values.dtype))
+            numerator = (sequence_sums / sequence_counts.clamp_min(1.0)).sum()
+        else:
+            numerator = torch.zeros((), dtype=values.dtype, device=values.device)
+    else:
+        sequence_sums = (values * valid).sum(dim=-1)
+        sequence_counts = valid.sum(dim=-1).to(dtype=values.dtype)
+        sequence_means = torch.where(
+            sequence_counts > 0, sequence_sums / sequence_counts.clamp_min(1.0), torch.zeros_like(sequence_sums)
+        )
+        numerator = sequence_means.sum()
+
+    return numerator / denominator if denominator > 0 else torch.zeros_like(numerator)
 
 
 _SCALAR_LOSS_STAT_KEYS = [
