@@ -824,6 +824,9 @@ class PolicyTrainerRayProcess(RayProcess):
             clip_higher=self.args.clip_higher,
             shards=max(1, int(self.args.liger_grpo_loss_chunk_size)),
             loss_scale=scale,
+            loss_fn=self.args.loss_fn,
+            dppo_divergence_type=self.args.dppo_divergence_type,
+            dppo_divergence_threshold=self.args.dppo_divergence_threshold,
             loss_denominator=loss_denominator_mode,
             rollout_sample_ids=rollout_sample_ids,
             sequence_process_group=self._sp_group,
@@ -1124,6 +1127,19 @@ class PolicyTrainerRayProcess(RayProcess):
                             if sequence_tis_mask_BT is not None:
                                 tis_mask_kept_tokens += sequence_tis_mask_BT.sum()
                                 tis_mask_total_tokens += response_mask_BT.sum()
+                            if self.args.loss_fn == grpo_utils.GRPOLossType.dppo:
+                                debug_ratio_BT = torch.exp(debug_logprobs_BT - vllm_logprobs_BT)
+                                debug_dppo_mask_BT, _ = grpo_utils.compute_dppo_mask(
+                                    new_logprobs=debug_logprobs_BT,
+                                    behavior_logprobs=vllm_logprobs_BT,
+                                    advantages=advantages_BT,
+                                    ratio=debug_ratio_BT,
+                                    response_mask=response_mask_BT,
+                                    divergence_type=self.args.dppo_divergence_type,
+                                    divergence_threshold=self.args.dppo_divergence_threshold,
+                                )
+                                dppo_mask_kept_tokens += debug_dppo_mask_BT.sum()
+                                dppo_mask_total_tokens += response_mask_BT.sum()
                         is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                         self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                         loss, tiled_metrics = self._compute_tiled_dapo_loss(
@@ -1297,11 +1313,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             data_BT.rollout_sample_ids[i][:, 1:] if data_BT.rollout_sample_ids is not None else None
                         )
                         loss = grpo_utils.sequence_weighted_mean(
-                            per_token_loss_BT,
-                            response_mask_BT,
-                            loss_denominator,
-                            rollout_ids_BT,
-                            self._sp_group,
+                            per_token_loss_BT, response_mask_BT, loss_denominator, rollout_ids_BT, self._sp_group
                         )
                     else:
                         loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)

@@ -312,8 +312,8 @@ class GRPOExperimentConfig(
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
         if self.use_liger_grpo_loss:
-            if self.loss_fn != GRPOLossType.dapo:
-                raise ValueError("`use_liger_grpo_loss` currently only supports `loss_fn=dapo`.")
+            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.dppo):
+                raise ValueError("`use_liger_grpo_loss` currently only supports `loss_fn=dapo` or `loss_fn=dppo`.")
             if not self.use_vllm_logprobs:
                 raise ValueError("`use_liger_grpo_loss` requires `use_vllm_logprobs=True`.")
             if self.record_entropy:
@@ -867,7 +867,7 @@ def compute_grpo_loss(
 
 
 class TiledGRPOLMHeadLoss(torch.autograd.Function):
-    """Tiled DAPO/GRPO lm-head loss that avoids materializing full logits.
+    """Tiled DAPO/DPPO lm-head loss that avoids materializing full logits.
 
     This follows DeepSpeed's ``TiledFusedLogitsLoss`` pattern: the lm-head
     projection and scalar loss are recomputed per tile in ``forward`` and
@@ -893,6 +893,9 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         beta: float,
         clip_lower: float,
         clip_higher: float,
+        loss_fn: str,
+        dppo_divergence_type: str,
+        dppo_divergence_threshold: float,
         sequence_loss: bool,
         rollout_sample_ids: torch.Tensor,
         has_rollout_sample_ids: bool,
@@ -911,6 +914,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             raise ValueError("policy_mask must match hidden_states batch/sequence dimensions")
         if shards < 1:
             raise ValueError(f"shards must be >= 1, got {shards}")
+        loss_type = GRPOLossType(loss_fn)
 
         x_requires_grad = hidden_states.requires_grad
         batch_size, seq_len, hidden_size = hidden_states.shape
@@ -975,8 +979,25 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                 new_logprobs = new_logprobs - torch.logsumexp(logits, dim=-1)
 
                 ratio = torch.exp(new_logprobs - old_logprob_shards[shard_idx])
-                pg_losses = -advantage_shards[shard_idx] * ratio
-                pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(ratio, 1.0 - clip_lower, 1.0 + clip_higher)
+                if loss_type == GRPOLossType.dapo:
+                    pg_losses = -advantage_shards[shard_idx] * ratio
+                    pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(ratio, 1.0 - clip_lower, 1.0 + clip_higher)
+                elif loss_type == GRPOLossType.dppo:
+                    pg_losses = -advantage_shards[shard_idx] * ratio
+                    pg_losses2 = pg_losses
+                    dppo_mask, _ = compute_dppo_mask(
+                        new_logprobs=new_logprobs,
+                        behavior_logprobs=old_logprob_shards[shard_idx],
+                        advantages=advantage_shards[shard_idx],
+                        ratio=ratio,
+                        response_mask=mask_shards[shard_idx].bool(),
+                        divergence_type=dppo_divergence_type,
+                        divergence_threshold=dppo_divergence_threshold,
+                    )
+                    pg_losses = pg_losses * dppo_mask
+                    pg_losses2 = pg_losses2 * dppo_mask
+                else:
+                    raise ValueError(f"`tiled_grpo_lm_head_loss` does not support loss_fn={loss_type}.")
                 pg_loss = torch.max(pg_losses, pg_losses2)
 
                 if has_ref_logprobs:
@@ -1046,6 +1067,9 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             None,
             None,
             None,
+            None,
+            None,
+            None,
         )
 
 
@@ -1063,6 +1087,9 @@ def tiled_grpo_lm_head_loss(
     clip_higher: float,
     shards: int,
     loss_scale: torch.Tensor,
+    loss_fn: str | GRPOLossType = GRPOLossType.dapo,
+    dppo_divergence_type: str | DPPODivergenceType = DPPODivergenceType.tv,
+    dppo_divergence_threshold: float = 0.1,
     loss_denominator: str = "token",
     rollout_sample_ids: torch.Tensor | None = None,
     sequence_process_group: dist.ProcessGroup | None = None,
@@ -1093,6 +1120,9 @@ def tiled_grpo_lm_head_loss(
         beta,
         clip_lower,
         clip_higher,
+        loss_fn,
+        dppo_divergence_type,
+        dppo_divergence_threshold,
         loss_denominator == "sequence",
         rollout_sample_ids,
         has_rollout_sample_ids,

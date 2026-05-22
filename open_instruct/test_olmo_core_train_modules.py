@@ -225,6 +225,80 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
         torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
 
+    def test_matches_dense_dppo_loss_and_grads(self):
+        torch.manual_seed(5)
+        batch_size, seq_len, hidden_size, vocab_size = 2, 5, 4, 11
+        lm_head_dense = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled.load_state_dict(lm_head_dense.state_dict())
+
+        hidden_dense = torch.randn(batch_size, seq_len, hidden_size, requires_grad=True)
+        hidden_tiled = hidden_dense.detach().clone().requires_grad_(True)
+        selected_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+        response_mask = torch.tensor([[True, True, False, True, False], [False, True, True, False, True]])
+        advantages = torch.randn(batch_size, seq_len)
+        old_logprobs = -torch.rand(batch_size, seq_len) * 3.0
+        ref_logprobs = -torch.rand(batch_size, seq_len) * 3.0
+        beta = 0.05
+        divergence_threshold = 0.02
+        loss_scale = torch.tensor(0.75)
+
+        logits = lm_head_dense(hidden_dense)
+        new_logprobs = model_utils.log_softmax_and_gather(logits, selected_token_ids)
+        ratio = torch.exp(new_logprobs - old_logprobs)
+        dppo_mask, _ = grpo_utils.compute_dppo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=old_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_type=grpo_utils.DPPODivergenceType.tv,
+            divergence_threshold=divergence_threshold,
+        )
+        pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            config=_make_grpo_config(
+                beta=beta, loss_fn=grpo_utils.GRPOLossType.dppo, dppo_divergence_threshold=divergence_threshold
+            ),
+            tis_weights=dppo_mask,
+        )
+        dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
+        dense_loss.backward()
+
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head_tiled,
+            hidden_states=hidden_tiled,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref_logprobs,
+            temperature=1.0,
+            beta=beta,
+            clip_lower=0.2,
+            clip_higher=0.28,
+            shards=3,
+            loss_scale=loss_scale,
+            loss_fn=grpo_utils.GRPOLossType.dppo,
+            dppo_divergence_type=grpo_utils.DPPODivergenceType.tv,
+            dppo_divergence_threshold=divergence_threshold,
+        )
+        tiled_loss.backward()
+
+        torch.testing.assert_close(tiled_loss, dense_loss.detach())
+        expected_kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40.0, 40.0), ratio)
+        expected_kl = (expected_kl * response_mask).sum(dim=(-2, -1)) / response_mask.sum()
+        torch.testing.assert_close(tiled_kl, expected_kl)
+        expected_clipfrac = ((pg_losses2 > pg_losses).float() * response_mask).sum() / response_mask.sum()
+        torch.testing.assert_close(tiled_clipfrac, expected_clipfrac)
+        torch.testing.assert_close(tiled_ratio, (ratio * response_mask).sum() / response_mask.sum())
+        torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
+        torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
+        torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
+
     def test_returns_kl_metrics_when_beta_is_zero(self):
         torch.manual_seed(1)
         batch_size, seq_len, hidden_size, vocab_size = 1, 4, 3, 7
@@ -700,8 +774,8 @@ class TestDPPOLoss(unittest.TestCase):
 
 
 class TestLigerGRPOLossConfig(unittest.TestCase):
-    def test_liger_grpo_loss_requires_dapo(self):
-        with self.assertRaisesRegex(ValueError, "loss_fn=dapo"):
+    def test_liger_grpo_loss_rejects_unsupported_loss_fn(self):
+        with self.assertRaisesRegex(ValueError, "loss_fn=dapo.*loss_fn=dppo"):
             grpo_utils.GRPOExperimentConfig(
                 use_liger_grpo_loss=True,
                 loss_fn=grpo_utils.GRPOLossType.cispo,
@@ -719,6 +793,16 @@ class TestLigerGRPOLossConfig(unittest.TestCase):
         config = grpo_utils.GRPOExperimentConfig(
             use_liger_grpo_loss=True,
             loss_fn=grpo_utils.GRPOLossType.dapo,
+            use_vllm_logprobs=True,
+            truncated_importance_sampling_ratio_cap=0.0,
+        )
+
+        self.assertTrue(config.use_liger_grpo_loss)
+
+    def test_liger_grpo_loss_accepts_dppo_with_vllm_logprobs(self):
+        config = grpo_utils.GRPOExperimentConfig(
+            use_liger_grpo_loss=True,
+            loss_fn=grpo_utils.GRPOLossType.dppo,
             use_vllm_logprobs=True,
             truncated_importance_sampling_ratio_cap=0.0,
         )
