@@ -1,10 +1,12 @@
 import unittest
+from unittest.mock import patch
 
 from open_instruct.olmo_eval_launch import (
     OlmoEvalLaunchConfig,
     build_olmo_eval_beaker_launch_command,
     default_olmo_eval_experiment_name,
     effective_olmo_eval_groups,
+    launch_olmo_evals_on_weka,
     resolve_olmo_eval_model_path,
 )
 
@@ -24,7 +26,7 @@ class TestOlmoEvalLaunch(unittest.TestCase):
         config = OlmoEvalLaunchConfig(
             olmo_eval_tasks=["math:posttrain:dev"],
             olmo_eval_cluster="h100",
-            olmo_eval_priority="urgent",
+            olmo_eval_priority="high",
             olmo_eval_workspace="ai2/open-instruct-dev",
             olmo_eval_budget="ai2/oe-other",
         )
@@ -40,7 +42,7 @@ class TestOlmoEvalLaunch(unittest.TestCase):
         self.assertIn("math:posttrain:dev", cmd)
         self.assertIn("h100", cmd)
         self.assertIn("ai2/open-instruct-dev", cmd)
-        self.assertIn("urgent", cmd)
+        self.assertIn("high", cmd)
         self.assertIn("my-grpo-run", cmd)
         self.assertIn("ai2/oe-other", cmd)
         self.assertIn("--yes", cmd)
@@ -58,6 +60,11 @@ class TestOlmoEvalLaunch(unittest.TestCase):
     def test_default_experiment_name_includes_step(self):
         self.assertEqual(default_olmo_eval_experiment_name("my-run", 100), "my-run_step_100")
         self.assertEqual(default_olmo_eval_experiment_name("my-run", None), "my-run")
+
+    def test_launch_handles_missing_olmo_eval_command(self):
+        config = OlmoEvalLaunchConfig(olmo_eval_tasks=["math:posttrain:dev"])
+        with patch("open_instruct.olmo_eval_launch.subprocess.run", side_effect=FileNotFoundError):
+            launch_olmo_evals_on_weka("/weka/model", config, exp_name="my-run", experiment_name="my-run_step_1")
 
 
 if __name__ == "__main__":

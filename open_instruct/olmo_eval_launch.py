@@ -31,7 +31,7 @@ class OlmoEvalLaunchConfig:
     olmo_eval_groups: list[str] | None = None
     """Beaker group(s) for olmo-eval jobs. Defaults to the training experiment name."""
 
-    olmo_eval_priority: Literal["low", "normal", "high", "urgent"] = "urgent"
+    olmo_eval_priority: Literal["low", "normal", "high", "urgent"] = "high"
     """Priority for auto-launched olmo-eval jobs."""
 
     olmo_eval_workspace: str = "ai2/open-instruct-dev"
@@ -158,14 +158,21 @@ def launch_olmo_evals_on_weka(
         model_path=model_path, config=config, exp_name=exp_name, experiment_name=experiment_name
     )
     logger.info("Launching olmo-eval jobs with command: %s", shlex.join(command))
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    logger.info(
-        "Olmo-eval launch finished (return code %s)\nStdout:\n%s\nStderr:\n%s",
-        process.returncode,
-        stdout.decode(),
-        stderr.decode(),
-    )
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False, errors="replace")
+        if result.returncode != 0:
+            logger.warning(
+                "Olmo-eval launch failed (return code %s)\nStdout:\n%s\nStderr:\n%s",
+                result.returncode,
+                result.stdout,
+                result.stderr,
+            )
+        else:
+            logger.info("Olmo-eval launch finished successfully.\nStdout:\n%s", result.stdout)
+    except FileNotFoundError:
+        logger.error("Failed to launch olmo-eval: 'olmo-eval' command not found. Ensure it is installed.")
+    except Exception:
+        logger.exception("An unexpected error occurred while launching olmo-eval.")
 
 
 def default_olmo_eval_experiment_name(leaderboard_name: str, training_step: int | None = None) -> str:

@@ -1693,7 +1693,7 @@ def maybe_save_checkpoint(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
             if args.try_launch_olmo_eval_jobs_on_weka and is_beaker_job():
-                leaderboard_name = f"{args.hf_repo_revision or args.exp_name}_step_{training_step}"
+                leaderboard_name = args.hf_repo_revision or args.exp_name
                 for i in range(args.world_size):
                     policy_group.models[i].launch_olmo_evals_on_weka_wrapper.remote(
                         step_dir, leaderboard_name, training_step
