@@ -103,6 +103,7 @@ def save_and_cleanup(
         olmo_eval_launch.launch_olmo_evals_on_weka(
             model_path=args.output_dir,
             config=args,
+            exp_name=args.exp_name,
             experiment_name=olmo_eval_launch.default_olmo_eval_experiment_name(args.hf_repo_revision or args.exp_name),
         )
 

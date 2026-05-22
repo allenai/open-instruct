@@ -4,6 +4,7 @@ from open_instruct.olmo_eval_launch import (
     OlmoEvalLaunchConfig,
     build_olmo_eval_beaker_launch_command,
     default_olmo_eval_experiment_name,
+    effective_olmo_eval_groups,
     resolve_olmo_eval_model_path,
 )
 
@@ -23,13 +24,15 @@ class TestOlmoEvalLaunch(unittest.TestCase):
         config = OlmoEvalLaunchConfig(
             olmo_eval_tasks=["math:posttrain:dev"],
             olmo_eval_cluster="h100",
-            olmo_eval_groups=["my-grpo-run"],
             olmo_eval_priority="urgent",
             olmo_eval_workspace="ai2/open-instruct-dev",
             olmo_eval_budget="ai2/oe-other",
         )
         cmd = build_olmo_eval_beaker_launch_command(
-            "/weka/oe-adapt-default/user/model/step_100", config, experiment_name="my-run_step_100"
+            "/weka/oe-adapt-default/user/model/step_100",
+            config,
+            exp_name="my-grpo-run",
+            experiment_name="my-run_step_100",
         )
         self.assertEqual(cmd[0:3], ["olmo-eval", "beaker", "launch"])
         self.assertIn("-m", cmd)
@@ -43,6 +46,14 @@ class TestOlmoEvalLaunch(unittest.TestCase):
         self.assertIn("--yes", cmd)
         self.assertIn("--no-follow", cmd)
         self.assertIn("my-run_step_100", cmd)
+
+    def test_effective_olmo_eval_groups_defaults_to_exp_name(self):
+        config = OlmoEvalLaunchConfig()
+        self.assertEqual(effective_olmo_eval_groups(config, "my-grpo-run"), ["my-grpo-run"])
+
+    def test_effective_olmo_eval_groups_respects_explicit_groups(self):
+        config = OlmoEvalLaunchConfig(olmo_eval_groups=["custom-group"])
+        self.assertEqual(effective_olmo_eval_groups(config, "my-grpo-run"), ["custom-group"])
 
     def test_default_experiment_name_includes_step(self):
         self.assertEqual(default_olmo_eval_experiment_name("my-run", 100), "my-run_step_100")

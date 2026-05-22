@@ -29,7 +29,7 @@ class OlmoEvalLaunchConfig:
     """Beaker cluster alias or full name."""
 
     olmo_eval_groups: list[str] | None = None
-    """Optional Beaker group(s) for grouping related eval experiments."""
+    """Beaker group(s) for olmo-eval jobs. Defaults to the training experiment name."""
 
     olmo_eval_priority: Literal["low", "normal", "high", "urgent"] = "urgent"
     """Priority for auto-launched olmo-eval jobs."""
@@ -79,8 +79,15 @@ def resolve_olmo_eval_model_path(checkpoint_path: str) -> str:
     return checkpoint_path.rstrip("/")
 
 
+def effective_olmo_eval_groups(config: OlmoEvalLaunchConfig, exp_name: str) -> list[str]:
+    """Return Beaker groups for olmo-eval launch, defaulting to the training experiment name."""
+    if config.olmo_eval_groups is not None:
+        return config.olmo_eval_groups
+    return [exp_name]
+
+
 def build_olmo_eval_beaker_launch_command(
-    model_path: str, config: OlmoEvalLaunchConfig, *, experiment_name: str | None = None
+    model_path: str, config: OlmoEvalLaunchConfig, *, exp_name: str, experiment_name: str | None = None
 ) -> list[str]:
     """Build the `olmo-eval beaker launch` argv for a saved checkpoint."""
     if not config.olmo_eval_tasks:
@@ -111,7 +118,7 @@ def build_olmo_eval_beaker_launch_command(
     for task in config.olmo_eval_tasks:
         cmd.extend(["-t", task])
 
-    for group in config.olmo_eval_groups or []:
+    for group in effective_olmo_eval_groups(config, exp_name):
         cmd.extend(["-g", group])
 
     if config.olmo_eval_budget is not None:
@@ -144,11 +151,11 @@ def build_olmo_eval_beaker_launch_command(
 
 
 def launch_olmo_evals_on_weka(
-    model_path: str, config: OlmoEvalLaunchConfig, *, experiment_name: str | None = None
+    model_path: str, config: OlmoEvalLaunchConfig, *, exp_name: str, experiment_name: str | None = None
 ) -> None:
     """Launch olmo-eval Beaker jobs for a checkpoint saved during training."""
     command = build_olmo_eval_beaker_launch_command(
-        model_path=model_path, config=config, experiment_name=experiment_name
+        model_path=model_path, config=config, exp_name=exp_name, experiment_name=experiment_name
     )
     logger.info("Launching olmo-eval jobs with command: %s", shlex.join(command))
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

@@ -45,6 +45,7 @@ dependencies = [
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
     "flash-linear-attention>=0.4.2",
+    "olmo-eval-internal[beaker]",
 ]
 
 [build-system]
@@ -68,6 +69,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "f1b69d796aa9691c0abbf29683ee04fe1e42aa50" }
+olmo-eval-internal = { path = "../olmo-eval-internal", editable = true }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
@@ -108,6 +110,7 @@ python-preference = "only-managed"
 link-mode = "hardlink"
 override-dependencies = [
     "transformers>=5.4.0",
+    "rich>=14.3.4,<14.4",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",

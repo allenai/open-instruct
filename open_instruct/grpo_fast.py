@@ -917,6 +917,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ray.remote(olmo_eval_launch.launch_olmo_evals_on_weka).options(num_cpus=1).remote(
                 model_path=step_dir,
                 config=args,
+                exp_name=args.exp_name,
                 experiment_name=olmo_eval_launch.default_olmo_eval_experiment_name(leaderboard_name, training_step),
             )
 

@@ -1,3 +1,0 @@
-# Optional: install olmo-eval CLI for GRPO auto-eval launch (separate from main uv env).
-# Conflicts with ai2-olmo-core's rich pin when installed in the same environment.
--e ../olmo-eval-internal[beaker]
