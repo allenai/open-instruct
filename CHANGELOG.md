@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- Add olmo-eval Beaker launch integration for GRPO training: optional `--try_launch_olmo_eval_jobs_on_weka` launches `olmo-eval beaker launch` after checkpoints using a configurable `OlmoEvalLaunchConfig` (https://github.com/allenai/open-instruct/pull/1698).
+
 ### Changed
 - Export `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug` in `scripts/train/debug/grpo.sh` and `grpo_fast.sh` (local Ray debug scripts that disable torch compile) so setuptools-scm can resolve the package version (https://github.com/allenai/open-instruct/pull/1696).
 - Simplify GRPO clip fraction handling by returning the final policy loss and clip fraction directly from `compute_grpo_loss` (https://github.com/allenai/open-instruct/pull/1679).
