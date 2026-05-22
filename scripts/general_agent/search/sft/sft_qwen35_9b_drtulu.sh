@@ -5,7 +5,11 @@
 
 BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
 MODEL="Qwen/Qwen3.5-9B"
+# MODEL="hamishivi/Qwen3.5-9B"
+TOKENIZER="Qwen/Qwen3.5-9B"
+# TOKENIZER="hamishivi/Qwen3.5-9B"
 DATASET="rl-rag/browsecomp-gptoss-clean-qwen35-sft"
+# DATASET="hamishivi/sft_ablations_bc_only_v1_sanitized"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -15,9 +19,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --env BEAKER_ALLOW_SUBCONTAINERS=1 \
-    --env BEAKER_SKIP_DOCKER_SOCKET=1 \
-    --budget ai2/oe-omai \
     --gpus 8 \
     -- \
     accelerate launch \
@@ -29,21 +30,23 @@ uv run python mason.py \
     open_instruct/finetune.py \
     --exp_name qwen35_9b_drtulu_sft_sample \
     --model_name_or_path $MODEL \
-    --tokenizer_name $MODEL \
-    --use_liger_kernel \
-    --max_seq_length 10240 \
+    --tokenizer_name $TOKENIZER \
     --sequence_parallel_size 2 \
+    --max_seq_length 10240 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
     --lr_scheduler_type linear \
-    --warmup_ratio 0.1 \
+    --use_liger_kernel \
+    --warmup_ratio 0.03 \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
+    --dataset_mixer_list \
+        $DATASET 1.0 \
+    --dataset_mixer_list_splits \
+        train \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
-    --seed 42 \
-    --push_to_hub false \
-    --try_launch_beaker_eval_jobs false
+    --seed 42
