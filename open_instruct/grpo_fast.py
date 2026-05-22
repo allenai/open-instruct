@@ -777,6 +777,7 @@ class PolicyTrainerRayProcess(RayProcess):
         advantages: torch.Tensor,
         old_logprobs: torch.Tensor,
         ref_logprobs: torch.Tensor | None,
+        policy_mask: torch.Tensor | None,
         loss_denominator: float,
         loss_denominator_mode: str,
         rollout_sample_ids: torch.Tensor | None,
@@ -813,6 +814,7 @@ class PolicyTrainerRayProcess(RayProcess):
             hidden_states=hidden_states,
             selected_token_ids=selected_token_ids,
             response_mask=response_mask,
+            policy_mask=policy_mask,
             advantages=advantages,
             old_logprobs=old_logprobs,
             ref_logprobs=ref_logprobs,
@@ -1047,7 +1049,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 value_step_metrics["value/predictions_mean"] = float(np.mean(preds_np))
                 value_step_metrics["value/predictions_std"] = float(np.std(preds_np))
                 value_step_metrics["value/explained_variance"] = 1.0 - float(np.var(residuals)) / (return_var + 1e-8)
-        tis_mask_enabled = self.args.tis_mask_lower > 0.0 or self.args.tis_mask_upper > 0.0
+        tis_mask_enabled = (
+            self.args.tis_mask_lower > 0.0
+            or self.args.tis_mask_upper > 0.0
+            or self.args.sequence_tis_mask_log_ratio_threshold > 0.0
+        )
         tis_mask_kept_tokens = torch.zeros((), device=device)
         tis_mask_total_tokens = torch.zeros((), device=device)
         dppo_enabled = self.args.loss_fn == grpo_utils.GRPOLossType.dppo
@@ -1088,25 +1094,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     advantages_BT = data_BT.advantages[i][:, 1:]
                     if self.args.use_liger_grpo_loss:
                         vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
-                        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
-                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                        loss, tiled_metrics = self._compute_tiled_dapo_loss(
-                            query_responses=data_BT.query_responses[i],
-                            position_ids=data_BT.position_ids[i],
-                            response_mask=response_mask_BT,
-                            advantages=advantages_BT,
-                            old_logprobs=vllm_logprobs_BT,
-                            ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
-                            loss_denominator=loss_denominator,
-                            loss_denominator_mode=self.args.loss_denominator,
-                            rollout_sample_ids=(
-                                data_BT.rollout_sample_ids[i][:, 1:]
-                                if data_BT.rollout_sample_ids is not None
-                                else None
-                            ),
-                            cp_context=cp_contexts_BT[i],
-                        )
-
                         with torch.no_grad():
                             debug_logprobs_BT, _ = grpo_utils.forward_for_logprobs(
                                 self.model,
@@ -1119,9 +1106,43 @@ class PolicyTrainerRayProcess(RayProcess):
                                 cp_context=cp_contexts_BT[i],
                             )
                             debug_logprobs_BT = grpo_utils.mask_logprobs(debug_logprobs_BT, response_mask_BT)
+                            sequence_tis_mask_BT = grpo_utils.compute_sequence_tis_mask(
+                                debug_logprobs_BT,
+                                vllm_logprobs_BT,
+                                advantages_BT,
+                                response_mask_BT,
+                                self.args.sequence_tis_mask_log_ratio_threshold,
+                                self.args.sequence_tis_mask_negative_advantages_only,
+                                data_BT.rollout_sample_ids[i][:, 1:]
+                                if data_BT.rollout_sample_ids is not None
+                                else None,
+                                self._sp_group,
+                            )
                             self._record_vllm_local_logprob_debug(
                                 debug_logprobs_BT, vllm_logprobs_BT, response_mask_BT
                             )
+                            if sequence_tis_mask_BT is not None:
+                                tis_mask_kept_tokens += sequence_tis_mask_BT.sum()
+                                tis_mask_total_tokens += response_mask_BT.sum()
+                        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+                        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+                        loss, tiled_metrics = self._compute_tiled_dapo_loss(
+                            query_responses=data_BT.query_responses[i],
+                            position_ids=data_BT.position_ids[i],
+                            response_mask=response_mask_BT,
+                            advantages=advantages_BT,
+                            old_logprobs=vllm_logprobs_BT,
+                            ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                            policy_mask=sequence_tis_mask_BT,
+                            loss_denominator=loss_denominator,
+                            loss_denominator_mode=self.args.loss_denominator,
+                            rollout_sample_ids=(
+                                data_BT.rollout_sample_ids[i][:, 1:]
+                                if data_BT.rollout_sample_ids is not None
+                                else None
+                            ),
+                            cp_context=cp_contexts_BT[i],
+                        )
 
                         torch.cuda.empty_cache()
                         self.model.backward(loss)
@@ -1198,6 +1219,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.args.tis_mask_lower,
                         self.args.tis_mask_upper,
                     )
+                    sequence_tis_mask_BT = grpo_utils.compute_sequence_tis_mask(
+                        new_logprobs_BT,
+                        vllm_logprobs_BT,
+                        advantages_BT,
+                        response_mask_BT,
+                        self.args.sequence_tis_mask_log_ratio_threshold,
+                        self.args.sequence_tis_mask_negative_advantages_only,
+                        data_BT.rollout_sample_ids[i][:, 1:] if data_BT.rollout_sample_ids is not None else None,
+                        self._sp_group,
+                    )
                     if self.args.loss_fn == grpo_utils.GRPOLossType.dppo:
                         dppo_mask_BT, _ = grpo_utils.compute_dppo_mask(
                             new_logprobs=new_logprobs_BT,
@@ -1240,11 +1271,14 @@ class PolicyTrainerRayProcess(RayProcess):
                             tvpo_tv_weight += response_count
                     else:
                         tvpo_mask_BT = None
-                    combined_tis_BT = grpo_utils.combine_tis_terms(tis_clamped_BT, tis_mask_BT, dppo_mask_BT)
+                    combined_tis_BT = grpo_utils.combine_tis_terms(
+                        tis_clamped_BT, tis_mask_BT, sequence_tis_mask_BT, dppo_mask_BT
+                    )
 
-                    if tis_mask_BT is not None:
+                    effective_tis_mask_BT = grpo_utils.combine_tis_terms(tis_mask_BT, sequence_tis_mask_BT)
+                    if effective_tis_mask_BT is not None:
                         with torch.no_grad():
-                            tis_mask_kept_tokens += tis_mask_BT.sum()
+                            tis_mask_kept_tokens += effective_tis_mask_BT.sum()
                             tis_mask_total_tokens += response_mask_BT.sum()
 
                     pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
