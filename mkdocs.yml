@@ -86,7 +86,9 @@ nav:
     - algorithms/grpo_fast_internals.md
     - algorithms/rl_with_environments.md
     - algorithms/rollout_loop_internals.md
+    - algorithms/multi_task_rl.md
     - algorithms/olmo_core_sharding.md
+    - algorithms/olmo_core_reference.md
     - algorithms/tool_training.md
     - algorithms/reward_modeling.md
     - slack-alerts.md
@@ -94,6 +96,7 @@ nav:
     - script_folder_guide.md
     - training_scripts_guide.md
   - Reference:
+    - distributed_training_primer.md
     - mason_reference.md
     - checkpoint_resumption.md
     - debug_envs_reference.md
