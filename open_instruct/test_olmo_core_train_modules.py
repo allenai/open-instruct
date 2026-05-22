@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 from parameterized import parameterized
@@ -285,6 +285,81 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
             loss_fn=grpo_utils.GRPOLossType.dppo,
             dppo_divergence_type=grpo_utils.DPPODivergenceType.tv,
             dppo_divergence_threshold=divergence_threshold,
+        )
+        tiled_loss.backward()
+
+        torch.testing.assert_close(tiled_loss, dense_loss.detach())
+        expected_kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40.0, 40.0), ratio)
+        expected_kl = (expected_kl * response_mask).sum(dim=(-2, -1)) / response_mask.sum()
+        torch.testing.assert_close(tiled_kl, expected_kl)
+        expected_clipfrac = ((pg_losses2 > pg_losses).float() * response_mask).sum() / response_mask.sum()
+        torch.testing.assert_close(tiled_clipfrac, expected_clipfrac)
+        torch.testing.assert_close(tiled_ratio, (ratio * response_mask).sum() / response_mask.sum())
+        torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
+        torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
+        torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
+
+    def test_matches_dense_tvpo_loss_and_grads(self):
+        torch.manual_seed(6)
+        batch_size, seq_len, hidden_size, vocab_size = 2, 5, 4, 11
+        lm_head_dense = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled.load_state_dict(lm_head_dense.state_dict())
+
+        hidden_dense = torch.randn(batch_size, seq_len, hidden_size, requires_grad=True)
+        hidden_tiled = hidden_dense.detach().clone().requires_grad_(True)
+        selected_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+        response_mask = torch.tensor([[True, True, False, True, False], [False, True, True, False, True]])
+        advantages = torch.randn(batch_size, seq_len)
+        old_logprobs = -torch.rand(batch_size, seq_len) * 3.0
+        ref_logprobs = -torch.rand(batch_size, seq_len) * 3.0
+        beta = 0.05
+        tvpo_truncation_cap = 2.0
+        loss_scale = torch.tensor(0.75)
+
+        logits = lm_head_dense(hidden_dense)
+        new_logprobs = model_utils.log_softmax_and_gather(logits, selected_token_ids)
+        ratio = torch.exp(new_logprobs - old_logprobs)
+        tvpo_mask, _ = grpo_utils.compute_tvpo_mask(
+            new_logprobs=new_logprobs,
+            behavior_logprobs=old_logprobs,
+            advantages=advantages,
+            ratio=ratio,
+            response_mask=response_mask,
+            divergence_threshold=0.01,
+            rollout_ids=torch.tensor([[0, 0, 0, 0, 0], [1, 1, 1, 1, 1]]),
+            num_samples_per_prompt=2,
+        )
+        pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            config=_make_grpo_config(
+                beta=beta, loss_fn=grpo_utils.GRPOLossType.tvpo, tvpo_truncation_cap=tvpo_truncation_cap
+            ),
+            policy_freeze_mask=tvpo_mask,
+        )
+        dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
+        dense_loss.backward()
+
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head_tiled,
+            hidden_states=hidden_tiled,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref_logprobs,
+            temperature=1.0,
+            beta=beta,
+            clip_lower=0.2,
+            clip_higher=0.28,
+            shards=3,
+            loss_scale=loss_scale,
+            loss_fn=grpo_utils.GRPOLossType.tvpo,
+            tvpo_truncation_cap=tvpo_truncation_cap,
+            policy_freeze_mask=tvpo_mask,
         )
         tiled_loss.backward()
 
@@ -775,7 +850,7 @@ class TestDPPOLoss(unittest.TestCase):
 
 class TestLigerGRPOLossConfig(unittest.TestCase):
     def test_liger_grpo_loss_rejects_unsupported_loss_fn(self):
-        with self.assertRaisesRegex(ValueError, "loss_fn=dapo.*loss_fn=dppo"):
+        with self.assertRaisesRegex(ValueError, "loss_fn=dapo.*loss_fn=dppo.*loss_fn=tvpo"):
             grpo_utils.GRPOExperimentConfig(
                 use_liger_grpo_loss=True,
                 loss_fn=grpo_utils.GRPOLossType.cispo,
@@ -803,6 +878,16 @@ class TestLigerGRPOLossConfig(unittest.TestCase):
         config = grpo_utils.GRPOExperimentConfig(
             use_liger_grpo_loss=True,
             loss_fn=grpo_utils.GRPOLossType.dppo,
+            use_vllm_logprobs=True,
+            truncated_importance_sampling_ratio_cap=0.0,
+        )
+
+        self.assertTrue(config.use_liger_grpo_loss)
+
+    def test_liger_grpo_loss_accepts_tvpo_with_vllm_logprobs(self):
+        config = grpo_utils.GRPOExperimentConfig(
+            use_liger_grpo_loss=True,
+            loss_fn=grpo_utils.GRPOLossType.tvpo,
             use_vllm_logprobs=True,
             truncated_importance_sampling_ratio_cap=0.0,
         )
@@ -1005,6 +1090,43 @@ class TestComputeTVPOMask(unittest.TestCase):
         )
 
         self.assertFalse(mask.requires_grad)
+
+    def test_sequence_process_group_aggregates_rollout_tv(self):
+        new_logprobs = torch.log(torch.tensor([[0.11]]))
+        behavior_logprobs = torch.log(torch.tensor([[0.1]]))
+        ratio = torch.exp(new_logprobs - behavior_logprobs)
+        advantages = torch.tensor([[1.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+        process_group = object()
+        float_calls = 0
+
+        def fake_all_reduce(tensor, op=None, group=None):
+            nonlocal float_calls
+            self.assertIs(group, process_group)
+            if tensor.dtype == torch.long:
+                tensor.fill_(0)
+                return
+            float_calls += 1
+            if float_calls == 1:
+                tensor.fill_(2.05)
+            else:
+                tensor.fill_(2.0)
+
+        with patch.object(grpo_utils.dist, "all_reduce", side_effect=fake_all_reduce):
+            mask, prompt_tv = grpo_utils.compute_tvpo_mask(
+                new_logprobs=new_logprobs,
+                behavior_logprobs=behavior_logprobs,
+                advantages=advantages,
+                ratio=ratio,
+                response_mask=response_mask,
+                divergence_threshold=0.5,
+                rollout_ids=torch.tensor([[0]]),
+                num_samples_per_prompt=1,
+                sequence_process_group=process_group,
+            )
+
+        torch.testing.assert_close(prompt_tv, torch.tensor([[1.025]]))
+        torch.testing.assert_close(mask, torch.zeros_like(mask))
 
 
 class TestTVPOLoss(unittest.TestCase):

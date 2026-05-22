@@ -778,6 +778,7 @@ class PolicyTrainerRayProcess(RayProcess):
         old_logprobs: torch.Tensor,
         ref_logprobs: torch.Tensor | None,
         policy_mask: torch.Tensor | None,
+        policy_freeze_mask: torch.Tensor | None,
         loss_denominator: float,
         loss_denominator_mode: str,
         rollout_sample_ids: torch.Tensor | None,
@@ -827,9 +828,11 @@ class PolicyTrainerRayProcess(RayProcess):
             loss_fn=self.args.loss_fn,
             dppo_divergence_type=self.args.dppo_divergence_type,
             dppo_divergence_threshold=self.args.dppo_divergence_threshold,
+            tvpo_truncation_cap=self.args.tvpo_truncation_cap,
             loss_denominator=loss_denominator_mode,
             rollout_sample_ids=rollout_sample_ids,
             sequence_process_group=self._sp_group,
+            policy_freeze_mask=policy_freeze_mask,
         )
         if ref_logprobs is not None:
             return loss, (kl_avg, clipfrac, ratio_avg)
@@ -1097,6 +1100,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     advantages_BT = data_BT.advantages[i][:, 1:]
                     if self.args.use_liger_grpo_loss:
                         vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
+                        tvpo_policy_freeze_mask_BT = None
                         with torch.no_grad():
                             debug_logprobs_BT, _ = grpo_utils.forward_for_logprobs(
                                 self.model,
@@ -1140,6 +1144,28 @@ class PolicyTrainerRayProcess(RayProcess):
                                 )
                                 dppo_mask_kept_tokens += debug_dppo_mask_BT.sum()
                                 dppo_mask_total_tokens += response_mask_BT.sum()
+                            if self.args.loss_fn == grpo_utils.GRPOLossType.tvpo:
+                                debug_ratio_BT = torch.exp(debug_logprobs_BT - vllm_logprobs_BT)
+                                rollout_ids_BT = (
+                                    data_BT.rollout_sample_ids[i][:, 1:]
+                                    if data_BT.rollout_sample_ids is not None
+                                    else None
+                                )
+                                tvpo_policy_freeze_mask_BT, debug_tvpo_prompt_tv_BT = grpo_utils.compute_tvpo_mask(
+                                    new_logprobs=debug_logprobs_BT,
+                                    behavior_logprobs=vllm_logprobs_BT,
+                                    advantages=advantages_BT,
+                                    ratio=debug_ratio_BT,
+                                    response_mask=response_mask_BT,
+                                    divergence_threshold=self.args.tvpo_divergence_threshold,
+                                    rollout_ids=rollout_ids_BT,
+                                    num_samples_per_prompt=self.streaming_config.num_samples_per_prompt_rollout,
+                                    sequence_process_group=self._sp_group,
+                                )
+                                tvpo_mask_kept_tokens += tvpo_policy_freeze_mask_BT.sum()
+                                tvpo_mask_total_tokens += response_mask_BT.sum()
+                                tvpo_tv_weighted_sum += (debug_tvpo_prompt_tv_BT * response_mask_BT).sum()
+                                tvpo_tv_weight += response_mask_BT.sum()
                         is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                         self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
                         loss, tiled_metrics = self._compute_tiled_dapo_loss(
@@ -1150,6 +1176,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             old_logprobs=vllm_logprobs_BT,
                             ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                             policy_mask=sequence_tis_mask_BT,
+                            policy_freeze_mask=tvpo_policy_freeze_mask_BT,
                             loss_denominator=loss_denominator,
                             loss_denominator_mode=self.args.loss_denominator,
                             rollout_sample_ids=(
@@ -1278,6 +1305,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             divergence_threshold=self.args.tvpo_divergence_threshold,
                             rollout_ids=rollout_ids_BT,
                             num_samples_per_prompt=self.streaming_config.num_samples_per_prompt_rollout,
+                            sequence_process_group=self._sp_group,
                         )
                         with torch.no_grad():
                             tvpo_mask_kept_tokens += tvpo_mask_BT.sum()

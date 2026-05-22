@@ -99,7 +99,7 @@ class GRPOExperimentConfig(
     lm_head_fp32: bool = False
     """Whether to keep the final LM head projection in fp32 for both HF training and vLLM rollout models."""
     use_liger_grpo_loss: bool = False
-    """Whether to use the tiled lm-head GRPO loss path. Currently supported only for DAPO."""
+    """Whether to use the tiled lm-head GRPO loss path. Supports DAPO, DPPO, and TVPO."""
     liger_grpo_loss_chunk_size: int = 1
     """Number of lm-head loss tiles to use in the tiled GRPO loss path."""
     liger_grpo_loss_compile: bool = True
@@ -312,8 +312,10 @@ class GRPOExperimentConfig(
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
         if self.use_liger_grpo_loss:
-            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.dppo):
-                raise ValueError("`use_liger_grpo_loss` currently only supports `loss_fn=dapo` or `loss_fn=dppo`.")
+            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.dppo, GRPOLossType.tvpo):
+                raise ValueError(
+                    "`use_liger_grpo_loss` currently only supports `loss_fn=dapo`, `loss_fn=dppo`, or `loss_fn=tvpo`."
+                )
             if not self.use_vllm_logprobs:
                 raise ValueError("`use_liger_grpo_loss` requires `use_vllm_logprobs=True`.")
             if self.record_entropy:
@@ -706,6 +708,7 @@ def compute_tvpo_mask(
     divergence_threshold: float,
     rollout_ids: torch.Tensor | None = None,
     num_samples_per_prompt: int = 1,
+    sequence_process_group: dist.ProcessGroup | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute the TVPO trust-region mask.
 
@@ -744,6 +747,10 @@ def compute_tvpo_mask(
         num_samples_per_prompt: number of rollouts per prompt. Prompt id is
             derived as ``rollout_id // num_samples_per_prompt``, matching the
             consecutive-grouped layout produced by the rollout pipeline.
+        sequence_process_group: optional sequence-parallel process group. When
+            set, token sums/counts are all-reduced before computing rollout and
+            prompt TV so the trust region is based on full sequences, not local
+            SP shards.
 
     Returns:
         ``(mask, prompt_tv_per_token)`` where ``mask`` is a 0/1 float tensor of
@@ -757,37 +764,55 @@ def compute_tvpo_mask(
 
         prompt_tv_per_token = torch.zeros_like(per_token_tv_half)
         if rollout_ids is None:
-            num_response = response_mask.sum().to(per_token_tv_half.dtype).clamp_min(1.0)
-            sample_tv = per_token_tv_half.sum() / num_response
+            tv_sum = per_token_tv_half.sum()
+            num_response = response_mask.sum().to(per_token_tv_half.dtype)
+            if sequence_process_group is not None:
+                dist.all_reduce(tv_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
+                dist.all_reduce(num_response, op=dist.ReduceOp.SUM, group=sequence_process_group)
+            sample_tv = tv_sum / num_response.clamp_min(1.0)
             prompt_tv_per_token = torch.where(
                 response_mask, sample_tv.expand_as(per_token_tv_half), prompt_tv_per_token
             )
         else:
-            valid_rollout_ids = rollout_ids[response_mask]
-            if valid_rollout_ids.numel() > 0:
-                unique_rollouts, token_to_rollout_local = torch.unique(valid_rollout_ids, return_inverse=True)
-                num_rollouts = int(unique_rollouts.numel())
-                ones_tok = torch.ones(
-                    valid_rollout_ids.numel(), dtype=per_token_tv_half.dtype, device=per_token_tv_half.device
-                )
+            valid = response_mask.bool()
+            has_valid = bool(valid.any().item())
+            local_max = rollout_ids[valid].max() if has_valid else torch.tensor(-1, device=rollout_ids.device)
+            local_max = local_max.to(dtype=torch.long)
+            if sequence_process_group is not None:
+                dist.all_reduce(local_max, op=dist.ReduceOp.MAX, group=sequence_process_group)
+            if local_max.item() >= 0:
+                num_rollouts = int(local_max.item()) + 1
                 rollout_sum = torch.zeros(num_rollouts, dtype=per_token_tv_half.dtype, device=per_token_tv_half.device)
-                rollout_sum.index_add_(0, token_to_rollout_local, per_token_tv_half[response_mask])
                 rollout_count = torch.zeros_like(rollout_sum)
-                rollout_count.index_add_(0, token_to_rollout_local, ones_tok)
-                per_rollout_tv = rollout_sum / rollout_count.clamp_min(1.0)
+                if has_valid:
+                    flat_rollout_ids = rollout_ids[valid].long()
+                    rollout_sum.index_add_(0, flat_rollout_ids, per_token_tv_half[valid])
+                    rollout_count.index_add_(
+                        0, flat_rollout_ids, torch.ones_like(flat_rollout_ids, dtype=rollout_count.dtype)
+                    )
+                if sequence_process_group is not None:
+                    dist.all_reduce(rollout_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
+                    dist.all_reduce(rollout_count, op=dist.ReduceOp.SUM, group=sequence_process_group)
 
-                rollout_to_prompt_id = unique_rollouts.div(num_samples_per_prompt, rounding_mode="floor")
-                unique_prompts, rollout_to_prompt_local = torch.unique(rollout_to_prompt_id, return_inverse=True)
-                num_prompts = int(unique_prompts.numel())
-                ones_roll = torch.ones_like(per_rollout_tv)
+                rollout_has_tokens = rollout_count > 0
+                per_rollout_tv = rollout_sum / rollout_count.clamp_min(1.0)
+                rollout_to_prompt_id = torch.arange(num_rollouts, device=rollout_ids.device, dtype=torch.long).div(
+                    num_samples_per_prompt, rounding_mode="floor"
+                )
+                num_prompts = int(rollout_to_prompt_id.max().item()) + 1
                 prompt_sum = torch.zeros(num_prompts, dtype=per_rollout_tv.dtype, device=per_rollout_tv.device)
-                prompt_sum.index_add_(0, rollout_to_prompt_local, per_rollout_tv)
                 prompt_count = torch.zeros_like(prompt_sum)
-                prompt_count.index_add_(0, rollout_to_prompt_local, ones_roll)
+                prompt_sum.index_add_(
+                    0,
+                    rollout_to_prompt_id,
+                    torch.where(rollout_has_tokens, per_rollout_tv, torch.zeros_like(per_rollout_tv)),
+                )
+                prompt_count.index_add_(0, rollout_to_prompt_id, rollout_has_tokens.to(dtype=prompt_count.dtype))
                 per_prompt_tv = prompt_sum / prompt_count.clamp_min(1.0)
 
-                token_prompt_local = rollout_to_prompt_local[token_to_rollout_local]
-                prompt_tv_per_token[response_mask] = per_prompt_tv[token_prompt_local]
+                if has_valid:
+                    token_prompt_id = rollout_ids[valid].long().div(num_samples_per_prompt, rounding_mode="floor")
+                    prompt_tv_per_token[valid] = per_prompt_tv[token_prompt_id]
 
         valid_tv = prompt_tv_per_token[response_mask] if response_mask.any() else prompt_tv_per_token.new_zeros(())
         max_prompt_tv = valid_tv.max() if valid_tv.numel() > 0 else prompt_tv_per_token.new_zeros(())
@@ -867,7 +892,7 @@ def compute_grpo_loss(
 
 
 class TiledGRPOLMHeadLoss(torch.autograd.Function):
-    """Tiled DAPO/DPPO lm-head loss that avoids materializing full logits.
+    """Tiled DAPO/DPPO/TVPO lm-head loss that avoids materializing full logits.
 
     This follows DeepSpeed's ``TiledFusedLogitsLoss`` pattern: the lm-head
     projection and scalar loss are recomputed per tile in ``forward`` and
@@ -885,6 +910,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         response_mask: torch.Tensor,
         policy_mask: torch.Tensor,
         has_policy_mask: bool,
+        policy_freeze_mask: torch.Tensor,
+        has_policy_freeze_mask: bool,
         advantages: torch.Tensor,
         old_logprobs: torch.Tensor,
         ref_logprobs: torch.Tensor,
@@ -896,6 +923,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         loss_fn: str,
         dppo_divergence_type: str,
         dppo_divergence_threshold: float,
+        tvpo_truncation_cap: float,
         sequence_loss: bool,
         rollout_sample_ids: torch.Tensor,
         has_rollout_sample_ids: bool,
@@ -912,6 +940,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             raise ValueError("response_mask must match hidden_states batch/sequence dimensions")
         if has_policy_mask and policy_mask.shape != hidden_states.shape[:2]:
             raise ValueError("policy_mask must match hidden_states batch/sequence dimensions")
+        if has_policy_freeze_mask and policy_freeze_mask.shape != hidden_states.shape[:2]:
+            raise ValueError("policy_freeze_mask must match hidden_states batch/sequence dimensions")
         if shards < 1:
             raise ValueError(f"shards must be >= 1, got {shards}")
         loss_type = GRPOLossType(loss_fn)
@@ -926,6 +956,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         mask = mask_2d.reshape(-1)
         advantages = advantages.reshape(-1)
         old_logprobs = old_logprobs.reshape(-1)
+        if has_policy_freeze_mask:
+            policy_freeze_mask = policy_freeze_mask.reshape(-1)
         if has_ref_logprobs:
             ref_logprobs = ref_logprobs.reshape(-1)
 
@@ -950,6 +982,9 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         loss_weight_shards = list(torch.chunk(loss_weights, chunks=shards, dim=0))
         advantage_shards = list(torch.chunk(advantages, chunks=shards, dim=0))
         old_logprob_shards = list(torch.chunk(old_logprobs, chunks=shards, dim=0))
+        policy_freeze_mask_shards = (
+            list(torch.chunk(policy_freeze_mask, chunks=shards, dim=0)) if has_policy_freeze_mask else []
+        )
         ref_logprob_shards = list(torch.chunk(ref_logprobs, chunks=shards, dim=0)) if has_ref_logprobs else []
 
         total_loss_sum = torch.zeros((), dtype=torch.float32, device=hidden_states.device)
@@ -996,8 +1031,16 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                     )
                     pg_losses = pg_losses * dppo_mask
                     pg_losses2 = pg_losses2 * dppo_mask
+                elif loss_type == GRPOLossType.tvpo:
+                    truncated_ratio = torch.clamp(ratio, max=tvpo_truncation_cap).detach()
+                    pg_losses = -advantage_shards[shard_idx] * truncated_ratio * new_logprobs
+                    pg_losses2 = pg_losses
                 else:
                     raise ValueError(f"`tiled_grpo_lm_head_loss` does not support loss_fn={loss_type}.")
+                if has_policy_freeze_mask:
+                    keep = policy_freeze_mask_shards[shard_idx].bool()
+                    pg_losses = torch.where(keep, pg_losses, pg_losses.detach())
+                    pg_losses2 = torch.where(keep, pg_losses2, pg_losses2.detach())
                 pg_loss = torch.max(pg_losses, pg_losses2)
 
                 if has_ref_logprobs:
@@ -1045,32 +1088,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         grad = grads[0]
         if isinstance(grad, torch.Tensor):
             x_grad = x_grad * grad.to(dtype=x_grad.dtype)
-        return (
-            None,
-            x_grad,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        return (None, x_grad, *([None] * 25))
 
 
 def tiled_grpo_lm_head_loss(
@@ -1090,10 +1108,12 @@ def tiled_grpo_lm_head_loss(
     loss_fn: str | GRPOLossType = GRPOLossType.dapo,
     dppo_divergence_type: str | DPPODivergenceType = DPPODivergenceType.tv,
     dppo_divergence_threshold: float = 0.1,
+    tvpo_truncation_cap: float = 20.0,
     loss_denominator: str = "token",
     rollout_sample_ids: torch.Tensor | None = None,
     sequence_process_group: dist.ProcessGroup | None = None,
     policy_mask: torch.Tensor | None = None,
+    policy_freeze_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     has_ref_logprobs = ref_logprobs is not None
     if ref_logprobs is None:
@@ -1101,6 +1121,9 @@ def tiled_grpo_lm_head_loss(
     has_policy_mask = policy_mask is not None
     if policy_mask is None:
         policy_mask = torch.empty(0, dtype=response_mask.dtype, device=response_mask.device)
+    has_policy_freeze_mask = policy_freeze_mask is not None
+    if policy_freeze_mask is None:
+        policy_freeze_mask = torch.empty(0, dtype=response_mask.dtype, device=response_mask.device)
     has_rollout_sample_ids = rollout_sample_ids is not None
     if rollout_sample_ids is None:
         rollout_sample_ids = torch.empty(0, dtype=torch.long, device=old_logprobs.device)
@@ -1112,6 +1135,8 @@ def tiled_grpo_lm_head_loss(
         response_mask,
         policy_mask,
         has_policy_mask,
+        policy_freeze_mask,
+        has_policy_freeze_mask,
         advantages,
         old_logprobs,
         ref_logprobs,
@@ -1123,6 +1148,7 @@ def tiled_grpo_lm_head_loss(
         loss_fn,
         dppo_divergence_type,
         dppo_divergence_threshold,
+        tvpo_truncation_cap,
         loss_denominator == "sequence",
         rollout_sample_ids,
         has_rollout_sample_ids,
