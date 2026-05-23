@@ -172,6 +172,7 @@ class TestGrpoFastBase(unittest.TestCase):
             original_responses=[[i] * seq_length for i in range(batch_size)],
             prompt_masks=[torch.zeros(length, dtype=torch.long) for length in lengths],
             rollout_sample_ids=[torch.full((length,), i, dtype=torch.long) for i, length in enumerate(lengths)],
+            model_steps=[torch.full((length,), 3, dtype=torch.long) for length in lengths],
             advantages=[torch.randn(length) for length in lengths],
             position_ids=[torch.arange(length, dtype=torch.long) for length in lengths],
             vllm_logprobs=[torch.randn(length) for length in lengths],
@@ -887,6 +888,7 @@ class TestDataPreparation(TestGrpoFastBase):
             "response_masks",
             "prompt_masks",
             "rollout_sample_ids",
+            "model_steps",
             "vllm_logprobs",
             "global_position_ids",
         }

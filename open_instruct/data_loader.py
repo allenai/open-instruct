@@ -989,6 +989,7 @@ def accumulate_inference_batches(
     all_decoded_responses = []
     all_reward_metrics = []
     all_active_tools = []
+    all_response_model_steps = []
     all_scores = []
     all_indices = []
     all_percent_solved = []
@@ -1109,6 +1110,11 @@ def accumulate_inference_batches(
         k_raw_queries = repeat_each([raw_query], generation_config.n)
         k_active_tools = repeat_each([sample_active_tools], generation_config.n)
         k_indices = repeat_each([result.index], generation_config.n)
+        k_model_steps = (
+            result.model_steps
+            if result.model_steps is not None
+            else repeat_each([result.model_step], generation_config.n)
+        )
 
         percent_solved = np.mean(result.reward_scores).item() / max_possible_score
         if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
@@ -1145,6 +1151,7 @@ def accumulate_inference_batches(
         all_datasets.extend(k_datasets)
         all_raw_queries.extend(k_raw_queries)
         all_active_tools.extend(k_active_tools)
+        all_response_model_steps.extend(k_model_steps)
         all_indices.extend(k_indices)
         all_decoded_responses.extend(decoded_responses)
         all_scores.extend(result.reward_scores)
@@ -1235,6 +1242,7 @@ def accumulate_inference_batches(
         prompt_id=results[0].prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
+        model_steps=all_response_model_steps,
     )
 
     if actor_manager is not None:
@@ -1347,6 +1355,12 @@ def prepare_collated_data_for_workers(
             ]
         else:
             per_device_packed_rollout_sample_ids = packed_sequences.rollout_sample_ids[B * i : B * (i + 1)]
+        if packed_sequences.model_steps is None:
+            per_device_packed_model_steps = [
+                torch.full_like(t, -1, dtype=torch.long) for t in per_device_packed_query_responses
+            ]
+        else:
+            per_device_packed_model_steps = packed_sequences.model_steps[B * i : B * (i + 1)]
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1356,6 +1370,7 @@ def prepare_collated_data_for_workers(
         collated_response_masks = []
         collated_prompt_masks = []
         collated_rollout_sample_ids = []
+        collated_model_steps = []
         collated_advantages = []
         collated_vllm_logprobs = []
         collated_rewards: list[torch.Tensor] | None = [] if has_rewards else None
@@ -1379,6 +1394,9 @@ def prepare_collated_data_for_workers(
             )
             collated_rollout_sample_ids.append(
                 collate_fn([per_device_packed_rollout_sample_ids[idx] for idx in micro_range], -1, pin_memory)
+            )
+            collated_model_steps.append(
+                collate_fn([per_device_packed_model_steps[idx] for idx in micro_range], -1, pin_memory)
             )
             collated_advantages.append(
                 collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0, pin_memory)
@@ -1406,6 +1424,7 @@ def prepare_collated_data_for_workers(
                 dones=collated_dones,
                 prompt_masks=collated_prompt_masks,
                 rollout_sample_ids=collated_rollout_sample_ids,
+                model_steps=collated_model_steps,
             )
         )
     return collated_data
@@ -1692,6 +1711,7 @@ class DataPreparationActor:
                 self.total_samples_written += len(batch.queries)
 
             rollout_sample_ids = list(range(len(batch.queries)))
+            rollout_model_steps = result.model_steps or [result.model_step for _ in result.responses]
 
             # Truncated-completion stats are computed on the unfiltered batch so
             # they stay meaningful regardless of whether `mask_truncated_completions`
@@ -1776,6 +1796,7 @@ class DataPreparationActor:
                 result.masks = [result.masks[i] for i in keep_idxes_list]
                 result.finish_reasons = [result.finish_reasons[i] for i in keep_idxes_list]
                 rollout_sample_ids = [rollout_sample_ids[i] for i in keep_idxes_list]
+                rollout_model_steps = [rollout_model_steps[i] for i in keep_idxes_list]
                 assert result.logprobs is not None
                 result.logprobs = [result.logprobs[i] for i in keep_idxes_list]
 
@@ -1788,6 +1809,7 @@ class DataPreparationActor:
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
                 rollout_sample_ids=rollout_sample_ids,
+                model_steps=rollout_model_steps,
                 mask_tool_use=self.config.mask_tool_use,
                 min_num_batches=self.dp_world_size,
             )

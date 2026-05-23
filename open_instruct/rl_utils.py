@@ -223,11 +223,13 @@ def _save_trainer_logprobs(
     trainer_logprobs,
     response_masks,
     sp_size: int,
+    trainer_model_step: int | None = None,
     input_token_ids=None,
     token_ids=None,
     prompt_masks=None,
     attention_masks=None,
     rollout_sample_ids=None,
+    model_steps=None,
     vllm_logprobs=None,
     rank: int | None = None,
     world_size: int | None = None,
@@ -253,6 +255,8 @@ def _save_trainer_logprobs(
                 "response_mask": mask_cpu,
                 "logprob_token_offset": 1,
             }
+            if trainer_model_step is not None:
+                record["trainer_model_step"] = trainer_model_step
             if rank is not None:
                 record["rank"] = rank
             if world_size is not None:
@@ -273,6 +277,14 @@ def _save_trainer_logprobs(
                 ids = rollout_sample_ids[i]
                 record["rollout_sample_ids_shape"] = list(ids.shape)
                 record["rollout_sample_ids"] = _flatten_tensor(ids, torch.long)
+            if model_steps is not None:
+                steps = model_steps[i]
+                record["model_steps_shape"] = list(steps.shape)
+                flattened_steps = _flatten_tensor(steps, torch.long)
+                record["model_steps"] = flattened_steps
+                unique_steps = sorted({int(s) for s in flattened_steps if int(s) >= 0})
+                if len(unique_steps) == 1:
+                    record["model_step"] = unique_steps[0]
             if vllm_logprobs is not None:
                 logprobs = vllm_logprobs[i]
                 record["vllm_logprobs_shape"] = list(logprobs.shape)
@@ -302,11 +314,13 @@ def save_trainer_logprobs_to_disk(
     trainer_logprobs,
     response_masks,
     sp_size: int = 1,
+    trainer_model_step: int | None = None,
     input_token_ids=None,
     token_ids=None,
     prompt_masks=None,
     attention_masks=None,
     rollout_sample_ids=None,
+    model_steps=None,
     vllm_logprobs=None,
     rank: int | None = None,
     world_size: int | None = None,
@@ -334,6 +348,7 @@ def save_trainer_logprobs_to_disk(
     prompt_masks = _to_cpu_tensor_list(prompt_masks)
     attention_masks = _to_cpu_tensor_list(attention_masks)
     rollout_sample_ids = _to_cpu_tensor_list(rollout_sample_ids)
+    model_steps = _to_cpu_tensor_list(model_steps)
     vllm_logprobs = _to_cpu_tensor_list(vllm_logprobs)
 
     future = _rollout_executor.submit(
@@ -344,11 +359,13 @@ def save_trainer_logprobs_to_disk(
         trainer_logprobs,
         response_masks,
         sp_size,
+        trainer_model_step,
         input_token_ids,
         token_ids,
         prompt_masks,
         attention_masks,
         rollout_sample_ids,
+        model_steps,
         vllm_logprobs,
         rank,
         world_size,
@@ -428,6 +445,8 @@ class PackedSequences(Generic[T]):
     """bool prompt mask for packed sequences (batch_size, pack_length)"""
     rollout_sample_ids: list[torch.Tensor] | None = None
     """original rollout sample index for each packed token (batch_size, pack_length)"""
+    model_steps: list[torch.Tensor] | None = None
+    """model step that produced each packed token's rollout logprob (batch_size, pack_length)"""
     advantages: list[torch.Tensor] | None = None
     """packed advantages (batch_size, pack_length) (to be filled in by the main process)"""
     num_actions: list[torch.Tensor] | None = None
@@ -467,6 +486,7 @@ def pack_sequences(
     pad_token_id: int,
     vllm_logprobs: list[list[float]],
     rollout_sample_ids: list[int] | None = None,
+    model_steps: list[int | None] | None = None,
     min_num_batches: int = 1,
     mask_tool_use: bool = False,
 ) -> PackedSequences:
@@ -481,6 +501,7 @@ def pack_sequences(
         vllm_logprobs: Log probabilities from vLLM for each response
         rollout_sample_ids: Original rollout trace sample indices for each
             query/response pair. Defaults to the current list index.
+        model_steps: Model step that produced each response's vLLM logprobs.
         min_num_batches: Minimum number of packed batches to produce.
             Used to ensure we have a batch for each rank in distributed training.
 
@@ -492,6 +513,9 @@ def pack_sequences(
         rollout_sample_ids = list(range(len(queries)))
     assert len(rollout_sample_ids) == len(queries)
     input_rollout_sample_ids = rollout_sample_ids
+    if model_steps is None:
+        model_steps = [None] * len(queries)
+    assert len(model_steps) == len(queries)
 
     # Calculate total tokens to determine effective pack_length
     total_tokens = 0
@@ -518,6 +542,7 @@ def pack_sequences(
     response_masks = []
     prompt_masks = []
     rollout_sample_ids = []
+    packed_model_steps = []
     dones = []
     num_actions = []
     packed_seq_lens = []
@@ -526,6 +551,7 @@ def pack_sequences(
     cur_response_mask = []
     cur_prompt_mask = []
     cur_rollout_sample_ids = []
+    cur_model_steps = []
     cur_num_actions = []
     cur_packed_seq_lens = []
     cur_attention_mask = []
@@ -537,6 +563,7 @@ def pack_sequences(
         response = responses[i]
         mask = masks[i]
         rollout_sample_id = input_rollout_sample_ids[i]
+        model_step = -1 if model_steps[i] is None else int(model_steps[i])
         # remove padding (but using vllm so this should not be needed, but just in case)
         query = [t for t in query if t != pad_token_id]
 
@@ -577,6 +604,7 @@ def pack_sequences(
             response_masks.append(cur_response_mask)
             prompt_masks.append(cur_prompt_mask)
             rollout_sample_ids.append(cur_rollout_sample_ids)
+            packed_model_steps.append(cur_model_steps)
             attention_masks.append(cur_attention_mask)
             num_actions.append(cur_num_actions)
             packed_seq_lens.append(cur_packed_seq_lens)
@@ -586,6 +614,7 @@ def pack_sequences(
             cur_response_mask = []
             cur_prompt_mask = []
             cur_rollout_sample_ids = []
+            cur_model_steps = []
             cur_attention_mask = []
             cur_num_actions = []
             cur_packed_seq_lens = []
@@ -602,6 +631,7 @@ def pack_sequences(
         cur_response_mask.extend(query_mask + response_mask)
         cur_prompt_mask.extend([1] * len(query) + [0] * len(response))
         cur_rollout_sample_ids.extend([rollout_sample_id] * len(query_response))
+        cur_model_steps.extend([model_step] * len(query_response))
         cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
         cur_dones.extend([0 for _ in range(len(query) + len(response) - 1)] + [i + 1])
 
@@ -611,6 +641,7 @@ def pack_sequences(
         response_masks.append(cur_response_mask)
         prompt_masks.append(cur_prompt_mask)
         rollout_sample_ids.append(cur_rollout_sample_ids)
+        packed_model_steps.append(cur_model_steps)
         attention_masks.append(cur_attention_mask)
         num_actions.append(cur_num_actions)
         packed_seq_lens.append(cur_packed_seq_lens)
@@ -625,6 +656,7 @@ def pack_sequences(
         original_responses=responses,
         prompt_masks=[torch.tensor(t, dtype=torch.long) for t in prompt_masks],
         rollout_sample_ids=[torch.tensor(t, dtype=torch.long) for t in rollout_sample_ids],
+        model_steps=[torch.tensor(t, dtype=torch.long) for t in packed_model_steps],
         num_actions=[torch.tensor(t) for t in num_actions],
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
         dones=[torch.tensor(t) for t in dones],

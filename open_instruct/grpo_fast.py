@@ -948,6 +948,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     if data_BT.rollout_sample_ids is not None
                     else None
                 )
+                trace_model_steps = (
+                    [model_steps[:, 1:] for model_steps in data_BT.model_steps]
+                    if data_BT.model_steps is not None
+                    else None
+                )
                 rl_utils.save_trainer_logprobs_to_disk(
                     save_path=self.streaming_config.rollouts_save_path,
                     run_name=self.args.run_name,
@@ -955,11 +960,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     trainer_logprobs=trace_logprobs_BT,
                     response_masks=[m[:, 1:] for m in data_BT.response_masks],
                     sp_size=sp_size,
+                    trainer_model_step=training_step,
                     input_token_ids=data_BT.query_responses,
                     token_ids=[qr[:, 1:] for qr in data_BT.query_responses],
                     prompt_masks=trace_prompt_masks,
                     attention_masks=[m[:, 1:] for m in data_BT.attention_masks],
                     rollout_sample_ids=trace_rollout_sample_ids,
+                    model_steps=trace_model_steps,
                     vllm_logprobs=[lp[:, 1:] for lp in data_BT.vllm_logprobs],
                     rank=self.rank,
                     world_size=self.world_size,

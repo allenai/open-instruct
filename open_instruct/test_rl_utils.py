@@ -164,6 +164,7 @@ class TestRLUtils(unittest.TestCase):
             pad_token_id=pad_token_id,
             vllm_logprobs=vllm_logprobs,
             rollout_sample_ids=[7, 9],
+            model_steps=[3, 4],
             mask_tool_use=mask_tool_use,
         )
 
@@ -180,6 +181,9 @@ class TestRLUtils(unittest.TestCase):
         torch.testing.assert_close(packed.prompt_masks[1].bool(), torch.tensor([True, True, False, False]))
         torch.testing.assert_close(packed.rollout_sample_ids[0], torch.tensor([7, 7, 7, 7, 7, 7]))
         torch.testing.assert_close(packed.rollout_sample_ids[1], torch.tensor([9, 9, 9, 9]))
+        self.assertIsNotNone(packed.model_steps)
+        torch.testing.assert_close(packed.model_steps[0], torch.tensor([3, 3, 3, 3, 3, 3]))
+        torch.testing.assert_close(packed.model_steps[1], torch.tensor([4, 4, 4, 4]))
 
     def test_save_trainer_logprobs_includes_token_metadata(self):
         trainer_logprobs = [torch.tensor([[0.1, 0.2, 0.3, 0.4]])]
@@ -189,6 +193,7 @@ class TestRLUtils(unittest.TestCase):
         prompt_masks = [torch.tensor([[True, True, False, False]])]
         attention_masks = [torch.tensor([[1, 1, 1, 0]])]
         rollout_sample_ids = [torch.tensor([[5, 5, 5, -1]])]
+        model_steps = [torch.tensor([[9, 9, 9, -1]])]
         vllm_logprobs = [torch.tensor([[0.0, -0.1, -0.2, float("nan")]])]
 
         rl_utils._save_trainer_logprobs(
@@ -198,11 +203,13 @@ class TestRLUtils(unittest.TestCase):
             trainer_logprobs=trainer_logprobs,
             response_masks=response_masks,
             sp_size=1,
+            trainer_model_step=8,
             input_token_ids=input_token_ids,
             token_ids=token_ids,
             prompt_masks=prompt_masks,
             attention_masks=attention_masks,
             rollout_sample_ids=rollout_sample_ids,
+            model_steps=model_steps,
             vllm_logprobs=vllm_logprobs,
             rank=3,
             world_size=8,
@@ -218,6 +225,9 @@ class TestRLUtils(unittest.TestCase):
         self.assertEqual(record["world_size"], 8)
         self.assertEqual(record["dp_rank"], 1)
         self.assertEqual(record["sp_rank"], 1)
+        self.assertEqual(record["trainer_model_step"], 8)
+        self.assertEqual(record["model_step"], 9)
+        self.assertEqual(record["model_steps"], [9, 9, 9, -1])
         self.assertEqual(record["trainer_logprobs_shape"], [1, 4])
         self.assertEqual(record["input_token_ids"], [11, 12, 13, 14, 0])
         self.assertEqual(record["token_ids"], [12, 13, 14, 0])

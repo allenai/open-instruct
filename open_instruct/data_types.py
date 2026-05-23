@@ -59,6 +59,7 @@ class GenerationResult:
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
     model_step: int | None = None
+    model_steps: list[int | None] | None = None
 
 
 @dataclass
@@ -117,6 +118,7 @@ class CollatedBatchData:
     """Per-token done markers aligned with query_responses. Populated when PPO value training is enabled."""
     prompt_masks: list[torch.Tensor] | None = None
     rollout_sample_ids: list[torch.Tensor] | None = None
+    model_steps: list[torch.Tensor] | None = None
     # Pre-Ulysses-split ``position_ids`` for each sample. Only populated when
     # ``sequence_parallel_size > 1``; lets downstream code (the Qwen3.5 packing
     # patch + FLA CP context) reconstruct the global ``cu_seqlens`` so that
