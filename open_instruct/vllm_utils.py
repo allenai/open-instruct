@@ -639,6 +639,7 @@ class LLMRayActor:
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
         inflight_updates: bool,
+        inflight_updates_recompute_kv_cache: bool = False,
         reward_config: RewardConfig | None = None,
         train_dataset=None,
         eval_dataset=None,
@@ -656,6 +657,7 @@ class LLMRayActor:
             mask_tool_use,
             pools,
             inflight_updates,
+            inflight_updates_recompute_kv_cache,
             reward_config,
             train_dataset,
             eval_dataset,
@@ -686,6 +688,7 @@ class LLMRayActor:
         mask_tool_use: bool,
         pools: dict[str, ray.actor.ActorHandle] | None,
         inflight_updates: bool,
+        inflight_updates_recompute_kv_cache: bool,
         reward_config: RewardConfig | None,
         train_dataset,
         eval_dataset,
@@ -696,6 +699,7 @@ class LLMRayActor:
         self.mask_tool_use = mask_tool_use
         self.pools: dict[str, ray.actor.ActorHandle] = pools or {}
         self.inflight_updates = inflight_updates
+        self.inflight_updates_recompute_kv_cache = inflight_updates_recompute_kv_cache
         self.request_metadata = {}
         self.active_tasks = {}
         self.request_outputs = {}
@@ -887,7 +891,9 @@ class LLMRayActor:
     def sleep(self) -> None:
         if not self.inflight_updates:
             self._drain_active_tasks("pause generation")
-        self._run_async(self.llm_engine.pause_generation(mode="keep", clear_cache=False))
+        self._run_async(
+            self.llm_engine.pause_generation(mode="keep", clear_cache=self.inflight_updates_recompute_kv_cache)
+        )
         self._generation_paused = True
 
     def wake_up(self) -> None:
@@ -1450,6 +1456,7 @@ def create_vllm_engines(
     eval_results_queue=None,
     actor_manager=None,
     inflight_updates: bool = False,
+    inflight_updates_recompute_kv_cache: bool = False,
     reward_config: RewardConfig | None = None,
     train_dataset=None,
     eval_dataset=None,
@@ -1539,6 +1546,7 @@ def create_vllm_engines(
                 mask_tool_use=mask_tool_use,
                 pools=pools,
                 inflight_updates=inflight_updates,
+                inflight_updates_recompute_kv_cache=inflight_updates_recompute_kv_cache,
                 reward_config=reward_config,
                 train_dataset=train_dataset,
                 eval_dataset=eval_dataset,

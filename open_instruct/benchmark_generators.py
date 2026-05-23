@@ -264,6 +264,7 @@ def setup_vllm_engines(
         results_queue=inference_results_Q,
         actor_manager=actor_manager,
         inflight_updates=streaming_config.inflight_updates,
+        inflight_updates_recompute_kv_cache=streaming_config.inflight_updates_recompute_kv_cache,
         reward_config=RewardConfig(
             apply_verifiable_reward=streaming_config.apply_verifiable_reward,
             verification_reward=streaming_config.verification_reward,

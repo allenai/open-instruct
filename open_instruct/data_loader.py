@@ -618,6 +618,8 @@ class StreamingDataLoaderConfig:
     temperature: float = 0.7
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
+    inflight_updates_recompute_kv_cache: bool = False
+    """When using in-flight weight updates, clear vLLM caches so paused requests recompute KV after resume."""
     eval_response_length: int | None = None
     """Local eval max tokens in GRPO `grpo_fast`. Defaults to `response_length` (see `__post_init__`)."""
 

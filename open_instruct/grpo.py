@@ -277,6 +277,7 @@ def main(
         vllm_attention_backend=vllm_config.vllm_attention_backend,
         vllm_gdn_prefill_backend=vllm_config.vllm_gdn_prefill_backend,
         inflight_updates=streaming_config.inflight_updates,
+        inflight_updates_recompute_kv_cache=streaming_config.inflight_updates_recompute_kv_cache,
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
