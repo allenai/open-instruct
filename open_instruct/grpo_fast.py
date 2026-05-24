@@ -1120,6 +1120,28 @@ class PolicyTrainerRayProcess(RayProcess):
                                 cp_context=cp_contexts_BT[i],
                             )
                             debug_logprobs_BT = grpo_utils.mask_logprobs(debug_logprobs_BT, response_mask_BT)
+                            old_logprob_BT = grpo_utils.resolve_old_logprob(
+                                old_logprobs_BT,
+                                i,
+                                epoch_idx,
+                                num_mini_batches,
+                                self.args.use_vllm_logprobs,
+                                vllm_logprobs_BT,
+                                debug_logprobs_BT,
+                            )
+                            tis_clamped_BT, _ = grpo_utils.compute_tis_weights(
+                                old_logprob_BT,
+                                vllm_logprobs_BT,
+                                response_mask_BT,
+                                self.args.truncated_importance_sampling_ratio_cap,
+                            )
+                            tis_mask_BT = grpo_utils.compute_tis_mask(
+                                debug_logprobs_BT,
+                                vllm_logprobs_BT,
+                                response_mask_BT,
+                                self.args.tis_mask_lower,
+                                self.args.tis_mask_upper,
+                            )
                             sequence_tis_mask_BT = grpo_utils.compute_sequence_tis_mask(
                                 debug_logprobs_BT,
                                 vllm_logprobs_BT,
@@ -1135,8 +1157,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             self._record_vllm_local_logprob_debug(
                                 debug_logprobs_BT, vllm_logprobs_BT, response_mask_BT
                             )
-                            if sequence_tis_mask_BT is not None:
-                                tis_mask_kept_tokens += sequence_tis_mask_BT.sum()
+                            effective_tis_mask_BT = grpo_utils.combine_tis_terms(tis_mask_BT, sequence_tis_mask_BT)
+                            combined_tis_BT = grpo_utils.combine_tis_terms(
+                                tis_clamped_BT, tis_mask_BT, sequence_tis_mask_BT
+                            )
+                            if effective_tis_mask_BT is not None:
+                                tis_mask_kept_tokens += effective_tis_mask_BT.sum()
                                 tis_mask_total_tokens += response_mask_BT.sum()
                             if self.args.loss_fn == grpo_utils.GRPOLossType.dppo:
                                 debug_ratio_BT = torch.exp(debug_logprobs_BT - vllm_logprobs_BT)
@@ -1180,9 +1206,9 @@ class PolicyTrainerRayProcess(RayProcess):
                             position_ids=data_BT.position_ids[i],
                             response_mask=response_mask_BT,
                             advantages=advantages_BT,
-                            old_logprobs=vllm_logprobs_BT,
+                            old_logprobs=old_logprob_BT,
                             ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
-                            policy_mask=sequence_tis_mask_BT,
+                            policy_mask=combined_tis_BT,
                             policy_freeze_mask=tvpo_policy_freeze_mask_BT,
                             loss_denominator=loss_denominator,
                             loss_denominator_mode=self.args.loss_denominator,

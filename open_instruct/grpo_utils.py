@@ -99,7 +99,7 @@ class GRPOExperimentConfig(
     lm_head_fp32: bool = False
     """Whether to keep the final LM head projection in fp32 for both HF training and vLLM rollout models."""
     use_liger_grpo_loss: bool = False
-    """Whether to use the tiled lm-head GRPO loss path. Supports DAPO, DPPO, and TVPO."""
+    """Whether to use the tiled lm-head GRPO loss path. Supports DAPO, CISPO, DPPO, and TVPO."""
     liger_grpo_loss_chunk_size: int = 1
     """Number of lm-head loss tiles to use in the tiled GRPO loss path."""
     liger_grpo_loss_compile: bool = True
@@ -312,20 +312,17 @@ class GRPOExperimentConfig(
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
         if self.use_liger_grpo_loss:
-            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.dppo, GRPOLossType.tvpo):
+            if self.loss_fn not in (GRPOLossType.dapo, GRPOLossType.cispo, GRPOLossType.dppo, GRPOLossType.tvpo):
                 raise ValueError(
-                    "`use_liger_grpo_loss` currently only supports `loss_fn=dapo`, `loss_fn=dppo`, or `loss_fn=tvpo`."
+                    "`use_liger_grpo_loss` currently only supports `loss_fn=dapo`, `loss_fn=cispo`, "
+                    "`loss_fn=dppo`, or `loss_fn=tvpo`."
                 )
-            if not self.use_vllm_logprobs:
-                raise ValueError("`use_liger_grpo_loss` requires `use_vllm_logprobs=True`.")
             if self.record_entropy:
                 raise ValueError("`use_liger_grpo_loss` does not support `record_entropy=True`.")
             if self.loss_denominator not in ("token", "sequence"):
                 raise ValueError("`use_liger_grpo_loss` currently requires `loss_denominator=token` or `sequence`.")
             if self.kl_estimator != 2:
                 raise ValueError("`use_liger_grpo_loss` uses the default KL estimator and requires `kl_estimator=2`.")
-            if self.tis_mask_lower > 0.0 or self.tis_mask_upper > 0.0:
-                raise ValueError("`use_liger_grpo_loss` does not support token-level TIS masks.")
             if self.liger_grpo_loss_chunk_size <= 0:
                 raise ValueError("`liger_grpo_loss_chunk_size` must be greater than 0.")
         if self.loss_fn == GRPOLossType.dppo:
@@ -892,7 +889,7 @@ def compute_grpo_loss(
 
 
 class TiledGRPOLMHeadLoss(torch.autograd.Function):
-    """Tiled DAPO/DPPO/TVPO lm-head loss that avoids materializing full logits.
+    """Tiled DAPO/CISPO/DPPO/TVPO lm-head loss that avoids materializing full logits.
 
     This follows DeepSpeed's ``TiledFusedLogitsLoss`` pattern: the lm-head
     projection and scalar loss are recomputed per tile in ``forward`` and
@@ -956,6 +953,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         mask = mask_2d.reshape(-1)
         advantages = advantages.reshape(-1)
         old_logprobs = old_logprobs.reshape(-1)
+        if has_policy_mask:
+            policy_mask = policy_mask.reshape(-1)
         if has_policy_freeze_mask:
             policy_freeze_mask = policy_freeze_mask.reshape(-1)
         if has_ref_logprobs:
@@ -969,8 +968,6 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         else:
             loss_weights_2d = mask_2d.to(dtype=torch.float32)
             loss_denom = loss_weights_2d.sum().clamp_min(1.0)
-        if has_policy_mask:
-            loss_weights_2d = loss_weights_2d * policy_mask.to(dtype=torch.float32)
         loss_weights = loss_weights_2d.reshape(-1)
         metric_denom = mask_2d.to(dtype=torch.float32).sum()
         incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / loss_denom).reshape(())
@@ -982,6 +979,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         loss_weight_shards = list(torch.chunk(loss_weights, chunks=shards, dim=0))
         advantage_shards = list(torch.chunk(advantages, chunks=shards, dim=0))
         old_logprob_shards = list(torch.chunk(old_logprobs, chunks=shards, dim=0))
+        policy_mask_shards = list(torch.chunk(policy_mask, chunks=shards, dim=0)) if has_policy_mask else []
         policy_freeze_mask_shards = (
             list(torch.chunk(policy_freeze_mask, chunks=shards, dim=0)) if has_policy_freeze_mask else []
         )
@@ -1017,6 +1015,10 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                 if loss_type == GRPOLossType.dapo:
                     pg_losses = -advantage_shards[shard_idx] * ratio
                     pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(ratio, 1.0 - clip_lower, 1.0 + clip_higher)
+                elif loss_type == GRPOLossType.cispo:
+                    clipped_ratio = torch.clamp(ratio.detach(), max=1.0 + clip_higher)
+                    pg_losses = -advantage_shards[shard_idx] * clipped_ratio * new_logprobs
+                    pg_losses2 = pg_losses
                 elif loss_type == GRPOLossType.dppo:
                     pg_losses = -advantage_shards[shard_idx] * ratio
                     pg_losses2 = pg_losses
@@ -1041,6 +1043,10 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                     keep = policy_freeze_mask_shards[shard_idx].bool()
                     pg_losses = torch.where(keep, pg_losses, pg_losses.detach())
                     pg_losses2 = torch.where(keep, pg_losses2, pg_losses2.detach())
+                if has_policy_mask:
+                    policy_weight = policy_mask_shards[shard_idx].to(dtype=pg_losses.dtype)
+                    pg_losses = pg_losses * policy_weight
+                    pg_losses2 = pg_losses2 * policy_weight
                 pg_loss = torch.max(pg_losses, pg_losses2)
 
                 if has_ref_logprobs:
