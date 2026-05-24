@@ -1,9 +1,18 @@
+import importlib.util
+import sys
 import tempfile
+import types
 import unittest
 
+import numpy as np
 import parameterized
 import torch
 from datasets import Dataset
+
+if importlib.util.find_spec("vllm") is None:
+    vllm_stub = types.ModuleType("vllm")
+    vllm_stub.SamplingParams = object
+    sys.modules["vllm"] = vllm_stub
 
 from open_instruct import data_loader
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
@@ -77,6 +86,41 @@ class TestWorldAwarePacking(unittest.TestCase):
             if not drop_last:
                 expected_indices = set(range(num_samples))
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
+
+
+class TestComputeGroupAdvantages(unittest.TestCase):
+    def test_maxrl_normalizes_by_per_prompt_mean_reward(self):
+        scores = np.array([1.0, 0.0, 1.0, 0.0])
+
+        advantages = data_loader.compute_group_advantages(
+            scores=scores,
+            num_samples_per_prompt=4,
+            advantage_normalization_type="maxrl",
+        )
+
+        np.testing.assert_allclose(advantages, np.array([1.0, -1.0, 1.0, -1.0]))
+
+    def test_maxrl_zeroes_groups_with_no_successes(self):
+        scores = np.array([0.0, 0.0, 0.0, 0.0])
+
+        advantages = data_loader.compute_group_advantages(
+            scores=scores,
+            num_samples_per_prompt=4,
+            advantage_normalization_type="maxrl",
+        )
+
+        np.testing.assert_allclose(advantages, np.zeros_like(scores))
+
+    def test_maxrl_zeroes_groups_with_all_successes(self):
+        scores = np.array([1.0, 1.0, 1.0, 1.0])
+
+        advantages = data_loader.compute_group_advantages(
+            scores=scores,
+            num_samples_per_prompt=4,
+            advantage_normalization_type="maxrl",
+        )
+
+        np.testing.assert_allclose(advantages, np.zeros_like(scores))
 
 
 if __name__ == "__main__":

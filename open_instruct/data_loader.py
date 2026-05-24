@@ -562,7 +562,14 @@ class StreamingDataLoaderConfig:
     active_sampling: bool = False
     filter_zero_std_samples: bool = True
     no_resampling_pass_rate: float | None = None
-    advantage_normalization_type: str = "centered"
+    advantage_normalization_type: Literal["standard", "centered", "maxrl"] = "centered"
+    """How to normalize per-prompt rollout rewards into policy advantages.
+
+    ``standard`` is GRPO-style (centered and divided by group std), ``centered``
+    is REINFORCE/RLOO-style with a per-prompt baseline, and ``maxrl`` uses the
+    MaxRL estimator from arXiv:2602.02710: ``(reward - mean_reward) / mean_reward``.
+    Prompt groups with zero mean reward get zero advantages.
+    """
     mask_truncated_completions: bool = False
     mask_non_submitting_completions: bool = False
     """Drop rollouts where the env state never reached `done=True`.
@@ -854,6 +861,40 @@ def _compute_avg_group_performance(n_solved: int, n_zero: int, n_kept: int, batc
     if total_groups == 0:
         return 0.0
     return float((n_solved + n_kept * batch_avg_score) / total_groups)
+
+
+def compute_group_advantages(
+    scores: np.ndarray, num_samples_per_prompt: int, advantage_normalization_type: str
+) -> np.ndarray:
+    if num_samples_per_prompt <= 0:
+        raise ValueError(f"num_samples_per_prompt must be positive, got {num_samples_per_prompt}.")
+    scores = np.asarray(scores)
+    if scores.size % num_samples_per_prompt != 0:
+        raise ValueError(
+            f"Number of scores ({scores.size}) must be divisible by num_samples_per_prompt "
+            f"({num_samples_per_prompt})."
+        )
+
+    score_dtype = np.result_type(scores.dtype, np.float32)
+    scores_per_prompt = scores.astype(score_dtype, copy=False).reshape(-1, num_samples_per_prompt)
+    mean_grouped_rewards = scores_per_prompt.mean(axis=-1, keepdims=True)
+
+    if advantage_normalization_type == "standard":
+        std_grouped_rewards = scores_per_prompt.std(axis=-1, keepdims=True)
+        advantages = (scores_per_prompt - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+    elif advantage_normalization_type == "centered":
+        advantages = scores_per_prompt - mean_grouped_rewards
+    elif advantage_normalization_type == "maxrl":
+        advantages = np.zeros_like(scores_per_prompt, dtype=score_dtype)
+        np.divide(
+            scores_per_prompt - mean_grouped_rewards,
+            mean_grouped_rewards,
+            out=advantages,
+            where=mean_grouped_rewards > 0.0,
+        )
+    else:
+        raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
+    return advantages.reshape(-1)
 
 
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1684,18 +1725,11 @@ class DataPreparationActor:
                         )
                         concave_length_metrics["concave_length_penalty/groups_with_multi_success"] = len(group_gaps)
 
-            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-
-            if self.config.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.config.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
+            advantages = compute_group_advantages(
+                scores=scores,
+                num_samples_per_prompt=self.config.num_samples_per_prompt_rollout,
+                advantage_normalization_type=self.config.advantage_normalization_type,
+            )
 
             if self.config.save_traces and self.config.rollouts_save_path:
                 save_rollouts_to_disk(
