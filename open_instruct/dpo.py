@@ -103,7 +103,6 @@ def _handle_post_training(
         and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and output_path != beaker_output_path
-        and not args.output_dir.startswith("/weka/")
     ):
         shutil.copytree(hf_model_path, "/output", dirs_exist_ok=True)
 

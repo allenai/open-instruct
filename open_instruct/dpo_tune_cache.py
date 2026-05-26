@@ -729,7 +729,6 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
         and beaker_config is not None
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
-        and not args.output_dir.startswith("/weka/")
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
