@@ -38,7 +38,7 @@ from tqdm.auto import tqdm
 from transformers import DataCollatorForSeq2Seq
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils, padding_free_collator, tensor_utils, utils
+from open_instruct import logger_utils, model_utils, olmo_core_utils, padding_free_collator, tensor_utils, utils
 from open_instruct.dataset_transformation import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
@@ -987,7 +987,20 @@ def concatenated_forward_olmo(
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
     concatenated_labels = concatenated_batch["concatenated_labels"]
-    output = model(concatenated_batch["concatenated_input_ids"], labels=concatenated_labels)
+    if not packing:
+        output = model(concatenated_batch["concatenated_input_ids"], labels=concatenated_labels)
+    else:
+        doc_lens_BD, max_doc_lens_B = olmo_core_utils.doc_lens_from_cu_seq_lens(
+            concatenated_batch["concatenated_cu_seq_lens_k"],
+            seq_len=concatenated_batch["concatenated_input_ids"].shape[-1],
+        )
+        output = model(
+            concatenated_batch["concatenated_input_ids"],
+            labels=concatenated_labels,
+            position_ids=concatenated_batch.get("concatenated_position_ids"),
+            doc_lens=doc_lens_BD,
+            max_doc_lens=max_doc_lens_B,
+        )
     per_token_logps = output.loss
 
     if not packing:

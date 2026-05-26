@@ -98,13 +98,14 @@ bash scripts/train/tulu3/dpo_8b.sh
 
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
-```bash
-# quick debugging run using 1 GPU (0.5 for inference, 0.5 for training)
-# here we are using a small model, so it's prob not gonna train good models, but it's easy to test run and print stuff.
-bash scripts/train/debug/single_gpu_on_beaker.sh
+We train with `open_instruct/grpo_fast.py`. Launch via `scripts/train/build_image_and_launch.sh`, which builds the Beaker image from your current commit and runs the chosen script:
 
-# train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
-bash scripts/train/rlvr/tulu_rlvr.sh
+```bash
+# Single-GPU smoke test on Beaker (small model, fast).
+./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
+
+# Two-node 8xGPU run (Qwen2.5-7B on code RLVR).
+./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh
 ```
 
 
