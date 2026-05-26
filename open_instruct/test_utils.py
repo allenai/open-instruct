@@ -587,6 +587,31 @@ class TestModelDims(unittest.TestCase):
         self.assertLessEqual(metrics["actor_mbu"], 100)
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
+    def test_utilization_metrics_expand_ngu_retry_prompt_lengths(self):
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        prompt_lengths = [256] * 32
+        prompt_sample_counts = [32] * 8 + [16] * 24
+        response_lengths = [128] * 640
+
+        metrics = utils.calculate_utilization_metrics(
+            model_dims=model_dims,
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=8.0,
+            samples_per_prompt=16,
+            num_engines=4,
+            num_gpus_per_engine=2,
+            training_time=4.0,
+            num_training_gpus=8,
+            prompt_sample_counts=prompt_sample_counts,
+        )
+        expanded_prompt_lengths = utils.expand_prompt_lengths_for_response_groups(
+            prompt_lengths, response_lengths, samples_per_prompt=16, prompt_sample_counts=prompt_sample_counts
+        )
+
+        self.assertEqual(len(expanded_prompt_lengths), 40)
+        self.assertEqual(set(metrics), {"actor_mfu", "actor_mbu", "learner_mfu"})
+
     @parameterized.expand(
         [
             ("two_engines_four_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 2, 4, 4, 8.0, 4.0),

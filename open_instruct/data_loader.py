@@ -676,6 +676,13 @@ def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: 
 
 @dataclass
 class BatchStatistics:
+    """Per-step batch metadata.
+
+    `prompt_lengths` has one entry per accepted logical prompt group.
+    `response_lengths` has one entry per trainable completion, so NGU-merged groups can have
+    more response lengths than `len(prompt_lengths) * num_samples_per_prompt`.
+    """
+
     prompt_lengths: list[int]
     response_lengths: list[int]
     filtered_prompts: int

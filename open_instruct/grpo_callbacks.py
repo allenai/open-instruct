@@ -87,6 +87,7 @@ class StepTimingCallback(Callback):
     _num_total_tokens: int = field(default=0, init=False, repr=False)
     _prompt_lengths: list[int] = field(default_factory=list, init=False, repr=False)
     _response_lengths: list[int] = field(default_factory=list, init=False, repr=False)
+    _prompt_sample_counts: list[int] = field(default_factory=list, init=False, repr=False)
     _total_generation_time: float = field(default=0.0, init=False, repr=False)
 
     def pre_train(self) -> None:
@@ -98,6 +99,7 @@ class StepTimingCallback(Callback):
         metrics = batch["metrics"]
         self._prompt_lengths = list(metrics["batch/prompt_lengths"])
         self._response_lengths = list(metrics["batch/response_lengths"])
+        self._prompt_sample_counts = list(metrics["batch/prompt_sample_counts"])
         self._total_generation_time = float(metrics["time/group_generation_max"])
 
     def post_train_batch(self) -> None:
@@ -130,6 +132,7 @@ class StepTimingCallback(Callback):
             num_gpus_per_engine=self.vllm_tensor_parallel_size,
             training_time=self._train_duration,
             num_training_gpus=self.num_training_gpus,
+            prompt_sample_counts=self._prompt_sample_counts,
         )
         for key, value in utilization.items():
             self.trainer.record_metric(key, float(value), reduce_type=None)

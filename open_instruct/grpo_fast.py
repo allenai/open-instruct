@@ -1600,7 +1600,11 @@ def one_training_step(
     sp_leader_metrics = [am for r, am in enumerate(array_metrics) if r % args.sequence_parallel_size == 0]
     prompt_lengths = [length for am in sp_leader_metrics for length in am["batch/prompt_lengths"]]
     response_lengths = [length for am in sp_leader_metrics for length in am["batch/response_lengths"]]
-    num_step_tokens = sum(prompt_lengths) + sum(response_lengths)
+    prompt_sample_counts = [count for am in sp_leader_metrics for count in am["batch/prompt_sample_counts"]]
+    utilization_prompt_lengths = utils.expand_prompt_lengths_for_response_groups(
+        prompt_lengths, response_lengths, streaming_config.num_samples_per_prompt_rollout, prompt_sample_counts
+    )
+    num_step_tokens = sum(utilization_prompt_lengths) + sum(response_lengths)
 
     utilization_metrics = utils.calculate_utilization_metrics(
         model_dims=model_dims,
@@ -1612,6 +1616,7 @@ def one_training_step(
         num_gpus_per_engine=vllm_config.vllm_tensor_parallel_size,
         training_time=train_timer.duration,
         num_training_gpus=args.world_size,
+        prompt_sample_counts=prompt_sample_counts,
     )
 
     metrics = {

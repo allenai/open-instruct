@@ -2445,9 +2445,10 @@ def calculate_utilization_metrics(
     num_gpus_per_engine: int,
     training_time: float,
     num_training_gpus: int,
+    prompt_sample_counts: list[int] | None = None,
 ) -> dict:
-    assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
-        f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+    prompt_lengths = expand_prompt_lengths_for_response_groups(
+        prompt_lengths, response_lengths, samples_per_prompt, prompt_sample_counts
     )
 
     actor_metrics = model_dims.calculate_actor_utilization(
@@ -2471,6 +2472,40 @@ def calculate_utilization_metrics(
     utilization_metrics["learner_mfu"] = learner_metrics["mfu"]
 
     return utilization_metrics
+
+
+def expand_prompt_lengths_for_response_groups(
+    prompt_lengths: list[int],
+    response_lengths: list[int],
+    samples_per_prompt: int,
+    prompt_sample_counts: list[int] | None = None,
+) -> list[int]:
+    if prompt_sample_counts is None:
+        assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
+            f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
+        )
+        return prompt_lengths
+
+    if len(prompt_sample_counts) != len(prompt_lengths):
+        raise ValueError(
+            "Expected one prompt sample count per prompt length, "
+            f"got {len(prompt_sample_counts)} counts and {len(prompt_lengths)} prompt lengths."
+        )
+    if sum(prompt_sample_counts) != len(response_lengths):
+        raise ValueError(
+            "Expected prompt sample counts to match response lengths, "
+            f"got {sum(prompt_sample_counts)} samples and {len(response_lengths)} response lengths."
+        )
+
+    expanded_prompt_lengths = []
+    for prompt_length, sample_count in zip(prompt_lengths, prompt_sample_counts, strict=True):
+        if sample_count % samples_per_prompt != 0:
+            raise ValueError(
+                "Expected each prompt sample count to be a multiple of samples_per_prompt, "
+                f"got sample_count={sample_count} and samples_per_prompt={samples_per_prompt}."
+            )
+        expanded_prompt_lengths.extend([prompt_length] * (sample_count // samples_per_prompt))
+    return expanded_prompt_lengths
 
 
 def check_calculation(
