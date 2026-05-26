@@ -202,41 +202,12 @@ class CheckpointConfig:
     """If the training should continue from a checkpoint folder."""
 
 
-@dataclass
-class PruningCheckpointerCallback(CheckpointerCallback):
-    """CheckpointerCallback that retains only the last `keep_last_n_checkpoints` permanent checkpoints.
-
-    olmo-core's CheckpointerCallback never prunes permanent checkpoints; this subclass
-    schedules older permanent checkpoints for removal after each save, mirroring
-    grpo_fast.py's `clean_last_n_checkpoints_deepspeed` behavior.
-    """
-
-    keep_last_n_checkpoints: int = -1
-
-    def _prune_permanent_checkpoints(self) -> None:
-        if self.keep_last_n_checkpoints is None or self.keep_last_n_checkpoints < 0:
-            return
-        while len(self._checkpoints) > self.keep_last_n_checkpoints:
-            oldest_path = self._checkpoints.pop(0)
-            self._schedule_for_removal(oldest_path)
-
-    def post_train_batch(self):
-        super().post_train_batch()
-        self._prune_permanent_checkpoints()
-
-
 def build_checkpointer_callback(
-    checkpointing_steps: int,
-    ephemeral_save_interval: int | None,
-    keep_last_n_checkpoints: int = -1,
-    save_async: bool = True,
+    checkpointing_steps: int, ephemeral_save_interval: int | None, save_async: bool = True
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
-    return PruningCheckpointerCallback(
-        save_interval=checkpointing_steps,
-        ephemeral_save_interval=ephemeral_save_interval,
-        save_async=save_async,
-        keep_last_n_checkpoints=keep_last_n_checkpoints,
+    return CheckpointerCallback(
+        save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
     )
 
 
