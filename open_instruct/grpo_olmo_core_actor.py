@@ -378,8 +378,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 
-        assert self.grpo_config.num_training_steps is not None
         save_folder = self.grpo_config.checkpoint_state_dir or self.grpo_config.output_dir
+
+        assert self.grpo_config.num_training_steps is not None
         self.trainer = train.TrainerConfig(
             save_folder=save_folder,
             load_strategy=LoadStrategy.if_available,
