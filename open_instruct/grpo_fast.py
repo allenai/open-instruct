@@ -702,7 +702,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
                     rho_BT = grpo_utils.compute_rho_correction(
-                        old_logprob_BT, vllm_logprobs_BT, response_mask_BT, self.args
+                        old_logprob_BT, vllm_logprobs_BT, response_mask_BT, data_BT.advantages[i][:, 1:], self.args
                     )
                     grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
 
