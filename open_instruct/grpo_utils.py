@@ -247,8 +247,16 @@ class GRPOExperimentConfig(
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
             )
-        if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
+        if self.checkpoint_state_dir is not None and self.checkpoint_state_freq <= 0:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
+        if self.save_freq != self.checkpoint_state_freq:
+            logger.warning(
+                "On the olmo-core training path, --save_freq is a no-op for periodic saves; "
+                "olmo-core checkpoints are full training state and saved every "
+                "--checkpoint_state_freq steps (got save_freq=%d, checkpoint_state_freq=%d).",
+                self.save_freq,
+                self.checkpoint_state_freq,
+            )
 
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")
@@ -474,22 +482,22 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     rho_weights: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        clipfrac = (pg_losses2 > pg_losses).float()
+        pg_loss = torch.max(pg_losses, pg_losses2)
     elif config.loss_fn == GRPOLossType.cispo:
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
-        pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
-        pg_losses2 = pg_losses
+        clipfrac = (ratio > 1.0 + config.clip_higher).float()
+        pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    pg_losses = pg_losses * rho_weights
-    pg_losses2 = pg_losses2 * rho_weights
-
-    pg_loss_max = torch.max(pg_losses, pg_losses2)
+    pg_loss *= rho_weights
+    clipfrac *= (rho_weights != 0).float()
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
@@ -499,31 +507,9 @@ def compute_grpo_loss(
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
     else:
-        kl = torch.zeros_like(pg_loss_max)
+        kl = torch.zeros_like(pg_loss)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
-
-
-def compute_olmo_core_doc_lens(attention_mask: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
-    """Convert an integer-coded packed attention_mask to OLMo-core ``doc_lens`` / ``max_doc_lens``.
-
-    The packed-sequence collator encodes per-doc indices as positive integers (1, 2, ...) in
-    ``attention_mask``, with 0 for padding. OLMo-core's Transformer requires explicit
-    ``doc_lens`` (B, max_docs) int32 and ``max_doc_lens`` (list[int], per row) to do intra-doc
-    attention; passing ``position_ids`` alone is a silent no-op (see docs/grpo_divergence.md).
-    """
-    B = attention_mask.size(0)
-    rows: list[torch.Tensor] = []
-    for i in range(B):
-        vals, counts = torch.unique_consecutive(attention_mask[i], return_counts=True)
-        rows.append(counts[vals > 0])
-    max_docs = max((t.numel() for t in rows), default=0)
-    doc_lens = torch.zeros((B, max_docs), dtype=torch.int32, device=attention_mask.device)
-    for i, t in enumerate(rows):
-        if t.numel():
-            doc_lens[i, : t.numel()] = t.to(torch.int32)
-    max_doc_lens = [int(t.max().item()) if t.numel() else 0 for t in rows]
-    return doc_lens, max_doc_lens
+    return pg_loss, clipfrac, kl
 
 
 def forward_for_logprobs(
@@ -536,26 +522,14 @@ def forward_for_logprobs(
     return_entropy: bool = False,
     pass_olmo_core_doc_lens: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """Forward pass to compute log probabilities.
-
-    When ``pass_olmo_core_doc_lens=True``, derives ``doc_lens`` / ``max_doc_lens`` from the
-    integer-coded ``attention_mask`` and passes them to the model (required for intra-doc
-    attention with OLMo-core's Transformer on packed sequences). The integer-coded
-    ``attention_mask`` itself is replaced with ``None`` for the forward call since OLMo-core
-    does not consume it.
-    """
-    extra_kwargs: dict = {}
-    attention_mask_kw = attention_mask
+    """Forward pass to compute log probabilities."""
+    extra_kwargs = {}
     if pass_olmo_core_doc_lens:
-        if attention_mask is None:
-            raise ValueError("pass_olmo_core_doc_lens=True requires a non-None attention_mask")
-        doc_lens, max_doc_lens = compute_olmo_core_doc_lens(attention_mask)
-        extra_kwargs["doc_lens"] = doc_lens
-        extra_kwargs["max_doc_lens"] = max_doc_lens
-        attention_mask_kw = None
-    output = model(
-        input_ids=query_responses, attention_mask=attention_mask_kw, position_ids=position_ids, **extra_kwargs
-    )
+        assert attention_mask is not None
+        doc_lens, max_doc_lens = olmo_core_utils.doc_lens_from_attention_mask(attention_mask)
+        extra_kwargs = {"doc_lens": doc_lens, "max_doc_lens": max_doc_lens}
+        attention_mask = None
+    output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
     logits = getattr(output, "logits", output)
     logits = logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
@@ -699,9 +673,8 @@ def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bo
 def populate_sample_loss_stats(
     loss_stats_B: dict[str, torch.Tensor],
     sample_idx: int,
-    pg_losses: torch.Tensor,
-    pg_losses2: torch.Tensor,
     pg_loss: torch.Tensor,
+    clipfrac: torch.Tensor,
     ratio: torch.Tensor,
     response_mask: torch.Tensor,
     new_logprobs: torch.Tensor,
@@ -721,7 +694,7 @@ def populate_sample_loss_stats(
         if rho_metrics is not None:
             for key, value in rho_metrics.items():
                 loss_stats_B[key][sample_idx] = masked_mean(value, response_mask)
-        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
+        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(clipfrac, response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = (
             loss_stats_B["loss/policy_avg"][sample_idx] + loss_stats_B["loss/kl_avg"][sample_idx]

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from parameterized import parameterized
 
+from open_instruct import ground_truth_utils
 from open_instruct.ground_truth_utils import (
     F1Verifier,
     GSM8KVerifier,
@@ -227,6 +228,17 @@ class TestLMJudgeVerifier(unittest.TestCase):
     def test_cleanup_helpers_are_safe_noops(self):
         self.assertIsNone(asyncio.run(LMJudgeVerifier.cleanup_all_clients()))
         self.assertIsNone(asyncio.run(cleanup_all_llm_judge_clients()))
+
+
+class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
+    """Regression test for PR #1655: IFEvalVerifier crashed with
+    ZeroDivisionError when the constraint's instruction_id list was empty."""
+
+    def test_empty_instruction_list_returns_zero_score(self):
+        verifier = ground_truth_utils.IFEvalVerifier()
+        label = str([{"instruction_id": [], "kwargs": []}])
+        result = verifier(tokenized_prediction=[1, 2, 3], prediction="some non-empty response", label=label)
+        self.assertEqual(result.score, 0.0)
 
 
 if __name__ == "__main__":

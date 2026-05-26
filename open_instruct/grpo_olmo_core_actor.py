@@ -17,7 +17,8 @@ from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
-from olmo_core.train import callbacks
+from olmo_core.train import LoadStrategy, callbacks
+from olmo_core.train.checkpoint import CheckpointerConfig
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
@@ -27,6 +28,7 @@ from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import data_loader as data_loader_lib
+from open_instruct import grpo_callbacks as grpo_callbacks_lib
 from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.grpo_callbacks import (
     EvalCallback,
@@ -191,6 +193,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             scheduler=scheduler,
             device=device,
             streaming_config=self.streaming_config,
+            attn_implementation=self.attn_implementation,
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
@@ -369,27 +372,21 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 actor_manager=self.actor_manager,
             )
 
-        if self.grpo_config.save_freq != self.grpo_config.checkpoint_state_freq:
-            logger.warning(
-                "On the olmo-core training path, --save_freq is a no-op for periodic saves; "
-                "olmo-core checkpoints are full training state and saved every "
-                "--checkpoint_state_freq steps (got save_freq=%d, checkpoint_state_freq=%d).",
-                self.grpo_config.save_freq,
-                self.grpo_config.checkpoint_state_freq,
+        if self.grpo_config.checkpoint_state_freq > 0:
+            trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
+                checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
             )
-        trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
-            checkpointing_steps=self.grpo_config.checkpoint_state_freq,
-            ephemeral_save_interval=None,
-            keep_last_n_checkpoints=self.grpo_config.keep_last_n_checkpoints,
-        )
+        trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 
         assert self.grpo_config.num_training_steps is not None
         save_folder = self.grpo_config.checkpoint_state_dir or self.grpo_config.output_dir
         self.trainer = train.TrainerConfig(
             save_folder=save_folder,
+            load_strategy=LoadStrategy.if_available,
             max_duration=train.Duration.steps(self.grpo_config.num_training_steps),
             metrics_collect_interval=10,
             callbacks=trainer_callbacks,
+            checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
         ).build(self.train_module, self.dataloader)
 
         logger.info(f"[Rank {self.rank}] Starting trainer.fit() with callbacks: {list(trainer_callbacks.keys())}")
@@ -415,9 +412,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         os.makedirs(output_dir, exist_ok=True)
-        olmo_core_utils.save_state_dict_as_hf(
-            self.model_config, state_dict, output_dir, self.model_name_or_path, tokenizer
-        )
+        olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
 
 

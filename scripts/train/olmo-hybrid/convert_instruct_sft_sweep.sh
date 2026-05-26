@@ -15,7 +15,7 @@ for LR in "${LRS[@]}"; do
 
     echo "Converting ${RUN_NAME}..."
 
-    gantry run --cluster ai2/saturn-cirrascale --timeout 0 -y --budget ai2/oe-omai --workspace ai2/olmo-instruct \
+    gantry run --cluster ai2/saturn-cirrascale --timeout 0 -y --budget ai2/oe-other --workspace ai2/olmo-instruct \
         --beaker-image "${BEAKER_IMAGE}" \
         --install "/opt/conda/bin/pip install -e '.[fla,transformers]'" \
         --weka=oe-adapt-default:/weka/oe-adapt-default \

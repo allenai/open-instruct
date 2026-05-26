@@ -193,7 +193,6 @@ def main(
         verifier_functions=build_all_verifiers(args, streaming_config),
     )
     generation_configs = grpo_fast.create_generation_configs(args, streaming_config, vllm_config)
-    generation_config = generation_configs["train"]
 
     queues_to_monitor = {
         "Inference Results Queue": inference_results_Q,
@@ -201,7 +200,6 @@ def main(
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
-    assert model_config.model_name_or_path is not None, "model_name_or_path must be set"
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
@@ -214,7 +212,7 @@ def main(
         param_prompt_Q=prompt_Q,
         tokenizer=tokenizer,
         config=streaming_config,
-        generation_config=generation_config,
+        generation_config=generation_configs["train"],
         num_training_steps=args.num_training_steps,
         seed=args.seed,
         per_device_train_batch_size=args.per_device_train_batch_size,

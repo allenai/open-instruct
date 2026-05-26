@@ -494,7 +494,7 @@ class PolicyTrainerRayProcess(RayProcess):
             expected = list(range(dp_rank * args.sequence_parallel_size, (dp_rank + 1) * args.sequence_parallel_size))
             assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
 
-        self._streaming_dataloader = streaming_config.build_dataloader(
+        self._streaming_dataloader = self.streaming_config.build_dataloader(
             tokenizer=tokenizer,
             dp_rank=dp_rank,
             fs_local_rank=self.local_rank,
@@ -652,9 +652,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
-                    accumulation_token_counts = grpo_utils.calculate_token_counts(
-                        accumulation_steps, data_BT, self.device
-                    )
+                    accumulation_token_counts = grpo_utils.calculate_token_counts(accumulation_steps, data_BT, device)
                 else:
                     accumulation_token_counts = {
                         int(group_idx * accumulation_steps): float(self.args.loss_denominator)
@@ -708,7 +706,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                     grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
 
-                    pg_losses_BT, pg_losses2_BT, pg_loss_max_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                    pg_loss_BT, clipfrac_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
                         advantages=data_BT.advantages[i][:, 1:],
@@ -717,7 +715,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         rho_weights=rho_BT.weights,
                     )
 
-                    per_token_loss_BT = pg_loss_max_BT + self.args.beta * kl_BT
+                    per_token_loss_BT = pg_loss_BT + self.args.beta * kl_BT
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
@@ -738,9 +736,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
                         i,
-                        pg_losses_BT,
-                        pg_losses2_BT,
-                        pg_loss_max_BT,
+                        pg_loss_BT,
+                        clipfrac_BT,
                         ratio_BT,
                         response_mask_BT,
                         new_logprobs_BT,
@@ -906,7 +903,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 wandb_url=wandb_url,
                 training_step=training_step,
                 oe_eval_tasks=args.oe_eval_tasks,
-                stop_strings=streaming_config.stop_strings,
+                stop_strings=self.streaming_config.stop_strings,
                 eval_priority=args.eval_priority,
                 eval_workspace=args.eval_workspace,
                 beaker_image=args.oe_eval_beaker_image,
@@ -1522,6 +1519,7 @@ def weight_sync_thread(
 def one_training_step(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+    vllm_config: data_loader_lib.VLLMConfig,
     policy_group: ModelGroup,
     tokenizer: PreTrainedTokenizer,
     data_thread_metrics: dict[str, Any],
@@ -1597,7 +1595,7 @@ def one_training_step(
     step_time = time.perf_counter() - start_time
     total_training_time = time.perf_counter() - training_start_time
 
-    total_generation_time = average_metrics["time/getting_response"]
+    total_generation_time = average_metrics["time/group_generation_max"]
     sp_leader_metrics = [am for r, am in enumerate(array_metrics) if r % args.sequence_parallel_size == 0]
     prompt_lengths = [length for am in sp_leader_metrics for length in am["batch/prompt_lengths"]]
     response_lengths = [length for am in sp_leader_metrics for length in am["batch/response_lengths"]]
@@ -1797,6 +1795,7 @@ def cleanup_training_resources(
 def run_training(
     args,
     streaming_config,
+    vllm_config,
     tokenizer,
     train_dataset,
     eval_dataset,
@@ -1972,6 +1971,7 @@ def run_training(
         num_step_tokens = one_training_step(
             args,
             streaming_config,
+            vllm_config,
             policy_group,
             tokenizer,
             data_thread_metrics,
@@ -2333,6 +2333,7 @@ def main(
         episode = run_training(
             args,
             streaming_config,
+            vllm_config,
             tokenizer,
             train_dataset,
             eval_dataset,

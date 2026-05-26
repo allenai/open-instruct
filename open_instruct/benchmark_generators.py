@@ -239,8 +239,6 @@ def setup_vllm_engines(
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
 
     tokenizer_name_or_path = tokenizer_config.tokenizer_name_or_path or model_config.model_name_or_path
-    assert tokenizer_name_or_path is not None
-    assert model_config.model_name_or_path is not None
 
     vllm_engines = vllm_utils.create_vllm_engines(
         num_engines=vllm_config.vllm_num_engines,

@@ -79,24 +79,24 @@ def build_command_without_args(command, args_to_remove):
         args_to_remove: Dict mapping argument names to boolean indicating if they have values
                        e.g., {"--with_tracking": False, "--checkpoint_state_dir": True}
 
+    For value-bearing args, the following token is consumed only if it doesn't itself start
+    with "--" — otherwise the flag is dropped alone and the next flag is preserved.
+
     Returns:
         New command list with specified arguments removed
     """
-    result = []
-    skip_next = False
-
-    for item in command:
-        if skip_next:
-            skip_next = False
-            continue
-
+    result: list[str] = []
+    i = 0
+    while i < len(command):
+        item = command[i]
         if item in args_to_remove:
-            if args_to_remove[item]:
-                skip_next = True
+            if args_to_remove[item] and i + 1 < len(command) and not command[i + 1].startswith("--"):
+                i += 2
+            else:
+                i += 1
             continue
-
         result.append(item)
-
+        i += 1
     return result
 
 
@@ -139,7 +139,9 @@ def get_args():
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
     )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
-    parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
+    parser.add_argument(
+        "--budget", type=str, help="Budget to use. If omitted, the workspace's default budget is used.", default=None
+    )
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument(
         "--shared_memory", type=str, help="Shared memory size (e.g., '10gb', '10.24gb')", default="10.24gb"

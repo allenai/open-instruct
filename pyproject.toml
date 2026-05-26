@@ -29,7 +29,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
     "transformers>=5.4.0",
-    "vllm>=0.19.0; platform_system != 'Darwin'",
+    "vllm>=0.19.1; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -67,7 +67,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "61091dba9c2761e4ba3294c916cee33739f7ff1a" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "f1b69d796aa9691c0abbf29683ee04fe1e42aa50" }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
