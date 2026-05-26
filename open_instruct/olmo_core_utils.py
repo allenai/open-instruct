@@ -15,7 +15,6 @@ from olmo_core import optim as olmo_optim
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.conversion.state_mapping import StateMappingTemplate, StateType
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
@@ -448,39 +447,6 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
-def _register_pre_norm_olmo_core_to_hf_overrides() -> None:
-    """Add OLMo-core → HF layernorm mappings for pre-norm HF model types.
-
-    olmo_core's base map assumes OLMo2-style post-norm
-    (``attention_norm`` → ``post_attention_layernorm``,
-    ``feed_forward_norm`` → ``post_feedforward_layernorm``). For pre-norm
-    architectures (Qwen3, Llama) the same olmo-core states correspond to
-    ``input_layernorm`` and ``post_attention_layernorm``.
-    """
-    layer = olmo_hf_convert.LAYER
-    overrides_per_model_type = {
-        "qwen3": {
-            f"blocks.{layer}.attention_norm.weight": f"model.layers.{layer}.input_layernorm.weight",
-            f"blocks.{layer}.feed_forward_norm.weight": f"model.layers.{layer}.post_attention_layernorm.weight",
-        },
-        "llama": {
-            f"blocks.{layer}.attention_norm.weight": f"model.layers.{layer}.input_layernorm.weight",
-            f"blocks.{layer}.feed_forward_norm.weight": f"model.layers.{layer}.post_attention_layernorm.weight",
-        },
-    }
-    for model_type, overrides in overrides_per_model_type.items():
-        target = olmo_hf_convert.MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_TEMPLATE_MAPPINGS.setdefault(model_type, {})
-        for olmo_core_key, hf_key in overrides.items():
-            target[olmo_core_key] = StateMappingTemplate(olmo_core_key, hf_key, state_type=StateType.weight)
-
-
-_register_pre_norm_olmo_core_to_hf_overrides()
-
-
-def get_hf_config(original_model_name_or_path: str) -> transformers.PretrainedConfig:
-    return transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-
-
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -488,7 +454,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     state-dict converter, and verifies the converted keys exactly cover the HF
     model's expected parameters. Raises before any training starts.
     """
-    hf_config = get_hf_config(original_model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
@@ -528,7 +494,7 @@ def save_state_dict_as_hf(
     an HF model with those weights, and writes the model + tokenizer to
     ``save_dir``.
     """
-    hf_config = get_hf_config(original_model_name_or_path)
+    hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
