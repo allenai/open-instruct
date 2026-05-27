@@ -203,8 +203,6 @@ class GRPOExperimentConfig(
     """Immediately exit after caching the dataset"""
     checkpoint_state_freq: int = 200
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
-    keep_last_n_checkpoints: int = 3
-    """Maximum number of permanent checkpoints to keep. -1 for unlimited."""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
     gs_checkpoint_state_dir: str | None = None

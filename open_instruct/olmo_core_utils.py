@@ -207,12 +207,16 @@ def build_checkpointer_callback(
     save_async: bool = True,
     max_checkpoints: int | None = 3,
 ) -> CheckpointerCallback:
-    """Construct a CheckpointerCallback with shared Open Instruct defaults."""
+    """Construct a CheckpointerCallback with shared Open Instruct defaults.
+
+    ``max_checkpoints`` accepts the open-instruct convention where ``-1`` means
+    unlimited.  Negative values are mapped to ``None`` (keep all).
+    """
     return CheckpointerCallback(
         save_interval=checkpointing_steps,
         ephemeral_save_interval=ephemeral_save_interval,
         save_async=save_async,
-        max_checkpoints=max_checkpoints,
+        max_checkpoints=max_checkpoints if max_checkpoints is not None and max_checkpoints >= 0 else None,
     )
 
 
@@ -269,8 +273,7 @@ def build_base_callbacks(
         "beaker": olmo_core_callbacks.BeakerCallbackV2(config=config_dict),
         "gpu_monitor": train_callbacks.GPUMemoryMonitorCallback(),
         "checkpointer": build_checkpointer_callback(
-            checkpointing_steps, ephemeral_save_interval, save_async=save_async,
-            max_checkpoints=max_checkpoints,
+            checkpointing_steps, ephemeral_save_interval, save_async=save_async, max_checkpoints=max_checkpoints
         ),
     }
     if with_tracking and wandb_project:

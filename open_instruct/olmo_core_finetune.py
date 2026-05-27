@@ -283,7 +283,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         with_tracking=args.logging.with_tracking,
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
-        max_checkpoints=args.checkpoint.keep_last_n_checkpoints if args.checkpoint.keep_last_n_checkpoints >= 0 else None,
+        max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()

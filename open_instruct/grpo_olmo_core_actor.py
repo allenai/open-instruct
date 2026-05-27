@@ -376,7 +376,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
                 checkpointing_steps=self.grpo_config.checkpoint_state_freq,
                 ephemeral_save_interval=None,
-                max_checkpoints=self.grpo_config.keep_last_n_checkpoints if self.grpo_config.keep_last_n_checkpoints >= 0 else None,
+                max_checkpoints=self.grpo_config.keep_last_n_checkpoints,
             )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 
