@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Literal
 
 from open_instruct import logger_utils
+from open_instruct.utils import is_beaker_job
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -63,6 +65,22 @@ class OlmoEvalLaunchConfig:
 
     olmo_eval_dry_run: bool = False
     """Print the olmo-eval launch command without submitting."""
+
+    def __post_init__(self) -> None:
+        self.try_launch_olmo_eval_jobs_on_weka = self.try_launch_olmo_eval_jobs_on_weka and is_beaker_job()
+        if not self.try_launch_olmo_eval_jobs_on_weka:
+            return
+
+        if not self.olmo_eval_tasks:
+            raise ValueError("olmo_eval_tasks must be set when --try_launch_olmo_eval_jobs_on_weka is enabled.")
+
+        if shutil.which("olmo-eval") is None:
+            raise RuntimeError(
+                "Olmo-eval auto-launch is enabled but the 'olmo-eval' command was not found. "
+                "Install olmo-eval-internal (clone into olmo-eval-internal/ and run "
+                "'uv sync --group beaker-eval'). For Beaker, ensure the Docker image was built "
+                "with olmo-eval-internal present."
+            )
 
 
 def resolve_olmo_eval_model_path(checkpoint_path: str) -> str:

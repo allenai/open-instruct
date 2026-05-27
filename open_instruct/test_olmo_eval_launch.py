@@ -66,6 +66,39 @@ class TestOlmoEvalLaunch(unittest.TestCase):
         with patch("open_instruct.olmo_eval_launch.subprocess.run", side_effect=FileNotFoundError):
             launch_olmo_evals_on_weka("/weka/model", config, exp_name="my-run", experiment_name="my-run_step_1")
 
+    def test_post_init_noop_when_disabled(self):
+        OlmoEvalLaunchConfig()
+
+    def test_post_init_requires_tasks(self):
+        with (
+            patch("open_instruct.olmo_eval_launch.is_beaker_job", return_value=True),
+            self.assertRaisesRegex(ValueError, "olmo_eval_tasks must be set"),
+        ):
+            OlmoEvalLaunchConfig(try_launch_olmo_eval_jobs_on_weka=True)
+
+    def test_post_init_requires_olmo_eval_command(self):
+        with (
+            patch("open_instruct.olmo_eval_launch.is_beaker_job", return_value=True),
+            patch("open_instruct.olmo_eval_launch.shutil.which", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "'olmo-eval' command was not found"),
+        ):
+            OlmoEvalLaunchConfig(try_launch_olmo_eval_jobs_on_weka=True, olmo_eval_tasks=["math:posttrain:dev"])
+
+    def test_post_init_passes_when_command_exists(self):
+        with (
+            patch("open_instruct.olmo_eval_launch.is_beaker_job", return_value=True),
+            patch("open_instruct.olmo_eval_launch.shutil.which", return_value="/usr/bin/olmo-eval"),
+        ):
+            config = OlmoEvalLaunchConfig(
+                try_launch_olmo_eval_jobs_on_weka=True, olmo_eval_tasks=["math:posttrain:dev"]
+            )
+        self.assertTrue(config.try_launch_olmo_eval_jobs_on_weka)
+
+    def test_post_init_disables_flag_outside_beaker(self):
+        with patch("open_instruct.olmo_eval_launch.is_beaker_job", return_value=False):
+            config = OlmoEvalLaunchConfig(try_launch_olmo_eval_jobs_on_weka=True)
+        self.assertFalse(config.try_launch_olmo_eval_jobs_on_weka)
+
 
 if __name__ == "__main__":
     unittest.main()

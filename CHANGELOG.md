@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add olmo-eval Beaker launch integration for GRPO training: optional `--try_launch_olmo_eval_jobs_on_weka` launches `olmo-eval beaker launch` after checkpoints using a configurable `OlmoEvalLaunchConfig` (https://github.com/allenai/open-instruct/pull/1698).
+- Add olmo-eval Beaker launch integration for GRPO training: optional `--try_launch_olmo_eval_jobs_on_weka` launches `olmo-eval beaker launch` after checkpoints using a configurable `OlmoEvalLaunchConfig`. `olmo-eval-internal` is an optional `beaker-eval` dependency group (installed in Docker when the repo is present) so CI does not require the private repo (https://github.com/allenai/open-instruct/pull/1698).
 
 ### Changed
 - Add TV divergence rho filtering for GRPO (https://github.com/allenai/open-instruct/pull/1681).

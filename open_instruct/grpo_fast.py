@@ -1043,7 +1043,6 @@ def setup_runtime_variables(
         streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
     )
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
-    args.try_launch_olmo_eval_jobs_on_weka = args.try_launch_olmo_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"

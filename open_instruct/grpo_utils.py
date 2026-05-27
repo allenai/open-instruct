@@ -338,6 +338,8 @@ class GRPOExperimentConfig(
             if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
                 raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
 
+        OlmoEvalLaunchConfig.__post_init__(self)
+
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
     """Set non-response positions to INVALID_LOGPROB and replace NaNs."""
