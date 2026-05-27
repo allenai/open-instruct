@@ -508,7 +508,9 @@ class GRPOTrainModule(TransformerTrainModule):
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
 
-                rho = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, self.grpo_config)
+                rho = grpo_utils.compute_rho_correction(
+                    old_logprob, vllm_logprobs, response_mask, advantages[:, 1:], self.grpo_config
+                )
                 grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
 
                 pg_loss, clipfrac, kl = grpo_utils.compute_grpo_loss(
