@@ -1,24 +1,30 @@
 #!/bin/bash
 # Qwen3-4B SFT with reasoning-heavy data mix (1.6x reasoning, 0.3x chat)
 MIX_NAME=reasoning_heavy
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
-python mason.py \
+echo "Using Beaker image: $BEAKER_IMAGE"
+
+uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority high \
     --budget ai2/oe-other \
+    --image "$BEAKER_IMAGE" \
+    --pure_docker_mode \
+    --preemptible \
     --num_nodes 1 \
     --gpus 8 \
     --non_resumable \
-    --preemptible \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
+    --env PYTHONPATH=/weka/oe-adapt-default/saumyam/open-instruct \
     -- torchrun \
     --nproc_per_node=8 \
-    open_instruct/olmo_core_finetune.py \
+    /weka/oe-adapt-default/saumyam/open-instruct/open_instruct/olmo_core_finetune.py \
     --model_name_or_path Qwen/Qwen3-4B-Base \
     --numpy_dataset_path /weka/oe-training-default/saumyam/qwen3_sft_mix_${MIX_NAME}.yaml \
-    --max_seq_length 8192 \
+    --max_seq_length 32768 \
     --per_device_train_batch_size 2 \
     --gradient_accumulation_steps 1 \
     --learning_rate 5e-5 \
