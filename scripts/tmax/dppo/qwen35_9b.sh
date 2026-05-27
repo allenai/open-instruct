@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Resume SWERL tmax-15k GRPO from the b001 checkpoint with sequence-level TIS masking.
+# 8 nodes x 8 GPUs (64 GPUs total)
+
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 uv run python mason.py \
@@ -80,14 +83,12 @@ uv run python mason.py \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
     --checkpoint_state_freq 10 \
-    --checkpoint_state_dir /weka/oe-adapt-default/hamishi/swerl_qwen35_9b_fp32lm_b001__42__1779347385_checkpoint_states_second/ \
     --inflight_updates true \
-    --inflight_updates_recompute_kv_cache true \
     --lm_head_fp32 true --use_liger_grpo_loss --liger_grpo_loss_chunk_size 8 \
     --advantage_normalization_type centered \
     --loss_fn dppo \
     --dppo_divergence_type tv \
-    --dppo_divergence_threshold 0.05 \
+    --dppo_divergence_threshold 0.1 \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
     --exp_name swerl_qwen35_9b_fp32lm_dppo \
