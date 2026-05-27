@@ -65,6 +65,7 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
         wandb_project=args.wandb_project,
         wandb_entity=args.wandb_entity,
         save_async=False,
+        max_checkpoints=args.keep_last_n_checkpoints,
     )
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if args.send_slack_alerts and slack_webhook_url:
