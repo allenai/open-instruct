@@ -786,6 +786,7 @@ def maybe_evaluate(
     args: GRPOExperimentConfig,
     training_step: int,
     evaluation_inference_results_Q: ray_queue.Queue,
+    processed_eval_results_Q: ray_queue.Queue,
     tokenizer,
     episode,
     eval_dataset: Dataset,
@@ -817,22 +818,24 @@ def maybe_evaluate(
 
         timeout = 100 if is_final_step else 0.01
 
-        eval_result, eval_batch, eval_reward_metrics, _ = data_loader_lib.accumulate_inference_batches(
+        data_loader_lib.process_inference_batches_to_queue(
+            processed_eval_results_Q,
             evaluation_inference_results_Q,
             eval_generation_config,
-            num_prompts=num_eval_prompts,
-            model_dims=model_dims,
-            tokenizer=tokenizer,
-            dataset=eval_dataset,
-            base_env_config=base_env_config,
+            num_eval_prompts,
+            model_dims,
+            tokenizer,
+            eval_dataset,
+            base_env_config,
+            training_step,
             actor_manager=actor_manager,
             timeout=timeout,
             active_sampling=False,
             filter_zero_std_samples=False,
             replenish_prompts=False,
             max_possible_score=max_possible_score,
-            training_step=training_step,
         )
+        eval_result, eval_batch, eval_reward_metrics, _ = processed_eval_results_Q.get(timeout=timeout)
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
 

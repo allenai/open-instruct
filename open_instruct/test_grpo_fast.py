@@ -528,6 +528,49 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(reward_metrics["model_step_max"], 12.0)
         self.assertEqual(reward_metrics["model_step_mean"], 11.0)
 
+    def test_make_batch_from_single_group_for_pipelined_training(self):
+        tokenizer = Mock()
+        tokenizer.batch_decode.return_value = ["a", "b", "c", "d"]
+        tokenizer.eos_token_id = 0
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(1)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+        mock_generation_config = Mock()
+        mock_generation_config.n = 4
+        generation_result = self.create_mock_result(
+            0, "0_0", num_samples_per_prompt=4, reward_scores=[0.0, 1.0, 0.0, 1.0], model_step=3
+        )
+
+        group = data_loader_lib.process_group(
+            result=generation_result,
+            generation_config=mock_generation_config,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            max_possible_score=1.0,
+            no_resampling_pass_rate=None,
+            iter_dataloader=None,
+            filter_zero_std_samples=True,
+            replenish_prompts=False,
+            param_prompt_Q=None,
+            base_env_config=EnvConfig(),
+        )
+        self.assertIsNotNone(group)
+
+        result, batch, reward_metrics, batch_stats = data_loader_lib.make_batch_from_groups(
+            [group],
+            mock_generation_config,
+            training_step=5,
+            filtered_prompts=2,
+            filtered_prompts_zero=1,
+            filtered_prompts_solved=1,
+        )
+
+        self.assertEqual(len(result.responses), 4)
+        self.assertEqual(len(batch.queries), 4)
+        self.assertEqual(batch_stats.total_prompts, 1)
+        self.assertEqual(batch_stats.filtered_prompts, 2)
+        self.assertEqual(reward_metrics["model_step_mean"], 3.0)
+        self.assertEqual(reward_metrics["num_steps_off_policy"], 2.0)
+
     @unittest.skip("Timing-sensitive test that is flaky in CI environments")
     def test_accumulate_waits_for_all_engines(self):
         """Test that accumulate_inference_batches waits for all engines."""

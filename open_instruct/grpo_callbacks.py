@@ -272,8 +272,13 @@ class EvalCallback(Callback):
     tokenizer: Any
     max_possible_score: float
     actor_manager: ray.actor.ActorHandle | None = None
+    processed_eval_results_Q: ray_queue.Queue | None = None
 
     _last_eval_collected: bool = field(default=True, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.processed_eval_results_Q is None:
+            self.processed_eval_results_Q = ray_queue.Queue()
 
     def pre_step(self, batch: dict[str, Any]) -> None:
         if not (
@@ -298,10 +303,12 @@ class EvalCallback(Callback):
         self.eval_data_loader.reset()
 
     def post_step(self) -> None:
+        assert self.processed_eval_results_Q is not None
         self._last_eval_collected = grpo_utils.maybe_evaluate(
             args=self.args,
             training_step=self.trainer.global_step,
             evaluation_inference_results_Q=self.evaluation_inference_results_Q,
+            processed_eval_results_Q=self.processed_eval_results_Q,
             tokenizer=self.tokenizer,
             episode=0,
             eval_dataset=self.eval_dataset,

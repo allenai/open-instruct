@@ -1812,6 +1812,7 @@ def run_training(
     inference_results_Q,
     prompt_Q,
     evaluation_inference_results_Q,
+    processed_eval_results_Q,
     weight_sync_metrics_Q,
     actor_manager: ActorManager,
     model_dims: utils.ModelDims,
@@ -1959,7 +1960,7 @@ def run_training(
                 )
             eval_data_loader.reset()
 
-        episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
+        episode += streaming_config.num_samples_per_prompt_rollout
 
         data_thread_metrics = {}
         try:
@@ -2029,6 +2030,7 @@ def run_training(
             args,
             training_step,
             evaluation_inference_results_Q,
+            processed_eval_results_Q,
             tokenizer,
             episode,
             eval_dataset,
@@ -2270,6 +2272,7 @@ def main(
     prompt_Q = ray_queue.Queue(maxsize=queue_size)
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
+    processed_eval_results_Q = ray_queue.Queue()
 
     reward_config = RewardConfig(
         apply_r1_style_format_reward=streaming_config.apply_r1_style_format_reward,
@@ -2350,6 +2353,7 @@ def main(
             inference_results_Q,
             prompt_Q,
             evaluation_inference_results_Q,
+            processed_eval_results_Q,
             weight_sync_metrics_Q,
             actor_manager,
             model_dims,
@@ -2365,7 +2369,10 @@ def main(
         raise
     finally:
         cleanup_training_resources(
-            stop_event, executor, [inference_results_Q, prompt_Q, evaluation_inference_results_Q], actor_manager
+            stop_event,
+            executor,
+            [inference_results_Q, prompt_Q, evaluation_inference_results_Q, processed_eval_results_Q],
+            actor_manager,
         )
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
