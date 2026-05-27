@@ -18,6 +18,7 @@ class TestValidateChoice(unittest.TestCase):
             ("option_appears", "I choose red", ["red", "blue"], True),
             ("no_option_present", "I choose green", ["red", "blue"], False),
             ("exact_match", "red", ["red", "blue"], True),
+            ("substring_false_positive", "I love Apple", ["A"], False),
         ]
     )
     def test_validate_choice(self, _name, text, options, expected):
