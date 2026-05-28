@@ -33,7 +33,7 @@ pwd > /tmp/.sandbox_cwd
 exit $_exit_code
 """
 
-_EXECUTE_BASH_TOOL = {
+_EXECUTE_BASH_TOOL: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "execute_bash",
@@ -51,7 +51,7 @@ _EXECUTE_BASH_TOOL = {
     },
 }
 
-_STR_REPLACE_EDITOR_TOOL = {
+_STR_REPLACE_EDITOR_TOOL: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "str_replace_editor",

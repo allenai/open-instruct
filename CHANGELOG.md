@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Add olmo-eval Beaker launch integration for GRPO training: optional `--try_launch_olmo_eval_jobs_on_weka` launches `olmo-eval beaker launch` after checkpoints using a configurable `OlmoEvalLaunchConfig`. `olmo-eval-internal` is installed separately in Docker (like `oe-eval-internal`) so CI does not require the private repo (https://github.com/allenai/open-instruct/pull/1698).
 
 ### Changed
+- Expand type-checking coverage by replacing `# ty: ignore` directives with typed casts and fixing related type issues (https://github.com/allenai/open-instruct/pull/1688).
 - Add TV divergence rho filtering for GRPO (https://github.com/allenai/open-instruct/pull/1681).
 - Export `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug` in `scripts/train/debug/grpo.sh` and `grpo_fast.sh` (local Ray debug scripts that disable torch compile) so setuptools-scm can resolve the package version (https://github.com/allenai/open-instruct/pull/1696).
 - Simplify GRPO clip fraction handling by returning the final policy loss and clip fraction directly from `compute_grpo_loss` (https://github.com/allenai/open-instruct/pull/1679).
