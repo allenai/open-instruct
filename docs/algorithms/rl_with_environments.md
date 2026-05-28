@@ -2,7 +2,7 @@
 
 This document covers how [open-instruct](open-instruct/) supports reinforcement learning with external environments and tools, including how to add new environments, the agent loop, async support, and how to launch training.
 
-The canonical upstream reference is [open-instruct/docs/algorithms/tool_training.md](open-instruct/docs/algorithms/tool_training.md).
+The canonical upstream reference is [tool_training.md](tool_training.md).
 
 ---
 

@@ -29,6 +29,13 @@ theme:
 #adding git repo
 repo_url: https://github.com/allenai/open-instruct
 repo_name: allenai/open-instruct
+# Many docs link to source files (../../open_instruct/..., ../../scripts/...) that live
+# outside the docs/ tree. Those links resolve correctly when the docs are viewed on
+# GitHub, but mkdocs cannot validate targets outside docs_dir, so don't warn on them.
+validation:
+  links:
+    not_found: ignore
+    unrecognized_links: ignore
 #markdown_extensions
 markdown_extensions:
   - pymdownx.superfences
