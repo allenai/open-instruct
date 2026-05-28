@@ -368,8 +368,9 @@ def validate_title(text: str) -> bool:
 
 # Choose: From Answer with one of the following options: {options}
 def validate_choice(text: str, options: list) -> bool:
+    text_lower = text.lower()
     for option in options:
-        if option.lower() in text.lower():
+        if option.lower() in text_lower:
             return True
     return False
 
