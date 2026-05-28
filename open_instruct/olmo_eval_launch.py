@@ -78,8 +78,8 @@ class OlmoEvalLaunchConfig:
             raise RuntimeError(
                 "Olmo-eval auto-launch is enabled but the 'olmo-eval' command was not found. "
                 "Install olmo-eval-internal (clone into olmo-eval-internal/ and run "
-                "'uv sync --group beaker-eval'). For Beaker, ensure the Docker image was built "
-                "with olmo-eval-internal present."
+                "'uv pip install -e ./olmo-eval-internal[beaker]'). For Beaker, ensure the Docker "
+                "image was built with olmo-eval-internal present."
             )
 
 

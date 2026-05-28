@@ -299,29 +299,6 @@ wheels = [
 ]
 
 [[package]]
-name = "beaker-gantry"
-version = "3.6.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "beaker-py", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "click", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "click-help-colors", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "click-option-group", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "dataclass-extensions", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "gitpython", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "packaging", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "petname", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "pyyaml", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "requests", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "rich", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "tomli", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/e8/42392d2368f1341cb5a22735679f5aeed918c4ff82e1cc2eccbcd92e2593/beaker_gantry-3.6.0.tar.gz", hash = "sha256:c235a74176184de0366c9375a5fa1e4dc4caedfa08c6cc215e036f4beed1c46e", size = 63687, upload-time = "2026-03-30T18:57:29.06Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/3b/6439301b73a1ecdbe597d431b23c4b323e9bad53d5d1aec0737f8df946e1/beaker_gantry-3.6.0-py3-none-any.whl", hash = "sha256:ff61fdee032a5292cf43f6c4ac9b252c6524dc9f11c3c73d829bb9d5847a75ce", size = 72560, upload-time = "2026-03-30T18:57:27.78Z" },
-]
-
-[[package]]
 name = "beaker-py"
 version = "2.5.7"
 source = { registry = "https://pypi.org/simple" }
@@ -556,18 +533,6 @@ wheels = [
 ]
 
 [[package]]
-name = "click-help-colors"
-version = "0.9.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/50/76f51d9c7fcd72a12da466801f7c1fa3884424c947787333c74327b4fcf3/click-help-colors-0.9.4.tar.gz", hash = "sha256:f4cabe52cf550299b8888f4f2ee4c5f359ac27e33bcfe4d61db47785a5cc936c", size = 8048, upload-time = "2023-11-18T11:55:15.554Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/f8/8768f803151714640cb6f06fd9de490ce7db632d351da05f42f77330d2fd/click_help_colors-0.9.4-py3-none-any.whl", hash = "sha256:b33c5803eeaeb084393b1ab5899dc5476c7196b87a18713045afe76f840b42db", size = 6437, upload-time = "2023-11-18T11:55:09.775Z" },
-]
-
-[[package]]
 name = "click-log"
 version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -577,18 +542,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/32/32/228be4f971e4bd556c33d52a22682bfe318ffe57a1ddb7a546f347a90260/click-log-0.4.0.tar.gz", hash = "sha256:3970f8570ac54491237bcdb3d8ab5e3eef6c057df29f8c3d1151a51a9c23b975", size = 9985, upload-time = "2022-03-13T11:10:15.262Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ae/5a/4f025bc751087833686892e17e7564828e409c43b632878afeae554870cd/click_log-0.4.0-py2.py3-none-any.whl", hash = "sha256:a43e394b528d52112af599f2fc9e4b7cf3c15f94e53581f74fa6867e68c91756", size = 4273, upload-time = "2022-03-13T11:10:17.594Z" },
-]
-
-[[package]]
-name = "click-option-group"
-version = "0.5.9"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ef/ff/d291d66595b30b83d1cb9e314b2c9be7cfc7327d4a0d40a15da2416ea97b/click_option_group-0.5.9.tar.gz", hash = "sha256:f94ed2bc4cf69052e0f29592bd1e771a1789bd7bfc482dd0bc482134aff95823", size = 22222, upload-time = "2025-10-09T09:38:01.474Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/75/45/54bb2d8d4138964a94bef6e9afe48b0be4705ba66ac442ae7d8a8dc4ffef/click_option_group-0.5.9-py3-none-any.whl", hash = "sha256:ad2599248bd373e2e19bec5407967c3eec1d0d4fc4a5e77b08a0481e75991080", size = 11553, upload-time = "2025-10-09T09:38:00.066Z" },
 ]
 
 [[package]]
@@ -1064,15 +1017,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f5/22/900cb125c76b7aaa450ce02fd727f452243f2e91a61af068b40adba60ea9/email_validator-2.3.0.tar.gz", hash = "sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426", size = 51238, upload-time = "2025-08-26T13:09:06.831Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/de/15/545e2b6cf2e3be84bc1ed85613edd75b8aea69807a71c26f4ca6a9258e82/email_validator-2.3.0-py3-none-any.whl", hash = "sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4", size = 35604, upload-time = "2025-08-26T13:09:05.858Z" },
-]
-
-[[package]]
-name = "emoji"
-version = "2.15.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a2/78/0d2db9382c92a163d7095fc08efff7800880f830a152cfced40161e7638d/emoji-2.15.0.tar.gz", hash = "sha256:eae4ab7d86456a70a00a985125a03263a5eac54cd55e51d7e184b1ed3b6757e4", size = 615483, upload-time = "2025-09-21T12:13:02.755Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/5e/4b5aaaabddfacfe36ba7768817bd1f71a7a810a43705e531f3ae4c690767/emoji-2.15.0-py3-none-any.whl", hash = "sha256:205296793d66a89d88af4688fa57fd6496732eb48917a87175a023c8138995eb", size = 608433, upload-time = "2025-09-21T12:13:01.197Z" },
 ]
 
 [[package]]
@@ -1759,25 +1703,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ifbench"
-version = "0.2.0"
-source = { git = "https://github.com/allenai/IFBench.git?rev=finbarr%2Fclean-install#9160563610f9529e9f242aab63962983fe52c099" }
-dependencies = [
-    { name = "absl-py", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "emoji", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "httpx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "immutabledict", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "langdetect", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "nltk", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "pydantic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "pydantic-settings", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "setuptools", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "syllapy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "tqdm", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "unicodedata2", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-
-[[package]]
 name = "ijson"
 version = "3.4.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -1997,18 +1922,6 @@ wheels = [
 ]
 
 [[package]]
-name = "linkify-it-py"
-version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "uc-micro-py", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/c9/06ea13676ef354f0af6169587ae292d3e2406e212876a413bf9eece4eb23/linkify_it_py-2.1.0.tar.gz", hash = "sha256:43360231720999c10e9328dc3691160e27a718e280673d444c38d7d3aaa3b98b", size = 29158, upload-time = "2026-03-01T07:48:47.683Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/de/88b3be5c31b22333b3ca2f6ff1de4e863d8fe45aaea7485f591970ec1d3e/linkify_it_py-2.1.0-py3-none-any.whl", hash = "sha256:0d252c1594ecba2ecedc444053db5d3a9b7ec1b0dd929c8f1d74dce89f86c05e", size = 19878, upload-time = "2026-03-01T07:48:46.098Z" },
-]
-
-[[package]]
 name = "litellm"
 version = "1.75.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2111,11 +2024,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/94/54/e7d793b573f298e1c9013b8c4dade17d481164aa517d1d7148619c2cedbf/markdown_it_py-4.0.0-py3-none-any.whl", hash = "sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147", size = 87321, upload-time = "2025-08-11T12:57:51.923Z" },
 ]
 
-[package.optional-dependencies]
-linkify = [
-    { name = "linkify-it-py", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-
 [[package]]
 name = "markupsafe"
 version = "3.0.3"
@@ -2176,18 +2084,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d5/2d/649d80a0ecf6a1f82632ca44bec21c0461a9d9fc8934d38cb5b319f2db5e/mcp-1.25.0.tar.gz", hash = "sha256:56310361ebf0364e2d438e5b45f7668cbb124e158bb358333cd06e49e83a6802", size = 605387, upload-time = "2025-12-19T10:19:56.985Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e2/fc/6dc7659c2ae5ddf280477011f4213a74f806862856b796ef08f028e664bf/mcp-1.25.0-py3-none-any.whl", hash = "sha256:b37c38144a666add0862614cc79ec276e97d72aa8ca26d622818d4e278b9721a", size = 233076, upload-time = "2025-12-19T10:19:55.416Z" },
-]
-
-[[package]]
-name = "mdit-py-plugins"
-version = "0.6.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markdown-it-py", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/59/fc/f8d0863f8862f25602c0404d75568e89fb6b4109804645e5cdfb1be5cf56/mdit_py_plugins-0.6.1.tar.gz", hash = "sha256:a2bca0f039f39dbd35fb74ae1b5f998608c437463371f0ff7f49a19a17a114d0", size = 56114, upload-time = "2026-05-13T09:03:38.91Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/69/6da5581c6a7fede7dc261bf4e67d6adca4196f176b43288b55b3db395b6e/mdit_py_plugins-0.6.1-py3-none-any.whl", hash = "sha256:214c82fb2ac524472ab6a5bcab1de80f73b50443e187f401bfd77efbc7c6481d", size = 66663, upload-time = "2026-05-13T09:03:37.76Z" },
 ]
 
 [[package]]
@@ -2796,86 +2692,6 @@ wheels = [
 ]
 
 [[package]]
-name = "olmo-eval-internal"
-version = "0.1.0"
-source = { editable = "olmo-eval-internal" }
-dependencies = [
-    { name = "antlr4-python3-runtime", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "click", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "datasets", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "ifbench", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "omegaconf", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "prometheus-client", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "rich", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "setuptools", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "sympy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "textual-plot", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "tree-sitter", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "tree-sitter-python", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-
-[package.optional-dependencies]
-beaker = [
-    { name = "beaker-gantry", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "beaker-py", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", marker = "extra == 'postgres'", specifier = ">=1.18.1" },
-    { name = "antlr4-python3-runtime", specifier = ">=4.11,<4.12" },
-    { name = "beaker-gantry", marker = "extra == 'beaker'", specifier = ">=3.2.0,<4" },
-    { name = "beaker-py", marker = "extra == 'beaker'", specifier = ">=2.5.4,<3" },
-    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34.0" },
-    { name = "click", specifier = "~=8.3.2" },
-    { name = "datasets", specifier = ">=3.2.0" },
-    { name = "httpx", marker = "extra == 'agents'", specifier = "~=0.28.1" },
-    { name = "ifbench", git = "https://github.com/allenai/IFBench.git?rev=finbarr%2Fclean-install" },
-    { name = "litellm", marker = "extra == 'litellm'", specifier = "~=1.80.11" },
-    { name = "matplotlib", marker = "extra == 'analysis'", specifier = "~=3.10.8" },
-    { name = "numpy", specifier = ">=1.20.0" },
-    { name = "nvidia-ml-py", marker = "sys_platform != 'darwin' and extra == 'gpu'", specifier = ">=12.560" },
-    { name = "olmo-eval-internal", extras = ["s3", "postgres"], marker = "extra == 'storage'" },
-    { name = "omegaconf", specifier = ">=2.4.0.dev10,<2.5.0" },
-    { name = "openai", marker = "extra == 'clients'", specifier = "~=2.21.0" },
-    { name = "openai-agents", marker = "extra == 'agents'", specifier = "~=0.7.0" },
-    { name = "opencv-python-headless", marker = "sys_platform != 'darwin' and extra == 'vllm'", specifier = "==4.13.0.92" },
-    { name = "openhands-ai", marker = "extra == 'openhands'", specifier = "~=1.4.0" },
-    { name = "prometheus-client", specifier = ">=0.21.0" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1.0" },
-    { name = "rich", specifier = "~=14.3.4" },
-    { name = "scipy", marker = "extra == 'analysis'", specifier = "~=1.17.1" },
-    { name = "seaborn", marker = "extra == 'analysis'", specifier = "~=0.13.2" },
-    { name = "setuptools", specifier = "<81" },
-    { name = "smart-open", extras = ["s3"], marker = "extra == 's3'", specifier = ">=7.0.0" },
-    { name = "sqlalchemy", marker = "extra == 'postgres'", specifier = ">=2.0.49" },
-    { name = "swe-rex", extras = ["modal"], marker = "extra == 'sandbox'", git = "https://github.com/jdahm/SWE-ReX.git?rev=johannd%2Fai2" },
-    { name = "sympy", specifier = ">=1.12" },
-    { name = "textual-plot", specifier = ">=0.10.1" },
-    { name = "torch-c-dlpack-ext", marker = "sys_platform != 'darwin' and extra == 'vllm'" },
-    { name = "transformers", marker = "extra == 'hf'", specifier = ">=5.4.0" },
-    { name = "tree-sitter", specifier = ">=0.24.0" },
-    { name = "tree-sitter-python", specifier = ">=0.23.0,<0.26.0" },
-    { name = "vllm", extras = ["runai"], marker = "sys_platform != 'darwin' and extra == 'vllm'", specifier = "==0.19.0" },
-]
-provides-extras = ["hf", "vllm", "litellm", "agents", "analysis", "openhands", "sandbox", "beaker", "s3", "postgres", "gpu", "clients", "storage"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "google-api-core", specifier = ">=2.0.0" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "olmo-eval-internal", extras = ["storage", "beaker", "hf", "analysis"] },
-    { name = "parameterized", specifier = ">=0.9.0" },
-    { name = "pre-commit", specifier = ">=4.0.0" },
-    { name = "pytest", specifier = ">=9.0.0" },
-    { name = "pytest-cov", specifier = ">=6.0.0" },
-    { name = "ruff", specifier = ">=0.14.0" },
-    { name = "ty", specifier = "==0.0.32" },
-]
-vllm = [{ name = "olmo-eval-internal", extras = ["vllm"] }]
-
-[[package]]
 name = "omegaconf"
 version = "2.4.0.dev11"
 source = { registry = "https://pypi.org/simple" }
@@ -2945,9 +2761,6 @@ dr-tulu = [
 ]
 
 [package.dev-dependencies]
-beaker-eval = [
-    { name = "olmo-eval-internal", extra = ["beaker"], marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
 dev = [
     { name = "beaker-py", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "mkdocs-material", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -3012,7 +2825,6 @@ requires-dist = [
 provides-extras = ["code", "dr-tulu"]
 
 [package.metadata.requires-dev]
-beaker-eval = [{ name = "olmo-eval-internal", extras = ["beaker"], editable = "olmo-eval-internal" }]
 dev = [
     { name = "beaker-py", specifier = ">=2.5.7" },
     { name = "mkdocs-material", specifier = ">=9.6.8" },
@@ -3469,15 +3281,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d8/48/147b3ea999560b40a34fd78724c7777aa9d18409c2250bdcaf9c4f2db7fc/peft-0.18.1.tar.gz", hash = "sha256:2dd0d6bfce936d1850e48aaddbd250941c5c02fc8ef3237cd8fd5aac35e0bae2", size = 635030, upload-time = "2026-01-09T13:08:01.136Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/14/b4e3f574acf349ae6f61f9c000a77f97a3b315b4bb6ad03791e79ae4a568/peft-0.18.1-py3-none-any.whl", hash = "sha256:0bf06847a3551e3019fc58c440cffc9a6b73e6e2962c95b52e224f77bbdb50f1", size = 556960, upload-time = "2026-01-09T13:07:55.865Z" },
-]
-
-[[package]]
-name = "petname"
-version = "2.9"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f5/74/8f0b5d5231e9045ef690342aa620e1a2f69d5eff1ec04803fc4fae6fe774/petname-2.9.tar.gz", hash = "sha256:df4e44b37c7907b5a5e1a74062d56a5845d7efb8833b21b557fdff99afff2d0c", size = 12956, upload-time = "2026-02-15T04:09:23.095Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/d7/6e9ca18d9d1d73e85be98664cca5d3422873e8838a6cfc84ff2096d9c88c/petname-2.9-py3-none-any.whl", hash = "sha256:57f2e0bb4292e9209b5ef02085a33525c638c07f5ec92ebd6db78e8bb574d238", size = 14093, upload-time = "2026-02-15T04:09:21.791Z" },
 ]
 
 [[package]]
@@ -4484,15 +4287,6 @@ wheels = [
 ]
 
 [[package]]
-name = "syllapy"
-version = "0.7.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/29/a1/7bc1ce4852e14ab5f3153262639742ae63fbfa626507dac4ab919a1e5232/syllapy-0.7.2.tar.gz", hash = "sha256:e55a7ad97d8b232e174b83f91b8f9be0c355d2a8e1208c7f6229055189605564", size = 25561, upload-time = "2022-08-29T01:55:03.366Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0e/cc/ffc9bddc146f14e8792a9b05b2bd1bc5f23f3b752a06e96b244780ce55b9/syllapy-0.7.2-py3-none-any.whl", hash = "sha256:198a7413033c32d7b31e21962efb3f284bcea80d3346e954b938ca1ebe6bee20", size = 24882, upload-time = "2022-08-29T01:55:01.1Z" },
-]
-
-[[package]]
 name = "sympy"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4551,50 +4345,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7a/13/e503968fefabd4c6b2650af21e110aa8466fe21432cd7c43a84577a89438/tensorboard_data_server-0.7.2-py3-none-any.whl", hash = "sha256:7e0610d205889588983836ec05dc098e80f97b7e7bbff7e994ebb78f578d0ddb", size = 2356, upload-time = "2023-10-23T21:23:32.16Z" },
     { url = "https://files.pythonhosted.org/packages/b7/85/dabeaf902892922777492e1d253bb7e1264cadce3cea932f7ff599e53fea/tensorboard_data_server-0.7.2-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:9fe5d24221b29625dbc7328b0436ca7fc1c23de4acf4d272f1180856e32f9f60", size = 4823598, upload-time = "2023-10-23T21:23:33.714Z" },
     { url = "https://files.pythonhosted.org/packages/73/c6/825dab04195756cf8ff2e12698f22513b3db2f64925bdd41671bfb33aaa5/tensorboard_data_server-0.7.2-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:ef687163c24185ae9754ed5650eb5bc4d84ff257aabdc33f0cc6f74d8ba54530", size = 6590363, upload-time = "2023-10-23T21:23:35.583Z" },
-]
-
-[[package]]
-name = "textual"
-version = "8.2.7"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markdown-it-py", extra = ["linkify"], marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "mdit-py-plugins", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "platformdirs", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "pygments", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "rich", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "typing-extensions", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/9b/7a/c519db0aba5024f86e71e9631810bfdd6866ed2c8695bd7fa34b90e7ef59/textual-8.2.7.tar.gz", hash = "sha256:658f568ff81e30ed43890c3e07520390e5cf1b4763822006e060656b0a88f105", size = 1859249, upload-time = "2026-05-19T10:52:49.531Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/f5/c1e18bc0707300a0e90204343abbf7d7acd6fb7ebe03a6d4893b99a234b8/textual-8.2.7-py3-none-any.whl", hash = "sha256:4caaa13a90bc4cf9c6c862c067ccd34fe84e9c161710a2a907a8026313b6bd73", size = 731129, upload-time = "2026-05-19T10:52:51.773Z" },
-]
-
-[[package]]
-name = "textual-hires-canvas"
-version = "0.14.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "textual", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/20/f0/13f2a30ab7950cc3d5d5a2c893fbe3d40b4d129fd2cd30313260181578c4/textual_hires_canvas-0.14.0.tar.gz", hash = "sha256:0fa512492ddd2cd6c2a970a6beea58f5350f4cf25f40ad14ffd9fa86c6458769", size = 1251440, upload-time = "2026-01-10T22:16:56.708Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/ea/e7e6d0f749395d61ca2ab8cda2f3c4e6613800b6b0d0b21f9d1d180c4d42/textual_hires_canvas-0.14.0-py3-none-any.whl", hash = "sha256:8cd67d656387220684449e837dd5809b6c00c5dfee8e4b494414b5837cb5a804", size = 19825, upload-time = "2026-01-10T22:16:54.69Z" },
-]
-
-[[package]]
-name = "textual-plot"
-version = "0.10.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "textual", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-    { name = "textual-hires-canvas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/c2/13f9f747e83cd0b740d1bf310e89a006316cfb5acb4e5a4136c12f96340b/textual_plot-0.10.1.tar.gz", hash = "sha256:503db96d849134293228419324eb15efbadf1f1927a2e0a229b54e7a7e5d5292", size = 2451096, upload-time = "2026-02-01T13:27:43.658Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/36/75eba496995e6f9a001cd601972eab753203167dfcccfbf1816e3959d28d/textual_plot-0.10.1-py3-none-any.whl", hash = "sha256:74ff3a8b2d84bd71b3a9abbac95139ff952f190e6bac60c7091911c63a1863ba", size = 50409, upload-time = "2026-02-01T13:27:41.013Z" },
 ]
 
 [[package]]
@@ -4857,33 +4607,6 @@ wheels = [
 ]
 
 [[package]]
-name = "tree-sitter"
-version = "0.25.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/66/7c/0350cfc47faadc0d3cf7d8237a4e34032b3014ddf4a12ded9933e1648b55/tree-sitter-0.25.2.tar.gz", hash = "sha256:fe43c158555da46723b28b52e058ad444195afd1db3ca7720c59a254544e9c20", size = 177961, upload-time = "2025-09-25T17:37:59.751Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/9e/20c2a00a862f1c2897a436b17edb774e831b22218083b459d0d081c9db33/tree_sitter-0.25.2-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:ddabfff809ffc983fc9963455ba1cecc90295803e06e140a4c83e94c1fa3d960", size = 146941, upload-time = "2025-09-25T17:37:34.813Z" },
-    { url = "https://files.pythonhosted.org/packages/ef/04/8512e2062e652a1016e840ce36ba1cc33258b0dcc4e500d8089b4054afec/tree_sitter-0.25.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c0c0ab5f94938a23fe81928a21cc0fac44143133ccc4eb7eeb1b92f84748331c", size = 137699, upload-time = "2025-09-25T17:37:36.349Z" },
-    { url = "https://files.pythonhosted.org/packages/47/8a/d48c0414db19307b0fb3bb10d76a3a0cbe275bb293f145ee7fba2abd668e/tree_sitter-0.25.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dd12d80d91d4114ca097626eb82714618dcdfacd6a5e0955216c6485c350ef99", size = 607125, upload-time = "2025-09-25T17:37:37.725Z" },
-    { url = "https://files.pythonhosted.org/packages/39/d1/b95f545e9fc5001b8a78636ef942a4e4e536580caa6a99e73dd0a02e87aa/tree_sitter-0.25.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b43a9e4c89d4d0839de27cd4d6902d33396de700e9ff4c5ab7631f277a85ead9", size = 635418, upload-time = "2025-09-25T17:37:38.922Z" },
-    { url = "https://files.pythonhosted.org/packages/de/4d/b734bde3fb6f3513a010fa91f1f2875442cdc0382d6a949005cd84563d8f/tree_sitter-0.25.2-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:fbb1706407c0e451c4f8cc016fec27d72d4b211fdd3173320b1ada7a6c74c3ac", size = 631250, upload-time = "2025-09-25T17:37:40.039Z" },
-]
-
-[[package]]
-name = "tree-sitter-python"
-version = "0.25.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b8/8b/c992ff0e768cb6768d5c96234579bf8842b3a633db641455d86dd30d5dac/tree_sitter_python-0.25.0.tar.gz", hash = "sha256:b13e090f725f5b9c86aa455a268553c65cadf325471ad5b65cd29cac8a1a68ac", size = 159845, upload-time = "2025-09-11T06:47:58.159Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/64/a4e503c78a4eb3ac46d8e72a29c1b1237fa85238d8e972b063e0751f5a94/tree_sitter_python-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:14a79a47ddef72f987d5a2c122d148a812169d7484ff5c75a3db9609d419f361", size = 73790, upload-time = "2025-09-11T06:47:47.652Z" },
-    { url = "https://files.pythonhosted.org/packages/e6/1d/60d8c2a0cc63d6ec4ba4e99ce61b802d2e39ef9db799bdf2a8f932a6cd4b/tree_sitter_python-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:480c21dbd995b7fe44813e741d71fed10ba695e7caab627fb034e3828469d762", size = 76691, upload-time = "2025-09-11T06:47:49.038Z" },
-    { url = "https://files.pythonhosted.org/packages/aa/cb/d9b0b67d037922d60cbe0359e0c86457c2da721bc714381a63e2c8e35eba/tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:86f118e5eecad616ecdb81d171a36dde9bef5a0b21ed71ea9c3e390813c3baf5", size = 108133, upload-time = "2025-09-11T06:47:50.499Z" },
-    { url = "https://files.pythonhosted.org/packages/40/bd/bf4787f57e6b2860f3f1c8c62f045b39fb32d6bac4b53d7a9e66de968440/tree_sitter_python-0.25.0-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:be71650ca2b93b6e9649e5d65c6811aad87a7614c8c1003246b303f6b150f61b", size = 110603, upload-time = "2025-09-11T06:47:51.985Z" },
-    { url = "https://files.pythonhosted.org/packages/5d/25/feff09f5c2f32484fbce15db8b49455c7572346ce61a699a41972dea7318/tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:e6d5b5799628cc0f24691ab2a172a8e676f668fe90dc60468bee14084a35c16d", size = 108998, upload-time = "2025-09-11T06:47:53.046Z" },
-    { url = "https://files.pythonhosted.org/packages/75/69/4946da3d6c0df316ccb938316ce007fb565d08f89d02d854f2d308f0309f/tree_sitter_python-0.25.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:71959832fc5d9642e52c11f2f7d79ae520b461e63334927e93ca46cd61cd9683", size = 107268, upload-time = "2025-09-11T06:47:54.388Z" },
-]
-
-[[package]]
 name = "trimesh"
 version = "4.11.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4973,29 +4696,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/a7/c202b344c5ca7daf398f3b8a477eeb205cf3b6f32e7ec3a6bac0629ca975/tzdata-2025.3.tar.gz", hash = "sha256:de39c2ca5dc7b0344f2eba86f49d614019d29f060fc4ebc8a417896a620b56a7", size = 196772, upload-time = "2025-12-13T17:45:35.667Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/b0/003792df09decd6849a5e39c28b513c06e84436a54440380862b5aeff25d/tzdata-2025.3-py2.py3-none-any.whl", hash = "sha256:06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1", size = 348521, upload-time = "2025-12-13T17:45:33.889Z" },
-]
-
-[[package]]
-name = "uc-micro-py"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/78/67/9a363818028526e2d4579334460df777115bdec1bb77c08f9db88f6389f2/uc_micro_py-2.0.0.tar.gz", hash = "sha256:c53691e495c8db60e16ffc4861a35469b0ba0821fe409a8a7a0a71864d33a811", size = 6611, upload-time = "2026-03-01T06:31:27.526Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/73/d21edf5b204d1467e06500080a50f79d49ef2b997c79123a536d4a17d97c/uc_micro_py-2.0.0-py3-none-any.whl", hash = "sha256:3603a3859af53e5a39bc7677713c78ea6589ff188d70f4fee165db88e22b242c", size = 6383, upload-time = "2026-03-01T06:31:26.257Z" },
-]
-
-[[package]]
-name = "unicodedata2"
-version = "17.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/44/cb/520721a715da85530e21c71953b9b9a85a44e0d80d3b34bf9303c422d208/unicodedata2-17.0.1.tar.gz", hash = "sha256:d79943d153f5f6bfbe3f55a5ec611985184bda37fcedb3ecc75322d82ae6ad3b", size = 679856, upload-time = "2026-02-12T10:05:41.465Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/7b/52359e301fe53fc742e1f9ef8b2aec4b8b0d5509c365eb1819072a46506e/unicodedata2-17.0.1-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:4bd5990d17c8415ed44d4cb2642a06c0377551540d151c458dcdff5426719661", size = 973395, upload-time = "2026-02-12T10:04:29.234Z" },
-    { url = "https://files.pythonhosted.org/packages/fc/b8/d2140512697cd1085b2a7004cd7813c1e6b26033587f19aa5f02ab25a54a/unicodedata2-17.0.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:cbc1d0a458294ae5af4a7ca560dae976a6a88534fc2c61289f0b8ab25684aeb1", size = 495277, upload-time = "2026-02-12T10:04:30.644Z" },
-    { url = "https://files.pythonhosted.org/packages/56/f5/17f8ad3a780043d2aff2b8bbb60280ecebc54cf45596942942fae28cd33d/unicodedata2-17.0.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:88a32dc5372787f9cc0bfaf0a39b38a72e3f703111efa84a550cc228b85f2a30", size = 531996, upload-time = "2026-02-12T10:04:32.274Z" },
-    { url = "https://files.pythonhosted.org/packages/32/b5/f1ef0d3944f30ebc0fc436a5be98e53969d76f975ce1005aeb5d99acc7be/unicodedata2-17.0.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b9cceda1f25498670245c79a6a1b3e2bc310b629693934075c388cc02585a686", size = 531920, upload-time = "2026-02-12T10:04:33.617Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/d0/837bec637a3076496627d24d9921f7b5855122e2558d25417f1146f9e63f/unicodedata2-17.0.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:c9eee5d5bad5ced178f14d946f106dff4419cb76000b77b49bc78b50fabe7b36", size = 530573, upload-time = "2026-02-12T10:04:35.17Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/89/c73a4e430d59d80f9e07ffb85294cfcb47c5050249728b1049e7b51ed351/unicodedata2-17.0.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:e9e01d1525f57695fbb4aed3efad8814ae6fdbb9a0b710ec9dec18d1b07dd2f0", size = 531410, upload-time = "2026-02-12T10:04:36.631Z" },
 ]
 
 [[package]]
