@@ -706,10 +706,12 @@ def _get_batch_logps(
     per_token_logps = per_token_logps[:, :-1]
     loss_mask = labels[:, 1:] != -100
 
+    masked_logps = per_token_logps.masked_fill(~loss_mask, 0.0)
+
     if average_log_prob:
-        return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
+        return masked_logps.sum(-1) / loss_mask.sum(-1).clamp(min=1)
     else:
-        return (per_token_logps * loss_mask).sum(-1)
+        return masked_logps.sum(-1)
 
 
 def process_batch(batch: dict[str, list | torch.Tensor], prefix: str, pad_value: int = 0) -> dict[str, torch.Tensor]:
