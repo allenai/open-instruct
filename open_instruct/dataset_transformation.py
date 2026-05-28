@@ -56,8 +56,8 @@ from typing import Any, Literal
 import numpy as np
 import torch
 import transformers
-from datasets import Dataset, concatenate_datasets, load_dataset
-from huggingface_hub import ModelCard, revision_exists
+from datasets import Dataset, Features, Value, concatenate_datasets, load_dataset
+from huggingface_hub import ModelCard, hf_hub_download, list_repo_files, revision_exists
 from rich.console import Console
 from rich.text import Text
 from transformers import (
@@ -951,8 +951,26 @@ ENV_CONFIG_KEY = "env_config"
 EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v10: Parse JSON-string tool schemas before templating.
-DATASET_CACHE_VERSION = "v11"
+# to invalidate old caches. v12: Parse JSON-string messages and fall back to
+# stringified JSONL loading for datasets with unstable nested schemas.
+DATASET_CACHE_VERSION = "v12"
+
+
+def _normalize_messages_for_chat_template(messages: Any) -> list[dict[str, Any]]:
+    """Normalize dataset messages before passing them to chat templates."""
+    if isinstance(messages, str):
+        try:
+            messages = json.loads(messages)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"messages must be a JSON-encoded chat message list, got: {messages!r}") from exc
+
+    if not isinstance(messages, list):
+        raise TypeError(f"messages must be a list or JSON string, got {type(messages).__name__}")
+
+    if not all(isinstance(message, dict) for message in messages):
+        raise TypeError(f"messages must contain chat message dictionaries, got: {messages!r}")
+
+    return messages
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list[dict[str, Any]] | None:
@@ -979,6 +997,59 @@ def _normalize_tools_for_chat_template(tools: Any) -> list[dict[str, Any]] | Non
         raise TypeError(f"{TOOLS_COLUMN_KEY} must contain JSON-schema dictionaries, got: {tools!r}")
 
     return tools
+
+
+def _should_fallback_to_stringified_jsonl(error: Exception) -> bool:
+    error_text = str(error)
+    return "Feature type 'Json' not found" in error_text or (
+        "Column(" in error_text and "changed from" in error_text
+    )
+
+
+def _find_hf_jsonl_file(dataset_name: str, revision: str, split: str) -> str:
+    repo_files = list_repo_files(dataset_name, repo_type="dataset", revision=revision)
+    candidates = [
+        f"data/{split}.jsonl",
+        f"{split}.jsonl",
+        f"data/{split}.json",
+        f"{split}.json",
+    ]
+    for candidate in candidates:
+        if candidate in repo_files:
+            return candidate
+
+    jsonl_files = [path for path in repo_files if path.endswith((".jsonl", ".json"))]
+    if len(jsonl_files) == 1:
+        return jsonl_files[0]
+
+    raise ValueError(
+        f"Could not choose a JSON/JSONL data file for {dataset_name} split {split!r}. "
+        f"Candidates found: {jsonl_files}"
+    )
+
+
+def _load_hf_jsonl_with_stringified_nested_columns(dataset_name: str, revision: str, split: str) -> Dataset:
+    """Load Hub JSONL manually when Arrow cannot infer a stable nested schema."""
+    filename = _find_hf_jsonl_file(dataset_name, revision, split)
+    path = hf_hub_download(dataset_name, filename, repo_type="dataset", revision=revision)
+    rows: list[dict[str, str]] = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            rows.append(
+                {
+                    key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+                    for key, value in row.items()
+                }
+            )
+
+    if not rows:
+        raise ValueError(f"No rows found in {dataset_name}:{filename}")
+
+    features = Features({key: Value("string") for key in rows[0]})
+    return Dataset.from_list(rows, features=features)
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1097,11 +1168,12 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 def sft_tokenize_v1(
     row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
-    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
+    messages = _normalize_messages_for_chat_template(row[sft_messages_key])
+    prompt = messages if len(messages) == 1 else messages[:-1]
 
     # return_dict=False: transformers >= 5.0 defaults to returning a dict; we need a plain list of ints.
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(messages, return_dict=False)
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1113,10 +1185,11 @@ def sft_tokenize_mask_out_prompt_v1(
     row: dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
     """mask out the prompt tokens by manipulating labels"""
-    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
+    messages = _normalize_messages_for_chat_template(row[sft_messages_key])
+    prompt = messages if len(messages) == 1 else messages[:-1]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(messages, return_dict=False)
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
@@ -1272,7 +1345,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
 
 def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
-    messages = row["messages"]
+    messages = _normalize_messages_for_chat_template(row["messages"])
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
@@ -1295,7 +1368,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
 
 def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
-    messages = row["messages"]
+    messages = _normalize_messages_for_chat_template(row["messages"])
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
@@ -1452,7 +1525,8 @@ def rlvr_tokenize_v1(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
-    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
+    messages = _normalize_messages_for_chat_template(row[sft_messages_key])
+    prompt = messages if len(messages) == 1 else messages[:-1]
 
     # Override the system prompt if provided
     if system_prompt_override:
@@ -1477,7 +1551,7 @@ def rlvr_tokenize_v1(
         return_dict=False,
         tools=tools_for_template,  # type: ignore[arg-type]
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(messages, return_dict=False)
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -1495,9 +1569,10 @@ def rlvr_tokenize_v2(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
 ):
-    prompt = row[sft_messages_key] if len(row[sft_messages_key]) == 1 else row[sft_messages_key][:-1]
+    messages = _normalize_messages_for_chat_template(row[sft_messages_key])
+    prompt = messages if len(messages) == 1 else messages[:-1]
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True, return_dict=False)
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(messages, return_dict=False)
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
     # ill look into this more later, for now this guard should be enough
     if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
@@ -1558,7 +1633,7 @@ def rlvr_tokenize_v3(
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
-    prompt = row.pop(sft_messages_key)
+    prompt = _normalize_messages_for_chat_template(row.pop(sft_messages_key))
     assert len(prompt) > 0, "Empty prompt in dataset"
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
     if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
@@ -1731,13 +1806,24 @@ class DatasetConfig:
             self.dataset_commit_hash = get_commit_hash(
                 self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
-            dataset = load_dataset(
-                self.dataset_name,
-                self.dataset_config_name,
-                split=self.dataset_split,
-                revision=self.dataset_revision,
-                num_proc=max_num_processes(),
-            )
+            try:
+                dataset = load_dataset(
+                    self.dataset_name,
+                    self.dataset_config_name,
+                    split=self.dataset_split,
+                    revision=self.dataset_revision,
+                    num_proc=max_num_processes(),
+                )
+            except Exception as exc:
+                if self.dataset_config_name is not None or not _should_fallback_to_stringified_jsonl(exc):
+                    raise
+                logger.warning(
+                    f"Falling back to manual JSONL loading for {self.dataset_name} because Hugging Face "
+                    f"datasets could not infer a stable schema: {exc}"
+                )
+                dataset = _load_hf_jsonl_with_stringified_nested_columns(
+                    self.dataset_name, self.dataset_revision, self.dataset_split
+                )
         assert isinstance(dataset, Dataset), f"Expected Dataset, got {type(dataset)}"
         self.dataset = dataset
         if self.dataset_range is None:
