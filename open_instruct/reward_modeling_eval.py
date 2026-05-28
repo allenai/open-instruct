@@ -20,13 +20,12 @@ from open_instruct.model_utils import get_reward, print_rich_table
 api = HfApi()
 
 
-def find_shared_text(chosen_text: str, rejected_text: str):
+def find_shared_text(chosen_text: str, rejected_text: str) -> str:
     """return shared (prompt) text between chosen and rejected text"""
-    min_len = min(len(chosen_text), len(rejected_text))
-    for i in range(min_len):
-        if chosen_text[i] != rejected_text[i]:
+    for i, (c, r) in enumerate(zip(chosen_text, rejected_text)):
+        if c != r:
             return chosen_text[:i]
-    return chosen_text[:min_len]
+    return chosen_text[:min(len(chosen_text), len(rejected_text))]
 
 
 def evaluate(
