@@ -558,7 +558,7 @@ class GRPOTrainModule(TransformerTrainModule):
         # Keep _metrics non-empty on every rank every step so OLMo-core's
         # _log_metrics skip can't fire asymmetrically and deadlock gloo on the
         # untagged bookkeeping process group.
-        self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
+        self.record_metric("_metrics_keepalive", float(self.trainer.global_step), reduce_type=None)
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)
