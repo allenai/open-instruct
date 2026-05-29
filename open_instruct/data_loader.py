@@ -1349,6 +1349,9 @@ class DataPreparationActor:
         self.training_step = 0
         self.total_samples_written = 0
         self.metadata_saved = False
+        # Latch for solve_rate length-reward warmup: once the batch solve rate
+        # crosses the threshold, shaping stays on for the rest of training.
+        self._length_reward_latched = False
         self._executor: ThreadPoolExecutor | None = None
         self._prep_future = None
 
@@ -1471,6 +1474,13 @@ class DataPreparationActor:
                 lengths_per_prompt = response_lengths_arr.reshape(-1, self.config.num_samples_per_prompt_rollout)
                 correct_mask = scores_per_prompt > self.config.length_reward_correctness_threshold
                 group_solve_rate = float(correct_mask.mean(axis=-1).mean()) if correct_mask.size else 0.0
+                # Latch the solve_rate warmup once the threshold is reached so it
+                # stays on monotonically (no chatter on the noisy per-batch signal).
+                if (
+                    self.config.length_reward_warmup_type == "solve_rate"
+                    and group_solve_rate >= self.config.length_reward_solve_rate_threshold
+                ):
+                    self._length_reward_latched = True
                 length_reward_warmup_weight = length_reward_shaping.compute_warmup_weight(
                     step=self.training_step,
                     num_training_steps=self.num_training_steps,
@@ -1478,6 +1488,7 @@ class DataPreparationActor:
                     warmup_fraction=self.config.length_reward_warmup_fraction,
                     solve_rate_threshold=self.config.length_reward_solve_rate_threshold,
                     group_solve_rate=group_solve_rate,
+                    solve_rate_latched=self._length_reward_latched,
                 )
                 scores_per_prompt = length_reward_shaping.apply_length_reward_shaping(
                     scores_per_prompt=scores_per_prompt,
@@ -1656,6 +1667,7 @@ class DataPreparationActor:
             "training_step": self.training_step,
             "last_consumed_step": self._last_consumed_step,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
+            "length_reward_latched": self._length_reward_latched,
         }
 
     def set_state(self, state: dict):
@@ -1665,6 +1677,7 @@ class DataPreparationActor:
 
         self._last_consumed_step = state.get("last_consumed_step", state["training_step"] - 1)
         self.training_step = self._last_consumed_step + 1
+        self._length_reward_latched = state.get("length_reward_latched", False)
 
         logger.info(
             f"[DataPreparationActor] Restored state: training_step={self.training_step}, last_consumed_step={self._last_consumed_step}"

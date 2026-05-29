@@ -156,6 +156,17 @@ class TestComputeWarmupWeight(unittest.TestCase):
     def test_solve_rate_missing_value(self):
         self.assertEqual(lrs.compute_warmup_weight(0, 100, "solve_rate", 0.0, 0.3, group_solve_rate=None), 0.0)
 
+    def test_solve_rate_latched_stays_on(self):
+        # Once latched, weight is 1 regardless of the current batch solve rate.
+        self.assertEqual(lrs.compute_warmup_weight(0, 100, "solve_rate", 0.0, 0.3, 0.0, solve_rate_latched=True), 1.0)
+        self.assertEqual(lrs.compute_warmup_weight(0, 100, "solve_rate", 0.0, 0.3, None, solve_rate_latched=True), 1.0)
+
+    def test_solve_rate_latch_only_affects_solve_rate_type(self):
+        # The latch flag must not turn on shaping for the linear ramp before its time.
+        self.assertAlmostEqual(
+            lrs.compute_warmup_weight(0, 100, "linear", 0.5, 0.3, None, solve_rate_latched=True), 0.0
+        )
+
     def test_unknown_warmup_raises(self):
         with self.assertRaises(ValueError):
             lrs.compute_warmup_weight(0, 100, "bogus", 0.5, 0.3, None)

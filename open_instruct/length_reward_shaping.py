@@ -165,6 +165,7 @@ def compute_warmup_weight(
     warmup_fraction: float,
     solve_rate_threshold: float,
     group_solve_rate: float | None,
+    solve_rate_latched: bool = False,
 ) -> float:
     """Compute the warm-up multiplier for the length penalty at this training step.
 
@@ -172,12 +173,16 @@ def compute_warmup_weight(
         step: current training step (0-indexed).
         num_training_steps: total training steps planned.
         warmup_type: "constant" (always 1.0), "linear" (ramp 0→1 over warmup_fraction
-            of training), or "solve_rate" (0 until group solve rate exceeds threshold,
-            then 1).
+            of training), or "solve_rate" (0 until group solve rate reaches the
+            threshold, then latched on at 1 for the rest of training).
         warmup_fraction: fraction of training over which to linearly ramp up.
         solve_rate_threshold: solve-rate cutoff for the "solve_rate" type.
         group_solve_rate: current batch's mean solve rate (fraction of correct
             responses); required when warmup_type == "solve_rate".
+        solve_rate_latched: for the "solve_rate" type, whether the threshold has
+            already been reached on a prior step. Once latched, the weight stays at
+            1 regardless of the current batch's solve rate (monotonic; avoids the
+            on/off chatter of keying a hard switch on a noisy per-batch signal).
 
     Returns:
         weight in [0, 1].
@@ -190,6 +195,8 @@ def compute_warmup_weight(
         end_step = max(1, int(warmup_fraction * num_training_steps))
         return float(min(1.0, max(0.0, step / end_step)))
     if warmup_type == "solve_rate":
+        if solve_rate_latched:
+            return 1.0
         if group_solve_rate is None:
             return 0.0
         return 1.0 if group_solve_rate >= solve_rate_threshold else 0.0
