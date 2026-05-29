@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, length_reward_shaping, padding_free_collator, utils
+from open_instruct import data_types, gfpo, length_reward_shaping, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -517,6 +517,15 @@ class StreamingDataLoaderConfig:
     per-prompt baseline a measure of problem difficulty even when shaping zeroes
     out longer correct responses. No effect when shaping is "none"."""
 
+    # Group Filtered Policy Optimization (see open_instruct/gfpo.py).
+    gfpo_filter_metric: str = "none"
+    """One of: none, shortest, token_efficiency. When set, train only on the
+    top-`gfpo_retain_k` responses per group ranked by this metric (the rollout
+    group size `num_samples_per_prompt_rollout` is the oversampled G). Mutually
+    exclusive with length_reward_shaping_method."""
+    gfpo_retain_k: int = 8
+    """Number of responses retained per group (k < num_samples_per_prompt_rollout)."""
+
     # Computed at post_init
     max_possible_score: float = 1.0
 
@@ -587,6 +596,21 @@ class StreamingDataLoaderConfig:
                 self.length_reward_correctness_threshold = self.r1_style_format_reward
             else:
                 self.length_reward_correctness_threshold = 0.0
+
+        if self.gfpo_filter_metric not in gfpo.GFPO_METRICS:
+            raise ValueError(f"gfpo_filter_metric must be one of {gfpo.GFPO_METRICS}, got {self.gfpo_filter_metric!r}")
+        if self.gfpo_filter_metric != "none":
+            if self.length_reward_shaping_method != "none":
+                raise ValueError(
+                    "GFPO and length-aware reward shaping are mutually exclusive; set one of "
+                    "gfpo_filter_metric / length_reward_shaping_method to 'none'."
+                )
+            if not 1 <= self.gfpo_retain_k < self.num_samples_per_prompt_rollout:
+                raise ValueError(
+                    f"gfpo_retain_k ({self.gfpo_retain_k}) must satisfy "
+                    f"1 <= k < num_samples_per_prompt_rollout ({self.num_samples_per_prompt_rollout}); "
+                    "GFPO needs to oversample (G > k)."
+                )
 
     def build_dataloader(
         self,
@@ -1500,20 +1524,50 @@ class DataPreparationActor:
                 )
                 scores = scores_per_prompt.reshape(-1)
 
-            stats_source = (
-                raw_scores_per_prompt if self.config.length_reward_use_raw_group_stats else scores_per_prompt
-            )
-            mean_grouped_rewards = stats_source.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = stats_source.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-
-            if self.config.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.config.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
+            gfpo_metrics: dict[str, float] = {}
+            if self.config.gfpo_filter_metric != "none":
+                # GFPO: retain top-k responses per group by the filter metric and
+                # normalize the advantage over that subset; the rest get advantage 0
+                # (no policy gradient) but stay in the batch per the GFPO objective.
+                gfpo_lengths = np.array([len(r) for r in result.responses])
+                gfpo_lengths_per_prompt = gfpo_lengths.reshape(-1, self.config.num_samples_per_prompt_rollout)
+                gfpo_keep_mask = gfpo.apply_gfpo_filter(
+                    scores_per_prompt,
+                    gfpo_lengths_per_prompt,
+                    self.config.gfpo_retain_k,
+                    self.config.gfpo_filter_metric,
+                )
+                advantages = gfpo.compute_gfpo_advantages(
+                    scores_per_prompt, gfpo_keep_mask, self.config.advantage_normalization_type
+                ).reshape(-1)
+                kept_lengths = gfpo_lengths_per_prompt[gfpo_keep_mask]
+                dropped_lengths = gfpo_lengths_per_prompt[~gfpo_keep_mask]
+                gfpo_metrics = {
+                    "val/gfpo_frac_kept": float(gfpo_keep_mask.mean()),
+                    "val/gfpo_kept_mean_length": float(kept_lengths.mean()) if kept_lengths.size else 0.0,
+                    "val/gfpo_dropped_mean_length": float(dropped_lengths.mean()) if dropped_lengths.size else 0.0,
+                }
             else:
-                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
+                stats_source = (
+                    raw_scores_per_prompt if self.config.length_reward_use_raw_group_stats else scores_per_prompt
+                )
+                mean_grouped_rewards = stats_source.mean(axis=-1)
+                mean_grouped_rewards = np.repeat(
+                    mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0
+                )
+                std_grouped_rewards = stats_source.std(axis=-1)
+                std_grouped_rewards = np.repeat(
+                    std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0
+                )
+
+                if self.config.advantage_normalization_type == "standard":
+                    advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+                elif self.config.advantage_normalization_type == "centered":
+                    advantages = scores - mean_grouped_rewards
+                else:
+                    raise ValueError(
+                        f"Invalid advantage normalization type: {self.config.advantage_normalization_type}"
+                    )
 
             if self.config.save_traces and self.config.rollouts_save_path:
                 save_rollouts_to_disk(
@@ -1601,6 +1655,7 @@ class DataPreparationActor:
                 "val/length_reward_warmup_weight": length_reward_warmup_weight,
                 "val/scores_pre_shaping": scores_pre_shaping_mean,
                 "val/scores_post_shaping": float(scores.mean()) if scores.size else 0.0,
+                **gfpo_metrics,
                 **reward_metrics,
                 **batch_metrics_prefixed,
             }
