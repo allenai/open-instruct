@@ -51,6 +51,7 @@ All notable changes to this project will be documented in this file.
 - Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py` (https://github.com/allenai/open-instruct/pull/1671).
 
 ### Fixed
+- Fix `PreferenceDatasetProcessor.filter` applying prompt and sequence length checks independently so both `max_prompt_token_length` and `max_token_length` are enforced together.
 - Pass packed-sequence `doc_lens`/`max_doc_lens` to OLMo-core models in `forward_for_logprobs` (instead of relying on `attention_mask`), so OLMo-core GRPO uses correct intra-document attention; bumps olmo-core to a commit that accepts these kwargs (https://github.com/allenai/open-instruct/pull/1670).
 - Fix gpt-4o / gpt-4o-standard output pricing (was 10× too low) and restate `open_instruct/judge_utils.py` rates as dollars per 1M tokens (renamed `PRICE_PER_TOKEN` → `PRICE_PER_MILLION_TOKENS`); update the cost calculation in `open_instruct/ground_truth_utils.py` accordingly (supersedes #1618) (https://github.com/allenai/open-instruct/pull/1686).
 - Use processed vLLM logprobs in GRPO rollouts so sampled-token logprobs include sampling transforms like temperature (https://github.com/allenai/open-instruct/pull/1678).
