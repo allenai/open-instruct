@@ -338,11 +338,8 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )
-    extra_kwargs = {}
-    if config_name.startswith("qwen"):
-        extra_kwargs["rope_full_precision"] = True
     return getattr(TransformerConfig, config_name)(
-        vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend), **extra_kwargs
+        vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend)
     )
 
 
