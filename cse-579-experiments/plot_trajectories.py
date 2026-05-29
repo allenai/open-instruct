@@ -149,17 +149,9 @@ def main() -> None:
                 continue
             scores = [data[display][s][task]["primary_score"] for s in steps]
             tok_mean = [data[display][s][task]["tok_mean"] for s in steps]
-            tok_corr = [data[display][s][task]["tok_corr_mean"] for s in steps]
-            tok_inc = [data[display][s][task]["tok_inc_mean"] for s in steps]
             ax_score.plot(steps, scores, marker="o", color=color, linewidth=1.6)
             ax_len.plot(steps, tok_mean, color=color, marker="o", linestyle="-",
-                        linewidth=1.6, label=f"{display} (all)")
-            if any(v is not None for v in tok_corr):
-                ax_len.plot(steps, tok_corr, color=color, marker=".", linestyle="--",
-                            linewidth=1.1, alpha=0.85, label=f"{display} (correct)")
-            if any(v is not None for v in tok_inc):
-                ax_len.plot(steps, tok_inc, color=color, marker=".", linestyle=":",
-                            linewidth=1.1, alpha=0.85, label=f"{display} (incorrect)")
+                        linewidth=1.6, label=display)
 
         ax_score.set_xlabel("training step")
         if ti == 0:
