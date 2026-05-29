@@ -45,13 +45,27 @@ else
     trap 'cleanup 129' HUP
     trap 'cleanup 1' EXIT
 
+    RAY_HEAD_MONITOR_INTERVAL_S="${RAY_HEAD_MONITOR_INTERVAL_S:-5}"
+    RAY_HEAD_MONITOR_MAX_MISSES="${RAY_HEAD_MONITOR_MAX_MISSES:-6}"
+    ray_head_monitor_misses=0
+
     echo "[ray_node_setup] Monitoring Ray head at ${RAY_ADDRESS}"
     # Poll head availability. Workers should never report success on shutdown.
+    # Require consecutive misses so transient Ray status hiccups don't kill the worker.
     while true; do
         if ! ray status --address="${RAY_ADDRESS}" >/dev/null 2>&1; then
-            echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 1."
-            cleanup 1
+            ray_head_monitor_misses=$((ray_head_monitor_misses + 1))
+            echo "[ray_node_setup] Head status check failed (${ray_head_monitor_misses}/${RAY_HEAD_MONITOR_MAX_MISSES})."
+            if [ "$ray_head_monitor_misses" -ge "$RAY_HEAD_MONITOR_MAX_MISSES" ]; then
+                echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 1."
+                cleanup 1
+            fi
+        else
+            if [ "$ray_head_monitor_misses" -gt 0 ]; then
+                echo "[ray_node_setup] Head status recovered after ${ray_head_monitor_misses} failed checks."
+            fi
+            ray_head_monitor_misses=0
         fi
-        sleep 5
+        sleep "$RAY_HEAD_MONITOR_INTERVAL_S"
     done
 fi
