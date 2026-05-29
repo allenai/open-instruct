@@ -247,16 +247,10 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 
     def filter(self, dataset: Union[Dataset, DatasetDict]):
         def filter_fn(row):
-            return (
-                len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length
-                if self.config.max_prompt_token_length is not None
-                else (
-                    len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length
-                    and len(row[INPUT_IDS_REJECTED_KEY]) <= self.config.max_token_length
-                    if self.config.max_token_length is not None
-                    else True
-                )
-            )
+            prompt_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length if self.config.max_prompt_token_length is not None else True
+            chosen_ok = len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length if self.config.max_token_length is not None else True
+            rejected_ok = len(row[INPUT_IDS_REJECTED_KEY]) <= self.config.max_token_length if self.config.max_token_length is not None else True
+            return prompt_ok and chosen_ok and rejected_ok
 
         filtered_dataset = dataset.filter(
             filter_fn,
