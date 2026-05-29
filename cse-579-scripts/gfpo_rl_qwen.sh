@@ -15,6 +15,10 @@
 #     The paper likewise fixes step count across group sizes.
 #   - No --length_reward_* args (GFPO and shaping are mutually exclusive).
 #   - --gfpo_filter_metric / --gfpo_retain_k instead.
+#   - --inflight_updates True: at G=16 the per-step generation (1024 long
+#     sequences) takes >120s to drain, so the default (drain-then-sync) weight
+#     sync hits the hardcoded WEIGHT_SYNC_TIMEOUT_S and the run dies at step ~2.
+#     inflight_updates lets vLLM pause mid-generation for the sync.
 #
 # Required env vars:
 #   GFPO_METRIC    shortest | token_efficiency
@@ -88,6 +92,7 @@ uv run python mason.py \
         --mask_truncated_completions False \
         --temperature 1.0 \
         --total_episodes "$TOTAL_EPISODES" \
+        --inflight_updates True \
         --deepspeed_stage 3 \
         --num_learners_per_node 4 \
         --sequence_parallel_size 1 \
