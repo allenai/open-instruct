@@ -89,6 +89,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     docker.io \
     netavark \
     passt \
+    slirp4netns \
     pkg-config \
     python3-sphinx \
     systemd \
