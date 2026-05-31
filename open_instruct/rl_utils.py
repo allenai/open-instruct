@@ -2,11 +2,12 @@ import contextlib
 import datetime
 import json
 import os
+import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 import torch
@@ -17,6 +18,7 @@ T = TypeVar("T")
 logger = logger_utils.setup_logger(__name__)
 
 _rollout_executor = ThreadPoolExecutor(max_workers=2)
+_rollout_save_lock = threading.Lock()
 ROLLOUT_SHARD_SIZE = 10000
 
 
@@ -65,6 +67,29 @@ class RolloutRecord:
     ground_truth: list[int] | None = None
     request_info: dict | None = None
     logprobs: list[float] | None = None
+
+
+@dataclass
+class FilteredRolloutRecord:
+    step: int
+    filter_reason: str
+    sample_idx: int
+    prompt_idx: int
+    prompt_id: str | None
+    dataset_index: int | None
+    model_step: int | None
+    prompt_tokens: list[int]
+    raw_prompt: str | None
+    response_tokens: list[int]
+    decoded_response: str | None
+    reward: float
+    finish_reason: str
+    dataset: str
+    ground_truth: Any = None
+    active_tools: list[str] | None = None
+    request_info: dict | None = None
+    logprobs: list[float] | None = None
+    reward_metrics: dict[str, Any] | None = None
 
 
 def save_rollout_metadata(save_path: str, run_name: str, model_name: str | None) -> None:
@@ -146,10 +171,91 @@ def _save_rollouts(
             )
         )
 
-    with open(filepath, "a") as f:
+    with _rollout_save_lock, open(filepath, "a") as f:
         for record in records:
             f.write(json.dumps(record, default=_json_default) + "\n")
     logger.info(f"Saved {len(records)} rollouts to {filepath}")
+
+
+def _save_filtered_rollouts(
+    save_path: str,
+    run_name: str,
+    step: int,
+    filter_reason: str,
+    batch: model_utils.Batch,
+    result: data_types.GenerationResult,
+    num_samples_per_prompt: int,
+    shard_idx: int,
+) -> None:
+    shard_filename = f"{run_name}_filtered_rollouts_{shard_idx:06d}.jsonl"
+    filepath = os.path.join(save_path, shard_filename)
+    os.makedirs(save_path, exist_ok=True)
+
+    assert batch.scores is not None, "batch.scores must not be None when saving filtered rollouts"
+
+    records = []
+    for i in range(len(batch.queries)):
+        model_step = (
+            result.model_steps[i]
+            if result.model_steps is not None and i < len(result.model_steps)
+            else result.model_step
+        )
+        records.append(
+            asdict(
+                FilteredRolloutRecord(
+                    step=step,
+                    filter_reason=filter_reason,
+                    sample_idx=i,
+                    prompt_idx=i // num_samples_per_prompt,
+                    prompt_id=result.prompt_id,
+                    dataset_index=batch.indices[i] if batch.indices is not None else None,
+                    model_step=model_step,
+                    prompt_tokens=batch.queries[i],
+                    raw_prompt=batch.raw_queries[i] if batch.raw_queries is not None else None,
+                    response_tokens=result.responses[i],
+                    decoded_response=batch.decoded_responses[i] if batch.decoded_responses is not None else None,
+                    reward=float(batch.scores[i]),
+                    finish_reason=result.finish_reasons[i],
+                    dataset=batch.datasets[i],
+                    ground_truth=batch.ground_truths[i],
+                    active_tools=batch.active_tools[i] if batch.active_tools is not None else None,
+                    request_info=_get_request_info_for_sample(result.request_info, i),
+                    logprobs=result.logprobs[i] if result.logprobs else None,
+                    reward_metrics=result.reward_metrics,
+                )
+            )
+        )
+
+    with _rollout_save_lock, open(filepath, "a") as f:
+        for record in records:
+            f.write(json.dumps(record, default=_json_default) + "\n")
+    logger.info(f"Saved {len(records)} filtered rollouts to {filepath}")
+
+
+def save_filtered_rollouts_to_disk(
+    save_path: str,
+    run_name: str,
+    step: int,
+    filter_reason: str,
+    batch: model_utils.Batch,
+    result: data_types.GenerationResult,
+    num_samples_per_prompt: int,
+    total_samples_written: int,
+) -> None:
+    """Asynchronously save filtered rollout records to disk for debugging."""
+    shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE
+    future = _rollout_executor.submit(
+        _save_filtered_rollouts,
+        save_path,
+        run_name,
+        step,
+        filter_reason,
+        batch,
+        result,
+        num_samples_per_prompt,
+        shard_idx,
+    )
+    future.add_done_callback(_log_rollout_save_failure)
 
 
 def _to_cpu_tensor_list(tensors):
