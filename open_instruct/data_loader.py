@@ -45,7 +45,13 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
-from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
+from open_instruct.rl_utils import (
+    PackedSequences,
+    pack_sequences,
+    save_filtered_rollouts_to_disk,
+    save_rollout_metadata,
+    save_rollouts_to_disk,
+)
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics, repeat_each
 
@@ -677,6 +683,8 @@ class StreamingDataLoaderConfig:
 
     # Rollout saving
     save_traces: bool = False
+    save_filtered_rollouts: bool = False
+    """Save prompt groups dropped by zero-std filtering for debugging active sampling."""
     save_trainer_logprobs: bool = True
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
 
@@ -740,6 +748,8 @@ class StreamingDataLoaderConfig:
 
         if self.save_traces and not self.rollouts_save_path:
             raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
+        if self.save_filtered_rollouts and not self.rollouts_save_path:
+            raise ValueError("`rollouts_save_path` must be provided when `save_filtered_rollouts` is True.")
 
     def build_dataloader(
         self,
@@ -871,8 +881,7 @@ def compute_group_advantages(
     scores = np.asarray(scores)
     if scores.size % num_samples_per_prompt != 0:
         raise ValueError(
-            f"Number of scores ({scores.size}) must be divisible by num_samples_per_prompt "
-            f"({num_samples_per_prompt})."
+            f"Number of scores ({scores.size}) must be divisible by num_samples_per_prompt ({num_samples_per_prompt})."
         )
 
     score_dtype = np.result_type(scores.dtype, np.float32)
@@ -1010,6 +1019,9 @@ def accumulate_inference_batches(
     max_result_age_steps: int | None = None,
     ground_truth_overrides: dict[int, Any] | None = None,
     image_prewarm_actors: list[ray.actor.ActorHandle] | None = None,
+    save_filtered_rollouts: bool = False,
+    filtered_rollouts_save_path: str | None = None,
+    run_name: str | None = None,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1170,6 +1182,28 @@ def accumulate_inference_batches(
             if not active_sampling:
                 num_prompts_sampled += 1
                 progress_bar.update(1)
+
+            if save_filtered_rollouts and filtered_rollouts_save_path and run_name is not None:
+                filtered_batch = Batch(
+                    queries=k_queries,
+                    ground_truths=k_ground_truths,
+                    datasets=k_datasets,
+                    raw_queries=k_raw_queries,
+                    decoded_responses=decoded_responses,
+                    indices=k_indices,
+                    scores=result.reward_scores,
+                    active_tools=k_active_tools if k_active_tools else None,
+                )
+                save_filtered_rollouts_to_disk(
+                    filtered_rollouts_save_path,
+                    run_name,
+                    training_step if training_step is not None else -1,
+                    "zero_std_reward",
+                    filtered_batch,
+                    result,
+                    generation_config.n,
+                    total_filtered_prompts * generation_config.n,
+                )
 
             total_filtered_prompts += 1
             if result.reward_scores[0] == 0:
@@ -1568,7 +1602,8 @@ class DataPreparationActor:
     def _data_preparation_loop(self):
         logger.info("[DataPreparationActor] Starting _data_preparation_loop")
 
-        if self.config.save_traces and self.config.rollouts_save_path and not self.metadata_saved:
+        should_save_rollout_metadata = self.config.save_traces or self.config.save_filtered_rollouts
+        if should_save_rollout_metadata and self.config.rollouts_save_path and not self.metadata_saved:
             save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
             self.metadata_saved = True
 
@@ -1619,6 +1654,9 @@ class DataPreparationActor:
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
                 image_prewarm_actors=self.image_prewarm_actors,
+                save_filtered_rollouts=self.config.save_filtered_rollouts,
+                filtered_rollouts_save_path=os.path.join(self.config.rollouts_save_path, "filtered"),
+                run_name=self.run_name,
             )
             logger.info(
                 f"[DataPreparationActor] Step {step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
