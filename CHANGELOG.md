@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Record a `_metrics_keepalive` metric on every rank every GRPO+OLMo-core step to keep `_metrics` non-empty, preventing OLMo-core's empty-skip in `_log_metrics` from desyncing the bookkeeping process group and deadlocking gloo for 30 minutes at save-time flushes (https://github.com/allenai/open-instruct/pull/1708).
+- Expand type-checking coverage by replacing `# ty: ignore` directives with typed casts and fixing related type issues (https://github.com/allenai/open-instruct/pull/1688).
+- Add TV divergence rho filtering for GRPO (https://github.com/allenai/open-instruct/pull/1681).
 - Export `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug` in `scripts/train/debug/grpo.sh` and `grpo_fast.sh` (local Ray debug scripts that disable torch compile) so setuptools-scm can resolve the package version (https://github.com/allenai/open-instruct/pull/1696).
 - Simplify GRPO clip fraction handling by returning the final policy loss and clip fraction directly from `compute_grpo_loss` (https://github.com/allenai/open-instruct/pull/1679).
 - Bring `grpo.py` (OLMo-core GRPO) to feature parity with `grpo_fast.py`: add `EvalCallback`, `setup_eval` actor RPC, unconditional vLLM-sync callback, `ConstantWithWarmup` scheduler support, and `StepTimingCallback` end-to-end step timing (https://github.com/allenai/open-instruct/pull/1672).
