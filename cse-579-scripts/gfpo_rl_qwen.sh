@@ -16,12 +16,16 @@
 #   - No --length_reward_* args (GFPO and shaping are mutually exclusive).
 #   - --gfpo_filter_metric / --gfpo_retain_k instead.
 #
-# Note: at G=16 the per-step generation (1024 long sequences) takes >120s to
-# drain before vLLM can pause for a weight sync, which tripped the old 120s
-# WEIGHT_SYNC_TIMEOUT_S and killed the run at step ~2. We bumped that constant
-# (grpo_fast.py) to 600s rather than enabling inflight_updates, so this run keeps
-# inflight_updates=False — identical weight-sync semantics to the baseline/shaping
-# runs, for a fair comparison.
+# Note: at G=16 the EARLY steps on a base model emit a heavy tail of max-length
+# non-stopping rollouts; the 16x generation drain before a weight sync (with
+# inflight_updates off) can blow the timeout and kill the run in the opening steps.
+# It's a nondeterministic lottery (same seed/metric, crashes at step ~2 on one
+# launch and runs 100s of steps on another), not a code/degeneration issue. To keep
+# inflight_updates=False (identical weight-sync semantics to the baseline/shaping
+# runs — fair comparison) we instead (a) bump WEIGHT_SYNC_TIMEOUT_S to 1200s in
+# grpo_fast.py so each attempt is more likely to clear the opening window, and
+# (b) set --max_retries 3 so Beaker re-rolls the lottery (resuming from
+# checkpoint_state_dir if a checkpoint exists, else fresh) until one clears it.
 #
 # Required env vars:
 #   GFPO_METRIC    shortest | token_efficiency
@@ -68,7 +72,7 @@ uv run python mason.py \
     --preemptible \
     --num_nodes 1 \
     --gpus 8 \
-    --max_retries 0 \
+    --max_retries 3 \
     --no_auto_dataset_cache \
     --env RAY_CGRAPH_get_timeout=300 \
     --env "LAUNCH_WANDB_KEY=$LAUNCH_WANDB_KEY" \

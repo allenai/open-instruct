@@ -157,13 +157,15 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 
 
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
-# Bumped from 120s: with large oversampled groups (e.g. GFPO at G=16) the per-step
-# generation of many long sequences can take >120s to drain before the engines can
-# pause for a weight sync (when inflight_updates is off), tripping a false "stuck"
-# timeout. A worst-case full-length (~30k token) generation can approach ~10 min,
-# so allow for it. Raising the ceiling only delays detection of a genuinely stuck
-# run; it does not change training behavior.
-WEIGHT_SYNC_TIMEOUT_S = 600.0
+# Bumped from the original 120s: with large oversampled groups (e.g. GFPO at G=16),
+# the EARLY training steps on a base model produce a heavy tail of max-length
+# (~30k token) non-stopping rollouts. At G=16 there are 16x as many of these per
+# step, so the per-step generation drain before the engines can pause for a weight
+# sync (when inflight_updates is off) can exceed 600s, tripping a false "stuck"
+# timeout in the opening steps (it stabilizes once the model learns to stop).
+# 1200s covers that worst-case opening-step drain. Raising the ceiling only delays
+# detection of a genuinely stuck run; it does not change training behavior.
+WEIGHT_SYNC_TIMEOUT_S = 1200.0
 CLUSTER_STARTUP_TIMEOUT_S = 1200.0
 PLACEMENT_GROUP_READY_TIMEOUT_S = 300.0
 LEARNER_ACTOR_NUM_CPUS = 4
