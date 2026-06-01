@@ -2,9 +2,8 @@
 
 ## Status
 
-- **State**: running (launched 2026-05-29)
-- **Eval state**: not started (auto-launched evals fire every 100 steps; manual
-  fetch once checkpoints land)
+- **State**: training completed (1000 steps, exit 0) on the 2026-05-30 relaunch
+- **Eval state**: submitted 2026-06-01 — oe-eval jobs for steps 100–1000 via `cse-579-scripts/submit_all_current_evals.sh` (priority normal, ai2/saturn+ceres). Fetch with `cse-579-experiments/fetch_eval_results.sh` once the jobs finish.
 - **Last updated**: 2026-05-29
 
 ## Purpose
@@ -31,7 +30,8 @@ schedule alone.
 
 | # | URL | Launched (UTC) | Terminated (UTC) | Exit | Notes |
 |---|-----|----------------|------------------|------|-------|
-| 1 | [01KSTQDC…](https://beaker.org/ex/01KSTQDCJ9RF60W1Z5885BTEYE) | 2026-05-29 20:39 | — | — | running |
+| 1 | [01KSTQDC…](https://beaker.org/ex/01KSTQDCJ9RF60W1Z5885BTEYE) | 2026-05-29 20:39 | 2026-05-30 ~21:50 | deleted | Reached ~step 139; experiment deleted by a colleague by accident. |
+| 2 | [01KSXDZ0…](https://beaker.org/ex/01KSXDZ07VPFHHFBE3V3T2RMGX) | 2026-05-30 21:51 | 2026-05-31 | 0 | Completed all 1000 steps (relaunch, fresh from step 0). |
 
 - **Workspace**: ai2/olmo-instruct
 - **Cluster**: ai2/jupiter

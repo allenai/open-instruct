@@ -9,8 +9,10 @@ runs do not get tracked here — only experiments whose results inform the write
 |------|---------|--------|-------|------|
 | [qwen_4b_base_baseline.md](qwen_4b_base_baseline.md) | No-shaping baseline (Jacob's run) on Qwen3-4B-Base RL-Zero | (Jacob's training; checkpoint on weka) | training complete | retrieved (step_1000) |
 | [qwen_4b_base_linear_alpha1.md](qwen_4b_base_linear_alpha1.md) | First length-shaping run on Qwen3-4B-Base RL-Zero, linear α=1.0 | [01KQTJDA…](https://beaker.org/ex/01KQTJDAE5J37VZ0VRXKEHGWTY) | training complete (reward-hacked) | retrieved (step_1000) |
-| [qwen_4b_base_linear_alpha1_warmup_linear.md](qwen_4b_base_linear_alpha1_warmup_linear.md) | linear α=1.0 + step-based warmup (frac=0.5) — does ramping the penalty avoid collapse? | [01KSTQDC…](https://beaker.org/ex/01KSTQDCJ9RF60W1Z5885BTEYE) | running | not started |
-| [qwen_4b_base_linear_alpha1_warmup_solve_rate.md](qwen_4b_base_linear_alpha1_warmup_solve_rate.md) | linear α=1.0 + latched solve-rate warmup (thr=0.55) — gate penalty on competence | [01KSTR2C…](https://beaker.org/ex/01KSTR2CJ3QF43NYGGKQJ1CPVY) | running | not started |
+| [qwen_4b_base_linear_alpha1_warmup_linear.md](qwen_4b_base_linear_alpha1_warmup_linear.md) | linear α=1.0 + step-based warmup (frac=0.5) — does ramping the penalty avoid collapse? | [01KSXDZ0…](https://beaker.org/ex/01KSXDZ07VPFHHFBE3V3T2RMGX) | training complete | submitted (steps 100–1000) |
+| [qwen_4b_base_linear_alpha1_warmup_solve_rate.md](qwen_4b_base_linear_alpha1_warmup_solve_rate.md) | linear α=1.0 + latched solve-rate warmup (thr=0.55) — gate penalty on competence | [01KSXDZ2…](https://beaker.org/ex/01KSXDZ2TMB7K2PM813R1K2403) | training complete | submitted (steps 100–1000) |
+| [qwen_4b_base_gfpo_shortest.md](qwen_4b_base_gfpo_shortest.md) | GFPO baseline (comparison method), Shortest filter, G=16/k=8 | [01KSXDZA…](https://beaker.org/ex/01KSXDZAHMG54BQYZ6ZM96929Y) | running (attempt 4) | submitted (steps 100–600) |
+| [qwen_4b_base_gfpo_token_efficiency.md](qwen_4b_base_gfpo_token_efficiency.md) | GFPO baseline (comparison method), Token-efficiency filter, G=16/k=8 | [01KT07XH…](https://beaker.org/ex/01KT07XH59FKN4XRPEG4DKZ71Q) | running (attempt 6) | submitted (steps 100–300) |
 
 ## Design follow-ups
 

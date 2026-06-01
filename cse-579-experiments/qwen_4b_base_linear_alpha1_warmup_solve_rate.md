@@ -2,9 +2,8 @@
 
 ## Status
 
-- **State**: running (launched 2026-05-29)
-- **Eval state**: not started (auto-launched evals fire every 100 steps; manual
-  fetch once checkpoints land)
+- **State**: training completed (1000 steps, exit 0) on the 2026-05-30 relaunch
+- **Eval state**: submitted 2026-06-01 — oe-eval jobs for steps 100–1000 via `cse-579-scripts/submit_all_current_evals.sh` (priority normal, ai2/saturn+ceres). Fetch with `cse-579-experiments/fetch_eval_results.sh` once the jobs finish.
 - **Last updated**: 2026-05-29
 
 ## Purpose
@@ -53,7 +52,8 @@ actor's `get_state`/`set_state` so a preempted+resumed run doesn't un-latch.
 | # | URL | Launched (UTC) | Terminated (UTC) | Exit | Notes |
 |---|-----|----------------|------------------|------|-------|
 | 1 | [01KSTQDR…](https://beaker.org/ex/01KSTQDR0J0JB179FH594XRN6D) | 2026-05-29 20:40 | 2026-05-29 20:51 | cancelled | thr=0.3 — latches at step 1 ≈ constant warmup; cancelled before training (see Threshold calibration) |
-| 2 | [01KSTR2C…](https://beaker.org/ex/01KSTR2CJ3QF43NYGGKQJ1CPVY) | 2026-05-29 20:51 | — | — | running; thr=0.55 |
+| 2 | [01KSTR2C…](https://beaker.org/ex/01KSTR2CJ3QF43NYGGKQJ1CPVY) | 2026-05-29 20:51 | 2026-05-30 ~21:50 | deleted | thr=0.55; reached ~step 379, experiment deleted by a colleague by accident. |
+| 3 | [01KSXDZ2…](https://beaker.org/ex/01KSXDZ2TMB7K2PM813R1K2403) | 2026-05-30 21:51 | 2026-05-31 | 0 | Completed all 1000 steps (relaunch, fresh from step 0); thr=0.55. |
 
 - **Workspace**: ai2/olmo-instruct
 - **Cluster**: ai2/jupiter
