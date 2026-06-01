@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- Add `minimax-m3` to `PRICE_PER_MILLION_TOKENS` in `open_instruct/judge_utils.py` for cost tracking on the latest MiniMax flagship model.
+
 ### Changed
 - Expand type-checking coverage by replacing `# ty: ignore` directives with typed casts and fixing related type issues (https://github.com/allenai/open-instruct/pull/1688).
 - Add TV divergence rho filtering for GRPO (https://github.com/allenai/open-instruct/pull/1681).

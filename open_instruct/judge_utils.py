@@ -21,6 +21,7 @@ PRICE_PER_MILLION_TOKENS = {
     "deepseek-chat": {"input": 0.07, "output": 1.0},
     "deepseek-reasoner": {"input": 0.14, "output": 2.0},
     "claude-3-7-sonnet-20250219": {"input": 3.0, "output": 15.0},
+    "minimax-m3": {"input": 0.6, "output": 2.4},
     "minimax-m2.7": {"input": 0.3, "output": 1.2},
     "minimax-m2.7-highspeed": {"input": 0.6, "output": 2.4},
 }
