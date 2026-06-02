@@ -114,15 +114,17 @@ class TrainingConfig:
 
     "budget" uses torch.compile's partitioner with `activation_memory_budget` (requires compilation,
     and cannot checkpoint through opaque custom ops such as the GDN `fla` kernels). "full" wraps every
-    transformer block in `torch.utils.checkpoint`, keeping only one block's activations live at a time,
-    which is required to fit linear-attention (GDN) models at long sequence lengths. "selected_modules"
-    wraps only the modules in `activation_checkpointing_modules` (by default every block submodule
-    except the GDN mixer), leaving the opaque GDN mixer activations live so they are never recomputed,
-    which lets `torch.compile` coexist with checkpointing (the recomputed regions are compile-safe).
+    transformer block in `torch.utils.checkpoint`, applying compile *outside* the checkpoint, whose
+    recompute re-enters the compiled block's backward and fails an inductor stride guard — so "full"
+    is incompatible with `torch.compile` for GDN models. "selected_modules" wraps the individual block
+    submodules in `activation_checkpointing_modules` (by default all of them, including the GDN mixer),
+    which keeps compile *outside* the checkpoint boundary (the supported order) while still recovering
+    full-block memory savings, letting `torch.compile` coexist with checkpointing at long sequences.
     """
     activation_checkpointing_modules: list[str] = field(
         default_factory=lambda: [
             "blocks.*.attention_norm",
+            "blocks.*.attention",
             "blocks.*.attention_residual_stream",
             "blocks.*.feed_forward_norm",
             "blocks.*.feed_forward",
@@ -131,9 +133,11 @@ class TrainingConfig:
     )
     """Module-name globs to wrap when `activation_checkpointing_mode` is "selected_modules".
 
-    Defaults to every transformer-block submodule except the GDN mixer (`blocks.*.attention`), so the
-    opaque `fla` kernel activations stay resident (never recomputed) while everything else is
-    checkpointed, which both recovers memory and keeps `torch.compile` compatible.
+    Defaults to every transformer-block submodule, including the GDN mixer (`blocks.*.attention`).
+    Wrapping submodules individually (rather than the whole block, as "full" does) keeps `torch.compile`
+    *outside* the checkpoint boundary, which is the order compile supports, while still recovering
+    full-block activation memory. The opaque `fla` kernel's recompute metadata check is suppressed by
+    `patch_checkpoint_wrapper_determinism_check`.
     """
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
