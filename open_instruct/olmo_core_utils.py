@@ -115,12 +115,25 @@ class TrainingConfig:
     and cannot checkpoint through opaque custom ops such as the GDN `fla` kernels). "full" wraps every
     transformer block in `torch.utils.checkpoint`, keeping only one block's activations live at a time,
     which is required to fit linear-attention (GDN) models at long sequence lengths. "selected_modules"
-    wraps only the modules in `activation_checkpointing_modules` (by default the feed-forward MLPs),
-    leaving the opaque GDN mixer activations live so they are never recomputed, which lets
-    `torch.compile` coexist with checkpointing (the recomputed MLP regions are compile-safe).
+    wraps only the modules in `activation_checkpointing_modules` (by default every block submodule
+    except the GDN mixer), leaving the opaque GDN mixer activations live so they are never recomputed,
+    which lets `torch.compile` coexist with checkpointing (the recomputed regions are compile-safe).
     """
-    activation_checkpointing_modules: list[str] = field(default_factory=lambda: ["blocks.*.feed_forward"])
-    """Module-name globs to wrap when `activation_checkpointing_mode` is "selected_modules"."""
+    activation_checkpointing_modules: list[str] = field(
+        default_factory=lambda: [
+            "blocks.*.attention_norm",
+            "blocks.*.attention_residual_stream",
+            "blocks.*.feed_forward_norm",
+            "blocks.*.feed_forward",
+            "blocks.*.feed_forward_residual_stream",
+        ]
+    )
+    """Module-name globs to wrap when `activation_checkpointing_mode` is "selected_modules".
+
+    Defaults to every transformer-block submodule except the GDN mixer (`blocks.*.attention`), so the
+    opaque `fla` kernel activations stay resident (never recomputed) while everything else is
+    checkpointed, which both recovers memory and keeps `torch.compile` compatible.
+    """
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
     fused_optimizer: bool = True
