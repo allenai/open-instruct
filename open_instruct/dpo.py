@@ -274,6 +274,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         args.activation_checkpointing_mode,
         args.activation_checkpointing_modules,
     )
+    olmo_core_utils.patch_checkpoint_wrapper_determinism_check()
 
     train_module = DPOTrainModule(
         model=model,

@@ -27,6 +27,7 @@ from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingMode,
 )
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
+from torch.distributed.algorithms._checkpoint import checkpoint_wrapper as ptd_checkpoint_wrapper_mod
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -158,6 +159,25 @@ def build_ac_config(
             mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=activation_memory_budget
         )
     return None
+
+
+def patch_checkpoint_wrapper_determinism_check() -> None:
+    """Make olmo-core's activation checkpointing skip torch's recompute determinism check.
+
+    olmo-core hardcodes `ptd_checkpoint_wrapper(block, preserve_rng_state=False)`, leaving torch's
+    `determinism_check="default"`, which compares forward vs. recompute tensor metadata. The opaque
+    `fla` GDN kernel's recompute produces a spurious metadata mismatch under `torch.compile`, raising
+    CheckpointError. Eager recompute already proves the values match, so we forward
+    `determinism_check="none"` to suppress the (metadata-only) check and let full checkpointing and
+    compile coexist.
+    """
+    original = ptd_checkpoint_wrapper_mod.checkpoint_wrapper
+
+    def patched(module, **kwargs):
+        kwargs.setdefault("determinism_check", "none")
+        return original(module, **kwargs)
+
+    ptd_checkpoint_wrapper_mod.checkpoint_wrapper = patched
 
 
 def build_cp_config(training: TrainingConfig) -> TransformerContextParallelConfig | None:
