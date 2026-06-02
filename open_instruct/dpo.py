@@ -269,7 +269,10 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
     )
     ac_config = olmo_core_utils.build_ac_config(
-        args.activation_memory_budget, args.compile_model, args.activation_checkpointing_mode
+        args.activation_memory_budget,
+        args.compile_model,
+        args.activation_checkpointing_mode,
+        args.activation_checkpointing_modules,
     )
 
     train_module = DPOTrainModule(

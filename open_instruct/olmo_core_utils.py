@@ -108,14 +108,19 @@ class TrainingConfig:
     typically faster; lower values use less memory and are typically slower, so use the highest
     value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
     """
-    activation_checkpointing_mode: Literal["budget", "full"] = "budget"
+    activation_checkpointing_mode: Literal["budget", "full", "selected_modules"] = "budget"
     """Activation checkpointing mode.
 
     "budget" uses torch.compile's partitioner with `activation_memory_budget` (requires compilation,
     and cannot checkpoint through opaque custom ops such as the GDN `fla` kernels). "full" wraps every
     transformer block in `torch.utils.checkpoint`, keeping only one block's activations live at a time,
-    which is required to fit linear-attention (GDN) models at long sequence lengths.
+    which is required to fit linear-attention (GDN) models at long sequence lengths. "selected_modules"
+    wraps only the modules in `activation_checkpointing_modules` (by default the feed-forward MLPs),
+    leaving the opaque GDN mixer activations live so they are never recomputed, which lets
+    `torch.compile` coexist with checkpointing (the recomputed MLP regions are compile-safe).
     """
+    activation_checkpointing_modules: list[str] = field(default_factory=lambda: ["blocks.*.feed_forward"])
+    """Module-name globs to wrap when `activation_checkpointing_mode` is "selected_modules"."""
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
     fused_optimizer: bool = True
@@ -127,10 +132,14 @@ class TrainingConfig:
 
 
 def build_ac_config(
-    activation_memory_budget: float, compile_model: bool, mode: str = "budget"
+    activation_memory_budget: float, compile_model: bool, mode: str = "budget", modules: list[str] | None = None
 ) -> TransformerActivationCheckpointingConfig | None:
     if mode == "full":
         return TransformerActivationCheckpointingConfig(mode=TransformerActivationCheckpointingMode.full)
+    if mode == "selected_modules":
+        return TransformerActivationCheckpointingConfig(
+            mode=TransformerActivationCheckpointingMode.selected_modules, modules=modules
+        )
     if activation_memory_budget < 1.0 and compile_model:
         return TransformerActivationCheckpointingConfig(
             mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=activation_memory_budget

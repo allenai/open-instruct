@@ -81,8 +81,8 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --loss_type dpo_norm \
             --beta 5 \
             --packing \
-            --activation_checkpointing_mode full \
-            --compile_model false \
+            --activation_checkpointing_mode selected_modules \
+            --compile_model true \
             --with_tracking
     done
 done
