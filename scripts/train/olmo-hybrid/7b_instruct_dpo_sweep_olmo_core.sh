@@ -82,6 +82,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --beta 5 \
             --packing \
             --activation_checkpointing_mode full \
+            --compile_model false \
             --with_tracking
     done
 done
