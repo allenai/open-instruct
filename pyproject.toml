@@ -45,6 +45,9 @@ dependencies = [
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
     "flash-linear-attention>=0.5.0",
+    # Provides the tilelang backend for fla's gated chunk_bwd_dqkwg, which fla routes to on
+    # Hopper with Triton>=3.4.0 (the Triton kernel produces incorrect gradients there; see fla #640).
+    "tilelang>=0.1.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 
 [build-system]
