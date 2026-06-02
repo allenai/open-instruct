@@ -1842,23 +1842,15 @@ class ModelDims:
     sliding_window: int | None = None
     num_sliding_window_layers: int = 0
     num_linear_attn_layers: int = 0
-    linear_attn_num_k_heads: int | None = None
-    linear_attn_num_v_heads: int | None = None
-    linear_attn_key_head_dim: int | None = None
-    linear_attn_value_head_dim: int | None = None
+    linear_attn_num_k_heads: int = 0
+    linear_attn_num_v_heads: int = 0
+    linear_attn_key_head_dim: int = 0
+    linear_attn_value_head_dim: int = 0
     linear_attn_conv_size: int = 4
 
     def __post_init__(self):
         if self.num_kv_heads is None:
             self.num_kv_heads = self.num_attn_heads
-
-        if self.num_linear_attn_layers > 0:
-            assert None not in (
-                self.linear_attn_num_k_heads,
-                self.linear_attn_num_v_heads,
-                self.linear_attn_key_head_dim,
-                self.linear_attn_value_head_dim,
-            ), "linear attention dims must be set when num_linear_attn_layers > 0"
 
         self.num_params = self.num_params or self._calculate_num_params()
 
@@ -1881,6 +1873,10 @@ class ModelDims:
     @property
     def linear_attn_value_dim(self) -> int:
         return self.linear_attn_num_v_heads * self.linear_attn_value_head_dim
+
+    @property
+    def num_full_attn_layers(self) -> int:
+        return self.num_layers - self.num_sliding_window_layers - self.num_linear_attn_layers
 
     def _gdn_layer_params(self) -> int:
         """Parameter count for one Gated Delta Net (linear attention) layer, excluding MLP."""
@@ -1905,8 +1901,7 @@ class ModelDims:
 
         num_attn_layers = self.num_layers - self.num_linear_attn_layers
         layer_params = self.num_layers * mlp_params + num_attn_layers * attn_params
-        if self.num_linear_attn_layers > 0:
-            layer_params += self.num_linear_attn_layers * self._gdn_layer_params()
+        layer_params += self.num_linear_attn_layers * self._gdn_layer_params()
 
         lm_head_params = self.vocab_size * self.hidden_size
 
@@ -1920,16 +1915,15 @@ class ModelDims:
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
         sliding_window = getattr(config, "sliding_window", None)
+        layer_types = getattr(config, "layer_types", None)
         num_sliding_window_layers = 0
         if sliding_window is not None:
-            layer_types = getattr(config, "layer_types", None)
             if layer_types is not None:
                 num_sliding_window_layers = layer_types.count("sliding_attention")
             else:
                 num_sliding_window_layers = config.num_hidden_layers
         head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
 
-        layer_types = getattr(config, "layer_types", None)
         num_linear_attn_layers = layer_types.count("linear_attention") if layer_types is not None else 0
         linear_attn_kwargs = {}
         if num_linear_attn_layers > 0:
@@ -2039,7 +2033,7 @@ class ModelDims:
 
     def prefill_flops(self, prompt_lengths: list[int]) -> int:
         """Prefill builds the KV cache; logits are computed once after each prompt."""
-        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers - self.num_linear_attn_layers
+        num_full_attn_layers = self.num_full_attn_layers
         num_sliding_layers = self.num_sliding_window_layers
 
         total = 0
@@ -2052,8 +2046,7 @@ class ModelDims:
                     self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
                 )
 
-            if self.num_linear_attn_layers > 0:
-                total += self.num_linear_attn_layers * (self.linear_attn_flops(L) + self.mlp_flops(L))
+            total += self.num_linear_attn_layers * (self.linear_attn_flops(L) + self.mlp_flops(L))
 
             # LM head is applied to each token position during training
             total += L * FLOP_PER_MAC * self.hidden_size * self.vocab_size
@@ -2074,7 +2067,7 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
-        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers - self.num_linear_attn_layers
+        num_full_attn_layers = self.num_full_attn_layers
         num_sliding_layers = self.num_sliding_window_layers
 
         total = 0
@@ -2085,8 +2078,7 @@ class ModelDims:
                 R = response_lengths[response_idx]
                 total += R * self.num_layers * self.mlp_flops(seq_len=1)
                 # Linear attention per-token cost is constant in context length.
-                if self.num_linear_attn_layers > 0:
-                    total += self.num_linear_attn_layers * self.linear_attn_flops(R)
+                total += self.num_linear_attn_layers * self.linear_attn_flops(R)
                 for t in range(R):
                     kv_len = P + t + 1  # prompt + generated so far + current
                     if num_full_attn_layers > 0:
@@ -2192,7 +2184,7 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
-        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers - self.num_linear_attn_layers
+        num_full_attn_layers = self.num_full_attn_layers
         num_sliding_layers = self.num_sliding_window_layers
 
         # For batched sampling with shared prompt KV cache:
@@ -2235,8 +2227,6 @@ class ModelDims:
         cache. Each decode step reads and writes the full state once per layer, independent of
         context length.
         """
-        if self.num_linear_attn_layers == 0:
-            return 0
         state_elems = self.linear_attn_num_v_heads * self.linear_attn_key_head_dim * self.linear_attn_value_head_dim
         # 2x for read + write
         return self.num_linear_attn_layers * num_tokens * 2 * state_elems * dtype_bytes

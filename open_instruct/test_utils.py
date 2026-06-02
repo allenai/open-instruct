@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
+import dataclasses
 import json
 import os
 import pathlib
@@ -68,6 +69,22 @@ MODEL_DIMS: dict[str, utils.ModelDims] = {
         num_attn_heads=16,
         head_dim=128,
         num_kv_heads=8,
+        device_name="h100",
+    ),
+    "olmo-hybrid-7b": utils.ModelDims(
+        num_layers=8,
+        hidden_size=3840,
+        intermediate_size=11008,
+        vocab_size=100352,
+        num_attn_heads=30,
+        head_dim=128,
+        num_kv_heads=30,
+        num_linear_attn_layers=6,
+        linear_attn_num_k_heads=30,
+        linear_attn_num_v_heads=30,
+        linear_attn_key_head_dim=96,
+        linear_attn_value_head_dim=192,
+        linear_attn_conv_size=4,
         device_name="h100",
     ),
 }
@@ -592,6 +609,7 @@ class TestModelDims(unittest.TestCase):
             ("two_engines_four_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 2, 4, 4, 8.0, 4.0),
             ("four_engines_two_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 4, 2, 4, 8.0, 4.0),
             ("single_engine_eight_gpus", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 1, 8, 4, 8.0, 4.0),
+            ("hybrid_two_engines_two_gpus_each", "olmo-hybrid-7b", 8, 2, 256, 256, 4, 2, 2, 4, 8.0, 4.0),
         ]
     )
     def test_multi_engine_utilization(
@@ -771,23 +789,8 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
 
 
 class TestModelDimsHybrid(unittest.TestCase):
-    def _hybrid_dims(self) -> utils.ModelDims:
-        return utils.ModelDims(
-            num_layers=8,
-            hidden_size=3840,
-            intermediate_size=11008,
-            vocab_size=100352,
-            num_attn_heads=30,
-            head_dim=128,
-            num_kv_heads=30,
-            num_linear_attn_layers=6,
-            linear_attn_num_k_heads=30,
-            linear_attn_num_v_heads=30,
-            linear_attn_key_head_dim=96,
-            linear_attn_value_head_dim=192,
-            linear_attn_conv_size=4,
-            device_name="h100",
-        )
+    def _hybrid_dims(self, num_layers: int = 8) -> utils.ModelDims:
+        return dataclasses.replace(MODEL_DIMS["olmo-hybrid-7b"], num_layers=num_layers, num_params=None)
 
     def test_linear_attn_flops_scale_linearly(self):
         dims = self._hybrid_dims()
@@ -796,22 +799,7 @@ class TestModelDimsHybrid(unittest.TestCase):
     def test_decode_flops_constant_per_prompt_length_for_gdn(self):
         # A purely linear-attention model has no growing context, so decode FLOPs are independent
         # of prompt length (unlike softmax attention, where they grow with kv_len).
-        gdn_only = utils.ModelDims(
-            num_layers=6,
-            hidden_size=3840,
-            intermediate_size=11008,
-            vocab_size=100352,
-            num_attn_heads=30,
-            head_dim=128,
-            num_kv_heads=30,
-            num_linear_attn_layers=6,
-            linear_attn_num_k_heads=30,
-            linear_attn_num_v_heads=30,
-            linear_attn_key_head_dim=96,
-            linear_attn_value_head_dim=192,
-            linear_attn_conv_size=4,
-            device_name="h100",
-        )
+        gdn_only = self._hybrid_dims(num_layers=6)
         self.assertEqual(gdn_only.decode_flops([10], [32]), gdn_only.decode_flops([10000], [32]))
 
     def test_gdn_layers_excluded_from_kv_cache(self):
@@ -824,25 +812,6 @@ class TestModelDimsHybrid(unittest.TestCase):
         dims = self._hybrid_dims()
         state_elems = 30 * 96 * 192
         self.assertEqual(dims.gdn_state_bytes(10), 6 * 10 * 2 * state_elems * 2)
-
-    def test_utilization_under_100(self):
-        dims = self._hybrid_dims()
-        prompt_lengths = [256] * 8
-        response_lengths = [256] * 16
-        metrics = utils.calculate_utilization_metrics(
-            model_dims=dims,
-            prompt_lengths=prompt_lengths,
-            response_lengths=response_lengths,
-            total_generation_time=8.0,
-            samples_per_prompt=2,
-            num_engines=2,
-            num_gpus_per_engine=2,
-            training_time=4.0,
-            num_training_gpus=4,
-        )
-        self.assertLessEqual(metrics["actor_mfu"], 100)
-        self.assertLessEqual(metrics["actor_mbu"], 100)
-        self.assertLessEqual(metrics["learner_mfu"], 100)
 
 
 # useful for checking if public datasets are still available
