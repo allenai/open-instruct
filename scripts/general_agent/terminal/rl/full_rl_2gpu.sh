@@ -36,7 +36,7 @@ ray stop --force
 ray start --head --port=8888 --dashboard-host=0.0.0.0
 
 uv run python open_instruct/grpo_fast.py \
-    --exp_name swerl_qwen35_4b_tmax_10k_2gpu_local \
+    --exp_name terminal_local_rl_qwen35_4b_tmax_10k_2gpu \
     --model_name_or_path Qwen/Qwen3.5-4B \
     --dataset_mixer_list hamishivi/swerl-tmax-10k 1.0 \
     --dataset_mixer_list_splits train \
@@ -82,5 +82,6 @@ uv run python open_instruct/grpo_fast.py \
     --seed 42 \
     --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --output_dir output/tmax_rl_2gpu_local \
     --push_to_hub false

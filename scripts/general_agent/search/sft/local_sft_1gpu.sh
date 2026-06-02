@@ -8,7 +8,7 @@ uv run accelerate launch \
     --mixed_precision bf16 \
     --num_processes 1 \
     open_instruct/finetune.py \
-    --exp_name sft_drtulu_local_1gpu \
+    --exp_name drtulu_local_sft_1gpu \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --tokenizer_name Qwen/Qwen3-0.6B \
     --use_liger_kernel \
@@ -23,8 +23,10 @@ uv run accelerate launch \
     --gradient_checkpointing \
     --dataset_mixer_list rl-rag/browsecomp-gptoss-clean-qwen35-sft 50 \
     --report_to none \
-    --with_tracking \
     --logging_steps 1 \
     --seed 42 \
+    --report_to wandb \
+    --with_tracking \
+    --wandb_project_name oe-general-agents \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false

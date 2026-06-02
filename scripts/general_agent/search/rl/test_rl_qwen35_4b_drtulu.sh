@@ -86,7 +86,9 @@ source configs/beaker_configs/ray_node_setup.sh \
     --save_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
+    --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --vllm_enable_prefix_caching \
     --keep_last_n_checkpoints -1 \
     --kl_estimator 3 \

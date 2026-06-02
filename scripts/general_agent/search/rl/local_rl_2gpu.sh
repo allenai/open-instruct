@@ -17,7 +17,7 @@ export RUBRIC_JUDGE_MODEL="${RUBRIC_JUDGE_MODEL:-gpt-4.1}"
 export RUBRIC_GENERATION_MODEL="${RUBRIC_GENERATION_MODEL:-gpt-4.1}"
 
 uv run open_instruct/grpo_fast.py \
-    --exp_name rl_drtulu_local_2gpu \
+    --exp_name drtulu_local_rl_2gpu \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --dataset_mixer_list rl-research/dr-tulu-rl-data 32 \
     --dataset_mixer_list_splits train \
@@ -60,6 +60,7 @@ uv run open_instruct/grpo_fast.py \
     --save_traces \
     --logging_steps 1 \
     --seed 1 \
-    --report_to none \
+    --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --push_to_hub false

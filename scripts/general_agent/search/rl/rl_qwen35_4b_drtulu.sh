@@ -5,7 +5,7 @@
 # Launch via Beaker:
 #   ./scripts/train/build_image_and_launch.sh scripts/train/dr-tulu/dr_tulu_qwen35.sh
 
-EXP_NAME="${EXP_NAME:-dr_tulu_qwen35_4b}"
+EXP_NAME="${EXP_NAME:-drtulu_rl_qwen35_4b}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B"
@@ -86,7 +86,9 @@ source configs/beaker_configs/ray_node_setup.sh \
     --save_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
+    --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --vllm_enable_prefix_caching \
     --keep_last_n_checkpoints -1 \
     --kl_estimator 3 \

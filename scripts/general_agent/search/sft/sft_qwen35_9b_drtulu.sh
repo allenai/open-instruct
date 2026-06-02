@@ -28,7 +28,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name qwen35_9b_drtulu_sft_sample \
+    --exp_name drtulu_sft_qwen35_9b \
     --model_name_or_path $MODEL \
     --tokenizer_name $TOKENIZER \
     --sequence_parallel_size 2 \
@@ -48,5 +48,7 @@ uv run python mason.py \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --logging_steps 1 \
-    --seed 42
+    --seed 42 \
+    --wandb_project_name oe-general-agents

@@ -20,7 +20,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 1 \
     --gpus 8 \
     -- \
     accelerate launch \
@@ -30,7 +30,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name sft_qwen35_9b_our_sft \
+    --exp_name terminal_sft_qwen35_9b_our_sft_sample \
     --model_name_or_path $MODEL \
     --tokenizer_name $TOKENIZER \
     --sequence_parallel_size 4 \
@@ -43,7 +43,7 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
     --dataset_mixer_list \
-        $DATASET 1.0 \
+        $DATASET 0.2 \
     --dataset_mixer_list_config_names \
         $DATASET_CONFIG \
     --dataset_mixer_list_splits \
@@ -51,5 +51,6 @@ uv run python mason.py \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --logging_steps 1 \
     --seed 42

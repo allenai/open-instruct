@@ -12,7 +12,7 @@ export SWERL_DOCKER_AUTO_REMOVE=1
 export SWERL_SANDBOX_TIMING_LOGS=1
 
 uv run python open_instruct/grpo_fast.py \
-    --exp_name tmax_rl_local_2gpu \
+    --exp_name terminal_local_rl_tmax_2gpu \
     --model_name_or_path Qwen/Qwen3-0.6B \
     --dataset_mixer_list hamishivi/swerl-tmax-10k 32 \
     --dataset_mixer_list_splits train \
@@ -49,7 +49,8 @@ uv run python open_instruct/grpo_fast.py \
     --local_eval_every 8 \
     --logging_steps 1 \
     --seed 42 \
-    --report_to none \
+    --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --output_dir output/tmax_rl_local_2gpu \
     --push_to_hub false
