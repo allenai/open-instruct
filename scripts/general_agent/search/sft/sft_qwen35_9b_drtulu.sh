@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# SFT for Qwen3.5-9B on rl-rag/browsecomp-gptoss-clean-qwen35-sft.
-# 1 nodes x 8 GPUs = 8 GPUs, SP=2, 10k seq len.
+# SFT for Qwen3.5-9B on hamishivi/sft_ablations_bc_only_v1_sanitized
+# 4 nodes x 32 GPUs = 8 GPUs
 
 BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
-MODEL="Qwen/Qwen3.5-9B"
-# MODEL="hamishivi/Qwen3.5-9B"
-TOKENIZER="Qwen/Qwen3.5-9B"
-# TOKENIZER="hamishivi/Qwen3.5-9B"
-DATASET="rl-rag/browsecomp-gptoss-clean-qwen35-sft"
-# DATASET="hamishivi/sft_ablations_bc_only_v1_sanitized"
+# MODEL="Qwen/Qwen3.5-9B"
+MODEL="hamishivi/Qwen3.5-9B"
+# TOKENIZER="Qwen/Qwen3.5-9B"
+TOKENIZER="hamishivi/Qwen3.5-9B"
+# DATASET="rl-rag/browsecomp-gptoss-clean-qwen35-sft"
+DATASET="hamishivi/sft_ablations_bc_only_v1_sanitized"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -18,7 +18,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 4 \
     --gpus 8 \
     -- \
     accelerate launch \
@@ -28,11 +28,11 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name drtulu_sft_qwen35_9b \
+    --exp_name drtulu_sft_qwen35_9b_v1_sanitized_full_reasoning \
     --model_name_or_path $MODEL \
     --tokenizer_name $TOKENIZER \
-    --sequence_parallel_size 2 \
-    --max_seq_length 10240 \
+    --sequence_parallel_size 4 \
+    --max_seq_length 131072 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
@@ -50,5 +50,4 @@ uv run python mason.py \
     --with_tracking \
     --wandb_project_name oe-general-agents \
     --logging_steps 1 \
-    --seed 42 \
-    --wandb_project_name oe-general-agents
+    --seed 42
