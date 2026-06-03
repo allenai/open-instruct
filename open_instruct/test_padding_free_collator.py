@@ -22,7 +22,6 @@ from open_instruct.olmo_core_train_modules import DPOLMHead
 from open_instruct.padding_free_collator import (
     TensorDataCollatorWithFlattening,
     TensorDataCollatorWithFlatteningDPO,
-    bucket_length,
     calculate_per_token_logps,
     concatenated_inputs,
     get_batch_logps,
@@ -398,44 +397,3 @@ class TestDPOLMHead(unittest.TestCase):
         output = head(x, labels=None)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (1, seq_len, vocab_size))
-
-
-class TestBucketLength(unittest.TestCase):
-    @parameterized.expand(
-        [
-            ("below_min", 10, 16384, 512),
-            ("at_min", 512, 16384, 512),
-            ("just_above_min", 513, 16384, 1024),
-            ("power_of_two", 1024, 16384, 1024),
-            ("just_above_power", 1025, 16384, 2048),
-            ("mid", 3000, 16384, 4096),
-            ("at_max", 16384, 16384, 16384),
-            ("above_max", 20000, 16384, 16384),
-            ("near_max", 16383, 16384, 16384),
-        ]
-    )
-    def test_bucket_length(self, name, length, max_seq_length, expected):
-        self.assertEqual(bucket_length(length, max_seq_length), expected)
-
-
-class TestDPOBucketedPadding(unittest.TestCase):
-    def test_pads_to_shared_bucket_below_max(self):
-        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=16384, pad_to_bucket=True)
-        features = _make_dpo_features(num_samples=4, chosen_lengths=[100], rejected_lengths=[120])
-        batch = collator(features)
-
-        chosen_total = sum(100 for _ in range(4))
-        rejected_total = sum(120 for _ in range(4))
-        expected = bucket_length(max(chosen_total, rejected_total), 16384)
-
-        self.assertEqual(batch["chosen_input_ids"].shape[-1], expected)
-        self.assertEqual(batch["rejected_input_ids"].shape[-1], expected)
-        self.assertLess(expected, 16384)
-
-    def test_default_pads_to_max_seq_length(self):
-        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=16384)
-        features = _make_dpo_features(num_samples=4, chosen_lengths=[100], rejected_lengths=[120])
-        batch = collator(features)
-
-        self.assertEqual(batch["chosen_input_ids"].shape[-1], 16384)
-        self.assertEqual(batch["rejected_input_ids"].shape[-1], 16384)

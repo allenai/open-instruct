@@ -79,5 +79,53 @@ class TestWorldAwarePacking(unittest.TestCase):
                 self.assertEqual(all_indices, expected_indices, f"Missing indices: {expected_indices - all_indices}")
 
 
+def _make_fixed_length_dpo_dataset(num_samples: int, seq_len: int) -> Dataset:
+    rng = torch.Generator().manual_seed(42)
+    data = {
+        "chosen_input_ids": [torch.randint(0, 1000, (seq_len,), generator=rng) for _ in range(num_samples)],
+        "chosen_labels": [torch.randint(0, 1000, (seq_len,), generator=rng) for _ in range(num_samples)],
+        "rejected_input_ids": [torch.randint(0, 1000, (seq_len,), generator=rng) for _ in range(num_samples)],
+        "rejected_labels": [torch.randint(0, 1000, (seq_len,), generator=rng) for _ in range(num_samples)],
+        "index": list(range(num_samples)),
+    }
+    ds = Dataset.from_dict(data)
+    ds.set_format(type="pt")
+    return ds
+
+
+class TestTokenBudgetPacking(unittest.TestCase):
+    def test_packs_to_token_budget_not_sample_cap(self):
+        max_seq_length = 16384
+        seq_len = 100
+        num_samples = 200
+        global_batch_size = 4
+        dataset = _make_fixed_length_dpo_dataset(num_samples, seq_len)
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            loader = data_loader.HFDataLoader(
+                dataset=dataset,
+                batch_size=global_batch_size,
+                seed=42,
+                dp_rank=0,
+                dp_world_size=1,
+                work_dir=work_dir,
+                collator=collator,
+                drop_last=False,
+            )
+
+            batch_sizes = []
+            seen_indices = set()
+            for batch in loader:
+                num_seqs = len(batch["index"])
+                batch_sizes.append(num_seqs)
+                seen_indices.update(batch["index"].tolist())
+                self.assertLessEqual(batch["chosen_cu_seq_lens_k"][-1].item(), max_seq_length)
+                self.assertLessEqual(batch["rejected_cu_seq_lens_k"][-1].item(), max_seq_length)
+
+            self.assertGreater(max(batch_sizes), global_batch_size)
+            self.assertEqual(seen_indices, set(range(num_samples)))
+
+
 if __name__ == "__main__":
     unittest.main()

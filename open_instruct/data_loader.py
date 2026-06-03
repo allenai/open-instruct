@@ -324,9 +324,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         for i in range(len(all_indices)):
             new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
             would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
-            at_max_samples = len(current_batch) >= self._per_rank_batch_size
 
-            if would_exceed or at_max_samples:
+            if would_exceed:
                 batches.append(current_batch)
                 current_batch = [i]
                 running_totals = list(lengths[i])
