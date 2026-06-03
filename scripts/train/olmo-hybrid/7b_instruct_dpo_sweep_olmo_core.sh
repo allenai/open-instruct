@@ -24,6 +24,9 @@ EXP_TAG="${EXP_TAG:-}"
 PROFILING="${PROFILING:-false}"
 PROFILING_FLAG=""
 if [ "$PROFILING" = "true" ]; then PROFILING_FLAG="--profiling"; fi
+MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-}"
+MAX_TRAIN_STEPS_FLAG=""
+if [ -n "$MAX_TRAIN_STEPS" ]; then MAX_TRAIN_STEPS_FLAG="--max_train_steps $MAX_TRAIN_STEPS"; fi
 AC_MODULES_FLAG=""
 if [ -n "$AC_MODULES" ]; then AC_MODULES_FLAG="--activation_checkpointing_modules $AC_MODULES"; fi
 TENSOR_PARALLEL_DEGREE="${TENSOR_PARALLEL_DEGREE:-1}"
@@ -101,6 +104,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             $AC_MODULES_FLAG \
             --compile_model true \
             $PROFILING_FLAG \
+            $MAX_TRAIN_STEPS_FLAG \
             --with_tracking
     done
 done

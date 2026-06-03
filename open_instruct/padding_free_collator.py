@@ -7,6 +7,20 @@ from transformers import DefaultDataCollator
 from open_instruct import tensor_utils
 
 
+def bucket_length(length: int, max_seq_length: int, min_bucket: int = 512) -> int:
+    """Round ``length`` up to the next power of two, clamped to [min_bucket, max_seq_length].
+
+    Padding every packed microbatch to ``max_seq_length`` wastes compute when batches are
+    short (the model's matmuls run over the padding). Bucketing to a small fixed set of
+    power-of-two lengths keeps torch.compile from recompiling for every distinct packed
+    length while padding far less than the full ``max_seq_length``.
+    """
+    if length >= max_seq_length:
+        return max_seq_length
+    bucket = max(min_bucket, 1 << max(length - 1, 0).bit_length())
+    return min(bucket, max_seq_length)
+
+
 def calculate_per_token_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     shifted_labels = torch.full_like(labels, -100)
     shifted_labels[:, :-1] = labels[:, 1:]
@@ -87,8 +101,9 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
     return_seq_idx: bool = True
     separator_id: int = -100
     max_seq_length: int | None = None
+    pad_to_bucket: bool = False
 
-    def __call__(self, features, return_tensors=None, separator_id=None):
+    def __call__(self, features, return_tensors=None, separator_id=None, pad_target=None):
         if return_tensors is None:
             return_tensors = self.return_tensors
         if separator_id is None:
@@ -111,12 +126,17 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             ret["seq_idx"] = torch.cat(seq_idx, dim=0)[None]
 
         if self.max_seq_length is not None:
-            ret["input_ids"] = tensor_utils.pad_to_length(ret["input_ids"], self.max_seq_length, pad_value=0)
-            ret["labels"] = tensor_utils.pad_to_length(ret["labels"], self.max_seq_length, pad_value=-100)
+            if pad_target is None:
+                content_length = ret["input_ids"].shape[-1]
+                pad_target = (
+                    bucket_length(content_length, self.max_seq_length) if self.pad_to_bucket else self.max_seq_length
+                )
+            ret["input_ids"] = tensor_utils.pad_to_length(ret["input_ids"], pad_target, pad_value=0)
+            ret["labels"] = tensor_utils.pad_to_length(ret["labels"], pad_target, pad_value=-100)
             if "position_ids" in ret:
-                ret["position_ids"] = tensor_utils.pad_to_length(ret["position_ids"], self.max_seq_length, pad_value=0)
+                ret["position_ids"] = tensor_utils.pad_to_length(ret["position_ids"], pad_target, pad_value=0)
             if "seq_idx" in ret:
-                ret["seq_idx"] = tensor_utils.pad_to_length(ret["seq_idx"], self.max_seq_length, pad_value=-1)
+                ret["seq_idx"] = tensor_utils.pad_to_length(ret["seq_idx"], pad_target, pad_value=-1)
         return ret
 
 
@@ -144,14 +164,28 @@ def count_features_within_token_budget(features: list[dict[str, Any]], max_seq_l
 
 @dataclass
 class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
-    def __call__(self, features, return_tensors=None, separator_id=None):
+    def __call__(self, features, return_tensors=None, separator_id=None, pad_target=None):
         keep = count_features_within_token_budget(features, self.max_seq_length)
         features = features[:keep]
+
+        # Pad chosen and rejected to a single shared bucket so the concatenated sequence
+        # (see concatenated_inputs) only ever takes one of a few static lengths under compile.
+        if pad_target is None and self.max_seq_length is not None and self.pad_to_bucket:
+            chosen_len = sum(len(f["chosen_input_ids"]) for f in features)
+            rejected_len = sum(len(f["rejected_input_ids"]) for f in features)
+            pad_target = bucket_length(max(chosen_len, rejected_len), self.max_seq_length)
+
         chosen_features = super().__call__(
-            _filter_feature_dicts(features, "chosen_"), return_tensors=return_tensors, separator_id=separator_id
+            _filter_feature_dicts(features, "chosen_"),
+            return_tensors=return_tensors,
+            separator_id=separator_id,
+            pad_target=pad_target,
         )
         rejected_features = super().__call__(
-            _filter_feature_dicts(features, "rejected_"), return_tensors=return_tensors, separator_id=separator_id
+            _filter_feature_dicts(features, "rejected_"),
+            return_tensors=return_tensors,
+            separator_id=separator_id,
+            pad_target=pad_target,
         )
 
         result = {}
