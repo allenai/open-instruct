@@ -701,7 +701,8 @@ if args.run_oe_eval_experiments:
     # double GPUs for reasoning models
     if args.oe_eval_task_suite == "SAFETY_EVAL_REASONING":
         num_gpus *= 2
-    oe_eval_cmd += f" --num_gpus {num_gpus}"
+    # oe_eval_cmd += f" --num_gpus {num_gpus}"
+    oe_eval_cmd += f" --num_gpus 2"
 
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
