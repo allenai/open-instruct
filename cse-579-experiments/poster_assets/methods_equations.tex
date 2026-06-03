@@ -1,0 +1,47 @@
+
+\documentclass[border=8pt]{standalone}
+\usepackage{amsmath,amssymb,booktabs,array}
+\usepackage{xcolor}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\definecolor{uwpurple}{HTML}{4B2E83}
+\definecolor{textdark}{HTML}{25313D}
+\begin{document}
+
+\begin{minipage}{6.8in}
+\color{textdark}
+\large
+\textbf{\color{uwpurple} Length-aware shaping.}
+For prompt group rewards $r_i$, response lengths $L_i$, correct set
+$C=\{i:r_i>0\}$, and $L_{\min}=\min_{j\in C} L_j$, incorrect responses keep raw reward.
+\[
+\begin{aligned}
+\textbf{Linear:}\quad
+r'_i &= r_i\max\!\left(0,1-\alpha\frac{L_i-L_{\min}}{L_{\min}}\right) \\[2mm]
+\textbf{Exponential:}\quad
+r'_i &= r_i\exp\!\left(-\lambda\frac{L_i-L_{\min}}{L_{\min}}\right) \\[2mm]
+\textbf{Ranked:}\quad
+r'_i &= \frac{r_i}{1+\operatorname{Rank}(L_i)} \\[2mm]
+\textbf{Binary shortest:}\quad
+r'_i &= r_i\,\mathbf{1}[L_i=L_{\min}] \\[2mm]
+\textbf{Soft threshold:}\quad
+T &= \operatorname{median}\{L_j:j\in C\},\qquad
+r'_i =
+\begin{cases}
+r_i, & L_i\le T\\
+r_i\max\!\left(0,1-\frac{L_i-T}{T}\right), & L_i>T
+\end{cases}
+\end{aligned}
+\]
+\vspace{1mm}
+
+\textbf{\color{uwpurple} Warm-up.}
+\[
+r_i^{\mathrm{train}}=(1-w_t)r_i+w_t r'_i,\qquad
+w_t=\min\!\left(1,\frac{\text{num\_steps}}{\text{num\_total\_steps}}\right).
+\]
+Alternatively, solve-rate warm-up keeps $w_t=0$ until the batch solve rate first
+hits a chosen threshold; once it has hit, $w_t=1$ for the rest of training.
+\end{minipage}
+
+\end{document}

@@ -1,0 +1,28 @@
+
+\documentclass[border=8pt]{standalone}
+\usepackage{amsmath,amssymb,booktabs,array}
+\usepackage{xcolor}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\definecolor{uwpurple}{HTML}{4B2E83}
+\definecolor{textdark}{HTML}{25313D}
+\begin{document}
+
+\begin{minipage}{8.8in}
+\color{textdark}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{llll}
+\toprule
+\textbf{Domain} & \textbf{Benchmark} & \textbf{Primary metric} & \textbf{Purpose}\\
+\midrule
+Math, moderate & Minerva Math 500 (Lewkowycz et al., 2022) & exact-answer score & Core math reasoning\\
+Math, hard & AIME 2025 (HF set) & pass@1 and pass@32 & Hard problems where lengths grow most\\
+Code & LiveCodeBench generation (Jain et al., 2024) & pass@1 & Code generation and cross-domain brevity\\
+Instruction following & IFEval / ifbench wildchat + OOD (Zhou et al., 2023) & instruction-following accuracy & Precise instruction following\\
+Chat quality & AlpacaEval v3 (Li et al., 2023) & length-controlled win rate & General quality and verbosity\\
+\bottomrule
+\end{tabular}
+\end{minipage}
+
+\end{document}

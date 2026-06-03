@@ -1,0 +1,35 @@
+
+\documentclass[border=8pt]{standalone}
+\usepackage{amsmath,amssymb,booktabs,array}
+\usepackage{xcolor}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\definecolor{uwpurple}{HTML}{4B2E83}
+\definecolor{textdark}{HTML}{25313D}
+\begin{document}
+
+\begin{minipage}{6.7in}
+\color{textdark}
+\large
+\textbf{\color{uwpurple} GFPO baseline (Shrivastava et al., 2025).}
+GFPO oversamples $G$ responses, keeps a top-$k$ subset $S$, and zeroes
+gradient from the dropped responses.
+\[
+\begin{aligned}
+S &= \operatorname{TopK}_{m}\{1,\ldots,G\},\\
+m_i &=
+\begin{cases}
+-L_i, & \text{shortest filter}\\
+r_i/\max(L_i,1), & \text{token-efficiency filter}
+\end{cases}\\[1mm]
+\mu_S &= \frac{1}{|S|}\sum_{j\in S} r_j,\qquad
+\sigma_S=\sqrt{\frac{1}{|S|}\sum_{j\in S}(r_j-\mu_S)^2}\\[1mm]
+A_i^{\mathrm{GFPO}} &=
+\mathbf{1}[i\in S]\frac{r_i-\mu_S}{\sigma_S+\epsilon}.
+\end{aligned}
+\]
+Our reproduction uses $G=16$, $k=8$, raw rewards unchanged, and dropped
+responses kept in batch with zero advantage.
+\end{minipage}
+
+\end{document}
