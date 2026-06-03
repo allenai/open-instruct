@@ -14,6 +14,20 @@
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
+# MFU-tuning knobs (defaults reproduce the original fully-sharded config).
+FSDP_SHARD_DEGREE="${FSDP_SHARD_DEGREE:-32}"
+FSDP_NUM_REPLICAS="${FSDP_NUM_REPLICAS:-1}"
+ACTIVATION_CHECKPOINTING_MODE="${ACTIVATION_CHECKPOINTING_MODE:-selected_modules}"
+PER_DEVICE_TRAIN_BATCH_SIZE="${PER_DEVICE_TRAIN_BATCH_SIZE:-1}"
+GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-4}"
+EXP_TAG="${EXP_TAG:-}"
+PROFILING="${PROFILING:-false}"
+PROFILING_FLAG=""
+if [ "$PROFILING" = "true" ]; then PROFILING_FLAG="--profiling"; fi
+AC_MODULES_FLAG=""
+if [ -n "$AC_MODULES" ]; then AC_MODULES_FLAG="--activation_checkpointing_modules $AC_MODULES"; fi
+TENSOR_PARALLEL_DEGREE="${TENSOR_PARALLEL_DEGREE:-1}"
+
 SFT_MODELS=(
     allenai/Olmo-Hybrid-Instruct-SFT-7B
 )
@@ -28,7 +42,7 @@ CONFIG_NAME=olmo3_hybrid_7B
 
 for MODEL_PATH in "${SFT_MODELS[@]}"; do
     for LR in "${DPO_LRS[@]}"; do
-        EXP_NAME="hybrid-7b-DPO-oc-0219-SFT-public-LR-${LR}"
+        EXP_NAME="hybrid-7b-DPO-oc-0219-SFT-public-LR-${LR}${EXP_TAG}"
         echo "====================================="
         echo "Launching: ${EXP_NAME}"
         echo "  SFT model: ${MODEL_PATH}"
@@ -67,9 +81,11 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --chat_template_name olmo123 \
             --mixer_list allenai/Dolci-Instruct-DPO-fixed 259922 \
             --max_seq_length 16384 \
-            --per_device_train_batch_size 1 \
-            --gradient_accumulation_steps 4 \
-            --fsdp_shard_degree 32 \
+            --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \
+            --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS" \
+            --fsdp_shard_degree "$FSDP_SHARD_DEGREE" \
+            --fsdp_num_replicas "$FSDP_NUM_REPLICAS" \
+            --tensor_parallel_degree "$TENSOR_PARALLEL_DEGREE" \
             --learning_rate "$LR" \
             --lr_scheduler_type linear \
             --checkpointing_steps 500 \
@@ -81,8 +97,10 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --loss_type dpo_norm \
             --beta 5 \
             --packing \
-            --activation_checkpointing_mode selected_modules \
+            --activation_checkpointing_mode "$ACTIVATION_CHECKPOINTING_MODE" \
+            $AC_MODULES_FLAG \
             --compile_model true \
+            $PROFILING_FLAG \
             --with_tracking
     done
 done
