@@ -253,29 +253,38 @@ class DPOTrainModule(TransformerTrainModule):
             global_total_tokens = local_sums[0]
             global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
 
-            self.record_metric("train/loss", global_metrics["loss"].item(), reduce_type=None)
-            self.record_metric("train/logps_chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
-            self.record_metric("train/logps_rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
+            self.record_metric("train_loss", global_metrics["loss"].item(), reduce_type=None)
+            self.record_metric("logps/chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
+            self.record_metric("logps/rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
             token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
+            self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
+            if self.trainer.steps_per_epoch is not None:
+                self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
+            if self.scheduler is not None and self.trainer.max_steps is not None:
+                lr = self.scheduler.get_lr(
+                    self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
+                    self.trainer.global_step,
+                    self.trainer.max_steps,
+                )
+                self.record_metric("learning_rate", float(lr), reduce_type=None)
+
             if self.dpo_config.loss_type.computes_reward_metrics:
                 margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
-                self.record_metric("train/rewards_chosen", global_metrics["chosen_rewards"].item(), reduce_type=None)
+                self.record_metric("rewards/chosen", global_metrics["chosen_rewards"].item(), reduce_type=None)
+                self.record_metric("rewards/rejected", global_metrics["rejected_rewards"].item(), reduce_type=None)
                 self.record_metric(
-                    "train/rewards_rejected", global_metrics["rejected_rewards"].item(), reduce_type=None
-                )
-                self.record_metric(
-                    "train/rewards_average",
+                    "rewards/average",
                     ((global_metrics["chosen_rewards"] + global_metrics["rejected_rewards"]) / 2).item(),
                     reduce_type=None,
                 )
-                self.record_metric("train/rewards_accuracy", global_metrics["accuracy"].item(), reduce_type=None)
-                self.record_metric("train/rewards_margin", margin.item(), reduce_type=None)
+                self.record_metric("rewards/accuracy", global_metrics["accuracy"].item(), reduce_type=None)
+                self.record_metric("rewards/margin", margin.item(), reduce_type=None)
 
             if "aux_loss" in global_metrics:
-                self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
+                self.record_metric("aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
 
 
 class GRPOTrainModule(TransformerTrainModule):
