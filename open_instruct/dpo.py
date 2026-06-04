@@ -25,7 +25,7 @@ from olmo_core.train.train_module.transformer import config as transformer_confi
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
 from open_instruct.olmo_core_callbacks import PerfCallback
-from open_instruct.olmo_core_train_modules import DPOTrainModule
+from open_instruct.olmo_core_train_modules import DPOMetricsCallback, DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
@@ -66,6 +66,7 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
         wandb_entity=args.wandb_entity,
         save_async=False,
     )
+    trainer_callbacks["dpo_metrics"] = DPOMetricsCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if args.send_slack_alerts and slack_webhook_url:
         trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(name=run_name, webhook_url=slack_webhook_url)

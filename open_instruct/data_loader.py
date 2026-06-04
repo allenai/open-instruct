@@ -199,9 +199,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
             offsets = [0]
             for batch_size in self._precomputed_batch_sizes:
                 offsets.append(offsets[-1] + batch_size)
-            for group_idx in range(num_groups):
-                if group_idx < self.batches_processed:
-                    continue
+            for group_idx in range(self.batches_processed, num_groups):
                 group = []
                 for mb_idx in range(group_idx * mbs_per_step, (group_idx + 1) * mbs_per_step):
                     examples = []
