@@ -93,6 +93,8 @@ nav:
     - algorithms/grpo_fast_internals.md
     - algorithms/rl_with_environments.md
     - algorithms/rollout_loop_internals.md
+    - algorithms/monitoring_and_debugging_runs.md
+    - algorithms/terminal_rl_trajectory_analysis.md
     - algorithms/multi_task_rl.md
     - algorithms/olmo_core_sharding.md
     - algorithms/olmo_core_reference.md
