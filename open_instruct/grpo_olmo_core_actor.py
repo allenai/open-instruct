@@ -385,7 +385,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             save_folder=save_folder,
             load_strategy=LoadStrategy.if_available,
             max_duration=train.Duration.steps(self.grpo_config.num_training_steps),
-            metrics_collect_interval=10,
+            metrics_collect_interval=1,
             callbacks=trainer_callbacks,
             checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
         ).build(self.train_module, self.dataloader)
