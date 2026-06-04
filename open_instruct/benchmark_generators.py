@@ -53,11 +53,13 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
         timestamp: Unix timestamp
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(csv_path, "a", newline="") as csvfile:
+    with csv_path.open("a", newline="") as csvfile:
         fieldnames = ["batch_num", "prompt_num", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
+        if csvfile.tell() == 0:
+            writer.writeheader()
 
         for batch_result in batch_results:
             response_lengths = batch_result["response_lengths"]
@@ -90,7 +92,7 @@ def save_config(
         "timestamp": timestamp,
     }
 
-    with open(config_path, "w") as f:
+    with config_path.open("w") as f:
         json.dump(config_dict, f, indent=2, default=str)
 
     logger.info(f"Saved config to {config_path}")
@@ -136,13 +138,11 @@ def save_benchmark_results_to_csv(
         ),
     }
 
-    csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
-    csv_dir = csv_path.parent
-    csv_dir.mkdir(parents=True, exist_ok=True)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     with csv_path.open("a", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=list(row_data.keys()))
-        if not csv_path.exists():
+        if csvfile.tell() == 0:
             writer.writeheader()
         writer.writerow(row_data)
     logger.info(f"Saved benchmark results to {csv_path}")

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Simplify `test_benchmark_generators.py`: drop unnecessary mocks, replace `MagicMock` with `SimpleNamespace`, and inline single-use helpers (https://github.com/allenai/open-instruct/pull/1684).
 - Expand type-checking coverage by replacing `# ty: ignore` directives with typed casts and fixing related type issues (https://github.com/allenai/open-instruct/pull/1688).
 - Add TV divergence rho filtering for GRPO (https://github.com/allenai/open-instruct/pull/1681).
 - Export `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+debug` in `scripts/train/debug/grpo.sh` and `grpo_fast.sh` (local Ray debug scripts that disable torch compile) so setuptools-scm can resolve the package version (https://github.com/allenai/open-instruct/pull/1696).
@@ -51,6 +52,7 @@ All notable changes to this project will be documented in this file.
 - Replace olmo-core's `save_hf_model` path with a direct `convert_state_to_hf` + HF `save_pretrained` flow; verify HF export works at startup in `dpo.py`/`grpo.py` (https://github.com/allenai/open-instruct/pull/1671).
 
 ### Fixed
+- Fix CSV header handling in `save_completion_lengths` and `save_benchmark_results_to_csv` in `open_instruct/benchmark_generators.py`: use `csvfile.tell() == 0` so the header is written exactly once across appends. Also convert remaining builtin `open(...)` calls in this file to `pathlib.Path.open(...)` (supersedes #1619 / #1623).
 - Pass packed-sequence `doc_lens`/`max_doc_lens` to OLMo-core models in `forward_for_logprobs` (instead of relying on `attention_mask`), so OLMo-core GRPO uses correct intra-document attention; bumps olmo-core to a commit that accepts these kwargs (https://github.com/allenai/open-instruct/pull/1670).
 - Fix gpt-4o / gpt-4o-standard output pricing (was 10× too low) and restate `open_instruct/judge_utils.py` rates as dollars per 1M tokens (renamed `PRICE_PER_TOKEN` → `PRICE_PER_MILLION_TOKENS`); update the cost calculation in `open_instruct/ground_truth_utils.py` accordingly (supersedes #1618) (https://github.com/allenai/open-instruct/pull/1686).
 - Use processed vLLM logprobs in GRPO rollouts so sampled-token logprobs include sampling transforms like temperature (https://github.com/allenai/open-instruct/pull/1678).
