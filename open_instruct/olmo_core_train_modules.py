@@ -60,7 +60,6 @@ class DPOMetricsCallback(Callback):
         prefix = f"{_DPO_REDUCE_NS}/"
         for key in [k for k in metrics if k.startswith(prefix)]:
             metrics[key[len(prefix) :]] = metrics.pop(key) / tokens
-        metrics["train/token_count"] = tokens
         metrics["train/padding_fraction"] = 1.0 - tokens / padded
 
 
@@ -281,6 +280,11 @@ class DPOTrainModule(TransformerTrainModule):
             self.record_metric(_DPO_TOKENS_KEY, tokens_tensor, reduce_type=ReduceType.sum)
             self.record_metric(
                 _DPO_PADDED_KEY, torch.tensor(float(local_padded_tokens), device=device), reduce_type=ReduceType.sum
+            )
+            # PerfCallback reads train/token_count from the per-step buffer (before the deferred
+            # reduction), so it must be recorded here rather than reconstructed in DPOMetricsCallback.
+            self.record_metric(
+                "train/token_count", float(total_tokens) * self.trainer.data_loader.dp_world_size, reduce_type=None
             )
             weighted_sums = {
                 "train_loss": self._metrics["loss"],
