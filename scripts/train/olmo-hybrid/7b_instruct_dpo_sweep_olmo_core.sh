@@ -101,7 +101,8 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --loss_type dpo_norm \
             --beta 5 \
             --packing \
-	    --push_to_hub False \
+            --push_to_hub False \
+            --try_launch_beaker_eval_jobs False \
             --activation_checkpointing_mode "$ACTIVATION_CHECKPOINTING_MODE" \
             $AC_MODULES_FLAG \
             --compile_model true \
