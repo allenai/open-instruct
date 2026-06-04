@@ -1689,7 +1689,10 @@ def broadcast_weights_to_vllm(
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
-    use_packed = True
+    # Packed mode expects one transfer matching the full metadata list. When
+    # gathering per-parameter, send unpacked tensors so vLLM consumes the same
+    # granularity the trainer emits.
+    use_packed = gather_whole_model
 
     if is_rank_0:
         refs = [engine.update_weights.remote(names, dtype_names, shapes, packed=use_packed) for engine in vllm_engines]
