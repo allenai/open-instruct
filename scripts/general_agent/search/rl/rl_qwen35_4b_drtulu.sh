@@ -26,7 +26,7 @@ uv run mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --gpus 8 \
     --budget ai2/oe-omai \
     --no_auto_dataset_cache \
@@ -63,10 +63,10 @@ source configs/beaker_configs/ray_node_setup.sh \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
-    --total_episodes 5120 \
+    --total_episodes 51200 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 8 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --apply_evolving_rubric_reward true \
@@ -77,7 +77,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --tool_call_names google_search browse_webpage snippet_search \
     --tool_configs '{}' '{}' '{}' \
     --pool_size 256 \
-    --system_prompt_override_file scripts/train/dr-tulu/dr_tulu_adjusted.txt \
+    --system_prompt_override_file scripts/general_agent/search/rl/dr_tulu_adjusted.txt \
     --max_steps 10 \
     --backend_timeout 1800 \
     --save_traces \
@@ -88,7 +88,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
-    --wandb_project_name oe-general-agents \
+    --wandb_project oe-general-agents \
     --vllm_enable_prefix_caching \
     --keep_last_n_checkpoints -1 \
     --kl_estimator 3 \

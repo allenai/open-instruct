@@ -54,7 +54,7 @@ uv run open_instruct/grpo_fast.py \
     --tool_configs '{}' '{}' '{}' \
     --pool_size 16 \
     --backend_timeout 300 \
-    --system_prompt_override_file scripts/train/dr-tulu/dr_tulu_adjusted.txt \
+    --system_prompt_override_file scripts/general_agent/search/rl/dr_tulu_adjusted.txt \
     --gradient_checkpointing \
     --local_eval_every 8 \
     --save_traces \
@@ -62,5 +62,5 @@ uv run open_instruct/grpo_fast.py \
     --seed 1 \
     --report_to wandb \
     --with_tracking \
-    --wandb_project_name oe-general-agents \
+    --wandb_project oe-general-agents \
     --push_to_hub false
