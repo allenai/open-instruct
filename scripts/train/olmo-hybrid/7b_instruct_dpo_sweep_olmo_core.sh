@@ -77,6 +77,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
             --master_port=29400 \
             --nproc_per_node=8 \
+	    --artifact_ttl 1d \
             open_instruct/dpo.py \
             --exp_name "$EXP_NAME" \
             --model_name_or_path "$MODEL_PATH" \
