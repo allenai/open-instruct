@@ -21,7 +21,7 @@ uv run mason.py \
     --no_auto_dataset_cache \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-other \
@@ -56,7 +56,7 @@ uv run open_instruct/grpo_fast.py \
     --total_episodes 128000 \
     --deepspeed_stage 2 \
     --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --vllm_num_engines 12 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
