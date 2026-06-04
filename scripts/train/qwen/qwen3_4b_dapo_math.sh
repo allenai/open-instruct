@@ -10,6 +10,7 @@ BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
+NODES="${NODES:-2}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -21,12 +22,11 @@ uv run mason.py \
     --no_auto_dataset_cache \
     --image ${BEAKER_IMAGE} \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes ${NODES} \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
     --budget ai2/oe-other \
-    -- \
-uv run open_instruct/grpo_fast.py \
+    -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
@@ -50,7 +50,7 @@ uv run open_instruct/grpo_fast.py \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
     --pack_length 18432 \
-    --model_name_or_path "Qwen/Qwen3-4B-Instruct" \
+    --model_name_or_path "Qwen/Qwen3-4B-Instruct-2507" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \

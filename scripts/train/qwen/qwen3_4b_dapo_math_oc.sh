@@ -1,25 +1,21 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
+EXP="${EXP:-}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_instruct_dapo_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
 BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-if [[ "${1:-}" == "$BEAKER_USER"* ]]; then
-    BEAKER_IMAGE="$1"
-    shift
-fi
-
 CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-urgent}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \
-    --workspace ai2/open-instruct-dev \
+    --workspace ${WORKSPACE} \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --no_auto_dataset_cache \
@@ -29,7 +25,8 @@ uv run mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
     -- \
-uv run open_instruct/grpo.py \
+source configs/beaker_configs/ray_node_setup.sh \
+\&\& uv run open_instruct/grpo.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
