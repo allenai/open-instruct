@@ -1,6 +1,7 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dapo}"
+EXP="${EXP:-}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_instruct_dapo_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
@@ -47,9 +48,9 @@ uv run open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list_splits "train" \
     --remap_verifier math_aime_2025=math \
     --max_prompt_token_length 2048 \
-    --response_length 8192 \
-    --pack_length 10240 \
-    --model_name_or_path "Qwen/Qwen3-4B-Base" \
+    --response_length 16384 \
+    --pack_length 18432 \
+    --model_name_or_path "Qwen/Qwen3-4B-Instruct" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \
