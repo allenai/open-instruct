@@ -391,6 +391,11 @@ class HFDataLoader(data_loader.DataLoaderBase):
         forward and backward pass before training officially starts.
         """
         num_examples = min(self._per_rank_batch_size, len(self.dataset))
+        # When packing, the collator consumes only as many examples as fit the token
+        # budget, so at most max_seq_length examples (each >= 1 token) can be used.
+        # Bound the rows loaded so a large microbatch_sample_cap doesn't load the dataset.
+        if getattr(self._collator, "max_seq_length", None) is not None:
+            num_examples = min(num_examples, self._collator.max_seq_length)
         examples = [self.dataset[i] for i in range(num_examples)]
         return to_device(self._collator(examples), self._device)
 
