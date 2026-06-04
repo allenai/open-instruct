@@ -126,6 +126,71 @@ class TestTokenBudgetPacking(unittest.TestCase):
             self.assertGreater(max(batch_sizes), global_batch_size)
             self.assertEqual(seen_indices, set(range(num_samples)))
 
+    def test_microbatch_sample_cap_binds(self):
+        max_seq_length = 16384
+        seq_len = 100
+        num_samples = 200
+        cap = 3
+        dataset = _make_fixed_length_dpo_dataset(num_samples, seq_len)
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            loader = data_loader.HFDataLoader(
+                dataset=dataset,
+                batch_size=4,
+                seed=42,
+                dp_rank=0,
+                dp_world_size=1,
+                work_dir=work_dir,
+                collator=collator,
+                drop_last=False,
+                microbatch_sample_cap=cap,
+            )
+
+            for batch in loader:
+                self.assertLessEqual(len(batch["index"]), cap)
+
+
+class TestGradientAccumulationGrouping(unittest.TestCase):
+    @parameterized.parameterized.expand([("gas2_dp1", 2, 1), ("gas4_dp1", 4, 1), ("gas2_dp2", 2, 2)])
+    def test_groups_microbatches_per_step(self, _name, microbatches_per_step, dp_world_size):
+        max_seq_length = 16384
+        seq_len = 100
+        num_samples = 200
+        cap = 2
+        dataset = _make_fixed_length_dpo_dataset(num_samples, seq_len)
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            loaders = [
+                data_loader.HFDataLoader(
+                    dataset=dataset,
+                    batch_size=4,
+                    seed=42,
+                    dp_rank=rank,
+                    dp_world_size=dp_world_size,
+                    work_dir=work_dir,
+                    collator=collator,
+                    drop_last=True,
+                    microbatch_sample_cap=cap,
+                    microbatches_per_step=microbatches_per_step,
+                )
+                for rank in range(dp_world_size)
+            ]
+
+            batch_counts = [loader.total_batches for loader in loaders]
+            self.assertTrue(all(c == batch_counts[0] for c in batch_counts), f"Step counts differ: {batch_counts}")
+
+            for loader in loaders:
+                num_steps = 0
+                for step in loader:
+                    self.assertIsInstance(step, list)
+                    self.assertEqual(len(step), microbatches_per_step)
+                    for micro_batch in step:
+                        self.assertLessEqual(len(micro_batch["index"]), cap)
+                    num_steps += 1
+                self.assertEqual(num_steps, loader.total_batches)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -178,11 +178,10 @@ class DPOTrainModule(TransformerTrainModule):
     def pre_train(self):
         pass
 
-    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int | None:
-        global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
-        if global_num_tokens is None:
-            return None
-        seq_len = batch["chosen_input_ids"].shape[1]
+    def global_num_flops_in_batch(self, batch: dict[str, Any] | list[dict[str, Any]]) -> int | None:
+        global_num_tokens = padding_free_collator.get_num_tokens(batch) * self.trainer.data_loader.dp_world_size
+        first = batch[0] if isinstance(batch, list) else batch
+        seq_len = first["chosen_input_ids"].shape[1]
         flops_per_token = self.num_flops_per_token(seq_len=seq_len)
         return flops_per_token * global_num_tokens if flops_per_token is not None else None
 
@@ -220,12 +219,12 @@ class DPOTrainModule(TransformerTrainModule):
 
         return loss, step_metrics
 
-    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
+    def train_batch(self, batch: dict[str, Any] | list[dict[str, Any]], dry_run: bool = False) -> None:
         self.model.train()
 
-        micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
+        micro_batches = batch if isinstance(batch, list) else split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
-        device = batch["chosen_input_ids"].device
+        device = micro_batches[0]["chosen_input_ids"].device
         total_tokens = padding_free_collator.get_num_tokens(batch)
 
         for v in self._metrics.values():
@@ -243,22 +242,35 @@ class DPOTrainModule(TransformerTrainModule):
         self.model.post_batch(dry_run=dry_run)
 
         if not dry_run:
+            local_padded_tokens = sum(
+                v.numel() for mb in micro_batches for k, v in mb.items() if k.endswith("input_ids")
+            )
+            local_num_sequences = padding_free_collator.get_num_sequences(batch)
+            if local_num_sequences is None:
+                local_num_sequences = sum(mb["chosen_input_ids"].shape[0] * 2 for mb in micro_batches)
             metric_keys = sorted(self._metrics.keys())
-            local_sums_list = [torch.tensor(total_tokens, dtype=torch.float32, device=device)] + [
-                self._metrics[k] for k in metric_keys
-            ]
+            local_sums_list = [
+                torch.tensor(total_tokens, dtype=torch.float32, device=device),
+                torch.tensor(local_padded_tokens, dtype=torch.float32, device=device),
+                torch.tensor(local_num_sequences, dtype=torch.float32, device=device),
+            ] + [self._metrics[k] for k in metric_keys]
             local_sums = torch.stack(local_sums_list)
             dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
 
             global_total_tokens = local_sums[0]
-            global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
+            global_padded_tokens = local_sums[1]
+            global_num_sequences = local_sums[2]
+            global_metrics = {k: local_sums[i + 3] / global_total_tokens for i, k in enumerate(metric_keys)}
 
             self.record_metric("train_loss", global_metrics["loss"].item(), reduce_type=None)
             self.record_metric("logps/chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
             self.record_metric("logps/rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
-            token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
-            assert token_count is not None
+            token_count = total_tokens * self.trainer.data_loader.dp_world_size
             self.record_metric("train/token_count", token_count, reduce_type=None)
+            self.record_metric(
+                "train/padding_fraction", (1.0 - global_total_tokens / global_padded_tokens).item(), reduce_type=None
+            )
+            self.record_metric("train/sequences_per_step", global_num_sequences.item(), reduce_type=None)
 
             self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
             if self.trainer.steps_per_epoch is not None:

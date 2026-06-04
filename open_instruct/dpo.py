@@ -204,6 +204,8 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         device=device,
         drop_last=True,
         fs_local_rank=global_rank,
+        microbatch_sample_cap=args.per_device_train_batch_size,
+        microbatches_per_step=args.gradient_accumulation_steps,
     )
     # 4x batch size: forward-only (no backward), so no activation storage needed.
     # With packing, the collator's token budget controls the actual forward-pass size

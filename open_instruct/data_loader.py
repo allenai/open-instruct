@@ -91,6 +91,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         drop_last: bool = True,
         fs_local_rank: int | None = None,
         max_seq_length: int = 1,
+        microbatch_sample_cap: int | None = None,
+        microbatches_per_step: int = 1,
     ) -> None:
         """Initialize the HFDataLoader.
 
@@ -110,6 +112,12 @@ class HFDataLoader(data_loader.DataLoaderBase):
             fs_local_rank: File system local rank. Defaults to dp_rank when None.
             max_seq_length: Maximum sequence length. Used to report global_batch_size in tokens
                 to the trainer for batch-size validation.
+            microbatch_sample_cap: When packing, the maximum number of examples per packed
+                microbatch. A microbatch closes when either the token budget or this cap is
+                reached. None means pack purely to the token budget.
+            microbatches_per_step: Number of packed microbatches grouped into each yielded batch
+                for gradient accumulation. When > 1, each yielded batch is a list of this many
+                collated microbatches; the trainer runs one optimizer step per yielded batch.
 
         Note:
             The dataset must have an 'index' column for tracking samples across epochs.
@@ -144,6 +152,10 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 f"The effective global batch size will be {batch_size // dp_world_size * dp_world_size}."
             )
         self._per_rank_batch_size = batch_size // dp_world_size
+        if microbatches_per_step < 1:
+            raise ValueError(f"microbatches_per_step must be >= 1, got {microbatches_per_step}")
+        self._microbatch_sample_cap = microbatch_sample_cap
+        self._microbatches_per_step = microbatches_per_step
         self._collator = collator if collator is not None else (lambda x: {"examples": x})
         self._automatic_reshuffle = automatic_reshuffle
         self._drop_last = drop_last
@@ -181,19 +193,24 @@ class HFDataLoader(data_loader.DataLoaderBase):
         # batches. Each entry in _precomputed_batch_sizes is the number of
         # examples in that batch (variable due to packing).
         if self._precomputed_batch_sizes is not None:
+            mbs_per_step = self._microbatches_per_step
             num_real = len(self._precomputed_batch_sizes) - self._num_padding_batches
-            offset = 0
-            for batch_idx, batch_size in enumerate(self._precomputed_batch_sizes):
-                if batch_idx < self.batches_processed:
-                    offset += batch_size
+            num_groups = len(self._precomputed_batch_sizes) // mbs_per_step
+            offsets = [0]
+            for batch_size in self._precomputed_batch_sizes:
+                offsets.append(offsets[-1] + batch_size)
+            for group_idx in range(num_groups):
+                if group_idx < self.batches_processed:
                     continue
-                examples = []
-                for i in range(offset, offset + batch_size):
-                    example = self.dataset[i]
-                    examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
-                batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
-                offset += batch_size
-                yield batch
+                group = []
+                for mb_idx in range(group_idx * mbs_per_step, (group_idx + 1) * mbs_per_step):
+                    examples = []
+                    for i in range(offsets[mb_idx], offsets[mb_idx + 1]):
+                        example = self.dataset[i]
+                        examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
+                    collated = to_device(self._collator(examples), self._device) | {"is_padding": mb_idx >= num_real}
+                    group.append(collated)
+                yield group if mbs_per_step > 1 else group[0]
             return
 
         start_example = self.batches_processed * self._per_rank_batch_size
@@ -219,7 +236,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
     def total_batches(self) -> int:
         """Return the total number of batches in an epoch."""
         if self._precomputed_batch_sizes is not None:
-            return len(self._precomputed_batch_sizes)
+            return len(self._precomputed_batch_sizes) // self._microbatches_per_step
         return self.effective_size // self._per_rank_batch_size
 
     def state_dict(self) -> dict[str, Any]:
@@ -324,8 +341,9 @@ class HFDataLoader(data_loader.DataLoaderBase):
         for i in range(len(all_indices)):
             new_totals = [running_totals[s] + lengths[i][s] for s in range(num_streams)]
             would_exceed = len(current_batch) > 0 and any(t > max_seq_length for t in new_totals)
+            at_cap = self._microbatch_sample_cap is not None and len(current_batch) >= self._microbatch_sample_cap
 
-            if would_exceed:
+            if would_exceed or at_cap:
                 batches.append(current_batch)
                 current_batch = [i]
                 running_totals = list(lengths[i])
@@ -336,14 +354,19 @@ class HFDataLoader(data_loader.DataLoaderBase):
         if current_batch:
             batches.append(current_batch)
 
+        # Batches are distributed round-robin to ranks and then grouped into
+        # microbatches_per_step-sized optimizer steps, so the global count must be a
+        # multiple of dp_world_size * microbatches_per_step for every rank to have the
+        # same number of complete groups.
+        group_size = self.dp_world_size * self._microbatches_per_step
         num_batches = len(batches)
         padding_start = num_batches
         if self._drop_last:
-            num_batches = (num_batches // self.dp_world_size) * self.dp_world_size
+            num_batches = (num_batches // group_size) * group_size
             batches = batches[:num_batches]
         else:
-            if (remainder := num_batches % self.dp_world_size) > 0:
-                for _ in range(self.dp_world_size - remainder):
+            if (remainder := num_batches % group_size) > 0:
+                for _ in range(group_size - remainder):
                     batches.append(batches[-1])
 
         rank_global_indices = list(range(self.dp_rank, len(batches), self.dp_world_size))
@@ -371,7 +394,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         examples = [self.dataset[i] for i in range(num_examples)]
         return to_device(self._collator(examples), self._device)
 
-    def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int:
+    def global_num_tokens_in_batch(self, batch: dict[str, Any] | list[dict[str, Any]]) -> int:
         """Return the total number of tokens in the batch across all ranks.
 
         Counts tokens from all keys containing 'input_ids' that are torch tensors.
