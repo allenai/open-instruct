@@ -192,8 +192,15 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
     else:
         collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=None, padding="longest")
 
-    rank_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
-    global_batch_size = rank_batch_size * dp_world_size
+    # With packing, an instance is one packed row (one microbatch), so a rank accumulates
+    # gradient_accumulation_steps rows per optimizer step. Without packing, an instance is
+    # one example and a rank consumes per_device_train_batch_size * gradient_accumulation_steps
+    # examples per step. Either way, each instance spans 2 * max_seq_length tokens
+    # (chosen + rejected streams).
+    if args.packing:
+        global_batch_size = args.gradient_accumulation_steps * dp_world_size
+    else:
+        global_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * dp_world_size
     data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=global_batch_size,
@@ -205,16 +212,13 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         device=device,
         drop_last=True,
         fs_local_rank=global_rank,
+        max_seq_length=2 * args.max_seq_length,
         microbatch_sample_cap=args.per_device_train_batch_size,
-        microbatches_per_step=args.gradient_accumulation_steps,
     )
-    # 4x batch size: forward-only (no backward), so no activation storage needed.
-    # With packing, the collator's token budget controls the actual forward-pass size
-    # and the overflow mechanism in HFDataLoader ensures no examples are dropped.
-    # We could probably have logic to use a longer sequence length here when packing
-    # is enabled, but for simplicity we just keep the 4x increase in batch size regardless of packing.
-    # We want the batch size to be as large as possible so that we always pack efficiently.
-    cache_batch_size = int(args.per_device_train_batch_size * 4 * dp_world_size)
+    # Forward-only (no backward), so no activation storage is needed. With packing each
+    # instance is already a full token-budget row, so one row per rank per batch suffices;
+    # without packing we use a 4x larger example batch.
+    cache_batch_size = dp_world_size if args.packing else int(args.per_device_train_batch_size * 4 * dp_world_size)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
@@ -227,6 +231,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         # We need to process every example to cache reference logprobs, so we can't drop the last batch.
         drop_last=False,
         fs_local_rank=global_rank,
+        max_seq_length=2 * args.max_seq_length,
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo

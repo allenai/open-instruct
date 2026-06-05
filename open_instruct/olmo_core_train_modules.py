@@ -52,7 +52,6 @@ class DPOMetricsCallback(Callback):
     priority = 10
 
     def pre_log_metrics(self, step: int, metrics: dict[str, float]) -> None:
-        del step
         if _DPO_TOKENS_KEY not in metrics:
             return
         tokens = metrics.pop(_DPO_TOKENS_KEY)
@@ -61,6 +60,11 @@ class DPOMetricsCallback(Callback):
         for key in [k for k in metrics if k.startswith(prefix)]:
             metrics[key[len(prefix) :]] = metrics.pop(key) / tokens
         metrics["train/padding_fraction"] = 1.0 - tokens / padded
+        metrics["training_step"] = float(step)
+        if self.trainer.steps_per_epoch is not None:
+            metrics["epoch"] = step / self.trainer.steps_per_epoch
+        if "optim/LR (group 0)" in metrics:
+            metrics["learning_rate"] = metrics["optim/LR (group 0)"]
 
 
 class DPOLMHead(LMHead):
@@ -166,7 +170,13 @@ class DPOTrainModule(TransformerTrainModule):
             )
         # TODO(finbarrtimbers): Remove this hack once Transformer supports configuring the LM head.
         model.lm_head.__class__ = DPOLMHead
-        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
+        # With packing, a microbatch is one packed row: chosen + rejected streams, each
+        # padded to max_sequence_length tokens. Without packing, it is sample_microbatch_size
+        # example pairs of up to max_sequence_length tokens per stream.
+        if dpo_config.packing:
+            rank_microbatch_size_tokens = 2 * max_sequence_length
+        else:
+            rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
         super().__init__(
             model=model,
             optim=optim,
@@ -203,14 +213,10 @@ class DPOTrainModule(TransformerTrainModule):
         if dpo_config.packing:
             self._forward_kwargs["packing"] = True
 
-    def pre_train(self):
-        pass
-
-    def global_num_flops_in_batch(self, batch: dict[str, Any] | list[dict[str, Any]]) -> int | None:
+    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int | None:
         data_loader = cast(data_loader_lib.HFDataLoader, self.trainer.data_loader)
         global_num_tokens = data_loader.global_num_tokens_in_batch(batch)
-        first = batch[0] if isinstance(batch, list) else batch
-        seq_len = first["chosen_input_ids"].shape[1]
+        seq_len = batch["chosen_input_ids"].shape[1]
         flops_per_token = self.num_flops_per_token(seq_len=seq_len)
         return flops_per_token * global_num_tokens if flops_per_token is not None else None
 
@@ -248,12 +254,15 @@ class DPOTrainModule(TransformerTrainModule):
 
         return loss, step_metrics
 
-    def train_batch(self, batch: dict[str, Any] | list[dict[str, Any]], dry_run: bool = False) -> None:
+    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
 
-        micro_batches = batch if isinstance(batch, list) else split_batch_dpo(batch, self.sample_microbatch_size)
+        if self.dpo_config.packing:
+            micro_batches = padding_free_collator.unstack_packed_rows(batch)
+        else:
+            micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
-        device = micro_batches[0]["chosen_input_ids"].device
+        device = batch["chosen_input_ids"].device
         micro_token_counts = [padding_free_collator.get_num_tokens(mb) for mb in micro_batches]
         total_tokens = sum(micro_token_counts)
 
@@ -272,10 +281,10 @@ class DPOTrainModule(TransformerTrainModule):
         self.model.post_batch(dry_run=dry_run)
 
         if not dry_run:
-            local_padded_tokens = padding_free_collator.get_num_padded_tokens(micro_batches)
+            local_padded_tokens = padding_free_collator.get_num_padded_tokens(batch)
             local_num_sequences = padding_free_collator.get_num_sequences(batch)
             if local_num_sequences is None:
-                local_num_sequences = sum(mb["chosen_input_ids"].shape[0] * 2 for mb in micro_batches)
+                local_num_sequences = batch["chosen_input_ids"].shape[0] * 2
 
             tokens_tensor = torch.tensor(float(total_tokens), device=device)
             self.record_metric(_DPO_TOKENS_KEY, tokens_tensor, reduce_type=ReduceType.sum)
@@ -310,16 +319,6 @@ class DPOTrainModule(TransformerTrainModule):
                 torch.tensor(float(local_num_sequences), device=device),
                 reduce_type=ReduceType.sum,
             )
-            self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
-            if self.trainer.steps_per_epoch is not None:
-                self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
-            if self.scheduler is not None and self.trainer.max_steps is not None:
-                lr = self.scheduler.get_lr(
-                    self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
-                    self.trainer.global_step,
-                    self.trainer.max_steps,
-                )
-                self.record_metric("learning_rate", float(lr), reduce_type=None)
 
 
 class GRPOTrainModule(TransformerTrainModule):

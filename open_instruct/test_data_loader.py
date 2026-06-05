@@ -5,7 +5,7 @@ import parameterized
 import torch
 from datasets import Dataset
 
-from open_instruct import data_loader
+from open_instruct import data_loader, padding_free_collator
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 
@@ -72,7 +72,7 @@ class TestWorldAwarePacking(unittest.TestCase):
             for loader in loaders:
                 for batch in loader:
                     if "index" in batch:
-                        all_indices.update(batch["index"].tolist())
+                        all_indices.update(batch["index"][batch["index"] >= 0].tolist())
 
             if not drop_last:
                 expected_indices = set(range(num_samples))
@@ -114,16 +114,16 @@ class TestTokenBudgetPacking(unittest.TestCase):
                 drop_last=False,
             )
 
-            batch_sizes = []
+            row_sizes = []
             seen_indices = set()
             for batch in loader:
-                num_seqs = len(batch["index"])
-                batch_sizes.append(num_seqs)
-                seen_indices.update(batch["index"].tolist())
-                self.assertLessEqual(batch["chosen_cu_seq_lens_k"][-1].item(), max_seq_length)
-                self.assertLessEqual(batch["rejected_cu_seq_lens_k"][-1].item(), max_seq_length)
+                for row in padding_free_collator.unstack_packed_rows(batch):
+                    row_sizes.append(len(row["index"]))
+                    seen_indices.update(row["index"].tolist())
+                    self.assertLessEqual(row["chosen_cu_seq_lens_k"][-1].item(), max_seq_length)
+                    self.assertLessEqual(row["rejected_cu_seq_lens_k"][-1].item(), max_seq_length)
 
-            self.assertGreater(max(batch_sizes), global_batch_size)
+            self.assertGreater(max(row_sizes), global_batch_size)
             self.assertEqual(seen_indices, set(range(num_samples)))
 
     def test_microbatch_sample_cap_binds(self):
@@ -148,12 +148,13 @@ class TestTokenBudgetPacking(unittest.TestCase):
             )
 
             for batch in loader:
-                self.assertLessEqual(len(batch["index"]), cap)
+                for row in padding_free_collator.unstack_packed_rows(batch):
+                    self.assertLessEqual(len(row["index"]), cap)
 
 
-class TestGradientAccumulationGrouping(unittest.TestCase):
-    @parameterized.parameterized.expand([("gas2_dp1", 2, 1), ("gas4_dp1", 4, 1), ("gas2_dp2", 2, 2)])
-    def test_groups_microbatches_per_step(self, _name, microbatches_per_step, dp_world_size):
+class TestStackedPackedBatches(unittest.TestCase):
+    @parameterized.parameterized.expand([("rows2_dp1", 2, 1), ("rows4_dp1", 4, 1), ("rows2_dp2", 2, 2)])
+    def test_yields_per_rank_rows_per_batch(self, _name, rows_per_rank, dp_world_size):
         max_seq_length = 16384
         seq_len = 100
         num_samples = 200
@@ -165,7 +166,7 @@ class TestGradientAccumulationGrouping(unittest.TestCase):
             loaders = [
                 data_loader.HFDataLoader(
                     dataset=dataset,
-                    batch_size=4,
+                    batch_size=rows_per_rank * dp_world_size,
                     seed=42,
                     dp_rank=rank,
                     dp_world_size=dp_world_size,
@@ -173,7 +174,6 @@ class TestGradientAccumulationGrouping(unittest.TestCase):
                     collator=collator,
                     drop_last=True,
                     microbatch_sample_cap=cap,
-                    microbatches_per_step=microbatches_per_step,
                 )
                 for rank in range(dp_world_size)
             ]
@@ -182,14 +182,41 @@ class TestGradientAccumulationGrouping(unittest.TestCase):
             self.assertTrue(all(c == batch_counts[0] for c in batch_counts), f"Step counts differ: {batch_counts}")
 
             for loader in loaders:
-                num_steps = 0
-                for step in loader:
-                    self.assertIsInstance(step, list)
-                    self.assertEqual(len(step), microbatches_per_step)
-                    for micro_batch in step:
-                        self.assertLessEqual(len(micro_batch["index"]), cap)
-                    num_steps += 1
-                self.assertEqual(num_steps, loader.total_batches)
+                num_batches = 0
+                for batch in loader:
+                    self.assertIsInstance(batch, dict)
+                    self.assertEqual(batch["chosen_input_ids"].shape, (rows_per_rank, max_seq_length))
+                    rows = padding_free_collator.unstack_packed_rows(batch)
+                    self.assertEqual(len(rows), rows_per_rank)
+                    for row in rows:
+                        self.assertLessEqual(len(row["index"]), cap)
+                    num_batches += 1
+                self.assertEqual(num_batches, loader.total_batches)
+
+    def test_stack_unstack_round_trip(self):
+        max_seq_length = 512
+        dataset = _make_dpo_dataset(num_samples=7, max_seq_length=max_seq_length)
+        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+        rows = [
+            collator([dataset[0], dataset[1]]) | {"is_padding": False},
+            collator([dataset[2]]) | {"is_padding": False},
+            collator([dataset[3], dataset[4], dataset[5]]) | {"is_padding": True},
+        ]
+
+        stacked = padding_free_collator.stack_packed_rows(rows)
+        unstacked = padding_free_collator.unstack_packed_rows(stacked)
+
+        self.assertEqual(len(unstacked), len(rows))
+        for original, restored in zip(rows, unstacked):
+            self.assertEqual(set(original.keys()), set(restored.keys()))
+            for k, v in original.items():
+                if k.endswith(("max_length_q", "max_length_k")):
+                    # Stacking reduces max_length to a batch-level max (a safe upper bound).
+                    self.assertEqual(restored[k], max(r[k] for r in rows))
+                elif isinstance(v, torch.Tensor):
+                    torch.testing.assert_close(restored[k], v)
+                else:
+                    self.assertEqual(restored[k], v)
 
 
 if __name__ == "__main__":

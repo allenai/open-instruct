@@ -229,22 +229,81 @@ def get_batch_logps(
     return segment_sums
 
 
-def get_num_tokens(batch: dict[str, Any] | list[dict[str, Any]]) -> int:
+def stack_packed_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Stack collated packed rows into one rectangular batch dict.
+
+    Each row is a collator output where every stream tensor has shape
+    (1, max_seq_length). Stream tensors are concatenated along dim 0 to
+    (num_rows, max_seq_length). Per-row cu_seq_lens tensors are padded to a
+    common length by repeating their final value (the row's total real token
+    count), producing zero-length phantom boundaries that unstack_packed_rows
+    trims away. `index` is padded with -1 and `max_length_q/k` ints are reduced
+    with max.
+    """
+    out: dict[str, Any] = {}
+    for k, v in rows[0].items():
+        if k.endswith(("cu_seq_lens_q", "cu_seq_lens_k")):
+            width = max(len(r[k]) for r in rows)
+            out[k] = torch.stack([torch.cat([r[k], r[k][-1:].expand(width - len(r[k]))]) for r in rows])
+        elif k.endswith(("max_length_q", "max_length_k")):
+            out[k] = max(r[k] for r in rows)
+        elif k == "index":
+            width = max(len(r[k]) for r in rows)
+            out[k] = torch.stack([torch.cat([r[k], r[k].new_full((width - len(r[k]),), -1)]) for r in rows])
+        elif k == "is_padding":
+            out[k] = torch.tensor([r[k] for r in rows])
+        elif isinstance(v, torch.Tensor):
+            out[k] = torch.cat([r[k] for r in rows], dim=0)
+        else:
+            out[k] = v
+    return out
+
+
+def unstack_packed_rows(batch: dict[str, Any]) -> list[dict[str, Any]]:
+    """Invert stack_packed_rows, recovering the per-row collated dicts.
+
+    Trims the repeated-value padding from cu_seq_lens rows and the -1 padding
+    from index rows. Batches without stacked (2-D) cu_seq_lens tensors are
+    returned unchanged as a single-element list, so callers can treat stacked
+    and unstacked batches uniformly.
+    """
+    cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
+    if not cu_keys or batch[cu_keys[0]].dim() == 1:
+        return [batch]
+    rows = []
+    for i in range(batch[cu_keys[0]].shape[0]):
+        row: dict[str, Any] = {}
+        for k, v in batch.items():
+            if k.endswith(("cu_seq_lens_q", "cu_seq_lens_k")):
+                cu = v[i]
+                num_seqs = int((cu[1:] > cu[:-1]).sum().item())
+                row[k] = cu[: num_seqs + 1]
+            elif k == "index":
+                row[k] = v[i][v[i] >= 0]
+            elif k == "is_padding":
+                row[k] = bool(v[i].item())
+            elif isinstance(v, torch.Tensor):
+                row[k] = v[i : i + 1]
+            else:
+                row[k] = v
+        rows.append(row)
+    return rows
+
+
+def get_num_tokens(batch: dict[str, Any]) -> int:
     """Return total non-padding token count from a training batch.
 
     For packed batches (DPO or GRPO), reads cu_seq_lens_k tensors whose last
-    element is the total token count for that branch. For padded batches, sums
-    the attention_mask. Falls back to counting input_ids elements. A list of
-    batches (gradient-accumulation microbatches) is summed.
+    element (per row, for stacked batches) is the total token count for that
+    branch. For padded batches, sums the attention_mask. Falls back to counting
+    input_ids elements.
     """
-    if isinstance(batch, list):
-        return sum(get_num_tokens(b) for b in batch)
     # cu_seq_lens_k is a cumulative sequence length tensor from the padding-free
     # collator. Its last element equals the total token count for that branch.
     # DPO has chosen_cu_seq_lens_k + rejected_cu_seq_lens_k; GRPO has cu_seq_lens_k.
     cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
     if cu_keys:
-        return sum(batch[k][-1].item() for k in cu_keys)
+        return sum(batch[k][..., -1].sum().item() for k in cu_keys)
     # DPO batches have chosen_attention_mask and rejected_attention_mask; sum both branches.
     attn_keys = [k for k in batch if k.endswith("attention_mask")]
     if attn_keys:
@@ -252,29 +311,22 @@ def get_num_tokens(batch: dict[str, Any] | list[dict[str, Any]]) -> int:
     return sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
 
 
-def get_num_padded_tokens(batch: dict[str, Any] | list[dict[str, Any]]) -> int:
+def get_num_padded_tokens(batch: dict[str, Any]) -> int:
     """Return total token count including padding from a training batch.
 
-    Counts all elements of input_ids tensors. A list of batches
-    (gradient-accumulation microbatches) is summed.
+    Counts all elements of input_ids tensors.
     """
-    if isinstance(batch, list):
-        return sum(get_num_padded_tokens(b) for b in batch)
     return sum(v.numel() for k, v in batch.items() if k.endswith("input_ids") and isinstance(v, torch.Tensor))
 
 
-def get_num_sequences(batch: dict[str, Any] | list[dict[str, Any]]) -> int | None:
+def get_num_sequences(batch: dict[str, Any]) -> int | None:
     """Return total sequence count from a training batch, or None for non-packing batches.
 
-    For packed batches, reads cu_seq_lens_k tensors which each have num_seqs + 1
-    elements (including a leading 0). Returns None if no cu_seq_lens_k keys are found.
-    A list of batches (gradient-accumulation microbatches) is summed.
+    Counts strictly-increasing boundaries in each cu_seq_lens_k tensor, which
+    works for both 1-D rows and stacked 2-D rows (whose repeated-value padding
+    contributes no increase). Returns None if no cu_seq_lens_k keys are found.
     """
-    if isinstance(batch, list):
-        counts = [get_num_sequences(b) for b in batch]
-        return sum(c for c in counts if c is not None)
     cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
     if cu_keys:
-        # Each cu_seq_lens tensor has num_seqs + 1 elements (leading 0 boundary).
-        return sum(len(batch[k]) - 1 for k in cu_keys)
+        return int(sum((batch[k][..., 1:] > batch[k][..., :-1]).sum().item() for k in cu_keys))
     return None
