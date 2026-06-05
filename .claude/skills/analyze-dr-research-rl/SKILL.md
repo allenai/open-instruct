@@ -65,14 +65,20 @@ interpretation differs — don't apply the binary-env playbook here.
      and tail regression.
 
 4. **Offer the deeper drills** (don't run unprompted unless the user wants depth):
-   uncapped full trajectory pass, decoding more examples from a specific step, or
-   distinguishing a stale post-restart batch from a real regression.
+   uncapped full trajectory pass, decoding more examples from a specific step,
+   distinguishing a stale post-restart batch from a real regression, or — for
+   *qualitative* depth — `inspect_trajectories.py` (see below) to read a full
+   multi-turn transcript or break reward down by rubric composition.
 
 ## Notes
 
 - Scripts: `analyze_dr_research_rl.py` (orchestrator), `analyze_wandb.py` (metrics +
-  flags), `analyze_trajectories.py` (reward/tool/trajectory analysis). See the directory
-  `README.md`.
+  flags), `analyze_trajectories.py` (aggregate reward/tool/trajectory stats),
+  `inspect_trajectories.py` (qualitative: `--view` renders one rollout's full
+  multi-turn transcript — reasoning, tool calls, results, answer — under the rubric
+  header; `--rubrics` gives a structural + correlational per-rubric reward analysis,
+  since the judge only persists the weighted-average score, not per-rubric verdicts).
+  See the directory `README.md`.
 - The orchestrator reads `exp_name`, `rollouts_save_path`, `response_length`, and
   `max_possible_score` from the wandb run config, so a URL is enough. If only an
   `exp_name` is given, run `analyze_trajectories.py --exp-name <name>` directly (pass

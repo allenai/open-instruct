@@ -40,6 +40,27 @@ uv run python analyze_dr_research_rl.py <url> --skip-trajectories
 | `analyze_dr_research_rl.py` | **Orchestrator.** Runs the wandb analysis, then drives the trajectory analysis using `exp_name` / `rollouts_save_path` / `response_length` / `max_possible_score` read from the run config. Start here. |
 | `analyze_wandb.py` | Pulls the keys this repo logs and prints learning / **evolving-rubric** / stability / **tools** / infra tables + wall-clock ETA, and emits automated **FLAGS** tuned for DR (reward-key identity, non-stationary target, rubric valid_rate/skipped, budget-bound truncation, the `non_submitting==1.0` artifact, per-tool failure rates, KL/clip/grad, staleness, tail regression). Dependency-light (wandb + numpy). Returns the run config. |
 | `analyze_trajectories.py` | Streams the `--save_traces` JSONL shards and reports the **continuous reward** distribution (zero / partial / full), the **truncated-vs-completed mean reward** gap (budget), **per-tool** call counts + failure rates (from `request_info.tool_call_stats`), turns/rollout, and **within-group reward spread** (the gradient magnitude) — all as a trend over training. Handles restart instances. |
+| `inspect_trajectories.py` | **Qualitative** companion to the above. `--view` renders a single rollout's **full multi-turn transcript** (every reasoning block, tool call w/ parsed args, tool result, and the trailing answer) under a header tying it to the rubrics being graded — the "read what the agent actually did" tool. `--rubrics` gives a **per-rubric reward analysis**: rubric inventory (persistent vs evolving, positive vs negative-weight *penalty* rubrics), reward-vs-composition tables + correlations, and the evolving-share-over-training (the rising bar). See caveat below. |
+
+### Inspecting individual trajectories & rubrics
+
+```bash
+# read one full-reward trajectory end-to-end (reasoning + tool calls + results + answer)
+uv run python inspect_trajectories.py --exp-name <name> --view --reward-bucket full --step 8
+
+# read a zero/negative-reward trajectory to see the failure mode (misread query, no answer, etc.)
+uv run python inspect_trajectories.py --exp-name <name> --view --reward-bucket zero --step 20 --num 2
+
+# per-rubric structural + correlational analysis across the run
+uv run python inspect_trajectories.py --exp-name <name> --rubrics --per-step-cap 96
+```
+
+**Per-rubric caveat:** the rubric judge (`RubricVerifier`) persists only the final
+*weighted-average* score per rollout, **not the per-rubric pass/fail verdicts**. So
+`--rubrics` is a *structural + correlational* view (rubric composition vs achieved reward),
+not literal per-rubric pass rates — those would require re-running the GPT-4.1 judge on the
+saved answers. Note reward can go **negative** when a rollout satisfies the negative-weight
+*penalty* rubrics.
 
 ## What's different from the Terminal-RL tooling
 
