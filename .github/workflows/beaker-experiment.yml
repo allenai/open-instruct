@@ -37,6 +37,15 @@ jobs:
           fetch-depth: 1
           filter: 'blob:none'
 
+      - name: Checkout olmo-eval-internal
+        uses: actions/checkout@v4
+        with:
+          repository: allenai/olmo-eval-internal
+          path: './olmo-eval-internal'
+          ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
+          fetch-depth: 1
+          filter: 'blob:none'
+
       - name: Get trigger information
         id: get-trigger-info
         run: |

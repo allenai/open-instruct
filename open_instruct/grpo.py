@@ -31,7 +31,7 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, utils, vllm_utils
+from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, olmo_eval_launch, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
@@ -97,6 +97,14 @@ def save_and_cleanup(
             eval_workspace=args.eval_workspace,
             eval_priority=args.eval_priority,
             oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
+        )
+
+    if utils.is_beaker_job() and args.try_launch_olmo_eval_jobs_on_weka:
+        olmo_eval_launch.launch_olmo_evals_on_weka(
+            model_path=args.output_dir,
+            config=args,
+            exp_name=args.exp_name,
+            experiment_name=olmo_eval_launch.default_olmo_eval_experiment_name(args.hf_repo_revision or args.exp_name),
         )
 
 

@@ -74,11 +74,19 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
+COPY pyproject.toml uv.lock ./
 COPY configs configs
 COPY scripts scripts
 COPY mason.py mason.py
 COPY open_instruct open_instruct
 COPY oe-eval-interna[l] oe-eval-internal/
+COPY olmo-eval-interna[l] olmo-eval-internal/
+
+# Install olmo-eval CLI when the private repo is present in the build context.
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    if [ -f olmo-eval-internal/pyproject.toml ]; then \
+        uv pip install -e './olmo-eval-internal[beaker]'; \
+    fi
 
 ARG GIT_COMMIT="" \
     GIT_BRANCH=""

@@ -108,6 +108,7 @@ python-preference = "only-managed"
 link-mode = "hardlink"
 override-dependencies = [
     "transformers>=5.4.0",
+    "rich>=14.3.4,<14.4",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -129,7 +130,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=oe-eval-internal/"
+addopts = "--ignore=oe-eval-internal/ --ignore=olmo-eval-internal/"
 filterwarnings = [
     "ignore:.*sentry_sdk.Hub.*:DeprecationWarning",
     "ignore:builtin type SwigPy.*:DeprecationWarning",

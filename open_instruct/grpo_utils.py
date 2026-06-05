@@ -18,6 +18,7 @@ from datasets import Dataset
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import data_types, logger_utils, model_utils, olmo_core_utils, utils
+from open_instruct.olmo_eval_launch import OlmoEvalLaunchConfig
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import (
     INVALID_LOGPROB,
@@ -77,6 +78,7 @@ class GRPOExperimentConfig(
     olmo_core_utils.TrainingConfig,
     olmo_core_utils.LoggingConfig,
     olmo_core_utils.CheckpointConfig,
+    OlmoEvalLaunchConfig,
 ):
     # Optimizer
     set_weight_decay_on_bias_and_norm: bool = True
@@ -335,6 +337,8 @@ class GRPOExperimentConfig(
                 )
             if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
                 raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
+
+        OlmoEvalLaunchConfig.__post_init__(self)
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:

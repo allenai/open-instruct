@@ -41,7 +41,7 @@ with contextlib.suppress(Exception):
     from deepspeed.utils import groups
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, utils
+from open_instruct import grpo_utils, olmo_eval_launch, utils
 from open_instruct.data_loader import add_prompt_to_generator
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
@@ -911,6 +911,16 @@ class PolicyTrainerRayProcess(RayProcess):
                 oe_eval_gpu_multiplier=args.oe_eval_gpu_multiplier,
             )
 
+    def launch_olmo_evals_on_weka_wrapper(self, step_dir, leaderboard_name, training_step):
+        args = self.args
+        if self.rank == 0:
+            ray.remote(olmo_eval_launch.launch_olmo_evals_on_weka).options(num_cpus=1).remote(
+                model_path=step_dir,
+                config=args,
+                exp_name=args.exp_name,
+                experiment_name=olmo_eval_launch.default_olmo_eval_experiment_name(leaderboard_name, training_step),
+            )
+
 
 class ModelGroup:
     def __init__(
@@ -1681,6 +1691,12 @@ def maybe_save_checkpoint(
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                         step_dir, leaderboard_name, wandb_url, training_step
                     )
+            if args.try_launch_olmo_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = args.hf_repo_revision or args.exp_name
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_olmo_evals_on_weka_wrapper.remote(
+                        step_dir, leaderboard_name, training_step
+                    )
         save_time = timer.duration
 
     return save_time
@@ -1709,6 +1725,12 @@ def save_final_model(
             for i in range(args.world_size):
                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                     args.output_dir, leaderboard_name, wandb_url, training_step
+                )
+        if args.try_launch_olmo_eval_jobs_on_weka and is_beaker_job():
+            leaderboard_name = args.hf_repo_revision or args.exp_name
+            for i in range(args.world_size):
+                policy_group.models[i].launch_olmo_evals_on_weka_wrapper.remote(
+                    args.output_dir, leaderboard_name, training_step
                 )
 
 

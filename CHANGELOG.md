@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- Add olmo-eval Beaker launch integration for GRPO training: optional `--try_launch_olmo_eval_jobs_on_weka` launches `olmo-eval beaker launch` after checkpoints using a configurable `OlmoEvalLaunchConfig`. `olmo-eval-internal` is installed separately in Docker (like `oe-eval-internal`) so CI does not require the private repo (https://github.com/allenai/open-instruct/pull/1698).
+
 ### Changed
 - Record a `_metrics_keepalive` metric on every rank every GRPO+OLMo-core step to keep `_metrics` non-empty, preventing OLMo-core's empty-skip in `_log_metrics` from desyncing the bookkeeping process group and deadlocking gloo for 30 minutes at save-time flushes (https://github.com/allenai/open-instruct/pull/1708).
 - Expand type-checking coverage by replacing `# ty: ignore` directives with typed casts and fixing related type issues (https://github.com/allenai/open-instruct/pull/1688).
