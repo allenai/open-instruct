@@ -82,6 +82,7 @@ All notable changes to this project will be documented in this file.
 - Harden `grpo_fast` startup with explicit Ray resource preflight checks and actionable learner placement-group timeout diagnostics for single-node runs (https://github.com/allenai/open-instruct/pull/1586).
 - Fix shellcheck `$@` quoting in GRPO debug scripts (https://github.com/allenai/open-instruct/pull/1572).
 - Add `--no_auto_dataset_cache` to GRPO and SFT integration test scripts to avoid HuggingFace 504 timeouts on CI runner (https://github.com/allenai/open-instruct/pull/1571).
+- Deterministic downsampling of dataset to enable reproducibility (https://github.com/allenai/open-instruct/pull/1603)
 
 ### Added
 - Replace `scripts/submit_eval_jobs.py` with a new olmo-eval-internal launcher (Beaker v2, no gantry); the previous script is preserved as `scripts/submit_eval_jobs_old.py` and emits a `DeprecationWarning` (https://github.com/allenai/open-instruct/pull/1638).
