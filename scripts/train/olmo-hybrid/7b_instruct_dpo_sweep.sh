@@ -39,7 +39,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
 
         uv run python mason.py \
             --cluster ai2/jupiter \
-            --description "Hybrid 7B DPO sweep, SFT-${SFT_LR}, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
+            --description "Hybrid 7B DPO sweep, SFT-public, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
             --workspace ai2/linear-rnns \
             --priority urgent \
             --max_retries 0 \
