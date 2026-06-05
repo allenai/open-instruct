@@ -283,8 +283,6 @@ class DPOTrainModule(TransformerTrainModule):
         if not dry_run:
             local_padded_tokens = padding_free_collator.get_num_padded_tokens(batch)
             local_num_sequences = padding_free_collator.get_num_sequences(batch)
-            if local_num_sequences is None:
-                local_num_sequences = batch["chosen_input_ids"].shape[0] * 2
 
             tokens_tensor = torch.tensor(float(total_tokens), device=device)
             self.record_metric(_DPO_TOKENS_KEY, tokens_tensor, reduce_type=ReduceType.sum)

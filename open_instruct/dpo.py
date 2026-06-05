@@ -73,7 +73,6 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
-        per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         dp_world_size=dp_world_size,
         tensor_parallel_degree=args.tensor_parallel_degree,

@@ -123,7 +123,6 @@ class PerfCallback(Callback):
     """Calculates MFU and tokens_per_second using same formula as dpo_tune_cache.py."""
 
     model_dims: utils.ModelDims
-    per_device_train_batch_size: int
     gradient_accumulation_steps: int
     dp_world_size: int
     tensor_parallel_degree: int = 1
@@ -161,8 +160,6 @@ class PerfCallback(Callback):
         self._pre_step_time = time.perf_counter()
         self._step_start_time = self._pre_step_time
         num_seqs = padding_free_collator.get_num_sequences(batch)
-        if num_seqs is None:
-            num_seqs = self.per_device_train_batch_size * 2
         self._interval_num_sequences += num_seqs * self.dp_world_size
 
     def post_step(self) -> None:
