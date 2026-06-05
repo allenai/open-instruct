@@ -1,7 +1,7 @@
 #!/bin/bash
 
 EXP="${EXP:-}"
-EXP_NAME="${EXP_NAME:-qwen3_4b_instruct_dapo_${EXP}}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_instruct_dapo_oc_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
