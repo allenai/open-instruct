@@ -153,8 +153,10 @@ def build_ac_config(
     activation_memory_budget: float, compile_model: bool, mode: str = "budget", modules: list[str] | None = None
 ) -> TransformerActivationCheckpointingConfig | None:
     if mode == "full":
+        patch_checkpoint_wrapper_determinism_check()
         return TransformerActivationCheckpointingConfig(mode=TransformerActivationCheckpointingMode.full)
     if mode == "selected_modules":
+        patch_checkpoint_wrapper_determinism_check()
         return TransformerActivationCheckpointingConfig(
             mode=TransformerActivationCheckpointingMode.selected_modules, modules=modules
         )

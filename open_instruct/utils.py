@@ -1878,6 +1878,10 @@ class ModelDims:
     def num_full_attn_layers(self) -> int:
         return self.num_layers - self.num_sliding_window_layers - self.num_linear_attn_layers
 
+    @property
+    def num_softmax_attn_layers(self) -> int:
+        return self.num_layers - self.num_linear_attn_layers
+
     def _gdn_layer_params(self) -> int:
         """Parameter count for one Gated Delta Net (linear attention) layer, excluding MLP."""
         h = self.hidden_size
@@ -1899,8 +1903,7 @@ class ModelDims:
         mlp_down_params = self.intermediate_size * self.hidden_size
         mlp_params = mlp_up_params + mlp_down_params
 
-        num_attn_layers = self.num_layers - self.num_linear_attn_layers
-        layer_params = self.num_layers * mlp_params + num_attn_layers * attn_params
+        layer_params = self.num_layers * mlp_params + self.num_softmax_attn_layers * attn_params
         layer_params += self.num_linear_attn_layers * self._gdn_layer_params()
 
         lm_head_params = self.vocab_size * self.hidden_size
@@ -2141,10 +2144,8 @@ class ModelDims:
         w_dn = self.intermediate_size * self.hidden_size
         mlp_weights = w_up + w_dn
 
-        num_attn_layers = self.num_layers - self.num_linear_attn_layers
-        total_weights = self.num_layers * mlp_weights + num_attn_layers * attn_weights
-        if self.num_linear_attn_layers > 0:
-            total_weights += self.num_linear_attn_layers * self._gdn_layer_params()
+        total_weights = self.num_layers * mlp_weights + self.num_softmax_attn_layers * attn_weights
+        total_weights += self.num_linear_attn_layers * self._gdn_layer_params()
 
         return num_tokens * total_weights * dtype_bytes
 
@@ -2159,9 +2160,8 @@ class ModelDims:
             Total bytes for KV cache writes across all layers
         """
         # 2x for K and V. Linear attention layers keep a fixed recurrent state, not a KV cache.
-        num_kv_cache_layers = self.num_layers - self.num_linear_attn_layers
         kv_write_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
-        return num_kv_cache_layers * num_tokens * kv_write_bytes_per_token
+        return self.num_softmax_attn_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
         self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
