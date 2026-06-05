@@ -27,6 +27,7 @@ from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingMode,
 )
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
+from torch.distributed.algorithms._checkpoint import checkpoint_wrapper as ptd_checkpoint_wrapper_mod
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -108,6 +109,36 @@ class TrainingConfig:
     typically faster; lower values use less memory and are typically slower, so use the highest
     value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
     """
+    activation_checkpointing_mode: Literal["budget", "full", "selected_modules"] = "budget"
+    """Activation checkpointing mode.
+
+    "budget" uses torch.compile's partitioner with `activation_memory_budget` (requires compilation,
+    and cannot checkpoint through opaque custom ops such as the GDN `fla` kernels). "full" wraps every
+    transformer block in `torch.utils.checkpoint`, applying compile *outside* the checkpoint, whose
+    recompute re-enters the compiled block's backward and fails an inductor stride guard — so "full"
+    is incompatible with `torch.compile` for GDN models. "selected_modules" wraps the individual block
+    submodules in `activation_checkpointing_modules` (by default all of them, including the GDN mixer),
+    which keeps compile *outside* the checkpoint boundary (the supported order) while still recovering
+    full-block memory savings, letting `torch.compile` coexist with checkpointing at long sequences.
+    """
+    activation_checkpointing_modules: list[str] = field(
+        default_factory=lambda: [
+            "blocks.*.attention_norm",
+            "blocks.*.attention",
+            "blocks.*.attention_residual_stream",
+            "blocks.*.feed_forward_norm",
+            "blocks.*.feed_forward",
+            "blocks.*.feed_forward_residual_stream",
+        ]
+    )
+    """Module-name globs to wrap when `activation_checkpointing_mode` is "selected_modules".
+
+    Defaults to every transformer-block submodule, including the GDN mixer (`blocks.*.attention`).
+    Wrapping submodules individually (rather than the whole block, as "full" does) keeps `torch.compile`
+    *outside* the checkpoint boundary, which is the order compile supports, while still recovering
+    full-block activation memory. The opaque `fla` kernel's recompute metadata check is suppressed by
+    `patch_checkpoint_wrapper_determinism_check`.
+    """
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
     fused_optimizer: bool = True
@@ -119,13 +150,38 @@ class TrainingConfig:
 
 
 def build_ac_config(
-    activation_memory_budget: float, compile_model: bool
+    activation_memory_budget: float, compile_model: bool, mode: str = "budget", modules: list[str] | None = None
 ) -> TransformerActivationCheckpointingConfig | None:
+    if mode == "full":
+        return TransformerActivationCheckpointingConfig(mode=TransformerActivationCheckpointingMode.full)
+    if mode == "selected_modules":
+        return TransformerActivationCheckpointingConfig(
+            mode=TransformerActivationCheckpointingMode.selected_modules, modules=modules
+        )
     if activation_memory_budget < 1.0 and compile_model:
         return TransformerActivationCheckpointingConfig(
             mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=activation_memory_budget
         )
     return None
+
+
+def patch_checkpoint_wrapper_determinism_check() -> None:
+    """Make olmo-core's activation checkpointing skip torch's recompute determinism check.
+
+    olmo-core hardcodes `ptd_checkpoint_wrapper(block, preserve_rng_state=False)`, leaving torch's
+    `determinism_check="default"`, which compares forward vs. recompute tensor metadata. The opaque
+    `fla` GDN kernel's recompute produces a spurious metadata mismatch under `torch.compile`, raising
+    CheckpointError. Eager recompute already proves the values match, so we forward
+    `determinism_check="none"` to suppress the (metadata-only) check and let full checkpointing and
+    compile coexist.
+    """
+    original = ptd_checkpoint_wrapper_mod.checkpoint_wrapper
+
+    def patched(module, **kwargs):
+        kwargs.setdefault("determinism_check", "none")
+        return original(module, **kwargs)
+
+    ptd_checkpoint_wrapper_mod.checkpoint_wrapper = patched
 
 
 def build_cp_config(training: TrainingConfig) -> TransformerContextParallelConfig | None:

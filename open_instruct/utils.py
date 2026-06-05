@@ -1823,6 +1823,9 @@ FLOP_PER_MAC = 2
 # Approximate softmax cost per attention score:
 # ~4 scalar ops/score: exp + subtract max (stabilization) + sum + divide.
 SOFTMAX_FLOPS_PER_SCORE = 4
+# Approximate number of state-matmul-equivalent passes in the gated delta rule
+# recurrence per token (state readout, delta error, decayed state update, gating).
+GDN_RECURRENCE_PASSES = 4
 
 
 @dataclasses.dataclass
@@ -1838,6 +1841,12 @@ class ModelDims:
     device_name: str | None = None
     sliding_window: int | None = None
     num_sliding_window_layers: int = 0
+    num_linear_attn_layers: int = 0
+    linear_attn_num_k_heads: int = 0
+    linear_attn_num_v_heads: int = 0
+    linear_attn_key_head_dim: int = 0
+    linear_attn_value_head_dim: int = 0
+    linear_attn_conv_size: int = 4
 
     def __post_init__(self):
         if self.num_kv_heads is None:
@@ -1852,9 +1861,31 @@ class ModelDims:
         assert self.num_attn_heads % self.num_kv_heads == 0, (
             "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
-        assert self.num_sliding_window_layers <= self.num_layers, (
-            f"num_sliding_window_layers ({self.num_sliding_window_layers}) cannot exceed num_layers ({self.num_layers})"
+        assert self.num_sliding_window_layers + self.num_linear_attn_layers <= self.num_layers, (
+            f"num_sliding_window_layers ({self.num_sliding_window_layers}) + num_linear_attn_layers "
+            f"({self.num_linear_attn_layers}) cannot exceed num_layers ({self.num_layers})"
         )
+
+    @property
+    def linear_attn_key_dim(self) -> int:
+        return self.linear_attn_num_k_heads * self.linear_attn_key_head_dim
+
+    @property
+    def linear_attn_value_dim(self) -> int:
+        return self.linear_attn_num_v_heads * self.linear_attn_value_head_dim
+
+    @property
+    def num_full_attn_layers(self) -> int:
+        return self.num_layers - self.num_sliding_window_layers - self.num_linear_attn_layers
+
+    def _gdn_layer_params(self) -> int:
+        """Parameter count for one Gated Delta Net (linear attention) layer, excluding MLP."""
+        h = self.hidden_size
+        kd = self.linear_attn_key_dim
+        vd = self.linear_attn_value_dim
+        proj_params = 2 * h * kd + 3 * h * vd + 2 * h * self.linear_attn_num_v_heads
+        conv_params = (2 * kd + vd) * self.linear_attn_conv_size
+        return proj_params + conv_params
 
     def _calculate_num_params(self) -> int:
         embedding_params = self.vocab_size * self.hidden_size
@@ -1862,11 +1893,15 @@ class ModelDims:
         q_params = self.hidden_size * (self.num_attn_heads * self.head_dim)
         kv_params = self.hidden_size * (self.num_kv_heads * self.head_dim) * 2
         o_params = (self.num_attn_heads * self.head_dim) * self.hidden_size
+        attn_params = q_params + kv_params + o_params
+
         mlp_up_params = self.hidden_size * self.intermediate_size * 2
         mlp_down_params = self.intermediate_size * self.hidden_size
+        mlp_params = mlp_up_params + mlp_down_params
 
-        per_layer_params = q_params + kv_params + o_params + mlp_up_params + mlp_down_params
-        layer_params = self.num_layers * per_layer_params
+        num_attn_layers = self.num_layers - self.num_linear_attn_layers
+        layer_params = self.num_layers * mlp_params + num_attn_layers * attn_params
+        layer_params += self.num_linear_attn_layers * self._gdn_layer_params()
 
         lm_head_params = self.vocab_size * self.hidden_size
 
@@ -1880,14 +1915,26 @@ class ModelDims:
         hidden_size = config.hidden_size
         intermediate_size = getattr(config, "intermediate_size", 4 * hidden_size)
         sliding_window = getattr(config, "sliding_window", None)
+        layer_types = getattr(config, "layer_types", None)
         num_sliding_window_layers = 0
         if sliding_window is not None:
-            layer_types = getattr(config, "layer_types", None)
             if layer_types is not None:
                 num_sliding_window_layers = layer_types.count("sliding_attention")
             else:
                 num_sliding_window_layers = config.num_hidden_layers
         head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
+
+        num_linear_attn_layers = layer_types.count("linear_attention") if layer_types is not None else 0
+        linear_attn_kwargs = {}
+        if num_linear_attn_layers > 0:
+            linear_attn_kwargs = {
+                "linear_attn_num_k_heads": config.linear_num_key_heads,
+                "linear_attn_num_v_heads": config.linear_num_value_heads,
+                "linear_attn_key_head_dim": config.linear_key_head_dim,
+                "linear_attn_value_head_dim": config.linear_value_head_dim,
+                "linear_attn_conv_size": config.linear_conv_kernel_dim,
+            }
+
         return cls(
             num_layers=config.num_hidden_layers,
             hidden_size=hidden_size,
@@ -1898,7 +1945,9 @@ class ModelDims:
             head_dim=head_dim,
             sliding_window=sliding_window,
             num_sliding_window_layers=num_sliding_window_layers,
+            num_linear_attn_layers=num_linear_attn_layers,
             device_name=get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+            **linear_attn_kwargs,
         )
 
     @property
@@ -1952,9 +2001,39 @@ class ModelDims:
         second = mul * seq_len * self.intermediate_size * self.hidden_size
         return first + act + second
 
+    def linear_attn_flops(self, seq_len: int) -> int:
+        """FLOPs for one Gated Delta Net (linear attention) layer over seq_len tokens.
+
+        Linear attention is O(seq_len): the per-token cost is constant and independent of
+        context length, so prefill and decode share the same per-token cost. Dominated by the
+        input/output projections plus the recurrent gated-delta state update; conv and
+        gate/decay projections to the head count are minor but included.
+        """
+        mul = FLOP_PER_MAC
+        kd = self.linear_attn_key_dim
+        vd = self.linear_attn_value_dim
+
+        qk_proj = mul * 2 * seq_len * self.hidden_size * kd
+        v_proj = mul * seq_len * self.hidden_size * vd
+        g_proj = mul * seq_len * self.hidden_size * vd
+        ab_proj = mul * 2 * seq_len * self.hidden_size * self.linear_attn_num_v_heads
+        conv = mul * seq_len * self.linear_attn_conv_size * (2 * kd + vd)
+        out_proj = mul * seq_len * vd * self.hidden_size
+
+        recurrence = (
+            mul
+            * GDN_RECURRENCE_PASSES
+            * seq_len
+            * self.linear_attn_num_v_heads
+            * self.linear_attn_key_head_dim
+            * self.linear_attn_value_head_dim
+        )
+
+        return qk_proj + v_proj + g_proj + ab_proj + conv + out_proj + recurrence
+
     def prefill_flops(self, prompt_lengths: list[int]) -> int:
         """Prefill builds the KV cache; logits are computed once after each prompt."""
-        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_full_attn_layers = self.num_full_attn_layers
         num_sliding_layers = self.num_sliding_window_layers
 
         total = 0
@@ -1966,6 +2045,8 @@ class ModelDims:
                 total += num_sliding_layers * (
                     self.attn_flops(L, L, sliding_window=self.sliding_window) + self.mlp_flops(L)
                 )
+
+            total += self.num_linear_attn_layers * (self.linear_attn_flops(L) + self.mlp_flops(L))
 
             # LM head is applied to each token position during training
             total += L * FLOP_PER_MAC * self.hidden_size * self.vocab_size
@@ -1986,7 +2067,7 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
-        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_full_attn_layers = self.num_full_attn_layers
         num_sliding_layers = self.num_sliding_window_layers
 
         total = 0
@@ -1996,6 +2077,8 @@ class ModelDims:
             for _ in range(samples_per_prompt):
                 R = response_lengths[response_idx]
                 total += R * self.num_layers * self.mlp_flops(seq_len=1)
+                # Linear attention per-token cost is constant in context length.
+                total += self.num_linear_attn_layers * self.linear_attn_flops(R)
                 for t in range(R):
                     kv_len = P + t + 1  # prompt + generated so far + current
                     if num_full_attn_layers > 0:
@@ -2046,16 +2129,24 @@ class ModelDims:
         hidden_q = self.num_attn_heads * self.head_dim
         hidden_kv = self.num_kv_heads * self.head_dim
 
-        # Per-layer weight params (Q, K, V, O, MLP up, MLP down)
+        # Per-attention-layer weight params (Q, K, V, O)
         w_q = self.hidden_size * hidden_q
         w_k = self.hidden_size * hidden_kv
         w_v = self.hidden_size * hidden_kv
         w_o = hidden_q * self.hidden_size
+        attn_weights = w_q + w_k + w_v + w_o
+
+        # Per-layer MLP weights (up, down), shared by all layer types
         w_up = self.hidden_size * (self.intermediate_size * 2)  # times 2 due to SwiGLU
         w_dn = self.intermediate_size * self.hidden_size
+        mlp_weights = w_up + w_dn
 
-        per_layer_weight_bytes = (w_q + w_k + w_v + w_o + w_up + w_dn) * dtype_bytes
-        return self.num_layers * num_tokens * per_layer_weight_bytes
+        num_attn_layers = self.num_layers - self.num_linear_attn_layers
+        total_weights = self.num_layers * mlp_weights + num_attn_layers * attn_weights
+        if self.num_linear_attn_layers > 0:
+            total_weights += self.num_linear_attn_layers * self._gdn_layer_params()
+
+        return num_tokens * total_weights * dtype_bytes
 
     def kv_cache_write_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
         """Memory bytes for writing KV cache for a given number of tokens.
@@ -2067,9 +2158,10 @@ class ModelDims:
         Returns:
             Total bytes for KV cache writes across all layers
         """
-        # 2x for K and V
+        # 2x for K and V. Linear attention layers keep a fixed recurrent state, not a KV cache.
+        num_kv_cache_layers = self.num_layers - self.num_linear_attn_layers
         kv_write_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
-        return self.num_layers * num_tokens * kv_write_bytes_per_token
+        return num_kv_cache_layers * num_tokens * kv_write_bytes_per_token
 
     def kv_cache_read_bytes(
         self, prompt_lengths: list[int], response_lengths: list[int], samples_per_prompt: int = 1, dtype_bytes: int = 2
@@ -2092,7 +2184,7 @@ class ModelDims:
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
         )
 
-        num_full_attn_layers = self.num_layers - self.num_sliding_window_layers
+        num_full_attn_layers = self.num_full_attn_layers
         num_sliding_layers = self.num_sliding_window_layers
 
         # For batched sampling with shared prompt KV cache:
@@ -2127,6 +2219,17 @@ class ModelDims:
         # 2x for K and V
         kv_bytes_per_token = 2 * self.num_kv_heads * self.head_dim * dtype_bytes
         return kv_bytes_per_token * kv_read_terms
+
+    def gdn_state_bytes(self, num_tokens: int, dtype_bytes: int = 2) -> int:
+        """Memory bytes for reading and writing the Gated Delta Net recurrent state.
+
+        Linear attention layers carry a fixed-size recurrent state instead of a growing KV
+        cache. Each decode step reads and writes the full state once per layer, independent of
+        context length.
+        """
+        state_elems = self.linear_attn_num_v_heads * self.linear_attn_key_head_dim * self.linear_attn_value_head_dim
+        # 2x for read + write
+        return self.num_linear_attn_layers * num_tokens * 2 * state_elems * dtype_bytes
 
     def prefill_memory_bytes(self, prompt_lengths: list[int], dtype_bytes: int = 2) -> int:
         """Memory bytes for prefill phase.
@@ -2187,7 +2290,8 @@ class ModelDims:
         kv_write_bytes = self.kv_cache_write_bytes(total_decode_tokens, dtype_bytes)
 
         kv_read_bytes = self.kv_cache_read_bytes(prompt_lengths, response_lengths, samples_per_prompt, dtype_bytes)
-        return weight_bytes + kv_write_bytes + kv_read_bytes
+        gdn_state_bytes = self.gdn_state_bytes(total_decode_tokens, dtype_bytes)
+        return weight_bytes + kv_write_bytes + kv_read_bytes + gdn_state_bytes
 
     def memory_bytes(
         self,

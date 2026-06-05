@@ -44,7 +44,10 @@ dependencies = [
     "mcp>=1.9.0",
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
-    "flash-linear-attention>=0.4.2",
+    "flash-linear-attention>=0.5.0",
+    # Provides the tilelang backend for fla's gated chunk_bwd_dqkwg, which fla routes to on
+    # Hopper with Triton>=3.4.0 (the Triton kernel produces incorrect gradients there; see fla #640).
+    "tilelang>=0.1.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 
 [build-system]
@@ -67,7 +70,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "b1bb3368c53305d6c5bf2b02ee40eaccff66f930" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "8085766b64d1a0ddcd495ccff9851a91ced21fc6" }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
