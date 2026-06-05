@@ -5,7 +5,7 @@ OLMo-core's native training infrastructure.
 """
 
 import math
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -207,7 +207,8 @@ class DPOTrainModule(TransformerTrainModule):
         pass
 
     def global_num_flops_in_batch(self, batch: dict[str, Any] | list[dict[str, Any]]) -> int | None:
-        global_num_tokens = padding_free_collator.get_num_tokens(batch) * self.trainer.data_loader.dp_world_size
+        data_loader = cast(data_loader_lib.HFDataLoader, self.trainer.data_loader)
+        global_num_tokens = data_loader.global_num_tokens_in_batch(batch)
         first = batch[0] if isinstance(batch, list) else batch
         seq_len = first["chosen_input_ids"].shape[1]
         flops_per_token = self.num_flops_per_token(seq_len=seq_len)

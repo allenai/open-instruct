@@ -157,6 +157,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self._microbatch_sample_cap = microbatch_sample_cap
         self._microbatches_per_step = microbatches_per_step
         self._collator = collator if collator is not None else (lambda x: {"examples": x})
+        self._collator_max_seq_length = getattr(self._collator, "max_seq_length", None)
         self._automatic_reshuffle = automatic_reshuffle
         self._drop_last = drop_last
         self._excluded_indices: set[int] = set()
@@ -287,9 +288,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
             mask = np.isin(all_indices, list(self._excluded_indices), invert=True)
             all_indices = all_indices[mask]
 
-        packing_enabled = hasattr(self._collator, "max_seq_length") and self._collator.max_seq_length is not None
-        if packing_enabled:
-            self._reshard_with_packing(all_indices)
+        if self._collator_max_seq_length is not None:
+            self._reshard_with_packing(all_indices, self._collator_max_seq_length)
             return
 
         self._precomputed_batch_sizes = None
@@ -315,7 +315,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         self.effective_size = len(rank_indices)
         self.dataset = self._full_dataset.select(rank_indices.tolist())
 
-    def _reshard_with_packing(self, all_indices: np.ndarray) -> None:
+    def _reshard_with_packing(self, all_indices: np.ndarray, max_seq_length: int) -> None:
         """Reshard with world-aware packing so all ranks get the same batch count.
 
         Instead of distributing examples to ranks and letting each rank pack
@@ -323,7 +323,6 @@ class HFDataLoader(data_loader.DataLoaderBase):
         overflow), this packs globally first and then distributes packed batches
         round-robin to ranks.
         """
-        max_seq_length = self._collator.max_seq_length
         column_names = self._full_dataset.column_names
         subset = self._full_dataset.select(all_indices.tolist())
         if "chosen_input_ids" in column_names:
@@ -392,8 +391,8 @@ class HFDataLoader(data_loader.DataLoaderBase):
         # When packing, the collator consumes only as many examples as fit the token
         # budget, so at most max_seq_length examples (each >= 1 token) can be used.
         # Bound the rows loaded so a large microbatch_sample_cap doesn't load the dataset.
-        if getattr(self._collator, "max_seq_length", None) is not None:
-            num_examples = min(num_examples, self._collator.max_seq_length)
+        if self._collator_max_seq_length is not None:
+            num_examples = min(num_examples, self._collator_max_seq_length)
         examples = [self.dataset[i] for i in range(num_examples)]
         return to_device(self._collator(examples), self._device)
 
