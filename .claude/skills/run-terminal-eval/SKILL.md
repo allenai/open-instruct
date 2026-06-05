@@ -86,8 +86,11 @@ Common launch failures: `BeakerWorkspaceNotFound` → pass `--workspace ai2/gene
 ## Run locally (dev VM, real Docker)
 
 `run_eval_local.sh` serves vLLM on one GPU and runs harbor against the host Docker
-daemon. It auto-installs the `docker compose` plugin and applies the
-`network_mode: host` patch. Defaults: `mini-swe-agent`, `Qwen/Qwen3.5-4B`, 2 tasks.
+daemon. It auto-installs the `docker compose` plugin, **authenticates to Docker
+Hub** (reads `$DOCKER_PAT` or the `shashankg_DOCKER_PAT` beaker secret, `docker
+login -u shashankg209`, hard-aborts on failure — no anonymous fallback; also
+strips a broken dev-containers `credsStore`), and applies the `network_mode:
+host` patch. Defaults: `mini-swe-agent`, `Qwen/Qwen3.5-4B`, 2 tasks.
 
 ```bash
 cd ~/code/tmax
