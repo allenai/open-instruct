@@ -27,11 +27,14 @@ The repo's `uv.lock` pins **harbor 0.6.6**. Pick the agent accordingly:
 | `VanilluxAgent:VanilluxAgent` | **NO** | hosted_vllm | hermes | Imports `ExecInput`/`create_run_agent_commands`, absent from 0.6.6 / all released harbor / main. Fails at import (`cannot import name 'ExecInput'`). This is the stock `launch_eval.sh` default — **don't use until the harbor pin is fixed.** |
 | `mini-swe-agent` (built-in) | YES | **openai** | any (hermes ok) | Parses `bash` code blocks from plain text, so it does NOT depend on the tool-call parser. |
 | `Vanillux2Agent:Vanillux2Agent` | YES | **openai** | **qwen3_xml** (Qwen3.5) | `BaseAgent` with its own litellm loop using *structured* tool-calls → needs the right parser (see below). Runs host-side. |
+| `TassieAgent:TassieAgent` | YES | **openai** | **qwen3_xml** (Qwen3.5) | Bash-only litellm loop, also **structured** tool-calls (`tools=[bash_tool]`) → same parser requirement as Vanillux2Agent. Runs host-side. |
+| `TassumAgent:TassumAgent` | YES | **openai** | **qwen3_xml** (Qwen3.5) | TassieAgent + context summarisation; same structured tool-calls. |
+| `terminus-2` (built-in) | YES | **openai** | qwen3_xml (safe) | Harbor's built-in agent. |
 | `swe-agent` (built-in) | YES | hosted_vllm | hermes | Upstream SWE-agent inside the sandbox. |
 
 **Tool-call parser (`--tool-call-parser`)**: `Qwen3.5` emits
 `<function=name><parameter=…>` XML. Agents that use litellm structured
-tool-calling (Vanillux2Agent) need **`qwen3_xml`** — with the default `hermes`
+tool-calling (**TassieAgent, TassumAgent, Vanillux2Agent**) need **`qwen3_xml`** — with the default `hermes`
 the tool-calls are silently dropped and the agent loops on "Format error" then
 gives up (0 useful steps). `qwen_xml` is NOT a valid name; the valid ones include
 `hermes, qwen3_coder, qwen3_xml, …`. Agents that parse text bash blocks
