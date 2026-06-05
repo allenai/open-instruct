@@ -70,7 +70,6 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
             --env TORCH_DIST_INIT_BARRIER=1 \
             --env TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800 \
-            --env TRITON_PRINT_AUTOTUNING=1 \
             --num_nodes 4 \
             --gpus 8 -- torchrun \
             --nnodes=4 \
