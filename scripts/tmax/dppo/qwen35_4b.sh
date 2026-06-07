@@ -48,8 +48,8 @@ uv run python mason.py \
     --response_length 65536 \
     --pack_length 67584 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 32 \
-    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 8 \
+    --num_samples_per_prompt_rollout 32 \
     --async_steps 4 \
     --model_name_or_path hamishivi/Qwen3.5-4B \
     --temperature 1.0 \

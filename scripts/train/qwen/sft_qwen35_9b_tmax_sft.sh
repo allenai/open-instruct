@@ -1,15 +1,16 @@
 #!/bin/bash
 
-# SFT for Qwen3.5-9B on hamishivi/tmax-sft-full-20260317 (sft), all splits.
+# SFT for Qwen3.5-9B on all splits of the TMAX skill-tax no-tool-call SFT mix.
 # 4 nodes x 8 GPUs = 32 GPUs, SP=2, 32k seq len.
 
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL="Qwen/Qwen3.5-9B"
-DATASET="hamishivi/tmax-sft-full-20260317"
+DATASET="hamishivi/tmax-sft-skill-tax-20260505-2.2k-combined-balanced-qwen3.6-27b-thinking-no-tool-call"
+DATASET_CONFIG="skill_tax_20260505_2.2k_combined_balanced_thinking_all"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/dr-tulu-ablations \
+    --workspace ai2/olmo-instruct \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -17,8 +18,8 @@ uv run python mason.py \
     --num_nodes 4 \
     --env BEAKER_ALLOW_SUBCONTAINERS=1 \
     --env BEAKER_SKIP_DOCKER_SOCKET=1 \
-    --budget ai2/oe-adapt \
     --gpus 8 \
+    --no_auto_dataset_cache \
     -- \
     accelerate launch \
     --mixed_precision bf16 \
@@ -27,7 +28,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name qwen35_9b_tmax_sft \
+    --exp_name qwen35_9b_tmax_skill_tax_no_tool_call_sft \
     --model_name_or_path $MODEL \
     --tokenizer_name $MODEL \
     --use_liger_kernel \
@@ -42,16 +43,10 @@ uv run python mason.py \
     --num_train_epochs 2 \
     --dataset_mixer_list \
         $DATASET 1.0 \
-        $DATASET 1.0 \
-        $DATASET 1.0 \
-        $DATASET 1.0 \
-        $DATASET 1.0 \
+    --dataset_mixer_list_config_names \
+        $DATASET_CONFIG \
     --dataset_mixer_list_splits \
-        nvidia__Nemotron_Terminal_Corpus__dataset_adapters \
-        nvidia__Nemotron_Terminal_Corpus__skill_based_easy \
-        nvidia__Nemotron_Terminal_Corpus__skill_based_medium \
-        nvidia__Nemotron_Terminal_Corpus__skill_based_mixed \
-        open_thoughts__OpenThoughts_Agent_v1_SFT \
+        train \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
