@@ -32,10 +32,10 @@ uv run python mason.py \
     --model_name_or_path $MODEL \
     --tokenizer_name $MODEL \
     --use_liger_kernel \
-    --max_seq_length 32768 \
-    --sequence_parallel_size 2 \
+    --max_seq_length 65536 \
+    --sequence_parallel_size 4 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 8 \
+    --gradient_accumulation_steps 16 \
     --learning_rate 2e-5 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
