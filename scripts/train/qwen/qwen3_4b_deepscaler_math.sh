@@ -84,5 +84,5 @@ uv run mason.py \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
-    --keep_last_n_checkpoints -1 \
+    --keep_last_n_checkpoints 3 \
     --push_to_hub False "$@"
