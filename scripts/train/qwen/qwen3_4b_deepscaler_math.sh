@@ -1,7 +1,20 @@
 #!/bin/bash
 
 EXP="${EXP:-}"
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_deepscaler_${EXP}}"
+
+# OC=true uses the OLMo-core GRPO (grpo.py) with FSDP; OC=false uses grpo_fast.py with DeepSpeed.
+OC="${OC:-false}"
+if [ "${OC}" = "true" ]; then
+    TRAIN_SCRIPT="open_instruct/grpo.py"
+    BACKEND_ARGS="--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
+    OC_TAG="oc_"
+else
+    TRAIN_SCRIPT="open_instruct/grpo_fast.py"
+    BACKEND_ARGS="--deepspeed_stage 2"
+    OC_TAG=""
+fi
+
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_deepscaler_${OC_TAG}${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
@@ -26,7 +39,7 @@ uv run mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus $NUM_GPUS \
     -- source configs/beaker_configs/ray_node_setup.sh \
-\&\& uv run open_instruct/grpo_fast.py \
+\&\& uv run ${TRAIN_SCRIPT} \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --eval_pass_at_k 32 \
@@ -53,7 +66,7 @@ uv run mason.py \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 128000 \
-    --deepspeed_stage 2 \
+    ${BACKEND_ARGS} \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
