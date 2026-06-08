@@ -60,7 +60,7 @@ uv run python mason.py \
     --sequence_parallel_size 4 \
     --num_epochs 1 \
     --num_learners_per_node 8 8 \
-    --vllm_num_engines 48 \
+    --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --use_vllm_logprobs true \
