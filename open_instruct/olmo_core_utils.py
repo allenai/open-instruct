@@ -108,6 +108,36 @@ class TrainingConfig:
     typically faster; lower values use less memory and are typically slower, so use the highest
     value your hardware can support. See: https://pytorch.org/blog/activation-checkpointing-techniques/.
     """
+    activation_checkpointing_mode: Literal["budget", "selected_modules"] = "budget"
+    """Activation checkpointing mode.
+
+    "budget" uses torch.compile's partitioner with `activation_memory_budget` (requires compilation,
+    and cannot checkpoint through opaque custom ops such as the GDN `fla` kernels). "selected_modules"
+    wraps the individual block submodules in `activation_checkpointing_modules` (by default all of
+    them, including the GDN mixer), which keeps compile *outside* the checkpoint boundary (the
+    supported order) while still recovering full-block memory savings, letting `torch.compile`
+    coexist with checkpointing at long sequences. olmo-core's "full" mode (wrapping whole blocks) is
+    intentionally unsupported: its recompute re-enters the compiled block's backward and fails an
+    inductor stride guard for GDN models.
+    """
+    activation_checkpointing_modules: list[str] = field(
+        default_factory=lambda: [
+            "blocks.*.attention_norm",
+            "blocks.*.attention",
+            "blocks.*.attention_residual_stream",
+            "blocks.*.feed_forward_norm",
+            "blocks.*.feed_forward",
+            "blocks.*.feed_forward_residual_stream",
+        ]
+    )
+    """Module-name globs to wrap when `activation_checkpointing_mode` is "selected_modules".
+
+    Defaults to every transformer-block submodule, including the GDN mixer (`blocks.*.attention`).
+    Wrapping submodules individually (rather than the whole block) keeps `torch.compile` *outside*
+    the checkpoint boundary, which is the order compile supports, while still recovering full-block
+    activation memory. The opaque `fla` kernel's recompute metadata check is suppressed by passing
+    `determinism_check="none"` through the activation checkpointing config.
+    """
     compile_model: bool = True
     """Whether to apply torch.compile to model blocks."""
     fused_optimizer: bool = True
@@ -119,8 +149,12 @@ class TrainingConfig:
 
 
 def build_ac_config(
-    activation_memory_budget: float, compile_model: bool
+    activation_memory_budget: float, compile_model: bool, mode: str = "budget", modules: list[str] | None = None
 ) -> TransformerActivationCheckpointingConfig | None:
+    if mode == "selected_modules":
+        return TransformerActivationCheckpointingConfig(
+            mode=TransformerActivationCheckpointingMode.selected_modules, modules=modules, determinism_check="none"
+        )
     if activation_memory_budget < 1.0 and compile_model:
         return TransformerActivationCheckpointingConfig(
             mode=TransformerActivationCheckpointingMode.budget, activation_memory_budget=activation_memory_budget
