@@ -174,7 +174,10 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             )
 
         ac_config = olmo_core_utils.build_ac_config(
-            self.grpo_config.activation_memory_budget, self.grpo_config.compile_model
+            self.grpo_config.activation_memory_budget,
+            self.grpo_config.compile_model,
+            self.grpo_config.activation_checkpointing_mode,
+            self.grpo_config.activation_checkpointing_modules,
         )
 
         self.train_module = GRPOTrainModule(
