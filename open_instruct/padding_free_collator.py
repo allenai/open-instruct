@@ -249,6 +249,11 @@ def get_num_tokens(batch: dict[str, Any]) -> int:
     return sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
 
 
+def get_total_tokens(batch: dict[str, Any]) -> int:
+    """Return total token count including padding, summed over all input_ids tensors."""
+    return sum(v.numel() for k, v in batch.items() if k.endswith("input_ids") and isinstance(v, torch.Tensor))
+
+
 def get_num_sequences(batch: dict[str, Any]) -> int | None:
     """Return total sequence count from a training batch, or None for non-packing batches.
 
