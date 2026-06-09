@@ -123,7 +123,6 @@ class PerfCallback(Callback):
     """Calculates MFU and tokens_per_second using same formula as dpo_tune_cache.py."""
 
     model_dims: utils.ModelDims
-    per_device_train_batch_size: int
     gradient_accumulation_steps: int
     dp_world_size: int
     tensor_parallel_degree: int = 1
@@ -161,8 +160,6 @@ class PerfCallback(Callback):
         self._pre_step_time = time.perf_counter()
         self._step_start_time = self._pre_step_time
         num_seqs = padding_free_collator.get_num_sequences(batch)
-        if num_seqs is None:
-            num_seqs = self.per_device_train_batch_size * 2
         self._interval_num_sequences += num_seqs * self.dp_world_size
 
     def post_step(self) -> None:
@@ -201,11 +198,11 @@ class PerfCallback(Callback):
 
         seconds_per_step = interval_end - self._step_start_time
 
-        self.trainer.record_metric("perf/mfu", mfu_result["mfu"], reduce_type=None)
+        self.trainer.record_metric("perf/mfu_step", mfu_result["mfu"], reduce_type=None)
         self.trainer.record_metric("perf/mfu_avg", mfu_avg, reduce_type=None)
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
-        self.trainer.record_metric("perf/tokens_per_second", tokens_per_second, reduce_type=None)
-        self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second_step", tokens_per_second, reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second_total", tokens_per_second_avg, reduce_type=None)
         self.trainer.record_metric(
             "perf/tokens_per_second_per_gpu",
             tokens_per_second / (self.dp_world_size * self.tensor_parallel_degree),

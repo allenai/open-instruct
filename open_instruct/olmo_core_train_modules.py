@@ -18,6 +18,8 @@ from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
+from olmo_core.train.callbacks import Callback
+from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
 from torch.distributed.tensor import DTensor, Replicate, Shard
@@ -33,6 +35,36 @@ logger = logger_utils.setup_logger(__name__)
 _DOC_LENS_ATTN_BACKENDS = frozenset(
     {AttentionBackendName.flash_2, AttentionBackendName.flash_3, AttentionBackendName.flash_4}
 )
+
+# DPO token-weighted metrics are ratios sum_ranks(sum_mb(metric*tokens)) / sum_ranks(tokens).
+# DPOTrainModule records each numerator under the _DPO_REDUCE_NS namespace and the shared
+# denominators (real and padded token counts) under the keys below, all with ReduceType.sum so
+# the trainer reduces them in its batched per-interval all-reduce. DPOMetricsCallback then divides
+# numerator/denominator after reduction, avoiding a per-step host sync and explicit all-reduce.
+_DPO_REDUCE_NS = "_dpo_reduce"
+_DPO_TOKENS_KEY = f"{_DPO_REDUCE_NS}/__tokens__"
+_DPO_PADDED_KEY = f"{_DPO_REDUCE_NS}/__padded__"
+
+
+class DPOMetricsCallback(Callback):
+    """Reconstructs token-weighted DPO metrics from reduced numerator/denominator sums."""
+
+    priority = 10
+
+    def pre_log_metrics(self, step: int, metrics: dict[str, float]) -> None:
+        if _DPO_TOKENS_KEY not in metrics:
+            return
+        tokens = metrics.pop(_DPO_TOKENS_KEY)
+        padded = metrics.pop(_DPO_PADDED_KEY)
+        prefix = f"{_DPO_REDUCE_NS}/"
+        for key in [k for k in metrics if k.startswith(prefix)]:
+            metrics[key[len(prefix) :]] = metrics.pop(key) / tokens
+        metrics["train/padding_fraction"] = 1.0 - tokens / padded
+        metrics["training_step"] = float(step)
+        if self.trainer.steps_per_epoch is not None:
+            metrics["epoch"] = step / self.trainer.steps_per_epoch
+        if "optim/LR (group 0)" in metrics:
+            metrics["learning_rate"] = metrics["optim/LR (group 0)"]
 
 
 class DPOLMHead(LMHead):
@@ -226,7 +258,8 @@ class DPOTrainModule(TransformerTrainModule):
         micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
         device = batch["chosen_input_ids"].device
-        total_tokens = padding_free_collator.get_num_tokens(batch)
+        micro_token_counts = [padding_free_collator.get_num_tokens(mb) for mb in micro_batches]
+        total_tokens = sum(micro_token_counts)
 
         for v in self._metrics.values():
             v.zero_()
@@ -234,7 +267,7 @@ class DPOTrainModule(TransformerTrainModule):
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
                 loss, step_metrics = self._compute_microbatch_loss(micro_batch)
-                micro_tokens = padding_free_collator.get_num_tokens(micro_batch)
+                micro_tokens = micro_token_counts[micro_batch_idx]
                 weight = micro_tokens / total_tokens
                 for k, v in step_metrics.items():
                     self._metrics[k] += v.detach() * micro_tokens
@@ -243,39 +276,44 @@ class DPOTrainModule(TransformerTrainModule):
         self.model.post_batch(dry_run=dry_run)
 
         if not dry_run:
-            metric_keys = sorted(self._metrics.keys())
-            local_sums_list = [torch.tensor(total_tokens, dtype=torch.float32, device=device)] + [
-                self._metrics[k] for k in metric_keys
-            ]
-            local_sums = torch.stack(local_sums_list)
-            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+            local_padded_tokens = padding_free_collator.get_num_padded_tokens(batch)
+            local_num_sequences = padding_free_collator.get_num_sequences(batch)
 
-            global_total_tokens = local_sums[0]
-            global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
-
-            self.record_metric("train/loss", global_metrics["loss"].item(), reduce_type=None)
-            self.record_metric("train/logps_chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
-            self.record_metric("train/logps_rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
+            self.record_metric(
+                _DPO_TOKENS_KEY, torch.tensor(float(total_tokens), device=device), reduce_type=ReduceType.sum
+            )
+            self.record_metric(
+                _DPO_PADDED_KEY, torch.tensor(float(local_padded_tokens), device=device), reduce_type=ReduceType.sum
+            )
+            # PerfCallback reads train/token_count from the per-step buffer (before the deferred
+            # reduction), so it must be recorded here rather than reconstructed in DPOMetricsCallback.
             token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
+            weighted_sums = {
+                "train_loss": self._metrics["loss"],
+                "logps/chosen": self._metrics["chosen_logps"],
+                "logps/rejected": self._metrics["rejected_logps"],
+            }
             if self.dpo_config.loss_type.computes_reward_metrics:
-                margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
-                self.record_metric("train/rewards_chosen", global_metrics["chosen_rewards"].item(), reduce_type=None)
-                self.record_metric(
-                    "train/rewards_rejected", global_metrics["rejected_rewards"].item(), reduce_type=None
-                )
-                self.record_metric(
-                    "train/rewards_average",
-                    ((global_metrics["chosen_rewards"] + global_metrics["rejected_rewards"]) / 2).item(),
-                    reduce_type=None,
-                )
-                self.record_metric("train/rewards_accuracy", global_metrics["accuracy"].item(), reduce_type=None)
-                self.record_metric("train/rewards_margin", margin.item(), reduce_type=None)
+                chosen_rewards = self._metrics["chosen_rewards"]
+                rejected_rewards = self._metrics["rejected_rewards"]
+                weighted_sums["rewards/chosen"] = chosen_rewards
+                weighted_sums["rewards/rejected"] = rejected_rewards
+                weighted_sums["rewards/average"] = (chosen_rewards + rejected_rewards) / 2
+                weighted_sums["rewards/accuracy"] = self._metrics["accuracy"]
+                weighted_sums["rewards/margin"] = chosen_rewards - rejected_rewards
+            if "aux_loss" in self._metrics:
+                weighted_sums["aux_loss"] = self._metrics["aux_loss"]
+            for name, value in weighted_sums.items():
+                self.record_metric(f"{_DPO_REDUCE_NS}/{name}", value, reduce_type=ReduceType.sum)
 
-            if "aux_loss" in global_metrics:
-                self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
+            self.record_metric(
+                "train/sequences_per_step",
+                torch.tensor(float(local_num_sequences), device=device),
+                reduce_type=ReduceType.sum,
+            )
 
 
 class GRPOTrainModule(TransformerTrainModule):
