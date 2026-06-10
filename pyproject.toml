@@ -195,7 +195,6 @@ exclude = [
     "scripts/",
     "decontamination/",
     "human_eval/",
-    "open_instruct/code_utils/",
     "open_instruct/test_*.py",
     "test_*.py",
     "open_instruct/IFEvalG/instructions.py",
