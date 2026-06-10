@@ -304,15 +304,20 @@ class DPOTrainModule(TransformerTrainModule):
             for name, value in weighted_sums.items():
                 self.record_metric(f"{_DPO_REDUCE_NS}/{name}", value, reduce_type=ReduceType.sum)
 
+            # ReduceType.sum reduces over the whole world, but all non-DP ranks (TP, CP) in a DP
+            # shard process the same batch, so divide by that duplication factor first to count
+            # each sequence once. Token-weighted metrics above cancel this in their ratios.
+            dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
+            sequence_dup_factor = dist.get_world_size() // dp_world_size
             self.record_metric(
                 "train/sequences_per_step",
-                local_num_sequences.to(device=device, dtype=torch.float32),
+                local_num_sequences.to(device=device, dtype=torch.float32) / sequence_dup_factor,
                 reduce_type=ReduceType.sum,
             )
 
             self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
-            if self.trainer.steps_per_epoch is not None:
-                self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
+            assert self.trainer.steps_per_epoch is not None
+            self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
             if self.scheduler is not None and self.trainer.max_steps is not None:
                 lr = self.scheduler.get_lr(
                     self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
