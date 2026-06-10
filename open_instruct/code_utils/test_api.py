@@ -6,23 +6,22 @@ import unittest
 
 import requests
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, utils
 
 logger = logger_utils.setup_logger(__name__)
+STARTUP_TIMEOUT_S = 30
 
 
 class APITestServer:
     """Manages starting and stopping the API server for testing."""
 
-    def __init__(self, host="0.0.0.0", port=1234, startup_timeout=30):
-        self.host = host
-        self.port = port
-        self.startup_timeout = startup_timeout
-        self.base_url = f"http://localhost:{port}"
+    def __init__(self) -> None:
+        self.port = utils.find_free_port()
+        self.base_url = f"http://localhost:{self.port}"
         self.health_url = f"{self.base_url}/health"
-        self.process = None
+        self.process: subprocess.Popen[str] | None = None
 
-    def is_running(self):
+    def is_running(self) -> bool:
         """Check if the server is already running."""
         try:
             response = requests.get(self.health_url, timeout=1)
@@ -30,7 +29,7 @@ class APITestServer:
         except requests.exceptions.RequestException:
             return False
 
-    def start(self):
+    def start(self) -> bool:
         """Start the server if it's not already running."""
         if self.is_running():
             logger.info("Server already running, using existing instance")
@@ -44,28 +43,40 @@ class APITestServer:
                 "uvicorn",
                 "open_instruct.code_utils.api:app",
                 "--host",
-                self.host,
+                "0.0.0.0",
                 "--port",
                 str(self.port),
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
 
         # Wait for server to start
-        for _ in range(self.startup_timeout):
+        deadline = time.monotonic() + STARTUP_TIMEOUT_S
+        while time.monotonic() < deadline:
             if self.is_running():
                 logger.info("Server started successfully")
                 return True
-            time.sleep(1)
+            if self.process.poll() is not None:
+                output = self.process.communicate()[0]
+                self.process = None
+                raise RuntimeError(f"API server exited before startup completed:\n{output}")
+            time.sleep(0.5)
 
         # Server failed to start
+        output = ""
         if self.process:
             self.process.terminate()
+            try:
+                output = self.process.communicate(timeout=10)[0]
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                output = self.process.communicate()[0]
             self.process = None
-        raise RuntimeError(f"Failed to start server within {self.startup_timeout} seconds")
+        raise RuntimeError(f"Failed to start server within {STARTUP_TIMEOUT_S} seconds:\n{output}")
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the server if we started it."""
         if self.process:
             logger.info("Stopping API server...")
@@ -77,12 +88,12 @@ class APITestServer:
                 self.process.wait()
             self.process = None
 
-    def __enter__(self):
+    def __enter__(self) -> "APITestServer":
         """Enter the context manager."""
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> bool:
         """Exit the context manager."""
         self.stop()
         return False

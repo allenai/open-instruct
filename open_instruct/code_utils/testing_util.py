@@ -54,12 +54,15 @@ def timeout_handler(signum, frame):
 # used to capture stdout as a list
 # from https://stackoverflow.com/a/16571630/6416660
 # alternative use redirect_stdout() from contextlib
+class NonClosingStringIO(StringIO):
+    def close(self) -> None:
+        pass
+
+
 class Capturing(list):
     def __enter__(self):
         self._stdout = sys.stdout
-        sys.stdout = self._stringio = StringIO()
-        # Make closing the StringIO a no-op
-        self._stringio.close = lambda x: 1
+        sys.stdout = self._stringio = NonClosingStringIO()
         return self
 
     def __exit__(self, *args):
@@ -132,6 +135,7 @@ def make_function(code: str) -> str:
             body=all_other_stmts,
             decorator_list=[],
             lineno=-1,
+            type_params=[],
         )
         main_code = (
             import_string
