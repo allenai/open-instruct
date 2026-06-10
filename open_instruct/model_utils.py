@@ -16,7 +16,6 @@
 
 import asyncio
 import functools
-import importlib.util
 import itertools
 import pathlib
 import tempfile
