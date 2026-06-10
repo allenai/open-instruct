@@ -230,12 +230,7 @@ def get_batch_logps(
 
 
 def get_num_tokens(batch: dict[str, Any]) -> int:
-    """Return total non-padding token count from a training batch.
-
-    For packed batches (DPO or GRPO), reads cu_seq_lens_k tensors whose last
-    element is the total token count for that branch. For padded batches, sums
-    the attention_mask. Falls back to counting input_ids elements.
-    """
+    """Return the unpadded (real) token count from a training batch."""
     # cu_seq_lens_k is a cumulative sequence length tensor from the padding-free
     # collator. Its last element equals the total token count for that branch.
     # DPO has chosen_cu_seq_lens_k + rejected_cu_seq_lens_k; GRPO has cu_seq_lens_k.
@@ -246,7 +241,12 @@ def get_num_tokens(batch: dict[str, Any]) -> int:
     attn_keys = [k for k in batch if k.endswith("attention_mask")]
     if attn_keys:
         return sum(batch[k].sum().item() for k in attn_keys)
-    return sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
+    return get_total_tokens(batch)
+
+
+def get_total_tokens(batch: dict[str, Any]) -> int:
+    """Return total token count including padding, summed over all input_ids tensors."""
+    return sum(v.numel() for k, v in batch.items() if k.endswith("input_ids") and isinstance(v, torch.Tensor))
 
 
 def get_num_sequences(batch: dict[str, Any]) -> int | None:

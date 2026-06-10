@@ -15,7 +15,7 @@ from transformers import (
     LlamaForCausalLM,
 )
 
-from open_instruct import model_utils
+from open_instruct import model_utils, padding_free_collator
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
 from open_instruct.olmo_core_train_modules import DPOLMHead
@@ -397,3 +397,16 @@ class TestDPOLMHead(unittest.TestCase):
         output = head(x, labels=None)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (1, seq_len, vocab_size))
+
+
+class TokenCountTest(unittest.TestCase):
+    def test_packed_dpo_batch_counts(self):
+        batch = {
+            "chosen_input_ids": torch.zeros(1, 10, dtype=torch.long),
+            "rejected_input_ids": torch.zeros(1, 10, dtype=torch.long),
+            "chosen_cu_seq_lens_k": torch.tensor([0, 3, 6], dtype=torch.int32),
+            "rejected_cu_seq_lens_k": torch.tensor([0, 4, 7], dtype=torch.int32),
+        }
+        self.assertEqual(padding_free_collator.get_total_tokens(batch), 20)
+        self.assertEqual(padding_free_collator.get_num_tokens(batch), 13)
+        self.assertEqual(padding_free_collator.get_num_sequences(batch), 4)
