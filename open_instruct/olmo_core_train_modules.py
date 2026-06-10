@@ -304,14 +304,21 @@ class DPOTrainModule(TransformerTrainModule):
             for name, value in weighted_sums.items():
                 self.record_metric(f"{_DPO_REDUCE_NS}/{name}", value, reduce_type=ReduceType.sum)
 
+            local_num_sequences_f = local_num_sequences.to(device=device, dtype=torch.float32)
             # Use mean rather than sum: the reduction runs over the whole world, but all non-DP
             # ranks (TP, CP) in a DP shard process the same batch. mean divides the world-group sum
             # by world_size, yielding the average per-rank sequence count without double-counting
             # the duplicated ranks.
+            self.record_metric("train/sequences_per_rank", local_num_sequences_f, reduce_type=ReduceType.mean)
+            # Global per-step total across DP shards. ReduceType.sum reduces over the whole world, so
+            # pre-divide by the TP/CP duplication factor (world_size / dp_world_size) to count each
+            # DP shard's sequences once.
+            dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
+            sequence_dup_factor = dist.get_world_size() // dp_world_size
             self.record_metric(
-                "train/sequences_per_step",
-                local_num_sequences.to(device=device, dtype=torch.float32),
-                reduce_type=ReduceType.mean,
+                "train/global_sequences_per_step",
+                local_num_sequences_f / sequence_dup_factor,
+                reduce_type=ReduceType.sum,
             )
 
             self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
