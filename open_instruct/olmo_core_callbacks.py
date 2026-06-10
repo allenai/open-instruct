@@ -141,7 +141,6 @@ class PerfCallback(Callback):
     _interval_num_sequences: int = field(default=0, repr=False)
     _interval_real_tokens: int = field(default=0, repr=False)
     _interval_total_tokens: int = field(default=0, repr=False)
-    _interval_steps: int = field(default=0, repr=False)
     _pre_step_time: float = field(default=0.0, repr=False)
     _prev_pre_step_time: float = field(default=0.0, repr=False)
 
@@ -154,7 +153,6 @@ class PerfCallback(Callback):
         self._interval_num_sequences = 0
         self._interval_real_tokens = 0
         self._interval_total_tokens = 0
-        self._interval_steps = 0
 
     def pre_load_batch(self) -> None:
         self._batch_load_start = time.perf_counter()
@@ -172,7 +170,6 @@ class PerfCallback(Callback):
         self._interval_num_sequences += num_seqs * self.dp_world_size
         self._interval_real_tokens += padding_free_collator.get_num_tokens(batch) * self.dp_world_size
         self._interval_total_tokens += padding_free_collator.get_total_tokens(batch) * self.dp_world_size
-        self._interval_steps += 1
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -223,12 +220,10 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/total_tokens", self._total_tokens_processed, reduce_type=None)
         self.trainer.record_metric("perf/data_loading_seconds", self._batch_load_time, reduce_type=None)
 
-        if self._interval_steps > 0:
-            sequences_per_step = self._interval_num_sequences / self._interval_steps
-            self.trainer.record_metric("perf/sequences_per_step", sequences_per_step, reduce_type=None)
-        if self._interval_total_tokens > 0:
-            padding_pct = 100 * (1 - self._interval_real_tokens / self._interval_total_tokens)
-            self.trainer.record_metric("perf/padding_pct", padding_pct, reduce_type=None)
+        sequences_per_step = self._interval_num_sequences / (self.step - self._last_step)
+        self.trainer.record_metric("perf/sequences_per_step", sequences_per_step, reduce_type=None)
+        padding_pct = 100 * (1 - self._interval_real_tokens / self._interval_total_tokens)
+        self.trainer.record_metric("perf/padding_pct", padding_pct, reduce_type=None)
 
         if self._prev_wall_clock_step_start > 0:
             wall_clock_per_step = self._wall_clock_step_start - self._prev_wall_clock_step_start
@@ -253,5 +248,4 @@ class PerfCallback(Callback):
         self._interval_num_sequences = 0
         self._interval_real_tokens = 0
         self._interval_total_tokens = 0
-        self._interval_steps = 0
         self._last_step = self.step
