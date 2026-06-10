@@ -1,27 +1,28 @@
 """Integration test for the /test_program endpoint."""
 
 import subprocess
+import time
 import unittest
 
-import backoff
 import requests
 
 from open_instruct import logger_utils, utils
 
 logger = logger_utils.setup_logger(__name__)
-STARTUP_TIMEOUT_S = 30
 
 
 class APITestServer:
     """Manages starting and stopping the API server for testing."""
 
     def __init__(self) -> None:
+        self.host = "127.0.0.1"
         self.port = utils.find_free_port()
-        self.base_url = f"http://localhost:{self.port}"
+        self.startup_timeout = 30
+        self.base_url = f"http://{self.host}:{self.port}"
         self.health_url = f"{self.base_url}/health"
-        self.process: subprocess.Popen[str] | None = None
+        self.process = None
 
-    def is_running(self) -> bool:
+    def is_running(self):
         """Check if the server is already running."""
         try:
             response = requests.get(self.health_url, timeout=1)
@@ -29,19 +30,11 @@ class APITestServer:
         except requests.exceptions.RequestException:
             return False
 
-    @backoff.on_predicate(backoff.constant, interval=0.5, max_time=STARTUP_TIMEOUT_S, jitter=None)
-    def _wait_until_startup_complete(self) -> bool:
-        return self.is_running() or bool(self.process and self.process.poll() is not None)
-
-    @backoff.on_predicate(backoff.constant, interval=0.5, max_time=10, jitter=None)
-    def _wait_for_exit(self) -> bool:
-        return bool(self.process and self.process.poll() is not None)
-
-    def start(self) -> None:
+    def start(self):
         """Start the server if it's not already running."""
         if self.is_running():
             logger.info("Server already running, using existing instance")
-            return
+            return True
 
         logger.info("Starting API server...")
         self.process = subprocess.Popen(
@@ -51,44 +44,46 @@ class APITestServer:
                 "uvicorn",
                 "open_instruct.code_utils.api:app",
                 "--host",
-                "0.0.0.0",
+                self.host,
                 "--port",
                 str(self.port),
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            stderr=subprocess.PIPE,
         )
 
-        self._wait_until_startup_complete()
-        if self.is_running():
-            logger.info("Server started successfully")
-            return
+        # Wait for server to start
+        for _ in range(self.startup_timeout):
+            if self.is_running():
+                logger.info("Server started successfully")
+                return True
+            time.sleep(1)
 
-        process_exited = bool(self.process and self.process.poll() is not None)
-        output = self.stop()
-        if process_exited:
-            raise RuntimeError(f"API server exited before startup completed:\n{output}")
-        raise RuntimeError(f"Failed to start server within {STARTUP_TIMEOUT_S} seconds:\n{output}")
+        # Server failed to start
+        if self.process:
+            self.process.terminate()
+            self.process = None
+        raise RuntimeError(f"Failed to start server within {self.startup_timeout} seconds")
 
-    def stop(self) -> str:
+    def stop(self):
         """Stop the server if we started it."""
-        if not self.process:
-            return ""
+        if self.process:
+            logger.info("Stopping API server...")
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+            self.process = None
 
-        self.process.terminate()
-        self._wait_for_exit()
-        if self.process.poll() is None:
-            self.process.kill()
-        output = self.process.communicate()[0]
-        self.process = None
-        return output
-
-    def __enter__(self) -> "APITestServer":
+    def __enter__(self):
+        """Enter the context manager."""
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context manager."""
         self.stop()
         return False
 
