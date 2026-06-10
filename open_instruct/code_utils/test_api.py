@@ -1,9 +1,7 @@
 """Integration test for the /test_program endpoint."""
 
-import contextlib
 import subprocess
 import unittest
-from collections.abc import Iterator
 
 import backoff
 import requests
@@ -15,7 +13,7 @@ STARTUP_TIMEOUT_S = 30
 
 
 class APITestServer:
-    """Stores API server state for testing."""
+    """Manages starting and stopping the API server for testing."""
 
     def __init__(self) -> None:
         self.port = utils.find_free_port()
@@ -35,37 +33,18 @@ class APITestServer:
     def _wait_until_startup_complete(self) -> bool:
         return self.is_running() or bool(self.process and self.process.poll() is not None)
 
-    def _stop_process(self) -> str:
-        if not self.process:
-            return ""
+    @backoff.on_predicate(backoff.constant, interval=0.5, max_time=10, jitter=None)
+    def _wait_for_exit(self) -> bool:
+        return bool(self.process and self.process.poll() is not None)
 
-        process = self.process
-        if process.poll() is None:
-            process.terminate()
-            try:
-                output = process.communicate(timeout=10)[0]
-            except subprocess.TimeoutExpired:
-                process.kill()
-                output = process.communicate()[0]
-        else:
-            output = process.communicate()[0]
-        self.process = None
-        return output
-
-
-@contextlib.contextmanager
-def api_test_server() -> Iterator[APITestServer]:
-    """Start and stop the API server for testing."""
-    server = APITestServer()
-
-    try:
-        if server.is_running():
+    def start(self) -> None:
+        """Start the server if it's not already running."""
+        if self.is_running():
             logger.info("Server already running, using existing instance")
-            yield server
             return
 
         logger.info("Starting API server...")
-        server.process = subprocess.Popen(
+        self.process = subprocess.Popen(
             [
                 "uv",
                 "run",
@@ -74,34 +53,50 @@ def api_test_server() -> Iterator[APITestServer]:
                 "--host",
                 "0.0.0.0",
                 "--port",
-                str(server.port),
+                str(self.port),
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
 
-        startup_complete = server._wait_until_startup_complete()
-        if startup_complete and server.is_running():
+        self._wait_until_startup_complete()
+        if self.is_running():
             logger.info("Server started successfully")
-            yield server
             return
 
-        process_exited = bool(server.process and server.process.poll() is not None)
-        output = server._stop_process()
+        process_exited = bool(self.process and self.process.poll() is not None)
+        output = self.stop()
         if process_exited:
             raise RuntimeError(f"API server exited before startup completed:\n{output}")
         raise RuntimeError(f"Failed to start server within {STARTUP_TIMEOUT_S} seconds:\n{output}")
-    finally:
-        if server.process:
-            logger.info("Stopping API server...")
-            server._stop_process()
+
+    def stop(self) -> str:
+        """Stop the server if we started it."""
+        if not self.process:
+            return ""
+
+        self.process.terminate()
+        self._wait_for_exit()
+        if self.process.poll() is None:
+            self.process.kill()
+        output = self.process.communicate()[0]
+        self.process = None
+        return output
+
+    def __enter__(self) -> "APITestServer":
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        self.stop()
+        return False
 
 
 class TestAPI(unittest.TestCase):
     def test_add_program_results(self):
         """POST to the endpoint and verify JSON response structure & content."""
-        with api_test_server() as server:
+        with APITestServer() as server:
             payload = {
                 "program": ("def add(a, b):\n    return a + b\n"),
                 "tests": [
@@ -125,7 +120,7 @@ class TestAPI(unittest.TestCase):
 
     def test_multiple_calls_to_test_program(self, num_requests=3):
         """Test making multiple calls to /test_program endpoint."""
-        with api_test_server() as server:
+        with APITestServer() as server:
             # Use the same payload for all requests
             test_payload = {
                 "program": "def multiply(a, b):\n    return a * b",
@@ -143,7 +138,7 @@ class TestAPI(unittest.TestCase):
 
     def test_multiple_calls_to_test_program_stdio(self, num_requests=3):
         """Test making multiple calls to /test_program_stdio endpoint."""
-        with api_test_server() as server:
+        with APITestServer() as server:
             # Use the same payload for all requests
             stdio_payload = {
                 "program": "a, b = map(int, input().split())\nprint(a + b)",
@@ -172,7 +167,7 @@ class TestAPI(unittest.TestCase):
 
 class TestAPITestServer(unittest.TestCase):
     def test_health_check_with_context_manager(self):
-        with api_test_server() as server:
+        with APITestServer() as server:
             response = requests.get(server.health_url, timeout=5)
             self.assertEqual(response.status_code, 200)
 
