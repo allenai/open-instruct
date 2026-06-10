@@ -60,11 +60,6 @@ class DPOMetricsCallback(Callback):
         for key in [k for k in metrics if k.startswith(prefix)]:
             metrics[key.removeprefix(prefix)] = metrics.pop(key) / tokens
         metrics["train/padding_fraction"] = 1.0 - tokens / padded
-        metrics["training_step"] = float(step)
-        if self.trainer.steps_per_epoch is not None:
-            metrics["epoch"] = step / self.trainer.steps_per_epoch
-        if "optim/LR (group 0)" in metrics:
-            metrics["learning_rate"] = metrics["optim/LR (group 0)"]
 
 
 class DPOLMHead(LMHead):
@@ -311,9 +306,20 @@ class DPOTrainModule(TransformerTrainModule):
 
             self.record_metric(
                 "train/sequences_per_step",
-                torch.tensor(float(local_num_sequences), device=device),
+                local_num_sequences.to(device=device, dtype=torch.float32),
                 reduce_type=ReduceType.sum,
             )
+
+            self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
+            if self.trainer.steps_per_epoch is not None:
+                self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
+            if self.scheduler is not None and self.trainer.max_steps is not None:
+                lr = self.scheduler.get_lr(
+                    self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
+                    self.trainer.global_step,
+                    self.trainer.max_steps,
+                )
+                self.record_metric("learning_rate", float(lr), reduce_type=None)
 
 
 class GRPOTrainModule(TransformerTrainModule):

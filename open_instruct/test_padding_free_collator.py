@@ -412,7 +412,7 @@ class TestBatchCounters(unittest.TestCase):
         ]
     )
     def test_get_num_sequences(self, name, batch, expected):
-        self.assertEqual(padding_free_collator.get_num_sequences(batch), expected)
+        self.assertEqual(int(padding_free_collator.get_num_sequences(batch)), expected)
 
     def test_get_num_padded_tokens(self):
         batch = {"chosen_input_ids": torch.zeros(2, 5), "rejected_input_ids": torch.zeros(2, 5)}

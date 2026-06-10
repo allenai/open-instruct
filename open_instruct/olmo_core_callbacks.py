@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
+import torch
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
@@ -137,7 +138,7 @@ class PerfCallback(Callback):
     _batch_load_time: float = field(default=0.0, repr=False)
     _wall_clock_step_start: float = field(default=0.0, repr=False)
     _prev_wall_clock_step_start: float = field(default=0.0, repr=False)
-    _interval_num_sequences: int = field(default=0, repr=False)
+    _interval_num_sequences: int | torch.Tensor = field(default=0, repr=False)
     _pre_step_time: float = field(default=0.0, repr=False)
     _prev_pre_step_time: float = field(default=0.0, repr=False)
 
@@ -159,8 +160,7 @@ class PerfCallback(Callback):
         self._prev_pre_step_time = self._pre_step_time
         self._pre_step_time = time.perf_counter()
         self._step_start_time = self._pre_step_time
-        num_seqs = padding_free_collator.get_num_sequences(batch)
-        self._interval_num_sequences += num_seqs * self.dp_world_size
+        self._interval_num_sequences += padding_free_collator.get_num_sequences(batch) * self.dp_world_size
 
     def post_step(self) -> None:
         if self.step % self.trainer.metrics_collect_interval != 0:
@@ -182,9 +182,8 @@ class PerfCallback(Callback):
         tokens_per_second_avg = self._total_tokens_processed / total_time_elapsed
 
         logging_steps = self.trainer.metrics_collect_interval
-        avg_sequence_length = (
-            total_tokens_step / self._interval_num_sequences if self._interval_num_sequences > 0 else 0
-        )
+        interval_num_sequences = int(self._interval_num_sequences)
+        avg_sequence_length = total_tokens_step / interval_num_sequences if interval_num_sequences > 0 else 0
 
         mfu_result = self.model_dims.approximate_learner_utilization(
             total_tokens=total_tokens_step,
