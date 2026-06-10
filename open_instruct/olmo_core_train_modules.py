@@ -58,7 +58,7 @@ class DPOMetricsCallback(Callback):
         padded = metrics.pop(_DPO_PADDED_KEY)
         prefix = f"{_DPO_REDUCE_NS}/"
         for key in [k for k in metrics if k.startswith(prefix)]:
-            metrics[key[len(prefix) :]] = metrics.pop(key) / tokens
+            metrics[key.removeprefix(prefix)] = metrics.pop(key) / tokens
         metrics["train/padding_fraction"] = 1.0 - tokens / padded
         metrics["training_step"] = float(step)
         if self.trainer.steps_per_epoch is not None:
