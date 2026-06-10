@@ -200,7 +200,7 @@ class PerfCallback(Callback):
         self.trainer.record_metric("perf/mfu_avg", mfu_avg, reduce_type=None)
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_step", tokens_per_second, reduce_type=None)
-        self.trainer.record_metric("perf/tokens_per_second_total", tokens_per_second_avg, reduce_type=None)
+        self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)
         self.trainer.record_metric(
             "perf/tokens_per_second_per_gpu",
             tokens_per_second / (self.dp_world_size * self.tensor_parallel_degree),
