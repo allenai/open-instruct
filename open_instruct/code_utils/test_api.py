@@ -1,9 +1,9 @@
 """Integration test for the /test_program endpoint."""
 
 import subprocess
-import time
 import unittest
 
+import backoff
 import requests
 
 from open_instruct import logger_utils, utils
@@ -29,6 +29,27 @@ class APITestServer:
         except requests.exceptions.RequestException:
             return False
 
+    @backoff.on_predicate(backoff.constant, interval=0.5, max_time=STARTUP_TIMEOUT_S, jitter=None)
+    def _wait_until_startup_complete(self) -> bool:
+        return self.is_running() or bool(self.process and self.process.poll() is not None)
+
+    def _stop_process(self) -> str:
+        if not self.process:
+            return ""
+
+        process = self.process
+        if process.poll() is None:
+            process.terminate()
+            try:
+                output = process.communicate(timeout=10)[0]
+            except subprocess.TimeoutExpired:
+                process.kill()
+                output = process.communicate()[0]
+        else:
+            output = process.communicate()[0]
+        self.process = None
+        return output
+
     def start(self) -> bool:
         """Start the server if it's not already running."""
         if self.is_running():
@@ -52,41 +73,22 @@ class APITestServer:
             text=True,
         )
 
-        # Wait for server to start
-        deadline = time.monotonic() + STARTUP_TIMEOUT_S
-        while time.monotonic() < deadline:
-            if self.is_running():
-                logger.info("Server started successfully")
-                return True
-            if self.process.poll() is not None:
-                output = self.process.communicate()[0]
-                self.process = None
-                raise RuntimeError(f"API server exited before startup completed:\n{output}")
-            time.sleep(0.5)
+        startup_complete = self._wait_until_startup_complete()
+        if startup_complete and self.is_running():
+            logger.info("Server started successfully")
+            return True
 
-        # Server failed to start
-        output = ""
-        if self.process:
-            self.process.terminate()
-            try:
-                output = self.process.communicate(timeout=10)[0]
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                output = self.process.communicate()[0]
-            self.process = None
+        process_exited = bool(self.process and self.process.poll() is not None)
+        output = self._stop_process()
+        if process_exited:
+            raise RuntimeError(f"API server exited before startup completed:\n{output}")
         raise RuntimeError(f"Failed to start server within {STARTUP_TIMEOUT_S} seconds:\n{output}")
 
     def stop(self) -> None:
         """Stop the server if we started it."""
         if self.process:
             logger.info("Stopping API server...")
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait()
-            self.process = None
+            self._stop_process()
 
     def __enter__(self) -> "APITestServer":
         """Enter the context manager."""
