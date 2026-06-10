@@ -73,7 +73,6 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
         wandb_entity=args.wandb_entity,
         save_async=False,
     )
-    trainer_callbacks["dpo_metrics"] = olmo_core_train_modules.DPOMetricsCallback()
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if args.send_slack_alerts and slack_webhook_url:
         trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(name=run_name, webhook_url=slack_webhook_url)

@@ -18,7 +18,6 @@ from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
-from olmo_core.train.callbacks import Callback
 from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
@@ -35,31 +34,6 @@ logger = logger_utils.setup_logger(__name__)
 _DOC_LENS_ATTN_BACKENDS = frozenset(
     {AttentionBackendName.flash_2, AttentionBackendName.flash_3, AttentionBackendName.flash_4}
 )
-
-# DPO token-weighted metrics are ratios sum_ranks(sum_mb(metric*tokens)) / sum_ranks(tokens).
-# DPOTrainModule records each numerator under the _DPO_REDUCE_NS namespace and the shared
-# denominators (real and padded token counts) under the keys below, all with ReduceType.sum so
-# the trainer reduces them in its batched per-interval all-reduce. DPOMetricsCallback then divides
-# numerator/denominator after reduction, avoiding a per-step host sync and explicit all-reduce.
-_DPO_REDUCE_NS = "_dpo_reduce"
-_DPO_TOKENS_KEY = f"{_DPO_REDUCE_NS}/__tokens__"
-_DPO_PADDED_KEY = f"{_DPO_REDUCE_NS}/__padded__"
-
-
-class DPOMetricsCallback(Callback):
-    """Reconstructs token-weighted DPO metrics from reduced numerator/denominator sums."""
-
-    priority = 10
-
-    def pre_log_metrics(self, step: int, metrics: dict[str, float]) -> None:
-        if _DPO_TOKENS_KEY not in metrics:
-            return
-        tokens = metrics.pop(_DPO_TOKENS_KEY)
-        padded = metrics.pop(_DPO_PADDED_KEY)
-        prefix = f"{_DPO_REDUCE_NS}/"
-        for key in [k for k in metrics if k.startswith(prefix)]:
-            metrics[key.removeprefix(prefix)] = metrics.pop(key) / tokens
-        metrics["train/padding_fraction"] = 1.0 - tokens / padded
 
 
 class DPOLMHead(LMHead):
@@ -274,14 +248,6 @@ class DPOTrainModule(TransformerTrainModule):
             local_padded_tokens = padding_free_collator.get_num_padded_tokens(batch)
             local_num_sequences = padding_free_collator.get_num_sequences(batch)
 
-            self.record_metric(
-                _DPO_TOKENS_KEY, torch.tensor(float(total_tokens), device=device), reduce_type=ReduceType.sum
-            )
-            self.record_metric(
-                _DPO_PADDED_KEY, torch.tensor(float(local_padded_tokens), device=device), reduce_type=ReduceType.sum
-            )
-            # PerfCallback reads train/token_count from the per-step buffer (before the deferred
-            # reduction), so it must be recorded here rather than reconstructed in DPOMetricsCallback.
             token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
@@ -301,8 +267,26 @@ class DPOTrainModule(TransformerTrainModule):
                 weighted_sums["rewards/margin"] = chosen_rewards - rejected_rewards
             if "aux_loss" in self._metrics:
                 weighted_sums["aux_loss"] = self._metrics["aux_loss"]
-            for name, value in weighted_sums.items():
-                self.record_metric(f"{_DPO_REDUCE_NS}/{name}", value, reduce_type=ReduceType.sum)
+
+            # DPO token-weighted metrics are ratios sum_ranks(sum_mb(metric*tokens)) / sum_ranks(tokens).
+            # Stack the shared denominators (real and padded token counts) with the numerators and
+            # reduce them in one all-reduce over the DP group, then divide. TP/CP duplicate ranks share
+            # a batch, so reducing over dp_process_group (not the whole world) avoids double-counting.
+            metric_names = list(weighted_sums.keys())
+            local_sums = torch.stack(
+                [
+                    torch.tensor(float(total_tokens), device=device),
+                    torch.tensor(float(local_padded_tokens), device=device),
+                    *[weighted_sums[name] for name in metric_names],
+                ]
+            )
+            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+            global_tokens, global_padded = local_sums[0], local_sums[1]
+            for i, name in enumerate(metric_names):
+                self.record_metric(name, (local_sums[i + 2] / global_tokens).item(), reduce_type=None)
+            self.record_metric(
+                "train/padding_fraction", (1.0 - global_tokens / global_padded).item(), reduce_type=None
+            )
 
             local_num_sequences_f = local_num_sequences.to(device=device, dtype=torch.float32)
             # Use mean rather than sum: the reduction runs over the whole world, but all non-DP
