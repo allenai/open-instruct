@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 import vllm
 from vllm.v1 import kv_cache_interface
@@ -34,8 +35,6 @@ from vllm.v1.core import kv_cache_utils
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
-
-RESULT_PREFIX = "KV_PROBE_RESULT "
 
 
 def run_worker(args) -> None:
@@ -60,7 +59,8 @@ def run_worker(args) -> None:
         "num_gpu_blocks": vllm_config.cache_config.num_gpu_blocks,
         "max_model_len": max_model_len,
     }
-    print(RESULT_PREFIX + json.dumps(result))
+    with open(args.result_path, "w") as f:
+        json.dump(result, f)
 
 
 def run_driver(args) -> None:
@@ -72,6 +72,9 @@ def run_driver(args) -> None:
             dp = args.num_gpus // tp
             logger.info(f"Probing tp={tp} dp={dp} response_length={response_length}")
             env = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in range(tp))}
+            result_path = os.path.join(tempfile.gettempdir(), f"kv_probe_tp{tp}_rl{response_length}.json")
+            if os.path.exists(result_path):
+                os.remove(result_path)
             cmd = [
                 sys.executable,
                 __file__,
@@ -86,14 +89,16 @@ def run_driver(args) -> None:
                 str(response_length),
                 "--gpu_memory_utilization",
                 str(args.gpu_memory_utilization),
+                "--result_path",
+                result_path,
             ]
-            proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
-            result_lines = [line for line in proc.stdout.splitlines() if line.startswith(RESULT_PREFIX)]
-            if not result_lines:
-                logger.error(f"tp={tp} response_length={response_length} failed:\n{proc.stdout}\n{proc.stderr}")
+            proc = subprocess.run(cmd, env=env)
+            if proc.returncode != 0 or not os.path.exists(result_path):
+                logger.error(f"tp={tp} response_length={response_length} failed (returncode={proc.returncode})")
                 rows.append((tp, dp, response_length, None, None, None))
                 continue
-            result = json.loads(result_lines[-1][len(RESULT_PREFIX) :])
+            with open(result_path) as f:
+                result = json.load(f)
             rows.append(
                 (tp, dp, response_length, result["num_gpu_blocks"], result["per_engine"], result["per_engine"] * dp)
             )
@@ -115,6 +120,7 @@ def main() -> None:
     parser.add_argument("--worker", action="store_true", help="Internal: run a single config and print its result.")
     parser.add_argument("--tensor_parallel_size", type=int, help="Worker mode: single tp.")
     parser.add_argument("--response_length", type=int, help="Worker mode: single response length.")
+    parser.add_argument("--result_path", help="Worker mode: file path to write the JSON result to.")
     parser.add_argument(
         "--num_gpus", type=int, default=8, help="Driver mode: GPUs on the node (sets dp = num_gpus // tp)."
     )
