@@ -46,6 +46,8 @@ def run_worker(args) -> None:
         max_model_len=max_model_len,
         enable_prefix_caching=True,
         trust_remote_code=True,
+        dtype="bfloat16",
+        language_model_only=True,
     )
     vllm_config = llm.llm_engine.vllm_config
     kv_cache_specs = llm.collective_rpc("get_kv_cache_spec")
@@ -71,11 +73,17 @@ def run_driver(args) -> None:
         for tp in tps:
             dp = args.num_gpus // tp
             logger.info(f"Probing tp={tp} dp={dp} response_length={response_length}")
-            env = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in range(tp))}
+            env = {
+                **os.environ,
+                "CUDA_VISIBLE_DEVICES": ",".join(str(i) for i in range(tp)),
+                "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+            }
             result_path = os.path.join(tempfile.gettempdir(), f"kv_probe_tp{tp}_rl{response_length}.json")
             if os.path.exists(result_path):
                 os.remove(result_path)
             cmd = [
+                "timeout",
+                str(args.config_timeout_seconds),
                 sys.executable,
                 __file__,
                 "--worker",
@@ -94,7 +102,8 @@ def run_driver(args) -> None:
             ]
             proc = subprocess.run(cmd, env=env)
             if proc.returncode != 0 or not os.path.exists(result_path):
-                logger.error(f"tp={tp} response_length={response_length} failed (returncode={proc.returncode})")
+                reason = "timed out" if proc.returncode == 124 else f"returncode={proc.returncode}"
+                logger.error(f"tp={tp} response_length={response_length} failed ({reason})")
                 rows.append((tp, dp, response_length, None, None, None))
                 continue
             with open(result_path) as f:
@@ -129,6 +138,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--response_lengths", default="16384,32768", help="Driver mode: comma-separated response lengths."
+    )
+    parser.add_argument(
+        "--config_timeout_seconds",
+        type=int,
+        default=1800,
+        help="Driver mode: per-config wall-clock budget; a config exceeding it is marked FAILED and the sweep continues.",
     )
     args = parser.parse_args()
 
