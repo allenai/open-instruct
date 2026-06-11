@@ -49,6 +49,7 @@ from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsA
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
+from vllm.v1 import kv_cache_interface
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
 
@@ -825,18 +826,20 @@ class LLMRayActor:
             )
 
     def get_kv_cache_info(self) -> int:
-        """Get KV cache max concurrency from the vLLM engine."""
+        """Get KV cache max concurrency from the vLLM engine.
+
+        Uses the KV cache blocks vLLM actually allocated after memory profiling
+        (weights, activations, and CUDA graph memory already subtracted) rather
+        than the raw gpu_memory_utilization * total_gpu_memory budget, which
+        ignores those and overestimates capacity.
+        """
         kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))
 
         vllm_config = self.llm_engine.vllm_config
-        gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory_utilization * total_gpu_memory)
-
         kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
 
-        kv_cache_config = kv_cache_utils.get_kv_cache_config_from_groups(
-            vllm_config, kv_cache_groups, available_memory
+        kv_cache_config = kv_cache_interface.KVCacheConfig(
+            num_blocks=vllm_config.cache_config.num_gpu_blocks, kv_cache_tensors=[], kv_cache_groups=kv_cache_groups
         )
 
         max_concurrency = kv_cache_utils.get_max_concurrency_for_kv_cache_config(vllm_config, kv_cache_config)
