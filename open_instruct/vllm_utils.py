@@ -597,6 +597,7 @@ class LLMRayActor:
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
+        logger.info(f"KV cache max inference batch size: {self.inference_batch_size}")
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
