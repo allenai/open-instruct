@@ -28,6 +28,7 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
+    "trackio",
     "transformers>=5.4.0",
     "vllm>=0.19.1; platform_system != 'Darwin'",
     "wandb==0.23.1",
