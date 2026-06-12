@@ -6,7 +6,7 @@ import unittest
 
 import requests
 
-from open_instruct import logger_utils
+from open_instruct import logger_utils, utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -14,11 +14,11 @@ logger = logger_utils.setup_logger(__name__)
 class APITestServer:
     """Manages starting and stopping the API server for testing."""
 
-    def __init__(self, host="0.0.0.0", port=1234, startup_timeout=30):
-        self.host = host
-        self.port = port
-        self.startup_timeout = startup_timeout
-        self.base_url = f"http://localhost:{port}"
+    def __init__(self) -> None:
+        self.host = "127.0.0.1"
+        self.port = utils.find_free_port()
+        self.startup_timeout = 30
+        self.base_url = f"http://{self.host}:{self.port}"
         self.health_url = f"{self.base_url}/health"
         self.process = None
 
