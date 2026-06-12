@@ -16,28 +16,21 @@ BEAKER_IMAGE="${1:-finbarrt/hybrid-dpo-stable}"
 BASE_PATH="/weka/oe-adapt-default/nathanl/checkpoints"
 
 SFT_MODELS=(
-    # "${BASE_PATH}/HYBRID_INSTRUCT_SFT_0218_6e-5/step3256-hf"
-    # "${BASE_PATH}/HYBRID_INSTRUCT_SFT_0218_5e-5/step3256-hf"
-    # "${BASE_PATH}/HYBRID_INSTRUCT_SFT_0218_8e-5/step3256-hf"
-    # "${BASE_PATH}/HYBRID_INSTRUCT_SFT_0218_9e-5/step3256-hf"
-    "${BASE_PATH}/HYBRID_INSTRUCT_SFT_0218_2.5e-5/step3256-hf" # Final Instruct SFT Model
-    # "${BASE_PATH}/HYBRID_INSTRUCT_SFT_0218_1e-4/step3256-hf"
+    allenai/Olmo-Hybrid-Instruct-SFT-7B
 )
 
 DPO_LRS=(
-    2e-6
-    # 1e-6
-    8.5e-7
-    7e-7
-    5e-7
-    2.5e-7
+    #2e-6
+    1e-6
+    #8.5e-7
+    #7e-7
+    #5e-7
+    #2.5e-7
 )
 
 for MODEL_PATH in "${SFT_MODELS[@]}"; do
-    # Extract SFT LR from path, e.g. HYBRID_INSTRUCT_SFT_0218_6e-5 -> 6e-5
-    SFT_LR=$(basename "$(dirname "$MODEL_PATH")" | sed 's/.*_\([0-9.e-]*\)$/\1/')
     for LR in "${DPO_LRS[@]}"; do
-        EXP_NAME="hybrid-7b-DPO-0219-SFT-${SFT_LR}-LR-${LR}"
+        EXP_NAME="hybrid-7b-DPO-0219-SFT-public-LR-${LR}"
         echo "====================================="
         echo "Launching: ${EXP_NAME}"
         echo "  SFT model: ${MODEL_PATH}"
@@ -46,8 +39,8 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
 
         uv run python mason.py \
             --cluster ai2/jupiter \
-            --description "Hybrid 7B DPO sweep, SFT-${SFT_LR}, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
-            --workspace ai2/olmo-instruct \
+            --description "Hybrid 7B DPO sweep, SFT-public, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
+            --workspace ai2/linear-rnns \
             --priority urgent \
             --max_retries 0 \
             --preemptible \

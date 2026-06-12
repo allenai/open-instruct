@@ -459,34 +459,35 @@ def build_reference_logprobs_cache(
 
     with torch.no_grad():
         for batch in (pbar := tqdm(dataloader, disable=not is_main_process, desc="Caching reference logprobs")):
-            batch_start = time.perf_counter()
-            if use_lora and disable_adapter_context is not None:
-                with disable_adapter_context():
+            for row in padding_free_collator.unstack_packed_rows(batch):
+                row_start = time.perf_counter()
+                if use_lora and disable_adapter_context is not None:
+                    with disable_adapter_context():
+                        chosen_logps, rejected_logps, _ = forward_fn(
+                            model, row, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                        )
+                else:
                     chosen_logps, rejected_logps, _ = forward_fn(
-                        model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+                        model, row, average_log_prob=average_log_prob, **(forward_kwargs or {})
                     )
-            else:
-                chosen_logps, rejected_logps, _ = forward_fn(
-                    model, batch, average_log_prob=average_log_prob, **(forward_kwargs or {})
+
+                if row.get("is_padding", False):
+                    continue
+
+                chosen_tensor[row["index"]] = chosen_logps
+                rejected_tensor[row["index"]] = rejected_logps
+
+                batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(row)
+                total_tokens += batch_tokens
+                total_examples += batch_size
+                pbar.set_postfix(
+                    {
+                        "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
+                        "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - row_start):.1f}",
+                        "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                        "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
+                    }
                 )
-
-            if batch.get("is_padding", False):
-                continue
-
-            chosen_tensor[batch["index"]] = chosen_logps
-            rejected_tensor[batch["index"]] = rejected_logps
-
-            batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
-            total_tokens += batch_tokens
-            total_examples += batch_size
-            pbar.set_postfix(
-                {
-                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
-                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
-                    "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
-                }
-            )
 
     dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
     dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
