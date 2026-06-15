@@ -426,6 +426,11 @@ class StreamingDataLoaderConfig:
 
     # GRPO sampling/filtering
     active_sampling: bool = False
+    batch_by: Literal["prompts", "completions"] = "prompts"
+    """How to size each accumulated batch. `"prompts"` accumulates `num_unique_prompts_rollout` prompts.
+    `"completions"` accumulates `num_unique_prompts_rollout * num_samples_per_prompt_rollout` completions; with NGU,
+    accepted groups can be larger than `num_samples_per_prompt_rollout`, so accumulation increments by each group's
+    actual accepted size."""
     filter_zero_std_samples: bool = True
     never_give_up: float = 0.0
     """Probability in [0.0, 1.0] that a zero-std prompt is requeued as a never-give-up retry."""
@@ -1208,6 +1213,7 @@ def accumulate_inference_batches(
     actor_manager=None,
     timeout: float | None = None,
     active_sampling: bool = False,
+    batch_by: Literal["prompts", "completions"] = "prompts",
     filter_zero_std_samples: bool = False,
     never_give_up: float = 0.0,
     never_give_up_accept_on: Literal["better", "different"] = "better",
@@ -1238,6 +1244,13 @@ def accumulate_inference_batches(
     if never_give_up_state is None:
         never_give_up_state = NeverGiveUpAccumulationState()
 
+    completions_per_prompt = generation_config.n
+    if batch_by == "completions":
+        accumulation_target = num_prompts * completions_per_prompt
+    else:
+        accumulation_target = num_prompts
+    accumulation_unit = batch_by
+
     groups: list[Group] = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
@@ -1245,15 +1258,16 @@ def accumulate_inference_batches(
     filtered_prompt_nonzero = 0
     total_no_resampled = 0
     progress_bar = tqdm(
-        total=num_prompts,
-        desc=f"Accumulating Responses and Rewarding {num_prompts} prompts",
+        total=accumulation_target,
+        desc=f"Accumulating Responses and Rewarding {accumulation_target} {accumulation_unit}",
         bar_format="{l_bar}{bar}{r_bar}\n",
         disable=not verbose,
     )
     logger.info(
-        f"[accumulate_inference_batches] Starting to accumulate {num_prompts} prompts, training_step={training_step}"
+        f"[accumulate_inference_batches] Starting to accumulate {accumulation_target} {accumulation_unit}, "
+        f"training_step={training_step}"
     )
-    num_prompts_sampled = 0
+    num_accumulated = 0
     collected_results = []
 
     def record_filtered_prompt(filtered_result: data_types.GenerationResult) -> None:
@@ -1267,23 +1281,26 @@ def accumulate_inference_batches(
         else:
             filtered_prompt_nonzero += 1
 
-    while num_prompts_sampled < num_prompts:
+    while num_accumulated < accumulation_target:
         logger.info(
-            f"[accumulate_inference_batches] Waiting for result {num_prompts_sampled + 1}/{num_prompts} from inference_results_Q"
+            f"[accumulate_inference_batches] Waiting for result, {num_accumulated}/{accumulation_target} "
+            f"{accumulation_unit} from inference_results_Q"
         )
         try:
             result = inference_results_Q.get(timeout=timeout)
         except Empty:
             if requeue_on_timeout and collected_results:
                 logger.info(
-                    f"[accumulate_inference_batches] Timeout with {len(collected_results)}/{num_prompts} results, requeuing"
+                    f"[accumulate_inference_batches] Timeout with {num_accumulated}/{accumulation_target} "
+                    f"{accumulation_unit}, requeuing"
                 )
                 for r in collected_results:
                     inference_results_Q.put(r)
             raise
         collected_results.append(result)
         logger.info(
-            f"[accumulate_inference_batches] Got result {num_prompts_sampled + 1}/{num_prompts}, type: {type(result).__name__}"
+            f"[accumulate_inference_batches] Got result ({num_accumulated}/{accumulation_target} "
+            f"{accumulation_unit}), type: {type(result).__name__}"
         )
 
         if isinstance(result, data_types.ShutdownSentinel):
@@ -1323,8 +1340,15 @@ def accumulate_inference_batches(
             record_filtered_prompt(filtered_result)
 
         if group_filter_result.counted_as_sampled:
-            num_prompts_sampled += 1
-            progress_bar.update(1)
+            if batch_by == "completions":
+                accepted_group = group_filter_result.group
+                # NGU groups can exceed completions_per_prompt, so count the actual accepted group size; a
+                # filtered (None) group contributed no completions to the batch but represents a default-sized rollout.
+                increment = accepted_group.sample_count if accepted_group is not None else completions_per_prompt
+            else:
+                increment = 1
+            num_accumulated += increment
+            progress_bar.update(increment)
 
         maybe_replenish_prompt(
             group_filter_result,
@@ -1341,7 +1365,7 @@ def accumulate_inference_batches(
         if group is None:
             logger.info(
                 f"[accumulate_inference_batches] training_step={training_step} "
-                f"sampled={num_prompts_sampled}/{num_prompts} "
+                f"accumulated={num_accumulated}/{accumulation_target} {accumulation_unit} "
                 f"filtered={total_filtered_prompts} "
                 f"(all_zero={filtered_prompt_zero}, all_solved={filtered_prompt_solved}, nonzero_std0={filtered_prompt_nonzero})"
             )
@@ -1609,6 +1633,7 @@ class DataPreparationActor:
                 dataset=self.dataset,
                 actor_manager=self.actor_manager,
                 active_sampling=self.config.active_sampling,
+                batch_by=self.config.batch_by,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
                 never_give_up=self.config.never_give_up,
                 never_give_up_accept_on=self.config.never_give_up_accept_on,
