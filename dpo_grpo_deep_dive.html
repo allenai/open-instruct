@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DPO & GRPO Deep Dive</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --accent2: #bc8cff;
+    --accent3: #3fb950;
+    --accent4: #f78166;
+    --accent5: #e3b341;
+    --text: #e6edf3;
+    --text-muted: #7d8590;
+    --code-bg: #0d1117;
+    --dpo-color: #a78bfa;
+    --grpo-color: #34d399;
+    --math-color: #fbbf24;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+    display: flex;
+  }
+
+  /* NAV */
+  nav {
+    width: 260px;
+    min-width: 260px;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 20px 0;
+  }
+
+  nav::-webkit-scrollbar { width: 3px; }
+  nav::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .nav-title {
+    padding: 0 18px 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .nav-group { margin-top: 12px; }
+
+  .nav-group-label {
+    padding: 4px 18px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--text-muted);
+  }
+
+  nav a {
+    display: block;
+    padding: 6px 18px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: all .12s;
+  }
+
+  nav a:hover { color: var(--text); background: var(--surface2); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); background: rgba(88,166,255,.07); }
+  nav a.sub { padding-left: 30px; font-size: 12px; }
+
+  .progress { position:fixed; top:0; left:0; width:0; height:2px; background:linear-gradient(90deg,var(--dpo-color),var(--grpo-color)); z-index:999; }
+
+  /* MAIN */
+  main {
+    flex: 1;
+    padding: 52px 60px;
+    max-width: 960px;
+  }
+
+  section { margin-bottom: 80px; scroll-margin-top: 28px; }
+
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  h2 .pill {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: .04em;
+  }
+
+  h3 {
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 32px 0 10px;
+    padding-left: 12px;
+    border-left: 3px solid var(--border);
+  }
+
+  h4 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin: 22px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+
+  p { font-size: 15px; margin-bottom: 14px; }
+
+  strong { color: #fff; }
+
+  /* CODE */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 16px 0;
+    position: relative;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  pre .file-tag {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: .04em;
+  }
+
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; background: var(--surface2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; color: #a5d6ff; }
+
+  pre code { background:none; border:none; padding:0; color: inherit; font-size: inherit; }
+
+  /* MATH BLOCK */
+  .math {
+    background: #1a1700;
+    border: 1px solid #4a3f00;
+    border-radius: 10px;
+    padding: 22px 28px;
+    margin: 18px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    line-height: 2;
+  }
+
+  .math-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--math-color);
+    font-weight: 700;
+    margin-bottom: 10px;
+    font-family: sans-serif;
+  }
+
+  .eq { color: var(--math-color); display: block; }
+  .eq .def { color: #fde68a; }
+  .eq .op { color: #94a3b8; }
+  .eq .fn { color: #fbbf24; }
+  .eq .note { color: var(--text-muted); font-size: 12px; font-style: italic; font-family: sans-serif; }
+
+  /* CALLOUTS */
+  .callout {
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    border-left: 3px solid;
+    font-size: 14px;
+  }
+
+  .info  { background: rgba(88,166,255,.07); border-color: var(--accent); }
+  .warn  { background: rgba(247,129,102,.07); border-color: var(--accent4); }
+  .tip   { background: rgba(63,185,80,.07);  border-color: var(--accent3); }
+  .key   { background: rgba(167,139,250,.07); border-color: var(--dpo-color); }
+
+  .callout-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 5px;
+  }
+
+  .info .callout-label  { color: var(--accent); }
+  .warn .callout-label  { color: var(--accent4); }
+  .tip  .callout-label  { color: var(--accent3); }
+  .key  .callout-label  { color: var(--dpo-color); }
+
+  /* TOKEN DIAGRAM */
+  .token-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 12px 0;
+    align-items: center;
+    font-family: monospace;
+    font-size: 13px;
+  }
+
+  .tok {
+    padding: 4px 8px;
+    border-radius: 5px;
+    border: 1px solid;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 36px;
+  }
+
+  .tok .id { font-size: 9px; color: var(--text-muted); }
+
+  .tok-prompt { background: rgba(88,166,255,.12); border-color: rgba(88,166,255,.4); color: var(--accent); }
+  .tok-resp   { background: rgba(63,185,80,.12);  border-color: rgba(63,185,80,.4);  color: var(--accent3); }
+  .tok-pad    { background: rgba(125,133,144,.1); border-color: rgba(125,133,144,.3); color: var(--text-muted); }
+  .tok-rej    { background: rgba(247,129,102,.1); border-color: rgba(247,129,102,.3); color: var(--accent4); }
+  .tok-sep    { color: var(--text-muted); padding: 0 4px; align-self: center; }
+
+  .label-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 4px 0 16px;
+    font-family: monospace;
+    font-size: 11px;
+  }
+
+  .label-tok {
+    padding: 2px 8px;
+    border-radius: 4px;
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .label-mask { background: rgba(125,133,144,.15); color: var(--text-muted); font-size: 10px; }
+  .label-real { background: rgba(63,185,80,.15);   color: var(--accent3); font-size: 10px; }
+
+  /* STEP DIAGRAM */
+  .steps { margin: 16px 0; }
+  .step {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+
+  .step:last-child { border-bottom: none; }
+
+  .step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--surface2);
+    border: 1.5px solid var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .step-body strong { display: block; margin-bottom: 4px; font-size: 15px; }
+  .step-body p { font-size: 13.5px; color: var(--text-muted); margin: 0; }
+
+  /* TABLES */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+  th { background: var(--surface2); padding: 9px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  /* SYNTAX */
+  .kw  { color: #ff7b72; }
+  .fn  { color: #d2a8ff; }
+  .st  { color: #a5d6ff; }
+  .cm  { color: #6e7681; font-style: italic; }
+  .nu  { color: #f78166; }
+  .op  { color: #94a3b8; }
+  .cl  { color: #ffa657; }
+  .var { color: #e6edf3; }
+  .hi  { background: rgba(255,255,150,.08); border-radius: 3px; padding: 0 2px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+
+  .box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+  }
+
+  .box h4 { margin-top: 0; }
+
+  @media (max-width: 900px) {
+    nav { display: none; }
+    main { padding: 28px 20px; }
+    .two-col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<nav id="nav">
+  <div class="nav-title">DPO & GRPO Deep Dive</div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">DPO</div>
+    <a href="#dpo-overview">Overview & Intuition</a>
+    <a href="#dpo-data" class="sub">How Data Is Structured</a>
+    <a href="#dpo-tokens" class="sub">Token-Level Walk-Through</a>
+    <a href="#dpo-forward" class="sub">Forward Pass & logprobs</a>
+    <a href="#dpo-loss" class="sub">The Loss Function</a>
+    <a href="#dpo-cache" class="sub">Reference Logprob Cache</a>
+    <a href="#dpo-loss-types" class="sub">Loss Type Variants</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">GRPO</div>
+    <a href="#grpo-overview">Overview & Intuition</a>
+    <a href="#grpo-loop" class="sub">The Online RL Loop</a>
+    <a href="#grpo-tokens" class="sub">Token-Level Walk-Through</a>
+    <a href="#grpo-advantage" class="sub">Group-Relative Advantage</a>
+    <a href="#grpo-loss" class="sub">The Policy Gradient Loss</a>
+    <a href="#grpo-packing" class="sub">Packing & Async</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Comparison</div>
+    <a href="#comparison">DPO vs GRPO</a>
+  </div>
+</nav>
+
+<main id="main">
+
+<!-- ══════════════════════════════════════════════════════ DPO OVERVIEW -->
+<section id="dpo-overview">
+  <h2>
+    DPO — Direct Preference Optimization
+    <span class="pill" style="background:rgba(167,139,250,.15);color:var(--dpo-color)">OFFLINE</span>
+  </h2>
+
+  <p><strong>The question DPO answers:</strong> Given a dataset of human preferences ("I prefer response A over response B for this prompt"), how do we fine-tune a model to produce preferred responses more often — without training a separate reward model?</p>
+
+  <p><strong>The intuition:</strong> The model should assign relatively higher probability to chosen responses <em>compared to the reference model</em>. The reference model anchors what "normal" looks like, so we penalize drift, not just raw probability.</p>
+
+  <div class="callout key">
+    <div class="callout-label">Core Insight</div>
+    DPO doesn't train a reward model. It derives an optimal policy directly from preference labels using the fact that there's a closed-form relationship between the reward function and the optimal policy. The <strong>β (beta)</strong> parameter controls how much you trust the preferences vs. how much you want to stay close to the reference model. Higher β = stay close to reference.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DPO DATA -->
+<section id="dpo-data">
+  <h3>How Data Is Structured</h3>
+
+  <p>Every training example is a <strong>triple</strong>: one prompt with two responses — one preferred (chosen) and one not (rejected).</p>
+
+  <pre><span class="cm"># What a raw preference example looks like</span>
+{
+  <span class="st">"prompt"</span>: <span class="st">"What is 2+2?"</span>,
+  <span class="st">"chosen"</span>: [
+    {<span class="st">"role"</span>: <span class="st">"user"</span>,      <span class="st">"content"</span>: <span class="st">"What is 2+2?"</span>},
+    {<span class="st">"role"</span>: <span class="st">"assistant"</span>, <span class="st">"content"</span>: <span class="st">"It is 4."</span>}
+  ],
+  <span class="st">"rejected"</span>: [
+    {<span class="st">"role"</span>: <span class="st">"user"</span>,      <span class="st">"content"</span>: <span class="st">"What is 2+2?"</span>},
+    {<span class="st">"role"</span>: <span class="st">"assistant"</span>, <span class="st">"content"</span>: <span class="st">"I don't know."</span>}
+  ]
+}</pre>
+
+  <p>After tokenization (in <code>dataset_transformation.py</code>), each example becomes <strong>two separate full sequences</strong> — both containing the prompt tokens, just with different response tails:</p>
+
+  <table>
+    <tr><th>Key</th><th>Contains</th><th>Shape</th></tr>
+    <tr><td><code>chosen_input_ids</code></td><td>prompt tokens + chosen response tokens</td><td>(1, seq_len)</td></tr>
+    <tr><td><code>chosen_labels</code></td><td>-100 for prompt tokens, token IDs for response</td><td>(1, seq_len)</td></tr>
+    <tr><td><code>chosen_attention_mask</code></td><td>1 for real tokens, 0 for padding</td><td>(1, seq_len)</td></tr>
+    <tr><td><code>rejected_input_ids</code></td><td>prompt tokens + rejected response tokens</td><td>(1, seq_len)</td></tr>
+    <tr><td><code>rejected_labels</code></td><td>-100 for prompt tokens, token IDs for response</td><td>(1, seq_len)</td></tr>
+    <tr><td><code>index</code></td><td>dataset row index (for cache lookup)</td><td>scalar</td></tr>
+  </table>
+
+  <p>The <code>-100</code> in labels is the PyTorch convention for "ignore this position in loss computation." It acts as a mask: the model predicts <em>all</em> tokens but we only measure loss on response tokens.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DPO TOKENS -->
+<section id="dpo-tokens">
+  <h3>Token-Level Walk-Through</h3>
+
+  <p>Let's trace a concrete example through the entire pipeline. Say the prompt tokenizes to 4 tokens, the chosen response to 3, and the rejected response to 2.</p>
+
+  <h4>chosen_input_ids (what the model sees)</h4>
+  <div class="token-row">
+    <div class="tok tok-prompt"><span>What</span><span class="id">0</span></div>
+    <div class="tok tok-prompt"><span>is</span><span class="id">1</span></div>
+    <div class="tok tok-prompt"><span>2+2</span><span class="id">2</span></div>
+    <div class="tok tok-prompt"><span>?</span><span class="id">3</span></div>
+    <div class="tok tok-resp"><span>It</span><span class="id">4</span></div>
+    <div class="tok tok-resp"><span>is</span><span class="id">5</span></div>
+    <div class="tok tok-resp"><span>4.</span><span class="id">6</span></div>
+  </div>
+
+  <h4>chosen_labels (what loss is computed on)</h4>
+  <div class="label-row">
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-real">It</div>
+    <div class="label-tok label-real">is</div>
+    <div class="label-tok label-real">4.</div>
+  </div>
+  <p style="font-size:13px;color:var(--text-muted)">Prompt positions are -100 (masked). Only the response tokens contribute to logprob computation.</p>
+
+  <h4>rejected_input_ids (same prompt, different tail)</h4>
+  <div class="token-row">
+    <div class="tok tok-prompt"><span>What</span><span class="id">0</span></div>
+    <div class="tok tok-prompt"><span>is</span><span class="id">1</span></div>
+    <div class="tok tok-prompt"><span>2+2</span><span class="id">2</span></div>
+    <div class="tok tok-prompt"><span>?</span><span class="id">3</span></div>
+    <div class="tok tok-rej"><span>I</span><span class="id">4</span></div>
+    <div class="tok tok-rej"><span>don't</span><span class="id">5</span></div>
+    <div class="tok tok-pad"><span>[PAD]</span><span class="id">6</span></div>
+  </div>
+
+  <h4>rejected_labels</h4>
+  <div class="label-row">
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-mask">-100</div>
+    <div class="label-tok label-real">I</div>
+    <div class="label-tok label-real">don't</div>
+    <div class="label-tok label-mask">-100</div>
+  </div>
+  <p style="font-size:13px;color:var(--text-muted)">Padding positions also get -100 — they are also masked out.</p>
+
+  <div class="callout info">
+    <div class="callout-label">Key Point</div>
+    Both chosen and rejected share identical prompt tokens. The sequences differ only in their response tails. This is intentional: we want the model to assign different probabilities to the same continuation given the same context.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DPO FORWARD -->
+<section id="dpo-forward">
+  <h3>Forward Pass & Computing Logprobs</h3>
+
+  <p>DPO needs a scalar per example: the <strong>sum of log-probabilities of the response tokens</strong>. Here's exactly how it's computed.</p>
+
+  <h4>Step 1: Concatenate Chosen + Rejected (concatenated_forward)</h4>
+
+  <p>Instead of two separate forward passes, both sequences are stacked along the batch dimension into one tensor of size <code>2*batch_size</code>:</p>
+
+  <pre><span class="cm"># open_instruct/dpo_utils.py: concatenated_inputs()</span>
+<span class="cm"># batch has chosen_input_ids shape (B, seq_len) and rejected_input_ids shape (B, seq_len)</span>
+<span class="cm"># After this, concatenated_input_ids has shape (2*B, max_len)</span>
+
+<span class="kw">for</span> k <span class="kw">in</span> batch:
+    <span class="kw">if</span> k.startswith(<span class="st">"chosen"</span>):
+        concatenated_batch[k.replace(<span class="st">"chosen"</span>, <span class="st">"concatenated"</span>)] = pad_to_length(v, max_length)
+<span class="kw">for</span> k <span class="kw">in</span> batch:
+    <span class="kw">if</span> k.startswith(<span class="st">"rejected"</span>):
+        concatenated_key = k.replace(<span class="st">"rejected"</span>, <span class="st">"concatenated"</span>)
+        concatenated_batch[concatenated_key] = torch.cat(
+            (concatenated_batch[concatenated_key], pad_to_length(v, max_length)), dim=<span class="nu">0</span>
+        )  <span class="cm"># stacks chosen and rejected along batch dim → shape (2*B, max_len)</span></pre>
+
+  <p>This halves the number of forward passes — one forward instead of two.</p>
+
+  <h4>Step 2: Forward Pass → Logits</h4>
+
+  <pre><span class="cm"># The model sees a batch of 2*B sequences and produces logits</span>
+logits = model(**inputs).logits
+<span class="cm"># logits shape: (2*B, seq_len, vocab_size)</span>
+<span class="cm"># logits[i][t] = unnormalized scores over vocabulary for position t of sequence i</span></pre>
+
+  <h4>Step 3: Per-Token Log-Probabilities (calculate_per_token_logps)</h4>
+
+  <p>For each position, we want the log-probability of the <em>actual next token</em> (what actually appears in the sequence):</p>
+
+  <pre><span class="cm"># open_instruct/padding_free_collator.py: calculate_per_token_logps()</span>
+<span class="cm"># logits shape: (2*B, seq_len, vocab_size)</span>
+<span class="cm"># labels shape: (2*B, seq_len)</span>
+
+<span class="cm"># Convert to log-probabilities (logsoftmax over vocab dimension)</span>
+logp = F.log_softmax(logits, dim=-1)  <span class="cm"># (2*B, seq_len, vocab_size)</span>
+
+<span class="cm"># For each position, pick the log-prob of the label that actually appeared.</span>
+<span class="cm"># logp[b][t][labels[b][t]] = log P(token at t+1 | tokens 0..t)</span>
+per_token_logps = torch.gather(logp, dim=2, index=labels.unsqueeze(-1)).squeeze(-1)
+<span class="cm"># Shape: (2*B, seq_len)</span>
+<span class="cm"># per_token_logps[b][t] = log P(labels[b][t] | context)</span></pre>
+
+  <div class="callout info">
+    <div class="callout-label">The Off-by-One Trick</div>
+    Language models are trained to predict the <em>next</em> token. So <code>logits[t]</code> predicts token at position <code>t+1</code>. The code slices <code>per_token_logps[:, :-1]</code> (dropping the last logit) and matches it against <code>labels[:, 1:]</code> (dropping the first label). This aligns each logit with the token it's predicting.
+  </div>
+
+  <h4>Step 4: Sum Over Response Tokens (_get_batch_logps)</h4>
+
+  <pre><span class="cm"># open_instruct/dpo_utils.py: _get_batch_logps()</span>
+per_token_logps = per_token_logps[:, :-1]  <span class="cm"># shift: drop last logit</span>
+loss_mask = labels[:, 1:] != -100          <span class="cm"># True only at response positions</span>
+
+<span class="kw">if</span> average_log_prob:
+    <span class="cm"># DPO-norm: average over response tokens</span>
+    return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1).clamp(min=1)
+else:
+    <span class="cm"># DPO: sum over response tokens</span>
+    return (per_token_logps * loss_mask).sum(-1)
+
+<span class="cm"># Returns shape: (2*B,)  — one scalar per sequence</span></pre>
+
+  <h4>Step 5: Split Chosen and Rejected</h4>
+
+  <pre><span class="cm"># The first B values correspond to chosen, last B to rejected</span>
+all_logps = _get_batch_logps(per_token_logps, concatenated_labels)  <span class="cm"># (2*B,)</span>
+chosen_logps   = all_logps[:bs]   <span class="cm"># shape (B,) — one scalar per example</span>
+rejected_logps = all_logps[bs:]   <span class="cm"># shape (B,) — one scalar per example</span></pre>
+
+  <p>At this point we have two vectors, each of shape <code>(B,)</code>: the total log-probability of the chosen response and the total log-probability of the rejected response, under the current policy.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DPO LOSS -->
+<section id="dpo-loss">
+  <h3>The DPO Loss Function</h3>
+
+  <p>Now the math. We have four scalars per example: <code>policy_chosen_logps</code>, <code>policy_rejected_logps</code>, <code>ref_chosen_logps</code>, <code>ref_rejected_logps</code>.</p>
+
+  <div class="math">
+    <div class="math-title">DPO Loss (per example)</div>
+    <span class="eq">
+      <span class="def">π_logratios</span> <span class="op">=</span> log π_θ(chosen) <span class="op">-</span> log π_θ(rejected)
+      <span class="note">  ← policy prefers chosen over rejected by how much?</span>
+    </span>
+    <span class="eq">
+      <span class="def">ref_logratios</span> <span class="op">=</span> log π_ref(chosen) <span class="op">-</span> log π_ref(rejected)
+      <span class="note">  ← reference model prefers chosen over rejected by how much?</span>
+    </span>
+    <span class="eq">
+      <span class="def">logits</span> <span class="op">=</span> π_logratios <span class="op">-</span> ref_logratios
+      <span class="note">  ← does the policy prefer chosen MORE than the reference does?</span>
+    </span>
+    <span class="eq">
+      <span class="def">loss</span> <span class="op">=</span> <span class="op">-</span><span class="fn">logsigmoid</span>(<span class="def">β</span> <span class="op">×</span> logits)
+      <span class="note">  ← binary cross-entropy loss. Loss is 0 when logits → +∞</span>
+    </span>
+  </div>
+
+  <p>This directly from the code:</p>
+
+  <pre><span class="cm"># open_instruct/dpo_utils.py: dpo_loss()</span>
+<span class="var">pi_logratios</span>  = policy_chosen_logps  <span class="op">-</span> policy_rejected_logps
+<span class="var">ref_logratios</span> = reference_chosen_logps <span class="op">-</span> reference_rejected_logps
+
+<span class="var">logits</span> = pi_logratios <span class="op">-</span> ref_logratios  <span class="cm"># "does policy prefer chosen more than ref?"</span>
+
+<span class="var">losses</span> = <span class="op">-</span>F.<span class="fn">logsigmoid</span>(beta <span class="op">*</span> logits)   <span class="cm"># main loss</span>
+         <span class="op">*</span> (<span class="nu">1</span> <span class="op">-</span> label_smoothing)          <span class="cm"># optional label smoothing</span>
+         <span class="op">-</span> F.<span class="fn">logsigmoid</span>(<span class="op">-</span>beta <span class="op">*</span> logits)  <span class="cm"># smoothing term (for rejected)</span>
+         <span class="op">*</span> label_smoothing
+
+<span class="cm"># Rewards (detached — only for logging, not backprop)</span>
+chosen_rewards  = beta <span class="op">*</span> (policy_chosen_logps  <span class="op">-</span> reference_chosen_logps)
+rejected_rewards = beta <span class="op">*</span> (policy_rejected_logps <span class="op">-</span> reference_rejected_logps)</pre>
+
+  <h4>Intuition for Each Term</h4>
+
+  <table>
+    <tr><th>Term</th><th>Meaning</th><th>Gradient Effect</th></tr>
+    <tr>
+      <td><code>pi_logratios</code></td>
+      <td>How much more the current policy prefers chosen over rejected</td>
+      <td>Increasing this reduces loss</td>
+    </tr>
+    <tr>
+      <td><code>ref_logratios</code></td>
+      <td>How much the <em>reference</em> prefers chosen over rejected</td>
+      <td>Subtracted — acts as a baseline</td>
+    </tr>
+    <tr>
+      <td><code>logits = pi - ref</code></td>
+      <td>Does the policy prefer chosen <em>more than the reference does?</em></td>
+      <td>Loss minimized when logits → +∞</td>
+    </tr>
+    <tr>
+      <td><code>-logsigmoid(β × logits)</code></td>
+      <td>Binary cross-entropy: push logits positive</td>
+      <td>Pull policy toward chosen, push away from rejected, relative to reference</td>
+    </tr>
+    <tr>
+      <td><code>β (beta)</code></td>
+      <td>KL penalty strength — how much to stay near reference</td>
+      <td>High β = small updates; low β = can diverge far from reference</td>
+    </tr>
+  </table>
+
+  <div class="callout tip">
+    <div class="callout-label">Why Subtract the Reference?</div>
+    Without subtracting <code>ref_logratios</code>, the model would just maximize <code>log P(chosen)</code> regardless of context. The reference term prevents "gaming": if the reference already strongly prefers chosen, the policy gets no gradient signal — it's already doing the right thing. If the reference <em>also</em> strongly prefers rejected (both are weird continuations), that's also fine. We only intervene when the policy is getting it wrong <em>relative to the reference</em>.
+  </div>
+
+  <h4>What Gets Backpropagated</h4>
+
+  <p>The gradient flows through <code>policy_chosen_logps</code> and <code>policy_rejected_logps</code>, which are functions of the model weights. <strong>The reference logprobs are loaded from cache — no gradient flows through them.</strong></p>
+
+  <pre><span class="cm"># open_instruct/dpo_utils.py: compute_loss()</span>
+<span class="cm"># Load reference logprobs from pre-computed cache (no grad)</span>
+ref_logps = reference_cache[batch[<span class="st">"index"</span>]]
+
+return <span class="fn">dpo_loss</span>(
+    policy_chosen_logps,          <span class="cm"># ← gradient flows through this</span>
+    policy_rejected_logps,        <span class="cm"># ← gradient flows through this</span>
+    ref_logps[<span class="st">"chosen_logps"</span>],   <span class="cm"># ← just a constant from disk</span>
+    ref_logps[<span class="st">"rejected_logps"</span>], <span class="cm"># ← just a constant from disk</span>
+    beta=args.beta,
+)</pre>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DPO CACHE -->
+<section id="dpo-cache">
+  <h3>Reference Logprob Cache</h3>
+
+  <p>Before training begins, the codebase runs a full pass through the <em>entire dataset</em> with the reference model (frozen), computes <code>chosen_logps</code> and <code>rejected_logps</code> for every example, and stores them to disk indexed by the dataset row index.</p>
+
+  <pre><span class="cm"># open_instruct/dpo_utils.py: build_reference_logprobs_cache()</span>
+chosen_tensor  = torch.full((full_dataset_size,), float(<span class="st">"-inf"</span>), ...)
+rejected_tensor = torch.full((full_dataset_size,), float(<span class="st">"-inf"</span>), ...)
+
+<span class="kw">with</span> torch.no_grad():
+    <span class="kw">for</span> batch <span class="kw">in</span> dataloader:
+        chosen_logps, rejected_logps, _ = forward_fn(model, batch, average_log_prob=...)
+
+        <span class="cm"># Store by dataset index — this is how we retrieve during training</span>
+        chosen_tensor[batch[<span class="st">"index"</span>]]  = chosen_logps
+        rejected_tensor[batch[<span class="st">"index"</span>]] = rejected_logps
+
+<span class="cm"># All-reduce across distributed ranks (each rank processed different shards)</span>
+dist.all_reduce(chosen_tensor,  op=dist.ReduceOp.MAX)
+dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
+
+<span class="cm"># Save to disk — hash-addressed, so changing any config invalidates it</span>
+cache.to_disk(cache_path)</pre>
+
+  <h4>Cache Key (how invalidation works)</h4>
+
+  <pre><span class="cm"># open_instruct/dpo_utils.py: compute_reference_cache_hash()</span>
+config_str = json.dumps({
+    <span class="st">"concatenated_forward"</span>: args.concatenated_forward,
+    <span class="st">"dataset_config_hash"</span>: dataset_config_hash,  <span class="cm"># ← changes if dataset changes</span>
+    <span class="st">"loss_type"</span>: args.loss_type,
+    <span class="st">"max_train_samples"</span>: args.max_train_samples,
+    <span class="st">"model_name_or_path"</span>: args.model_name_or_path,  <span class="cm"># ← changes if model changes</span>
+    <span class="st">"model_revision"</span>: args.model_revision,
+    <span class="st">"packing"</span>: args.packing,
+    <span class="st">"use_lora"</span>: args.use_lora,
+}, sort_keys=<span class="kw">True</span>)
+hash = hashlib.sha256(config_str.encode()).hexdigest()[:<span class="nu">16</span>]</pre>
+
+  <p>The cache lives at <code>REFERENCE_LOGPROBS_CACHE_PATH</code> (env var, defaults to a Weka path). During training, every batch lookup is just an index into this pre-computed tensor — O(1), no model forward pass.</p>
+
+  <div class="callout warn">
+    <div class="callout-label">Watch Out</div>
+    If you add a new field that meaningfully changes the reference logprobs (e.g., a different prompt format) but don't add it to the hash, the old stale cache will be reused silently. Always add new config fields that affect tokenization or model behavior to <code>compute_reference_cache_hash()</code>.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DPO LOSS TYPES -->
+<section id="dpo-loss-types">
+  <h3>Loss Type Variants</h3>
+
+  <div class="two-col">
+    <div class="box">
+      <h4 style="color:var(--dpo-color)">DPO (dpo)</h4>
+      <p style="font-size:13px">Sums log-probs over response tokens. Works well but sensitive to response length — long responses accumulate more signal regardless of quality.</p>
+      <pre style="font-size:12px">logps = Σ log P(token_t)</pre>
+    </div>
+    <div class="box">
+      <h4 style="color:var(--dpo-color)">DPO-norm (dpo_norm)</h4>
+      <p style="font-size:13px">Averages log-probs over response tokens. More robust when chosen and rejected have very different lengths. This is the default in the codebase.</p>
+      <pre style="font-size:12px">logps = (Σ log P(token_t)) / num_response_tokens</pre>
+    </div>
+    <div class="box">
+      <h4 style="color:var(--dpo-color)">SimPO (simpo)</h4>
+      <p style="font-size:13px">No reference model at all. Uses a margin <code>γ/β</code> between chosen and rejected. Simpler but less stable — the reference model serves as useful regularization.</p>
+      <pre style="font-size:12px">logits = pi_logratios - γ/β
+<span class="cm"># no ref_logratios subtracted</span></pre>
+    </div>
+    <div class="box">
+      <h4 style="color:var(--dpo-color)">WPO (wpo)</h4>
+      <p style="font-size:13px">Weighted Preference Optimization. Weights the loss by how confident the current policy is in the response — high-confidence responses get higher weight.</p>
+      <pre style="font-size:12px">weight = clamp(exp(logps_chosen + logps_rejected), max=1)
+loss = standard_dpo_loss * weight</pre>
+    </div>
+  </div>
+
+  <p>The dispatch is in <code>dpo_utils.py: compute_loss()</code>. SimPO doesn't use <code>reference_cache</code> at all — verify this when reviewing SimPO-related changes.</p>
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════ GRPO OVERVIEW -->
+<section id="grpo-overview">
+  <h2>
+    GRPO — Group Relative Policy Optimization
+    <span class="pill" style="background:rgba(52,211,153,.15);color:var(--grpo-color)">ONLINE RL</span>
+  </h2>
+
+  <p><strong>The question GRPO answers:</strong> How do we train a model to solve tasks where the only feedback is "correct" or "incorrect" — and we don't have a pre-built dataset of preferred responses?</p>
+
+  <p><strong>The intuition:</strong> Generate many responses to the same prompt. Score them. The model should learn to assign higher probability to responses that scored above the group average, and lower probability to those that scored below.</p>
+
+  <p>This is why it's called <em>group</em> relative: the advantage is computed relative to other responses for the <em>same prompt</em>, not globally across all prompts.</p>
+
+  <div class="callout key">
+    <div class="callout-label">Why Group-Relative?</div>
+    Different prompts have different difficulty. A score of 0.5 for a hard math problem is great; 0.5 for a simple instruction-following task is bad. Normalizing within each prompt's group removes this difficulty confound, giving cleaner gradient signal.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ GRPO LOOP -->
+<section id="grpo-loop">
+  <h3>The Online RL Loop</h3>
+
+  <p>Unlike DPO (which is offline — pre-computed dataset), GRPO generates its own data every step.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <strong>Sample prompts from dataset</strong>
+        <p><code>num_unique_prompts_rollout</code> prompts are drawn (e.g., 32 math problems).</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <strong>Generate G responses per prompt using vLLM</strong>
+        <p><code>num_samples_per_prompt_rollout</code> responses per prompt (e.g., G=8). Total: 32×8 = 256 responses. vLLM is used because it's 5-10× faster than <code>model.generate()</code>.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <strong>Score each response asynchronously</strong>
+        <p>Verifiers (math check, code execution, LM judge) run on all 256 responses. Each response gets a scalar reward (e.g., 0.0 or 1.0 for correctness).</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <strong>Compute group-relative advantages</strong>
+        <p>For each prompt's G responses, normalize rewards: subtract group mean, divide by group std. Each response now has an advantage ∈ ℝ instead of a raw reward.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <strong>Assign advantage to every response token</strong>
+        <p>Pack sequences. Every token in a response inherits the scalar advantage of the whole response.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <strong>Policy gradient update</strong>
+        <p>Compute clipped importance-weighted loss. Backprop. Update weights. Sync weights back to vLLM engines.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ GRPO TOKENS -->
+<section id="grpo-tokens">
+  <h3>Token-Level Walk-Through</h3>
+
+  <p>Let's trace a single prompt with G=3 responses through the pipeline.</p>
+
+  <h4>Input: 1 prompt, 3 generated responses</h4>
+
+  <div style="margin:16px 0">
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Prompt tokens:</div>
+    <div class="token-row">
+      <div class="tok tok-prompt"><span>Solve</span></div>
+      <div class="tok tok-prompt"><span>x²=4</span></div>
+    </div>
+
+    <div style="font-size:12px;color:var(--text-muted);margin:12px 0 6px">Response A (correct, score=1.0):</div>
+    <div class="token-row">
+      <div class="tok tok-prompt"><span>Solve</span></div>
+      <div class="tok tok-prompt"><span>x²=4</span></div>
+      <div class="tok tok-resp"><span>x</span></div>
+      <div class="tok tok-resp"><span>=</span></div>
+      <div class="tok tok-resp"><span>±2</span></div>
+    </div>
+
+    <div style="font-size:12px;color:var(--text-muted);margin:12px 0 6px">Response B (wrong, score=0.0):</div>
+    <div class="token-row">
+      <div class="tok tok-prompt"><span>Solve</span></div>
+      <div class="tok tok-prompt"><span>x²=4</span></div>
+      <div class="tok tok-rej"><span>x</span></div>
+      <div class="tok tok-rej"><span>=</span></div>
+      <div class="tok tok-rej"><span>2</span></div>
+    </div>
+
+    <div style="font-size:12px;color:var(--text-muted);margin:12px 0 6px">Response C (wrong, score=0.0):</div>
+    <div class="token-row">
+      <div class="tok tok-prompt"><span>Solve</span></div>
+      <div class="tok tok-prompt"><span>x²=4</span></div>
+      <div class="tok tok-rej"><span>x</span></div>
+      <div class="tok tok-rej"><span>=</span></div>
+      <div class="tok tok-rej"><span>4</span></div>
+    </div>
+  </div>
+
+  <h4>After Group-Relative Normalization (scores → advantages)</h4>
+
+  <pre><span class="cm"># open_instruct/data_loader.py (DataPreparationActor)</span>
+scores = [<span class="nu">1.0</span>, <span class="nu">0.0</span>, <span class="nu">0.0</span>]   <span class="cm"># raw rewards for [A, B, C]</span>
+
+scores_per_prompt = scores.reshape(<span class="nu">-1</span>, G)  <span class="cm"># shape (1, 3): [[1.0, 0.0, 0.0]]</span>
+
+mean_grouped = scores_per_prompt.mean(axis=<span class="nu">-1</span>)     <span class="cm"># [0.333]</span>
+mean_grouped = np.repeat(mean_grouped, G)             <span class="cm"># [0.333, 0.333, 0.333]</span>
+
+std_grouped  = scores_per_prompt.std(axis=<span class="nu">-1</span>)      <span class="cm"># [0.471]</span>
+std_grouped  = np.repeat(std_grouped, G)              <span class="cm"># [0.471, 0.471, 0.471]</span>
+
+advantages = (scores - mean_grouped) / (std_grouped + <span class="nu">1e-8</span>)
+<span class="cm"># A: (1.0 - 0.333) / 0.471 = +1.414  ← positive, model should do more of this</span>
+<span class="cm"># B: (0.0 - 0.333) / 0.471 = -0.707  ← negative, model should do less of this</span>
+<span class="cm"># C: (0.0 - 0.333) / 0.471 = -0.707  ← negative, model should do less of this</span></pre>
+
+  <h4>Assigning Advantage to Tokens</h4>
+
+  <p>The scalar advantage for each response is broadcast to <em>every response token</em>. Prompt tokens get advantage 0 (they are masked and don't contribute to the gradient).</p>
+
+  <pre><span class="cm"># Response A's tokens all get advantage +1.414</span>
+<span class="cm"># Response B's tokens all get advantage -0.707</span>
+<span class="cm"># Prompt tokens get 0 (masked out in the loss computation)</span>
+
+<span class="cm"># This is implemented via the lookup array trick in data_loader.py:</span>
+lookup_advantages = np.zeros(len(advantages) + <span class="nu">1</span>)  <span class="cm"># index 0 → advantage 0 (for prompt)</span>
+lookup_advantages[<span class="nu">1</span>:] = advantages                  <span class="cm"># index i+1 → advantage for response i</span>
+
+<span class="cm"># response_masks values are 0 (prompt/pad) or i+1 (response i's tokens)</span>
+<span class="cm"># So indexing lookup_advantages by response_masks gives the right advantage per token</span>
+packed_advantages = lookup_advantages[response_masks]</pre>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ GRPO ADVANTAGE -->
+<section id="grpo-advantage">
+  <h3>Group-Relative Advantage: The Math</h3>
+
+  <div class="math">
+    <div class="math-title">Group-Relative Advantage Computation</div>
+    <span class="eq">
+      G <span class="op">=</span> num_samples_per_prompt  <span class="note"> (e.g., 8)</span>
+    </span>
+    <span class="eq">
+      r_i <span class="op">=</span> reward for response i within the group
+    </span>
+    <span class="eq">
+      <span class="def">μ_group</span> <span class="op">=</span> (1/G) Σ r_i     <span class="note">← group mean reward</span>
+    </span>
+    <span class="eq">
+      <span class="def">σ_group</span> <span class="op">=</span> sqrt((1/G) Σ (r_i - μ)²)   <span class="note">← group std reward</span>
+    </span>
+    <span class="eq">
+      <span class="def">A_i</span> <span class="op">=</span> (r_i <span class="op">-</span> μ_group) <span class="op">/</span> (σ_group <span class="op">+</span> ε)   <span class="note">← normalized advantage</span>
+    </span>
+  </div>
+
+  <h4>Zero-Gradient Skipping (grpo_fast.py optimization)</h4>
+
+  <p>If <strong>all G responses for a prompt are identical in reward</strong> (e.g., all correct, or all wrong), then <code>σ_group = 0</code>, which means all advantages are 0, which means no gradient. The code detects this and skips those groups entirely:</p>
+
+  <pre><span class="cm"># open_instruct/data_loader.py (DataPreparationActor)</span>
+<span class="kw">if</span> self.config.filter_zero_std_samples:
+    <span class="cm"># Filter out groups where all responses have same reward</span>
+    nonzero_std_mask = std_grouped_rewards > <span class="nu">0</span>
+    <span class="kw">if</span> nonzero_std_mask.sum() == <span class="nu">0</span>:
+        <span class="cm"># All groups are homogeneous — skip entire batch, resample</span>
+        logger.info(<span class="st">"all groups filtered (zero-std rewards); resampling"</span>)
+        <span class="kw">continue</span></pre>
+
+  <div class="callout tip">
+    <div class="callout-label">Why Skip Zero-Std Groups?</div>
+    When all responses to a prompt are equally wrong (or equally right), the advantage is 0 for every token — the gradient is literally zero. Computing the forward pass, backward pass, and optimizer step for zero gradient wastes compute. Skipping these groups speeds up training without losing information.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ GRPO LOSS -->
+<section id="grpo-loss">
+  <h3>The Policy Gradient Loss</h3>
+
+  <p>With advantages computed, the training step uses a clipped importance-weighted loss (like PPO, but without a value network).</p>
+
+  <h4>Step 1: Compute Per-Token Log-Probs for the Current Policy</h4>
+
+  <pre><span class="cm"># open_instruct/grpo_fast.py (training loop)</span>
+local_logprobs_BT, entropy_BT = grpo_utils.<span class="fn">forward_for_logprobs</span>(
+    self.model,
+    data_BT.query_responses[i],   <span class="cm"># packed query+response tokens</span>
+    position_ids=data_BT.position_ids[i],
+    temperature=self.streaming_config.temperature,
+)
+<span class="cm"># local_logprobs_BT shape: (batch, seq_len)</span>
+<span class="cm"># Contains log P(token_t | tokens_0..t-1) for each response token</span></pre>
+
+  <h4>Step 2: Compute the Importance Ratio</h4>
+
+  <div class="math">
+    <div class="math-title">Importance Sampling Ratio</div>
+    <span class="eq">
+      <span class="def">ratio</span> <span class="op">=</span> π_θ(a_t | s_t) <span class="op">/</span> π_old(a_t | s_t)
+    </span>
+    <span class="eq">
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="op">=</span> <span class="fn">exp</span>(log π_θ(a_t) <span class="op">-</span> log π_old(a_t))
+    </span>
+    <span class="eq">
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="op">=</span> <span class="fn">exp</span>(new_logprobs <span class="op">-</span> old_logprobs)   <span class="note">← per token</span>
+    </span>
+  </div>
+
+  <pre><span class="cm"># open_instruct/grpo_fast.py</span>
+logprobs_diff_BT = new_logprobs_BT <span class="op">-</span> old_logprob_BT  <span class="cm"># per token difference</span>
+ratio_BT = torch.exp(logprobs_diff_BT)                  <span class="cm"># importance weight per token</span>
+<span class="cm"># ratio > 1 means current policy assigns MORE probability to this token than old policy</span>
+<span class="cm"># ratio < 1 means current policy assigns LESS probability</span></pre>
+
+  <p>The "old logprobs" are the logprobs from vLLM at generation time (or from the policy at the start of the current training step if using multiple epochs).</p>
+
+  <h4>Step 3: DAPO Clipped Loss (default loss_fn)</h4>
+
+  <div class="math">
+    <div class="math-title">DAPO Policy Gradient Loss (per token)</div>
+    <span class="eq">
+      <span class="def">pg_loss_1</span> <span class="op">=</span> <span class="op">-</span>A_i <span class="op">×</span> ratio
+      <span class="note">  ← unclipped loss</span>
+    </span>
+    <span class="eq">
+      <span class="def">pg_loss_2</span> <span class="op">=</span> <span class="op">-</span>A_i <span class="op">×</span> <span class="fn">clip</span>(ratio, 1<span class="op">-</span>ε_low, 1<span class="op">+</span>ε_high)
+      <span class="note">  ← clipped loss</span>
+    </span>
+    <span class="eq">
+      <span class="def">loss</span> <span class="op">=</span> <span class="fn">max</span>(pg_loss_1, pg_loss_2)
+      <span class="note">  ← conservative: take the worse of the two</span>
+    </span>
+  </div>
+
+  <pre><span class="cm"># open_instruct/grpo_utils.py: compute_grpo_loss()</span>
+<span class="kw">if</span> config.loss_fn == GRPOLossType.dapo:
+    pg_losses  = <span class="op">-</span>advantages <span class="op">*</span> ratio
+    pg_losses2 = <span class="op">-</span>advantages <span class="op">*</span> torch.clamp(ratio, <span class="nu">1.0</span> <span class="op">-</span> config.clip_lower,
+                                                     <span class="nu">1.0</span> <span class="op">+</span> config.clip_higher)
+    clipfrac = (pg_losses2 > pg_losses).float()  <span class="cm"># fraction of clipped tokens</span>
+    pg_loss   = torch.max(pg_losses, pg_losses2)  <span class="cm"># take conservative (higher) loss</span></pre>
+
+  <h4>Intuition for the Clipping</h4>
+
+  <p>If advantage is positive (good response), we want to increase the token's probability. But if ratio is already much > 1 (we've already increased it a lot), further increasing it is risky — we don't trust the gradient signal that much. The clip limits how aggressively we update.</p>
+
+  <p>If advantage is negative (bad response), we want to decrease probability. Same clip applies in the other direction.</p>
+
+  <h4>Step 4: Optional KL Penalty Against Reference</h4>
+
+  <pre><span class="cm"># If load_ref_policy=True, add KL divergence penalty</span>
+ref_logprobs_diff = (new_logprobs <span class="op">-</span> ref_logprobs).clamp(<span class="op">-</span><span class="nu">40.0</span>, <span class="nu">40.0</span>)
+kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
+kl = kl_all[config.kl_estimator]  <span class="cm"># e.g., "k3" estimator</span>
+
+per_token_loss_BT = pg_loss_BT + self.args.beta <span class="op">*</span> kl_BT</pre>
+
+  <h4>Step 5: Masked Mean → Scalar Loss → Backward</h4>
+
+  <pre><span class="cm"># Average over response tokens only (prompt tokens masked)</span>
+loss = <span class="fn">masked_mean</span>(per_token_loss_BT, response_mask_BT, None, loss_denominator)
+
+<span class="cm"># Scale for distributed training (DeepSpeed averages over ranks; we want sum)</span>
+loss *= self.args.world_size // self.args.sequence_parallel_size
+
+self.model.backward(loss)
+<span class="kw">if</span> is_accumulation_boundary:
+    self.model.step()  <span class="cm"># optimizer step after gradient accumulation</span></pre>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ GRPO PACKING -->
+<section id="grpo-packing">
+  <h3>Packing & Async in grpo_fast.py</h3>
+
+  <h4>Sequence Packing in GRPO</h4>
+
+  <p>Each training step produces many variable-length responses. Without packing, shorter responses waste most of the batch with padding. The <code>pack_sequences()</code> function bins responses into packed batches:</p>
+
+  <pre><span class="cm"># open_instruct/rl_utils.py: pack_sequences()</span>
+<span class="cm"># Input: 256 (query, response) pairs of varying length</span>
+<span class="cm"># Output: several packed batches, each up to pack_length tokens</span>
+
+<span class="kw">for</span> i, (query, response) <span class="kw">in</span> enumerate(zip(queries, responses)):
+    query_response = query + response
+
+    <span class="cm"># If adding this seq would exceed pack_length, flush current pack</span>
+    <span class="kw">if</span> len(query_response) + len(cur_data) > effective_pack_length and len(cur_data) > <span class="nu">0</span>:
+        query_responses.append(cur_data)        <span class="cm"># flush</span>
+        <span class="cm"># ... reset cur_data, attention_mask, etc.</span>
+
+    cur_data.extend(query_response)
+
+    <span class="cm"># Attention mask: encodes which "document" (sequence) each token belongs to</span>
+    <span class="cm"># Token at position t gets value (i+1) if it's from sequence i, else 0 (query/pad)</span>
+    cur_attention_mask.extend([i + <span class="nu">1</span> - offset for _ in range(len(query_response))])</pre>
+
+  <p>The attention mask values encode document identity. <code>reset_position_ids()</code> uses this to generate correct position IDs that reset to 0 at each sequence boundary.</p>
+
+  <h4>Async RLHF</h4>
+
+  <p>In <code>grpo_fast.py</code>, training and inference overlap via threads. While the GPU is doing the backward pass for batch N, the CPU is preparing batch N+1 (calling vLLM, running verifiers). This hides inference latency behind training time:</p>
+
+  <pre><span class="cm"># DataPreparationActor runs in a Ray remote actor (separate process)</span>
+<span class="cm"># It prepares data asynchronously and puts it into a queue</span>
+<span class="cm"># The training actor pulls from the queue, overlapping data prep with training</span>
+
+<span class="cm"># The data prep actor does:</span>
+<span class="cm">#   1. Sample prompts</span>
+<span class="cm">#   2. Send to vLLM (async)</span>
+<span class="cm">#   3. Run verifiers on responses (async)</span>
+<span class="cm">#   4. Compute advantages</span>
+<span class="cm">#   5. Pack sequences</span>
+<span class="cm">#   6. Put into queue</span>
+<span class="cm">#</span>
+<span class="cm"># The training actor does:</span>
+<span class="cm">#   1. Pull from queue (blocks until data ready)</span>
+<span class="cm">#   2. Run training step (forward + backward + step)</span>
+<span class="cm">#   3. Sync weights to vLLM</span>
+<span class="cm">#   → Meanwhile, data prep is running step N+1 in parallel</span></pre>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ COMPARISON -->
+<section id="comparison">
+  <h2>DPO vs GRPO — Side by Side</h2>
+
+  <table>
+    <tr>
+      <th>Aspect</th>
+      <th style="color:var(--dpo-color)">DPO</th>
+      <th style="color:var(--grpo-color)">GRPO</th>
+    </tr>
+    <tr>
+      <td>Data source</td>
+      <td>Pre-built preference dataset (offline)</td>
+      <td>Model generates its own data each step (online)</td>
+    </tr>
+    <tr>
+      <td>Per-example input</td>
+      <td>Prompt + chosen + rejected</td>
+      <td>Prompt only (responses generated on-the-fly)</td>
+    </tr>
+    <tr>
+      <td>Signal</td>
+      <td>Human/AI preference labels</td>
+      <td>Verifiable binary or scalar rewards</td>
+    </tr>
+    <tr>
+      <td>Token-level targets</td>
+      <td>Maximize chosen logprob, minimize rejected logprob (both relative to reference)</td>
+      <td>Increase logprob of high-advantage tokens, decrease logprob of low-advantage tokens</td>
+    </tr>
+    <tr>
+      <td>Reference model</td>
+      <td>Always used (except SimPO); logprobs pre-cached</td>
+      <td>Optional KL penalty; no pre-caching needed</td>
+    </tr>
+    <tr>
+      <td>β (beta) role</td>
+      <td>KL penalty: stay near reference model</td>
+      <td>KL penalty weight against reference policy</td>
+    </tr>
+    <tr>
+      <td>Loss shape</td>
+      <td>One scalar per sequence pair (chosen logp – rejected logp)</td>
+      <td>One scalar per <em>token</em>, weighted by per-sequence advantage</td>
+    </tr>
+    <tr>
+      <td>Normalization</td>
+      <td>None (or average over tokens for dpo_norm)</td>
+      <td>Group-relative: normalize rewards within each prompt's G responses</td>
+    </tr>
+    <tr>
+      <td>Infrastructure</td>
+      <td>Standard training loop; FSDP</td>
+      <td>Needs vLLM for fast inference; Ray for async; verifier sandbox</td>
+    </tr>
+    <tr>
+      <td>When to use</td>
+      <td>When you have preference data; stable training; easier to debug</td>
+      <td>When you have a verifiable reward signal (math, code); RLVR tasks</td>
+    </tr>
+    <tr>
+      <td>Training cost</td>
+      <td>~2× SFT (reference logprob cache pays upfront)</td>
+      <td>~3-5× SFT (inference + verification overhead)</td>
+    </tr>
+  </table>
+
+  <h3>Gradient Flow Comparison</h3>
+
+  <div class="two-col">
+    <div class="box">
+      <h4 style="color:var(--dpo-color)">DPO Gradient</h4>
+      <p style="font-size:13px">Flows through the per-token log-softmax at every <strong>response</strong> token of both chosen and rejected. The gradient at token t pulls the logit for the correct token up (for chosen) or down (for rejected).</p>
+      <p style="font-size:13px;color:var(--text-muted)">Strength proportional to: β × (1 - sigmoid(β × logits))</p>
+    </div>
+    <div class="box">
+      <h4 style="color:var(--grpo-color)">GRPO Gradient</h4>
+      <p style="font-size:13px">Flows through per-token log-probabilities at every <strong>response</strong> token, scaled by the response's advantage. Positive advantage → increase token probability. Negative → decrease.</p>
+      <p style="font-size:13px;color:var(--text-muted)">Strength proportional to: advantage × (ratio or clipped ratio)</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+const progress = document.getElementById('progress');
+window.addEventListener('scroll', () => {
+  const t = document.body.scrollHeight - window.innerHeight;
+  progress.style.width = (window.scrollY / t * 100) + '%';
+});
+
+const links = [...document.querySelectorAll('nav a')];
+const sections = [...document.querySelectorAll('section[id]')];
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(l => l.classList.remove('active'));
+      const a = document.querySelector(`nav a[href="#${e.target.id}"]`);
+      if (a) a.classList.add('active');
+    }
+  });
+}, { rootMargin: '-10% 0px -75% 0px' });
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
