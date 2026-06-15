@@ -436,7 +436,7 @@ class StreamingDataLoaderConfig:
     system_prompt_override_file: str | None = None
 
     # Generation
-    temperature: float = 0.7
+    temperature: float = 1.0
     stop_strings: list[str] | None = None
     inflight_updates: bool = True
     eval_response_length: int | None = None
