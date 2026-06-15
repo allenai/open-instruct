@@ -63,6 +63,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 WORKDIR /stage/
 
 ENV UV_CACHE_DIR=/root/.cache/uv \
+    UV_LINK_MODE=copy \
+    UV_CONCURRENT_INSTALLS=8 \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0 \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+docker
