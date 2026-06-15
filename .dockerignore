@@ -17,6 +17,7 @@ local_dataset_cache/
 
 
 # Virtual environments
+**/.venv/
 .venv/
 venv/
 ENV/
