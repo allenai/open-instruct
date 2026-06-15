@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Open-Instruct Maintainer's Guide</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222535;
+    --border: #2e3150;
+    --accent: #6c8eff;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+    --accent4: #fb923c;
+    --accent5: #f472b6;
+    --text: #e2e8f0;
+    --text-muted: #8892b0;
+    --code-bg: #141721;
+    --tag-sft: #1e3a5f;
+    --tag-dpo: #3b1f5e;
+    --tag-grpo: #1f4a3b;
+    --sidebar-w: 280px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    display: flex;
+  }
+
+  /* SIDEBAR */
+  nav {
+    width: var(--sidebar-w);
+    min-width: var(--sidebar-w);
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  nav::-webkit-scrollbar { width: 4px; }
+  nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .nav-logo {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+
+  .nav-logo h1 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .nav-logo p {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .nav-section-label {
+    padding: 12px 20px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+  }
+
+  nav a {
+    display: block;
+    padding: 7px 20px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 13px;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+  }
+
+  nav a:hover { color: var(--text); background: var(--surface2); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); background: rgba(108,142,255,0.08); }
+
+  nav a.sub { padding-left: 32px; font-size: 12px; }
+
+  /* MAIN */
+  main {
+    flex: 1;
+    max-width: 900px;
+    padding: 48px 56px;
+    overflow-x: hidden;
+  }
+
+  section {
+    margin-bottom: 72px;
+    scroll-margin-top: 32px;
+  }
+
+  h2 {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h2 .icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--accent2);
+    margin: 28px 0 10px;
+  }
+
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent3);
+    margin: 20px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  p { margin-bottom: 12px; color: var(--text); font-size: 14.5px; }
+
+  strong { color: #fff; }
+
+  em { color: var(--accent4); font-style: normal; font-weight: 500; }
+
+  /* CODE */
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12.5px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: #a5d6ff;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 14px 0;
+    position: relative;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #cdd9f5;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .code-label {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* CALLOUTS */
+  .callout {
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 16px 0;
+    border-left: 3px solid;
+    font-size: 14px;
+  }
+
+  .callout-info { background: rgba(108,142,255,0.08); border-color: var(--accent); }
+  .callout-warn { background: rgba(251,146,60,0.08); border-color: var(--accent4); }
+  .callout-tip  { background: rgba(52,211,153,0.08); border-color: var(--accent3); }
+  .callout-danger { background: rgba(248,113,113,0.08); border-color: #f87171; }
+
+  .callout-title {
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+
+  .callout-info .callout-title { color: var(--accent); }
+  .callout-warn .callout-title { color: var(--accent4); }
+  .callout-tip .callout-title  { color: var(--accent3); }
+  .callout-danger .callout-title { color: #f87171; }
+
+  /* TABLES */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13.5px;
+  }
+
+  th {
+    background: var(--surface2);
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  td code { font-size: 12px; }
+
+  /* TAGS */
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-right: 4px;
+  }
+
+  .tag-sft  { background: var(--tag-sft);  color: #7eb8f7; }
+  .tag-dpo  { background: var(--tag-dpo);  color: #c4b5fd; }
+  .tag-grpo { background: var(--tag-grpo); color: #6ee7b7; }
+  .tag-new  { background: #1a3320; color: #4ade80; }
+  .tag-old  { background: #2a1f0e; color: #fb923c; }
+  .tag-crit { background: #2a1015; color: #f87171; }
+
+  /* STACK COMPARISON */
+  .stack-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+
+  .stack-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+  }
+
+  .stack-card h4 { margin-top: 0; }
+
+  .stack-card ul { list-style: none; padding: 0; }
+  .stack-card ul li {
+    padding: 4px 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .stack-card ul li::before {
+    content: '→';
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* FLOW DIAGRAM */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    position: relative;
+  }
+
+  .flow-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 32px;
+    bottom: -8px;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .flow-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--surface2);
+    border: 2px solid var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .flow-content {
+    padding: 6px 0 24px;
+  }
+
+  .flow-content strong { display: block; margin-bottom: 2px; }
+  .flow-content p { font-size: 13px; color: var(--text-muted); margin: 0; }
+
+  /* FILE TREE */
+  .tree {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 2;
+  }
+
+  .tree .dir  { color: var(--accent); }
+  .tree .file { color: #cdd9f5; }
+  .tree .desc { color: var(--text-muted); font-size: 12px; }
+  .tree .important { color: var(--accent3); font-weight: 600; }
+  .tree .legacy { color: var(--accent4); }
+
+  /* REVIEW CHECKLIST */
+  .checklist {
+    list-style: none;
+    padding: 0;
+    margin: 12px 0;
+  }
+
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13.5px;
+    margin-bottom: 4px;
+  }
+
+  .checklist li:hover { background: var(--surface2); }
+
+  .checklist li::before {
+    content: '☐';
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-top: 1px;
+    font-size: 14px;
+  }
+
+  /* SEARCH */
+  .search-bar {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+
+  .search-bar input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+  }
+
+  .search-bar input:focus { border-color: var(--accent); }
+  .search-bar input::placeholder { color: var(--text-muted); }
+
+  /* PROGRESS */
+  .progress-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 0%;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    z-index: 100;
+    transition: width 0.1s;
+  }
+
+  /* SYNTAX COLORS */
+  .kw  { color: #c084fc; }
+  .cl  { color: #60a5fa; }
+  .st  { color: #34d399; }
+  .cm  { color: #6b7280; font-style: italic; }
+  .fn  { color: #fbbf24; }
+  .nu  { color: #fb923c; }
+  .op  { color: #94a3b8; }
+
+  /* RESPONSIVE */
+  @media (max-width: 900px) {
+    nav { display: none; }
+    main { padding: 32px 24px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progress"></div>
+
+<nav id="sidebar">
+  <div class="nav-logo">
+    <h1>Open-Instruct</h1>
+    <p>Maintainer's Guide</p>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="Search sections..." />
+  </div>
+
+  <div class="nav-section-label">Overview</div>
+  <a href="#what-is-it">What Is This Repo?</a>
+  <a href="#directory-map">Directory Map</a>
+
+  <div class="nav-section-label">Training Stacks</div>
+  <a href="#two-stacks">Two Stacks: Old vs New</a>
+  <a href="#config-system">Configuration System</a>
+
+  <div class="nav-section-label">Algorithms</div>
+  <a href="#sft">SFT</a>
+  <a href="#dpo">DPO</a>
+  <a href="#grpo">GRPO</a>
+
+  <div class="nav-section-label">Data</div>
+  <a href="#data-pipeline">Data Pipeline</a>
+  <a href="#packing">Sequence Packing</a>
+
+  <div class="nav-section-label">Infrastructure</div>
+  <a href="#beaker">Beaker & mason.py</a>
+  <a href="#testing">Tests & CI</a>
+
+  <div class="nav-section-label">Code Review</div>
+  <a href="#conventions">Code Conventions</a>
+  <a href="#review-patterns">Review Patterns</a>
+  <a href="#key-files">Key Files</a>
+  <a href="#why">Why It's Built This Way</a>
+</nav>
+
+<main id="main">
+
+  <!-- WHAT IS IT -->
+  <section id="what-is-it">
+    <h2><span class="icon" style="background:#1e2d5e">🧠</span> What Is This Repo?</h2>
+
+    <p>Open-instruct is AI2's production post-training codebase for instruction-tuning open-source LLMs. It's the implementation behind the <strong>TÜLU</strong> family of models and papers (TÜLU 1, 2, 3).</p>
+
+    <p>It supports three training paradigms, each building on the previous:</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:20px 0">
+      <div class="stack-card">
+        <h4 style="color:var(--accent)">SFT</h4>
+        <p style="font-size:13px;color:var(--text-muted);margin:0">Supervised Fine-Tuning. Start from a pretrained base. Train on (prompt, response) pairs.</p>
+        <div style="margin-top:10px"><span class="tag tag-sft">SFT</span></div>
+      </div>
+      <div class="stack-card">
+        <h4 style="color:var(--accent2)">DPO</h4>
+        <p style="font-size:13px;color:var(--text-muted);margin:0">Direct Preference Optimization. Train on (prompt, chosen, rejected) triples.</p>
+        <div style="margin-top:10px"><span class="tag tag-dpo">DPO</span></div>
+      </div>
+      <div class="stack-card">
+        <h4 style="color:var(--accent3)">GRPO</h4>
+        <p style="font-size:13px;color:var(--text-muted);margin:0">Online RL with verifiable rewards. Model generates its own training data each step.</p>
+        <div style="margin-top:10px"><span class="tag tag-grpo">GRPO</span></div>
+      </div>
+    </div>
+
+    <div class="callout callout-info">
+      <div class="callout-title">Research + Production</div>
+      The codebase is research-grade but production-deployed. This tension creates accumulated complexity — multiple algorithms, model families, and infrastructure approaches coexist. Understanding this framing helps when you encounter seemingly redundant code.
+    </div>
+
+    <h3>Supported Models</h3>
+    <p>Llama 3.x, OLMo / OLMo 2 / Olmo 3, Qwen. Chat templates exist for each. Adding a new model family means adding a tokenizer config + chat template.</p>
+  </section>
+
+  <!-- DIRECTORY MAP -->
+  <section id="directory-map">
+    <h2><span class="icon" style="background:#1a2e1e">📁</span> Directory Map</h2>
+
+    <div class="tree">
+<span class="dir">open-instruct/</span><br>
+├── <span class="dir important">open_instruct/</span>          <span class="desc">← main Python package; all code lives here</span><br>
+│   ├── <span class="file important">finetune.py</span>              <span class="desc">← SFT (old stack: Accelerate/DeepSpeed)</span><br>
+│   ├── <span class="file important">olmo_core_finetune.py</span>    <span class="desc">← SFT (new stack: OLMo-core FSDP)</span><br>
+│   ├── <span class="file important">dpo.py</span>                   <span class="desc">← DPO (new stack: OLMo-core FSDP)</span><br>
+│   ├── <span class="file legacy">dpo_tune_cache.py</span>        <span class="desc">← DPO (old stack: legacy)</span><br>
+│   ├── <span class="file important">grpo.py</span>                  <span class="desc">← GRPO (OLMo-core + Ray)</span><br>
+│   ├── <span class="file important">grpo_fast.py</span>             <span class="desc">← GRPO fast (packing + async, active)</span><br>
+│   ├── <span class="file">dataset_transformation.py</span>  <span class="desc">← tokenize, cache, mix datasets (98 KB!)</span><br>
+│   ├── <span class="file">data_loader.py</span>           <span class="desc">← HF + streaming data loaders (GRPO)</span><br>
+│   ├── <span class="file">ground_truth_utils.py</span>    <span class="desc">← verifiers for GRPO rewards (55 KB)</span><br>
+│   ├── <span class="file">padding_free_collator.py</span> <span class="desc">← sequence packing implementation</span><br>
+│   ├── <span class="file">model_utils.py</span>           <span class="desc">← model loading and saving</span><br>
+│   ├── <span class="file">utils.py</span>                 <span class="desc">← core utilities, ArgumentParserPlus (112 KB)</span><br>
+│   ├── <span class="file">dpo_utils.py</span>             <span class="desc">← DPO loss functions (DPO, SimPO, WPO)</span><br>
+│   ├── <span class="file">grpo_utils.py</span>            <span class="desc">← GRPO configs and utilities</span><br>
+│   ├── <span class="file">olmo_core_utils.py</span>       <span class="desc">← OLMo-core integration layer</span><br>
+│   ├── <span class="file">vllm_utils.py</span>            <span class="desc">← vLLM generation integration</span><br>
+│   ├── <span class="dir">environments/</span>            <span class="desc">← RL environments and tool execution</span><br>
+│   │   ├── <span class="file">base.py</span>                <span class="desc">← Environment base classes</span><br>
+│   │   ├── <span class="file">generic_sandbox.py</span>     <span class="desc">← sandboxed code execution</span><br>
+│   │   ├── <span class="file">pool.py</span>                <span class="desc">← environment pooling</span><br>
+│   │   └── <span class="dir">tools/</span>                 <span class="desc">← tool implementations & parsers</span><br>
+│   ├── <span class="dir">rubrics/</span>                 <span class="desc">← scoring rubric definitions</span><br>
+│   └── <span class="file">test_*.py</span>               <span class="desc">← unit tests (co-located with source)</span><br>
+│<br>
+├── <span class="dir">scripts/</span><br>
+│   ├── <span class="dir">train/</span>                   <span class="desc">← training launch scripts</span><br>
+│   │   ├── <span class="dir important">debug/</span>               <span class="desc">← smoke tests (fast, single GPU)</span><br>
+│   │   ├── <span class="dir">tulu3/</span>               <span class="desc">← TÜLU 3 production scripts</span><br>
+│   │   ├── <span class="dir">olmo3/</span>               <span class="desc">← Olmo 3 production scripts</span><br>
+│   │   └── <span class="file important">build_image_and_launch.sh</span>  <span class="desc">← Beaker launcher wrapper</span><br>
+│   ├── <span class="dir">data/</span>                    <span class="desc">← dataset preprocessing</span><br>
+│   └── <span class="dir">eval/</span>                    <span class="desc">← evaluation scripts</span><br>
+│<br>
+├── <span class="dir">configs/</span><br>
+│   ├── <span class="dir">train_configs/</span>           <span class="desc">← YAML/JSON experiment configs</span><br>
+│   ├── <span class="dir">ds_configs/</span>              <span class="desc">← DeepSpeed ZeRO-2/3 configs</span><br>
+│   └── <span class="dir">beaker_configs/</span>          <span class="desc">← Beaker cluster configs</span><br>
+│<br>
+├── <span class="file important">mason.py</span>                 <span class="desc">← Beaker job orchestrator (30 KB)</span><br>
+├── <span class="file">Dockerfile</span>               <span class="desc">← container def (Beaker requires this)</span><br>
+└── <span class="file">pyproject.toml</span>           <span class="desc">← dependencies + project config</span>
+    </div>
+  </section>
+
+  <!-- TWO STACKS -->
+  <section id="two-stacks">
+    <h2><span class="icon" style="background:#2a1f0e">⚡</span> Two Stacks: Old vs New</h2>
+
+    <p>This is the single most important architectural fact. There are <strong>two implementations</strong> for SFT and DPO. When you read code, the first thing to figure out is which stack you're in.</p>
+
+    <div class="stack-grid">
+      <div class="stack-card">
+        <h4><span class="tag tag-old">OLD</span> Accelerate / DeepSpeed</h4>
+        <ul>
+          <li><code>finetune.py</code> — SFT</li>
+          <li><code>dpo_tune_cache.py</code> — DPO</li>
+          <li>Uses HuggingFace Accelerate + DeepSpeed</li>
+          <li>Config: one flat <code>FlatArguments</code> dataclass</li>
+          <li>Supports LoRA / QLoRA (PEFT)</li>
+          <li>Still used for parameter-efficient experiments</li>
+        </ul>
+      </div>
+      <div class="stack-card">
+        <h4><span class="tag tag-new">NEW</span> OLMo-core (FSDP)</h4>
+        <ul>
+          <li><code>olmo_core_finetune.py</code> — SFT</li>
+          <li><code>dpo.py</code> — DPO</li>
+          <li><code>grpo.py</code> / <code>grpo_fast.py</code> — GRPO</li>
+          <li>Config: hierarchical composed dataclasses</li>
+          <li>FSDP + HSDP for multi-node</li>
+          <li><strong>Active development happens here</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout callout-warn">
+      <div class="callout-title">Why Two Stacks Exist</div>
+      OLMo-core was adopted mid-life for better FSDP semantics, hierarchical sharding (HSDP) for multi-node runs, and <code>torch.compile</code> support. The old Accelerate/DeepSpeed stack wasn't removed because LoRA workflows and some legacy configs still depend on it. Don't try to unify them without understanding what depends on each.
+    </div>
+  </section>
+
+  <!-- CONFIG SYSTEM -->
+  <section id="config-system">
+    <h2><span class="icon" style="background:#1e1a3e">⚙️</span> Configuration System</h2>
+
+    <p>The new stack uses <strong>hierarchical dataclasses</strong>. This is the most important pattern to internalize for reading and reviewing code.</p>
+
+    <pre><span class="cm"># Each algorithm's config inherits from specialized sub-configs</span>
+<span class="op">@</span><span class="fn">dataclass</span>
+<span class="kw">class</span> <span class="cl">DPOExperimentConfig</span>(
+    <span class="cl">ExperimentConfig</span>,   <span class="cm"># exp_name, seed</span>
+    <span class="cl">ModelConfig</span>,        <span class="cm"># model_name_or_path, revision, attn_implementation</span>
+    <span class="cl">TrainingConfig</span>,     <span class="cm"># lr, batch_size, max_steps, warmup_ratio</span>
+    <span class="cl">DatasetConfig</span>,      <span class="cm"># dataset_mixer_list, transform_fn, max_seq_length</span>
+    <span class="cl">LoggingConfig</span>,      <span class="cm"># wandb_project, logging_steps</span>
+    <span class="cl">CheckpointConfig</span>,   <span class="cm"># save_every_steps, resume_from</span>
+    <span class="cl">DPOConfig</span>,          <span class="cm"># loss_type, beta, label_smoothing</span>
+):
+    <span class="kw">pass</span></pre>
+
+    <p>When reviewing a new feature, check that new config fields are added to the <em>correct</em> sub-config class — not just thrown into <code>ExperimentConfig</code>.</p>
+
+    <h3>Parsing</h3>
+    <p><code>ArgumentParserPlus</code> (in <code>utils.py</code>) can parse multiple dataclasses simultaneously from CLI args. It handles JSON-string fields (dicts passed on the command line).</p>
+
+    <pre><span class="cl">parser</span> <span class="op">=</span> <span class="cl">ArgumentParserPlus</span>((<span class="cl">DPOExperimentConfig</span>, <span class="cl">TokenizerConfig</span>))
+<span class="cl">args</span>, <span class="cl">tc</span> <span class="op">=</span> <span class="cl">parser</span>.<span class="fn">parse</span>()</pre>
+
+    <h3>Key Config Groups</h3>
+    <table>
+      <tr><th>Config Class</th><th>Key Fields</th></tr>
+      <tr><td><code>ExperimentConfig</code></td><td><code>exp_name</code>, <code>run_name</code>, <code>seed</code></td></tr>
+      <tr><td><code>ModelConfig</code></td><td><code>model_name_or_path</code>, <code>model_revision</code>, <code>attn_implementation</code></td></tr>
+      <tr><td><code>TrainingConfig</code></td><td><code>learning_rate</code>, <code>per_device_train_batch_size</code>, <code>gradient_accumulation_steps</code>, <code>max_train_steps</code>, <code>lr_scheduler_type</code></td></tr>
+      <tr><td><code>DatasetConfig</code></td><td><code>dataset_mixer_list</code>, <code>dataset_transform_fn</code>, <code>max_seq_length</code>, <code>dataset_skip_cache</code></td></tr>
+      <tr><td><code>LoggingConfig</code></td><td><code>with_tracking</code>, <code>wandb_project</code>, <code>wandb_entity</code>, <code>logging_steps</code></td></tr>
+      <tr><td><code>HubConfig</code></td><td><code>push_to_hub</code>, <code>hf_repo_id</code>, <code>hf_repo_revision</code></td></tr>
+      <tr><td><code>DPOConfig</code></td><td><code>loss_type</code>, <code>beta</code>, <code>label_smoothing</code></td></tr>
+    </table>
+  </section>
+
+  <!-- SFT -->
+  <section id="sft">
+    <h2><span class="icon" style="background:var(--tag-sft)">📖</span> SFT: Supervised Fine-Tuning</h2>
+
+    <p><span class="tag tag-sft">SFT</span> <span class="tag tag-new">NEW</span> <code>olmo_core_finetune.py</code> — primary, use for new work</p>
+    <p><span class="tag tag-sft">SFT</span> <span class="tag tag-old">OLD</span> <code>finetune.py</code> — Accelerate/DeepSpeed, use for LoRA/QLoRA</p>
+
+    <h3>How It Works</h3>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-content">
+          <strong>Load pretrained model + tokenizer</strong>
+          <p>Via <code>model_utils.py</code>. Applies chat template from <code>TokenizerConfig</code>.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-content">
+          <strong>Tokenize + cache datasets</strong>
+          <p>Chat template applied, responses tokenized, prompt tokens masked to <code>-100</code>. Cached to disk by config hash.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-content">
+          <strong>Mix datasets + shard by DP rank</strong>
+          <p>Each GPU gets different data. Multiple datasets blended by weight.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-content">
+          <strong>Training loop</strong>
+          <p>Forward pass → language modeling cross-entropy loss (only on response tokens) → backward → step.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">5</div>
+        <div class="flow-content">
+          <strong>Checkpoint + optionally push to Hub</strong>
+          <p>Saved in HF format. Can auto-push to HuggingFace Hub.</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>Critical Details</h3>
+
+    <div class="callout callout-danger">
+      <div class="callout-title">Chat Template Correctness</div>
+      Getting the chat template wrong silently trains on wrong labels. The system uses named templates: <code>tulu</code>, <code>olmo</code>, <code>llama</code>, <code>qwen</code>. Each has different BOS/EOS behavior. When reviewing data code, verify the template name matches the model family.
+    </div>
+
+    <div class="callout callout-warn">
+      <div class="callout-title">Label Masking</div>
+      Prompt tokens must be masked to <code>-100</code> so the loss is only computed on response tokens. This happens during tokenization in <code>dataset_transformation.py</code>. A bug here (masking nothing, or masking everything) will train silently but produce a garbage model.
+    </div>
+
+    <div class="callout callout-info">
+      <div class="callout-title">torch.compile</div>
+      The OLMo-core version supports <code>torch.compile</code>. Changes to the model forward pass need to be compile-compatible — dynamic shapes, Python control flow inside the compiled region, and non-traceable ops will cause silent fallbacks or errors.
+    </div>
+  </section>
+
+  <!-- DPO -->
+  <section id="dpo">
+    <h2><span class="icon" style="background:var(--tag-dpo)">⚖️</span> DPO: Direct Preference Optimization</h2>
+
+    <p><span class="tag tag-dpo">DPO</span> <span class="tag tag-new">NEW</span> <code>dpo.py</code> — OLMo-core FSDP, primary</p>
+    <p><span class="tag tag-dpo">DPO</span> <span class="tag tag-old">OLD</span> <code>dpo_tune_cache.py</code> — Accelerate/DeepSpeed, legacy</p>
+
+    <h3>The Concept</h3>
+    <p>DPO trains on <em>(prompt, chosen response, rejected response)</em> triples. The loss pushes the model toward preferred responses and away from rejected ones, without needing a separate reward model. It uses a <strong>reference model</strong> (a frozen copy of the starting policy) to stabilize training.</p>
+
+    <h3>Loss Types (in <code>dpo_utils.py</code>)</h3>
+    <table>
+      <tr><th>Type</th><th>When To Use</th><th>Notes</th></tr>
+      <tr><td><code>dpo</code></td><td>Default</td><td>Original paper. Uses reference model log-probs.</td></tr>
+      <tr><td><code>dpo_norm</code></td><td>Variable-length responses</td><td>Averages loss over tokens instead of summing. Better for datasets with long/short response mix.</td></tr>
+      <tr><td><code>simpo</code></td><td>No reference model available</td><td>Uses length-normalized log-prob margin directly. No reference model needed.</td></tr>
+      <tr><td><code>wpo</code></td><td>Weighted preference</td><td>Weighted Preference Optimization variant.</td></tr>
+    </table>
+
+    <h3>Reference Logprob Caching — The Most Important Optimization</h3>
+
+    <div class="callout callout-tip">
+      <div class="callout-title">Why This Exists</div>
+      DPO requires computing <code>log p_ref(response)</code> for every example on every training step. Running a full reference model forward pass each batch would double memory and compute. Instead, iterate the dataset once before training, save <code>log p_ref</code> per example to disk, and load from cache during training.
+    </div>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-content">
+          <strong>Pre-training: compute reference logprobs</strong>
+          <p>Iterate entire dataset with reference model. Save per-example log-probs to a cache file (hash-addressed by config).</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-content">
+          <strong>Training: load from cache, never re-run reference model</strong>
+          <p>Each batch retrieves pre-computed reference log-probs. Memory savings: 2x (no reference model in GPU memory during training).</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout callout-danger">
+      <div class="callout-title">Cache Invalidation</div>
+      If the reference model changes <em>or</em> the dataset changes, the cache must invalidate. This happens automatically via config hashing — but watch for bugs where a meaningful config change doesn't change the hash (e.g., a field that affects data but isn't included in the hash key).
+    </div>
+
+    <h3>Concatenated Forward</h3>
+    <p>Chosen and rejected sequences are concatenated into one forward pass (not two). The loss is then split along the sequence dimension. This halves the number of forward passes per step. When reviewing changes to the DPO forward pass, make sure the split logic is correct.</p>
+  </section>
+
+  <!-- GRPO -->
+  <section id="grpo">
+    <h2><span class="icon" style="background:var(--tag-grpo)">🔄</span> GRPO: Online Reinforcement Learning</h2>
+
+    <p><span class="tag tag-grpo">GRPO</span> <code>grpo_fast.py</code> — primary, fast with packing + async</p>
+    <p><span class="tag tag-grpo">GRPO</span> <code>grpo.py</code> — OLMo-core + Ray, cleaner but slower</p>
+
+    <h3>The Concept</h3>
+    <p>GRPO is online RL — the model generates its own training data at every step. It's the technique behind DeepSeek R1. The key idea: generate <strong>G responses</strong> per prompt, score each one, then compute advantages <em>relative to the group</em> (not globally).</p>
+
+    <h3>The Training Loop</h3>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-content">
+          <strong>Sample prompts from dataset</strong>
+          <p>Math problems, code tasks, instruction-following tasks, etc.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-content">
+          <strong>Generate G responses per prompt using vLLM</strong>
+          <p>Typically G=8 or G=16. vLLM is used because it's 5-10x faster than <code>model.generate()</code>.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-content">
+          <strong>Score each response with a verifier</strong>
+          <p>Math: numeric equivalence. Code: execute and check tests. LM judge: another model scores it.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-content">
+          <strong>Compute group-relative advantage</strong>
+          <p>Normalize scores within the G responses for each prompt. Mean=0, std=1. This is what makes it "group relative."</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">5</div>
+        <div class="flow-content">
+          <strong>PPO-style policy gradient update</strong>
+          <p>Clipped ratio of new policy vs old policy log-probs, weighted by advantage.</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>grpo_fast.py Specific Optimizations</h3>
+    <table>
+      <tr><th>Optimization</th><th>What It Does</th><th>Why It Matters</th></tr>
+      <tr>
+        <td>Async RLHF</td>
+        <td>Training and inference overlap via threads</td>
+        <td>GPU never idle waiting for inference</td>
+      </tr>
+      <tr>
+        <td>Zero-gradient skipping</td>
+        <td>If all G responses are correct OR all wrong, skip gradient</td>
+        <td>Advantage = 0 for homogeneous groups → no useful gradient anyway</td>
+      </tr>
+      <tr>
+        <td>Sequence packing</td>
+        <td>Same FlashAttention packing as SFT</td>
+        <td>High GPU utilization for variable-length outputs</td>
+      </tr>
+    </table>
+
+    <h3>Verifiers — How Rewards Are Computed</h3>
+    <p>All in <code>ground_truth_utils.py</code>. All implement a base class. <strong>All run asynchronously</strong> — synchronous verifiers block the training loop.</p>
+
+    <table>
+      <tr><th>Verifier</th><th>For</th><th>How</th></tr>
+      <tr><td><code>CodeVerifier</code></td><td>Code tasks</td><td>Executes code in sandbox, checks test cases</td></tr>
+      <tr><td><code>MathVerifier</code></td><td>Math tasks</td><td>Numeric equivalence (handles formatting, LaTeX)</td></tr>
+      <tr><td><code>LMJudgeVerifier</code></td><td>Open-ended tasks</td><td>Another LLM judges via liteLLM (any provider)</td></tr>
+      <tr><td><code>RubricVerifier</code></td><td>Structured tasks</td><td>Custom rubrics in <code>open_instruct/rubrics/</code></td></tr>
+      <tr><td><code>InstructionFollowingVerifier</code></td><td>IFEval tasks</td><td>Constraint checking (length, format, keywords)</td></tr>
+      <tr><td><code>MaxLengthVerifier</code></td><td>Length control</td><td>Penalizes overly long responses</td></tr>
+    </table>
+
+    <div class="callout callout-danger">
+      <div class="callout-title">Adding a New Verifier</div>
+      It <strong>must</strong> be async. A synchronous verifier will block the training loop and make GRPO training extremely slow. Follow the async pattern from existing verifiers.
+    </div>
+
+    <h3>Tool Use in GRPO</h3>
+    <p>GRPO can train models that call tools (web search, code execution). The model generates output with embedded tool calls → environment pool executes them in sandboxes → results fed back → final response scored. Code: <code>open_instruct/environments/</code> and <code>open_instruct/environments/tools/</code>.</p>
+
+    <h3>Why vLLM and not model.generate()?</h3>
+    <p>vLLM uses continuous batching and PagedAttention — it's 5-10x faster than HuggingFace's <code>model.generate()</code>. In online RL, generation is the bottleneck (you generate many times before each training update), so this speedup is critical.</p>
+  </section>
+
+  <!-- DATA PIPELINE -->
+  <section id="data-pipeline">
+    <h2><span class="icon" style="background:#1a2a3e">💾</span> Data Pipeline</h2>
+
+    <h3>Two-Phase Design</h3>
+
+    <div class="stack-grid">
+      <div class="stack-card">
+        <h4>Phase 1: Tokenization + Caching</h4>
+        <p style="font-size:13px;color:var(--text-muted)">Handled by <code>dataset_transformation.py</code></p>
+        <ul>
+          <li>Apply chat template (convert messages → tokens)</li>
+          <li>Truncate to <code>max_seq_length</code></li>
+          <li>Mask prompt tokens to <code>-100</code> (SFT)</li>
+          <li>Cache result to disk (content-addressed by config hash)</li>
+        </ul>
+      </div>
+      <div class="stack-card">
+        <h4>Phase 2: Loading</h4>
+        <p style="font-size:13px;color:var(--text-muted)">Handled by <code>data_loader.py</code> / <code>dataset_transformation.py</code></p>
+        <ul>
+          <li>Shard by DP rank (each GPU gets different data)</li>
+          <li>Collate: pad OR pack (FlashAttention packing)</li>
+          <li>Feed to training loop</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Dataset Mixing</h3>
+    <p>You rarely train on a single dataset. <code>dataset_mixer_list</code> takes alternating <code>dataset_name, weight</code> pairs:</p>
+
+    <pre><span class="cm"># Example: 100% of tulu mixture + 50% sampling weight on another dataset</span>
+dataset_mixer_list: [
+    <span class="st">"allenai/tulu-3-sft-mixture"</span>, <span class="st">"1.0"</span>,
+    <span class="st">"some/other-dataset"</span>, <span class="st">"0.5"</span>
+]</pre>
+
+    <p>Weights are relative — they control sampling probability. At epoch boundaries, the data reshuffles.</p>
+
+    <h3>Content-Addressed Cache</h3>
+    <p>The tokenized dataset cache is keyed by a hash of the tokenizer config + dataset config. Any meaningful change to these configs automatically invalidates the cache. <strong>Watch for bugs</strong> where a field affects output but isn't included in the hash.</p>
+
+    <div class="callout callout-info">
+      <div class="callout-title">Why Cache?</div>
+      Tokenizing millions of examples takes hours. Caching means you only pay this cost once per unique config. Experiments that share a tokenizer and dataset config (e.g., different learning rates) reuse the same cache.
+    </div>
+
+    <h3>Key Dataset Columns by Algorithm</h3>
+    <table>
+      <tr><th>Algorithm</th><th>Required Columns</th></tr>
+      <tr><td><span class="tag tag-sft">SFT</span></td><td><code>input_ids</code>, <code>labels</code>, <code>attention_mask</code></td></tr>
+      <tr><td><span class="tag tag-dpo">DPO</span></td><td><code>chosen_input_ids</code>, <code>chosen_attention_mask</code>, <code>rejected_input_ids</code>, <code>rejected_attention_mask</code></td></tr>
+      <tr><td><span class="tag tag-grpo">GRPO</span></td><td><code>input_ids</code> (prompt only), <code>env_config_key</code>, ground truth column</td></tr>
+    </table>
+  </section>
+
+  <!-- PACKING -->
+  <section id="packing">
+    <h2><span class="icon" style="background:#1e3020">📦</span> Sequence Packing (Padding-Free)</h2>
+
+    <p>Without packing, most tokens in a batch are <code>[PAD]</code> — wasted compute. Packing eliminates this.</p>
+
+    <h3>How It Works</h3>
+    <p>Multiple sequences are <strong>concatenated end-to-end</strong> into one long sequence. FlashAttention's variable-length support (<code>cu_seqlens</code>) ensures attention doesn't cross sequence boundaries.</p>
+
+    <pre><span class="cm"># Without packing (most tokens are PAD)</span>
+batch = [
+    [token, token, PAD, PAD, PAD],
+    [token, token, token, PAD, PAD],
+]
+
+<span class="cm"># With packing (all tokens used)</span>
+packed = [token, token, EOS, token, token, token, EOS]
+cu_seqlens = [0, 3, 7]  <span class="cm"># sequence boundaries</span>
+position_ids = [0, 1, 2, 0, 1, 2, 3]  <span class="cm"># positions reset per sequence</span></pre>
+
+    <h3>Implementation</h3>
+    <p>In <code>padding_free_collator.py</code>:</p>
+    <ul style="padding-left:20px;margin:10px 0;font-size:14px">
+      <li style="margin-bottom:6px"><code>TensorDataCollatorWithFlattening</code> — for SFT packing</li>
+      <li style="margin-bottom:6px"><code>TensorDataCollatorWithFlatteningDPO</code> — for DPO packing</li>
+    </ul>
+
+    <div class="callout callout-danger">
+      <div class="callout-title">Critical: cu_seqlens Must Be Correct</div>
+      Any collator change that breaks <code>cu_seqlens</code> will silently produce <em>wrong</em> attention masks — sequences will attend across boundaries. The model will train, loss will decrease, but you're training on garbage. Always test with packing enabled when touching collation code.
+    </div>
+
+    <h3>Requirements</h3>
+    <p>Packing requires <strong>FlashAttention 2</strong>. If FA2 isn't available, fall back to standard padding. Check <code>attn_implementation</code> config field.</p>
+  </section>
+
+  <!-- BEAKER -->
+  <section id="beaker">
+    <h2><span class="icon" style="background:#1a2030">🚀</span> Beaker & mason.py</h2>
+
+    <p>Serious training runs on <strong>Beaker</strong> — AI2's internal compute cluster management system. The code runs in Docker containers on GPU nodes.</p>
+
+    <h3>The Launch Pattern</h3>
+
+    <pre><span class="cm"># Standard way to launch any experiment</span>
+./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh</pre>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-content">
+          <strong>Requires a committed state</strong>
+          <p>The script will commit your current changes. The git hash is baked into the Docker image tag.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-content">
+          <strong>Builds a Docker image</strong>
+          <p>Tagged with the git commit hash. Pushed to AI2's internal registry.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-content">
+          <strong>Calls mason.py</strong>
+          <p>Orchestrates the Beaker experiment: GPU allocation, dataset mounts, env vars, and job submission.</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>Debug / Smoke Test Scripts</h3>
+    <table>
+      <tr><th>Script</th><th>Algorithm</th><th>Scale</th><th>Time</th></tr>
+      <tr><td><code>debug/single_gpu_on_beaker.sh</code></td><td>GRPO (no tools)</td><td>1 GPU</td><td>~8 min</td></tr>
+      <tr><td><code>debug/large_test_script.sh</code></td><td>GRPO (no tools)</td><td>2×8 GPUs</td><td>~32 min</td></tr>
+      <tr><td><code>debug/tools/olmo_3_parser_multigpu.sh</code></td><td>GRPO + tools</td><td>Multi-GPU</td><td>—</td></tr>
+      <tr><td><code>debug/oc_sft.sh</code></td><td>SFT (OLMo-core)</td><td>1 GPU</td><td>—</td></tr>
+      <tr><td><code>debug/oc_sft_multinode.sh</code></td><td>SFT (OLMo-core)</td><td>2×8 GPUs</td><td>—</td></tr>
+      <tr><td><code>debug/dpo/single_gpu.sh</code></td><td>DPO</td><td>1 GPU</td><td>—</td></tr>
+      <tr><td><code>debug/dpo/multi_node.sh</code></td><td>DPO</td><td>Multi-node</td><td>—</td></tr>
+    </table>
+
+    <h3>mason.py Gotchas</h3>
+
+    <div class="callout callout-warn">
+      <div class="callout-title">--no_auto_dataset_cache Required on macOS</div>
+      When calling mason.py locally on macOS, always pass <code>--no_auto_dataset_cache</code> (before the <code>--</code> separator). Without it, mason.py tries to pre-cache the dataset locally, which fails because <code>data_loader.py</code> does <code>import vllm</code> at module level and vLLM doesn't install on macOS.
+    </div>
+
+    <div class="callout callout-warn">
+      <div class="callout-title">oe-eval-internal Required for Eval Launch</div>
+      If your experiment uses <code>--try_launch_beaker_eval_jobs_on_weka</code>, the Docker image needs the <code>oe-eval-internal</code> directory. Clone it first: <code>git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal</code>
+    </div>
+
+    <h3>DeepSpeed ZeRO Configs</h3>
+    <p>In <code>configs/ds_configs/</code>:</p>
+    <table>
+      <tr><th>Config</th><th>What It Shards</th><th>When To Use</th></tr>
+      <tr><td><code>stage2_no_offloading_accelerate.conf</code></td><td>Optimizer states + gradients</td><td>Moderate memory reduction, faster communication</td></tr>
+      <tr><td><code>stage3_no_offloading_accelerate.conf</code></td><td>Optimizer + gradients + model weights</td><td>Max memory reduction</td></tr>
+      <tr><td><code>stage3_offloading_accelerate.conf</code></td><td>Everything + CPU offload</td><td>Very large models that don't fit in GPU RAM</td></tr>
+    </table>
+  </section>
+
+  <!-- TESTING -->
+  <section id="testing">
+    <h2><span class="icon" style="background:#1f2a1a">🧪</span> Tests & CI</h2>
+
+    <h3>Test Locations</h3>
+    <p>Unit tests are <strong>co-located with source</strong> in <code>open_instruct/test_*.py</code>. Integration tests are in <code>tests/</code>.</p>
+
+    <table>
+      <tr><th>File</th><th>Tests</th></tr>
+      <tr><td><code>test_dataset_transformation.py</code></td><td>Tokenization + caching</td></tr>
+      <tr><td><code>test_padding_free_collator.py</code></td><td>Sequence packing (critical)</td></tr>
+      <tr><td><code>test_dpo_utils.py</code></td><td>DPO loss functions</td></tr>
+      <tr><td><code>test_grpo_fast.py</code></td><td>GRPO training step</td></tr>
+      <tr><td><code>test_ground_truth_utils.py</code></td><td>Verifier functions</td></tr>
+      <tr><td><code>test_data_loader.py</code></td><td>HF dataset loading</td></tr>
+      <tr><td><code>test_rl_utils.py</code></td><td>RL utilities</td></tr>
+      <tr><td><code>test_vllm_utils.py</code></td><td>vLLM integration</td></tr>
+      <tr><td><code>tests/test_environments.py</code></td><td>Environment execution</td></tr>
+    </table>
+
+    <h3>Running Tests</h3>
+    <pre><span class="cm"># Run all tests</span>
+uv run pytest
+
+<span class="cm"># Run a single test file (preferred during development)</span>
+uv run pytest open_instruct/test_dpo_utils.py
+
+<span class="cm"># Run linter + formatter</span>
+make style && make quality</pre>
+
+    <h3>GPU Tests in CI</h3>
+
+    <div class="callout callout-info">
+      <div class="callout-title">GPU Tests vs Training Experiments — Critical Distinction</div>
+      <p>PR CI checks for <code>GPU_TESTS=EXPERIMENT_ID</code> in the PR body and verifies the experiment passed. The experiment ID <strong>must come from running <code>scripts/test/run_gpu_pytest.sh</code></strong>, not from a training run. These are completely different things.</p>
+      <pre style="margin-top:10px"><span class="cm"># Launch GPU tests (creates an experiment ID)</span>
+./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
+
+<span class="cm"># In PR body</span>
+GPU_TESTS=<span class="st">[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)</span>
+
+<span class="cm"># To skip GPU tests entirely</span>
+GPU_TESTS=bypass</pre>
+    </div>
+  </section>
+
+  <!-- CONVENTIONS -->
+  <section id="conventions">
+    <h2><span class="icon" style="background:#2a1a1a">📏</span> Code Conventions</h2>
+
+    <h3>Logging</h3>
+    <div class="callout callout-danger">
+      <div class="callout-title">Never use import logging directly</div>
+      <pre><span class="cm"># WRONG</span>
+<span class="kw">import</span> logging
+logging.<span class="fn">info</span>(<span class="st">"training started"</span>)
+
+<span class="cm"># CORRECT</span>
+<span class="kw">from</span> open_instruct <span class="kw">import</span> logger_utils
+logger = logger_utils.<span class="fn">setup_logger</span>(__name__)
+logger.<span class="fn">info</span>(<span class="st">"training started"</span>)</pre>
+      This gives consistent formatting with process rank, timestamps, and multi-node awareness.
+    </div>
+
+    <h3>Imports</h3>
+    <ul style="padding-left:20px;margin:10px 0;font-size:14px">
+      <li style="margin-bottom:8px">All imports go at the <strong>top of the file</strong>, never inline (no conditional imports inside functions)</li>
+      <li style="margin-bottom:8px">Use <code>from package import module</code> style, <strong>not</strong> <code>import package.module</code></li>
+    </ul>
+
+    <h3>Naming Conventions (Non-Obvious)</h3>
+    <table>
+      <tr><th>Name</th><th>Capitalization</th><th>Refers To</th></tr>
+      <tr><td>OLMo</td><td>ALL CAPS "OLMo"</td><td>OLMo 1 and OLMo 2 (versions ≤2)</td></tr>
+      <tr><td>Olmo</td><td>Title case "Olmo"</td><td>Olmo 3, Olmo Hybrid, and later</td></tr>
+      <tr><td>OLMo-core</td><td>Always "OLMo-core"</td><td>The software library (not a model)</td></tr>
+      <tr><td>TÜLU</td><td>Always uppercase with umlaut</td><td>The product/model family name</td></tr>
+    </table>
+
+    <h3>PR Workflow</h3>
+    <ul class="checklist">
+      <li>Add entry to <code>CHANGELOG.md</code> with a link to the PR</li>
+      <li>Run <code>make style && make quality</code> (linting)</li>
+      <li>Run relevant tests: <code>uv run pytest open_instruct/test_NAME.py</code></li>
+      <li>Include GPU test experiment ID if GPU-touching changes</li>
+      <li>Use "Runs:" format for Beaker experiment links in PR body</li>
+    </ul>
+  </section>
+
+  <!-- REVIEW PATTERNS -->
+  <section id="review-patterns">
+    <h2><span class="icon" style="background:#1a2a1a">🔍</span> Review Patterns by Change Type</h2>
+
+    <h3>Data / Tokenization Changes</h3>
+    <ul class="checklist">
+      <li>Does the config change affect the cache hash? (Meaningful config changes must invalidate cache)</li>
+      <li>Is the chat template name correct for the model family?</li>
+      <li>Are prompt tokens masked to <code>-100</code> (only response tokens should contribute to loss)?</li>
+      <li>Does <code>add_bos_token</code> / <code>add_eos_token</code> match the model family's conventions?</li>
+      <li>Is dataset mixing weight logic correct (relative weights, not absolute)?</li>
+    </ul>
+
+    <h3>GRPO / RL Changes</h3>
+    <ul class="checklist">
+      <li>Are new verifiers async? (Synchronous verifiers block the training loop)</li>
+      <li>Is advantage normalization per-group, not global?</li>
+      <li>Does zero-gradient skipping still work correctly (homogeneous groups)?</li>
+      <li>Are tool parsers handling the model output format correctly?</li>
+    </ul>
+
+    <h3>DPO Changes</h3>
+    <ul class="checklist">
+      <li>If the reference model changes, does the logprob cache invalidate?</li>
+      <li>If the dataset changes, does the cache invalidate?</li>
+      <li>Is the concatenated forward pass split logic correct?</li>
+      <li>Is the new loss type handled in the loss-type dispatch?</li>
+    </ul>
+
+    <h3>Packing / Collation Changes</h3>
+    <ul class="checklist">
+      <li>Is <code>cu_seqlens</code> computed correctly? (Off-by-one = wrong attention masks)</li>
+      <li>Are <code>position_ids</code> reset correctly at sequence boundaries?</li>
+      <li>Does it work both with and without packing enabled?</li>
+      <li>Has it been tested with FlashAttention 2?</li>
+    </ul>
+
+    <h3>Config Changes</h3>
+    <ul class="checklist">
+      <li>Does the new field belong in the right config class?</li>
+      <li>Does the default value make sense for all experiments?</li>
+      <li>Is it added to CHANGELOG?</li>
+      <li>If it's a dataset/model field, does it affect the cache hash?</li>
+    </ul>
+
+    <h3>Performance Changes</h3>
+    <ul class="checklist">
+      <li>Does <code>torch.compile</code> still work? (Dynamic shapes, non-traceable ops)</li>
+      <li>Is the change compatible with FSDP + HSDP?</li>
+      <li>Does gradient accumulation still work correctly?</li>
+    </ul>
+  </section>
+
+  <!-- KEY FILES -->
+  <section id="key-files">
+    <h2><span class="icon" style="background:#1a1a2e">📄</span> Key Files You'll Read Repeatedly</h2>
+
+    <table>
+      <tr><th>File</th><th>Size</th><th>Why You'll Be Here</th></tr>
+      <tr>
+        <td><code>open_instruct/utils.py</code></td>
+        <td>112 KB</td>
+        <td>Core utilities, <code>ArgumentParserPlus</code>, shared helpers used everywhere</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/dataset_transformation.py</code></td>
+        <td>98 KB</td>
+        <td>All tokenization + caching logic — start here for any data bug</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/ground_truth_utils.py</code></td>
+        <td>55 KB</td>
+        <td>All GRPO verifiers — add new reward functions here</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/olmo_core_finetune.py</code></td>
+        <td>—</td>
+        <td>SFT training loop (new stack) — main SFT entry point</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/dpo.py</code></td>
+        <td>—</td>
+        <td>DPO training loop (new stack) — main DPO entry point</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/grpo_fast.py</code></td>
+        <td>—</td>
+        <td>Fast GRPO — main online RL entry point</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/data_loader.py</code></td>
+        <td>—</td>
+        <td>GRPO data loading (streaming + vLLM integration)</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/padding_free_collator.py</code></td>
+        <td>—</td>
+        <td>Sequence packing — critical for training efficiency</td>
+      </tr>
+      <tr>
+        <td><code>open_instruct/dpo_utils.py</code></td>
+        <td>—</td>
+        <td>DPO loss implementations + reference logprob caching</td>
+      </tr>
+      <tr>
+        <td><code>mason.py</code></td>
+        <td>30 KB</td>
+        <td>Beaker job orchestrator — understand before launching anything</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- WHY -->
+  <section id="why">
+    <h2><span class="icon" style="background:#2a1a2e">💡</span> Why It's Built This Way</h2>
+
+    <p>Understanding <em>why</em> decisions were made helps you make good decisions in the same spirit.</p>
+
+    <h3>Why Two Training Stacks?</h3>
+    <p>OLMo-core was adopted mid-life for better FSDP semantics, hierarchical sharding (HSDP) for multi-node, and <code>torch.compile</code> support. The Accelerate/DeepSpeed stack wasn't removed because LoRA/QLoRA workflows and some legacy configs still depend on it. Don't try to unify them without a full audit of what depends on each.</p>
+
+    <h3>Why Cache Reference Logprobs?</h3>
+    <p>Running a reference model forward pass every training batch would double GPU memory (two models simultaneously) and double compute. Pre-computing and caching eliminates the reference model from the training loop entirely. Trade-off: the cache can become stale if config changes aren't reflected in the hash.</p>
+
+    <h3>Why vLLM for Generation?</h3>
+    <p>In GRPO, generation is the bottleneck — you generate G responses for every prompt before each training step. vLLM's PagedAttention and continuous batching make it 5-10x faster than <code>model.generate()</code>. The complexity of integrating vLLM is worth it for training speed.</p>
+
+    <h3>Why Sequence Packing?</h3>
+    <p>Most real instruction datasets have highly variable-length responses. Without packing, a batch with one long response and many short ones wastes most of the batch. Packing fills every position with real tokens. The complexity cost (managing <code>cu_seqlens</code>, <code>position_ids</code>) is worth it for GPU utilization — especially at scale.</p>
+
+    <h3>Why Content-Addressed Dataset Caching?</h3>
+    <p>Tokenizing millions of examples takes hours. Without caching, every experiment restart retokenizes from scratch. Content-addressing ensures you get cache hits when running multiple experiments with the same data config (e.g., sweeping learning rates) and invalidation when data genuinely changes.</p>
+
+    <h3>Why Hierarchical Config Dataclasses?</h3>
+    <p>Early versions used flat argument parsers. As algorithms multiplied, so did arguments — leading to a single massive list of CLI args. Hierarchical dataclasses allow each concern (model, data, training, logging) to be defined once and composed. It also enables type-checking and auto-generated help text.</p>
+
+    <h3>Why Ray for GRPO?</h3>
+    <p>Online RL needs to run inference (vLLM) and training simultaneously on different GPU allocations. PyTorch's distributed primitives don't support heterogeneous workloads on the same cluster. Ray's actor model lets you allocate specific GPUs to specific roles and pass data between them asynchronously via queues.</p>
+  </section>
+
+</main>
+
+<script>
+  // Progress bar
+  const progress = document.getElementById('progress');
+  window.addEventListener('scroll', () => {
+    const total = document.body.scrollHeight - window.innerHeight;
+    progress.style.width = (window.scrollY / total * 100) + '%';
+  });
+
+  // Active nav link
+  const sections = document.querySelectorAll('section[id]');
+  const links = document.querySelectorAll('nav a[href^="#"]');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => observer.observe(s));
+
+  // Search
+  const search = document.getElementById('search');
+  search.addEventListener('input', () => {
+    const q = search.value.toLowerCase();
+    links.forEach(a => {
+      const text = a.textContent.toLowerCase();
+      a.style.opacity = !q || text.includes(q) ? '1' : '0.3';
+    });
+  });
+</script>
+</body>
+</html>
