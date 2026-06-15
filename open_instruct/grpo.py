@@ -296,9 +296,16 @@ def main(
     )
     logger.info("======== Model update group setup successfully =========")
 
-    json_config = dataclasses.asdict(args)
+    json_config = {}
     if beaker_config is not None:
         json_config.update(dataclasses.asdict(beaker_config))
+    json_config.update(
+        **dataclasses.asdict(args),
+        **dataclasses.asdict(tc),
+        **dataclasses.asdict(model_config),
+        **dataclasses.asdict(streaming_config),
+        **dataclasses.asdict(vllm_config),
+    )
     utils.ray_get_with_progress(
         [
             m.setup_callbacks.remote(
