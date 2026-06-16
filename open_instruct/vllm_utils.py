@@ -1320,8 +1320,11 @@ def create_vllm_engines(
             )
         )
 
+    vllm_engine_init_timeout = int(os.environ.get("VLLM_ENGINE_INIT_TIMEOUT_S", "1200"))
     utils.ray_get_with_progress(
-        [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
+        [engine.ready.remote() for engine in vllm_engines],
+        "Initializing vLLM engines",
+        timeout=vllm_engine_init_timeout,
     )
 
     return vllm_engines
