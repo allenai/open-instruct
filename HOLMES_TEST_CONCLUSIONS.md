@@ -36,6 +36,10 @@ The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class
 | --- | --- |
 | Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV7DC5W515CN1YCMDHEMVKGN launched from commit `8f23df74` with image `01KV7DAS2FYP5V1C0668NW46K6`, official `VLLM_ENGINE_READY_TIMEOUT_S=7200`, and Open Instruct wrapper `OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500`. |
 | Olmo 3 32B, TP=4, 32k generation | https://beaker.org/ex/01KV7F54ZQMRBDDB7ZE93S1GP1 launched from commit `980d84bf` with image `01KV7F2H4N917JGWVV5F8XNKAJ`. This uses the previous TP=4 single-node shape with 8 GPUs, `vllm_num_engines=2`, `vllm_tensor_parallel_size=4`, and `response_length=32768`. |
+| Olmo 3 32B, TP=1, 8k generation, 1 GPU, non-eager mode | https://beaker.org/ex/01KV7G8MMFZH1YAC2Z862M8CRR launched from commit `4d8e0694` with image `01KV7G7CN191WZMNATXKDYX4ZZ` to isolate single-GPU eager overhead. |
+| Olmo 3 32B, TP=4, 8k generation, eager mode | https://beaker.org/ex/01KV7G8HPAGD3X236NXTM6EPE0 launched from commit `4d8e0694` with image `01KV7G7CN191WZMNATXKDYX4ZZ` as the eager comparison for the completed TP=4 8k run. |
+| Olmo 3 32B, TP=4, 32k generation, eager mode | https://beaker.org/ex/01KV7G8K55GVS71BAJ8W5XBT2X launched from commit `4d8e0694` with image `01KV7G7CN191WZMNATXKDYX4ZZ` as the eager comparison for the running TP=4 32k run. |
+| Olmo 3 32B, TP=8, 32k generation, eager mode | https://beaker.org/ex/01KV7G8NP4VR4GE5RTYGDNPSJS launched from commit `4d8e0694` with image `01KV7G7CN191WZMNATXKDYX4ZZ`, official `VLLM_ENGINE_READY_TIMEOUT_S=7200`, and Open Instruct wrapper `OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500`. |
 | Olmo 3 32B, TP=1, 8k generation, 8 GPUs, eager mode | https://beaker.org/ex/01KV7CS3JT0M8SP6SWP1DPDVSK launched from commit `c91adf64` with `--vllm_enforce_eager` to compare against the previous non-eager 8-GPU TP=1 diagnostic. |
 
 ## Current Conclusions
@@ -44,4 +48,4 @@ The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class
 - The Olmo 3 32B TP=1 8k 8-GPU diagnostic passed at 3383.68 TPS, but it should not be used as the primary comparison for the documented TP=1 baseline row.
 - Olmo 3 32B TP=4 at 8k generation passed at 3588.51 TPS, which is 2.75x the documented H100 baseline and above the 2.4x target.
 - The Olmo 3 7B TP=1 8k run passed at 432.68 TPS, but the handoff does not include a matching H100 7B baseline.
-- TP=8 at 32k still needs a clean passing run before drawing conclusions for that H100 baseline row. TP=4 at 32k is also running as an additional fallback/diagnostic for long-generation behavior.
+- TP=8 at 32k still needs a clean passing run before drawing conclusions for that H100 baseline row. TP=4 at 32k is also running as an additional fallback/diagnostic for long-generation behavior. The remaining valid eager/non-eager grid cells have been queued to measure how much the RL-style eager setting changes throughput.
