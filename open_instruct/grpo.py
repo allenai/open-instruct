@@ -126,13 +126,16 @@ def main(
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
+    hf_model_name_or_path = olmo_core_utils.get_hf_config_source(
+        model_config.model_name_or_path, tc.tokenizer_name_or_path
+    )
     oc_model_config = olmo_core_utils.ModelConfig(
         model_name_or_path=model_config.model_name_or_path,
         config_name=model_config.config_name,
         attn_implementation=model_config.attn_implementation,
     )
     _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
-    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
+    olmo_core_utils.verify_can_save_as_hf(transformer_config, hf_model_name_or_path)
 
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",
@@ -201,7 +204,7 @@ def main(
         "Evaluation Queue": evaluation_inference_results_Q,
     }
     actor_manager = ray.remote(ActorManager).remote(queues_to_monitor, args, streaming_config, vllm_config)
-    model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
+    model_dims = utils.ModelDims.from_hf_config(hf_model_name_or_path)
 
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
 
@@ -243,6 +246,7 @@ def main(
         pg=pg,
         num_gpus_per_node=args.num_learners_per_node,
         model_name_or_path=model_config.model_name_or_path,
+        hf_model_name_or_path=hf_model_name_or_path,
         config_name=model_config.config_name,
         grpo_config=args,
         max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
@@ -263,7 +267,7 @@ def main(
         vllm_config.vllm_tensor_parallel_size,
         vllm_config.vllm_enforce_eager,
         tc.tokenizer_name_or_path,
-        model_config.model_name_or_path,
+        hf_model_name_or_path,
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,

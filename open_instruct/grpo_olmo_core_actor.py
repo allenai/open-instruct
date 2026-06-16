@@ -15,7 +15,6 @@ import transformers
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
-from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -61,6 +60,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         master_port: int | None,
         local_world_size: int,
         model_name_or_path: str,
+        hf_model_name_or_path: str,
         config_name: str | None,
         grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
@@ -73,6 +73,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.local_world_size = local_world_size
         self.tokenizer = tokenizer
         self.model_name_or_path = model_name_or_path
+        self.hf_model_name_or_path = hf_model_name_or_path
         self.config_name = config_name
         self.grpo_config = grpo_config
         self.max_sequence_length = max_sequence_length
@@ -137,7 +138,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
             self.ref_policy = self.model_config.build(init_device="cpu")
-            load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir)
+            olmo_core_utils.load_checkpoint_into_model(
+                self.ref_policy, self.model_name_or_path, work_dir=self.grpo_config.output_dir
+            )
             self.ref_policy = self.ref_policy.to(device=device, dtype=torch_dtype).eval()
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
@@ -204,11 +207,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
-        # We must reload HF weights after parallelization (FSDP-first loading pattern).
-        logger.info(f"[Rank {self.rank}] Reloading HuggingFace weights after parallelization...")
-        sd = self.train_module.model.state_dict()
-        load_hf_model(self.model_name_or_path, sd, work_dir=self.grpo_config.output_dir)
-        self.train_module.model.load_state_dict(sd)
+        # Reload checkpoint weights after parallelization (FSDP-first loading pattern).
+        logger.info(f"[Rank {self.rank}] Reloading checkpoint weights after parallelization...")
+        olmo_core_utils.reload_checkpoint_after_parallelization(
+            self.train_module, self.model_name_or_path, work_dir=self.grpo_config.output_dir
+        )
 
         if self.grpo_config.single_gpu_mode:
             logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode")
@@ -349,7 +352,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if is_beaker_job() and self.json_config is not None:
             trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
 
-        model_dims = utils.ModelDims.from_hf_config(self.model_name_or_path)
+        model_dims = utils.ModelDims.from_hf_config(self.hf_model_name_or_path)
 
         trainer_callbacks["step_timing"] = StepTimingCallback(
             model_dims=model_dims,
@@ -420,7 +423,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             return
 
         os.makedirs(output_dir, exist_ok=True)
-        olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
+        olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.hf_model_name_or_path, tokenizer)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
 
 
@@ -435,6 +438,7 @@ class OLMoCoreModelGroup:
         pg,
         num_gpus_per_node: list[int],
         model_name_or_path: str,
+        hf_model_name_or_path: str,
         config_name: str | None,
         grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
@@ -462,6 +466,7 @@ class OLMoCoreModelGroup:
         common_kwargs = {
             "world_size": world_size,
             "model_name_or_path": model_name_or_path,
+            "hf_model_name_or_path": hf_model_name_or_path,
             "config_name": config_name,
             "grpo_config": grpo_config,
             "max_sequence_length": max_sequence_length,

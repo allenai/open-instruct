@@ -3,6 +3,7 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -22,6 +23,7 @@ from olmo_core.nn.transformer import Transformer, TransformerConfig
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
+from olmo_core.train.checkpoint import load_state_dict as load_oc_state_dict
 from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingConfig,
     TransformerActivationCheckpointingMode,
@@ -281,6 +283,31 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     train_module.model.load_state_dict(sd)
 
 
+def reload_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
+    """Reload HF or OLMo-core checkpoint weights after FSDP parallelization."""
+    if is_hf_checkpoint(model_name_or_path):
+        reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path, work_dir)
+        return
+
+    checkpoint_dir = get_olmo_core_checkpoint_dir(model_name_or_path)
+    logger.info(f"Reloading OLMo-core checkpoint from {checkpoint_dir}")
+    sd = train_module.model.state_dict()
+    load_oc_state_dict(checkpoint_dir, sd, work_dir=work_dir, thread_count=32)
+    train_module.model.load_state_dict(sd)
+
+
+def load_checkpoint_into_model(model: torch.nn.Module, model_name_or_path: str, work_dir: str) -> None:
+    """Load HF or OLMo-core checkpoint weights into an unwrapped model."""
+    sd = model.state_dict()
+    if is_hf_checkpoint(model_name_or_path):
+        load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    else:
+        checkpoint_dir = get_olmo_core_checkpoint_dir(model_name_or_path)
+        logger.info(f"Loading OLMo-core checkpoint from {checkpoint_dir}")
+        load_oc_state_dict(checkpoint_dir, sd, work_dir=work_dir, thread_count=32)
+    model.load_state_dict(sd)
+
+
 def build_base_callbacks(
     config_dict: dict,
     run_name: str | None,
@@ -311,19 +338,44 @@ def build_base_callbacks(
     return result
 
 
+def _load_local_json(path: str) -> dict[str, Any] | None:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def is_hf_checkpoint(path: str) -> bool:
     """Detect whether a model path is a HuggingFace checkpoint (vs olmo-core format).
 
-    Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
-    containing config.json, and paths with a '-hf' component. Returns False for
-    olmo-core distributed checkpoints.
+    HF checkpoints can be local directories with a Transformers config.json,
+    remote repo IDs, or local directories whose name convention includes -hf.
+    OLMo-core checkpoints can also have config.json, but those configs do not
+    have the Transformers `model_type` key.
     """
     if os.path.isdir(path):
-        return os.path.isfile(os.path.join(path, "config.json"))
+        config = _load_local_json(os.path.join(path, "config.json"))
+        return bool(config and "model_type" in config)
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True
     return not os.path.isabs(path)
+
+
+def get_hf_config_source(model_name_or_path: str, tokenizer_name_or_path: str | None) -> str:
+    """Return a HF model/config id compatible with the checkpoint's architecture."""
+    if is_hf_checkpoint(model_name_or_path):
+        return model_name_or_path
+    if tokenizer_name_or_path is None:
+        raise ValueError("tokenizer_name_or_path is required as the HF config source for OLMo-core checkpoints")
+    return tokenizer_name_or_path
+
+
+def get_olmo_core_checkpoint_dir(model_name_or_path: str) -> str:
+    model_and_optim = os.path.join(model_name_or_path, "model_and_optim")
+    return model_and_optim if os.path.isdir(model_and_optim) else model_name_or_path
+
 
 
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
@@ -390,8 +442,16 @@ def setup_model(
         assert model_config_args.config_name is not None, (
             "--config_name is required when model_name_or_path is an olmo-core checkpoint"
         )
-        assert tc is not None, "tc (TokenizerConfig) is required for olmo-core checkpoints to derive vocab_size"
-        vocab_size = to_oc_tokenizer_config(tc).padded_vocab_size()
+        if tc is not None:
+            vocab_size = to_oc_tokenizer_config(tc).padded_vocab_size()
+        else:
+            config = _load_local_json(os.path.join(model_name_or_path, "config.json")) or {}
+            try:
+                vocab_size = int(config["model"]["vocab_size"])
+            except KeyError as exc:
+                raise ValueError(
+                    "tc (TokenizerConfig) is required for olmo-core checkpoints without model.vocab_size"
+                ) from exc
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
     model_config = get_transformer_config(
         model_config_args.config_name or model_name_or_path,
