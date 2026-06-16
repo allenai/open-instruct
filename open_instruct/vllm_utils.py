@@ -802,11 +802,9 @@ class LLMRayActor:
         if hasattr(self.llm_engine, "start_weight_update"):
             self._run_async(self.llm_engine.start_weight_update(is_checkpoint_format=True))
             session_started = True
-        try:
-            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
-        finally:
-            if session_started:
-                self._run_async(self.llm_engine.finish_weight_update())
+        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        if session_started:
+            self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
 
@@ -1348,19 +1346,50 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
     return fsdp_modules
 
 
+def _trim_token_weight_for_sync(
+    name: str, tensor: torch.Tensor, original_vocab_size: int | None
+) -> torch.Tensor:
+    if (
+        original_vocab_size is not None
+        and name in {"model.embed_tokens.weight", "lm_head.weight"}
+        and tensor.ndim >= 1
+        and tensor.shape[0] > original_vocab_size
+    ):
+        return tensor[:original_vocab_size]
+    return tensor
+
+
+def _sync_shape(name: str, shape: list[int], original_vocab_size: int | None) -> list[int]:
+    if (
+        original_vocab_size is not None
+        and name in {"model.embed_tokens.weight", "lm_head.weight"}
+        and len(shape) >= 1
+        and shape[0] > original_vocab_size
+    ):
+        return [original_vocab_size, *shape[1:]]
+    return shape
+
+
 def _prepare_params_for_sync(
-    params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
+    params: list[tuple[str, torch.nn.Parameter]],
+    name_mapper: Callable[[str], str] | None,
+    original_vocab_size: int | None,
 ) -> list[tuple[str, torch.Tensor]]:
     """Map parameter names and clone into contiguous tensors for NCCL send.
 
     DS3 gathered tensors may be non-contiguous or views into temporary buffers.
     Cloning ensures we send independent, contiguous tensors over NCCL.
     """
-    return [(name_mapper(n) if name_mapper else n, p.data.contiguous().clone()) for n, p in params]
+    mapped_params = []
+    for name, param in params:
+        mapped_name = name_mapper(name) if name_mapper else name
+        tensor = _trim_token_weight_for_sync(mapped_name, param.data, original_vocab_size)
+        mapped_params.append((mapped_name, tensor.contiguous().clone()))
+    return mapped_params
 
 
 def _collect_weight_metadata(
-    model: torch.nn.Module, name_mapper: Callable[[str], str] | None
+    model: torch.nn.Module, name_mapper: Callable[[str], str] | None, original_vocab_size: int | None
 ) -> tuple[list[str], list[str], list[list[int]]]:
     """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
 
@@ -1375,7 +1404,7 @@ def _collect_weight_metadata(
         names.append(mapped_name)
         dtype_names.append(str(param.dtype).split(".")[-1])
         shape = getattr(param, "ds_shape", param.shape)
-        shapes.append(list(shape))
+        shapes.append(_sync_shape(mapped_name, list(shape), original_vocab_size))
     return names, dtype_names, shapes
 
 
@@ -1385,6 +1414,7 @@ def _broadcast_weights_ipc(
     name_mapper: Callable[[str], str] | None,
     gather_whole_model: bool,
     model_step: int,
+    original_vocab_size: int | None,
 ) -> list[ray.ObjectRef]:
     """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
     is_rank_0 = torch.distributed.get_rank() == 0
@@ -1398,7 +1428,7 @@ def _broadcast_weights_ipc(
 
     with ctx:
         if is_rank_0:
-            mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
+            mapped_params = _prepare_params_for_sync(params, name_mapper, original_vocab_size)
             for engine in vllm_engines:
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
@@ -1413,6 +1443,7 @@ def broadcast_weights_to_vllm(
     model_step: int,
     name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
+    original_vocab_size: int | None = None,
 ) -> list[ray.ObjectRef]:
     """Broadcast model weights to vLLM engines using the native weight transfer API.
 
@@ -1433,7 +1464,9 @@ def broadcast_weights_to_vllm(
         ray.get([engine.sleep.remote() for engine in vllm_engines])
 
     if model_update_group is None and is_rank_0:
-        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
+        return _broadcast_weights_ipc(
+            model, vllm_engines, name_mapper, gather_whole_model, model_step, original_vocab_size
+        )
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     use_packed = False
@@ -1459,7 +1492,9 @@ def broadcast_weights_to_vllm(
         torch.cuda.synchronize()
         try:
             if is_rank_0:
-                mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
+                mapped_params = _prepare_params_for_sync(
+                    list(model.named_parameters()), name_mapper, original_vocab_size
+                )
                 names = [n for n, _ in mapped_params]
                 dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
                 shapes = [list(t.shape) for _, t in mapped_params]
@@ -1476,7 +1511,7 @@ def broadcast_weights_to_vllm(
             model.reshard()
         return refs
 
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
+    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, original_vocab_size)
 
     if is_rank_0:
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
@@ -1500,7 +1535,7 @@ def broadcast_weights_to_vllm(
     for ctx, batch_params in batches:
         with ctx:
             if is_rank_0:
-                mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
+                mapped_params = _prepare_params_for_sync(batch_params, name_mapper, original_vocab_size)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
 
     return refs

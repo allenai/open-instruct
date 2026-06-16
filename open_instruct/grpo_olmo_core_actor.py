@@ -268,6 +268,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             model_update_group=self.model_update_group,
             model_step=0,
             name_mapper=olmo_core_to_hf_name,
+            original_vocab_size=self.tokenizer.vocab_size,
         )
         if self.rank == 0:
             utils.ray_get_with_progress(refs, desc="Initial vLLM weight sync", enable=False)
@@ -342,6 +343,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             model_update_group=self.model_update_group,
             actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
             name_mapper=olmo_core_to_hf_name,
+            original_vocab_size=self.tokenizer.vocab_size,
         )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:

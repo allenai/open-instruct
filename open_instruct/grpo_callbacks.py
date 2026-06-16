@@ -151,6 +151,7 @@ class VLLMWeightSyncCallback(Callback):
     model_update_group: Any | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
+    original_vocab_size: int | None = None
 
     @property
     def train_module(self) -> TransformerTrainModule:
@@ -168,6 +169,7 @@ class VLLMWeightSyncCallback(Callback):
             model_update_group=self.model_update_group,
             model_step=self.trainer.global_step,
             name_mapper=self.name_mapper,
+            original_vocab_size=self.original_vocab_size,
         )
         sync_time_stats, _ = grpo_utils.perform_weight_sync(
             broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
