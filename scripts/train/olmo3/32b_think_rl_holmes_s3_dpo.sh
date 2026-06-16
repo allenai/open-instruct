@@ -5,6 +5,7 @@ BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 export exp_name=holmes_test_olmo3_32b_think_dpo_s3_rl_run_${RANDOM}
 export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
 export model_path=s3://ai2-llm/olmo-core-checkpoints/Olmo-3-32B-Think-DPO/model_and_optim/
+export judge_base_url=${JUDGE_BASE_URL:?Set JUDGE_BASE_URL to the hosted Qwen3-32B judge endpoint, e.g. http://saturn-cs-aus-000.reviz.ai2.in:8001/v1}
 
 
 uv run python mason.py \
@@ -22,7 +23,7 @@ uv run python mason.py \
     --env OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500 \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64 \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
-    --env HOSTED_VLLM_API_BASE=http://ceres-cs-aus-447.reviz.ai2.in:8001/v1 \
+    --env HOSTED_VLLM_API_BASE=${judge_base_url} \
     --no_auto_dataset_cache \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
