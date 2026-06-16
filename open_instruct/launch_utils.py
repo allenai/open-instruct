@@ -14,6 +14,7 @@ WEKA_CLUSTERS = [
     "ai2/triton",
     "ai2/rhea",
     "ai2/prometheus",
+    "ai2/holmes",
 ]
 
 
