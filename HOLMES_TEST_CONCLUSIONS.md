@@ -27,13 +27,14 @@ The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class
 
 | Config | Beaker experiment | Outcome |
 | --- | --- | --- |
-| Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV79XA9B3A89SCTE18K9BR5Q | Failed during vLLM engine initialization after the hardcoded 1200s internal wait, despite the 4h Beaker task timeout. Superseded by retry with `VLLM_ENGINE_INIT_TIMEOUT_S=3600`. |
+| Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV79XA9B3A89SCTE18K9BR5Q | Failed during vLLM engine initialization after the hardcoded 1200s internal wait, despite the 4h Beaker task timeout. Superseded by later timeout retries. |
+| Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV7BJM4Q6GJK83ZE0R8202KH | Failed at vLLM engine startup after 20m22s. The launcher used unsupported `VLLM_ENGINE_INIT_TIMEOUT_S`; vLLM warned it was unknown, so this did not raise the internal vLLM engine readiness timeout. |
 
 ## In Progress Or Next Runs
 
 | Config | Goal |
 | --- | --- |
-| Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV7BJM4Q6GJK83ZE0R8202KH relaunched from commit `9e1cd473` with a 4h Beaker task timeout and `VLLM_ENGINE_INIT_TIMEOUT_S=3600`; awaiting clean pass or final failure. |
+| Olmo 3 32B, TP=8, 32k generation | Relaunch with official `VLLM_ENGINE_READY_TIMEOUT_S=7200` and Open Instruct wrapper `OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500`. |
 | Olmo 3 32B, TP=1, 8k generation, 8 GPUs, eager mode | https://beaker.org/ex/01KV7CS3JT0M8SP6SWP1DPDVSK launched from commit `c91adf64` with `--vllm_enforce_eager` to compare against the previous non-eager 8-GPU TP=1 diagnostic. |
 
 ## Current Conclusions

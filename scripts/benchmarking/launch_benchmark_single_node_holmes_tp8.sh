@@ -53,7 +53,8 @@ for model_name_or_path in "$@"; do
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-        --env VLLM_ENGINE_INIT_TIMEOUT_S=3600 \
+        --env VLLM_ENGINE_READY_TIMEOUT_S=7200 \
+        --env OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500 \
         --env NCCL_CUMEM_ENABLE=0 \
         --gpus 8 \
         --secret HF_TOKEN=jacobm_HF_TOKEN \

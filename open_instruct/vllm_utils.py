@@ -93,7 +93,7 @@ MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
-INFERENCE_INIT_TIMEOUT_S = 1200
+INFERENCE_INIT_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S", "1200"))
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
@@ -1320,7 +1320,7 @@ def create_vllm_engines(
             )
         )
 
-    vllm_engine_init_timeout = int(os.environ.get("VLLM_ENGINE_INIT_TIMEOUT_S", "1200"))
+    vllm_engine_init_timeout = int(os.environ.get("OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S", "1200"))
     utils.ray_get_with_progress(
         [engine.ready.remote() for engine in vllm_engines],
         "Initializing vLLM engines",
