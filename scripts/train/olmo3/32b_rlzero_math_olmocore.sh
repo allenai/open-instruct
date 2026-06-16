@@ -22,10 +22,9 @@ if [[ "$1" == "$BEAKER_USER"* ]]; then
     shift
 fi
 
-cluster=ai2/jupiter
 uv run mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ${cluster} \
+    --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --priority high \
     --pure_docker_mode \
@@ -34,7 +33,6 @@ uv run mason.py \
     --no_auto_dataset_cache \
     --num_nodes 9 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo.py \
@@ -69,7 +67,7 @@ uv run mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 25 \
+    --local_eval_every 100 \
     --save_freq 100 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
@@ -79,6 +77,5 @@ uv run mason.py \
     --oe_eval_max_length 32768 \
     --try_launch_beaker_eval_jobs_on_weka True \
     --eval_priority high \
-    --eval_on_step_0 True \
     --oe_eval_tasks $EVALS \
     --oe_eval_gpu_multiplier 4 "$@"
