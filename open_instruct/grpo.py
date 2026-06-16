@@ -280,6 +280,7 @@ def main(
         eval_results_queue=evaluation_inference_results_Q,
         actor_manager=actor_manager,
         vllm_attention_backend=vllm_config.vllm_attention_backend,
+        vllm_distributed_executor_backend=vllm_config.vllm_distributed_executor_backend,
         inflight_updates=streaming_config.inflight_updates,
         reward_config=reward_config,
         train_dataset=train_dataset,

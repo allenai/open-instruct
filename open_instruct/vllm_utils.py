@@ -1215,12 +1215,13 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    vllm_distributed_executor_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
     # Using "ray" executor causes placement group context loss in vLLM v1's
     # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "mp"
+    distributed_executor_backend = vllm_distributed_executor_backend or ("uni" if tensor_parallel_size == 1 else "mp")
     use_hybrid_engine = pg is not None
     if tensor_parallel_size != 1 and use_hybrid_engine:
         raise ValueError("tensor_parallel_size > 1 is not supported with single_gpu_mode")
