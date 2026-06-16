@@ -49,6 +49,7 @@ for model_name_or_path in "$@"; do
         --workspace ai2/holmes-testing \
       	--preemptible \
         --priority urgent \
+        --timeout 4h \
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
