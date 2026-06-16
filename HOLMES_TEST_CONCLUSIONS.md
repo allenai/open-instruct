@@ -12,16 +12,16 @@ These notes summarize Holmes/B300 benchmark runs for Olmo inference acceptance t
 | Olmo 3 32B | 4 | 8k | 1302.62 |
 | Olmo 3 32B | 8 | 32k | 928.45 |
 
-The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class hardware. Interpret these rows as 8-GPU node-level baselines; TP is tensor parallel size, not total GPU count.
+The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class hardware. The handoff identifies `scripts/benchmarking/launch_benchmark_single_gpu_holmes.sh` as the PDF's single-GPU inference benchmark path for the TP=1, 8k baseline. The TP=4 and TP=8 rows use the single-node launchers.
 
 ## Completed Holmes Runs
 
 | Config | Beaker experiment | Status | TPS | Comparison |
 | --- | --- | --- | ---: | --- |
-| Olmo 3 32B, TP=1, 8k generation (1 GPU diagnostic) | https://beaker.org/ex/01KV6R7BW9KHM3HCWW7KZ8WXGH | Passed | 216.36 | Not comparable to the documented TP=1 H100 baseline because this B300 run used 1 GPU and the baseline is 8-GPU node-level throughput. |
-| Olmo 3 32B, TP=1, 8k generation, 8 GPUs | https://beaker.org/ex/01KV7B3WYBB2F05R5NAD0BTEZ0 | Passed | 3383.68 | 11.26x the documented 32B TP=1 H100 node-level baseline; above the 2.4x target. |
+| Olmo 3 32B, TP=1, 8k generation, 1 GPU | https://beaker.org/ex/01KV6R7BW9KHM3HCWW7KZ8WXGH | Passed | 216.36 | 0.72x the documented 32B TP=1 H100 single-GPU baseline and below the 2.4x target. This run used `--vllm_enforce_eager`. |
+| Olmo 3 32B, TP=1, 8k generation, 8 GPUs | https://beaker.org/ex/01KV7B3WYBB2F05R5NAD0BTEZ0 | Passed | 3383.68 | Useful 8-GPU node diagnostic, but not the documented TP=1 single-GPU baseline path. Per-GPU aggregate is 422.96 TPS, and this run did not use `--vllm_enforce_eager`. |
 | Olmo 3 32B, TP=4, 8k generation | https://beaker.org/ex/01KV6SNJBCGEQ8P5BBX67X5G1B | Passed | 3588.51 | 2.75x the documented 32B TP=4 H100 baseline; above the 2.4x target. |
-| Olmo 3 7B, TP=1, 8k generation | https://beaker.org/ex/01KV74GD5HSA24ZQT59JQ9VHWM | Passed | 432.68 | No documented 7B H100 baseline in the handoff. This is 2.00x the one-GPU B300 32B diagnostic, but that is not a hardware comparison. |
+| Olmo 3 7B, TP=1, 8k generation | https://beaker.org/ex/01KV74GD5HSA24ZQT59JQ9VHWM | Passed | 432.68 | No documented 7B H100 baseline in the handoff. |
 
 ## Failed Or Superseded Runs
 
@@ -37,8 +37,8 @@ The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class
 
 ## Current Conclusions
 
-- Olmo 3 32B TP=1 at 8k generation passed at 3383.68 TPS, which is 11.26x the documented H100 node-level baseline and above the 2.4x target.
+- The comparable Olmo 3 32B TP=1 8k single-GPU run passed at 216.36 TPS, which is 0.72x the documented H100 single-GPU baseline and below the 2.4x target.
+- The Olmo 3 32B TP=1 8k 8-GPU diagnostic passed at 3383.68 TPS, but it should not be used as the primary comparison for the documented TP=1 baseline row.
 - Olmo 3 32B TP=4 at 8k generation passed at 3588.51 TPS, which is 2.75x the documented H100 baseline and above the 2.4x target.
-- The Olmo 3 32B TP=1 8k one-GPU diagnostic should not be compared against the documented 8-GPU H100 baseline.
 - The Olmo 3 7B TP=1 8k run passed at 432.68 TPS, but the handoff does not include a matching H100 7B baseline.
 - TP=8 at 32k still needs a clean passing run before drawing conclusions for that H100 baseline row.
