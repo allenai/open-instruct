@@ -5,6 +5,7 @@ OLMo-core utility functions, shared training configurations, and model configura
 import datetime
 import json
 import os
+import pickle
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -283,6 +284,30 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     train_module.model.load_state_dict(sd)
 
 
+def _checkpoint_state_dict_keys(checkpoint_dir: str) -> set[str]:
+    metadata_path = os.path.join(checkpoint_dir, ".metadata")
+    if not os.path.exists(metadata_path):
+        return set()
+    with open(metadata_path, "rb") as f:
+        metadata = pickle.load(f)
+    return set(metadata.state_dict_metadata.keys())
+
+
+def _load_olmo_core_model_state_dict(checkpoint_dir: str, state_dict: dict[str, Any], work_dir: str) -> None:
+    checkpoint_keys = _checkpoint_state_dict_keys(checkpoint_dir)
+    state_keys = set(state_dict.keys())
+
+    if checkpoint_keys and not checkpoint_keys.intersection(state_keys):
+        prefixed_keys = {f"model.{key}" for key in state_keys}
+        if checkpoint_keys.intersection(prefixed_keys):
+            prefixed_state_dict = {f"model.{key}": value for key, value in state_dict.items()}
+            load_oc_state_dict(checkpoint_dir, prefixed_state_dict, work_dir=work_dir, thread_count=32)
+            state_dict.update({key: prefixed_state_dict[f"model.{key}"] for key in state_dict})
+            return
+
+    load_oc_state_dict(checkpoint_dir, state_dict, work_dir=work_dir, thread_count=32)
+
+
 def reload_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
     """Reload HF or OLMo-core checkpoint weights after FSDP parallelization."""
     if is_hf_checkpoint(model_name_or_path):
@@ -292,7 +317,7 @@ def reload_checkpoint_after_parallelization(train_module, model_name_or_path: st
     checkpoint_dir = get_olmo_core_checkpoint_dir(model_name_or_path)
     logger.info(f"Reloading OLMo-core checkpoint from {checkpoint_dir}")
     sd = train_module.model.state_dict()
-    load_oc_state_dict(checkpoint_dir, sd, work_dir=work_dir, thread_count=32)
+    _load_olmo_core_model_state_dict(checkpoint_dir, sd, work_dir)
     train_module.model.load_state_dict(sd)
 
 
@@ -304,7 +329,7 @@ def load_checkpoint_into_model(model: torch.nn.Module, model_name_or_path: str, 
     else:
         checkpoint_dir = get_olmo_core_checkpoint_dir(model_name_or_path)
         logger.info(f"Loading OLMo-core checkpoint from {checkpoint_dir}")
-        load_oc_state_dict(checkpoint_dir, sd, work_dir=work_dir, thread_count=32)
+        _load_olmo_core_model_state_dict(checkpoint_dir, sd, work_dir)
     model.load_state_dict(sd)
 
 
