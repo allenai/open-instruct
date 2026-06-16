@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add OLMo-core (FSDP) launch scripts `scripts/train/olmo3/32b_think_rl_olmocore.sh` and `scripts/train/olmo3/32b_rlzero_math_olmocore.sh`, which run 32B GRPO via `open_instruct/grpo.py` instead of the DeepSpeed `grpo_fast.py` (https://github.com/allenai/open-instruct/pull/XXXX).
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
