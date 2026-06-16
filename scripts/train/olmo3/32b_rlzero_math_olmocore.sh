@@ -8,8 +8,8 @@ EXP_NAME="olmo3_32b_rlzero_math_olmocore"
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-32B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
-LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
-LOCAL_EVAL_SPLITS="train train"
+LOCAL_EVALS="allenai/aime_2025_openinstruct 1.0"
+LOCAL_EVAL_SPLITS="train"
 
 EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero"
 
