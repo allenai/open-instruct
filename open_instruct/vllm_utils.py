@@ -1234,7 +1234,7 @@ def create_vllm_engines(
     actor_num_gpus = (
         0 if use_ray_executor else (0.5 if use_hybrid_engine and single_gpu_mode else tensor_parallel_size)
     )
-    actor_num_cpus = 1 if use_ray_executor else actor_num_gpus
+    actor_num_cpus = 0 if use_ray_executor else actor_num_gpus
 
     logger.info(f"actor_num_gpus: {actor_num_gpus}")
 
@@ -1242,7 +1242,7 @@ def create_vllm_engines(
         # Create a placement group to ensure that all engines are packed.
         # vLLM's Ray executor expects TP workers in separate <=1-GPU bundles.
         if use_ray_executor:
-            bundles = [{"GPU": 1, "CPU": 2} for _ in range(num_engines * tensor_parallel_size)]
+            bundles = [{"GPU": 1, "CPU": 0} for _ in range(num_engines * tensor_parallel_size)]
         else:
             # Each bundle reserves tensor_parallel_size GPUs for one engine.
             bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
@@ -1258,11 +1258,10 @@ def create_vllm_engines(
         else:
             bundle_indices = [bundle_indices_list[i]]
 
-        scheduling_strategy = PlacementGroupSchedulingStrategy(
-            placement_group=pg,
-            placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=bundle_indices[0],
-        )
+        scheduling_kwargs = {"placement_group": pg, "placement_group_capture_child_tasks": True}
+        if not use_ray_executor:
+            scheduling_kwargs["placement_group_bundle_index"] = bundle_indices[0]
+        scheduling_strategy = PlacementGroupSchedulingStrategy(**scheduling_kwargs)
 
         vllm_engines.append(
             ray.remote(LLMRayActor)
