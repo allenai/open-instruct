@@ -26,7 +26,7 @@ The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class
 
 | Config | Goal |
 | --- | --- |
-| Olmo 3 32B, TP=1, 8k generation, 8 GPUs | Needed for an apples-to-apples comparison with the documented TP=1 H100 node-level baseline. |
+| Olmo 3 32B, TP=1, 8k generation, 8 GPUs | https://beaker.org/ex/01KV7B3WYBB2F05R5NAD0BTEZ0 launched for apples-to-apples comparison with the documented TP=1 H100 node-level baseline. |
 | Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV79XA9B3A89SCTE18K9BR5Q launched with the explicit 4h Beaker task timeout added in `scripts/benchmarking/launch_benchmark_single_node_holmes_tp8.sh`. |
 
 ## Current Conclusions
