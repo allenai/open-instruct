@@ -8,7 +8,7 @@
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 export exp_name=test_olmo3_32b_rl_olmocore_run_${RANDOM}
 export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
-export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo3-merge-32b-1e-4-5e-5/olmo3-merge-32b-1e-4-5e-5/
+export model_path=/weka/oe-adapt-default/jacobm/olmo-core-checkpoints/Olmo-3-32B-Think-SFT
 
 
 uv run python mason.py \
@@ -22,6 +22,7 @@ uv run python mason.py \
     --num_nodes 28 \
     --gpus 8 \
     --max_retries 0 \
+    --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64 \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \

@@ -5,7 +5,7 @@
 # (--fsdp_shard_degree / --fsdp_num_replicas / --activation_memory_budget).
 
 EXP_NAME="olmo3_32b_rlzero_math_olmocore"
-MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-32B"
+MODEL_NAME_OR_PATH="/weka/oe-adapt-default/jacobm/olmo-core-checkpoints/Olmo-3-1125-32B"
 DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
 
 LOCAL_EVALS="allenai/Dolci-RLZero-Math-7B 16"
@@ -31,6 +31,7 @@ uv run mason.py \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
+    --no_auto_dataset_cache \
     --num_nodes 9 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
