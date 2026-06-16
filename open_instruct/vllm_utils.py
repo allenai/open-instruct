@@ -797,7 +797,16 @@ class LLMRayActor:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+
+        session_started = False
+        if hasattr(self.llm_engine, "start_weight_update"):
+            self._run_async(self.llm_engine.start_weight_update(is_checkpoint_format=True))
+            session_started = True
+        try:
+            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        finally:
+            if session_started:
+                self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
 
