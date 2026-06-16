@@ -13,7 +13,6 @@ uv run python mason.py \
     --pure_docker_mode \
     --workspace ai2/holmes-testing \
     --priority urgent \
-    --gs_model_name "olmo3_32b_think_dpo_s3_rl_holmes_testing" \
     --preemptible \
     --num_nodes 28 \
     --gpus 8 \
