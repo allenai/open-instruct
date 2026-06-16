@@ -61,6 +61,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         master_port: int | None,
         local_world_size: int,
         model_name_or_path: str,
+        config_name: str | None,
         grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -72,6 +73,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.local_world_size = local_world_size
         self.tokenizer = tokenizer
         self.model_name_or_path = model_name_or_path
+        self.config_name = config_name
         self.grpo_config = grpo_config
         self.max_sequence_length = max_sequence_length
         self.streaming_config = streaming_config
@@ -125,7 +127,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
         model_config_args = olmo_core_utils.ModelConfig(
-            model_name_or_path=self.model_name_or_path, attn_implementation=self.attn_implementation
+            model_name_or_path=self.model_name_or_path,
+            config_name=self.config_name,
+            attn_implementation=self.attn_implementation,
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
@@ -431,6 +435,7 @@ class OLMoCoreModelGroup:
         pg,
         num_gpus_per_node: list[int],
         model_name_or_path: str,
+        config_name: str | None,
         grpo_config: grpo_utils.GRPOExperimentConfig,
         max_sequence_length: int,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -457,6 +462,7 @@ class OLMoCoreModelGroup:
         common_kwargs = {
             "world_size": world_size,
             "model_name_or_path": model_name_or_path,
+            "config_name": config_name,
             "grpo_config": grpo_config,
             "max_sequence_length": max_sequence_length,
             "streaming_config": streaming_config,

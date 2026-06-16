@@ -178,6 +178,8 @@ class Batch:
 class ModelConfig:
     model_name_or_path: str
     """The model checkpoint for weights initialization."""
+    config_name: str | None = None
+    """Pretrained config name or path if not the same as model_name."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     dtype: str | None = None

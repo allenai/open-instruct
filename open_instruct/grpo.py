@@ -127,7 +127,9 @@ def main(
     pprint([args, model_config])
 
     oc_model_config = olmo_core_utils.ModelConfig(
-        model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
+        model_name_or_path=model_config.model_name_or_path,
+        config_name=model_config.config_name,
+        attn_implementation=model_config.attn_implementation,
     )
     _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
     olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
@@ -241,6 +243,7 @@ def main(
         pg=pg,
         num_gpus_per_node=args.num_learners_per_node,
         model_name_or_path=model_config.model_name_or_path,
+        config_name=model_config.config_name,
         grpo_config=args,
         max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
         streaming_config=streaming_config,
