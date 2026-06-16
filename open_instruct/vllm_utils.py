@@ -1238,45 +1238,49 @@ def create_vllm_engines(
 
     logger.info(f"actor_num_gpus: {actor_num_gpus}")
 
-    if not use_hybrid_engine:
+    if not use_hybrid_engine and not use_ray_executor:
         # Create a placement group to ensure that all engines are packed.
-        # vLLM's Ray executor expects TP workers in separate <=1-GPU bundles.
-        if use_ray_executor:
-            bundles = [{"GPU": 1, "CPU": 0} for _ in range(num_engines * tensor_parallel_size)]
-        else:
-            # Each bundle reserves tensor_parallel_size GPUs for one engine.
-            bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
+        # Each bundle reserves tensor_parallel_size GPUs for one engine.
+        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
+    elif not use_hybrid_engine:
+        logger.info("Letting vLLM's Ray executor manage its own placement group.")
 
     # ensure we use bundles on the same node where possible if tp>1.
-    bundle_indices_list = get_bundle_indices_list(pg)
+    bundle_indices_list = get_bundle_indices_list(pg) if pg is not None else []
 
     for i in range(num_engines):
-        if use_hybrid_engine or use_ray_executor:
+        if pg is None:
+            bundle_indices = None
+        elif use_hybrid_engine or use_ray_executor:
             bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
         else:
             bundle_indices = [bundle_indices_list[i]]
 
-        scheduling_kwargs = {"placement_group": pg, "placement_group_capture_child_tasks": True}
-        if not use_ray_executor:
-            scheduling_kwargs["placement_group_bundle_index"] = bundle_indices[0]
-        scheduling_strategy = PlacementGroupSchedulingStrategy(**scheduling_kwargs)
+        scheduling_strategy = None
+        if pg is not None:
+            scheduling_kwargs = {"placement_group": pg, "placement_group_capture_child_tasks": True}
+            if not use_ray_executor:
+                scheduling_kwargs["placement_group_bundle_index"] = bundle_indices[0]
+            scheduling_strategy = PlacementGroupSchedulingStrategy(**scheduling_kwargs)
 
+        ray_actor_options = {
+            "num_cpus": actor_num_cpus,
+            "num_gpus": actor_num_gpus,
+            "runtime_env": ray.runtime_env.RuntimeEnv(
+                env_vars={
+                    "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+                    "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+                    "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
+                }
+            ),
+        }
+        if scheduling_strategy is not None:
+            ray_actor_options["scheduling_strategy"] = scheduling_strategy
         vllm_engines.append(
             ray.remote(LLMRayActor)
-            .options(
-                num_cpus=actor_num_cpus,
-                num_gpus=actor_num_gpus,
-                scheduling_strategy=scheduling_strategy,
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={
-                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
-                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
-                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
-                    }
-                ),
-            )
+            .options(**ray_actor_options)
             .remote(
                 model=pretrain,
                 revision=revision,
