@@ -34,7 +34,7 @@ The handoff target is roughly 2.4x H100 inference throughput on GB200/B300-class
 
 | Config | Goal |
 | --- | --- |
-| Olmo 3 32B, TP=8, 32k generation | Relaunch with official `VLLM_ENGINE_READY_TIMEOUT_S=7200` and Open Instruct wrapper `OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500`. |
+| Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV7DC5W515CN1YCMDHEMVKGN launched from commit `8f23df74` with image `01KV7DAS2FYP5V1C0668NW46K6`, official `VLLM_ENGINE_READY_TIMEOUT_S=7200`, and Open Instruct wrapper `OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500`. |
 | Olmo 3 32B, TP=1, 8k generation, 8 GPUs, eager mode | https://beaker.org/ex/01KV7CS3JT0M8SP6SWP1DPDVSK launched from commit `c91adf64` with `--vllm_enforce_eager` to compare against the previous non-eager 8-GPU TP=1 diagnostic. |
 
 ## Current Conclusions
