@@ -1223,19 +1223,29 @@ def create_vllm_engines(
     # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
     distributed_executor_backend = vllm_distributed_executor_backend or ("uni" if tensor_parallel_size == 1 else "mp")
     use_hybrid_engine = pg is not None
+    use_ray_executor = distributed_executor_backend == "ray"
     if tensor_parallel_size != 1 and use_hybrid_engine:
         raise ValueError("tensor_parallel_size > 1 is not supported with single_gpu_mode")
     # In single_gpu_mode, use 0.5 GPU so we can schedule 2 instances on the same GPUs.
+    # For vLLM's Ray executor, the outer actor only coordinates engine startup;
+    # vLLM schedules tensor-parallel workers into the placement-group bundles.
     # Otherwise, request tensor_parallel_size GPUs so Ray sets CUDA_VISIBLE_DEVICES
     # correctly for the "mp" distributed executor backend.
-    num_gpus = 0.5 if use_hybrid_engine and single_gpu_mode else tensor_parallel_size
+    actor_num_gpus = (
+        0 if use_ray_executor else (0.5 if use_hybrid_engine and single_gpu_mode else tensor_parallel_size)
+    )
+    actor_num_cpus = 1 if use_ray_executor else actor_num_gpus
 
-    logger.info(f"num_gpus: {num_gpus}")
+    logger.info(f"actor_num_gpus: {actor_num_gpus}")
 
     if not use_hybrid_engine:
         # Create a placement group to ensure that all engines are packed.
-        # Each bundle reserves tensor_parallel_size GPUs for one engine.
-        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
+        # vLLM's Ray executor expects TP workers in separate <=1-GPU bundles.
+        if use_ray_executor:
+            bundles = [{"GPU": 1, "CPU": 2} for _ in range(num_engines * tensor_parallel_size)]
+        else:
+            # Each bundle reserves tensor_parallel_size GPUs for one engine.
+            bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
@@ -1243,7 +1253,7 @@ def create_vllm_engines(
     bundle_indices_list = get_bundle_indices_list(pg)
 
     for i in range(num_engines):
-        if use_hybrid_engine:
+        if use_hybrid_engine or use_ray_executor:
             bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
         else:
             bundle_indices = [bundle_indices_list[i]]
@@ -1257,8 +1267,8 @@ def create_vllm_engines(
         vllm_engines.append(
             ray.remote(LLMRayActor)
             .options(
-                num_cpus=num_gpus,
-                num_gpus=num_gpus,
+                num_cpus=actor_num_cpus,
+                num_gpus=actor_num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={
