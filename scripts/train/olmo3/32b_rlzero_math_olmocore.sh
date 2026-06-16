@@ -1,0 +1,81 @@
+#!/bin/bash
+# 32B OLMo-core (FSDP) version of 7b_rlzero_math.sh.
+# Uses open_instruct/grpo.py (OLMo-core Trainer) instead of grpo_fast.py (DeepSpeed),
+# and scales the model from 7B to 32B. DeepSpeed args are replaced by FSDP args
+# (--fsdp_shard_degree / --fsdp_num_replicas / --activation_memory_budget).
+
+EXP_NAME="olmo3_32b_rlzero_math_olmocore"
+MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-32B"
+DATASETS="allenai/Dolci-RLZero-Math-7B 1.0"
+
+LOCAL_EVALS="allenai/aime_2025_openinstruct 1.0"
+LOCAL_EVAL_SPLITS="train"
+
+EVALS="aime:zs_cot_r1::pass_at_32_2024_rlzero,aime:zs_cot_r1::pass_at_32_2025_rlzero"
+
+BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+BEAKER_IMAGE="nathanl/open_instruct_auto"
+
+# Check if the first argument starts with the value of $BEAKER_NAME
+if [[ "$1" == "$BEAKER_USER"* ]]; then
+    BEAKER_IMAGE="$1"
+    shift
+fi
+
+uv run mason.py \
+    --task_name ${EXP_NAME} \
+    --cluster ai2/jupiter \
+    --workspace ai2/olmo-instruct \
+    --priority high \
+    --pure_docker_mode \
+    --image ${BEAKER_IMAGE} \
+    --preemptible \
+    --no_auto_dataset_cache \
+    --num_nodes 9 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --gpus 8 \
+    -- source configs/beaker_configs/ray_node_setup.sh \
+\&\& uv run open_instruct/grpo.py \
+    --exp_name ${EXP_NAME} \
+    --beta 0.0 \
+    --no_resampling_pass_rate 0.875 \
+    --active_sampling \
+    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 32 \
+    --num_mini_batches 1 \
+    --learning_rate 1e-6 \
+    --per_device_train_batch_size 1 \
+    --kl_estimator 2 \
+    --dataset_mixer_list $DATASETS \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list $LOCAL_EVALS \
+    --dataset_mixer_eval_list_splits $LOCAL_EVAL_SPLITS \
+    --max_prompt_token_length 2048 \
+    --response_length 16384 \
+    --pack_length 18432 \
+    --model_name_or_path ${MODEL_NAME_OR_PATH} \
+    --chat_template_name olmo_thinker_rlzero \
+    --non_stop_penalty False \
+    --temperature 1.0 \
+    --total_episodes 768000 \
+    --num_learners_per_node 8 8 8 8 \
+    --fsdp_shard_degree 32 \
+    --fsdp_num_replicas 1 \
+    --activation_memory_budget 0.3 \
+    --vllm_num_engines 10 \
+    --vllm_tensor_parallel_size 4 \
+    --lr_scheduler_type constant \
+    --apply_verifiable_reward true \
+    --seed 1 \
+    --local_eval_every 100 \
+    --save_freq 100 \
+    --checkpoint_state_freq 100 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --vllm_enable_prefix_caching \
+    --mask_truncated_completions False \
+    --oe_eval_max_length 32768 \
+    --try_launch_beaker_eval_jobs_on_weka True \
+    --eval_priority high \
+    --oe_eval_tasks $EVALS \
+    --oe_eval_gpu_multiplier 4 "$@"
