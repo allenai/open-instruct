@@ -24,7 +24,7 @@ uv run python mason.py \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
     --env HOSTED_VLLM_API_BASE=http://ceres-cs-aus-447.reviz.ai2.in:8001/v1 \
     --no_auto_dataset_cache \
-    -- bash -lc "source configs/beaker_configs/ray_node_setup.sh && source configs/beaker_configs/code_api_setup.sh && python open_instruct/grpo_fast.py \
+    -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout 8 \
@@ -77,4 +77,4 @@ uv run python mason.py \
         --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo2_retrofit_auto \
         --oe_eval_tasks mmlu:cot::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,gpqa:0shot_cot::qwen3-instruct,zebralogic::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek \
         --vllm_enforce_eager \
-        --deepspeed_zpg 32"
+        --deepspeed_zpg 32
