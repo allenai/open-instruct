@@ -6,7 +6,7 @@ set -euo pipefail
 
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 export exp_name=holmes_smoke_olmo3_7b_think_dpo_olmocore_rl_${RANDOM}
-export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
+export data_mix="${DATA_MIX:-hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387}"
 export model_path=/weka/oe-adapt-default/jacobm/olmo-core-checkpoints/Olmo-3-7B-Think-DPO
 export tokenizer_name_or_path=${TOKENIZER_NAME_OR_PATH:-allenai/Olmo-3-7B-Think-DPO}
 export hf_model_name_or_path=${HF_MODEL_NAME_OR_PATH:-allenai/Olmo-3-7B-Think-DPO}
