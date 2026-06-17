@@ -10,9 +10,15 @@ export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture
 export model_path=/weka/oe-adapt-default/jacobm/olmo-core-checkpoints/Olmo-3-32B-Think-DPO
 export tokenizer_name_or_path=allenai/Olmo-3-32B-Think-DPO
 export judge_base_url=${JUDGE_BASE_URL:?Set JUDGE_BASE_URL to the hosted Qwen3-32B judge endpoint, e.g. http://holmes-cs-aus-000.reviz.ai2.in:8001/v1}
-export total_episodes=${TOTAL_EPISODES:-512}
+export num_samples_per_prompt_rollout=${NUM_SAMPLES_PER_PROMPT_ROLLOUT:-8}
+export num_unique_prompts_rollout=${NUM_UNIQUE_PROMPTS_ROLLOUT:-64}
+export total_episodes=${TOTAL_EPISODES:-$((num_unique_prompts_rollout * num_samples_per_prompt_rollout))}
 export response_length=${RESPONSE_LENGTH:-32768}
 export pack_length=${PACK_LENGTH:-$((response_length + 3072))}
+vllm_enforce_eager_args=()
+if [[ "${VLLM_ENFORCE_EAGER:-false}" == "true" ]]; then
+    vllm_enforce_eager_args=(--vllm_enforce_eager)
+fi
 
 uv run python mason.py \
     --cluster ai2/holmes \
@@ -34,8 +40,8 @@ uv run python mason.py \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
-        --num_samples_per_prompt_rollout 8 \
-        --num_unique_prompts_rollout 64 \
+        --num_samples_per_prompt_rollout ${num_samples_per_prompt_rollout} \
+        --num_unique_prompts_rollout ${num_unique_prompts_rollout} \
         --num_mini_batches 1 \
         --num_epochs 1 \
         --learning_rate 2e-6 \
@@ -76,4 +82,5 @@ uv run python mason.py \
         --code_pass_rate_reward_threshold 0.99 \
         --checkpoint_state_freq 100 \
         --backend_timeout 1200 \
-        --active_sampling
+        --active_sampling \
+        "${vllm_enforce_eager_args[@]}"
