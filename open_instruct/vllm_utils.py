@@ -102,7 +102,7 @@ VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 def _parse_vllm_compilation_config_override(value: str) -> Any:
     if value.isdigit():
-        return int(value)
+        return {"mode": int(value)}
     return json.loads(value)
 
 
