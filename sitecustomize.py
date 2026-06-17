@@ -49,6 +49,18 @@ def _patch_vllm_rms_norm_fake_impls() -> None:
         if "does not exist" not in str(exc):
             raise
 
+    from vllm.model_executor.layers import activation
+
+    original_silu_and_mul_forward_cuda = activation.SiluAndMul.forward_cuda
+
+    def _silu_and_mul_forward_cuda(self, x):
+        if getattr(x, "is_meta", False):
+            d = x.shape[-1] // 2
+            return torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
+        return original_silu_and_mul_forward_cuda(self, x)
+
+    activation.SiluAndMul.forward_cuda = _silu_and_mul_forward_cuda
+
 
 if _truthy(os.environ.get("OPEN_INSTRUCT_PATCH_VLLM_RMS_NORM_FAKE_IMPL")):
     _patch_vllm_rms_norm_fake_impls()
