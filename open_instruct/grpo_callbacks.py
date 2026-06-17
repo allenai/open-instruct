@@ -40,13 +40,13 @@ _OLMO_CORE_TO_HF_LAYER_MAPPINGS = {
     "feed_forward.w1.weight": "mlp.gate_proj.weight",
     "feed_forward.w2.weight": "mlp.down_proj.weight",
     "feed_forward.w3.weight": "mlp.up_proj.weight",
-    "attention_norm.weight": "input_layernorm.weight",
-    "feed_forward_norm.weight": "post_attention_layernorm.weight",
+    "attention_norm.weight": "post_attention_layernorm.weight",
+    "feed_forward_norm.weight": "post_feedforward_layernorm.weight",
 }
 
 
 def olmo_core_to_hf_name(name: str) -> str:
-    """Convert OLMo-core parameter name to HuggingFace format for Qwen3/LLaMA models."""
+    """Convert OLMo-core parameter names to released Olmo 3 HuggingFace format."""
     if name == "embeddings.weight":
         return "model.embed_tokens.weight"
     if name == "lm_head.norm.weight":
