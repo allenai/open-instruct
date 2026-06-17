@@ -28,10 +28,6 @@ vllm_compilation_config_env=()
 if [[ -n "${VLLM_COMPILATION_CONFIG:-}" ]]; then
     vllm_compilation_config_env=(--env OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG=${VLLM_COMPILATION_CONFIG})
 fi
-vllm_ir_op_priority_env=()
-if [[ -n "${VLLM_IR_OP_PRIORITY:-}" ]]; then
-    vllm_ir_op_priority_env=(--env OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY=${VLLM_IR_OP_PRIORITY})
-fi
 vllm_rms_norm_fake_patch_env=()
 if [[ "${PATCH_VLLM_RMS_NORM_FAKE_IMPL:-false}" == "true" ]]; then
     vllm_rms_norm_fake_patch_env=(--env OPEN_INSTRUCT_PATCH_VLLM_RMS_NORM_FAKE_IMPL=1)
@@ -60,7 +56,6 @@ uv run python mason.py \
     --env OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500 \
     "${vllm_inference_batch_size_env[@]}" \
     "${vllm_compilation_config_env[@]}" \
-    "${vllm_ir_op_priority_env[@]}" \
     "${vllm_rms_norm_fake_patch_env[@]}" \
     "${disable_vllm_request_seed_env[@]}" \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64 \
