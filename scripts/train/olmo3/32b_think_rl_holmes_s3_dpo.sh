@@ -28,6 +28,10 @@ vllm_compilation_config_env=()
 if [[ -n "${VLLM_COMPILATION_CONFIG:-}" ]]; then
     vllm_compilation_config_env=(--env OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG=${VLLM_COMPILATION_CONFIG})
 fi
+vllm_ir_op_priority_env=()
+if [[ -n "${VLLM_IR_OP_PRIORITY:-}" ]]; then
+    vllm_ir_op_priority_env=(--env OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY=${VLLM_IR_OP_PRIORITY})
+fi
 chat_template_args=()
 if [[ -n "${CHAT_TEMPLATE_NAME:-}" ]]; then
     chat_template_args=(--chat_template_name "${CHAT_TEMPLATE_NAME}")
@@ -48,6 +52,7 @@ uv run python mason.py \
     --env OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500 \
     "${vllm_inference_batch_size_env[@]}" \
     "${vllm_compilation_config_env[@]}" \
+    "${vllm_ir_op_priority_env[@]}" \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64 \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
     --env HOSTED_VLLM_API_BASE=${judge_base_url} \

@@ -44,6 +44,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.config import WeightTransferConfig
+from vllm.config.kernel import IrOpPriorityConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest, WeightTransferUpdateRequest
 from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
 from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
@@ -97,6 +98,7 @@ SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S", "1200"))
 INFERENCE_BATCH_SIZE_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_INFERENCE_BATCH_SIZE")
 VLLM_COMPILATION_CONFIG_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG")
+VLLM_IR_OP_PRIORITY_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY")
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
@@ -104,6 +106,10 @@ def _parse_vllm_compilation_config_override(value: str) -> Any:
     if value.isdigit():
         return {"mode": int(value)}
     return json.loads(value)
+
+
+def _parse_vllm_ir_op_priority_override(value: str) -> IrOpPriorityConfig:
+    return IrOpPriorityConfig(**json.loads(value))
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -722,6 +728,12 @@ class LLMRayActor:
             logger.info(
                 "Set vLLM compilation_config from OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG=%s",
                 VLLM_COMPILATION_CONFIG_OVERRIDE,
+            )
+        if VLLM_IR_OP_PRIORITY_OVERRIDE is not None:
+            kwargs["ir_op_priority"] = _parse_vllm_ir_op_priority_override(VLLM_IR_OP_PRIORITY_OVERRIDE)
+            logger.info(
+                "Set vLLM ir_op_priority from OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY=%s",
+                VLLM_IR_OP_PRIORITY_OVERRIDE,
             )
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
