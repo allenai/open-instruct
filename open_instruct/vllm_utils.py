@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import dataclasses
+import json
 import os
 import queue
 import sys
@@ -95,7 +96,14 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S", "1200"))
 INFERENCE_BATCH_SIZE_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_INFERENCE_BATCH_SIZE")
+VLLM_COMPILATION_CONFIG_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG")
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+def _parse_vllm_compilation_config_override(value: str) -> Any:
+    if value.isdigit():
+        return int(value)
+    return json.loads(value)
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -709,6 +717,12 @@ class LLMRayActor:
         # model-provided HF generation_config (e.g., max_new_tokens=2048)
         # cannot cap request max_tokens via OpenAI serving defaults.
         kwargs["generation_config"] = "vllm"
+        if VLLM_COMPILATION_CONFIG_OVERRIDE is not None:
+            kwargs["compilation_config"] = _parse_vllm_compilation_config_override(VLLM_COMPILATION_CONFIG_OVERRIDE)
+            logger.info(
+                "Set vLLM compilation_config from OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG=%s",
+                VLLM_COMPILATION_CONFIG_OVERRIDE,
+            )
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
