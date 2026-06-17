@@ -65,6 +65,10 @@ def save_and_cleanup(
     args: grpo_utils.GRPOExperimentConfig, tc: TokenizerConfig, policy_group, tokenizer, beaker_config
 ) -> None:
     """Save the final model, optionally push to Hub, and launch eval jobs."""
+    if args.skip_final_model_save:
+        logger.info("Skipping final model save and save-dependent follow-up actions")
+        return
+
     final_output_dir = args.output_dir
     utils.ray_get_with_progress(
         [m.save_model.remote(final_output_dir, tc.chat_template_name, tokenizer) for m in policy_group.models],

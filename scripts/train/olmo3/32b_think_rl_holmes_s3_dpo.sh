@@ -74,6 +74,7 @@ uv run python mason.py \
         --save_freq 25 \
         --gradient_checkpointing \
         --with_tracking \
+        --skip_final_model_save \
         --llm_judge_model hosted_vllm/Qwen/Qwen3-32B \
         --llm_judge_timeout 600 \
         --llm_judge_max_tokens 2048 \
@@ -83,4 +84,4 @@ uv run python mason.py \
         --checkpoint_state_freq 100 \
         --backend_timeout 1200 \
         --active_sampling \
-        "${vllm_enforce_eager_args[@]}"
+        "${vllm_enforce_eager_args[@]}" \; status=\$? \; ray stop --force \; exit \$status

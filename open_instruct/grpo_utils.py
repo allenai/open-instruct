@@ -191,6 +191,8 @@ class GRPOExperimentConfig(
     """If toggled, debug output will be shown"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
+    skip_final_model_save: bool = False
+    """Whether to skip final HF model export and save-dependent follow-up actions. Useful for smoke tests."""
     hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
     hf_repo_id: str | None = None
