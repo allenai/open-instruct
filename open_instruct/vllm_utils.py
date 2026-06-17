@@ -99,6 +99,7 @@ INFERENCE_INIT_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_ENGINE_INIT_
 INFERENCE_BATCH_SIZE_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_INFERENCE_BATCH_SIZE")
 VLLM_COMPILATION_CONFIG_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG")
 VLLM_IR_OP_PRIORITY_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY")
+VLLM_COMPLETION_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_COMPLETION_TIMEOUT_S", "0"))
 PATCH_VLLM_META_ACTIVATION_FORWARD = os.environ.get("OPEN_INSTRUCT_PATCH_VLLM_RMS_NORM_FAKE_IMPL", "").lower() in {
     "1",
     "true",
@@ -1096,7 +1097,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
-            api_response = await actor.client.completions.create(
+            completion_request = actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
                 extra_body={
@@ -1108,6 +1109,26 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 },
                 **params_dict,
             )
+            try:
+                if VLLM_COMPLETION_TIMEOUT_S > 0:
+                    api_response = await asyncio.wait_for(
+                        completion_request,
+                        timeout=VLLM_COMPLETION_TIMEOUT_S,
+                    )
+                else:
+                    api_response = await completion_request
+            except asyncio.TimeoutError:
+                rollout.timeout = True
+                logger.warning(
+                    "vLLM completion timed out after %.1fs for %s "
+                    "with prompt_tokens=%d generated_tokens=%d max_tokens=%d",
+                    VLLM_COMPLETION_TIMEOUT_S,
+                    sub_request_id,
+                    len(current_prompt),
+                    len(response_tokens),
+                    current_max_tokens,
+                )
+                break
 
             output = api_response.choices[0]
             model_tokens = list(output.token_ids)
