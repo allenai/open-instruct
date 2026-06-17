@@ -20,6 +20,10 @@ vllm_enforce_eager_args=()
 if [[ "${VLLM_ENFORCE_EAGER:-false}" == "true" ]]; then
     vllm_enforce_eager_args=(--vllm_enforce_eager)
 fi
+chat_template_args=()
+if [[ -n "${CHAT_TEMPLATE_NAME:-}" ]]; then
+    chat_template_args=(--chat_template_name "${CHAT_TEMPLATE_NAME}")
+fi
 
 uv run python mason.py \
     --cluster ai2/holmes \
@@ -58,6 +62,7 @@ uv run python mason.py \
         --tokenizer_name_or_path ${tokenizer_name_or_path} \
         --hf_model_name_or_path ${hf_model_name_or_path} \
         --config_name olmo3_32B \
+        "${chat_template_args[@]}" \
         --non_stop_penalty False \
         --mask_truncated_completions False \
         --temperature 1.0 \
