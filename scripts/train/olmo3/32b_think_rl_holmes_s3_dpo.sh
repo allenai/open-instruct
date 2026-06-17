@@ -11,6 +11,8 @@ export model_path=/weka/oe-adapt-default/jacobm/olmo-core-checkpoints/Olmo-3-32B
 export tokenizer_name_or_path=allenai/Olmo-3-32B-Think-DPO
 export judge_base_url=${JUDGE_BASE_URL:?Set JUDGE_BASE_URL to the hosted Qwen3-32B judge endpoint, e.g. http://holmes-cs-aus-000.reviz.ai2.in:8001/v1}
 export total_episodes=${TOTAL_EPISODES:-512}
+export response_length=${RESPONSE_LENGTH:-32768}
+export pack_length=${PACK_LENGTH:-$((response_length + 3072))}
 
 uv run python mason.py \
     --cluster ai2/holmes \
@@ -43,8 +45,8 @@ uv run python mason.py \
         --dataset_mixer_list ${data_mix} \
         --dataset_mixer_list_splits train \
         --max_prompt_token_length 2048 \
-        --response_length 32768 \
-        --pack_length 35840 \
+        --response_length ${response_length} \
+        --pack_length ${pack_length} \
         --model_name_or_path ${model_path} \
         --tokenizer_name_or_path ${tokenizer_name_or_path} \
         --config_name olmo3_32B \
