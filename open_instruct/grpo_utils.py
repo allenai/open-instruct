@@ -193,6 +193,8 @@ class GRPOExperimentConfig(
     """Whether to upload the saved model to huggingface"""
     skip_final_model_save: bool = False
     """Whether to skip final HF model export and save-dependent follow-up actions. Useful for smoke tests."""
+    hf_model_name_or_path: str | None = None
+    """Optional HF model/config source for OLMo-core runs when the tokenizer path is tokenizer-only."""
     hf_entity: str | None = None
     """The user or org name of the model repository from the Hugging Face Hub"""
     hf_repo_id: str | None = None

@@ -130,7 +130,7 @@ def main(
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
-    hf_model_name_or_path = olmo_core_utils.get_hf_config_source(
+    hf_model_name_or_path = args.hf_model_name_or_path or olmo_core_utils.get_hf_config_source(
         model_config.model_name_or_path, tc.tokenizer_name_or_path
     )
     oc_model_config = olmo_core_utils.ModelConfig(
@@ -139,7 +139,8 @@ def main(
         attn_implementation=model_config.attn_implementation,
     )
     _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
-    olmo_core_utils.verify_can_save_as_hf(transformer_config, hf_model_name_or_path)
+    if not args.skip_final_model_save:
+        olmo_core_utils.verify_can_save_as_hf(transformer_config, hf_model_name_or_path)
 
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",
