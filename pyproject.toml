@@ -69,7 +69,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "76c239cab3ef3774aa1e3d0e35d1c0fc70e665c7" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "9aa3280fd5331b93fc766206eadec42ee73befc0" }
 torch = [
   { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
 ]
