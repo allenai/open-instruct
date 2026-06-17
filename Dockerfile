@@ -80,6 +80,7 @@ COPY configs configs
 COPY scripts scripts
 COPY mason.py mason.py
 COPY open_instruct open_instruct
+COPY sitecustomize.py /stage/.venv/lib/python3.12/site-packages/sitecustomize.py
 COPY oe-eval-interna[l] oe-eval-internal/
 
 ARG GIT_COMMIT="" \
