@@ -1072,7 +1072,7 @@ def setup_experiment_tracking(
             group=args.wandb_group_name,
             name=args.run_name,
             save_code=True,
-            tags=[args.exp_name] + get_wandb_tags(),
+            tags=get_wandb_tags(extra_tags=[args.exp_name]),
         )
         # Set training_step as the default x-axis metric
         wandb.define_metric("training_step")
