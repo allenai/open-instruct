@@ -99,7 +99,30 @@ INFERENCE_INIT_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_ENGINE_INIT_
 INFERENCE_BATCH_SIZE_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_INFERENCE_BATCH_SIZE")
 VLLM_COMPILATION_CONFIG_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG")
 VLLM_IR_OP_PRIORITY_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY")
+PATCH_VLLM_META_ACTIVATION_FORWARD = os.environ.get("OPEN_INSTRUCT_PATCH_VLLM_RMS_NORM_FAKE_IMPL", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+def _patch_vllm_activation_meta_forward() -> None:
+    from vllm.model_executor.layers import activation
+
+    if getattr(activation.SiluAndMul.forward_cuda, "_open_instruct_meta_patch", False):
+        return
+
+    original_silu_and_mul_forward_cuda = activation.SiluAndMul.forward_cuda
+
+    def _silu_and_mul_forward_cuda(self, x):
+        if getattr(x, "is_meta", False):
+            d = x.shape[-1] // 2
+            return torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
+        return original_silu_and_mul_forward_cuda(self, x)
+
+    _silu_and_mul_forward_cuda._open_instruct_meta_patch = True
+    activation.SiluAndMul.forward_cuda = _silu_and_mul_forward_cuda
 
 
 def _parse_vllm_compilation_config_override(value: str) -> Any:
@@ -735,6 +758,9 @@ class LLMRayActor:
                 "Set vLLM ir_op_priority from OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY=%s",
                 VLLM_IR_OP_PRIORITY_OVERRIDE,
             )
+        if PATCH_VLLM_META_ACTIVATION_FORWARD:
+            _patch_vllm_activation_meta_forward()
+            logger.info("Patched vLLM SiLU activation meta forward")
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
