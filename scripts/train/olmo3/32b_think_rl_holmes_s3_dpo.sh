@@ -37,7 +37,7 @@ uv run python mason.py \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
     --env HOSTED_VLLM_API_BASE=${judge_base_url} \
     --no_auto_dataset_cache \
-    -- trap 'status=$?; ray stop --force; exit $status' EXIT \&\& source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo.py \
+    -- cleanup\(\) \{ status=\$? \; ray stop --force \; exit \$status \; \} \&\& trap cleanup EXIT \&\& source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo.py \
         --exp_name ${exp_name} \
         --beta 0.0 \
         --num_samples_per_prompt_rollout ${num_samples_per_prompt_rollout} \
