@@ -1439,13 +1439,18 @@ def create_generation_configs(
     vllm_config: data_loader_lib.VLLMConfig,
 ):
     """Create generation configs for training and evaluation."""
+    sampling_seed = args.seed
+    if os.environ.get("OPEN_INSTRUCT_DISABLE_VLLM_REQUEST_SEED", "").lower() in {"1", "true", "yes"}:
+        logger.info("Disabling vLLM per-request sampling seeds")
+        sampling_seed = None
+
     generation_config = vllm_utils.SamplingConfig(
         temperature=streaming_config.temperature,
         top_p=vllm_config.vllm_top_p,
         max_tokens=streaming_config.response_length,
         n=streaming_config.num_samples_per_prompt_rollout,
         stop=streaming_config.stop_strings,
-        seed=args.seed,
+        seed=sampling_seed,
         logprobs=1,
     )
     eval_generation_config = dataclasses.replace(

@@ -36,6 +36,10 @@ vllm_rms_norm_fake_patch_env=()
 if [[ "${PATCH_VLLM_RMS_NORM_FAKE_IMPL:-false}" == "true" ]]; then
     vllm_rms_norm_fake_patch_env=(--env OPEN_INSTRUCT_PATCH_VLLM_RMS_NORM_FAKE_IMPL=1)
 fi
+disable_vllm_request_seed_env=()
+if [[ "${DISABLE_VLLM_REQUEST_SEED:-false}" == "true" ]]; then
+    disable_vllm_request_seed_env=(--env OPEN_INSTRUCT_DISABLE_VLLM_REQUEST_SEED=1)
+fi
 chat_template_args=()
 if [[ -n "${CHAT_TEMPLATE_NAME:-}" ]]; then
     chat_template_args=(--chat_template_name "${CHAT_TEMPLATE_NAME}")
@@ -58,6 +62,7 @@ uv run python mason.py \
     "${vllm_compilation_config_env[@]}" \
     "${vllm_ir_op_priority_env[@]}" \
     "${vllm_rms_norm_fake_patch_env[@]}" \
+    "${disable_vllm_request_seed_env[@]}" \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64 \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
     --env HOSTED_VLLM_API_BASE=${judge_base_url} \
