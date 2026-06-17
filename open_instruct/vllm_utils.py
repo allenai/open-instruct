@@ -100,6 +100,7 @@ INFERENCE_BATCH_SIZE_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_INFERENCE_BAT
 VLLM_COMPILATION_CONFIG_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_COMPILATION_CONFIG")
 VLLM_IR_OP_PRIORITY_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY")
 VLLM_COMPLETION_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_COMPLETION_TIMEOUT_S", "0"))
+LOG_VLLM_REQUESTS = os.environ.get("OPEN_INSTRUCT_LOG_VLLM_REQUESTS", "").lower() in {"1", "true", "yes"}
 PATCH_VLLM_META_ACTIVATION_FORWARD = os.environ.get("OPEN_INSTRUCT_PATCH_VLLM_RMS_NORM_FAKE_IMPL", "").lower() in {
     "1",
     "true",
@@ -524,6 +525,15 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "ground_truth": request.ground_truth,
         "next_sample_index": 0,
     }
+
+    if LOG_VLLM_REQUESTS:
+        logger.info(
+            "Queued vLLM request %s prompt_tokens=%d n=%d max_tokens=%d",
+            request_id,
+            len(request.prompt),
+            request.generation_config.n,
+            request.generation_config.max_tokens,
+        )
 
     _start_pending_samples(actor, request_id)
 
@@ -1039,7 +1049,11 @@ async def _acquire_and_reset_pools(
 
 async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_params: SamplingConfig):
     """Process a single async request with tool/environment support."""
+    if LOG_VLLM_REQUESTS:
+        logger.info("Starting vLLM sub-request %s", sub_request_id)
     await _check_health(actor.server_port)
+    if LOG_VLLM_REQUESTS:
+        logger.info("vLLM health check passed for %s", sub_request_id)
 
     response_tokens: list[int] = []
     response_logprobs: list[float] = []
@@ -1097,6 +1111,14 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
+            if LOG_VLLM_REQUESTS:
+                logger.info(
+                    "Starting vLLM completion for %s prompt_tokens=%d generated_tokens=%d max_tokens=%d",
+                    sub_request_id,
+                    len(current_prompt),
+                    len(response_tokens),
+                    current_max_tokens,
+                )
             completion_request = actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
@@ -1132,6 +1154,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
 
             output = api_response.choices[0]
             model_tokens = list(output.token_ids)
+            if LOG_VLLM_REQUESTS:
+                logger.info(
+                    "Finished vLLM completion for %s response_tokens=%d finish_reason=%s",
+                    sub_request_id,
+                    len(model_tokens),
+                    output.finish_reason,
+                )
             response_tokens.extend(model_tokens)
             current_prompt.extend(model_tokens)
 

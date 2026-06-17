@@ -38,6 +38,10 @@ vllm_ir_op_priority_env=()
 if [[ -n "${VLLM_IR_OP_PRIORITY:-}" ]]; then
     vllm_ir_op_priority_env=(--env OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY=${VLLM_IR_OP_PRIORITY})
 fi
+vllm_request_logging_env=()
+if [[ "${VLLM_REQUEST_LOGGING:-false}" == "true" ]]; then
+    vllm_request_logging_env=(--env OPEN_INSTRUCT_LOG_VLLM_REQUESTS=1)
+fi
 vllm_completion_timeout_env=()
 if [[ -n "${VLLM_COMPLETION_TIMEOUT:-}" ]]; then
     vllm_completion_timeout_env=(--env OPEN_INSTRUCT_VLLM_COMPLETION_TIMEOUT_S=${VLLM_COMPLETION_TIMEOUT})
@@ -71,6 +75,7 @@ uv run python mason.py \
     "${vllm_inference_batch_size_env[@]}" \
     "${vllm_compilation_config_env[@]}" \
     "${vllm_ir_op_priority_env[@]}" \
+    "${vllm_request_logging_env[@]}" \
     "${vllm_completion_timeout_env[@]}" \
     "${vllm_rms_norm_fake_patch_env[@]}" \
     "${disable_vllm_request_seed_env[@]}" \
