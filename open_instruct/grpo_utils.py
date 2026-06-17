@@ -112,7 +112,7 @@ class GRPOExperimentConfig(
     When True, ρ is clamped to [rho_clamp_lower_bound, rho_clamp_upper_bound] and tokens
     whose ρ falls outside [rho_mask_lower_bound, rho_mask_upper_bound] have their
     per-token policy loss zeroed out. This unifies truncated importance sampling
-    (https://arxiv.org/abs/...) and IcePop (https://arxiv.org/abs/2510.18855)."""
+    (https://fengyao.notion.site/off-policy-rl) and IcePop (https://arxiv.org/abs/2510.18855)."""
     rho_clamp_lower_bound: float = 0.0
     """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
     rho_clamp_upper_bound: float = 2.0
@@ -126,6 +126,11 @@ class GRPOExperimentConfig(
     compute the mean log-ratio (1/|o_i|) Σ_t log(π_old / π_θ) per response sequence,
     exponentiate to get a per-sequence ρ, and broadcast the keep/drop decision to every
     token in that sequence. If False (default), the mask is applied per token."""
+    rho_mask_tv_divergence: bool = False
+    """If True, applies the TV divergence masking from VACO (https://arxiv.org/abs/2603.01365)
+    maintains same rho for correction but masks using bounds and sequence-level TV divergence abs(p_seq - 1)
+    won't mask tokens that purport to decrease TV divergence: advantage * logprob_diff <= 0
+    """
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -383,17 +388,17 @@ def _rho_drop_masks(
     return dropped_low, dropped_high
 
 
-def _rho_sequence_level(logprob_diff: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
-    """Per-sequence ρ = exp((1/|o_i|) Σ_t (log π_old - log π_θ)), broadcast to every token.
+def _sequence_level_mean(values: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
+    """Per-sequence masked mean, broadcast back to every token.
 
-    Sequences are identified with rows of ``logprob_diff`` (shape [B, T]); padding tokens
-    contribute 0 to the sum and are excluded from the count. Empty rows return ρ = 1.
+    Sequences are identified with rows of ``values`` (shape [B, T]); padding tokens
+    are excluded from the count. Empty rows return 0.
     """
     valid = response_mask.float()
-    seq_sum = (logprob_diff * valid).sum(dim=-1, keepdim=True)
+    seq_sum = (values * valid).sum(dim=-1, keepdim=True)
     seq_count = valid.sum(dim=-1, keepdim=True).clamp_min(1.0)
     seq_mean = seq_sum / seq_count
-    return torch.exp(seq_mean).expand_as(logprob_diff)
+    return seq_mean.expand_as(values)
 
 
 @dataclass
@@ -414,7 +419,11 @@ class RhoCorrection:
 
 
 def compute_rho_correction(
-    old_logprob: torch.Tensor, vllm_logprobs: torch.Tensor, response_mask: torch.Tensor, config: GRPOExperimentConfig
+    old_logprob: torch.Tensor,
+    vllm_logprobs: torch.Tensor,
+    response_mask: torch.Tensor,
+    advantages: torch.Tensor,
+    config: GRPOExperimentConfig,
 ) -> RhoCorrection:
     """Compute the unified ρ = π^train_old / π^infer_old correction (clamp + mask)."""
     logprob_diff = torch.where(
@@ -425,10 +434,27 @@ def compute_rho_correction(
     if not config.use_rho_correction:
         return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
 
-    rho_effective = _rho_sequence_level(logprob_diff, response_mask) if config.rho_mask_sequence_level else rho
-    dropped_low, dropped_high = _rho_drop_masks(
-        rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+    rho_effective = (
+        torch.exp(_sequence_level_mean(logprob_diff, response_mask)) if config.rho_mask_sequence_level else rho
     )
+
+    if config.rho_mask_tv_divergence:
+        # don't change rho_effective as it is our truncated importance sampling
+        # calculate sequence-level TV divergence with abs(rho - 1)
+        # filter if TV divergence > delta and advantage * logprob_diff > 0
+        tv_divergence = torch.abs(rho - 1.0)
+        tv_sequence_level = _sequence_level_mean(tv_divergence, response_mask)
+        tv_dropped_low, tv_dropped_high = _rho_drop_masks(
+            tv_sequence_level, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+        )
+        tokens_increase_tv = torch.sign(logprob_diff) * advantages > 0
+        dropped_low = tv_dropped_low & tokens_increase_tv
+        dropped_high = tv_dropped_high & tokens_increase_tv
+    else:
+        dropped_low, dropped_high = _rho_drop_masks(
+            rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+        )
+
     in_range = response_mask & ~dropped_low & ~dropped_high
 
     rho_clamped = rho_effective
@@ -493,22 +519,22 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
     rho_weights: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
         pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        clipfrac = (pg_losses2 > pg_losses).float()
+        pg_loss = torch.max(pg_losses, pg_losses2)
     elif config.loss_fn == GRPOLossType.cispo:
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
-        pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
-        pg_losses2 = pg_losses
+        clipfrac = (ratio > 1.0 + config.clip_higher).float()
+        pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    pg_losses = pg_losses * rho_weights
-    pg_losses2 = pg_losses2 * rho_weights
-
-    pg_loss_max = torch.max(pg_losses, pg_losses2)
+    pg_loss *= rho_weights
+    clipfrac *= (rho_weights != 0).float()
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
@@ -518,9 +544,9 @@ def compute_grpo_loss(
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
     else:
-        kl = torch.zeros_like(pg_loss_max)
+        kl = torch.zeros_like(pg_loss)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
+    return pg_loss, clipfrac, kl
 
 
 def forward_for_logprobs(
@@ -684,9 +710,8 @@ def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bo
 def populate_sample_loss_stats(
     loss_stats_B: dict[str, torch.Tensor],
     sample_idx: int,
-    pg_losses: torch.Tensor,
-    pg_losses2: torch.Tensor,
     pg_loss: torch.Tensor,
+    clipfrac: torch.Tensor,
     ratio: torch.Tensor,
     loss: torch.Tensor,
     response_mask: torch.Tensor,
@@ -707,7 +732,7 @@ def populate_sample_loss_stats(
         if rho_metrics is not None:
             for key, value in rho_metrics.items():
                 loss_stats_B[key][sample_idx] = masked_mean(value, response_mask)
-        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
+        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(clipfrac, response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss
         loss_stats_B["val/ratio"][sample_idx] = masked_mean(ratio, response_mask)
