@@ -54,6 +54,10 @@ disable_vllm_request_seed_env=()
 if [[ "${DISABLE_VLLM_REQUEST_SEED:-false}" == "true" ]]; then
     disable_vllm_request_seed_env=(--env OPEN_INSTRUCT_DISABLE_VLLM_REQUEST_SEED=1)
 fi
+active_sampling_args=()
+if [[ "${ACTIVE_SAMPLING:-true}" == "true" ]]; then
+    active_sampling_args=(--active_sampling)
+fi
 chat_template_args=()
 if [[ -n "${CHAT_TEMPLATE_NAME:-}" ]]; then
     chat_template_args=(--chat_template_name "${CHAT_TEMPLATE_NAME}")
@@ -131,5 +135,5 @@ uv run python mason.py \
         --code_pass_rate_reward_threshold 0.99 \
         --checkpoint_state_freq ${checkpoint_state_freq} \
         --backend_timeout 1200 \
-        --active_sampling \
+        "${active_sampling_args[@]}" \
         "${vllm_enforce_eager_args[@]}"
