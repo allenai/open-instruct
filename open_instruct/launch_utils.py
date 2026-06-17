@@ -42,7 +42,7 @@ def get_commit_hash(
     return commit_hash
 
 
-INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan"]
+INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/holmes"]
 
 
 def live_subprocess_output(cmd: list[str]) -> str:
