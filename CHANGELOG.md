@@ -15,3 +15,5 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Make `get_wandb_tags` accept `extra_tags` (e.g. the experiment name) and truncate them to W&B's 64-char tag limit, and pass tags to the OLMo-core GRPO `WandBCallback` (https://github.com/allenai/open-instruct/pull/1727).
+- Log all config dataclasses (`tc`, `model_config`, `streaming_config`, `vllm_config`) in the OLMo-core GRPO wandb config, not just `args` (https://github.com/allenai/open-instruct/pull/1727).
