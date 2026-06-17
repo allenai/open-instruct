@@ -204,7 +204,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                 "wandb": {
                     "name": args.exp_name,
                     "entity": args.wandb_entity,
-                    "tags": [args.exp_name] + get_wandb_tags(),
+                    "tags": get_wandb_tags(extra_tags=[args.exp_name]),
                 }
             },
         )
