@@ -50,8 +50,11 @@ that and skips `OPENAI_API_KEY` → litellm "Missing credentials").
 ## Run on Beaker (preferred — verifier patches applied automatically)
 
 Prereqs: HEAD pushed (Gantry clones the ref); a `*_DOCKER_PAT` and `HF_TOKEN`
-secret in the workspace. Keep it small with the sample dataset (there's no
-`--n-tasks` flag; `terminal-bench@2.0` is 89 tasks).
+secret in the workspace. Keep it small with `--n-tasks N` (runs the first N
+tasks) and/or the sample dataset — `terminal-bench@2.0` is 89 tasks.
+`launch_eval.sh` also exposes Harbor resource/timeout overrides
+(`--override-cpus/-gpus/-memory-mb`, the `--*-timeout-multiplier` flags) and
+`--harbor-env daytona`.
 
 ```bash
 cd ~/code/tmax
