@@ -37,6 +37,7 @@ uv run mason.py \
     --preemptible \
     --num_nodes ${NODES} \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
     --gpus $NUM_GPUS \
     -- source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run ${TRAIN_SCRIPT} \
@@ -82,6 +83,10 @@ uv run mason.py \
     --send_slack_alerts \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
+    --loss_fn cispo \
+    --use_rho_correction \
+    --rho_mask_lower_bound 0.5 \
+    --rho_mask_upper_bound 2.0 \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
