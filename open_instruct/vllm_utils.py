@@ -564,14 +564,26 @@ def accumulate_completions(actor: "LLMRayActor", sub_request: dict) -> futures.F
         }
 
     actor.request_outputs[base_request_id]["outputs"].append(sub_request["request_output"])
+    output_count = len(actor.request_outputs[base_request_id]["outputs"])
+    if LOG_VLLM_REQUESTS:
+        logger.info(
+            "Accumulated vLLM completion for %s count=%d/%d",
+            base_request_id,
+            output_count,
+            expected_n,
+        )
 
-    if len(actor.request_outputs[base_request_id]["outputs"]) == expected_n:
+    if output_count == expected_n:
+        if LOG_VLLM_REQUESTS:
+            logger.info("Scheduling finalize for vLLM request %s", base_request_id)
         return asyncio.run_coroutine_threadsafe(finalize_completed_request(actor, base_request_id), actor.loop)
 
     return None
 
 
 async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str) -> None:
+    if LOG_VLLM_REQUESTS:
+        logger.info("Starting finalize for vLLM request %s", base_request_id)
     outputs = actor.request_outputs[base_request_id]["outputs"]
     ordered_outs = sorted(outputs, key=lambda x: split_request_id(x.request_id)["request_index"])
 
@@ -594,12 +606,29 @@ async def finalize_completed_request(actor: "LLMRayActor", base_request_id: str)
     actor.request_outputs.pop(base_request_id)
     actor.request_metadata.pop(base_request_id, None)
 
+    if LOG_VLLM_REQUESTS:
+        logger.info(
+            "Computing rewards for vLLM request %s responses=%d is_eval=%s",
+            base_request_id,
+            len(result.responses),
+            is_eval,
+        )
     result.reward_scores, result.reward_metrics = await compute_rewards(actor, result, example)
+    if LOG_VLLM_REQUESTS:
+        logger.info("Finished rewards for vLLM request %s", base_request_id)
     results_queue = actor.eval_results_queue if is_eval else actor.results_queue
     results_queue.put(result)
+    if LOG_VLLM_REQUESTS:
+        logger.info("Put finalized vLLM request %s on results queue", base_request_id)
 
 
 async def compute_rewards(actor: "LLMRayActor", result: GenerationResult, example: dict) -> tuple[list[float], dict]:
+    if LOG_VLLM_REQUESTS:
+        logger.info(
+            "Starting reward_fn responses=%d verifier_source=%s",
+            len(result.responses),
+            example.get(VERIFIER_SOURCE_KEY),
+        )
     decoded_responses = actor.llm_engine.tokenizer.batch_decode(result.responses, skip_special_tokens=True)
 
     k = len(result.responses)
@@ -616,6 +645,8 @@ async def compute_rewards(actor: "LLMRayActor", result: GenerationResult, exampl
         result.request_info,
         k_raw_queries,
     )
+    if LOG_VLLM_REQUESTS:
+        logger.info("Finished reward_fn metrics=%s", sorted(metrics.keys()))
     return scores, metrics
 
 
