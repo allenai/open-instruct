@@ -16,6 +16,12 @@ export num_unique_prompts_rollout=${NUM_UNIQUE_PROMPTS_ROLLOUT:-64}
 export total_episodes=${TOTAL_EPISODES:-$((num_unique_prompts_rollout * num_samples_per_prompt_rollout))}
 export response_length=${RESPONSE_LENGTH:-32768}
 export pack_length=${PACK_LENGTH:-$((response_length + 3072))}
+export num_nodes=${NUM_NODES:-2}
+export num_learners_per_node=${NUM_LEARNERS_PER_NODE:-8}
+export fsdp_shard_degree=${FSDP_SHARD_DEGREE:-${num_learners_per_node}}
+export fsdp_num_replicas=${FSDP_NUM_REPLICAS:-1}
+export vllm_num_engines=${VLLM_NUM_ENGINES:-1}
+export checkpoint_state_freq=${CHECKPOINT_STATE_FREQ:-100}
 vllm_enforce_eager_args=()
 if [[ "${VLLM_ENFORCE_EAGER:-false}" == "true" ]]; then
     vllm_enforce_eager_args=(--vllm_enforce_eager)
@@ -40,7 +46,7 @@ uv run python mason.py \
     --workspace ai2/holmes-testing \
     --priority urgent \
     --preemptible \
-    --num_nodes 2 \
+    --num_nodes ${num_nodes} \
     --gpus 8 \
     --max_retries 0 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -79,11 +85,11 @@ uv run python mason.py \
         --ground_truths_key ground_truth \
         --sft_messages_key messages \
         --total_episodes ${total_episodes} \
-        --num_learners_per_node 8 \
-        --fsdp_shard_degree 8 \
-        --fsdp_num_replicas 1 \
+        --num_learners_per_node ${num_learners_per_node} \
+        --fsdp_shard_degree ${fsdp_shard_degree} \
+        --fsdp_num_replicas ${fsdp_num_replicas} \
         --activation_memory_budget 0.1 \
-        --vllm_num_engines 1 \
+        --vllm_num_engines ${vllm_num_engines} \
         --vllm_tensor_parallel_size 1 \
         --lr_scheduler_type constant \
         --apply_verifiable_reward true \
@@ -98,7 +104,7 @@ uv run python mason.py \
         --llm_judge_max_context_length 32768 \
         --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
         --code_pass_rate_reward_threshold 0.99 \
-        --checkpoint_state_freq 100 \
+        --checkpoint_state_freq ${checkpoint_state_freq} \
         --backend_timeout 1200 \
         --active_sampling \
         "${vllm_enforce_eager_args[@]}"
