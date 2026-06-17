@@ -44,7 +44,10 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.config import WeightTransferConfig
-from vllm.config.kernel import IrOpPriorityConfig
+try:
+    from vllm.config.kernel import IrOpPriorityConfig
+except ImportError:
+    IrOpPriorityConfig = None
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest, WeightTransferUpdateRequest
 from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
 from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
@@ -133,7 +136,9 @@ def _parse_vllm_compilation_config_override(value: str) -> Any:
     return json.loads(value)
 
 
-def _parse_vllm_ir_op_priority_override(value: str) -> IrOpPriorityConfig:
+def _parse_vllm_ir_op_priority_override(value: str) -> Any:
+    if IrOpPriorityConfig is None:
+        raise RuntimeError("OPEN_INSTRUCT_VLLM_IR_OP_PRIORITY requires a vLLM version with IrOpPriorityConfig")
     return IrOpPriorityConfig(**json.loads(value))
 
 
