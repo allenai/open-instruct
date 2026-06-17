@@ -24,6 +24,10 @@ vllm_enforce_eager_args=()
 if [[ "${VLLM_ENFORCE_EAGER:-false}" == "true" ]]; then
     vllm_enforce_eager_args=(--vllm_enforce_eager)
 fi
+vllm_inference_batch_size_env=()
+if [[ -n "${VLLM_INFERENCE_BATCH_SIZE:-}" ]]; then
+    vllm_inference_batch_size_env=(--env OPEN_INSTRUCT_VLLM_INFERENCE_BATCH_SIZE=${VLLM_INFERENCE_BATCH_SIZE})
+fi
 
 uv run python mason.py \
     --cluster ai2/holmes \
@@ -38,6 +42,7 @@ uv run python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ENGINE_READY_TIMEOUT_S=7200 \
     --env OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500 \
+    "${vllm_inference_batch_size_env[@]}" \
     --env LD_LIBRARY_PATH=/var/lib/tcpxo/lib64 \
     --env NCCL_LIB_DIR=/var/lib/tcpxo/lib64 \
     --env HOSTED_VLLM_API_BASE=${judge_base_url} \

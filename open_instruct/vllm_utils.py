@@ -94,6 +94,7 @@ NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = float(os.environ.get("OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S", "1200"))
+INFERENCE_BATCH_SIZE_OVERRIDE = os.environ.get("OPEN_INSTRUCT_VLLM_INFERENCE_BATCH_SIZE")
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
@@ -434,12 +435,37 @@ async def _check_health(port: int) -> None:
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
     while True:
-        if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
+        if actor._should_stop() or actor.active_task_count() >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
         request = actor.prompt_queue.get()
         add_request(actor, request)
+
+
+def _start_sub_request(
+    actor: "LLMRayActor", request_id: str, request_index: int, sampling_params: SamplingConfig
+) -> None:
+    seed = sampling_params.seed + request_index if sampling_params.seed is not None else None
+    sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
+    sub_request_id = f"{request_id}_{request_index}"
+    actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
+        process_request(actor, sub_request_id, sub_sampling_params), actor.loop
+    )
+
+
+def _start_pending_samples(actor: "LLMRayActor", request_id: str) -> None:
+    metadata = actor.request_metadata.get(request_id)
+    if metadata is None:
+        return
+
+    sampling_params = metadata["sampling_params"]
+    expected_n = metadata["original_sampling_params"].n
+    with actor.active_tasks_lock:
+        while len(actor.active_tasks) < actor.inference_batch_size and metadata["next_sample_index"] < expected_n:
+            request_index = metadata["next_sample_index"]
+            metadata["next_sample_index"] += 1
+            _start_sub_request(actor, request_id, request_index, sampling_params)
 
 
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
@@ -458,15 +484,10 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "active_tools": request.active_tools,
         "env_config": request.env_config,
         "ground_truth": request.ground_truth,
+        "next_sample_index": 0,
     }
 
-    for j in range(request.generation_config.n):
-        seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
-        sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
-        sub_request_id = f"{request_id}_{j}"
-        actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
-            process_request(actor, sub_request_id, sub_sampling_params), actor.loop
-        )
+    _start_pending_samples(actor, request_id)
 
 
 FALLBACK_CHAT_TEMPLATE = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
@@ -597,6 +618,9 @@ class LLMRayActor:
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
+        if INFERENCE_BATCH_SIZE_OVERRIDE is not None:
+            self.inference_batch_size = max(1, min(self.inference_batch_size, int(INFERENCE_BATCH_SIZE_OVERRIDE)))
+            logger.info("Capped vLLM inference batch size to %d", self.inference_batch_size)
         self._init_executor()
         # comes after executor as it requires tokenizer access.
         self._init_tool_parser(tool_parser_type)
@@ -641,6 +665,7 @@ class LLMRayActor:
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
+        self.active_tasks_lock = threading.RLock()
 
         # For caching should_stop status.
         self._last_should_stop_update = float("-inf")
@@ -767,6 +792,10 @@ class LLMRayActor:
                 ray.cancel(should_stop_ref)
         return self._should_stop_value
 
+    def active_task_count(self) -> int:
+        with self.active_tasks_lock:
+            return len(self.active_tasks)
+
     def process_from_queue(self) -> None:
         finalize_futures: list[futures.Future] = []
         while True:
@@ -822,7 +851,9 @@ class LLMRayActor:
             self._prefetch_future.result()
         if self._process_future.done():
             self._process_future.result()
-        for task in self.active_tasks.values():
+        with self.active_tasks_lock:
+            active_tasks = list(self.active_tasks.values())
+        for task in active_tasks:
             if task.done():
                 task.result()
         if not self.loop_thread.is_alive():
@@ -1158,7 +1189,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         rollout_state=dataclasses.asdict(rollout),
     )
 
-    actor.active_tasks.pop(sub_request_id, None)
+    with actor.active_tasks_lock:
+        actor.active_tasks.pop(sub_request_id, None)
+    _start_pending_samples(actor, base_request_id)
     actor.completion_queue.put(
         {
             "base_request_id": base_request_id,
