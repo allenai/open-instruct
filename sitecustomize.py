@@ -39,6 +39,16 @@ def _patch_vllm_rms_norm_fake_impls() -> None:
     def _fused_add_rms_norm_fake(x, x_residual, weight, epsilon, variance_size=None):
         return _empty_like_for_fake(x), _empty_like_for_fake(x_residual)
 
+    import torch
+
+    try:
+        @torch.library.register_fake("_C::silu_and_mul")
+        def _silu_and_mul_fake(out, x):
+            return None
+    except RuntimeError as exc:
+        if "does not exist" not in str(exc):
+            raise
+
 
 if _truthy(os.environ.get("OPEN_INSTRUCT_PATCH_VLLM_RMS_NORM_FAKE_IMPL")):
     _patch_vllm_rms_norm_fake_impls()
