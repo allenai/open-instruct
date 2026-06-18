@@ -59,8 +59,8 @@ class ModelConfig:
     """Pretrained config name or path if not the same as model_name."""
     attn_implementation: AttentionBackendName | None = None
     """Which attention implementation to use. If None, auto-detects the best available."""
-    loss_implementation: LMLossImplementation | None = None
-    """LM loss implementation (e.g. 'fused_linear' for Liger FLCE). If None, uses olmo-core's default.
+    loss_implementation: LMLossImplementation = LMLossImplementation.default
+    """LM loss implementation (e.g. 'fused_linear' for Liger FLCE). Defaults to olmo-core's default.
     Only consulted when labels are passed into the model (SFT); DPO computes loss from logits outside the lm_head."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
@@ -368,8 +368,7 @@ def setup_model(
         vocab_size,
         attn_backend=model_config_args.attn_implementation,
     )
-    if model_config_args.loss_implementation is not None:
-        model_config.lm_head.loss_implementation = LMLossImplementation(model_config_args.loss_implementation)
+    model_config.lm_head.loss_implementation = LMLossImplementation(model_config_args.loss_implementation)
     if model_config_args.rope_scaling_factor is not None:
         model_config = model_config.with_rope_scaling(
             YaRNRoPEScalingConfig(
