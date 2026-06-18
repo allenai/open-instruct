@@ -18,6 +18,7 @@ from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
+from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
 from torch.distributed.tensor import DTensor, Replicate, Shard
@@ -226,7 +227,8 @@ class DPOTrainModule(TransformerTrainModule):
         micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
         device = batch["chosen_input_ids"].device
-        total_tokens = padding_free_collator.get_num_tokens(batch)
+        micro_token_counts = [padding_free_collator.get_num_tokens(mb) for mb in micro_batches]
+        total_tokens = sum(micro_token_counts)
 
         for v in self._metrics.values():
             v.zero_()
@@ -234,7 +236,7 @@ class DPOTrainModule(TransformerTrainModule):
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
                 loss, step_metrics = self._compute_microbatch_loss(micro_batch)
-                micro_tokens = padding_free_collator.get_num_tokens(micro_batch)
+                micro_tokens = micro_token_counts[micro_batch_idx]
                 weight = micro_tokens / total_tokens
                 for k, v in step_metrics.items():
                     self._metrics[k] += v.detach() * micro_tokens
@@ -243,39 +245,76 @@ class DPOTrainModule(TransformerTrainModule):
         self.model.post_batch(dry_run=dry_run)
 
         if not dry_run:
-            metric_keys = sorted(self._metrics.keys())
-            local_sums_list = [torch.tensor(total_tokens, dtype=torch.float32, device=device)] + [
-                self._metrics[k] for k in metric_keys
-            ]
-            local_sums = torch.stack(local_sums_list)
-            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+            local_padded_tokens = padding_free_collator.get_num_padded_tokens(batch)
+            local_num_sequences = padding_free_collator.get_num_sequences(batch)
 
-            global_total_tokens = local_sums[0]
-            global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
-
-            self.record_metric("train/loss", global_metrics["loss"].item(), reduce_type=None)
-            self.record_metric("train/logps_chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
-            self.record_metric("train/logps_rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
             token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
             assert token_count is not None
             self.record_metric("train/token_count", token_count, reduce_type=None)
 
+            weighted_sums = {
+                "train_loss": self._metrics["loss"],
+                "logps/chosen": self._metrics["chosen_logps"],
+                "logps/rejected": self._metrics["rejected_logps"],
+            }
             if self.dpo_config.loss_type.computes_reward_metrics:
-                margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
-                self.record_metric("train/rewards_chosen", global_metrics["chosen_rewards"].item(), reduce_type=None)
-                self.record_metric(
-                    "train/rewards_rejected", global_metrics["rejected_rewards"].item(), reduce_type=None
-                )
-                self.record_metric(
-                    "train/rewards_average",
-                    ((global_metrics["chosen_rewards"] + global_metrics["rejected_rewards"]) / 2).item(),
-                    reduce_type=None,
-                )
-                self.record_metric("train/rewards_accuracy", global_metrics["accuracy"].item(), reduce_type=None)
-                self.record_metric("train/rewards_margin", margin.item(), reduce_type=None)
+                chosen_rewards = self._metrics["chosen_rewards"]
+                rejected_rewards = self._metrics["rejected_rewards"]
+                weighted_sums["rewards/chosen"] = chosen_rewards
+                weighted_sums["rewards/rejected"] = rejected_rewards
+                weighted_sums["rewards/average"] = (chosen_rewards + rejected_rewards) / 2
+                weighted_sums["rewards/accuracy"] = self._metrics["accuracy"]
+                weighted_sums["rewards/margin"] = chosen_rewards - rejected_rewards
+            if "aux_loss" in self._metrics:
+                weighted_sums["aux_loss"] = self._metrics["aux_loss"]
 
-            if "aux_loss" in global_metrics:
-                self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
+            # DPO token-weighted metrics are ratios sum_ranks(sum_mb(metric*tokens)) / sum_ranks(tokens).
+            # Stack the shared denominators (real and padded token counts) with the numerators and
+            # reduce them in one all-reduce over the DP group, then divide. TP/CP duplicate ranks share
+            # a batch, so reducing over dp_process_group (not the whole world) avoids double-counting.
+            metric_names = list(weighted_sums.keys())
+            local_sums = torch.stack(
+                [
+                    torch.tensor(float(total_tokens), device=device),
+                    torch.tensor(float(local_padded_tokens), device=device),
+                    *[weighted_sums[name] for name in metric_names],
+                ]
+            )
+            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+            global_tokens, global_padded = local_sums[0], local_sums[1]
+            for i, name in enumerate(metric_names):
+                self.record_metric(name, (local_sums[i + 2] / global_tokens).item(), reduce_type=None)
+            self.record_metric(
+                "train/padding_fraction", (1.0 - global_tokens / global_padded).item(), reduce_type=None
+            )
+
+            local_num_sequences_f = local_num_sequences.to(device=device, dtype=torch.float32)
+            # Use mean rather than sum: the reduction runs over the whole world, but all non-DP
+            # ranks (TP, CP) in a DP shard process the same batch. mean divides the world-group sum
+            # by world_size, yielding the average per-rank sequence count without double-counting
+            # the duplicated ranks.
+            self.record_metric("train/sequences_per_rank", local_num_sequences_f, reduce_type=ReduceType.mean)
+            # Global per-step total across DP shards. ReduceType.sum reduces over the whole world, so
+            # pre-divide by the TP/CP duplication factor (world_size / dp_world_size) to count each
+            # DP shard's sequences once.
+            dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
+            sequence_dup_factor = dist.get_world_size() // dp_world_size
+            self.record_metric(
+                "train/global_sequences_per_step",
+                local_num_sequences_f / sequence_dup_factor,
+                reduce_type=ReduceType.sum,
+            )
+
+            self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
+            assert self.trainer.steps_per_epoch is not None
+            self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
+            if self.scheduler is not None and self.trainer.max_steps is not None:
+                lr = self.scheduler.get_lr(
+                    self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
+                    self.trainer.global_step,
+                    self.trainer.max_steps,
+                )
+                self.record_metric("learning_rate", float(lr), reduce_type=None)
 
 
 class GRPOTrainModule(TransformerTrainModule):
@@ -556,6 +595,11 @@ class GRPOTrainModule(TransformerTrainModule):
             if not dry_run:
                 self._do_optim_step()
             self.optim.zero_grad(set_to_none=True)
+
+        # Keep _metrics non-empty on every rank every step so OLMo-core's
+        # _log_metrics skip can't fire asymmetrically and deadlock gloo on the
+        # untagged bookkeeping process group.
+        self.record_metric("_metrics_keepalive", float(self.trainer.global_step), reduce_type=None)
 
         if not dry_run and num_steps > 0:
             local_metrics = grpo_utils.compute_metrics_from_loss_stats(loss_stats_B, token_counts)

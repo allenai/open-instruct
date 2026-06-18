@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
+import dataclasses
 import json
 import os
 import pathlib
@@ -68,6 +69,22 @@ MODEL_DIMS: dict[str, utils.ModelDims] = {
         num_attn_heads=16,
         head_dim=128,
         num_kv_heads=8,
+        device_name="h100",
+    ),
+    "olmo-hybrid-7b": utils.ModelDims(
+        num_layers=8,
+        hidden_size=3840,
+        intermediate_size=11008,
+        vocab_size=100352,
+        num_attn_heads=30,
+        head_dim=128,
+        num_kv_heads=30,
+        num_linear_attn_layers=6,
+        linear_attn_num_k_heads=30,
+        linear_attn_num_v_heads=30,
+        linear_attn_key_head_dim=96,
+        linear_attn_value_head_dim=192,
+        linear_attn_conv_size=4,
         device_name="h100",
     ),
 }
@@ -592,6 +609,7 @@ class TestModelDims(unittest.TestCase):
             ("two_engines_four_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 2, 4, 4, 8.0, 4.0),
             ("four_engines_two_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 4, 2, 4, 8.0, 4.0),
             ("single_engine_eight_gpus", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 1, 8, 4, 8.0, 4.0),
+            ("hybrid_two_engines_two_gpus_each", "olmo-hybrid-7b", 8, 2, 256, 256, 4, 2, 2, 4, 8.0, 4.0),
         ]
     )
     def test_multi_engine_utilization(
@@ -738,6 +756,62 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             model_dims = utils.ModelDims.from_hf_config("test/cpu")
 
         self.assertIsNone(model_dims.device_name)
+
+    def test_from_hf_config_hybrid(self):
+        config = SimpleNamespace(
+            model_type="olmo_hybrid",
+            hidden_size=3840,
+            intermediate_size=11008,
+            num_attention_heads=30,
+            num_key_value_heads=30,
+            head_dim=128,
+            num_hidden_layers=8,
+            vocab_size=100352,
+            layer_types=["linear_attention", "linear_attention", "linear_attention", "full_attention"] * 2,
+            linear_num_key_heads=30,
+            linear_num_value_heads=30,
+            linear_key_head_dim=96,
+            linear_value_head_dim=192,
+            linear_conv_kernel_dim=4,
+        )
+        config.get_text_config = lambda: config
+
+        with (
+            mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
+            mock.patch("torch.cuda.is_available", return_value=False),
+        ):
+            model_dims = utils.ModelDims.from_hf_config("test/hybrid")
+
+        self.assertEqual(model_dims.num_linear_attn_layers, 6)
+        self.assertEqual(model_dims.linear_attn_key_dim, 30 * 96)
+        self.assertEqual(model_dims.linear_attn_value_dim, 30 * 192)
+        self.assertEqual(model_dims.linear_attn_conv_size, 4)
+
+
+class TestModelDimsHybrid(unittest.TestCase):
+    def _hybrid_dims(self, num_layers: int = 8) -> utils.ModelDims:
+        return dataclasses.replace(MODEL_DIMS["olmo-hybrid-7b"], num_layers=num_layers, num_params=None)
+
+    def test_linear_attn_flops_scale_linearly(self):
+        dims = self._hybrid_dims()
+        self.assertEqual(dims.linear_attn_flops(2000), 2 * dims.linear_attn_flops(1000))
+
+    def test_decode_flops_constant_per_prompt_length_for_gdn(self):
+        # A purely linear-attention model has no growing context, so decode FLOPs are independent
+        # of prompt length (unlike softmax attention, where they grow with kv_len).
+        gdn_only = self._hybrid_dims(num_layers=6)
+        self.assertEqual(gdn_only.decode_flops([10], [32]), gdn_only.decode_flops([10000], [32]))
+
+    def test_gdn_layers_excluded_from_kv_cache(self):
+        dims = self._hybrid_dims()
+        # Only the 2 full-attention layers (8 total - 6 GDN) write a KV cache.
+        per_token = 2 * dims.num_kv_heads * dims.head_dim * 2
+        self.assertEqual(dims.kv_cache_write_bytes(100), 2 * 100 * per_token)
+
+    def test_gdn_state_bytes_present(self):
+        dims = self._hybrid_dims()
+        state_elems = 30 * 96 * 192
+        self.assertEqual(dims.gdn_state_bytes(10), 6 * 10 * 2 * state_elems * 2)
 
 
 # useful for checking if public datasets are still available

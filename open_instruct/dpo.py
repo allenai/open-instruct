@@ -23,9 +23,16 @@ from olmo_core.train.callbacks import ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import dataset_transformation, dpo_utils, logger_utils, model_utils, olmo_core_utils, utils
+from open_instruct import (
+    dataset_transformation,
+    dpo_utils,
+    logger_utils,
+    model_utils,
+    olmo_core_train_modules,
+    olmo_core_utils,
+    utils,
+)
 from open_instruct.olmo_core_callbacks import PerfCallback
-from open_instruct.olmo_core_train_modules import DPOTrainModule
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
@@ -72,7 +79,6 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
     model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
-        per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         dp_world_size=dp_world_size,
         tensor_parallel_degree=args.tensor_parallel_degree,
@@ -268,9 +274,14 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         reduce_dtype=DType.float32,
         wrapping_strategy=transformer_config.TransformerDataParallelWrappingStrategy.blocks,
     )
-    ac_config = olmo_core_utils.build_ac_config(args.activation_memory_budget, args.compile_model)
+    ac_config = olmo_core_utils.build_ac_config(
+        args.activation_memory_budget,
+        args.compile_model,
+        args.activation_checkpointing_mode,
+        args.activation_checkpointing_modules,
+    )
 
-    train_module = DPOTrainModule(
+    train_module = olmo_core_train_modules.DPOTrainModule(
         model=model,
         optim=optim_config,
         sample_microbatch_size=args.per_device_train_batch_size,
