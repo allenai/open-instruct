@@ -58,6 +58,7 @@ for model_name_or_path in "$@"; do
         --num_nodes 1 \
         --max_retries 0 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        --env RAY_NODE_PORT=8898 \
         --gpus 1 \
         --secret HF_TOKEN=jacobm_HF_TOKEN \
         --no_auto_dataset_cache \
