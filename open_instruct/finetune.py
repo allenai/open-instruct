@@ -1108,8 +1108,10 @@ if __name__ == "__main__":
         DeprecationWarning,
         stacklevel=1,
     )
-    utils.check_oe_eval_internal()
-
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
+    # oe-eval-internal is only needed to launch Beaker eval jobs (see line ~1089).
+    # Only enforce its presence when evals are actually requested.
+    if args.try_launch_beaker_eval_jobs:
+        utils.check_oe_eval_internal()
     main(args, tc)
