@@ -37,6 +37,7 @@ uv run mason.py \
     --preemptible \
     --num_nodes ${NODES} \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
     --gpus $NUM_GPUS \
     -- source configs/beaker_configs/ray_node_setup.sh \
@@ -66,7 +67,6 @@ uv run mason.py \
     --pack_length 10240 \
     --model_name_or_path "Qwen/Qwen3-4B-Base" \
     --non_stop_penalty False \
-    --temperature 1.0 \
     --total_episodes 128000 \
     ${BACKEND_ARGS} \
     --num_learners_per_node 4 \

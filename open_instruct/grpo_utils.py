@@ -322,19 +322,19 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
-        if self.use_rho_correction:
-            if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
-                raise ValueError(
-                    f"rho_mask_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_mask_lower_bound}."
-                )
-            if self.rho_mask_upper_bound > 0.0 and self.rho_mask_upper_bound <= 1.0:
-                raise ValueError(f"rho_mask_upper_bound must be > 1 when set, got {self.rho_mask_upper_bound}.")
-            if self.rho_clamp_lower_bound > 0.0 and self.rho_clamp_lower_bound >= 1.0:
-                raise ValueError(
-                    f"rho_clamp_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_clamp_lower_bound}."
-                )
-            if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
-                raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
+        # if self.use_rho_correction:
+        # if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
+        #     raise ValueError(
+        #         f"rho_mask_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_mask_lower_bound}."
+        #     )
+        # if self.rho_mask_upper_bound > 0.0 and self.rho_mask_upper_bound <= 1.0:
+        #     raise ValueError(f"rho_mask_upper_bound must be > 1 when set, got {self.rho_mask_upper_bound}.")
+        # if self.rho_clamp_lower_bound > 0.0 and self.rho_clamp_lower_bound >= 1.0:
+        #     raise ValueError(
+        #         f"rho_clamp_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_clamp_lower_bound}."
+        #     )
+        # if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
+        #     raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
