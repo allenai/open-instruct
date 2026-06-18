@@ -36,7 +36,7 @@ dependencies = [
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     # The flat FA3 wheel index can publish a newer aarch64-only build than the latest x86_64 build.
     # Pin the Linux x86_64 wheel directly so uv doesn't resolve to an aarch64-only version.
-    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
@@ -72,12 +72,20 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "9aa3280fd5331b93fc766206eadec42ee73befc0" }
 flash-attn = [
-  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
+  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
+]
+vllm = [
+  { url = "https://github.com/vllm-project/vllm/releases/download/v0.19.1/vllm-0.19.1%2Bcu130-cp38-abi3-manylinux_2_35_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
 
 torch = [
-  { index = "pytorch-cu128", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
+]
+torchaudio = [
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
+]
+torchvision = [
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
 ]
 [[tool.uv.index]]
 name = "pytorch-cu128"
