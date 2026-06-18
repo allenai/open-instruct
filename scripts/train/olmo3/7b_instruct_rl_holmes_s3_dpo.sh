@@ -54,6 +54,7 @@ uv run python mason.py \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ENGINE_READY_TIMEOUT_S=7200 \
     --env OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500 \
+    --env OPEN_INSTRUCT_PATCH_OLMO_CORE_FLASH_ATTN_4_API=1 \
     "${vllm_inference_batch_size_env[@]}" \
     "${vllm_compilation_config_env[@]}" \
     "${vllm_rms_norm_fake_patch_env[@]}" \
