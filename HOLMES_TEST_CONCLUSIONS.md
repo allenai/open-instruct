@@ -59,16 +59,16 @@ All TPS values are aggregate benchmark throughput across the configured vLLM eng
 
 ## Refreshed Inference Grid
 
-These runs use the newer Holmes image/settings after the CUDA 13 / FlashAttention 4 / vLLM compatibility work and after restoring Mason `VLLM_DISABLE_COMPILE_CACHE=1`. Prefer this table over the older inference grid once all cells finish.
+These runs use the newer Holmes image/settings after the CUDA 13 / FlashAttention 4 / vLLM compatibility work and after restoring Mason `VLLM_DISABLE_COMPILE_CACHE=1`. Prefer this table over the older inference grid; all refreshed cells have now resolved. The long eager 32k cells failed before producing TPS summaries.
 
 | Config | Beaker experiment | Status | TPS | Notes |
 | --- | --- | --- | ---: | --- |
 | Olmo 3 32B, TP=1, 8k generation, 1 GPU, non-eager | https://beaker.org/ex/01KVCMXNYW0TCXDBHJW6D552N6 | Failed | n/a | Timed out during vLLM engine initialization after loading shards. |
 | Olmo 3 32B, TP=1, 8k generation, 1 GPU, eager | https://beaker.org/ex/01KVCNME9HPP7V1R82JBHKCQR2 | Passed | 281.86 | New-image refreshed result; lower than the older non-eager single-GPU result and above the older eager result. |
 | Olmo 3 32B, TP=4, 32k generation, 8 GPUs, non-eager | https://beaker.org/ex/01KVCMXNZ63NNAPS3PAKGXRKWK | Failed | n/a | Timed out during vLLM engine initialization after loading shards. |
-| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXP06K4QN9Z3NKD6RR8KS | Running | n/a | Reached vLLM health checks; no summary yet. |
+| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXP06K4QN9Z3NKD6RR8KS | Failed | n/a | Reached vLLM health checks, then failed with `TimeoutError: Batch timed out, got 0/16`; no benchmark summary. |
 | Olmo 3 32B, TP=8, 32k generation, 8 GPUs, non-eager | https://beaker.org/ex/01KVCMXNYZT453NSDXZZSCQGHJ | Passed | 2028.12 | New-image refreshed result; still well above the 928.45 H100 baseline, but lower than the older TP=8 32k pass at 2271.36 TPS. |
-| Olmo 3 32B, TP=8, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXNYTR5FA3YY0QFRGKM2B | Running | n/a | Reached vLLM health checks; no summary yet. |
+| Olmo 3 32B, TP=8, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXNYTR5FA3YY0QFRGKM2B | Failed | n/a | Reached vLLM health checks, then failed with `TimeoutError: Batch timed out, got 0/16`; no benchmark summary. |
 
 ## RLVR Training Throughput Notes
 
