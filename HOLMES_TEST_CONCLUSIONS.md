@@ -4,6 +4,8 @@
 
 These notes summarize Holmes/B300 benchmark runs for Olmo inference acceptance testing and compare them against the H100 baseline table in `HOLMES_HANDOFF.md` where the configuration matches.
 
+Note: the original inference tables below were collected before the latest Holmes image/environment work (CUDA 13, FlashAttention 4, vLLM CUDA-13 wheel path, and Mason compile-cache defaults). Treat the older inference results as potentially obsolete until the refreshed grid finishes. The older results remain useful as historical diagnostics, but the refreshed runs should be preferred for final acceptance conclusions.
+
 ## H100 Baselines From Handoff
 
 | Model | TP | Generation length | H100 TPS |
@@ -53,6 +55,36 @@ All TPS values are aggregate benchmark throughput across the configured vLLM eng
 | --- | --- |
 | Olmo 3 32B, TP=8, 32k generation, eager mode | https://beaker.org/ex/01KV7GZTHQFRFHSRKHX47KFRVG launched from commit `402852b2` with image `01KV7GYNMS32XJZF7F39Q6V8C4`, official `VLLM_ENGINE_READY_TIMEOUT_S=7200`, and Open Instruct wrapper `OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500`. This removes the nested Ray executor override so TP>1 uses the local `mp` executor path; logs reached repeated vLLM health checks. |
 | Olmo 3 32B, TP=4, 32k generation, eager mode | https://beaker.org/ex/01KV7G8K55GVS71BAJ8W5XBT2X launched from commit `4d8e0694` with image `01KV7G7CN191WZMNATXKDYX4ZZ` as the eager comparison for the completed TP=4 32k run. |
+
+
+## Refreshed Inference Grid
+
+These runs use the newer Holmes image/settings after the CUDA 13 / FlashAttention 4 / vLLM compatibility work and after restoring Mason `VLLM_DISABLE_COMPILE_CACHE=1`. Prefer this table over the older inference grid once all cells finish.
+
+| Config | Beaker experiment | Status | TPS | Notes |
+| --- | --- | --- | ---: | --- |
+| Olmo 3 32B, TP=1, 8k generation, 1 GPU, non-eager | https://beaker.org/ex/01KVCMXNYW0TCXDBHJW6D552N6 | Failed | n/a | Timed out during vLLM engine initialization after loading shards. |
+| Olmo 3 32B, TP=1, 8k generation, 1 GPU, eager | https://beaker.org/ex/01KVCNME9HPP7V1R82JBHKCQR2 | Passed | 281.86 | New-image refreshed result; lower than the older non-eager single-GPU result and above the older eager result. |
+| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, non-eager | https://beaker.org/ex/01KVCMXNZ63NNAPS3PAKGXRKWK | Failed | n/a | Timed out during vLLM engine initialization after loading shards. |
+| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXP06K4QN9Z3NKD6RR8KS | Running | n/a | Reached vLLM health checks; no summary yet. |
+| Olmo 3 32B, TP=8, 32k generation, 8 GPUs, non-eager | https://beaker.org/ex/01KVCMXNYZT453NSDXZZSCQGHJ | Passed | 2028.12 | New-image refreshed result; still well above the 928.45 H100 baseline, but lower than the older TP=8 32k pass at 2271.36 TPS. |
+| Olmo 3 32B, TP=8, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXNYTR5FA3YY0QFRGKM2B | Running | n/a | Reached vLLM health checks; no summary yet. |
+
+## RLVR Training Throughput Notes
+
+The current 28-node Holmes Think RLVR run is `https://beaker.org/ex/01KVCM995YVBCGT1E2DG4P8K81` with W&B run `l534x7sh`. The closest older Jupiter comparison is W&B run `29h723j6`.
+
+| Run | Step | Actor TPS | Learner TPS step | Learner TPS overall | Step tokens |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Holmes current | 1 | 6849.73 | 2868.88 | 2868.88 | 1604666 |
+| Holmes current | 2 | 9217.38 | 12258.52 | 5467.63 | 2623906 |
+| Holmes current | 3 | 7249.14 | 4580.76 | 4935.42 | 5316105 |
+| Old Jupiter | 1 | 5039.49 | 3912.87 | 3912.87 | 3516883 |
+| Old Jupiter | 2 | 4792.07 | 11389.63 | 6787.86 | 6523532 |
+| Old Jupiter final summary | 1685 | 3829.55 | 9206.84 | 10813.68 | 9786193 |
+
+Early interpretation: Holmes/B300 generation throughput is clearly improved versus the old Jupiter reference, which is the expected sign that the GPUs are working well. Learner throughput has not yet shown a clean steady-state improvement: step 2 was strong, while steps 1 and 3 were lower. With only three steps, this looks more like learner-side variability and cold-start / communication / batch-composition noise than a GPU health concern.
+
 
 ## Current Conclusions
 
