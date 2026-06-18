@@ -13,7 +13,7 @@ fi
 export exp_name=${EXP_NAME:-h224_32b_think_ds${eager_suffix}_${run_stamp}_${RANDOM}}
 export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture_dpo 1.0 hamishivi/IF_multi_constraints_upto5_filtered_dpo_0625_filter 30186 allenai/rlvr_general_mix-keyword-filtered 21387"
 export model_path=${MODEL_PATH:-allenai/Olmo-3-32B-Think-DPO}
-export tokenizer_name_or_path=${TOKENIZER_NAME_OR_PATH:-allenai/dolma2-tokenizer}
+export tokenizer_name_or_path=${TOKENIZER_NAME_OR_PATH:-allenai/Olmo-3-32B-Think-DPO}
 export chat_template_name=${CHAT_TEMPLATE_NAME:-olmo_thinker}
 export judge_base_url=${JUDGE_BASE_URL:?Set JUDGE_BASE_URL to the hosted Qwen3-32B judge endpoint, e.g. http://holmes-cs-aus-000.reviz.ai2.in:8001/v1}
 export num_samples_per_prompt_rollout=${NUM_SAMPLES_PER_PROMPT_ROLLOUT:-8}
