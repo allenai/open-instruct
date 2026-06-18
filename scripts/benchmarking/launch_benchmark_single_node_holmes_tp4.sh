@@ -56,7 +56,7 @@ for model_name_or_path in "$@"; do
         --gpus 8 \
         --secret HF_TOKEN=jacobm_HF_TOKEN \
         --no_auto_dataset_cache \
-        --task_name open_instruct-benchmark_generators-holmes-tp4 -- source configs/beaker_configs/ray_node_setup.sh \&\& python -m open_instruct.benchmark_generators \
+        --task_name open_instruct-benchmark_generators-holmes-tp4 -- source configs/beaker_configs/ray_node_setup.sh \&\& HF_DATASETS_CACHE=/tmp/open_instruct_hf_datasets_cache_${BEAKER_JOB_ID} python -m open_instruct.benchmark_generators \
             --model_name_or_path "$model_name_or_path" \
             --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
             --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
