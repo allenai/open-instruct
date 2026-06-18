@@ -138,7 +138,6 @@ These are injected into every Beaker experiment:
 
 | Variable | Value | Why |
 |----------|-------|-----|
-| `VLLM_DISABLE_COMPILE_CACHE` | `1` | Torch compile caching is consistently broken in our setup, though compilation itself works fine |
 | `VLLM_USE_V1` | `1` | Use the vLLM v1 engine (default for new work) |
 | `VLLM_ALLOW_INSECURE_SERIALIZATION` | `1` | Required for certain model serialization paths |
 | `VLLM_ATTENTION_BACKEND` | `FLASH_ATTN` | Default vLLM attention backend; override via `--env VLLM_ATTENTION_BACKEND=...` or `--vllm_attention_backend ...` |

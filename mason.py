@@ -95,12 +95,8 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
     return {"name": name, "value": value}
 
 
-# by default, we turn off vllm compile cache
-# torch compile caching seems consistently broken, but the actual compiling isn't.
-# Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
 DEFAULT_ENV_VARS = {
     "RAY_CGRAPH_get_timeout": "300",
-    "VLLM_DISABLE_COMPILE_CACHE": "1",
     "NCCL_DEBUG": "ERROR",
     "VLLM_LOGGING_LEVEL": "WARNING",
     "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
