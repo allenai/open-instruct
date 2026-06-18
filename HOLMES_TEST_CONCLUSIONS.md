@@ -98,7 +98,7 @@ Key known differences between the current Holmes run and the older Jupiter compa
 | Old Jupiter | 2 | 4792.07 | 11389.63 | 6787.86 | 6523532 |
 | Old Jupiter final summary | 1685 | 3829.55 | 9206.84 | 10813.68 | 9786193 |
 
-Current estimates across Holmes Think RLVR steps 1-11: token-weighted actor/generator throughput is about 2451.31 TPS, learner overall throughput is 10306.97 TPS, median actor TPS is about 2557.60, and median learner step TPS is about 10781.50. The actor/generator throughput was strongest in early steps and has dropped in later steps as step token counts stabilized near 5.2M tokens; the learner estimate is now close to the old Jupiter final summary while still slightly lower.
+Current estimates across Holmes Think RLVR steps 1-11: token-weighted actor/generator throughput is about 2451.31 TPS, learner overall throughput is 10306.97 TPS, median actor TPS is about 2557.60, and median learner step TPS is about 10781.50. Final pre-stop W&B summary at step 14: actor TPS 1026.55, learner step TPS 12392.57, learner overall TPS 11098.88, step tokens 5201326, mean sequence length 10536.95, max sequence length 32768. The actor/generator throughput was strongest in early steps and dropped sharply once step token counts and long sequence lengths stabilized; the learner estimate is now roughly comparable to the old Jupiter final summary.
 
 ## RL0 Debug Throughput Notes
 
@@ -113,7 +113,7 @@ The 9-node Holmes RL0 debug run is `https://beaker.org/ex/01KVCQ2HWSDPNMQT2SPZWN
 | RL0 debug | 5 | 4580.91 | 24223.99 | 7668.76 | 905730 |
 | RL0 debug | 6 | 4756.91 | 23635.82 | 9195.68 | 881158 |
 
-Current estimates across RL0 debug steps 1-6: token-weighted actor/generator throughput is about 4889.48 TPS, learner overall throughput is 9195.68 TPS, median actor TPS is about 4942.52, and median learner step TPS is about 23929.91. This small run is healthy enough to use for the large RL0 launch planning; its learner/generator balance is still based on the original RL0 4-learner-node / 5-generator-node split.
+Current estimates across RL0 debug steps 1-6: token-weighted actor/generator throughput is about 4889.48 TPS, learner overall throughput is 9195.68 TPS, median actor TPS is about 4942.52, and median learner step TPS is about 23929.91. Final pre-stop W&B summary at step 30: actor TPS 5044.43, learner step TPS 40363.08, learner overall TPS 30022.55, step tokens 1782897, mean sequence length 7200.03, max sequence length 16384. This small run is healthy enough to use for the large RL0 launch planning; its learner/generator balance is still based on the original RL0 4-learner-node / 5-generator-node split.
 
 
 ## Current Conclusions
