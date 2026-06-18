@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Add deprecation warning to `finetune.py` pointing users to the OLMo-core SFT implementation (https://github.com/allenai/open-instruct/pull/1574).
 
 ### Fixed
+- Support SFT datasets whose tool-call `arguments` are stored as JSON strings: `_normalize_messages_for_chat_template` now deserializes `tool_calls[].function.arguments` back to a dict before chat templating. This lets datasets with heterogeneous multi-tool argument schemas keep a uniform Arrow schema on disk (so `load_dataset("json")` succeeds) while still rendering under chat templates that iterate `arguments | items` (e.g. Qwen3.5). No-op for datasets that already store `arguments` as a dict (https://github.com/allenai/open-instruct/pull/XXXX).
 - Fix `DataPreparationActor` hanging on shutdown by killing the actor with `ray.kill()` during cleanup (https://github.com/allenai/open-instruct/pull/1611).
 - Fix empty optimizer group error with torch 2.10 and DeepSpeed in `finetune.py`, `dpo_tune_cache.py`, and `utils.py`. (https://github.com/allenai/open-instruct/pull/1598)
 - Fix `DatasetTransformationCache.load_or_transform_dataset` return type to match expected tuple unpacking. (https://github.com/allenai/open-instruct/pull/1598)
