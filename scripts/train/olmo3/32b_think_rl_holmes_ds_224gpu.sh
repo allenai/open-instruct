@@ -113,4 +113,5 @@ uv run python mason.py \
         --active_sampling \
         --deepspeed_zpg 32 \
         --keep_last_n_checkpoints -1 \
+        --no_push_to_hub \
         "${vllm_enforce_eager_args[@]}"
