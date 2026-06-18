@@ -1,0 +1,31 @@
+version: v2
+budget: ai2/oe-omai
+description: "Holmes Qwen3-32B hosted vLLM judge"
+tasks:
+  - name: vllm-judge
+    image:
+      beaker: 01KV7MVFM57VPHK07W1GRDXRZG
+    hostNetworking: true
+    command: ["/bin/sh", "-lc"]
+    arguments:
+      - >-
+        VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+        vllm serve Qwen/Qwen3-32B
+        --tensor-parallel-size 8
+        --max-model-len 32768
+        --trust-remote-code
+        --port 8001
+        --enforce-eager
+        --chat-template /weka/oe-adapt-default/hamishi/qwen_no_think_config.jinja
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    constraints:
+      cluster:
+        - ai2/holmes
+    resources:
+      gpuCount: 8
+    context:
+      priority: urgent
+      preemptible: false
