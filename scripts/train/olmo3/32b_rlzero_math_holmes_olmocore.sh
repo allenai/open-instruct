@@ -4,7 +4,12 @@
 
 set -euo pipefail
 
-BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
+if [[ $# -gt 0 ]]; then
+    BEAKER_IMAGE=$1
+    shift
+else
+    BEAKER_IMAGE=nathanl/open_instruct_auto
+fi
 run_stamp=$(date -u +%Y%m%d_%H%M%S)
 
 export exp_name=${EXP_NAME:-holmes_debug_olmo3_32b_rlzero_math_olmocore_${run_stamp}_${RANDOM}}
