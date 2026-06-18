@@ -970,6 +970,22 @@ def _normalize_messages_for_chat_template(messages: Any) -> list[dict[str, Any]]
     if not all(isinstance(message, dict) for message in messages):
         raise TypeError(f"messages must contain chat message dictionaries, got: {messages!r}")
 
+    # Tool-call arguments may be stored as JSON strings on disk so that datasets
+    # with heterogeneous multi-tool argument schemas keep a uniform Arrow schema
+    # and load_dataset("json") succeeds. Chat templates that iterate
+    # `tool_call.arguments | items` need a mapping, so deserialize back to a dict
+    # here (mirrors how `tools` is handled in _normalize_tools_for_chat_template).
+    for message in messages:
+        for tool_call in message.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function")
+            if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                try:
+                    function["arguments"] = json.loads(function["arguments"])
+                except json.JSONDecodeError:
+                    pass  # leave as a string; some templates accept string arguments
+
     return messages
 
 

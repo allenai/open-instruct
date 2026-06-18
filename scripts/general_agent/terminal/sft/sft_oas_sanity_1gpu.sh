@@ -8,8 +8,9 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 DATA=/weka/oe-adapt-default/mingqianz/agent-safety/data/sft/sft_oas_sanity.jsonl
 
 uv run python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale ai2/ceres-cirrascale ai2/titan-cirrascale \
+    --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres ai2/titan \
     --workspace ai2/general-tool-use \
+    --description "sft oas" \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode --preemptible \
