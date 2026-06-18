@@ -398,6 +398,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             load_strategy=LoadStrategy.if_available,
             max_duration=train.Duration.steps(self.grpo_config.num_training_steps),
             metrics_collect_interval=1,
+            async_bookkeeping=False if self.grpo_config.disable_async_bookkeeping else None,
+            bookkeeping_soft_timeout=self.grpo_config.bookkeeping_soft_timeout,
             callbacks=trainer_callbacks,
             checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
         ).build(self.train_module, self.dataloader)

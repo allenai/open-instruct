@@ -111,5 +111,7 @@ uv run python mason.py \
         --oe_eval_tasks ${oe_eval_tasks} \
         --oe_eval_gpu_multiplier 4 \
         --backend_timeout 1200 \
+        --disable_async_bookkeeping \
+        --bookkeeping_soft_timeout 3600 \
         "${vllm_enforce_eager_args[@]}" \
         "$@"

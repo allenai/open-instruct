@@ -95,6 +95,10 @@ class GRPOExperimentConfig(
     """How many train steps to save the model"""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
+    disable_async_bookkeeping: bool = False
+    """Disable OLMo-core async bookkeeping collectives."""
+    bookkeeping_soft_timeout: int = 30
+    """Soft timeout in seconds for OLMo-core bookkeeping operations."""
     model_dtype: str = "bfloat16"
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
