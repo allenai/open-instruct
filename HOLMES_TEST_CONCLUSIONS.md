@@ -72,18 +72,28 @@ These runs use the newer Holmes image/settings after the CUDA 13 / FlashAttentio
 
 ## RLVR Training Throughput Notes
 
-The current 28-node Holmes Think RLVR run is `https://beaker.org/ex/01KVCM995YVBCGT1E2DG4P8K81` with W&B run `l534x7sh`. The closest older Jupiter comparison is W&B run `29h723j6`.
+The current 28-node Holmes Think RLVR run is `https://beaker.org/ex/01KVCM995YVBCGT1E2DG4P8K81` with W&B run `l534x7sh`. The closest older Jupiter comparison we checked is W&B run `29h723j6`.
+
+Key known differences between the current Holmes run and the older Jupiter comparison:
+
+- Trainer backend changed from the older `grpo_fast.py` / DeepSpeed path to `grpo.py` / OLMo-core FSDP.
+- Hardware changed from H100/Jupiter to B300/Holmes.
+- The current Holmes run does not use `--vllm_enforce_eager`; the old Jupiter run logged `vllm_enforce_eager=true`.
+- The logged generator/learner allocation may also differ: the old W&B config reports 20 TP=8 vLLM engines and 8 learner nodes, while the current Holmes launch command uses 6 TP=8 vLLM engines and 12 learner nodes. Treat cross-run attribution carefully.
 
 | Run | Step | Actor TPS | Learner TPS step | Learner TPS overall | Step tokens |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Holmes current | 1 | 6849.73 | 2868.88 | 2868.88 | 1604666 |
 | Holmes current | 2 | 9217.38 | 12258.52 | 5467.63 | 2623906 |
 | Holmes current | 3 | 7249.14 | 4580.76 | 4935.42 | 5316105 |
+| Holmes current | 4 | 5556.19 | 7243.51 | 5529.69 | 4857399 |
+| Holmes current | 5 | 5489.14 | 93239.59 | 7393.43 | 5272167 |
+| Holmes current | 6 | 2557.60 | 59847.29 | 8238.98 | 2609228 |
 | Old Jupiter | 1 | 5039.49 | 3912.87 | 3912.87 | 3516883 |
 | Old Jupiter | 2 | 4792.07 | 11389.63 | 6787.86 | 6523532 |
 | Old Jupiter final summary | 1685 | 3829.55 | 9206.84 | 10813.68 | 9786193 |
 
-Early interpretation: Holmes/B300 generation throughput is clearly improved versus the old Jupiter reference, which is the expected sign that the GPUs are working well. Learner throughput has not yet shown a clean steady-state improvement: step 2 was strong, while steps 1 and 3 were lower. With only three steps, this looks more like learner-side variability and cold-start / communication / batch-composition noise than a GPU health concern.
+Current estimates across Holmes steps 1-6: token-weighted actor/generator throughput is about 5425.51 TPS, learner overall throughput is 8238.98 TPS, median actor TPS is about 6202.96, and median learner step TPS is about 9751.02. Early interpretation: Holmes/B300 generation throughput is clearly improved versus the old Jupiter reference, which is the expected sign that the GPUs are working well. Learner throughput is improving but remains noisier and is not yet a clean steady-state improvement signal.
 
 
 ## Current Conclusions
