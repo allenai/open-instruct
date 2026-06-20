@@ -37,8 +37,8 @@ All TPS values are aggregate benchmark throughput across the configured vLLM eng
 | TP | H100 doc baseline | B300 1 GPU eager 8k | B300 1 GPU non-eager 8k | B300 8 GPU non-eager 8k | B300 8 GPU eager 8k | B300 8 GPU non-eager 32k | B300 8 GPU eager 32k |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1 | 300.50 TPS, 8k | 216.36 | 419.68 | 3383.68 | 1765.72 | n/a | n/a |
-| 4 | 1302.62 TPS, 8k | n/a | n/a | 3588.51 | 612.39 | 2641.33 | running: https://beaker.org/ex/01KV7G8K55GVS71BAJ8W5XBT2X |
-| 8 | 928.45 TPS, 32k | n/a | n/a | n/a | n/a | 2271.36 | running: https://beaker.org/ex/01KV7GZTHQFRFHSRKHX47KFRVG |
+| 4 | 1302.62 TPS, 8k | n/a | n/a | 3588.51 | 612.39 | 2641.33 | superseded; see refreshed grid |
+| 8 | 928.45 TPS, 32k | n/a | n/a | n/a | n/a | 2271.36 | superseded; see refreshed grid |
 
 ## Failed Or Superseded Runs
 
@@ -49,26 +49,22 @@ All TPS values are aggregate benchmark throughput across the configured vLLM eng
 | Olmo 3 32B, TP=8, 32k generation | https://beaker.org/ex/01KV7DC5W515CN1YCMDHEMVKGN | Failed during vLLM EngineCore startup after vLLM could not create its nested Ray placement group requiring 8 GPUs within 1800s. Root cause was the TP=8 launcher overriding the Open Instruct TP>1 default and passing `--vllm_distributed_executor_backend ray`. Superseded by corrected `mp`-executor retries. |
 | Olmo 3 32B, TP=8, 32k generation, eager mode | https://beaker.org/ex/01KV7G8NP4VR4GE5RTYGDNPSJS | Canceled because it used the same nested Ray executor override as the failed TP=8 non-eager run. Superseded by the corrected eager retry. |
 
-## In Progress Or Next Runs
+## Earlier Eager Follow-up Runs
 
-| Config | Goal |
-| --- | --- |
-| Olmo 3 32B, TP=8, 32k generation, eager mode | https://beaker.org/ex/01KV7GZTHQFRFHSRKHX47KFRVG launched from commit `402852b2` with image `01KV7GYNMS32XJZF7F39Q6V8C4`, official `VLLM_ENGINE_READY_TIMEOUT_S=7200`, and Open Instruct wrapper `OPEN_INSTRUCT_VLLM_ENGINE_INIT_TIMEOUT_S=7500`. This removes the nested Ray executor override so TP>1 uses the local `mp` executor path; logs reached repeated vLLM health checks. |
-| Olmo 3 32B, TP=4, 32k generation, eager mode | https://beaker.org/ex/01KV7G8K55GVS71BAJ8W5XBT2X launched from commit `4d8e0694` with image `01KV7G7CN191WZMNATXKDYX4ZZ` as the eager comparison for the completed TP=4 32k run. |
-
+The older eager 32k follow-up placeholders were superseded by the refreshed-grid retries below, which used the new image and longer vLLM/benchmark batch timeouts.
 
 ## Refreshed Inference Grid
 
-These runs use the newer Holmes image/settings after the CUDA 13 / FlashAttention 4 / vLLM compatibility work and after restoring Mason `VLLM_DISABLE_COMPILE_CACHE=1`. Prefer this table over the older inference grid; all refreshed cells have now resolved. The long eager 32k cells failed before producing TPS summaries.
+These runs use the newer Holmes image/settings after the CUDA 13 / FlashAttention 4 / vLLM compatibility work and after restoring Mason `VLLM_DISABLE_COMPILE_CACHE=1`. Prefer this table over the older inference grid. Initial failures in several cells were superseded by retries with longer vLLM / benchmark batch timeouts; all refreshed cells now have resolved TPS summaries.
 
 | Config | Beaker experiment | Status | TPS | Notes |
 | --- | --- | --- | ---: | --- |
-| Olmo 3 32B, TP=1, 8k generation, 1 GPU, non-eager | https://beaker.org/ex/01KVCMXNYW0TCXDBHJW6D552N6 | Failed | n/a | Timed out during vLLM engine initialization after loading shards. |
+| Olmo 3 32B, TP=1, 8k generation, 1 GPU, non-eager | https://beaker.org/ex/01KVE6XSRDTMWRF6HDSFTNRB8H | Passed | 421.62 | Retry of the earlier init-timeout cell; essentially matches the older Holmes single-GPU non-eager result. |
 | Olmo 3 32B, TP=1, 8k generation, 1 GPU, eager | https://beaker.org/ex/01KVCNME9HPP7V1R82JBHKCQR2 | Passed | 281.86 | New-image refreshed result; lower than the older non-eager single-GPU result and above the older eager result. |
-| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, non-eager | https://beaker.org/ex/01KVCMXNZ63NNAPS3PAKGXRKWK | Failed | n/a | Timed out during vLLM engine initialization after loading shards. |
-| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXP06K4QN9Z3NKD6RR8KS | Failed | n/a | Reached vLLM health checks, then failed with `TimeoutError: Batch timed out, got 0/16`; no benchmark summary. |
+| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, non-eager | https://beaker.org/ex/01KVE6Y8AQNZYF2AXYP3BZV4A4 | Passed | 2669.13 | Retry of the earlier init-timeout cell; two TP=4 engines on one 8-GPU node. |
+| Olmo 3 32B, TP=4, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVEFVZT84QQ2JNZ9QZS49Z3Y | Passed | 961.60 | Retry with longer batch/completion timeouts; much slower than TP=4 non-eager but faster than TP=8 eager. |
 | Olmo 3 32B, TP=8, 32k generation, 8 GPUs, non-eager | https://beaker.org/ex/01KVCMXNYZT453NSDXZZSCQGHJ | Passed | 2028.12 | New-image refreshed result; still well above the 928.45 H100 baseline, but lower than the older TP=8 32k pass at 2271.36 TPS. |
-| Olmo 3 32B, TP=8, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVCMXNYTR5FA3YY0QFRGKM2B | Failed | n/a | Reached vLLM health checks, then failed with `TimeoutError: Batch timed out, got 0/16`; no benchmark summary. |
+| Olmo 3 32B, TP=8, 32k generation, 8 GPUs, eager | https://beaker.org/ex/01KVEFWGY7PCQZ84TP58436AV4 | Passed | 517.16 | Retry with longer batch/completion timeouts; this is the slowest refreshed 32k 8-GPU cell. |
 
 ## RLVR Training Throughput Notes
 
@@ -116,9 +112,35 @@ The 9-node Holmes RL0 debug run is `https://beaker.org/ex/01KVCQ2HWSDPNMQT2SPZWN
 Current estimates across RL0 debug steps 1-6: token-weighted actor/generator throughput is about 4889.48 TPS, learner overall throughput is 9195.68 TPS, median actor TPS is about 4942.52, and median learner step TPS is about 23929.91. Final pre-stop W&B summary at step 30: actor TPS 5044.43, learner step TPS 40363.08, learner overall TPS 30022.55, step tokens 1782897, mean sequence length 7200.03, max sequence length 16384. This small run is healthy enough to use for the large RL0 launch planning; its learner/generator balance is still based on the original RL0 4-learner-node / 5-generator-node split.
 
 
+## DeepSpeed 28-Node Think RLVR Retry Notes
+
+These runs retry the 28-node Think RLVR shape with the DeepSpeed backend. The non-eager run is `https://beaker.org/ex/01KVDYZZ5ENSBA57S2DYGBTC69` with W&B run `1jl40yhi`; the eager run is `https://beaker.org/ex/01KVDZ0HQ1MDRTKJKMC2TYW392` with W&B run `3vfsddan`. Both jobs were still running at the time these metrics were recorded. W&B was lagging behind Beaker logs, so the table below is taken from Beaker leader log summaries.
+
+| Run | Logged steps | Average actor TPS | Average learner step TPS | Latest learner overall TPS | Short summary |
+| --- | ---: | ---: | ---: | ---: | --- |
+| DeepSpeed non-eager | 1-3 | 9373.32 | 276805.92 | 122277.09 | Actor/generator throughput is much higher than the eager retry so far. Step 4 had started, but no step-4 metric summary had flushed yet. |
+| DeepSpeed eager | 1-4 | 2245.94 | 414033.86 | 183859.17 | Learner step TPS is higher than non-eager on the logged rows, but actor/generator throughput is much lower. |
+
+Per-step TPS:
+
+| Run | Step | Actor TPS | Learner step TPS | Learner overall TPS |
+| --- | ---: | ---: | ---: | ---: |
+| DeepSpeed non-eager | 1 | 7647.75 | 172185.84 | 0.00 |
+| DeepSpeed non-eager | 2 | 10506.35 | 292953.12 | 60349.70 |
+| DeepSpeed non-eager | 3 | 9965.87 | 365278.81 | 122277.09 |
+| DeepSpeed eager | 1 | 1988.78 | 111394.52 | 0.00 |
+| DeepSpeed eager | 2 | 2414.77 | 530648.90 | 67831.87 |
+| DeepSpeed eager | 3 | 3096.56 | 444569.39 | 120041.39 |
+| DeepSpeed eager | 4 | 1483.65 | 569522.63 | 183859.17 |
+
+
 ## Current Conclusions
 
-- The comparable Olmo 3 32B TP=1 8k single-GPU non-eager run passed at 419.68 TPS, which is 1.40x the documented H100 single-GPU baseline. The eager version passed at 216.36 TPS, only 0.72x H100.
+- Refreshed inference grid status: all updated Holmes/B300 inference cells have now passed after retrying the failed cells with longer vLLM and benchmark batch timeouts.
+- On the refreshed image, TP=1 8k single-GPU non-eager reached 421.62 TPS, or 1.40x the 300.50 H100 baseline; TP=1 eager reached 281.86 TPS, or 0.94x H100.
+- On the refreshed image for 32k generation, TP=4 non-eager remains the best 8-GPU setting at 2669.13 TPS. TP=8 non-eager reached 2028.12 TPS, or 2.18x the 928.45 H100 TP=8 32k baseline.
+- Refreshed eager 32k remains much slower: TP=4 eager reached 961.60 TPS and TP=8 eager reached 517.16 TPS.
+- Historical pre-refresh note: the comparable Olmo 3 32B TP=1 8k single-GPU non-eager run passed at 419.68 TPS, which is 1.40x the documented H100 single-GPU baseline. The eager version passed at 216.36 TPS, only 0.72x H100.
 - The Olmo 3 32B TP=1 8k 8-GPU diagnostic passed at 3383.68 TPS non-eager and 1765.72 TPS eager, but this should not be used as the primary comparison for the documented TP=1 single-GPU baseline row.
 - Olmo 3 32B TP=4 at 8k generation passed at 3588.51 TPS, which is 2.75x the documented H100 baseline and above the 2.4x target. The matching eager run was much slower at 612.39 TPS.
 - Olmo 3 32B TP=8 at 32k generation passed at 2271.36 TPS with the corrected `mp` executor path, which is 2.45x the documented H100 baseline and above the 2.4x target.

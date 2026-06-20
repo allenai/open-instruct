@@ -1,0 +1,11 @@
+run,model_step,verifiable_reward,verifiable_correct_rate
+crashed-1 9hyfrg60,100,3.0,0.3
+crashed-2 s5461ctd,200,2.0,0.2
+resumed ygqxifcj,300,3.0,0.3
+resumed ygqxifcj,400,2.0,0.2
+resumed ygqxifcj,500,3.0,0.3
+resumed ygqxifcj,600,3.67,0.37
+resumed ygqxifcj,700,2.0,0.2
+resumed ygqxifcj,800,1.67,0.17
+resumed ygqxifcj,900,3.67,0.37
+resumed ygqxifcj,1000,3.67,0.37
