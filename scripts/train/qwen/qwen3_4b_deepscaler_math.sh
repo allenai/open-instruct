@@ -84,6 +84,7 @@ uv run mason.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --use_rho_correction \
+    --rho_clamp_upper_bound 2.0 \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
