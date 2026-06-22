@@ -628,6 +628,17 @@ class GRPOTrainModule(TransformerTrainModule):
             self.record_metric("_token_count", global_tokens, reduce_type=None)
 
             self._record_step_counter_metrics(int(global_tokens))
+            if self.streaming_config.opd_enabled and dist_utils.get_rank() == 0:
+                logger.info(
+                    "OPD learner metrics step=%d use_task_rewards=%s loss/opd_avg=%.6f "
+                    "teacher_topk_mass=%.6f sampled_token_in_topk=%.6f total_loss=%.6f",
+                    self.trainer.global_step,
+                    self.streaming_config.opd_use_task_rewards,
+                    local_metrics.get("loss/opd_avg", float("nan")),
+                    local_metrics.get("opd/teacher_topk_mass", float("nan")),
+                    local_metrics.get("opd/sampled_token_in_topk", float("nan")),
+                    local_metrics.get("loss/total_avg", float("nan")),
+                )
             data_prep_metrics = dict(batch.get("metrics") or {})
             data_prep_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
             self._record_data_prep_metrics(data_prep_metrics)

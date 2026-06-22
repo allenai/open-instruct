@@ -1437,6 +1437,16 @@ class DataPreparationActor:
             "time/opd_teacher_scoring_worker_sum": total_teacher_time,
             "opd/teacher_tokens_per_second": total_response_tokens / wall_time if wall_time > 0 else 0.0,
         }
+        logger.info(
+            "[DataPreparationActor] OPD teacher scored step=%d responses=%d response_tokens=%d topk=%d "
+            "wall_time=%.3fs tokens_per_second=%.2f",
+            self.training_step,
+            len(responses),
+            total_response_tokens,
+            self.config.opd_topk,
+            wall_time,
+            metrics["opd/teacher_tokens_per_second"],
+        )
         return final_teacher_topk_token_ids, final_teacher_topk_logprobs, metrics
 
     def start(self):
