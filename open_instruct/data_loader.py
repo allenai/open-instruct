@@ -609,6 +609,8 @@ class StreamingDataLoaderConfig:
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
             fs_local_rank=fs_local_rank,
+            opd_enabled=self.opd_enabled,
+            opd_topk=self.opd_topk,
         )
 
 
@@ -625,6 +627,8 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         dp_world_size: int = 1,
         dp_rank: int = 0,
         fs_local_rank: int = 0,
+        opd_enabled: bool = False,
+        opd_topk: int = 1,
     ):
         super().__init__(
             work_dir=work_dir,
@@ -639,6 +643,8 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
         self.num_training_steps = num_training_steps
         self.training_step = 0
         self.current_epoch = 0
+        self.opd_enabled = opd_enabled
+        self.opd_topk = opd_topk
 
     @property
     def total_batches(self) -> int | None:
@@ -670,6 +676,14 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             response_masks=[dummy_response_mask],
             vllm_logprobs=[torch.zeros_like(dummy_qr, dtype=torch.float)],
         )
+        if self.opd_enabled:
+            dummy_teacher_token_ids = torch.full(
+                (dummy_qr.shape[0], dummy_qr.shape[1], self.opd_topk), self.tokenizer.eos_token_id, dtype=torch.long
+            )
+            dummy_teacher_logprobs = torch.full_like(dummy_teacher_token_ids, float("-inf"), dtype=torch.float)
+            dummy_teacher_logprobs[:, :, 0] = 0.0
+            batch.teacher_topk_token_ids = [dummy_teacher_token_ids]
+            batch.teacher_topk_logprobs = [dummy_teacher_logprobs]
         return {"batch": batch, "metrics": {}}
 
     def _iter_batches(self) -> Iterable[dict[str, Any]]:
