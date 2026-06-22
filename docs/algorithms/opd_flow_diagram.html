@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OLMo-core GRPO + OPD Flow</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --ink: #172033;
+      --muted: #5e697d;
+      --panel: #ffffff;
+      --line: #d8deea;
+      --student: #1f7a8c;
+      --teacher: #8a4fff;
+      --learner: #c24b3a;
+      --distill: #25764d;
+      --warn: #b88700;
+      --shadow: 0 18px 40px rgba(27, 38, 59, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      overflow-x: hidden;
+    }
+
+    main {
+      width: 100%;
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 32px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      max-width: 860px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.55;
+    }
+
+    .legend {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      display: inline-block;
+      background: currentColor;
+    }
+
+    .canvas {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 26px;
+      max-width: 100%;
+      overflow: auto;
+    }
+
+    svg {
+      width: 100%;
+      min-width: 1120px;
+      height: auto;
+      display: block;
+    }
+
+    .node rect {
+      fill: #fff;
+      stroke: var(--line);
+      stroke-width: 1.5;
+      filter: drop-shadow(0 8px 16px rgba(23, 32, 51, 0.08));
+    }
+
+    .node text {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .node .title {
+      font-size: 17px;
+      font-weight: 760;
+    }
+
+    .node .sub {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .tag {
+      font-size: 11px;
+      font-weight: 760;
+      text-transform: uppercase;
+    }
+
+    .arrow {
+      stroke: #607086;
+      stroke-width: 2;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .teacher-arrow {
+      stroke: var(--teacher);
+      stroke-width: 2.4;
+      fill: none;
+      marker-end: url(#arrowTeacher);
+    }
+
+    .distill-arrow {
+      stroke: var(--distill);
+      stroke-width: 2.4;
+      fill: none;
+      marker-end: url(#arrowDistill);
+    }
+
+    .dash {
+      stroke-dasharray: 8 7;
+    }
+
+    .section-label {
+      font-size: 12px;
+      fill: var(--muted);
+      font-weight: 760;
+      text-transform: uppercase;
+    }
+
+    .formula {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      fill: #263247;
+    }
+
+    .panels {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 10px 24px rgba(27, 38, 59, 0.06);
+    }
+
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    .panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .panel code {
+      color: #1d2b46;
+      background: #edf2f9;
+      border: 1px solid #dce5f2;
+      border-radius: 5px;
+      padding: 1px 5px;
+      white-space: nowrap;
+    }
+
+    .flow-list {
+      display: grid;
+      gap: 10px;
+      margin: 14px 0 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .flow-list li {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .flow-list b {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      color: #fff;
+      background: var(--student);
+      border-radius: 50%;
+      font-size: 12px;
+    }
+
+    .modes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .mode {
+      background: #111827;
+      color: #eef4ff;
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 14px 30px rgba(17, 24, 39, 0.18);
+    }
+
+    .mode h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+    }
+
+    .mode pre {
+      margin: 0;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #dce8ff;
+    }
+
+    .mode strong {
+      color: #bfe3ff;
+    }
+
+    .bottleneck {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      overflow: hidden;
+      border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 24px rgba(27, 38, 59, 0.06);
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf2f9;
+      color: #263247;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .meter {
+      height: 8px;
+      background: #e7ecf5;
+      border-radius: 99px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .meter i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--distill), var(--warn));
+    }
+
+    .footer-note {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        padding: 18px;
+      }
+
+      header,
+      .panels,
+      .modes,
+      .bottleneck {
+        grid-template-columns: 1fr;
+      }
+
+      .legend {
+        justify-content: flex-start;
+      }
+
+      svg {
+        width: 1120px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>OLMo-core GRPO + OPD</h1>
+        <p class="lede">
+          Student rollouts stay online. A teacher vLLM scorer evaluates those exact student prefixes.
+          DistillKit turns sparse teacher top-k logprobs into a forward-KL token loss that can augment GRPO
+          or run by itself as pure OPD.
+        </p>
+      </div>
+      <div class="legend" aria-label="Diagram legend">
+        <span style="color: var(--student)"><i class="dot"></i>Student rollout</span>
+        <span style="color: var(--teacher)"><i class="dot"></i>Teacher scorer</span>
+        <span style="color: var(--distill)"><i class="dot"></i>DistillKit loss</span>
+        <span style="color: var(--learner)"><i class="dot"></i>Learner update</span>
+      </div>
+    </header>
+
+    <section class="canvas" aria-label="OPD flow diagram">
+      <svg viewBox="0 0 1380 760" role="img" aria-labelledby="diagram-title diagram-desc">
+        <title id="diagram-title">End-to-end OPD data flow</title>
+        <desc id="diagram-desc">
+          The student model generates responses, data preparation scores them with the teacher,
+          sparse top-k tensors are packed, and the learner computes GRPO plus OPD losses.
+        </desc>
+
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#607086"></path>
+          </marker>
+          <marker id="arrowTeacher" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a4fff"></path>
+          </marker>
+          <marker id="arrowDistill" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#25764d"></path>
+          </marker>
+        </defs>
+
+        <text x="54" y="38" class="section-label">Online rollout path</text>
+        <text x="710" y="38" class="section-label">Teacher scoring path</text>
+        <text x="54" y="468" class="section-label">Learner path</text>
+
+        <g class="node">
+          <rect x="54" y="70" width="250" height="142" rx="12"></rect>
+          <text x="76" y="102" class="tag" fill="#1f7a8c">student policy</text>
+          <text x="76" y="132" class="title">Student vLLM engine</text>
+          <text x="76" y="160" class="sub">Generates current-policy rollouts</text>
+          <text x="76" y="184" class="sub">Output: queries, responses, masks, old logprobs</text>
+        </g>
+
+        <g class="node">
+          <rect x="370" y="70" width="292" height="142" rx="12"></rect>
+          <text x="392" y="102" class="tag" fill="#1f7a8c">data prep</text>
+          <text x="392" y="132" class="title">DataPreparationActor</text>
+          <text x="392" y="160" class="sub">Computes rewards and GRPO advantages</text>
+          <text x="392" y="184" class="sub">OPD hook runs before packing</text>
+        </g>
+
+        <g class="node">
+          <rect x="748" y="70" width="284" height="142" rx="12"></rect>
+          <text x="770" y="102" class="tag" fill="#8a4fff">teacher</text>
+          <text x="770" y="132" class="title">OPDTeacherScorerRayActor</text>
+          <text x="770" y="160" class="sub">Scores query + student response</text>
+          <text x="770" y="184" class="sub">vLLM prompt_logprobs = K</text>
+        </g>
+
+        <g class="node">
+          <rect x="1088" y="70" width="238" height="142" rx="12"></rect>
+          <text x="1110" y="102" class="tag" fill="#8a4fff">sparse target</text>
+          <text x="1110" y="132" class="title">Teacher top-k tensors</text>
+          <text x="1110" y="160" class="sub">token_ids: [B, T, K]</text>
+          <text x="1110" y="184" class="sub">logprobs: [B, T, K]</text>
+        </g>
+
+        <path class="arrow" d="M304 141 H370"></path>
+        <path class="teacher-arrow" d="M662 123 C700 88 716 88 748 123"></path>
+        <path class="teacher-arrow" d="M1032 141 H1088"></path>
+        <path class="teacher-arrow dash" d="M1207 212 C1207 310 638 290 560 384"></path>
+
+        <text x="692" y="92" class="formula">query + response</text>
+        <text x="1048" y="84" class="formula">extract response rows</text>
+        <text x="820" y="292" class="formula">attached to same online batch</text>
+
+        <g class="node">
+          <rect x="54" y="500" width="260" height="142" rx="12"></rect>
+          <text x="76" y="532" class="tag" fill="#1f7a8c">batch contract</text>
+          <text x="76" y="562" class="title">Pack + collate</text>
+          <text x="76" y="590" class="sub">Preserves optional teacher tensors</text>
+          <text x="76" y="614" class="sub">Sequence-parallel split slices T, not K</text>
+        </g>
+
+        <g class="node">
+          <rect x="386" y="500" width="286" height="142" rx="12"></rect>
+          <text x="408" y="532" class="tag" fill="#c24b3a">learner</text>
+          <text x="408" y="562" class="title">GRPOTrainModule</text>
+          <text x="408" y="590" class="sub">Recomputes student logits once</text>
+          <text x="408" y="614" class="sub">Gathers student logprobs at teacher ids</text>
+        </g>
+
+        <g class="node">
+          <rect x="744" y="500" width="296" height="142" rx="12"></rect>
+          <text x="766" y="532" class="tag" fill="#25764d">distillkit</text>
+          <text x="766" y="562" class="title">forward_kl_topk</text>
+          <text x="766" y="590" class="sub">sum_k p_t(k) * (log p_t(k) - log p_s(k))</text>
+          <text x="766" y="614" class="sub">Default: unnormalized teacher top-k mass</text>
+        </g>
+
+        <g class="node">
+          <rect x="1096" y="500" width="230" height="142" rx="12"></rect>
+          <text x="1118" y="532" class="tag" fill="#c24b3a">update</text>
+          <text x="1118" y="562" class="title">Optimizer step</text>
+          <text x="1118" y="590" class="sub">GRPO + OPD, or pure OPD</text>
+          <text x="1118" y="614" class="sub">Metrics to W&amp;B / console</text>
+        </g>
+
+        <path class="arrow" d="M560 212 C512 292 220 382 184 500"></path>
+        <path class="arrow" d="M314 571 H386"></path>
+        <path class="distill-arrow" d="M672 571 H744"></path>
+        <path class="distill-arrow" d="M1040 571 H1096"></path>
+
+        <g>
+          <rect x="388" y="302" width="324" height="98" rx="12" fill="#f2f7ff" stroke="#cbd8eb"></rect>
+          <text x="410" y="332" class="title" fill="#172033">Why this is on-policy</text>
+          <text x="410" y="360" class="sub">Teacher scores current student prefixes:</text>
+          <text x="410" y="382" class="formula">s_t = prompt + student_response_&lt;t</text>
+        </g>
+
+        <g>
+          <rect x="752" y="302" width="342" height="98" rx="12" fill="#f6f1ff" stroke="#d7c6ff"></rect>
+          <text x="774" y="332" class="title" fill="#172033">Why top-k</text>
+          <text x="774" y="360" class="sub">Avoids full-vocab teacher logits at every token.</text>
+          <text x="774" y="382" class="formula">storage ~ B * T * K, not B * T * V</text>
+        </g>
+
+        <g>
+          <rect x="1132" y="302" width="194" height="98" rx="12" fill="#fff9e8" stroke="#ead99f"></rect>
+          <text x="1154" y="332" class="title" fill="#172033">Watch</text>
+          <text x="1154" y="360" class="sub">teacher throughput</text>
+          <text x="1154" y="382" class="sub">top-k mass</text>
+        </g>
+
+        <text x="54" y="704" class="formula">GRPO + OPD: total = pg_loss + beta * ref_kl + opd_loss_coef * opd_loss</text>
+        <text x="54" y="730" class="formula">Pure OPD: total = opd_loss_coef * opd_loss; rollout infra stays online, reward loss is zeroed</text>
+      </svg>
+    </section>
+
+    <section class="panels" aria-label="Implementation quick facts">
+      <article class="panel">
+        <h2>Where It Hooks</h2>
+        <p>
+          OPD enters after rollout/reward collection and before packing. This keeps one batch contract for baseline GRPO,
+          GRPO + OPD, and pure OPD.
+        </p>
+      </article>
+      <article class="panel">
+        <h2>Teacher Top-k</h2>
+        <p>
+          For each response token, teacher vLLM returns the top <code>K</code> next-token ids and logprobs under the
+          prefix the student actually visited.
+        </p>
+      </article>
+      <article class="panel">
+        <h2>Missing Mass</h2>
+        <p>
+          The loss omits teacher probability outside top-k by default. <code>opd/teacher_topk_mass</code> tells us
+          whether top-k is large enough.
+        </p>
+      </article>
+      <article class="panel">
+        <h2>Pure OPD</h2>
+        <p>
+          Pure OPD still samples online from the student. It simply zeros the GRPO reward/policy loss and trains only on
+          teacher KL.
+        </p>
+      </article>
+    </section>
+
+    <section class="modes" aria-label="Loss modes">
+      <article class="mode">
+        <h2>GRPO + OPD</h2>
+        <pre><strong>Use when:</strong> we still want task reward optimization.
+
+task_loss = grpo_pg_loss + beta * ref_kl
+total_loss = task_loss + opd_loss_coef * opd_loss
+
+Typical knobs:
+  --opd_enabled true
+  --opd_use_task_rewards true
+  --beta 0.0
+  --load_ref_policy false</pre>
+      </article>
+      <article class="mode">
+        <h2>Pure OPD</h2>
+        <pre><strong>Use when:</strong> we want online distillation only.
+
+task_loss = 0
+total_loss = opd_loss_coef * opd_loss
+
+Typical knobs:
+  --opd_enabled true
+  --opd_use_task_rewards false
+  --beta 0.0
+  --load_ref_policy false</pre>
+      </article>
+    </section>
+
+    <section class="bottleneck" aria-label="Bottlenecks and validation">
+      <table>
+        <thead>
+          <tr>
+            <th>Possible Bottleneck</th>
+            <th>Why It Happens</th>
+            <th>What To Watch</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Teacher scoring</td>
+            <td>Every online response token needs teacher prompt-logprob scoring.</td>
+            <td><code>time/opd_teacher_scoring</code>, <code>opd/teacher_tokens_per_second</code></td>
+          </tr>
+          <tr>
+            <td>Top-k tensor memory</td>
+            <td>Teacher ids and logprobs scale as <code>B * T * K</code>.</td>
+            <td><code>opd_topk</code>, response length, packed batch size</td>
+          </tr>
+          <tr>
+            <td>Async staleness</td>
+            <td>Rollout producer can get ahead of learner updates.</td>
+            <td><code>num_steps_off_policy</code>, <code>rho_weight</code>, <code>rho_clipfrac</code></td>
+          </tr>
+          <tr>
+            <td>Truncated completions</td>
+            <td>Long reasoning tasks can hit response max length.</td>
+            <td><code>val/stop_rate</code>, <code>val/sequence_lengths</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <article class="panel">
+        <h2>Validated Rehearsal</h2>
+        <p>
+          Qwen3-0.6B student + Qwen3-4B teacher, top-k 128, 500 steps, 2 GPUs, W&amp;B tracking, final checkpoint saved.
+          The run showed the whole path working: teacher loads, live scoring happens, tensors reach the learner, OPD loss
+          logs, and training completes.
+        </p>
+        <ul class="flow-list">
+          <li><b>1</b><span>Teacher top-k mass was effectively 1.0, so top-k 128 captured almost all teacher mass.</span></li>
+          <li><b>2</b><span>Sampled-token-in-top-k was near 1.0, so teacher support covered student behavior.</span></li>
+          <li><b>3</b><span>This proves the system path, not yet OPD quality versus a matched GRPO-only control.</span></li>
+        </ul>
+      </article>
+    </section>
+
+    <p class="footer-note">
+      Mental model: OPD is online dense supervision. GRPO answers “did the final answer get reward?” OPD answers
+      “at every visited prefix, what would the teacher distribution have preferred?”
+    </p>
+  </main>
+</body>
+</html>

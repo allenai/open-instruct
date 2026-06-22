@@ -1,6 +1,6 @@
 # Design: On-Policy Distillation in Open Instruct
 
-Status: design proposal
+Status: implemented, experimental v1
 
 Primary target: `open_instruct/grpo.py` with the OLMo-core backend.
 
@@ -8,10 +8,11 @@ Reference: [verl On-Policy Distillation docs](https://verl.readthedocs.io/en/lat
 
 ## Summary
 
-Implement On-Policy Distillation (OPD) as a reusable teacher-scoring and
-distillation-loss layer, integrated first with the OLMo-core GRPO stack.
+Open Instruct now implements On-Policy Distillation (OPD) as a reusable
+teacher-scoring and distillation-loss layer, integrated first with the
+OLMo-core GRPO stack.
 
-The v1 loss should match the stable verl-style GKD OPD recipe:
+The v1 loss matches the stable verl-style GKD OPD recipe:
 
 ```text
 loss_mode = forward_kl_topk
@@ -25,10 +26,10 @@ This means:
 - The learner directly backpropagates a teacher-top-k forward KL loss.
 - The same infrastructure can run as either GRPO + OPD or pure OPD.
 
-The first implementation should not target `olmo_core_finetune.py` or `dpo.py`
+The v1 implementation does not target `olmo_core_finetune.py` or `dpo.py`
 directly. Those are offline SFT/DPO paths today, while OPD requires online
-student rollouts. Once the shared loss and scorer are in place, SFT/DPO can get
-separate distillation integrations.
+student rollouts. The shared sparse signal/loss pieces can be reused later for
+separate SFT/DPO distillation integrations.
 
 ## Background
 
@@ -61,7 +62,7 @@ This also differs from RLVR:
 
 ## Loss Variants
 
-verl exposes two OPD families. The implementation should start with the first.
+verl exposes two OPD families. The v1 implementation starts with the first.
 
 ### GKD OPD
 
@@ -76,8 +77,8 @@ KL(nu || pi_theta)
 ```
 
 Full-vocabulary KL is expensive because it requires teacher probabilities for
-the entire vocabulary at every response position. Instead, v1 should implement
-the teacher-top-k approximation:
+the entire vocabulary at every response position. Instead, v1 implements the
+teacher-top-k approximation:
 
 ```text
 L_forward_kl_topk(s_t)
@@ -127,17 +128,20 @@ Reasons:
 
 ## Chosen V1 Behavior
 
-Add OPD to the OLMo-core GRPO online pipeline with these default semantics:
+OPD is added to the OLMo-core GRPO online pipeline with these default
+semantics:
 
 ```text
 opd_enabled = false
 opd_loss_mode = forward_kl_topk
-opd_use_policy_gradient = false
 opd_topk = 128
 opd_loss_coef = 1.0
 opd_use_task_rewards = true
 opd_teacher_prompt_mode = student_prompt
 ```
+
+There is no `opd_use_policy_gradient` flag in v1. The policy-gradient OPD
+variant is intentionally unimplemented.
 
 When `opd_use_task_rewards=true`, train with:
 
@@ -152,14 +156,14 @@ loss = opd_loss_coef * opd_loss
 ```
 
 This "pure OPD" mode still uses the GRPO online rollout infrastructure, but the
-task-reward policy loss is zeroed out. In that mode, `beta * ref_kl` should also
-be ignored or rejected with a clear validation error, because the user asked for
-distillation-only training.
+task-reward policy loss is zeroed out. In the current implementation,
+`beta * ref_kl` is also ignored by that zeroing. `grpo.py` warns if pure OPD is
+requested while `beta != 0` or `load_ref_policy=true`, because that setup may do
+unnecessary reference-policy work.
 
 For GRPO + OPD runs, keep the existing reference KL configurable. Most OPD
-recipes should run with `--beta 0.0 --load_ref_policy False`, but the code should
-not silently override existing GRPO behavior. Instead, warn when OPD is enabled
-and `beta > 0`.
+recipes should run with `--beta 0.0 --load_ref_policy False`, but the code does
+not silently override existing GRPO behavior.
 
 ## Architecture
 
@@ -173,7 +177,7 @@ Current OLMo-core GRPO has the right online structure:
 4. `StreamingDataLoader` serves `CollatedBatchData` to learners.
 5. `GRPOTrainModule.train_batch` recomputes student logprobs and applies GRPO.
 
-OPD should hook between steps 2 and 3:
+OPD hooks between steps 2 and 3:
 
 1. Collect student responses.
 2. Build teacher scoring requests.
@@ -185,15 +189,14 @@ This preserves one batch contract for GRPO, GRPO + OPD, and pure OPD.
 
 ### Teacher Scoring
 
-Add a teacher scorer actor that owns one teacher vLLM engine or replica.
+The OPD implementation adds a teacher scorer actor that owns one teacher vLLM
+engine or replica.
 
 Input per sample:
 
 ```text
-teacher_prompt_tokens: list[int]
+query_tokens: list[int]
 response_tokens: list[int]
-response_mask: list[int]
-metadata: dict
 ```
 
 For v1 external OPD:
@@ -208,13 +211,13 @@ For later OPSD:
 teacher_prompt_tokens = demo_conditioned_prompt_tokens
 ```
 
-The scorer should request teacher `prompt_logprobs=opd_topk` over:
+The scorer requests teacher `prompt_logprobs=opd_topk` over:
 
 ```text
 teacher_prompt_tokens + response_tokens
 ```
 
-Then it should extract the response-token positions and return:
+Then it extracts the response-token positions and returns:
 
 ```text
 teacher_topk_token_ids: Tensor[response_len, K]
@@ -227,10 +230,12 @@ Alignment rule:
   of `y_t` inside `teacher_prompt + response`.
 - That entry represents the teacher distribution conditioned on
   `teacher_prompt + y_<t`.
-- Ignore or sentinel-fill non-trainable response positions.
+- Prompt tokens are context only. Query/pad sentinel filling happens later in
+  packing/collation; the learner mask decides which positions contribute to the
+  loss.
 
-The scorer should use the same extraction strategy as `sample_logits_vllm.py`,
-but it should return in-memory tensors rather than compressed parquet.
+The scorer uses the same broad extraction strategy as `sample_logits_vllm.py`,
+but returns in-memory tensors rather than compressed parquet.
 
 ### Student Loss
 
@@ -257,62 +262,79 @@ Apply the same response/tool mask used by GRPO:
 masked_opd_loss = masked_mean(opd_loss_bt, response_mask)
 ```
 
-Metrics should also compute:
+Current v1 metrics also compute:
 
 ```text
 teacher_topk_mass = sum_k exp(teacher_topk_logprobs)
-student_topk_mass = sum_k exp(student_topk_logprobs)
+sampled_token_in_topk = 1[sampled_token in teacher_topk]
 ```
 
 These are diagnostic metrics. Low teacher mass means `opd_topk` is too small for
-a faithful forward-KL approximation.
+a faithful forward-KL approximation. Low sampled-token-in-top-k means the
+teacher top-k support is often missing the tokens the student actually sampled.
+
+Useful future diagnostics include `student_topk_mass` and teacher top-k entropy,
+but they are not part of the current v1 metric set.
 
 ## Config And Public Interface
 
-Add a new dataclass in `open_instruct/opd_utils.py`:
+The v1 implementation keeps OPD fields in the existing GRPO streaming config
+dataclass in `open_instruct/data_loader.py`. This was an intentional divergence
+from the original standalone `OPDConfig` idea: OPD v1 is not a separate trainer,
+and keeping the fields in the existing config avoids threading a parallel config
+object through the GRPO stack.
+
+Current v1 fields:
 
 ```python
-@dataclass
-class OPDConfig:
-    opd_enabled: bool = False
-    opd_loss_mode: Literal["forward_kl_topk"] = "forward_kl_topk"
-    opd_use_policy_gradient: bool = False
-    opd_use_task_rewards: bool = True
-    opd_loss_coef: float = 1.0
-    opd_topk: int = 128
-    opd_loss_max_clamp: float | None = None
-    opd_log_prob_min_clamp: float | None = None
-
-    opd_teacher_source: Literal["external", "self_sync"] = "external"
-    opd_teacher_model_name_or_path: str | None = None
-    opd_teacher_revision: str | None = None
-    opd_teacher_num_engines: int = 1
-    opd_teacher_tensor_parallel_size: int = 1
-    opd_teacher_gpu_memory_utilization: float = 0.8
-    opd_teacher_enable_prefix_caching: bool = True
-    opd_teacher_max_model_len: int | None = None
-
-    opd_teacher_prompt_mode: Literal["student_prompt", "demo_conditioned"] = "student_prompt"
-    opd_teacher_prompt_column: str = "teacher_input_ids_prompt"
+opd_enabled: bool = False
+opd_loss_mode: Literal["forward_kl_topk"] = "forward_kl_topk"
+opd_topk: int = 128
+opd_loss_coef: float = 1.0
+opd_use_task_rewards: bool = True
+opd_teacher_model_name_or_path: str | None = None
+opd_teacher_model_revision: str | None = None
+opd_teacher_num_engines: int = 1
+opd_teacher_tensor_parallel_size: int = 1
+opd_teacher_gpu_memory_utilization: float = 0.9
+opd_teacher_dtype: str = "bfloat16"
+opd_teacher_enforce_eager: bool = False
+opd_teacher_enable_prefix_caching: bool = False
+opd_teacher_prompt_mode: Literal["student_prompt"] = "student_prompt"
 ```
 
-Validation:
+Notable omitted fields from the original proposal:
+
+- `opd_use_policy_gradient`: PG OPD is future work.
+- `opd_loss_max_clamp` and `opd_log_prob_min_clamp`: not needed for current
+  stable runs; missing top-k entries are represented with `-inf` logprobs.
+- `opd_teacher_source=self_sync`: future OPSD/self-distillation work.
+- `opd_teacher_prompt_mode=demo_conditioned` and `opd_teacher_prompt_column`:
+  future OPSD dataset/prompt work.
+- `opd_teacher_max_model_len`: current v1 derives this from
+  `max_prompt_token_length + response_length`.
+
+Current validation:
 
 - `opd_enabled=false` leaves all behavior unchanged.
-- `opd_use_policy_gradient` must be `False` in v1.
 - `opd_loss_mode` must be `forward_kl_topk` in v1.
 - `opd_topk > 0`.
 - `opd_loss_coef >= 0`.
-- External teachers require `opd_teacher_model_name_or_path`.
-- Teacher and student must share tokenizer/vocab.
-- `opd_use_task_rewards=false` should reject or ignore `beta > 0` explicitly.
-- `opd_teacher_prompt_mode=demo_conditioned` requires the teacher prompt column.
+- `opd_teacher_num_engines > 0`.
+- `opd_teacher_tensor_parallel_size > 0`.
+- `opd_teacher_prompt_mode` must be `student_prompt`.
+- Pure OPD disables `filter_zero_std_samples` because rewards are neutral.
+- At least one reward must be configured unless running pure OPD.
+- `grpo.py` requires `opd_teacher_model_name_or_path` when OPD is enabled.
+- `grpo.py` warns if pure OPD is requested with `beta != 0` or
+  `load_ref_policy=true`.
 
-Parser wiring:
+Known validation gap:
 
-- Add `OPDConfig` to `open_instruct/grpo.py`.
-- Optionally add it to `grpo_fast.py` after the OLMo-core path is stable.
-- Do not add it to `olmo_core_finetune.py` or `dpo.py` in v1.
+- Teacher and student tokenizer/vocab compatibility should be checked more
+  explicitly. Current usage passes the student tokenizer to teacher vLLM and has
+  been validated for Qwen3 student/teacher pairs, but mismatched vocabularies
+  should fail earlier with a clear error.
 
 ## Data Model Changes
 
@@ -340,84 +362,85 @@ Sequence parallelism:
 
 Mock data:
 
-- `StreamingDataLoader.get_mock_batch` should include valid teacher fields when
-  OPD is enabled and `None` otherwise.
+- `StreamingDataLoader.get_mock_batch` includes valid teacher fields when OPD
+  is enabled and `None` otherwise.
 - Tests should cover both cases.
 
-## File-Level Implementation Plan
+## File-Level Implementation
 
 ### `open_instruct/opd_utils.py`
 
-New module containing:
+OPD-specific online orchestration helpers:
 
-- `OPDConfig`
 - teacher scoring request/result dataclasses
-- top-k prompt-logprob extraction helpers
-- `compute_forward_kl_topk`
-- student top-k gather helper
-- OPD metrics helpers
-- validation helpers
+- `OPDTeacherScorerRayActor`
+- teacher scorer Ray actor creation
+- vLLM teacher initialization settings
+- teacher scoring latency/throughput metrics
 
 Use `logger_utils.setup_logger(__name__)`.
 
+### `open_instruct/distillkit`
+
+Reusable sparse distillation pieces live under DistillKit:
+
+- `signals.py`: `SparseTeacherSignal`
+- `losses.py`: student top-k gather helper and `forward_kl_topk_from_logprobs`
+- `vllm_logprobs.py`: vLLM prompt-logprob extraction helpers
+
+This keeps distributional distillation math reusable for future offline
+distillation, SFT distillation, or OPSD work. GRPO owns only the online rollout
+and batch plumbing.
+
 ### `open_instruct/vllm_utils.py`
 
-Add a teacher scorer actor or reusable base actor for logprob-only scoring.
-
-The actor should:
-
-- launch a teacher vLLM engine
-- request `prompt_logprobs=opd_topk`
-- set `max_tokens=1`
-- set `detokenize=False`
-- return top-k prompt logprob tensors
-
-It should not use tool execution or reward verification.
+No OPD-specific teacher scorer was added here. This is intentional: the scorer
+semantics are OPD-specific, while `vllm_utils.py` remains focused on the shared
+policy rollout engine utilities.
 
 ### `open_instruct/data_types.py`
 
-Add optional teacher top-k fields to `CollatedBatchData`.
+Adds optional teacher top-k fields to `CollatedBatchData`.
 
-The `__getitem__`, `__len__`, and `.to(...)` style helpers should keep working
-through dataclass field iteration.
+The `__getitem__`, `__len__`, and `.to(...)` style helpers keep working through
+dataclass field iteration.
 
 ### `open_instruct/rl_utils.py`
 
-Update `PackedSequences` and `pack_sequences` to carry teacher top-k fields.
+Updates `PackedSequences` and `pack_sequences` to carry teacher top-k fields.
 
-Filtering must keep response tokens, masks, vLLM logprobs, and teacher top-k
+Filtering keeps response tokens, masks, vLLM logprobs, and teacher top-k
 targets aligned.
 
 ### `open_instruct/data_loader.py`
 
-Update `DataPreparationActor`:
+`DataPreparationActor`:
 
-1. Accumulate inference batches as today.
-2. Apply truncation masking as today.
-3. If OPD is enabled, call teacher scorer before packing.
-4. Pass teacher top-k targets into `pack_sequences`.
-5. Collate teacher top-k targets for each worker.
+1. Accumulates inference batches as today.
+2. Applies truncation masking as today.
+3. Calls teacher scorer before packing if OPD is enabled.
+4. Passes teacher top-k targets into `pack_sequences`.
+5. Collates teacher top-k targets for each worker.
 
-Also update:
+Also covers:
 
 - `prepare_collated_data_for_workers`
 - mock batch construction
-- saved rollout metadata only with scalar OPD diagnostics, not full top-k tensors
+- scalar OPD timing/throughput metrics in step metrics
 
 ### `open_instruct/grpo.py`
 
-Add `OPDConfig` parsing and teacher scorer setup.
+Sets up teacher scorers when `opd_enabled=true`.
 
 Pass:
 
-- `opd_config`
 - teacher scorer handles
 
 into `DataPreparationActor`.
 
 ### `open_instruct/olmo_core_train_modules.py`
 
-Update `GRPOTrainModule.train_batch`:
+Updates `GRPOTrainModule.train_batch`:
 
 - normal student forward still computes sampled-token logprobs for GRPO
 - if OPD is enabled, gather student logprobs at teacher top-k ids
@@ -429,14 +452,13 @@ Do not change `DPOTrainModule` in v1.
 
 ### `open_instruct/grpo_utils.py`
 
-Prefer keeping OPD-specific math in `opd_utils.py`, but add or refactor shared
-forward helpers if needed so the student forward can return:
+The student forward helper returns:
 
 - sampled-token logprobs
 - optional student top-k logprobs
 - optional entropy
 
-Avoid a second student forward for OPD.
+This avoids a second student forward for OPD.
 
 ## OPSD Extension
 
@@ -506,20 +528,19 @@ Possible future work:
 - add online generation of preference candidates before DPO
 - implement a DPO-specific per-token top-k gather path
 
-This should come after OLMo-core GRPO OPD is working.
+This remains future work after the OLMo-core GRPO OPD v1 path.
 
 ## Metrics
 
-Record these metrics per training step:
+Current v1 records these OPD metrics:
 
 ```text
-train/opd_loss
-train/opd_forward_kl_topk
-train/opd_teacher_topk_mass
-train/opd_student_topk_mass
-train/opd_teacher_entropy_topk
-train/opd_sampled_token_in_teacher_topk
+loss/opd_avg
+opd/teacher_topk_mass
+opd/sampled_token_in_topk
 time/opd_teacher_scoring
+time/opd_teacher_scoring_worker_sum
+opd/teacher_tokens_per_second
 ```
 
 For GRPO + OPD, keep current GRPO metrics unchanged.
@@ -527,22 +548,28 @@ For GRPO + OPD, keep current GRPO metrics unchanged.
 For pure OPD, GRPO reward metrics may still be logged if rewards are computed,
 but they must not contribute to the loss.
 
+Useful future metrics:
+
+```text
+opd/student_topk_mass
+opd/teacher_entropy_topk
+```
+
 ## Testing Plan
 
 Unit tests:
 
 ```bash
-uv run pytest open_instruct/test_opd_utils.py
+uv run pytest open_instruct/distillkit/test_losses.py
 uv run pytest open_instruct/test_rl_utils.py
 uv run pytest open_instruct/test_utils.py
-uv run pytest open_instruct/test_olmo_core_train_modules.py
+uv run pytest open_instruct/test_grpo_fast.py
 ```
 
 Coverage:
 
 - top-k extraction alignment
 - unnormalized forward-KL math
-- logprob clamps
 - masking
 - teacher top-k mass metrics
 - pack/unpack/collation alignment
@@ -550,17 +577,13 @@ Coverage:
 - GRPO loss composition with and without task rewards
 - validation failures for invalid config combinations
 
-Integration tests:
+GPU/integration tests:
 
-- mocked teacher scorer inside `DataPreparationActor`
-- OLMo-core GRPO train batch with synthetic teacher targets
-- pure OPD mode where policy loss is disabled
-
-GPU validation:
-
-- add a Beaker debug script for small OLMo-core GRPO + OPD
+- `uv run pytest open_instruct/test_opd_gpu.py` exercises live teacher scorer
+  setup on GPU.
 - launch with `scripts/train/build_image_and_launch.sh`
 - run `scripts/test/run_gpu_pytest.sh` before PR if GPU coverage is required
+- run a small OLMo-core GRPO + OPD Beaker script before scale-up
 
 Final checks:
 
@@ -571,7 +594,7 @@ make quality
 
 ## Acceptance Criteria
 
-The implementation is complete when:
+The v1 implementation is complete when:
 
 - `opd_enabled=false` is behaviorally unchanged.
 - OLMo-core `grpo.py` can run GRPO + OPD with an external teacher.
@@ -580,8 +603,8 @@ The implementation is complete when:
 - No extra student forward is required for OPD.
 - Sequence parallelism works with teacher top-k tensors.
 - OPD metrics make top-k approximation quality visible.
-- OPSD can be added by providing a demo-conditioned teacher prompt without
-  rewriting the scorer or loss.
+- The scorer/loss structure leaves a path for OPSD to add demo-conditioned
+  teacher prompts without rewriting the sparse loss.
 
 ## Implementation Checklist
 
@@ -616,4 +639,35 @@ This section is intentionally kept as a running teaching/debugging checklist.
   - `make style` and `make quality` passed locally.
   - Local macOS validation could not collect vLLM-dependent GRPO tests because
     `vllm` is not installed in this environment.
-  - GPU/Beaker validation is still required before opening a production PR.
+  - GPU pytest was launched through `scripts/train/build_image_and_launch.sh
+    scripts/test/run_gpu_pytest.sh`.
+  - A 500-step Beaker rehearsal completed successfully with Qwen3-0.6B student,
+    Qwen3-4B teacher, `opd_topk=128`, W&B tracking, and final checkpoint save:
+    `01KVRJ1Y7HHQHWAMQ3ECBVAXCK`.
+
+## Remaining Implementation Gap Audit
+
+The original design contains a few ideas that are intentionally future work and
+should not block v1:
+
+- PG OPD / reverse-KL reward shaping.
+- OPSD with `self_sync` teacher source.
+- Demo-conditioned teacher prompts and `teacher_input_ids_prompt`.
+- SFT/DPO-specific distillation integrations.
+- Separate `opd_teacher_max_model_len` config.
+- Loss/logprob clamp knobs.
+
+The current v1 gaps worth considering before a production PR or larger scale
+run are:
+
+1. Add explicit teacher/student tokenizer or vocab compatibility validation.
+   Teacher top-k token ids must be valid student token ids, so mismatched
+   vocabularies should fail early.
+2. Decide whether pure OPD should reject `beta != 0` / `load_ref_policy=true`
+   instead of warning. Current behavior is correct in the loss, but may waste
+   reference-policy setup.
+3. Consider adding `opd/student_topk_mass` as an alignment diagnostic.
+4. Consider adding `opd/teacher_entropy_topk` as a teacher uncertainty
+   diagnostic.
+5. Run a matched GRPO-only control before making quality claims. The current
+   Beaker rehearsal validates the system path, not OPD superiority.
