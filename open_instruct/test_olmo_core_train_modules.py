@@ -130,6 +130,38 @@ class TestForwardForLogprobs(unittest.TestCase):
 
         self.assertFalse(torch.allclose(logprob_t1, logprob_t2))
 
+    def test_forward_for_logprobs_and_topk(self):
+        batch_size, seq_len, vocab_size, topk = 2, 5, 10, 3
+        model = _make_mock_model(vocab_size, seq_len, batch_size)
+        logits = torch.randn(batch_size, seq_len, vocab_size)
+        model.return_value = logits
+        query_responses = torch.randint(0, vocab_size, (batch_size, seq_len))
+        attention_mask = torch.ones(batch_size, seq_len)
+        position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
+        topk_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len - 1, topk))
+
+        sampled_logprobs, entropy, topk_logprobs = grpo_utils.forward_for_logprobs_and_topk(
+            model,
+            query_responses,
+            attention_mask,
+            position_ids,
+            pad_token_id=0,
+            temperature=1.0,
+            return_entropy=False,
+            topk_token_ids=topk_token_ids,
+        )
+
+        expected_log_probs = torch.log_softmax(logits[:, :-1].float(), dim=-1)
+        expected_sampled = torch.gather(
+            expected_log_probs, dim=-1, index=query_responses[:, 1:].unsqueeze(-1)
+        ).squeeze(-1)
+        expected_topk = torch.gather(expected_log_probs, dim=-1, index=topk_token_ids)
+
+        torch.testing.assert_close(sampled_logprobs, expected_sampled)
+        self.assertIsNone(entropy)
+        assert topk_logprobs is not None
+        torch.testing.assert_close(topk_logprobs, expected_topk)
+
 
 class TestDAPOLoss(unittest.TestCase):
     def test_negative_advantages_clipping(self):

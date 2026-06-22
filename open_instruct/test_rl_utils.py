@@ -157,6 +157,39 @@ class TestRLUtils(unittest.TestCase):
         torch.testing.assert_close(packed.response_masks[0].bool(), torch.tensor(expected_mask_0, dtype=torch.bool))
         torch.testing.assert_close(packed.response_masks[1].bool(), torch.tensor(expected_mask_1, dtype=torch.bool))
 
+    def test_pack_sequences_with_teacher_topk(self):
+        queries = [[1, 2], [3]]
+        responses = [[4, 0], [5]]
+        masks = [[1, 0], [1]]
+        vllm_logprobs = [[-0.1, -0.2], [-0.3]]
+        teacher_topk_token_ids = [
+            torch.tensor([[10, 11], [0, 0]], dtype=torch.long),
+            torch.tensor([[12, 13]], dtype=torch.long),
+        ]
+        teacher_topk_logprobs = [
+            torch.tensor([[-0.4, -0.5], [float("-inf"), float("-inf")]], dtype=torch.float32),
+            torch.tensor([[-0.6, -0.7]], dtype=torch.float32),
+        ]
+
+        packed = rl_utils.pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=10,
+            pad_token_id=0,
+            vllm_logprobs=vllm_logprobs,
+            teacher_topk_token_ids=teacher_topk_token_ids,
+            teacher_topk_logprobs=teacher_topk_logprobs,
+        )
+
+        assert packed.teacher_topk_token_ids is not None
+        assert packed.teacher_topk_logprobs is not None
+        self.assertEqual(packed.teacher_topk_token_ids[0].shape, (5, 2))
+        torch.testing.assert_close(packed.teacher_topk_token_ids[0][0], torch.tensor([0, 0]))
+        torch.testing.assert_close(packed.teacher_topk_token_ids[0][2], torch.tensor([10, 11]))
+        torch.testing.assert_close(packed.teacher_topk_token_ids[0][4], torch.tensor([12, 13]))
+        self.assertTrue(torch.isneginf(packed.teacher_topk_logprobs[0][0]).all())
+
     def test_calculate_advantages_packed(self):
         """Test that calculate_advantages_packed produces same results as unpacked version."""
         _, _, pad_token_id = get_test_data()

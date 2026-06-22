@@ -549,6 +549,32 @@ def forward_for_logprobs(
     pass_olmo_core_doc_lens: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
+    logprob_BT, entropy, _ = forward_for_logprobs_and_topk(
+        model,
+        query_responses,
+        attention_mask,
+        position_ids,
+        pad_token_id,
+        temperature,
+        return_entropy,
+        pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
+        topk_token_ids=None,
+    )
+    return logprob_BT, entropy
+
+
+def forward_for_logprobs_and_topk(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    position_ids: torch.Tensor,
+    pad_token_id: int,
+    temperature: float,
+    return_entropy: bool = False,
+    pass_olmo_core_doc_lens: bool = False,
+    topk_token_ids: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    """Forward pass to compute sampled-token and optional sparse top-k logprobs."""
     extra_kwargs = {}
     if pass_olmo_core_doc_lens:
         assert attention_mask is not None
@@ -563,7 +589,18 @@ def forward_for_logprobs(
     labels = query_responses[:, 1:].clone().to(logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
-    logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
+    topk_logprobs = None
+    if topk_token_ids is not None:
+        if topk_token_ids.shape[:2] != logits.shape[:2]:
+            raise ValueError(
+                f"topk_token_ids shape {topk_token_ids.shape} does not align to logits shape {logits.shape}"
+            )
+        log_probs = torch.log_softmax(logits.float(), dim=-1)
+        logprob_BT = torch.gather(log_probs, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+        safe_topk_token_ids = topk_token_ids.to(logits.device).clamp(min=0, max=logits.shape[-1] - 1)
+        topk_logprobs = torch.gather(log_probs, dim=-1, index=safe_topk_token_ids)
+    else:
+        logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
 
     # For now, entropy is just for monitoring, and we don't pass gradients through it.
     entropy = None
@@ -571,7 +608,7 @@ def forward_for_logprobs(
         with torch.no_grad():
             entropy = model_utils.entropy_from_logits(logits)
 
-    return logprob_BT, entropy
+    return logprob_BT, entropy, topk_logprobs
 
 
 def compute_logprobs(
@@ -673,8 +710,11 @@ def calculate_token_counts(
 
 _SCALAR_LOSS_STAT_KEYS = [
     "loss/kl_avg",
+    "loss/opd_avg",
     "loss/policy_avg",
     "loss/total_avg",
+    "opd/sampled_token_in_topk",
+    "opd/teacher_topk_mass",
     "objective/kl0_avg",
     "objective/kl1_avg",
     "objective/kl2_avg",

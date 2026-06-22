@@ -203,6 +203,10 @@ class PackedSequences(Generic[T]):
     """packed sequence lengths (batch_size, pack_length)"""
     vllm_logprobs: list[torch.Tensor] | None = None
     """packed vLLM logprobs for comparison (batch_size, pack_length)"""
+    teacher_topk_token_ids: list[torch.Tensor] | None = None
+    """packed teacher top-k token ids for OPD (batch_size, pack_length, topk)"""
+    teacher_topk_logprobs: list[torch.Tensor] | None = None
+    """packed teacher top-k logprobs for OPD (batch_size, pack_length, topk)"""
     dones: list[torch.Tensor] | None = None
     """packed dones (batch_size, pack_length), specifies the sequence boundaries
     E.g., [0, 0, 0, 0, 1, 0, 0, 0, 0, 2] means the first sequence ends at index 4, and the
@@ -231,6 +235,8 @@ def pack_sequences(
     pack_length: int,
     pad_token_id: int,
     vllm_logprobs: list[list[float]],
+    teacher_topk_token_ids: list[torch.Tensor] | None = None,
+    teacher_topk_logprobs: list[torch.Tensor] | None = None,
     min_num_batches: int = 1,
     mask_tool_use: bool = False,
 ) -> PackedSequences:
@@ -243,6 +249,8 @@ def pack_sequences(
         pack_length: Maximum length of each packed sequence
         pad_token_id: Token ID used for padding
         vllm_logprobs: Log probabilities from vLLM for each response
+        teacher_topk_token_ids: Optional teacher top-k token ids for each response token
+        teacher_topk_logprobs: Optional teacher top-k logprobs for each response token
         min_num_batches: Minimum number of packed batches to produce.
             Used to ensure we have a batch for each rank in distributed training.
 
@@ -278,6 +286,8 @@ def pack_sequences(
     num_actions = []
     packed_seq_lens = []
     packed_vllm_logprobs = []
+    packed_teacher_topk_token_ids = []
+    packed_teacher_topk_logprobs = []
     cur_data = []
     cur_response_mask = []
     cur_num_actions = []
@@ -285,7 +295,12 @@ def pack_sequences(
     cur_attention_mask = []
     cur_dones = []
     cur_vllm_logprobs = []
+    cur_teacher_topk_token_ids = []
+    cur_teacher_topk_logprobs = []
     offset = 0
+    use_teacher_topk = teacher_topk_token_ids is not None or teacher_topk_logprobs is not None
+    if use_teacher_topk and (teacher_topk_token_ids is None or teacher_topk_logprobs is None):
+        raise ValueError("teacher_topk_token_ids and teacher_topk_logprobs must be provided together")
     for i in range(len(queries)):
         query = queries[i]
         response = responses[i]
@@ -295,6 +310,23 @@ def pack_sequences(
 
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
+        response_teacher_ids_unfiltered = None
+        response_teacher_logprobs_unfiltered = None
+        if use_teacher_topk:
+            assert teacher_topk_token_ids is not None
+            assert teacher_topk_logprobs is not None
+            response_teacher_ids_unfiltered = torch.as_tensor(teacher_topk_token_ids[i], dtype=torch.long)
+            response_teacher_logprobs_unfiltered = torch.as_tensor(teacher_topk_logprobs[i], dtype=torch.float32)
+            if response_teacher_ids_unfiltered.shape != response_teacher_logprobs_unfiltered.shape:
+                raise ValueError(
+                    f"Response {i}: teacher token ids shape {response_teacher_ids_unfiltered.shape} != "
+                    f"teacher logprobs shape {response_teacher_logprobs_unfiltered.shape}"
+                )
+            if response_teacher_ids_unfiltered.shape[0] != len(response):
+                raise ValueError(
+                    f"Response {i}: teacher top-k length ({response_teacher_ids_unfiltered.shape[0]}) != "
+                    f"response length ({len(response)})"
+                )
 
         assert len(response_logprobs_unfiltered) == len(response), (
             f"Response {i}: logprobs length ({len(response_logprobs_unfiltered)}) != response length ({len(response)})"
@@ -303,11 +335,18 @@ def pack_sequences(
         filtered_response = []
         filtered_mask = []
         filtered_logprobs = []
+        filtered_teacher_ids = []
+        filtered_teacher_logprobs = []
         for j, (token, mask_val) in enumerate(zip(response, mask)):
             if token != pad_token_id:
                 filtered_response.append(token)
                 filtered_mask.append(mask_val)
                 filtered_logprobs.append(response_logprobs_unfiltered[j])
+                if use_teacher_topk:
+                    assert response_teacher_ids_unfiltered is not None
+                    assert response_teacher_logprobs_unfiltered is not None
+                    filtered_teacher_ids.append(response_teacher_ids_unfiltered[j])
+                    filtered_teacher_logprobs.append(response_teacher_logprobs_unfiltered[j])
 
         response = filtered_response
         response_tool_mask = filtered_mask
@@ -324,6 +363,20 @@ def pack_sequences(
             f"This can happen if vLLM returns N-1 logprobs for N tokens (missing first token logprob)."
         )
         combined_logprobs = query_logprobs + response_logprobs
+        if use_teacher_topk:
+            if filtered_teacher_ids:
+                response_teacher_ids = torch.stack(filtered_teacher_ids)
+                response_teacher_logprobs = torch.stack(filtered_teacher_logprobs)
+                topk = response_teacher_ids.shape[-1]
+            else:
+                assert teacher_topk_token_ids is not None
+                topk = torch.as_tensor(teacher_topk_token_ids[i]).shape[-1]
+                response_teacher_ids = torch.empty((0, topk), dtype=torch.long)
+                response_teacher_logprobs = torch.empty((0, topk), dtype=torch.float32)
+            query_teacher_ids = torch.zeros((len(query), topk), dtype=torch.long)
+            query_teacher_logprobs = torch.full((len(query), topk), float("-inf"), dtype=torch.float32)
+            combined_teacher_ids = torch.cat([query_teacher_ids, response_teacher_ids], dim=0)
+            combined_teacher_logprobs = torch.cat([query_teacher_logprobs, response_teacher_logprobs], dim=0)
         # only flush if we have data and we exceed the pack length.
         if len(query_response) + len(cur_data) > effective_pack_length and len(cur_data) > 0:
             query_responses.append(cur_data)
@@ -333,6 +386,9 @@ def pack_sequences(
             packed_seq_lens.append(cur_packed_seq_lens)
             dones.append(cur_dones)
             packed_vllm_logprobs.append(cur_vllm_logprobs)
+            if use_teacher_topk:
+                packed_teacher_topk_token_ids.append(torch.stack(cur_teacher_topk_token_ids))
+                packed_teacher_topk_logprobs.append(torch.stack(cur_teacher_topk_logprobs))
             cur_data = []
             cur_response_mask = []
             cur_attention_mask = []
@@ -340,9 +396,14 @@ def pack_sequences(
             cur_packed_seq_lens = []
             cur_dones = []
             cur_vllm_logprobs = []
+            cur_teacher_topk_token_ids = []
+            cur_teacher_topk_logprobs = []
             offset = i
         cur_data.extend(query_response)
         cur_vllm_logprobs.extend(combined_logprobs)
+        if use_teacher_topk:
+            cur_teacher_topk_token_ids.extend(combined_teacher_ids)
+            cur_teacher_topk_logprobs.extend(combined_teacher_logprobs)
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
@@ -361,6 +422,9 @@ def pack_sequences(
         packed_seq_lens.append(cur_packed_seq_lens)
         dones.append(cur_dones)
         packed_vllm_logprobs.append(cur_vllm_logprobs)
+        if use_teacher_topk:
+            packed_teacher_topk_token_ids.append(torch.stack(cur_teacher_topk_token_ids))
+            packed_teacher_topk_logprobs.append(torch.stack(cur_teacher_topk_logprobs))
     attention_masks_list = [torch.tensor(t) for t in attention_masks]
     return PackedSequences(
         query_responses=[torch.tensor(t) for t in query_responses],
@@ -372,6 +436,8 @@ def pack_sequences(
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
         dones=[torch.tensor(t) for t in dones],
         vllm_logprobs=[torch.tensor(t, dtype=torch.float) for t in packed_vllm_logprobs],
+        teacher_topk_token_ids=packed_teacher_topk_token_ids if use_teacher_topk else None,
+        teacher_topk_logprobs=packed_teacher_topk_logprobs if use_teacher_topk else None,
     )
 
 

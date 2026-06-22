@@ -822,7 +822,7 @@ class TestDataPreparation(TestGrpoFastBase):
         ) // per_device_train_batch_size
 
         for worker_data in result:
-            self.assertEqual(set(f.name for f in worker_data.__dataclass_fields__.values()), expected_fields)
+            self.assertTrue(expected_fields.issubset(set(f.name for f in worker_data.__dataclass_fields__.values())))
 
             total_samples = sum(len(batch) for batch in worker_data.query_responses)
             self.assertEqual(total_samples, expected_samples_per_worker)
@@ -838,6 +838,7 @@ class TestDataPreparation(TestGrpoFastBase):
                     self.assertIsInstance(tensor, torch.Tensor)
                     if i < expected_num_microbatches - 1:
                         self.assertEqual(len(tensor), per_device_train_batch_size)
+
                     else:
                         self.assertLessEqual(len(tensor), per_device_train_batch_size)
 
@@ -851,6 +852,39 @@ class TestDataPreparation(TestGrpoFastBase):
                         continue
                     first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
+
+    def test_distribution_with_teacher_topk(self):
+        packed_sequences = rl_utils.PackedSequences(
+            query_responses=[torch.tensor([1, 2, 3]), torch.tensor([4, 5])],
+            attention_masks=[torch.tensor([1, 1, 1]), torch.tensor([1, 1])],
+            response_masks=[torch.tensor([False, True, True]), torch.tensor([False, True])],
+            original_responses=[[2, 3], [5]],
+            advantages=[torch.tensor([0.0, 1.0, 1.0]), torch.tensor([0.0, 2.0])],
+            position_ids=[torch.tensor([0, 1, 2]), torch.tensor([0, 1])],
+            vllm_logprobs=[torch.tensor([float("nan"), -0.1, -0.2]), torch.tensor([float("nan"), -0.3])],
+            teacher_topk_token_ids=[
+                torch.tensor([[0, 0], [10, 11], [12, 13]], dtype=torch.long),
+                torch.tensor([[0, 0], [14, 15]], dtype=torch.long),
+            ],
+            teacher_topk_logprobs=[
+                torch.tensor([[float("-inf"), float("-inf")], [-0.4, -0.5], [-0.6, -0.7]]),
+                torch.tensor([[float("-inf"), float("-inf")], [-0.8, -0.9]]),
+            ],
+        )
+
+        result = data_loader_lib.prepare_collated_data_for_workers(
+            packed_sequences=packed_sequences,
+            dp_world_size=1,
+            per_device_train_batch_size=2,
+            pad_token_id=0,
+            pin_memory=False,
+        )
+
+        batch = result[0]
+        assert batch.teacher_topk_token_ids is not None
+        assert batch.teacher_topk_logprobs is not None
+        self.assertEqual(batch.teacher_topk_token_ids[0].shape, (2, 3, 2))
+        self.assertEqual(batch.teacher_topk_logprobs[0].shape, (2, 3, 2))
 
 
 if __name__ == "__main__":

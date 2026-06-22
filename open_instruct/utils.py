@@ -2735,20 +2735,34 @@ class UlyssesSPSplitter:
         start_idx = chunk_len * self.sp_rank
         end_idx = chunk_len * (self.sp_rank + 1)
 
+        def pad_and_slice_sequence(t: torch.Tensor, pad_value: float | int) -> torch.Tensor:
+            if t.ndim == 2:
+                padded = F.pad(t, (0, max_seqlen - t.shape[1]), value=pad_value)
+                return padded[:, start_idx:end_idx]
+            if t.ndim == 3:
+                padded = F.pad(t, (0, 0, 0, max_seqlen - t.shape[1]), value=pad_value)
+                return padded[:, start_idx:end_idx, :]
+            raise ValueError(f"Unsupported tensor rank for sequence parallel splitting: {t.ndim}")
+
         # slice and pad tensors for this sp rank
         kwargs = {}
         for field in dataclasses.fields(data):
+            field_value = getattr(data, field.name)
+            if field_value is None:
+                kwargs[field.name] = None
+                continue
             if field.name == "query_responses":
                 pad_value = self.pad_token_id
             elif field.name == "vllm_logprobs":
                 pad_value = INVALID_LOGPROB
+            elif field.name == "teacher_topk_logprobs":
+                pad_value = float("-inf")
             else:
                 pad_value = 0
             sharded = []
-            for t in getattr(data, field.name):
+            for t in field_value:
                 # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
-                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
-                sharded.append(padded_sliced)
+                sharded.append(pad_and_slice_sequence(t, pad_value))
             kwargs[field.name] = sharded
 
         return data_types.CollatedBatchData(**kwargs)

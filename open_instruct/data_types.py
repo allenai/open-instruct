@@ -111,9 +111,30 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    teacher_topk_token_ids: list[torch.Tensor] | None = None
+    teacher_topk_logprobs: list[torch.Tensor] | None = None
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
-        return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
+        def select(values: list[torch.Tensor]) -> list[torch.Tensor]:
+            if isinstance(idx, slice):
+                return values[idx]
+            return [values[idx]]
+
+        def select_optional(values: list[torch.Tensor] | None) -> list[torch.Tensor] | None:
+            if values is None:
+                return None
+            return select(values)
+
+        return CollatedBatchData(
+            query_responses=select(self.query_responses),
+            attention_masks=select(self.attention_masks),
+            position_ids=select(self.position_ids),
+            advantages=select(self.advantages),
+            response_masks=select(self.response_masks),
+            vllm_logprobs=select(self.vllm_logprobs),
+            teacher_topk_token_ids=select_optional(self.teacher_topk_token_ids),
+            teacher_topk_logprobs=select_optional(self.teacher_topk_logprobs),
+        )
 
     def __len__(self) -> int:
         return len(self.query_responses)
@@ -123,6 +144,8 @@ class CollatedBatchData:
             self,
             **{
                 f.name: [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
+                if getattr(self, f.name) is not None
+                else None
                 for f in dataclasses.fields(self)
             },
         )

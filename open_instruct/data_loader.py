@@ -33,7 +33,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, opd_utils, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -442,6 +442,36 @@ class StreamingDataLoaderConfig:
     eval_response_length: int | None = None
     """Local eval max tokens in GRPO `grpo_fast`. Defaults to `response_length` (see `__post_init__`)."""
 
+    # On-policy distillation
+    opd_enabled: bool = False
+    """Enable online teacher scoring and distillation loss for OLMo-core GRPO."""
+    opd_loss_mode: Literal["forward_kl_topk"] = "forward_kl_topk"
+    """OPD loss variant. V1 supports only direct teacher-top-k forward KL."""
+    opd_topk: int = 128
+    """Number of teacher top-k logits to request per response token."""
+    opd_loss_coef: float = 1.0
+    """Coefficient applied to the OPD distillation loss."""
+    opd_use_task_rewards: bool = True
+    """When False, run pure OPD and ignore the GRPO policy/reward loss."""
+    opd_teacher_model_name_or_path: str | None = None
+    """Teacher model used for OPD scoring."""
+    opd_teacher_model_revision: str | None = None
+    """Optional teacher model revision."""
+    opd_teacher_num_engines: int = 1
+    """Number of teacher vLLM scorer replicas."""
+    opd_teacher_tensor_parallel_size: int = 1
+    """Tensor parallel size for each teacher scorer."""
+    opd_teacher_gpu_memory_utilization: float = 0.9
+    """Teacher vLLM GPU memory utilization."""
+    opd_teacher_dtype: str = "bfloat16"
+    """Teacher vLLM dtype."""
+    opd_teacher_enforce_eager: bool = False
+    """Whether teacher vLLM should enforce eager execution."""
+    opd_teacher_enable_prefix_caching: bool = False
+    """Whether teacher vLLM should enable prefix caching."""
+    opd_teacher_prompt_mode: Literal["student_prompt"] = "student_prompt"
+    """Prompt construction mode for teacher scoring. V1 supports student_prompt."""
+
     # Reward - R1 style format reward
     apply_r1_style_format_reward: bool = False
     r1_style_format_reward: float = 1.0
@@ -523,12 +553,31 @@ class StreamingDataLoaderConfig:
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
 
-        assert (
+        if self.opd_enabled:
+            if self.opd_topk <= 0:
+                raise ValueError(f"`opd_topk` must be positive, got {self.opd_topk}")
+            if self.opd_loss_coef < 0:
+                raise ValueError(f"`opd_loss_coef` must be non-negative, got {self.opd_loss_coef}")
+            if self.opd_teacher_num_engines <= 0:
+                raise ValueError(f"`opd_teacher_num_engines` must be positive, got {self.opd_teacher_num_engines}")
+            if self.opd_teacher_tensor_parallel_size <= 0:
+                raise ValueError(
+                    f"`opd_teacher_tensor_parallel_size` must be positive, got {self.opd_teacher_tensor_parallel_size}"
+                )
+            if self.opd_teacher_prompt_mode != "student_prompt":
+                raise ValueError("V1 OPD supports only `opd_teacher_prompt_mode=student_prompt`.")
+            if not self.opd_use_task_rewards and self.filter_zero_std_samples:
+                logger.warning("Disabling `filter_zero_std_samples` for pure OPD because rewards are neutral.")
+                self.filter_zero_std_samples = False
+
+        has_reward = (
             self.apply_verifiable_reward
             or self.apply_r1_style_format_reward
             or self.non_stop_penalty
             or self.apply_evolving_rubric_reward
-        ), "At least one reward must be applied!"
+        )
+        if not has_reward and not (self.opd_enabled and not self.opd_use_task_rewards):
+            raise ValueError("At least one reward must be applied unless running pure OPD.")
 
         if self.stop_strings is None:
             self.stop_strings = []
@@ -633,7 +682,7 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             yield batch_data
 
 
-def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
+def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int | float, pin_memory: bool = True) -> torch.Tensor:
     padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
     padded_tensor = torch.atleast_2d(padded_tensor)
     if pin_memory and torch.cuda.is_available():
@@ -807,7 +856,7 @@ def process_group(
 
     decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
-    percent_solved = np.mean(result.reward_scores).item() / max_possible_score
+    percent_solved = 0.0 if max_possible_score <= 0 else np.mean(result.reward_scores).item() / max_possible_score
     if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
         assert iter_dataloader is not None
         iter_dataloader.exclude_index(result.index)
@@ -1190,6 +1239,16 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        per_device_teacher_topk_token_ids = (
+            packed_sequences.teacher_topk_token_ids[B * i : B * (i + 1)]
+            if packed_sequences.teacher_topk_token_ids is not None
+            else None
+        )
+        per_device_teacher_topk_logprobs = (
+            packed_sequences.teacher_topk_logprobs[B * i : B * (i + 1)]
+            if packed_sequences.teacher_topk_logprobs is not None
+            else None
+        )
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1199,6 +1258,8 @@ def prepare_collated_data_for_workers(
         collated_response_masks = []
         collated_advantages = []
         collated_vllm_logprobs = []
+        collated_teacher_topk_token_ids = [] if per_device_teacher_topk_token_ids is not None else None
+        collated_teacher_topk_logprobs = [] if per_device_teacher_topk_logprobs is not None else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1219,6 +1280,18 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
+            if per_device_teacher_topk_token_ids is not None:
+                assert collated_teacher_topk_token_ids is not None
+                collated_teacher_topk_token_ids.append(
+                    collate_fn([per_device_teacher_topk_token_ids[idx] for idx in micro_range], 0, pin_memory)
+                )
+            if per_device_teacher_topk_logprobs is not None:
+                assert collated_teacher_topk_logprobs is not None
+                collated_teacher_topk_logprobs.append(
+                    collate_fn(
+                        [per_device_teacher_topk_logprobs[idx] for idx in micro_range], float("-inf"), pin_memory
+                    )
+                )
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1227,6 +1300,8 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                teacher_topk_token_ids=collated_teacher_topk_token_ids,
+                teacher_topk_logprobs=collated_teacher_topk_logprobs,
             )
         )
     return collated_data
@@ -1263,6 +1338,7 @@ class DataPreparationActor:
         run_name: str,
         model_name: str | None,
         base_env_config: EnvConfig,
+        teacher_scorers: list[ray.actor.ActorHandle] | None = None,
         initial_state: dict | None = None,
     ):
         self.inference_results_Q = inference_results_Q
@@ -1283,6 +1359,9 @@ class DataPreparationActor:
         self.run_name = run_name
         self.model_name = model_name
         self.base_env_config = base_env_config
+        self.teacher_scorers = teacher_scorers or []
+        if self.config.opd_enabled and not self.teacher_scorers:
+            raise ValueError("OPD is enabled but no teacher scorer actors were provided.")
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -1315,6 +1394,50 @@ class DataPreparationActor:
             logger.info("[DataPreparationActor] Given initial state, setting state and starting preparation loop")
             self.set_state(initial_state)
             self.start()
+
+    def _score_opd_teacher(
+        self, queries: list[list[int]], responses: list[list[int]]
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], dict[str, float]]:
+        if not self.teacher_scorers:
+            raise ValueError("OPD teacher scoring requested but no teacher scorers are configured.")
+
+        wall_start = time.perf_counter()
+        num_scorers = min(len(self.teacher_scorers), len(responses))
+        chunk_size = int(np.ceil(len(responses) / num_scorers))
+        futures = []
+        for scorer_idx in range(num_scorers):
+            start = scorer_idx * chunk_size
+            end = min(start + chunk_size, len(responses))
+            if start >= end:
+                continue
+            scorer = self.teacher_scorers[scorer_idx % len(self.teacher_scorers)]
+            futures.append((start, end, scorer.score.remote(queries[start:end], responses[start:end])))
+
+        teacher_topk_token_ids: list[torch.Tensor | None] = [None] * len(responses)
+        teacher_topk_logprobs: list[torch.Tensor | None] = [None] * len(responses)
+        scorer_results: list[opd_utils.OPDTeacherScoringResult] = ray.get([future for _, _, future in futures])
+        for (start, end, _), scorer_result in zip(futures, scorer_results):
+            if len(scorer_result.teacher_topk_token_ids) != end - start:
+                raise ValueError(
+                    f"Teacher scorer returned {len(scorer_result.teacher_topk_token_ids)} rows for chunk {start}:{end}"
+                )
+            teacher_topk_token_ids[start:end] = scorer_result.teacher_topk_token_ids
+            teacher_topk_logprobs[start:end] = scorer_result.teacher_topk_logprobs
+
+        if any(t is None for t in teacher_topk_token_ids) or any(t is None for t in teacher_topk_logprobs):
+            raise RuntimeError("Teacher scorer did not return top-k tensors for every response.")
+        final_teacher_topk_token_ids = [t for t in teacher_topk_token_ids if t is not None]
+        final_teacher_topk_logprobs = [t for t in teacher_topk_logprobs if t is not None]
+
+        wall_time = time.perf_counter() - wall_start
+        total_teacher_time = sum(result.metrics.get("time/opd_teacher_scoring", 0.0) for result in scorer_results)
+        total_response_tokens = sum(len(response) for response in responses)
+        metrics = {
+            "time/opd_teacher_scoring": wall_time,
+            "time/opd_teacher_scoring_worker_sum": total_teacher_time,
+            "opd/teacher_tokens_per_second": total_response_tokens / wall_time if wall_time > 0 else 0.0,
+        }
+        return final_teacher_topk_token_ids, final_teacher_topk_logprobs, metrics
 
     def start(self):
         if self._prep_future is not None:
@@ -1438,6 +1561,14 @@ class DataPreparationActor:
                 )
                 self.total_samples_written += len(batch.queries)
 
+            teacher_topk_token_ids = None
+            teacher_topk_logprobs = None
+            opd_metrics = {}
+            if self.config.opd_enabled:
+                teacher_topk_token_ids, teacher_topk_logprobs, opd_metrics = self._score_opd_teacher(
+                    batch.queries, result.responses
+                )
+
             packed_sequences = pack_sequences(
                 queries=batch.queries,
                 responses=result.responses,
@@ -1445,6 +1576,8 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                teacher_topk_token_ids=teacher_topk_token_ids,
+                teacher_topk_logprobs=teacher_topk_logprobs,
                 mask_tool_use=self.config.mask_tool_use,
                 min_num_batches=self.dp_world_size,
             )
@@ -1510,6 +1643,7 @@ class DataPreparationActor:
                 "val/advantages_hist": advantages,
                 **reward_metrics,
                 **batch_metrics_prefixed,
+                **opd_metrics,
             }
 
             tool_stats = EnvStatistics(tool_names=self.tool_names)

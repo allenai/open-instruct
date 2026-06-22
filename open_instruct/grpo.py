@@ -31,7 +31,7 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, utils, vllm_utils
+from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, opd_utils, utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
@@ -202,6 +202,33 @@ def main(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
+    teacher_scorers = []
+    if streaming_config.opd_enabled:
+        if streaming_config.opd_teacher_model_name_or_path is None:
+            raise ValueError("`opd_teacher_model_name_or_path` is required when `opd_enabled=True`.")
+        if not streaming_config.opd_use_task_rewards and (args.beta != 0 or args.load_ref_policy):
+            logger.warning(
+                "Pure OPD is enabled, so GRPO task loss and reference KL will be ignored. "
+                "Consider setting --beta 0.0 --load_ref_policy False to avoid unnecessary reference-policy setup."
+            )
+        assert tc.tokenizer_name_or_path is not None, "tokenizer_name_or_path must be set after make_tokenizer"
+        teacher_scorers = opd_utils.create_teacher_scorers(
+            num_engines=streaming_config.opd_teacher_num_engines,
+            tensor_parallel_size=streaming_config.opd_teacher_tensor_parallel_size,
+            enforce_eager=streaming_config.opd_teacher_enforce_eager,
+            tokenizer_name_or_path=tc.tokenizer_name_or_path,
+            tokenizer_revision=tc.tokenizer_revision,
+            model_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            model_revision=streaming_config.opd_teacher_model_revision,
+            seed=args.seed,
+            enable_prefix_caching=streaming_config.opd_teacher_enable_prefix_caching,
+            max_model_len=streaming_config.max_prompt_token_length + streaming_config.response_length,
+            gpu_memory_utilization=streaming_config.opd_teacher_gpu_memory_utilization,
+            topk=streaming_config.opd_topk,
+            dtype=streaming_config.opd_teacher_dtype,
+            trust_remote_code=tc.trust_remote_code,
+            attention_backend=vllm_config.vllm_attention_backend,
+        )
 
     _data_prep_actor = data_loader_lib.DataPreparationActor.options(  # type: ignore[unresolved-attribute]
         name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
@@ -226,6 +253,7 @@ def main(
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
         base_env_config=base_env_config,
+        teacher_scorers=teacher_scorers,
         initial_state=None,
     )
 

@@ -27,4 +27,5 @@ uv run python mason.py \
        --gpus 1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)" \
+       --no_auto_dataset_cache \
        -- bash scripts/test/run_gpu_tests.sh "${PYTEST_ARGS[@]}"
