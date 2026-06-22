@@ -14,7 +14,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 DATA=/weka/oe-adapt-default/mingqianz/agent-safety/data/sft/sft_oas_sanity.jsonl
 
 uv run python mason.py \
-    --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres ai2/titan \
+    --cluster ai2/jupiter ai2/saturn ai2/neptune ai2/ceres \
     --workspace ai2/general-tool-use \
     --description "sft oas" \
     --priority urgent \
