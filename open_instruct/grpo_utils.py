@@ -418,33 +418,33 @@ def compute_rho_correction(
     logprob_diff = torch.where(
         response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
     )
-    rho = torch.exp(logprob_diff)
+    rho = torch.where(response_mask, torch.exp(logprob_diff), torch.ones_like(response_mask))
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
     if not config.use_rho_correction:
         return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
 
-    rho_effective = (
-        torch.exp(_sequence_level_mean(logprob_diff, response_mask)) if config.rho_mask_sequence_level else rho
-    )
+    rho_effective = rho
+    if config.rho_mask_sequence_level:
+        rho_effective = torch.exp(_sequence_level_mean(logprob_diff, response_mask))
 
-    if config.rho_mask_tv_divergence:
-        # don't change rho_effective as it is our truncated importance sampling
-        # calculate sequence-level TV divergence with abs(rho - 1)
-        # filter if TV divergence > delta and advantage * logprob_diff > 0
-        tv_divergence = torch.abs(rho - 1.0)
-        tv_sequence_level = _sequence_level_mean(tv_divergence, response_mask)
-        tv_dropped_low, tv_dropped_high = _rho_drop_masks(
-            tv_sequence_level, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
-        )
-        tokens_increase_tv = torch.sign(logprob_diff) * advantages > 0
-        dropped_low = tv_dropped_low & tokens_increase_tv
-        dropped_high = tv_dropped_high & tokens_increase_tv
-    else:
-        dropped_low, dropped_high = _rho_drop_masks(
-            rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
-        )
-
-    in_range = response_mask & ~dropped_low & ~dropped_high
+    if config.rho_mask_lower_bound > 0.0 or config.rho_mask_upper_bound > 0.0:
+        if config.rho_mask_tv_divergence:
+            # don't change rho_effective as it is our truncated importance sampling
+            # calculate sequence-level TV divergence with abs(rho - 1)
+            # filter if TV divergence > delta and advantage * logprob_diff > 0
+            tv_divergence = torch.abs(rho - 1.0)
+            tv_sequence_level = _sequence_level_mean(tv_divergence, response_mask)
+            tv_dropped_low, tv_dropped_high = _rho_drop_masks(
+                tv_sequence_level, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+            )
+            tokens_increase_tv = torch.sign(logprob_diff) * advantages > 0
+            dropped_low = tv_dropped_low & tokens_increase_tv
+            dropped_high = tv_dropped_high & tokens_increase_tv
+        else:
+            dropped_low, dropped_high = _rho_drop_masks(
+                rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+            )
+        rho_effective = torch.where(dropped_low | dropped_high, torch.zeros_like(rho_effective), rho_effective)
 
     rho_clamped = rho_effective
     if config.rho_clamp_lower_bound > 0.0:
@@ -452,15 +452,14 @@ def compute_rho_correction(
     if config.rho_clamp_upper_bound > 0.0:
         rho_clamped = torch.clamp(rho_clamped, max=config.rho_clamp_upper_bound)
 
-    weights = torch.where(in_range, rho_clamped, torch.zeros_like(rho_clamped))
     metrics = {
         "val/rho_drop_frac": (dropped_low | dropped_high).float(),
         "val/rho_drop_low_frac": dropped_low.float(),
         "val/rho_drop_high_frac": dropped_high.float(),
-        "val/rho_weight": weights.float(),
+        "val/rho_weight": rho_clamped.float(),
         "val/rho_clipfrac": (rho_clamped != rho_effective).float(),
     }
-    return RhoCorrection(weights=weights, metrics=metrics, histogram_metrics=rho_hist)
+    return RhoCorrection(weights=rho_clamped, metrics=metrics, histogram_metrics=rho_hist)
 
 
 def accumulate_rho_histograms(acc: dict[str, list[torch.Tensor]], correction: RhoCorrection) -> None:
