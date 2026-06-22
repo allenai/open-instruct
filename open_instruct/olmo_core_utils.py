@@ -17,6 +17,7 @@ from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
+from olmo_core.nn.lm_head import LMLossImplementation
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
 from olmo_core.train import callbacks as train_callbacks
@@ -58,6 +59,9 @@ class ModelConfig:
     """Pretrained config name or path if not the same as model_name."""
     attn_implementation: AttentionBackendName | None = None
     """Which attention implementation to use. If None, auto-detects the best available."""
+    loss_implementation: LMLossImplementation = LMLossImplementation.default
+    """LM loss implementation (e.g. 'fused_linear' for Liger FLCE). Defaults to olmo-core's default.
+    Only consulted when labels are passed into the model (SFT); DPO computes loss from logits outside the lm_head."""
     model_revision: str | None = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     low_cpu_mem_usage: bool = False
@@ -400,6 +404,7 @@ def setup_model(
         vocab_size,
         attn_backend=model_config_args.attn_implementation,
     )
+    model_config.lm_head.loss_implementation = LMLossImplementation(model_config_args.loss_implementation)
     if model_config_args.rope_scaling_factor is not None:
         model_config = model_config.with_rope_scaling(
             YaRNRoPEScalingConfig(
