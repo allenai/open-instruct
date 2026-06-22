@@ -16,13 +16,14 @@ uv run python mason.py \
     --pure_docker_mode --preemptible \
     --num_nodes 1 --gpus 1 \
     --no_auto_dataset_cache \
+    --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     -- \
     accelerate launch --mixed_precision bf16 --num_processes 1 \
     open_instruct/finetune.py \
     --exp_name sft_oas_sanity_qwen35_4b \
     --model_name_or_path hamishivi/Qwen3.5-4B \
     --tokenizer_name hamishivi/Qwen3.5-4B \
-    --max_seq_length 16384 \
+    --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
     --learning_rate 2e-5 --lr_scheduler_type linear --warmup_ratio 0.03 \
