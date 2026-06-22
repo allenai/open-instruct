@@ -1,5 +1,5 @@
 #!/bin/bash
-# SANITY dry-run: OAS baseline safe rollouts -> Qwen3-0.6B, OpenHands multi-tool format.
+# SANITY dry-run: OAS baseline safe rollouts -> Qwen3.5-4B, OpenHands multi-tool format.
 # Single GPU on Beaker, 20 steps. Goal is to exercise the full SFT cycle and confirm the
 # data format loads/trains. NOTE: OAS = held-out eval; this is a pipeline test, NOT real training.
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open_instruct_auto}"
@@ -19,8 +19,9 @@ uv run python mason.py \
     -- \
     accelerate launch --mixed_precision bf16 --num_processes 1 \
     open_instruct/finetune.py \
-    --exp_name sft_oas_sanity_qwen3_0_6b \
-    --model_name_or_path Qwen/Qwen3-0.6B \
+    --exp_name sft_oas_sanity_qwen35_4b \
+    --model_name_or_path hamishivi/Qwen3.5-4B \
+    --tokenizer_name hamishivi/Qwen3.5-4B \
     --max_seq_length 16384 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
