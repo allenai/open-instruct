@@ -6,7 +6,7 @@ accelerate==1.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     # via
     #   open-instruct
     #   peft
-ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@76c239cab3ef3774aa1e3d0e35d1c0fc70e665c7 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@9aa3280fd5331b93fc766206eadec42ee73befc0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 aiofiles==25.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via crawl4ai
