@@ -427,6 +427,8 @@ def compute_rho_correction(
     if config.rho_mask_sequence_level:
         rho_effective = torch.exp(_sequence_level_mean(logprob_diff, response_mask))
 
+    dropped_low = torch.zeros_like(response_mask)
+    dropped_high = torch.zeros_like(response_mask)
     if config.rho_mask_lower_bound > 0.0 or config.rho_mask_upper_bound > 0.0:
         if config.rho_mask_tv_divergence:
             # don't change rho_effective as it is our truncated importance sampling
