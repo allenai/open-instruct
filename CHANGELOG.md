@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add the DPPO loss function (`--loss_fn dppo`), a binary-divergence trust-region policy update (https://arxiv.org/abs/2602.04879) gated on `--use_vllm_logprobs` (https://github.com/allenai/open-instruct/pull/PR_NUMBER).
+- Add the DPPO loss function (`--loss_fn dppo`), a binary-divergence trust-region policy update (https://arxiv.org/abs/2602.04879) gated on `--use_vllm_logprobs` (https://github.com/allenai/open-instruct/pull/1733).
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
