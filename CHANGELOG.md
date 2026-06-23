@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add an opt-in tiled GRPO lm-head loss (`--use_liger_grpo_loss`) that recomputes the lm-head projection and loss tile-by-tile to avoid materializing full-vocabulary logits, reproducing the DAPO/CISPO objective with much lower peak memory (https://github.com/allenai/open-instruct/pull/PR_NUMBER).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
