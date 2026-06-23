@@ -597,6 +597,7 @@ class PolicyTrainerRayProcess(RayProcess):
         accumulation_steps: int,
         grad_norms: list[float],
         loss_stats_B: dict[str, torch.Tensor],
+        rho_histograms: dict[str, list[torch.Tensor]],
     ) -> int:
         """Train on a single sample using the tiled lm-head GRPO loss path.
 
@@ -630,6 +631,13 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_logprobs_BT,
             current_logprobs_BT,
         )
+
+        # Truncated-importance-sampling correction ρ (all-ones when use_rho_correction is off),
+        # computed from the resolved old logprobs exactly as in the non-tiled path.
+        rho_BT = grpo_utils.compute_rho_correction(
+            old_logprob_BT, vllm_logprobs_BT, response_mask_BT, data_BT.advantages[i][:, 1:], self.args
+        )
+        grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
 
         hidden_states = grpo_utils.forward_for_liger_hidden_states(
             self.model, data_BT.query_responses[i], None, data_BT.position_ids[i]
@@ -665,6 +673,7 @@ class PolicyTrainerRayProcess(RayProcess):
             loss_scale=loss_scale,
             loss_denom=loss_denom,
             loss_fn=self.args.loss_fn,
+            rho_weights=rho_BT.weights,
         )
 
         torch.cuda.empty_cache()
@@ -685,6 +694,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 for j in range(4):
                     loss_stats_B[f"objective/kl{j}_avg"][i] = kl_avg[j]
                 loss_stats_B["loss/kl_avg"][i] = kl_avg[2] * self.args.beta
+            for key, value in rho_BT.metrics.items():
+                loss_stats_B[key][i] = masked_mean(value, response_mask_BT)
         return local_step
 
     def step(self):
@@ -783,6 +794,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             accumulation_steps,
                             grad_norms,
                             loss_stats_B,
+                            rho_histograms,
                         )
                         continue
 
