@@ -1248,9 +1248,14 @@ def _tokenize_tulu_sft_with_assistant_labels(
         if last_turn_only and message_idx != last_assistant_idx:
             continue
 
-        rendered_before = tokenizer.apply_chat_template(
-            conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=False
-        )
+        # An empty conversation (assistant is the first message) raises in most chat
+        # templates, so treat the prefix as empty.
+        if message_idx == 0:
+            rendered_before = ""
+        else:
+            rendered_before = tokenizer.apply_chat_template(
+                conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=False
+            )
         rendered_through_message = tokenizer.apply_chat_template(
             conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
         )

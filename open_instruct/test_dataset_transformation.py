@@ -441,6 +441,17 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertIn("HELLOWORLD", trained_text)
         self.assertNotIn("hi", trained_text)
 
+    def test_conversation_starting_with_assistant(self):
+        # message_idx == 0 -> messages[:0] is empty; must not call apply_chat_template([]).
+        row = {"messages": [{"role": "assistant", "content": "OPENINGLINE"}]}
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = self.tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("OPENINGLINE", trained_text)
+
     def test_slow_tokenizer_raises_clear_error(self):
         slow_tokenizer = mock.MagicMock()
         slow_tokenizer.is_fast = False
