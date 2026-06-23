@@ -1858,9 +1858,11 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
-        # Only preserve tools for non-SFT transforms; SFT tokenization consumes tools and must not keep it
+        # SFT tokenization consumes the tools column and must not persist it; other transforms keep it.
         if fn_name not in _SFT_TOKENIZE_FNS:
             target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        else:
+            target_columns = [col for col in target_columns if col != TOOLS_COLUMN_KEY]
         target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
         if fn_type == "map":

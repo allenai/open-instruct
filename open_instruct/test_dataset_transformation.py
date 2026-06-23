@@ -151,6 +151,41 @@ class TestCachedDataset(unittest.TestCase):
             dataset_hash.update(str(row["input_ids"]).encode())
         self.assertEqual(dataset_hash.hexdigest(), GOLD_SFT["hash"])
 
+    def test_sft_tokenization_drops_tools_column_when_target_columns_none(self):
+        # With target_columns=None it defaults to all dataset columns (including "tools");
+        # SFT tokenization must still drop the consumed tools column.
+        tc = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH,
+            tokenizer_revision="main",
+            use_fast=True,
+            chat_template_name="tulu",
+            add_bos=False,
+        )
+        jsonl_path = os.path.join(self.temp_dir.name, "sft_with_tools.jsonl")
+        with open(jsonl_path, "w") as f:
+            for _ in range(3):
+                f.write(
+                    json.dumps(
+                        {
+                            "messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
+                            "tools": None,
+                        }
+                    )
+                    + "\n"
+                )
+
+        dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
+            [jsonl_path, "1.0"],
+            ["train"],
+            tc,
+            ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            [{"max_seq_length": 4096}, {}],
+            target_columns=None,
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=self.temp_dir.name,
+        )
+        self.assertNotIn(open_instruct.dataset_transformation.TOOLS_COLUMN_KEY, dataset.column_names)
+
     def test_get_cached_dataset_tulu_preference(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path=TOKENIZER_PATH,
