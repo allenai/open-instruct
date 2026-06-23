@@ -125,23 +125,23 @@ class TestGroupedAdvantages(unittest.TestCase):
     def test_compute_grouped_advantages_ignores_ngu_baseline_when_disabled(self):
         scores = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
-        # use_ngu_baseline=True applies the NGU baseline (rescales the advantages).
+        # filtered_ngu_baseline=True applies the NGU baseline (shifts the advantages).
         with_baseline = compute_grouped_advantages(
             scores,
             prompt_sample_counts=[3],
             prompt_baseline_sample_counts=[5],
             prompt_baseline_reward_sums=[1.0],
             advantage_normalization_type="centered",
-            use_ngu_baseline=True,
+            filtered_ngu_baseline=True,
         )
-        # use_ngu_baseline=False falls back to the regular grouped mean.
+        # filtered_ngu_baseline=False falls back to the regular grouped mean.
         keep_all = compute_grouped_advantages(
             scores,
             prompt_sample_counts=[3],
             prompt_baseline_sample_counts=[5],
             prompt_baseline_reward_sums=[1.0],
             advantage_normalization_type="centered",
-            use_ngu_baseline=False,
+            filtered_ngu_baseline=False,
         )
         regular = compute_grouped_advantages(scores, prompt_sample_counts=[3], advantage_normalization_type="centered")
 
