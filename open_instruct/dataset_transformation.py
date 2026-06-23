@@ -1209,6 +1209,15 @@ def _tokenize_tulu_sft_with_assistant_labels(
     tools: list[dict[str, Any]] | None,
     max_seq_length: int | None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Assistant label spans are derived from `return_offsets_mapping`, which slow
+    # (Python) tokenizers do not support. Fail with a clear message instead of the
+    # opaque ValueError/NotImplementedError the tokenizer would raise.
+    if not getattr(tokenizer, "is_fast", False):
+        raise ValueError(
+            f"SFT tokenization requires a fast tokenizer because it relies on "
+            f"`return_offsets_mapping` to derive assistant label spans, but got a slow tokenizer "
+            f"({type(tokenizer).__name__}). Load the tokenizer with `use_fast=True`."
+        )
     rendered = tokenizer.apply_chat_template(
         conversation=messages, tools=tools, tokenize=False, add_generation_prompt=False
     )

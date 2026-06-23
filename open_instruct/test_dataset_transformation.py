@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 from parameterized import parameterized
@@ -394,6 +395,16 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
             dict(row), self.tokenizer, max_seq_length=4096
         )
         self.assertIn(open_instruct.dataset_transformation.LABELS_KEY, out)
+
+    def test_slow_tokenizer_raises_clear_error(self):
+        slow_tokenizer = mock.MagicMock()
+        slow_tokenizer.is_fast = False
+        type(slow_tokenizer).__name__ = "FakeSlowTokenizer"
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}
+        with self.assertRaisesRegex(ValueError, "fast tokenizer"):
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+                dict(row), slow_tokenizer, max_seq_length=4096
+            )
 
     def test_without_truncation_variant_runs(self):
         row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello there"}]}
