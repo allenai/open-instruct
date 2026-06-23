@@ -16,3 +16,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Guard process_tool_tokens against None tool outputs (https://github.com/allenai/open-instruct/pull/1730).
