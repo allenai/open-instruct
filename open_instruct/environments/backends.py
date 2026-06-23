@@ -69,11 +69,15 @@ class _FileSlotSemaphore:
         while handle is None:
             for slot in range(self.slots):
                 path = os.path.join(self.lock_dir, f"{self.name}.{slot}.lock")
-                candidate = open(path, "a+")  # noqa: SIM115 - lock handle lives through the context manager
+                candidate = None
                 try:
+                    candidate = open(path, "a+")  # noqa: SIM115 - lock handle lives through the context manager
                     fcntl.flock(candidate.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError as e:
-                    candidate.close()
+                    if candidate is not None:
+                        candidate.close()
+                    # A slot owned by another user (PermissionError/EACCES) or already
+                    # locked (EAGAIN) just means we should try the next slot.
                     if e.errno in (errno.EACCES, errno.EAGAIN):
                         continue
                     raise
