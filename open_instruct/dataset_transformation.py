@@ -1248,57 +1248,33 @@ def _tokenize_tulu_sft_with_assistant_labels(
         if last_turn_only and message_idx != last_assistant_idx:
             continue
 
-        # An empty conversation (assistant is the first message) raises in most chat
-        # templates, so treat the prefix as empty.
+        # The trainable span runs from the end of the assistant header (the generation
+        # prompt the template emits before the assistant's content) to the end of the
+        # assistant turn, i.e. content + closing tokens. ``header`` and ``through`` are
+        # taken as char offsets into the full ``rendered`` string (which is what we
+        # tokenize), so both must be a prefix of it; if not, the template/conversation
+        # is not prefix-stable (e.g. eos appended only on the final turn) and we error
+        # rather than silently mis-masking. ``messages[:0]`` is empty for an assistant
+        # opening turn, so the header is taken as empty there.
         if message_idx == 0:
-            rendered_before = ""
+            header = ""
         else:
-            rendered_before = tokenizer.apply_chat_template(
-                conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=False
-            )
-        rendered_through_message = tokenizer.apply_chat_template(
-            conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
-        )
-        assert isinstance(rendered_before, str)
-        assert isinstance(rendered_through_message, str)
-        if not rendered_through_message.startswith(rendered_before):
-            # Some templates append eos_token only on the final turn (loop.last), so
-            # rendered_before ends with an eos that is absent at that position in the
-            # longer render. Strip a trailing eos_token and retry before failing.
-            eos_token = tokenizer.eos_token
-            if eos_token and rendered_before.endswith(eos_token):
-                stripped = rendered_before[: -len(eos_token)]
-                if rendered_through_message.startswith(stripped):
-                    rendered_before = stripped
-            if not rendered_through_message.startswith(rendered_before):
-                raise ValueError("Chat template rendering is not prefix-stable; cannot compute assistant label spans.")
-
-        assistant_text = rendered_through_message[len(rendered_before) :]
-        # Locate where the assistant's actual content begins so the header (e.g.
-        # "<|assistant|>\n" or "Assistant: ") is masked but the content is trained.
-        # Prefer matching the real content string (rfind avoids matching header
-        # look-alikes). When the content can't be located verbatim (empty content,
-        # tool calls, or template-transformed text), determine the header exactly from
-        # the chat template's generation prompt rather than guessing with a newline.
-        content = message.get("content")
-        stripped_content = content.strip() if isinstance(content, str) else ""
-        content_offset = assistant_text.rfind(stripped_content) if stripped_content else -1
-        if content_offset == -1:
-            # The generation prompt is exactly the assistant header the template emits
-            # before the assistant content, so its length gives the header offset.
-            rendered_with_generation_prompt = tokenizer.apply_chat_template(
+            header = tokenizer.apply_chat_template(
                 conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=True
             )
-            assert isinstance(rendered_with_generation_prompt, str)
-            if not rendered_with_generation_prompt.startswith(rendered_before):
-                raise ValueError(
-                    "Cannot determine the assistant header offset for label masking: "
-                    "add_generation_prompt did not extend the rendered prefix."
-                )
-            content_offset = len(rendered_with_generation_prompt) - len(rendered_before)
-            if content_offset > len(assistant_text):
-                raise ValueError("Computed assistant content offset exceeds the assistant turn length.")
-        trainable_char_spans.append((len(rendered_before) + content_offset, len(rendered_through_message)))
+        through = tokenizer.apply_chat_template(
+            conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
+        )
+        assert isinstance(header, str)
+        assert isinstance(through, str)
+        if not (len(header) <= len(through) and rendered.startswith(header) and rendered.startswith(through)):
+            raise ValueError(
+                "Cannot compute assistant label spans for this chat template/conversation: the "
+                "rendered conversation is not prefix-stable. This happens, for example, when the "
+                "template appends eos_token only on the final turn or does not support "
+                "add_generation_prompt."
+            )
+        trainable_char_spans.append((len(header), len(through)))
 
     for token_idx, (token_start, token_end) in enumerate(offsets):
         if token_start == token_end:
