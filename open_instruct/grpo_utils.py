@@ -153,7 +153,7 @@ class GRPOExperimentConfig(
     """Whether to use the tiled lm-head GRPO loss path, which avoids materializing the full
     vocabulary logits by recomputing the lm-head projection and loss tile-by-tile (DeepSpeed
     ``TiledFusedLogitsLoss`` pattern). High value for large-vocab / long-context memory.
-    Supports ``loss_fn=dapo`` and ``loss_fn=cispo`` with the default KL estimator."""
+    Supports ``loss_fn=dapo`` and ``loss_fn=cispo``."""
     liger_grpo_loss_chunk_size: int = 8
     """Number of tiles (shards) to split the flattened tokens into when computing the tiled
     lm-head GRPO loss. Larger values reduce peak memory at the cost of more lm-head recomputes."""
@@ -261,8 +261,6 @@ class GRPOExperimentConfig(
                 raise ValueError("`use_liger_grpo_loss` currently only supports `loss_fn=dapo` or `loss_fn=cispo`.")
             if self.record_entropy:
                 raise ValueError("`use_liger_grpo_loss` does not support `record_entropy=True`.")
-            if self.kl_estimator != 2:
-                raise ValueError("`use_liger_grpo_loss` uses the default KL estimator and requires `kl_estimator=2`.")
             if self.liger_grpo_loss_chunk_size < 1:
                 raise ValueError(f"`liger_grpo_loss_chunk_size` must be >= 1 (got {self.liger_grpo_loss_chunk_size}).")
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
@@ -582,6 +580,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         has_ref_logprobs: bool,
         temperature: float,
         beta: float,
+        kl_estimator: int,
         clip_lower: float,
         clip_higher: float,
         loss_fn: str,
@@ -686,7 +685,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                 if has_ref_logprobs:
                     ref_diff = (new_logprobs - ref_logprob_shards[shard_idx]).clamp(-40.0, 40.0)
                     kl_all = model_utils.estimate_kl(ref_diff, ratio)
-                    kl = kl_all[2]
+                    kl = kl_all[kl_estimator]
                 else:
                     kl = torch.zeros_like(pg_loss)
 
@@ -723,7 +722,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         grad = grads[0]
         if isinstance(grad, torch.Tensor):
             x_grad = x_grad * grad.to(dtype=x_grad.dtype)
-        return (None, x_grad, *([None] * 17))
+        return (None, x_grad, *([None] * 18))
 
 
 def tiled_grpo_lm_head_loss(
@@ -743,6 +742,7 @@ def tiled_grpo_lm_head_loss(
     loss_denom: torch.Tensor,
     loss_fn: str | GRPOLossType = GRPOLossType.dapo,
     rho_weights: torch.Tensor | None = None,
+    kl_estimator: int = 2,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Memory-efficient tiled GRPO lm-head loss. Returns ``(loss, pg_avg, kl_avg, clipfrac, ratio_avg)``.
 
@@ -767,6 +767,7 @@ def tiled_grpo_lm_head_loss(
         has_ref_logprobs,
         temperature,
         beta,
+        kl_estimator,
         clip_lower,
         clip_higher,
         loss_fn,

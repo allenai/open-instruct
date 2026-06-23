@@ -28,6 +28,7 @@ def _dense_reference(
     denom,
     scale,
     rho_weights=None,
+    kl_estimator=2,
 ):
     logits = lm_head(hidden)
     if temperature != 1.0:
@@ -44,7 +45,7 @@ def _dense_reference(
     if rho_weights is not None:
         pg = pg * rho_weights
     if ref_logprobs is not None:
-        kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40, 40), ratio)[2]
+        kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40, 40), ratio)[kl_estimator]
     else:
         kl = torch.zeros_like(pg)
     per_token = pg + beta * kl
@@ -171,9 +172,61 @@ class TestLigerGRPOLossConfigValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "record_entropy"):
             grpo_utils.GRPOExperimentConfig(use_liger_grpo_loss=True, record_entropy=True)
 
-    def test_rejects_non_default_kl_estimator(self):
-        with self.assertRaisesRegex(ValueError, "kl_estimator"):
-            grpo_utils.GRPOExperimentConfig(use_liger_grpo_loss=True, kl_estimator=1)
+
+class TestTiledGRPOKLEstimator(unittest.TestCase):
+    @parameterized.expand([("est0", 0), ("est1", 1), ("est2", 2), ("est3", 3)])
+    def test_kl_estimator_is_configurable(self, _name, kl_estimator):
+        torch.manual_seed(0)
+        batch_size, seq_len, hidden_size, vocab_size = 2, 5, 8, 17
+        base = nn.Linear(hidden_size, vocab_size, bias=False)
+        hidden0 = torch.randn(batch_size, seq_len, hidden_size)
+        labels = torch.randint(0, vocab_size, (batch_size, seq_len))
+        mask = torch.rand(batch_size, seq_len) > 0.3
+        advantages = torch.randn(batch_size, seq_len)
+        old_logprobs = -torch.rand(batch_size, seq_len) * 2
+        ref = -torch.rand(batch_size, seq_len) * 2
+
+        hidden_tiled = hidden0.clone().requires_grad_(True)
+        lm_tiled = nn.Linear(hidden_size, vocab_size, bias=False)
+        lm_tiled.load_state_dict(base.state_dict())
+        loss_tiled, *_ = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_tiled,
+            hidden_states=hidden_tiled,
+            selected_token_ids=labels,
+            response_mask=mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref,
+            temperature=1.0,
+            beta=0.1,
+            clip_lower=0.2,
+            clip_higher=0.272,
+            shards=2,
+            loss_scale=torch.tensor(3.0),
+            loss_denom=torch.tensor(7.0),
+            loss_fn=grpo_utils.GRPOLossType.dapo,
+            kl_estimator=kl_estimator,
+        )
+
+        hidden_dense = hidden0.clone().requires_grad_(True)
+        lm_dense = nn.Linear(hidden_size, vocab_size, bias=False)
+        lm_dense.load_state_dict(base.state_dict())
+        loss_dense, _ = _dense_reference(
+            lm_dense,
+            hidden_dense,
+            labels,
+            mask.float(),
+            advantages,
+            old_logprobs,
+            ref,
+            1.0,
+            0.1,
+            grpo_utils.GRPOLossType.dapo,
+            7.0,
+            3.0,
+            kl_estimator=kl_estimator,
+        )
+        torch.testing.assert_close(loss_tiled, loss_dense, atol=1e-5, rtol=1e-5)
 
 
 if __name__ == "__main__":
