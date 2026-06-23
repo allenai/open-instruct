@@ -950,7 +950,8 @@ DATASET_CACHE_VERSION = "v7"
 
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
     """Normalize dataset tool schemas before passing them to chat templates."""
-    if tools is None or tools == "":
+    # pandas/CSV-backed datasets may represent a missing object cell as float('nan').
+    if tools is None or tools == "" or (isinstance(tools, float) and np.isnan(tools)):
         return None
 
     if isinstance(tools, str):

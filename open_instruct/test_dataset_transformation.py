@@ -342,6 +342,7 @@ class TestToolNormalization(unittest.TestCase):
         self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template(None))
         self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template(""))
         self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template([]))
+        self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template(float("nan")))
 
     def test_normalize_tools_treats_json_null_and_empty_string_as_none(self):
         self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template("null"))
