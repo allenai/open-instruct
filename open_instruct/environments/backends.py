@@ -54,7 +54,10 @@ class _FileSlotSemaphore:
     def __init__(self, name: str, slots: int):
         self.name = name
         self.slots = max(0, slots)
-        self.lock_dir = os.getenv("SWERL_DOCKER_LOCK_DIR", "/tmp/open_instruct_docker_locks")
+        # User-specific default dir so a shared /tmp doesn't cause cross-user permission
+        # conflicts (and the EACCES-skip loop never finding a usable slot).
+        uid = os.getuid() if hasattr(os, "getuid") else "default"
+        self.lock_dir = os.getenv("SWERL_DOCKER_LOCK_DIR", f"/tmp/open_instruct_docker_locks_{uid}")
         if self.slots > 0:
             os.makedirs(self.lock_dir, exist_ok=True)
 
