@@ -648,7 +648,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                 grad_is_ready = shard_idx + 1 == len(x_shards)
                 for param in compute_params:
                     # ds_grad_is_ready is injected by DeepSpeed ZeRO-3 at runtime.
-                    param.ds_grad_is_ready = grad_is_ready  # ty: ignore[unresolved-attribute]
+                    param.ds_grad_is_ready = grad_is_ready  # type: ignore[unresolved-attribute]
 
             shard_step = x_shard.shape[0]
             shard_offset = shard_idx * x_shards[0].shape[0]
@@ -704,7 +704,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
 
         if compute_params:
             for param in compute_params:
-                param.ds_grad_is_ready = True  # ty: ignore[unresolved-attribute]
+                param.ds_grad_is_ready = True  # type: ignore[unresolved-attribute]
 
         if x_grad is None:
             x_grad = torch.zeros_like(x)
