@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Harden DockerBackend with transient-exec retries, OOM detection, and concurrency limits (https://github.com/allenai/open-instruct/pull/1732).
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
