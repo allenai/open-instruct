@@ -487,6 +487,28 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         trained_text = self.tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
         self.assertIn("OPENINGLINE", trained_text)
 
+    def test_content_offset_falls_back_to_generation_prompt(self):
+        # Template uppercases assistant content so rfind(content) fails, forcing the
+        # add_generation_prompt header-length fallback (no newline heuristic).
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'user' %}User: {{ m['content'] }}\n"
+            "{% elif m['role'] == 'assistant' %}Assistant: {{ m['content'] | upper }}{% endif %}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}Assistant: {% endif %}"
+        )
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("HELLO", trained_text)
+        self.assertNotIn("Assistant", trained_text)
+        self.assertNotIn("hi", trained_text)
+
     def test_slow_tokenizer_raises_clear_error(self):
         slow_tokenizer = mock.MagicMock()
         slow_tokenizer.is_fast = False
