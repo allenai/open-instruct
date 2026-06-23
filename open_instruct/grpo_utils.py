@@ -551,8 +551,7 @@ def compute_binary_divergence(
         ``response_mask`` are zeroed.
     """
     orig_dtype = policy_logprobs.dtype
-    # Upcast to float32 for numerical stability. In bfloat16 the machine epsilon is ~0.0078,
-    # so a tiny eps would make ``1.0 - eps`` round to 1.0 and ``log(1 - pi)`` blow up to -inf.
+    # Upcast to float32 for numerical stability.
     behavior_logprobs = behavior_logprobs.to(torch.float32)
     policy_logprobs = policy_logprobs.to(torch.float32)
     eps = 1e-6
