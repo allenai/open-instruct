@@ -835,6 +835,37 @@ def forward_for_liger_hidden_states(
     return hidden_states[:, :-1]
 
 
+def tiled_token_logprobs(
+    lm_head: torch.nn.Module,
+    hidden_states: torch.Tensor,
+    selected_token_ids: torch.Tensor,
+    temperature: float,
+    shards: int,
+) -> torch.Tensor:
+    """Per-token logprobs from hidden states, computed tile-by-tile to avoid full-vocab logits.
+
+    Mirrors the lm-head logprob computation in :class:`TiledGRPOLMHeadLoss` but without
+    autograd, so the tiled-loss path can compute old/behavior logprobs without the
+    ``[B, T, vocab]`` materialization that a full ``forward_for_logprobs`` would incur.
+    Callers should wrap this in ``torch.no_grad()``.
+    """
+    batch_size, seq_len, hidden_size = hidden_states.shape
+    x = hidden_states.reshape(-1, hidden_size)
+    labels = selected_token_ids.reshape(-1)
+    num_tokens = x.shape[0]
+    shards = max(1, min(shards, num_tokens))
+    logprobs = torch.empty(num_tokens, dtype=torch.float32, device=x.device)
+    for x_shard, label_shard, logprob_shard in zip(
+        torch.chunk(x, shards), torch.chunk(labels, shards), torch.chunk(logprobs, shards)
+    ):
+        logits = lm_head(x_shard)
+        if temperature != 1.0:
+            logits = logits / temperature
+        selected = torch.gather(logits, dim=-1, index=label_shard.unsqueeze(-1)).squeeze(-1)
+        logprob_shard.copy_(selected - torch.logsumexp(logits, dim=-1))
+    return logprobs.reshape(batch_size, seq_len)
+
+
 def forward_for_logprobs(
     model: torch.nn.Module,
     query_responses: torch.Tensor,

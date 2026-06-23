@@ -609,15 +609,22 @@ class PolicyTrainerRayProcess(RayProcess):
         vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
         # Resolve old (behavior) logprobs identically to the non-tiled path. The current
         # policy's logprobs are only needed for the single-minibatch, non-vLLM, first-epoch case.
+        # Compute them tile-by-tile (backbone hidden states + chunked lm-head) rather than via
+        # forward_for_logprobs, which would materialize full-vocab logits and defeat the tiled loss.
         if num_mini_batches == 1 and not self.args.use_vllm_logprobs and epoch_idx == 0:
             with torch.no_grad():
-                current_logprobs_BT, _ = grpo_utils.forward_for_logprobs(
-                    self.model,
-                    data_BT.query_responses[i],
-                    None,
-                    data_BT.position_ids[i],
-                    self.pad_token_id,
+                hidden_states_old = grpo_utils.forward_for_liger_hidden_states(
+                    self.model, data_BT.query_responses[i], None, data_BT.position_ids[i]
+                )
+                _, lm_head_old = grpo_utils.get_causal_lm_backbone_and_lm_head(self.model)
+                old_labels = data_BT.query_responses[i][:, 1:].clone()
+                old_labels[old_labels == self.pad_token_id] = 0
+                current_logprobs_BT = grpo_utils.tiled_token_logprobs(
+                    lm_head_old,
+                    hidden_states_old,
+                    old_labels,
                     self.streaming_config.temperature,
+                    max(1, int(self.args.liger_grpo_loss_chunk_size)),
                 )
             current_logprobs_BT = grpo_utils.mask_logprobs(current_logprobs_BT, response_mask_BT)
         else:
