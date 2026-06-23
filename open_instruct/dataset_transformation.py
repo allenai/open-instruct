@@ -1277,14 +1277,27 @@ def _tokenize_tulu_sft_with_assistant_labels(
         # Locate where the assistant's actual content begins so the header (e.g.
         # "<|assistant|>\n" or "Assistant: ") is masked but the content is trained.
         # Prefer matching the real content string (rfind avoids matching header
-        # look-alikes); fall back to the newline heuristic when the content can't be
-        # located verbatim (empty content, tool calls, or template-transformed text).
+        # look-alikes). When the content can't be located verbatim (empty content,
+        # tool calls, or template-transformed text), determine the header exactly from
+        # the chat template's generation prompt rather than guessing with a newline.
         content = message.get("content")
         stripped_content = content.strip() if isinstance(content, str) else ""
         content_offset = assistant_text.rfind(stripped_content) if stripped_content else -1
         if content_offset == -1:
-            newline_idx = assistant_text.find("\n")
-            content_offset = 0 if newline_idx == -1 else newline_idx + 1
+            # The generation prompt is exactly the assistant header the template emits
+            # before the assistant content, so its length gives the header offset.
+            rendered_with_generation_prompt = tokenizer.apply_chat_template(
+                conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=True
+            )
+            assert isinstance(rendered_with_generation_prompt, str)
+            if not rendered_with_generation_prompt.startswith(rendered_before):
+                raise ValueError(
+                    "Cannot determine the assistant header offset for label masking: "
+                    "add_generation_prompt did not extend the rendered prefix."
+                )
+            content_offset = len(rendered_with_generation_prompt) - len(rendered_before)
+            if content_offset > len(assistant_text):
+                raise ValueError("Computed assistant content offset exceeds the assistant turn length.")
         trainable_char_spans.append((len(rendered_before) + content_offset, len(rendered_through_message)))
 
     for token_idx, (token_start, token_end) in enumerate(offsets):
