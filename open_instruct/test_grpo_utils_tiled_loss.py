@@ -167,6 +167,24 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
             )
 
 
+class TestTiledTokenLogprobs(unittest.TestCase):
+    @parameterized.expand([("s1_t1", 1, 1.0), ("s3_t07", 3, 0.7), ("sbig_t1", 100, 1.0)])
+    def test_matches_dense_log_softmax_gather(self, _name, shards, temperature):
+        torch.manual_seed(0)
+        batch_size, seq_len, hidden_size, vocab_size = 2, 5, 8, 17
+        lm_head = nn.Linear(hidden_size, vocab_size, bias=False)
+        hidden = torch.randn(batch_size, seq_len, hidden_size)
+        labels = torch.randint(0, vocab_size, (batch_size, seq_len))
+
+        with torch.no_grad():
+            tiled = grpo_utils.tiled_token_logprobs(lm_head, hidden, labels, temperature, shards)
+            logits = lm_head(hidden)
+            if temperature != 1.0:
+                logits = logits / temperature
+            dense = torch.gather(logits.log_softmax(dim=-1), dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+        torch.testing.assert_close(tiled, dense, atol=1e-5, rtol=1e-5)
+
+
 class _FakeCausalLM(nn.Module):
     base_model_prefix = "model"
 
