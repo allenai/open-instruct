@@ -1204,10 +1204,7 @@ def mask_labels(
 
 
 def _tokenize_tulu_sft_with_assistant_labels(
-    messages: list[dict[str, Any]],
-    tokenizer: PreTrainedTokenizer,
-    tools: list | None,
-    max_seq_length: int | None,
+    messages: list[dict[str, Any]], tokenizer: PreTrainedTokenizer, tools: list | None, max_seq_length: int | None
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # Assistant label spans are derived from `return_offsets_mapping`, which slow
     # (Python) tokenizers do not support. Fail with a clear message instead of the
