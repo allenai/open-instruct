@@ -44,7 +44,9 @@ uv run python mason.py \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
     --total_episodes 200 \
-    --deepspeed_stage 2 \
+    --deepspeed_stage 3 \
+    --use_liger_grpo_loss \
+    --liger_grpo_loss_chunk_size 8 \
     --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \
