@@ -1238,11 +1238,14 @@ def _tokenize_tulu_sft_with_assistant_labels(
     offsets = tokenized["offset_mapping"][0].tolist()
     labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
 
+    assistant_indices = [idx for idx, m in enumerate(messages) if m["role"] == "assistant"]
+    last_assistant_idx = assistant_indices[-1] if assistant_indices else -1
+
     trainable_char_spans: list[tuple[int, int]] = []
     for message_idx, message in enumerate(messages):
         if message["role"] != "assistant":
             continue
-        if last_turn_only and message_idx < len(messages) - 1:
+        if last_turn_only and message_idx != last_assistant_idx:
             continue
 
         rendered_before = tokenizer.apply_chat_template(

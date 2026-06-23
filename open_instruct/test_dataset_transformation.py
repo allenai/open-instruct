@@ -456,6 +456,26 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertIn("SECONDANSWER", trained_text)
         self.assertNotIn("FIRSTANSWER", trained_text)
 
+    def test_last_turn_only_when_conversation_does_not_end_with_assistant(self):
+        # Trailing non-assistant message must not cause the real last assistant turn to be skipped.
+        row = {
+            "messages": [
+                {"role": "user", "content": "first question"},
+                {"role": "assistant", "content": "FIRSTANSWER"},
+                {"role": "assistant", "content": "SECONDANSWER"},
+                {"role": "user", "content": "trailing user message"},
+            ]
+        }
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = self.tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("SECONDANSWER", trained_text)
+        self.assertNotIn("FIRSTANSWER", trained_text)
+        self.assertNotIn("trailing user message", trained_text)
+
 
 if __name__ == "__main__":
     unittest.main()
