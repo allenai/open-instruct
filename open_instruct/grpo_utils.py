@@ -755,7 +755,7 @@ def tiled_grpo_lm_head_loss(
     has_rho_weights = rho_weights is not None
     if rho_weights is None:
         rho_weights = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
-    compute_params = list(lm_head.parameters(recurse=False))
+    compute_params = list(lm_head.parameters())
     return TiledGRPOLMHeadLoss.apply(
         lm_head,
         hidden_states,
