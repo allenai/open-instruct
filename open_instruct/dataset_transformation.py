@@ -948,7 +948,7 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 DATASET_CACHE_VERSION = "v7"
 
 
-def _normalize_tools_for_chat_template(tools: Any) -> list[dict[str, Any]] | None:
+def _normalize_tools_for_chat_template(tools: Any) -> list | None:
     """Normalize dataset tool schemas before passing them to chat templates."""
     if tools is None or tools == "":
         return None
@@ -1206,7 +1206,7 @@ def mask_labels(
 def _tokenize_tulu_sft_with_assistant_labels(
     messages: list[dict[str, Any]],
     tokenizer: PreTrainedTokenizer,
-    tools: list[dict[str, Any]] | None,
+    tools: list | None,
     max_seq_length: int | None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # Assistant label spans are derived from `return_offsets_mapping`, which slow
@@ -1221,6 +1221,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
     rendered = tokenizer.apply_chat_template(
         conversation=messages, tools=tools, tokenize=False, add_generation_prompt=False
     )
+    assert isinstance(rendered, str)
     tokenized = tokenizer(
         rendered,
         add_special_tokens=False,
@@ -1246,6 +1247,8 @@ def _tokenize_tulu_sft_with_assistant_labels(
         rendered_through_message = tokenizer.apply_chat_template(
             conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
         )
+        assert isinstance(rendered_before, str)
+        assert isinstance(rendered_through_message, str)
         if not rendered_through_message.startswith(rendered_before):
             raise ValueError("Chat template rendering is not prefix-stable; cannot compute assistant label spans.")
 
