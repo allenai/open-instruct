@@ -667,6 +667,7 @@ class PolicyTrainerRayProcess(RayProcess):
             ref_logprobs=ref_logprob_BT,
             temperature=self.streaming_config.temperature,
             beta=self.args.beta if self.args.load_ref_policy else 0.0,
+            kl_estimator=self.args.kl_estimator,
             clip_lower=self.args.clip_lower,
             clip_higher=self.args.clip_higher,
             shards=max(1, int(self.args.liger_grpo_loss_chunk_size)),
@@ -693,7 +694,7 @@ class PolicyTrainerRayProcess(RayProcess):
             if self.args.load_ref_policy and ref_logprob_BT is not None:
                 for j in range(4):
                     loss_stats_B[f"objective/kl{j}_avg"][i] = kl_avg[j]
-                loss_stats_B["loss/kl_avg"][i] = kl_avg[2] * self.args.beta
+                loss_stats_B["loss/kl_avg"][i] = kl_avg[self.args.kl_estimator] * self.args.beta
             for key, value in rho_BT.metrics.items():
                 loss_stats_B[key][i] = masked_mean(value, response_mask_BT)
         return local_step
