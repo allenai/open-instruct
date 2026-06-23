@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add an opt-in tiled GRPO lm-head loss (`--use_liger_grpo_loss`) that recomputes the lm-head projection and loss tile-by-tile to avoid materializing full-vocabulary logits, reproducing the DAPO/CISPO objective with much lower peak memory (https://github.com/allenai/open-instruct/pull/PR_NUMBER).
+- Add an opt-in tiled GRPO lm-head loss (`--use_liger_grpo_loss`) that recomputes the lm-head projection and loss tile-by-tile to avoid materializing full-vocabulary logits, reproducing the DAPO/CISPO objective with much lower peak memory (https://github.com/allenai/open-instruct/pull/1735).
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
