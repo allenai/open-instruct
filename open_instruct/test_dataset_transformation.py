@@ -342,6 +342,11 @@ class TestToolNormalization(unittest.TestCase):
         self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template(""))
         self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template([]))
 
+    def test_normalize_tools_treats_json_null_and_empty_string_as_none(self):
+        self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template("null"))
+        self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template('""'))
+        self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template("[]"))
+
     def test_normalize_tools_rejects_tool_name_lists(self):
         with self.assertRaises(TypeError):
             open_instruct.dataset_transformation._normalize_tools_for_chat_template(["bash"])
