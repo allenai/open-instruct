@@ -706,6 +706,21 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                     grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
 
+                    # DPPO enforces its trust region via a per-token mask computed from the
+                    # binary divergence between the rollout policy μ_θ' (old_logprob_BT, which
+                    # equals the vLLM logprobs when use_vllm_logprobs=True) and the trainer policy.
+                    dppo_mask_BT = None
+                    if self.args.loss_fn == grpo_utils.GRPOLossType.dppo:
+                        dppo_mask_BT, _ = grpo_utils.compute_dppo_mask(
+                            new_logprobs=new_logprobs_BT,
+                            behavior_logprobs=old_logprob_BT,
+                            advantages=data_BT.advantages[i][:, 1:],
+                            ratio=ratio_BT,
+                            response_mask=response_mask_BT,
+                            divergence_type=self.args.dppo_divergence_type,
+                            divergence_threshold=self.args.dppo_divergence_threshold,
+                        )
+
                     pg_loss_BT, clipfrac_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         ratio=ratio_BT,
@@ -713,6 +728,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
                         rho_weights=rho_BT.weights,
+                        dppo_mask=dppo_mask_BT,
                     )
 
                     per_token_loss_BT = pg_loss_BT + self.args.beta * kl_BT
