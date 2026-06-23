@@ -154,7 +154,7 @@ class GRPOExperimentConfig(
     vocabulary logits by recomputing the lm-head projection and loss tile-by-tile (DeepSpeed
     ``TiledFusedLogitsLoss`` pattern). High value for large-vocab / long-context memory.
     Supports ``loss_fn=dapo`` and ``loss_fn=cispo`` with the default KL estimator."""
-    liger_grpo_loss_chunk_size: int = 1
+    liger_grpo_loss_chunk_size: int = 8
     """Number of tiles (shards) to split the flattened tokens into when computing the tiled
     lm-head GRPO loss. Larger values reduce peak memory at the cost of more lm-head recomputes."""
     record_entropy: bool = False
