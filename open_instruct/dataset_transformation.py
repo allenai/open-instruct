@@ -1263,7 +1263,8 @@ def _tokenize_tulu_sft_with_assistant_labels(
         # look-alikes); fall back to the newline heuristic when the content can't be
         # located verbatim (empty content, tool calls, or template-transformed text).
         content = message.get("content")
-        content_offset = assistant_text.rfind(content) if isinstance(content, str) and content.strip() else -1
+        stripped_content = content.strip() if isinstance(content, str) else ""
+        content_offset = assistant_text.rfind(stripped_content) if stripped_content else -1
         if content_offset == -1:
             newline_idx = assistant_text.find("\n")
             content_offset = 0 if newline_idx == -1 else newline_idx + 1
