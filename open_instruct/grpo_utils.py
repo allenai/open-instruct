@@ -781,12 +781,23 @@ def tiled_grpo_lm_head_loss(
 
 
 def _unwrap_causal_lm(model: torch.nn.Module) -> torch.nn.Module:
-    """Unwrap a (possibly DeepSpeed-wrapped) model down to the HF causal-LM module."""
+    """Unwrap a (possibly DeepSpeed- or PEFT-wrapped) model down to the HF causal-LM module.
+
+    Strips DeepSpeed/DDP ``.module`` wrappers and PEFT ``PeftModel`` wrappers (via
+    ``get_base_model``). Without the PEFT unwrap, the backbone lookup would treat the
+    full causal LM (lm_head included) as the backbone and materialize logits.
+    """
     inner = model
     seen: set[int] = set()
-    while hasattr(inner, "module") and id(inner) not in seen:
+    while id(inner) not in seen:
         seen.add(id(inner))
-        inner = inner.module
+        get_base_model = getattr(inner, "get_base_model", None)
+        if hasattr(inner, "module"):
+            inner = inner.module
+        elif callable(get_base_model):
+            inner = get_base_model()
+        else:
+            break
     return cast(torch.nn.Module, inner)
 
 
