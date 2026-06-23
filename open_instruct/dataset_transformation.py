@@ -1250,17 +1250,25 @@ def _tokenize_tulu_sft_with_assistant_labels(
             raise ValueError("Chat template rendering is not prefix-stable; cannot compute assistant label spans.")
 
         assistant_text = rendered_through_message[len(rendered_before) :]
-        content_offset = assistant_text.find("\n")
+        # Locate where the assistant's actual content begins so the header (e.g.
+        # "<|assistant|>\n" or "Assistant: ") is masked but the content is trained.
+        # Prefer matching the real content string (rfind avoids matching header
+        # look-alikes); fall back to the newline heuristic when the content can't be
+        # located verbatim (empty content, tool calls, or template-transformed text).
+        content = message.get("content")
+        content_offset = assistant_text.rfind(content) if isinstance(content, str) and content else -1
         if content_offset == -1:
-            content_offset = 0
-        else:
-            content_offset += 1
+            newline_idx = assistant_text.find("\n")
+            content_offset = 0 if newline_idx == -1 else newline_idx + 1
         trainable_char_spans.append((len(rendered_before) + content_offset, len(rendered_through_message)))
 
     for token_idx, (token_start, token_end) in enumerate(offsets):
         if token_start == token_end:
             continue
-        if any(span_start <= token_start and token_end <= span_end for span_start, span_end in trainable_char_spans):
+        # Train a token if it overlaps a trainable span. Overlap (rather than full
+        # containment) keeps a boundary token that straddles the header/content edge —
+        # e.g. a leading-space-merged " ok" token in "Assistant: ok" — trainable.
+        if any(token_start < span_end and span_start < token_end for span_start, span_end in trainable_char_spans):
             labels[0, token_idx] = input_ids[0, token_idx]
 
     return input_ids, attention_mask, labels
