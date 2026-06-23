@@ -958,6 +958,9 @@ def _normalize_tools_for_chat_template(tools: Any) -> list[dict[str, Any]] | Non
             tools = json.loads(tools)
         except json.JSONDecodeError as exc:
             raise ValueError(f"{TOOLS_COLUMN_KEY} must be a JSON-encoded tool schema list, got: {tools!r}") from exc
+        # Re-check after parsing: a JSON "null" or "" decodes to None / "".
+        if tools is None or tools == "":
+            return None
 
     if isinstance(tools, dict):
         tools = [tools]
