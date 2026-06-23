@@ -422,6 +422,25 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertNotIn("Assistant", trained_text)
         self.assertNotIn("User", trained_text)
 
+    def test_template_appending_eos_only_on_last_turn(self):
+        # A template that appends eos_token only on the final turn (loop.last) makes
+        # rendered_before end with an eos absent in the longer render; the prefix check
+        # must recover via the eos-strip fallback rather than raising.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}"
+            "{% if loop.last %}{{ eos_token }}{% endif %}\n{% endfor %}"
+        )
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "HELLOWORLD"}]}
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("HELLOWORLD", trained_text)
+        self.assertNotIn("hi", trained_text)
+
     def test_slow_tokenizer_raises_clear_error(self):
         slow_tokenizer = mock.MagicMock()
         slow_tokenizer.is_fast = False
