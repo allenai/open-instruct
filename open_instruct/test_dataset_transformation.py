@@ -396,6 +396,31 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         )
         self.assertIn(open_instruct.dataset_transformation.LABELS_KEY, out)
 
+    def test_content_span_handles_header_without_newline_and_multiline_content(self):
+        # A "simple_chat"-style template: the assistant header ("Assistant: ") has no
+        # trailing newline, and the content itself spans a newline. The newline heuristic
+        # would mis-mask here; matching the actual content keeps the full content trainable
+        # and the header masked.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'user' %}User: {{ m['content'] }}\n"
+            "{% elif m['role'] == 'assistant' %}Assistant: {{ m['content'] }}{{ eos_token }}{% endif %}"
+            "{% endfor %}"
+        )
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok\ndone"}]}
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_ids = [tid for tid, lab in zip(input_ids, labels) if lab != -100]
+        trained_text = tokenizer.decode(trained_ids)
+        self.assertIn("ok", trained_text)
+        self.assertIn("done", trained_text)
+        self.assertNotIn("Assistant", trained_text)
+        self.assertNotIn("User", trained_text)
+
     def test_slow_tokenizer_raises_clear_error(self):
         slow_tokenizer = mock.MagicMock()
         slow_tokenizer.is_fast = False
