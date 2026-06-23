@@ -437,6 +437,8 @@ class StreamingDataLoaderConfig:
     never_give_up_accept_on: Literal["better", "different"] = "better"
     """When to accept a never-give-up retry against the chain's previous best reward."""
     maintain_pending_ngu_age: int = 4
+    """Max age (in model steps) of pending never_give_up completions to keep when a chain is accepted.
+    Set to -1 to keep all pending completions regardless of age."""
     maintain_pending_ngu_completions: bool = True
     maintain_pending_ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = "anchor_pos"
     """How to adjust grouped advantages when NGU adds pending attempts to the baseline count."""
@@ -546,13 +548,18 @@ class StreamingDataLoaderConfig:
             raise ValueError(
                 f"`never_give_up_accept_on` must be 'better' or 'different', got {self.never_give_up_accept_on!r}."
             )
-        if self.maintain_pending_ngu_age < 0:
-            raise ValueError(f"`maintain_pending_ngu_age` must be non-negative, got {self.maintain_pending_ngu_age}.")
         if self.maintain_pending_ngu_count_rescale not in (None, "anchor_pos", "ratio", "count_ratio"):
             raise ValueError(
                 "`maintain_pending_ngu_count_rescale` must be None, 'anchor_pos', 'ratio', or 'count_ratio', "
                 f"got {self.maintain_pending_ngu_count_rescale!r}."
             )
+        if self.maintain_pending_ngu_age < 0 and self.maintain_pending_ngu_count_rescale is not None:
+            logger.warning(
+                "`maintain_pending_ngu_age` < 0 keeps all pending samples, so the NGU baseline matches the batch and "
+                "no rescaling is needed; overriding `maintain_pending_ngu_count_rescale=%r` to None.",
+                self.maintain_pending_ngu_count_rescale,
+            )
+            self.maintain_pending_ngu_count_rescale = None
         if self.num_samples_per_prompt_rollout == 1 and self.filter_zero_std_samples:
             raise ValueError(
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
@@ -1695,6 +1702,7 @@ class DataPreparationActor:
                 batch_stats.prompt_baseline_reward_sums,
                 advantage_normalization_type=self.config.advantage_normalization_type,
                 ngu_count_rescale=self.config.maintain_pending_ngu_count_rescale,
+                filtered_ngu_baseline=self.config.maintain_pending_ngu_age >= 0,
             )
 
             if self.config.save_traces and self.config.rollouts_save_path:

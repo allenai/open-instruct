@@ -122,6 +122,32 @@ class TestGroupedAdvantages(unittest.TestCase):
         self.assertTrue(np.allclose(anchored.sum(), 0.0))
         self.assertTrue(np.allclose(anchored[-1], 0.8))
 
+    def test_compute_grouped_advantages_ignores_ngu_baseline_when_disabled(self):
+        scores = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+        # use_ngu_baseline=True applies the NGU baseline (rescales the advantages).
+        with_baseline = compute_grouped_advantages(
+            scores,
+            prompt_sample_counts=[3],
+            prompt_baseline_sample_counts=[5],
+            prompt_baseline_reward_sums=[1.0],
+            advantage_normalization_type="centered",
+            use_ngu_baseline=True,
+        )
+        # use_ngu_baseline=False falls back to the regular grouped mean.
+        keep_all = compute_grouped_advantages(
+            scores,
+            prompt_sample_counts=[3],
+            prompt_baseline_sample_counts=[5],
+            prompt_baseline_reward_sums=[1.0],
+            advantage_normalization_type="centered",
+            use_ngu_baseline=False,
+        )
+        regular = compute_grouped_advantages(scores, prompt_sample_counts=[3], advantage_normalization_type="centered")
+
+        self.assertTrue(np.allclose(keep_all, regular))
+        self.assertFalse(np.allclose(with_baseline, regular))
+
     def test_get_never_give_up_retry_suffix_increments_existing_suffix(self):
         self.assertEqual(get_never_give_up_retry_suffix("7_0", epoch_number=7, index=0), "_1")
         self.assertEqual(get_never_give_up_retry_suffix("7_0_1", epoch_number=7, index=0), "_2")

@@ -72,6 +72,10 @@ def pop_pending_never_give_up_state(
     maintain_pending_ngu_age: int,
     never_give_up_state_lock: Any = None,
 ) -> PendingNeverGiveUpState:
+    """Pop pending never_give_up state, dropping completions older than `maintain_pending_ngu_age` steps.
+
+    A negative `maintain_pending_ngu_age` (e.g. -1) keeps all pending completions regardless of age.
+    """
     lock = never_give_up_state_lock or contextlib.nullcontext()
     with lock:
         pending_results = never_give_up_state.pending_results.pop(chain_id, [])
@@ -81,7 +85,7 @@ def pop_pending_never_give_up_state(
         pending_reward_sum = never_give_up_state.pending_reward_sums.pop(chain_id, 0.0)
         pending_attempt_count = never_give_up_state.pending_attempt_counts.pop(chain_id, 0)
 
-    if current_model_step is None:
+    if current_model_step is None or maintain_pending_ngu_age < 0:
         return PendingNeverGiveUpState(
             pending_results,
             pending_metrics,
@@ -329,12 +333,22 @@ def compute_grouped_advantages(
     prompt_baseline_reward_sums: list[float] | None = None,
     advantage_normalization_type: str = "centered",
     ngu_count_rescale: Literal["anchor_pos", "ratio", "count_ratio"] | None = None,
+    filtered_ngu_baseline: bool = True,
 ) -> np.ndarray:
-    """Compute per-sample advantages from raw scores grouped by prompt."""
+    """Compute per-sample advantages from raw scores grouped by prompt.
+
+    The NGU baseline is only meaningful when the batch is a strict subset of all attempts in a chain.
+    When all pending completions are kept the baseline collapses to the standard grouped mean, so callers
+    should pass `filtered_ngu_baseline=False` to fall back to regular group advantages.
+    """
+    if not filtered_ngu_baseline and ngu_count_rescale is not None:
+        raise ValueError("`ngu_count_rescale` must be None when `filtered_ngu_baseline` is False.")
+
     mean_grouped_rewards, std_grouped_rewards = expand_grouped_scores(scores, prompt_sample_counts)
 
-    have_ngu_baseline = prompt_baseline_sample_counts is not None and prompt_baseline_reward_sums is not None
-    if have_ngu_baseline:
+    have_baseline = prompt_baseline_sample_counts is not None and prompt_baseline_reward_sums is not None
+    if have_baseline and filtered_ngu_baseline:
+        assert prompt_baseline_reward_sums is not None and prompt_baseline_sample_counts is not None
         ngu_group_means = [s / c for s, c in zip(prompt_baseline_reward_sums, prompt_baseline_sample_counts)]
         ngu_mean_baseline = _expand_per_group_values(ngu_group_means, prompt_sample_counts, dtype=scores.dtype)
         mean_grouped_rewards = ngu_mean_baseline
