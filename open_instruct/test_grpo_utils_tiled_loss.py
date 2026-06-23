@@ -34,7 +34,10 @@ def _dense_reference(
     else:
         kl = torch.zeros_like(pg)
     per_token = pg + beta * kl
-    return (per_token * mask).sum() / denom * scale
+    loss = (per_token * mask).sum() / denom * scale
+    clip = (pg2 > pg1).float() if loss_fn == grpo_utils.GRPOLossType.dapo else (ratio > 1.0 + 0.272).float()
+    clipfrac = (clip * mask).sum() / mask.sum().clamp_min(1.0)
+    return loss, clipfrac
 
 
 class TestTiledGRPOLMHeadLoss(unittest.TestCase):
@@ -58,13 +61,15 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         labels = torch.randint(0, vocab_size, (batch_size, seq_len))
         mask = torch.rand(batch_size, seq_len) > 0.3
         advantages = torch.randn(batch_size, seq_len)
-        old_logprobs = -torch.rand(batch_size, seq_len) * 2
+        # Very negative so some ratios exceed 1 + clip_higher, giving a non-zero cispo
+        # clipfrac (guards against the clipfrac-always-zero bug).
+        old_logprobs = -torch.rand(batch_size, seq_len) * 6 - 3
         ref = -torch.rand(batch_size, seq_len) * 2 if has_ref else None
 
         hidden_tiled = hidden0.clone().requires_grad_(True)
         lm_tiled = nn.Linear(hidden_size, vocab_size, bias=False)
         lm_tiled.load_state_dict(base.state_dict())
-        loss_tiled, _pg, _kl, _clip, _ratio = grpo_utils.tiled_grpo_lm_head_loss(
+        loss_tiled, _pg, _kl, clipfrac_tiled, _ratio = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=labels,
@@ -86,7 +91,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         hidden_dense = hidden0.clone().requires_grad_(True)
         lm_dense = nn.Linear(hidden_size, vocab_size, bias=False)
         lm_dense.load_state_dict(base.state_dict())
-        loss_dense = _dense_reference(
+        loss_dense, clipfrac_dense = _dense_reference(
             lm_dense,
             hidden_dense,
             labels,
@@ -105,6 +110,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         torch.testing.assert_close(loss_tiled, loss_dense, atol=1e-5, rtol=1e-5)
         torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad, atol=1e-5, rtol=1e-5)
         torch.testing.assert_close(lm_tiled.weight.grad, lm_dense.weight.grad, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(clipfrac_tiled, clipfrac_dense, atol=1e-5, rtol=1e-5)
 
     def test_rejects_unsupported_loss_fn(self):
         lm_head = nn.Linear(4, 5, bias=False)

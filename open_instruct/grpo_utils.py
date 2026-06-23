@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from queue import Empty
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -642,7 +642,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                 # last shard trigger the reduction so all tiles accumulate into the same buffer.
                 grad_is_ready = shard_idx + 1 == len(x_shards)
                 for param in compute_params:
-                    param.ds_grad_is_ready = grad_is_ready
+                    # ds_grad_is_ready is injected by DeepSpeed ZeRO-3 at runtime.
+                    param.ds_grad_is_ready = grad_is_ready  # ty: ignore[unresolved-attribute]
 
             shard_step = x_shard.shape[0]
             shard_offset = shard_idx * x_shards[0].shape[0]
@@ -662,11 +663,12 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                 if loss_type == GRPOLossType.dapo:
                     pg_losses = -advantage_shards[shard_idx] * ratio
                     pg_losses2 = -advantage_shards[shard_idx] * torch.clamp(ratio, 1.0 - clip_lower, 1.0 + clip_higher)
+                    pg_loss = torch.max(pg_losses, pg_losses2)
+                    shard_clip = (pg_losses2 > pg_losses).detach().float()
                 else:  # cispo
                     clipped_ratio = torch.clamp(ratio.detach(), max=1.0 + clip_higher)
-                    pg_losses = -advantage_shards[shard_idx] * clipped_ratio * new_logprobs
-                    pg_losses2 = pg_losses
-                pg_loss = torch.max(pg_losses, pg_losses2)
+                    pg_loss = -advantage_shards[shard_idx] * clipped_ratio * new_logprobs
+                    shard_clip = (ratio > 1.0 + clip_higher).detach().float()
 
                 if has_ref_logprobs:
                     ref_diff = (new_logprobs - ref_logprob_shards[shard_idx]).clamp(-40.0, 40.0)
@@ -674,7 +676,6 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                     kl = kl_all[2]
                 else:
                     kl = torch.zeros_like(pg_loss)
-                    kl_all = torch.zeros(4, *pg_loss.shape, dtype=pg_loss.dtype, device=pg_loss.device)
 
                 shard_mask = mask_shards[shard_idx].to(dtype=pg_loss.dtype)
                 per_token_loss = pg_loss + beta * kl
@@ -682,14 +683,15 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
 
             total_loss_sum = total_loss_sum + loss_sum.detach().float()
             total_pg_sum = total_pg_sum + (pg_loss.detach().float() * shard_mask.float()).sum()
-            total_kl_sum = total_kl_sum + (kl_all.detach().float() * shard_mask.float()).sum(dim=-1)
-            total_clip_sum = total_clip_sum + ((pg_losses2 > pg_losses).detach().float() * shard_mask.float()).sum()
+            if has_ref_logprobs:
+                total_kl_sum = total_kl_sum + (kl_all.detach().float() * shard_mask.float()).sum(dim=-1)
+            total_clip_sum = total_clip_sum + (shard_clip * shard_mask.float()).sum()
             total_ratio_sum = total_ratio_sum + (ratio.detach().float() * shard_mask.float()).sum()
             torch.autograd.backward(loss_sum, incoming_grad.to(dtype=loss_sum.dtype))
 
         if compute_params:
             for param in compute_params:
-                param.ds_grad_is_ready = True
+                param.ds_grad_is_ready = True  # ty: ignore[unresolved-attribute]
 
         if x_grad is None:
             x_grad = torch.zeros_like(x)
@@ -761,7 +763,7 @@ def _unwrap_causal_lm(model: torch.nn.Module) -> torch.nn.Module:
     while hasattr(inner, "module") and id(inner) not in seen:
         seen.add(id(inner))
         inner = inner.module
-    return inner
+    return cast(torch.nn.Module, inner)
 
 
 def get_causal_lm_backbone_and_lm_head(model: torch.nn.Module) -> tuple[torch.nn.Module, torch.nn.Module]:
@@ -778,7 +780,7 @@ def get_causal_lm_backbone_and_lm_head(model: torch.nn.Module) -> tuple[torch.nn
     lm_head = getattr(causal_lm, "lm_head", None)
     if lm_head is None:
         raise AttributeError(f"Could not find lm_head for {type(causal_lm).__name__}.")
-    return backbone, lm_head
+    return cast(torch.nn.Module, backbone), cast(torch.nn.Module, lm_head)
 
 
 def forward_for_liger_hidden_states(
