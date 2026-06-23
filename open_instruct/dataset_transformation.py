@@ -1204,7 +1204,11 @@ def mask_labels(
 
 
 def _tokenize_tulu_sft_with_assistant_labels(
-    messages: list[dict[str, Any]], tokenizer: PreTrainedTokenizer, tools: list | None, max_seq_length: int | None
+    messages: list[dict[str, Any]],
+    tokenizer: PreTrainedTokenizer,
+    tools: list | None,
+    max_seq_length: int | None,
+    last_turn_only: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # Assistant label spans are derived from `return_offsets_mapping`, which slow
     # (Python) tokenizers do not support. Fail with a clear message instead of the
@@ -1237,6 +1241,8 @@ def _tokenize_tulu_sft_with_assistant_labels(
     for message_idx, message in enumerate(messages):
         if message["role"] != "assistant":
             continue
+        if last_turn_only and message_idx < len(messages) - 1:
+            continue
 
         rendered_before = tokenizer.apply_chat_template(
             conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=False
@@ -1256,7 +1262,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
         # look-alikes); fall back to the newline heuristic when the content can't be
         # located verbatim (empty content, tool calls, or template-transformed text).
         content = message.get("content")
-        content_offset = assistant_text.rfind(content) if isinstance(content, str) and content else -1
+        content_offset = assistant_text.rfind(content) if isinstance(content, str) and content.strip() else -1
         if content_offset == -1:
             newline_idx = assistant_text.find("\n")
             content_offset = 0 if newline_idx == -1 else newline_idx + 1
@@ -1298,27 +1304,18 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
 
 
 def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
-    """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
+    """Tokenize a conversation, training only on the final assistant turn.
+
+    Reuses the offset-based assistant-label derivation (which forwards the tools
+    column to the chat template) rather than the legacy mask_labels path.
+    """
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
-    input_ids_result = tokenizer.apply_chat_template(
-        conversation=messages,
-        tools=tools,
-        tokenize=True,
-        return_tensors="pt",
-        return_dict=False,
-        padding=False,
-        truncation=True,
-        max_length=max_seq_length,
-        add_generation_prompt=False,
+    input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
+        messages, tokenizer, tools, max_seq_length, last_turn_only=True
     )
-    assert isinstance(input_ids_result, torch.Tensor)
-    input_ids = input_ids_result
-    labels = input_ids.clone()
-    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, _msg, msgs: idx < len(msgs) - 1)
-    attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()

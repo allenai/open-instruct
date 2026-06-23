@@ -436,6 +436,25 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         out = open_instruct.dataset_transformation.sft_tulu_tokenize_without_truncation_v1(dict(row), self.tokenizer)
         self.assertTrue(any(label != -100 for label in out[open_instruct.dataset_transformation.LABELS_KEY].tolist()))
 
+    def test_last_turn_only_trains_final_assistant_turn(self):
+        row = {
+            "messages": [
+                {"role": "user", "content": "first question"},
+                {"role": "assistant", "content": "FIRSTANSWER"},
+                {"role": "user", "content": "second question"},
+                {"role": "assistant", "content": "SECONDANSWER"},
+            ]
+        }
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = self.tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        # Only the final assistant turn is trained; the earlier assistant turn is masked.
+        self.assertIn("SECONDANSWER", trained_text)
+        self.assertNotIn("FIRSTANSWER", trained_text)
+
 
 if __name__ == "__main__":
     unittest.main()
