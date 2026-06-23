@@ -1,6 +1,7 @@
 import gc
 import gzip
 import hashlib
+import json
 import os
 import shutil
 import tempfile
@@ -314,6 +315,85 @@ class TestMaskLabels(unittest.TestCase):
         self.assertTrue(
             any(x != -100 for x in flat[boundary:]), f"Tokens from {boundary} onward should have kept tokens"
         )
+
+
+class TestToolNormalization(unittest.TestCase):
+    def test_normalize_tools_accepts_json_encoded_schema_list(self):
+        tool_schema = {
+            "type": "function",
+            "function": {
+                "name": "bash",
+                "description": "Execute bash",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+        tools = open_instruct.dataset_transformation._normalize_tools_for_chat_template(json.dumps([tool_schema]))
+
+        self.assertEqual(tools, [tool_schema])
+
+    def test_normalize_tools_wraps_single_dict(self):
+        tool_schema = {"type": "function", "function": {"name": "bash"}}
+        self.assertEqual(
+            open_instruct.dataset_transformation._normalize_tools_for_chat_template(tool_schema), [tool_schema]
+        )
+
+    def test_normalize_tools_treats_empty_as_none(self):
+        self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template(None))
+        self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template(""))
+        self.assertIsNone(open_instruct.dataset_transformation._normalize_tools_for_chat_template([]))
+
+    def test_normalize_tools_rejects_tool_name_lists(self):
+        with self.assertRaises(TypeError):
+            open_instruct.dataset_transformation._normalize_tools_for_chat_template(["bash"])
+
+    def test_normalize_tools_rejects_invalid_json(self):
+        with self.assertRaises(ValueError):
+            open_instruct.dataset_transformation._normalize_tools_for_chat_template("{not json")
+
+
+class TestSFTTuluTokenizeLabels(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+
+    def test_only_assistant_tokens_are_trainable(self):
+        row = {
+            "messages": [
+                {"role": "user", "content": "What is 2+2?"},
+                {"role": "assistant", "content": "The answer is 4."},
+            ]
+        }
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+
+        self.assertEqual(len(input_ids), len(labels))
+        # At least one assistant token is trainable, and every trainable label matches its input id.
+        self.assertTrue(any(label != -100 for label in labels))
+        for input_id, label in zip(input_ids, labels):
+            if label != -100:
+                self.assertEqual(label, input_id)
+        # The prompt prefix (first token, part of the user turn) must be masked.
+        self.assertEqual(labels[0], -100)
+
+    def test_tools_column_is_consumed_and_accepts_json_string(self):
+        # The test chat template ignores tools, but tokenization must still succeed
+        # when a JSON-encoded tools column is present (it is parsed, not crashed on).
+        row = {
+            "messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
+            "tools": json.dumps([{"type": "function", "function": {"name": "bash"}}]),
+        }
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096
+        )
+        self.assertIn(open_instruct.dataset_transformation.LABELS_KEY, out)
+
+    def test_without_truncation_variant_runs(self):
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello there"}]}
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_without_truncation_v1(dict(row), self.tokenizer)
+        self.assertTrue(any(label != -100 for label in out[open_instruct.dataset_transformation.LABELS_KEY].tolist()))
 
 
 if __name__ == "__main__":
