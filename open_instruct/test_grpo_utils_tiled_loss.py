@@ -15,7 +15,19 @@ from open_instruct import grpo_utils, model_utils
 
 
 def _dense_reference(
-    lm_head, hidden, labels, mask, advantages, old_logprobs, ref_logprobs, temperature, beta, loss_fn, denom, scale
+    lm_head,
+    hidden,
+    labels,
+    mask,
+    advantages,
+    old_logprobs,
+    ref_logprobs,
+    temperature,
+    beta,
+    loss_fn,
+    denom,
+    scale,
+    rho_weights=None,
 ):
     logits = lm_head(hidden)
     if temperature != 1.0:
@@ -29,6 +41,8 @@ def _dense_reference(
         pg1 = -advantages * torch.clamp(ratio.detach(), max=1.0 + 0.272) * new_logprobs
         pg2 = pg1
     pg = torch.max(pg1, pg2)
+    if rho_weights is not None:
+        pg = pg * rho_weights
     if ref_logprobs is not None:
         kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40, 40), ratio)[2]
     else:
@@ -36,6 +50,8 @@ def _dense_reference(
     per_token = pg + beta * kl
     loss = (per_token * mask).sum() / denom * scale
     clip = (pg2 > pg1).float() if loss_fn == grpo_utils.GRPOLossType.dapo else (ratio > 1.0 + 0.272).float()
+    if rho_weights is not None:
+        clip = clip * (rho_weights != 0).float()
     clipfrac = (clip * mask).sum() / mask.sum().clamp_min(1.0)
     return loss, clipfrac
 
@@ -43,14 +59,22 @@ def _dense_reference(
 class TestTiledGRPOLMHeadLoss(unittest.TestCase):
     @parameterized.expand(
         [
-            (f"{loss_fn}_ref{int(has_ref)}_shards{shards}_temp{temperature}", loss_fn, has_ref, shards, temperature)
+            (
+                f"{loss_fn}_ref{int(has_ref)}_shards{shards}_temp{temperature}_rho{int(use_rho)}",
+                loss_fn,
+                has_ref,
+                shards,
+                temperature,
+                use_rho,
+            )
             for loss_fn in (grpo_utils.GRPOLossType.dapo, grpo_utils.GRPOLossType.cispo)
             for has_ref in (False, True)
             for shards in (1, 3, 100)
             for temperature in (1.0, 0.7)
+            for use_rho in (False, True)
         ]
     )
-    def test_matches_dense_loss_and_grads(self, _name, loss_fn, has_ref, shards, temperature):
+    def test_matches_dense_loss_and_grads(self, _name, loss_fn, has_ref, shards, temperature, use_rho):
         torch.manual_seed(0)
         batch_size, seq_len, hidden_size, vocab_size = 2, 5, 8, 17
         denom_val, scale_val = 7.0, 3.0
@@ -65,6 +89,11 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         # clipfrac (guards against the clipfrac-always-zero bug).
         old_logprobs = -torch.rand(batch_size, seq_len) * 6 - 3
         ref = -torch.rand(batch_size, seq_len) * 2 if has_ref else None
+        # Some rho weights clamped, some dropped to 0, to exercise the masking path.
+        rho = None
+        if use_rho:
+            rho = (torch.rand(batch_size, seq_len) * 1.5).clamp(0.0, 1.2)
+            rho = torch.where(torch.rand(batch_size, seq_len) > 0.2, rho, torch.zeros_like(rho))
 
         hidden_tiled = hidden0.clone().requires_grad_(True)
         lm_tiled = nn.Linear(hidden_size, vocab_size, bias=False)
@@ -85,6 +114,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
             loss_scale=torch.tensor(scale_val),
             loss_denom=torch.tensor(denom_val),
             loss_fn=loss_fn,
+            rho_weights=rho,
         )
         loss_tiled.backward()
 
@@ -104,6 +134,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
             loss_fn,
             denom_val,
             scale_val,
+            rho,
         )
         loss_dense.backward()
 

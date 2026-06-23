@@ -588,6 +588,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         shards: int,
         loss_scale: torch.Tensor,
         loss_denom: torch.Tensor,
+        rho_weights: torch.Tensor,
+        has_rho_weights: bool,
         compute_params: list[torch.nn.Parameter],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if hidden_states.dim() != 3:
@@ -614,6 +616,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         old_logprobs = old_logprobs.reshape(-1)
         if has_ref_logprobs:
             ref_logprobs = ref_logprobs.reshape(-1)
+        if has_rho_weights:
+            rho_weights = rho_weights.reshape(-1)
 
         num_tokens = x.shape[0]
         shards = min(shards, num_tokens)
@@ -627,6 +631,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         advantage_shards = list(torch.chunk(advantages, chunks=shards, dim=0))
         old_logprob_shards = list(torch.chunk(old_logprobs, chunks=shards, dim=0))
         ref_logprob_shards = list(torch.chunk(ref_logprobs, chunks=shards, dim=0)) if has_ref_logprobs else []
+        rho_weight_shards = list(torch.chunk(rho_weights, chunks=shards, dim=0)) if has_rho_weights else []
 
         total_loss_sum = torch.zeros((), dtype=torch.float32, device=hidden_states.device)
         total_pg_sum = torch.zeros_like(total_loss_sum)
@@ -670,6 +675,14 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                     pg_loss = -advantage_shards[shard_idx] * clipped_ratio * new_logprobs
                     shard_clip = (ratio > 1.0 + clip_higher).detach().float()
 
+                if has_rho_weights:
+                    # Truncated-importance-sampling correction ρ = π^train_old / π^infer_old.
+                    # Scales the policy loss per token and zeros clipfrac for dropped tokens
+                    # (matching the non-tiled compute_grpo_loss path). KL is left unscaled.
+                    rho_shard = rho_weight_shards[shard_idx].to(dtype=pg_loss.dtype)
+                    pg_loss = pg_loss * rho_shard
+                    shard_clip = shard_clip * (rho_shard != 0).float()
+
                 if has_ref_logprobs:
                     ref_diff = (new_logprobs - ref_logprob_shards[shard_idx]).clamp(-40.0, 40.0)
                     kl_all = model_utils.estimate_kl(ref_diff, ratio)
@@ -710,7 +723,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         grad = grads[0]
         if isinstance(grad, torch.Tensor):
             x_grad = x_grad * grad.to(dtype=x_grad.dtype)
-        return (None, x_grad, *([None] * 15))
+        return (None, x_grad, *([None] * 17))
 
 
 def tiled_grpo_lm_head_loss(
@@ -729,11 +742,19 @@ def tiled_grpo_lm_head_loss(
     loss_scale: torch.Tensor,
     loss_denom: torch.Tensor,
     loss_fn: str | GRPOLossType = GRPOLossType.dapo,
+    rho_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Memory-efficient tiled GRPO lm-head loss. Returns ``(loss, pg_avg, kl_avg, clipfrac, ratio_avg)``."""
+    """Memory-efficient tiled GRPO lm-head loss. Returns ``(loss, pg_avg, kl_avg, clipfrac, ratio_avg)``.
+
+    ``rho_weights`` is the optional per-token truncated-importance-sampling correction
+    (ρ = π^train_old / π^infer_old); when ``None`` the correction is disabled.
+    """
     has_ref_logprobs = ref_logprobs is not None
     if ref_logprobs is None:
         ref_logprobs = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
+    has_rho_weights = rho_weights is not None
+    if rho_weights is None:
+        rho_weights = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
     compute_params = list(lm_head.parameters(recurse=False))
     return TiledGRPOLMHeadLoss.apply(
         lm_head,
@@ -752,6 +773,8 @@ def tiled_grpo_lm_head_loss(
         shards,
         loss_scale,
         loss_denom,
+        rho_weights,
+        has_rho_weights,
         compute_params,
     )
 
