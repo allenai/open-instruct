@@ -550,7 +550,12 @@ def compute_binary_divergence(
         Float tensor of the same shape as ``policy_logprobs``; entries outside
         ``response_mask`` are zeroed.
     """
-    eps = 1e-9
+    orig_dtype = policy_logprobs.dtype
+    # Upcast to float32 for numerical stability. In bfloat16 the machine epsilon is ~0.0078,
+    # so a tiny eps would make ``1.0 - eps`` round to 1.0 and ``log(1 - pi)`` blow up to -inf.
+    behavior_logprobs = behavior_logprobs.to(torch.float32)
+    policy_logprobs = policy_logprobs.to(torch.float32)
+    eps = 1e-6
     # Real logprobs are <= 0; non-response sentinel positions can be > 0
     # (see ``mask_logprobs`` / INVALID_LOGPROB). Clamp so exp() stays in [eps, 1].
     mu = torch.exp(behavior_logprobs.clamp(min=-30.0, max=0.0))
@@ -560,14 +565,15 @@ def compute_binary_divergence(
     elif divergence_type == DPPODivergenceType.kl:
         mu_clip = mu.clamp(eps, 1.0 - eps)
         pi_clip = pi.clamp(eps, 1.0 - eps)
+        # ``log1p(-x)`` keeps precision for x near 1, where ``(1 - x).log()`` loses it.
         divergence = mu_clip * (mu_clip.log() - pi_clip.log()) + (1.0 - mu_clip) * (
-            (1.0 - mu_clip).log() - (1.0 - pi_clip).log()
+            torch.log1p(-mu_clip) - torch.log1p(-pi_clip)
         )
     else:
         raise ValueError(
             f"Unknown DPPO divergence type: {divergence_type}. Expected one of {list(DPPODivergenceType)}."
         )
-    return torch.where(response_mask, divergence, torch.zeros_like(divergence))
+    return torch.where(response_mask, divergence, torch.zeros_like(divergence)).to(orig_dtype)
 
 
 def compute_dppo_mask(
