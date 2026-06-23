@@ -636,7 +636,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         _, lm_head = grpo_utils.get_causal_lm_backbone_and_lm_head(self.model)
 
-        selected_token_ids = data_BT.query_responses[i][:, 1:].clone()
+        selected_token_ids = data_BT.query_responses[i][:, 1:]
         selected_token_ids = torch.where(response_mask_bool, selected_token_ids, torch.zeros_like(selected_token_ids))
         advantages_BT = data_BT.advantages[i][:, 1:]
         advantages_BT = torch.where(response_mask_bool, advantages_BT, torch.zeros_like(advantages_BT))
