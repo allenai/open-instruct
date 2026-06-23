@@ -167,6 +167,53 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
             )
 
 
+class _FakeCausalLM(nn.Module):
+    base_model_prefix = "model"
+
+    def __init__(self):
+        super().__init__()
+        self.model = nn.Linear(4, 4)
+        self.lm_head = nn.Linear(4, 7)
+
+
+class _FakePeftModel(nn.Module):
+    def __init__(self, base):
+        super().__init__()
+        self._base = base
+
+    def get_base_model(self):
+        return self._base
+
+
+class _FakeDeepSpeedEngine(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+
+class TestGetCausalLMBackboneAndLMHead(unittest.TestCase):
+    def _check(self, wrapped, hf):
+        backbone, lm_head = grpo_utils.get_causal_lm_backbone_and_lm_head(wrapped)
+        self.assertIs(backbone, hf.model)
+        self.assertIs(lm_head, hf.lm_head)
+
+    def test_plain_causal_lm(self):
+        hf = _FakeCausalLM()
+        self._check(hf, hf)
+
+    def test_deepspeed_wrapped(self):
+        hf = _FakeCausalLM()
+        self._check(_FakeDeepSpeedEngine(hf), hf)
+
+    def test_peft_wrapped(self):
+        hf = _FakeCausalLM()
+        self._check(_FakePeftModel(hf), hf)
+
+    def test_deepspeed_wrapped_peft(self):
+        hf = _FakeCausalLM()
+        self._check(_FakeDeepSpeedEngine(_FakePeftModel(hf)), hf)
+
+
 class TestLigerGRPOLossConfigValidation(unittest.TestCase):
     def test_rejects_record_entropy(self):
         with self.assertRaisesRegex(ValueError, "record_entropy"):
