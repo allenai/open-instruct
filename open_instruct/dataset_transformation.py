@@ -1257,7 +1257,16 @@ def _tokenize_tulu_sft_with_assistant_labels(
         assert isinstance(rendered_before, str)
         assert isinstance(rendered_through_message, str)
         if not rendered_through_message.startswith(rendered_before):
-            raise ValueError("Chat template rendering is not prefix-stable; cannot compute assistant label spans.")
+            # Some templates append eos_token only on the final turn (loop.last), so
+            # rendered_before ends with an eos that is absent at that position in the
+            # longer render. Strip a trailing eos_token and retry before failing.
+            eos_token = tokenizer.eos_token
+            if eos_token and rendered_before.endswith(eos_token):
+                stripped = rendered_before[: -len(eos_token)]
+                if rendered_through_message.startswith(stripped):
+                    rendered_before = stripped
+            if not rendered_through_message.startswith(rendered_before):
+                raise ValueError("Chat template rendering is not prefix-stable; cannot compute assistant label spans.")
 
         assistant_text = rendered_through_message[len(rendered_before) :]
         # Locate where the assistant's actual content begins so the header (e.g.
