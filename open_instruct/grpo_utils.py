@@ -565,7 +565,6 @@ def compute_binary_divergence(
     elif divergence_type == DPPODivergenceType.kl:
         mu_clip = mu.clamp(eps, 1.0 - eps)
         pi_clip = pi.clamp(eps, 1.0 - eps)
-        # ``log1p(-x)`` keeps precision for x near 1, where ``(1 - x).log()`` loses it.
         divergence = mu_clip * (mu_clip.log() - pi_clip.log()) + (1.0 - mu_clip) * (
             torch.log1p(-mu_clip) - torch.log1p(-pi_clip)
         )
