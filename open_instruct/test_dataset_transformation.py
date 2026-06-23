@@ -443,6 +443,7 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
             "{% if m['role'] == 'user' %}User: {{ m['content'] }}\n"
             "{% elif m['role'] == 'assistant' %}Assistant: {{ m['content'] }}{{ eos_token }}{% endif %}"
             "{% endfor %}"
+            "{% if add_generation_prompt %}Assistant: {% endif %}"
         )
         row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok\ndone"}]}
         out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
@@ -457,24 +458,20 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertNotIn("Assistant", trained_text)
         self.assertNotIn("User", trained_text)
 
-    def test_template_appending_eos_only_on_last_turn(self):
-        # A template that appends eos_token only on the final turn (loop.last) makes
-        # rendered_before end with an eos absent in the longer render; the prefix check
-        # must recover via the eos-strip fallback rather than raising.
+    def test_template_appending_eos_only_on_last_turn_raises(self):
+        # A template that appends eos_token only on the final turn (loop.last) is not
+        # prefix-stable, so label-span derivation should raise a clear error rather than
+        # silently mis-mask.
         tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
         tokenizer.chat_template = (
             "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}"
             "{% if loop.last %}{{ eos_token }}{% endif %}\n{% endfor %}"
         )
         row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "HELLOWORLD"}]}
-        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
-            dict(row), tokenizer, max_seq_length=4096
-        )
-        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
-        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
-        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
-        self.assertIn("HELLOWORLD", trained_text)
-        self.assertNotIn("hi", trained_text)
+        with self.assertRaisesRegex(ValueError, "prefix-stable"):
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+                dict(row), tokenizer, max_seq_length=4096
+            )
 
     def test_conversation_starting_with_assistant(self):
         # message_idx == 0 -> messages[:0] is empty; must not call apply_chat_template([]).
@@ -549,6 +546,7 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
             "messages": [
                 {"role": "user", "content": "first question"},
                 {"role": "assistant", "content": "FIRSTANSWER"},
+                {"role": "user", "content": "second question"},
                 {"role": "assistant", "content": "SECONDANSWER"},
                 {"role": "user", "content": "trailing user message"},
             ]
