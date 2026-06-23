@@ -720,6 +720,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             divergence_type=self.args.dppo_divergence_type,
                             divergence_threshold=self.args.dppo_divergence_threshold,
                         )
+                        # Fraction of response tokens whose gradient DPPO masks out (1 - keep).
+                        loss_stats_B["policy/dppo_masked_frac"][i] = masked_mean(1.0 - dppo_mask_BT, response_mask_BT)
 
                     pg_loss_BT, clipfrac_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,

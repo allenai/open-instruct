@@ -811,6 +811,7 @@ _SCALAR_LOSS_STAT_KEYS = [
     "objective/kl2_avg",
     "objective/kl3_avg",
     "policy/clipfrac_avg",
+    "policy/dppo_masked_frac",
     "val/ratio",
     "val/rho_clipfrac",
     "val/rho_weight",
