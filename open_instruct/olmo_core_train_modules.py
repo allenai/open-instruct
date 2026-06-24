@@ -544,7 +544,11 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 advantages = data_BT.advantages[sample_idx]
 
-                if self.grpo_config.num_epochs == 1 and not self.grpo_config.use_vllm_logprobs:
+                if (
+                    self.grpo_config.num_epochs == 1
+                    and num_mini_batches == 1
+                    and not self.grpo_config.use_vllm_logprobs
+                ):
                     ratio = torch.ones_like(new_logprobs)
                 else:
                     log_ratio = new_logprobs - old_logprob
