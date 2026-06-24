@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add `--use_cpu_adam` flag to `grpo_fast.py` for DeepSpeedCPUAdam when training with CPU optimizer offload (https://github.com/allenai/open-instruct/pull/TBD).
+- Add `--use_cpu_adam` flag to `grpo_fast.py` for DeepSpeedCPUAdam when training with CPU optimizer offload (https://github.com/allenai/open-instruct/pull/1737).
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
