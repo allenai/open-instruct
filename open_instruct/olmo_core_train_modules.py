@@ -544,8 +544,11 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 advantages = data_BT.advantages[sample_idx]
 
-                log_ratio = new_logprobs - old_logprob
-                ratio = torch.exp(log_ratio)
+                if self.grpo_config.num_epochs == 1 and not self.grpo_config.use_vllm_logprobs:
+                    ratio = torch.ones_like(new_logprobs)
+                else:
+                    log_ratio = new_logprobs - old_logprob
+                    ratio = torch.exp(log_ratio)
 
                 rho = grpo_utils.compute_rho_correction(
                     old_logprob, vllm_logprobs, response_mask, advantages[:, 1:], self.grpo_config
