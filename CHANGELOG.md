@@ -16,4 +16,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
-- Use token-weighted loss under gradient accumulation in `finetune.py` instead of averaging per-microbatch means (https://github.com/allenai/open-instruct/pull/TBD).
+- Use token-weighted loss under gradient accumulation in `finetune.py` instead of averaging per-microbatch means (https://github.com/allenai/open-instruct/pull/1736).
