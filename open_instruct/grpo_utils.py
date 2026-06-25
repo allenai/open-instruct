@@ -516,6 +516,8 @@ def compute_grpo_loss(
         clipfrac = (pg_losses2 > pg_losses).float()
         pg_loss = torch.max(pg_losses, pg_losses2)
     elif config.loss_fn == GRPOLossType.cispo:
+        if config.num_epochs == 1 and config.num_mini_batches == 1 and not config.use_vllm_logprobs:
+            ratio = torch.ones_like(new_logprobs)
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
         clipfrac = (ratio > 1.0 + config.clip_higher).float()
