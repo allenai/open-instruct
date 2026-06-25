@@ -1037,6 +1037,11 @@ def accumulate_inference_batches(
             "replenish_prompts requires param_prompt_Q and iter_dataloader and dataset"
         )
 
+    if max_result_age_steps is not None and not replenish_prompts:
+        # Dropping stale results without replenishing would steadily drain the in-flight
+        # prompt pool and eventually hang the accumulator waiting for results that never come.
+        raise ValueError("max_result_age_steps requires replenish_prompts=True to avoid draining the prompt pipeline.")
+
     groups: list[Group] = []
     total_filtered_prompts = 0
     filtered_prompt_zero = 0
@@ -1090,17 +1095,18 @@ def accumulate_inference_batches(
                 training_step - result.model_step,
                 max_result_age_steps,
             )
-            if replenish_prompts:
-                assert iter_dataloader is not None and param_prompt_Q is not None
-                add_prompt_to_generator(
-                    next(iter_dataloader),
-                    iter_dataloader._epoch,
-                    param_prompt_Q,
-                    generation_config,
-                    is_eval=False,
-                    base_env_config=base_env_config,
-                    ground_truth_overrides=ground_truth_overrides,
-                )
+            # replenish_prompts is guaranteed True here (validated above), so always
+            # replenish a fresh prompt to keep the in-flight prompt pool from draining.
+            assert iter_dataloader is not None and param_prompt_Q is not None
+            add_prompt_to_generator(
+                next(iter_dataloader),
+                iter_dataloader._epoch,
+                param_prompt_Q,
+                generation_config,
+                is_eval=False,
+                base_env_config=base_env_config,
+                ground_truth_overrides=ground_truth_overrides,
+            )
             continue
 
         collected_results.append(result)
