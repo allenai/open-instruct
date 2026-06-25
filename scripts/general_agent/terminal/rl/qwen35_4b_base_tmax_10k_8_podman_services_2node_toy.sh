@@ -70,6 +70,7 @@ uv run python mason.py \
     --vllm_gdn_prefill_backend triton \
     --push_to_hub false \
     --with_tracking \
+    --wandb_project oe-general-agents \
     --save_traces \
     --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
