@@ -16,6 +16,7 @@ NUM_GPUS="${NUM_GPUS:-8}"
 CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
+BUDGET="${BUDGET:-ai2/oe-other}"
 
 RLVR_DATASET="${RLVR_DATASET:-mnoukhov/deepscaler-10k-rlvr}"
 SAMPLES_DATASET="${SAMPLES_DATASET:-mnoukhov/deepscaler-10k-qwen3-4b-base-32samples}"
@@ -35,7 +36,7 @@ uv run mason.py \
     --no_auto_dataset_cache \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --gpus ${NUM_GPUS} \
-    --budget ai2/oe-adapt \
+    --budget ${BUDGET} \
     -- \
 uv run scripts/data/create_deepscaler_subset_rlvr.py \
     --push_to_hub \
