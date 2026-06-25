@@ -31,7 +31,16 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, opd_utils, utils, vllm_utils
+from open_instruct import (
+    grpo_fast,
+    grpo_utils,
+    logger_utils,
+    olmo_core_utils,
+    opd_utils,
+    opd_validation,
+    utils,
+    vllm_utils,
+)
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
@@ -206,18 +215,34 @@ def main(
     if streaming_config.opd_enabled:
         if streaming_config.opd_teacher_model_name_or_path is None:
             raise ValueError("`opd_teacher_model_name_or_path` is required when `opd_enabled=True`.")
-        if not streaming_config.opd_use_task_rewards and (args.beta != 0 or args.load_ref_policy):
-            logger.warning(
-                "Pure OPD is enabled, so GRPO task loss and reference KL will be ignored. "
-                "Consider setting --beta 0.0 --load_ref_policy False to avoid unnecessary reference-policy setup."
-            )
+        opd_validation.validate_pure_opd_reference_config(
+            opd_use_task_rewards=streaming_config.opd_use_task_rewards,
+            beta=args.beta,
+            load_ref_policy=args.load_ref_policy,
+        )
         assert tc.tokenizer_name_or_path is not None, "tokenizer_name_or_path must be set after make_tokenizer"
+        teacher_tokenizer_config = dataclasses.replace(
+            tc,
+            tokenizer_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            tokenizer_revision=streaming_config.opd_teacher_model_revision,
+        )
+        teacher_tokenizer = teacher_tokenizer_config.tokenizer
+        opd_validation.validate_teacher_student_tokenizer_compatibility(
+            student_tokenizer=tokenizer,
+            teacher_tokenizer=teacher_tokenizer,
+            student_name=tc.tokenizer_name_or_path,
+            teacher_name=streaming_config.opd_teacher_model_name_or_path,
+        )
         teacher_scorers = opd_utils.create_teacher_scorers(
             num_engines=streaming_config.opd_teacher_num_engines,
             tensor_parallel_size=streaming_config.opd_teacher_tensor_parallel_size,
             enforce_eager=streaming_config.opd_teacher_enforce_eager,
-            tokenizer_name_or_path=tc.tokenizer_name_or_path,
-            tokenizer_revision=tc.tokenizer_revision,
+            # Load the teacher vLLM with the teacher's own tokenizer, not the student's.
+            # Scoring runs on pre-tokenized ids and validate_teacher_student_tokenizer_compatibility
+            # has already confirmed the vocabularies share ids, so this is behavior-preserving for
+            # valid configs while avoiding loading the teacher model with a foreign tokenizer.
+            tokenizer_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            tokenizer_revision=streaming_config.opd_teacher_model_revision,
             model_name_or_path=streaming_config.opd_teacher_model_name_or_path,
             model_revision=streaming_config.opd_teacher_model_revision,
             seed=args.seed,

@@ -157,9 +157,8 @@ loss = opd_loss_coef * opd_loss
 
 This "pure OPD" mode still uses the GRPO online rollout infrastructure, but the
 task-reward policy loss is zeroed out. In the current implementation,
-`beta * ref_kl` is also ignored by that zeroing. `grpo.py` warns if pure OPD is
-requested while `beta != 0` or `load_ref_policy=true`, because that setup may do
-unnecessary reference-policy work.
+`grpo.py` requires pure OPD runs to set `--beta 0.0 --load_ref_policy false`
+because the GRPO task loss and reference KL are not part of the objective.
 
 For GRPO + OPD runs, keep the existing reference KL configurable. Most OPD
 recipes should run with `--beta 0.0 --load_ref_policy False`, but the code does
@@ -247,6 +246,15 @@ For OPD, gather student logprobs at the teacher top-k token ids:
 student_topk_logprobs = log pi_theta(teacher_topk_token_ids | s_t)
 ```
 
+Important temperature detail:
+
+- GRPO sampled-token logprobs use the rollout temperature because they are part
+  of the policy-gradient/importance-ratio objective for the sampling policy.
+- OPD student top-k logprobs use raw `T=1` model logits because the teacher
+  scorer returns raw teacher logprobs. This keeps the distillation objective as
+  `KL(teacher_raw || student_raw)` rather than accidentally training
+  `KL(teacher_raw || student_at_rollout_temperature)`.
+
 Then compute:
 
 ```text
@@ -326,15 +334,10 @@ Current validation:
 - Pure OPD disables `filter_zero_std_samples` because rewards are neutral.
 - At least one reward must be configured unless running pure OPD.
 - `grpo.py` requires `opd_teacher_model_name_or_path` when OPD is enabled.
-- `grpo.py` warns if pure OPD is requested with `beta != 0` or
-  `load_ref_policy=true`.
-
-Known validation gap:
-
-- Teacher and student tokenizer/vocab compatibility should be checked more
-  explicitly. Current usage passes the student tokenizer to teacher vLLM and has
-  been validated for Qwen3 student/teacher pairs, but mismatched vocabularies
-  should fail earlier with a clear error.
+- Pure OPD hard-errors unless `beta == 0.0` and `load_ref_policy=false`.
+- Teacher and student tokenizers must be compatible: every teacher vocab token
+  must have the same id in the student tokenizer. Student-only extra tokens above
+  the teacher vocab range are allowed to support harmless added pad tokens.
 
 ## Data Model Changes
 
@@ -633,6 +636,9 @@ This section is intentionally kept as a running teaching/debugging checklist.
   - Problem: OPD should not require a second student forward pass.
   - Decision: gather sampled-token logprobs and teacher-top-k student logprobs
     from the same shifted logits, then add the masked OPD loss.
+  - Temperature detail: sampled-token GRPO logprobs use rollout temperature;
+    OPD teacher-top-k student logprobs use raw `T=1` model logits to match
+    teacher `raw_logprobs`.
 - [x] Stage 6: Validation
   - Focused local tests passed for DistillKit loss/extraction and teacher-top-k
     packing.
@@ -660,14 +666,8 @@ should not block v1:
 The current v1 gaps worth considering before a production PR or larger scale
 run are:
 
-1. Add explicit teacher/student tokenizer or vocab compatibility validation.
-   Teacher top-k token ids must be valid student token ids, so mismatched
-   vocabularies should fail early.
-2. Decide whether pure OPD should reject `beta != 0` / `load_ref_policy=true`
-   instead of warning. Current behavior is correct in the loss, but may waste
-   reference-policy setup.
-3. Consider adding `opd/student_topk_mass` as an alignment diagnostic.
-4. Consider adding `opd/teacher_entropy_topk` as a teacher uncertainty
+1. Consider adding `opd/student_topk_mass` as an alignment diagnostic.
+2. Consider adding `opd/teacher_entropy_topk` as a teacher uncertainty
    diagnostic.
-5. Run a matched GRPO-only control before making quality claims. The current
+3. Run a matched GRPO-only control before making quality claims. The current
    Beaker rehearsal validates the system path, not OPD superiority.

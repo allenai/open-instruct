@@ -574,7 +574,13 @@ def forward_for_logprobs_and_topk(
     pass_olmo_core_doc_lens: bool = False,
     topk_token_ids: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-    """Forward pass to compute sampled-token and optional sparse top-k logprobs."""
+    """Forward pass to compute sampled-token and optional sparse top-k logprobs.
+
+    Sampled-token logprobs use the rollout temperature because GRPO importance
+    ratios are defined over the policy that generated the rollout. Sparse top-k
+    logprobs are used for OPD teacher matching and therefore use raw T=1 model
+    logits to match teacher `raw_logprobs`.
+    """
     extra_kwargs = {}
     if pass_olmo_core_doc_lens:
         assert attention_mask is not None
@@ -582,31 +588,33 @@ def forward_for_logprobs_and_topk(
         extra_kwargs = {"doc_lens": doc_lens, "max_doc_lens": max_doc_lens}
         attention_mask = None
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
-    logits = getattr(output, "logits", output)
-    logits = logits / temperature
+    raw_logits = getattr(output, "logits", output)
+    policy_logits = raw_logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
-    logits = logits[:, :-1]
-    labels = query_responses[:, 1:].clone().to(logits.device)
+    raw_logits = raw_logits[:, :-1]
+    policy_logits = policy_logits[:, :-1]
+    labels = query_responses[:, 1:].clone().to(policy_logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
     topk_logprobs = None
     if topk_token_ids is not None:
-        if topk_token_ids.shape[:2] != logits.shape[:2]:
+        if topk_token_ids.shape[:2] != policy_logits.shape[:2]:
             raise ValueError(
-                f"topk_token_ids shape {topk_token_ids.shape} does not align to logits shape {logits.shape}"
+                f"topk_token_ids shape {topk_token_ids.shape} does not align to logits shape {policy_logits.shape}"
             )
-        log_probs = torch.log_softmax(logits.float(), dim=-1)
-        logprob_BT = torch.gather(log_probs, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-        safe_topk_token_ids = topk_token_ids.to(logits.device).clamp(min=0, max=logits.shape[-1] - 1)
-        topk_logprobs = torch.gather(log_probs, dim=-1, index=safe_topk_token_ids)
+        policy_log_probs = torch.log_softmax(policy_logits.float(), dim=-1)
+        logprob_BT = torch.gather(policy_log_probs, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+        safe_topk_token_ids = topk_token_ids.to(policy_logits.device).clamp(min=0, max=policy_logits.shape[-1] - 1)
+        raw_log_probs = torch.log_softmax(raw_logits.float(), dim=-1)
+        topk_logprobs = torch.gather(raw_log_probs, dim=-1, index=safe_topk_token_ids)
     else:
-        logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
+        logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
 
     # For now, entropy is just for monitoring, and we don't pass gradients through it.
     entropy = None
     if return_entropy:
         with torch.no_grad():
-            entropy = model_utils.entropy_from_logits(logits)
+            entropy = model_utils.entropy_from_logits(policy_logits)
 
     return logprob_BT, entropy, topk_logprobs
 

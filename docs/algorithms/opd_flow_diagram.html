@@ -361,7 +361,8 @@
         <p class="lede">
           Student rollouts stay online. A teacher vLLM scorer evaluates those exact student prefixes.
           DistillKit turns sparse teacher top-k logprobs into a forward-KL token loss that can augment GRPO
-          or run by itself as pure OPD.
+          or run by itself as pure OPD. GRPO uses rollout-temperature logprobs; OPD uses raw T=1 student
+          logprobs to match teacher raw logprobs.
         </p>
       </div>
       <div class="legend" aria-label="Diagram legend">
@@ -512,7 +513,7 @@
         <h2>Teacher Top-k</h2>
         <p>
           For each response token, teacher vLLM returns the top <code>K</code> next-token ids and logprobs under the
-          prefix the student actually visited.
+          prefix the student actually visited. The student OPD gather uses raw <code>T=1</code> logits.
         </p>
       </article>
       <article class="panel">

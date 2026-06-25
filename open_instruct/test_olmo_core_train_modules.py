@@ -2,9 +2,13 @@ import unittest
 from unittest.mock import MagicMock
 
 import torch
+import transformers
 from parameterized import parameterized
 
 from open_instruct import data_types, grpo_utils
+from open_instruct.distillkit.losses import forward_kl_topk_from_logprobs
+from open_instruct.distillkit.signals import SparseTeacherSignal
+from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import INVALID_LOGPROB
 
 
@@ -161,6 +165,40 @@ class TestForwardForLogprobs(unittest.TestCase):
         self.assertIsNone(entropy)
         assert topk_logprobs is not None
         torch.testing.assert_close(topk_logprobs, expected_topk)
+
+    def test_forward_for_logprobs_and_topk_uses_raw_logits_for_topk(self):
+        batch_size, seq_len, vocab_size = 1, 3, 4
+        model = _make_mock_model(vocab_size, seq_len, batch_size)
+        logits = torch.tensor([[[0.0, 1.0, 2.0, 3.0], [3.0, 1.0, 0.0, -1.0], [0.5, 0.0, -0.5, -1.0]]])
+        model.return_value = logits
+        query_responses = torch.tensor([[0, 3, 1]])
+        attention_mask = torch.ones(batch_size, seq_len)
+        position_ids = torch.arange(seq_len).unsqueeze(0)
+        topk_token_ids = torch.tensor([[[0, 3], [1, 2]]])
+
+        sampled_logprobs, _, topk_logprobs = grpo_utils.forward_for_logprobs_and_topk(
+            model,
+            query_responses,
+            attention_mask,
+            position_ids,
+            pad_token_id=99,
+            temperature=0.5,
+            return_entropy=False,
+            topk_token_ids=topk_token_ids,
+        )
+
+        raw_log_probs = torch.log_softmax(logits[:, :-1].float(), dim=-1)
+        policy_log_probs = torch.log_softmax((logits[:, :-1] / 0.5).float(), dim=-1)
+        expected_sampled = torch.gather(policy_log_probs, dim=-1, index=query_responses[:, 1:].unsqueeze(-1)).squeeze(
+            -1
+        )
+        expected_topk_raw = torch.gather(raw_log_probs, dim=-1, index=topk_token_ids)
+        expected_topk_policy = torch.gather(policy_log_probs, dim=-1, index=topk_token_ids)
+
+        torch.testing.assert_close(sampled_logprobs, expected_sampled)
+        assert topk_logprobs is not None
+        torch.testing.assert_close(topk_logprobs, expected_topk_raw)
+        self.assertFalse(torch.allclose(topk_logprobs, expected_topk_policy))
 
 
 class TestDAPOLoss(unittest.TestCase):
@@ -432,6 +470,136 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 config=config,
                 rho_weights=torch.ones(2, 4),
             )
+
+
+_OPD_MODEL_NAME = "EleutherAI/pythia-14m"
+
+
+class TestOPDLearnerLossEndToEnd(unittest.TestCase):
+    """End-to-end OPD learner path on a real model.
+
+    The unit tests above use a mocked model. This exercises the actual learner
+    OPD computation that ``GRPOTrainModule.train_batch`` performs, against a real
+    transformer forward, with real backprop:
+
+      forward -> raw (T=1) top-k gather -> forward_kl_topk -> masked_mean -> backward
+
+    It mirrors ``train_batch``'s OPD block (the ``[:, 1:, :]`` teacher slice, the
+    sampled-token-in-top-k metric, and the masked-mean reduction) so a regression
+    in that assembly or in the temperature handling is caught without standing up
+    the full OLMo-core Trainer. Runs on GPU when available, otherwise CPU.
+    """
+
+    K = 4
+    # Teacher top-k probabilities for response positions (mass < 1 on purpose, so
+    # teacher_topk_mass is a meaningful diagnostic rather than trivially 1.0).
+    TEACHER_PROBS = [0.5, 0.3, 0.1, 0.05]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        cls.tokenizer = transformers.AutoTokenizer.from_pretrained(_OPD_MODEL_NAME)
+        cls.model = transformers.AutoModelForCausalLM.from_pretrained(_OPD_MODEL_NAME).to(cls.device)
+        cls.pad_token_id = cls.tokenizer.eos_token_id
+
+    def _build_batch(self):
+        query = self.tokenizer.encode("The capital of France is")
+        response = self.tokenizer.encode(" Paris")
+        self.assertGreater(len(query), 0)
+        self.assertGreater(len(response), 0)
+
+        qr = query + response
+        seq_len = len(qr)
+        vocab_size = self.model.config.vocab_size
+        query_responses = torch.tensor([qr], dtype=torch.long, device=self.device)
+        attention_mask = torch.ones(1, seq_len, dtype=torch.long, device=self.device)
+        position_ids = torch.arange(seq_len, device=self.device).unsqueeze(0)
+
+        # Response positions are the slots holding response tokens.
+        response_mask = torch.zeros(1, seq_len, dtype=torch.bool, device=self.device)
+        response_mask[0, len(query) :] = True
+
+        # Teacher tensors are [B, T, K]: at full-tensor position j the teacher row is
+        # the distribution that *predicts* token j (the same convention pack_sequences
+        # uses). Query/sentinel positions get id 0 and -inf logprobs (contribute zero).
+        teacher_ids = torch.zeros(1, seq_len, self.K, dtype=torch.long, device=self.device)
+        teacher_logprobs = torch.full((1, seq_len, self.K), float("-inf"), device=self.device)
+        resp_lp = torch.log(torch.tensor(self.TEACHER_PROBS, device=self.device))
+        for pos in range(len(query), seq_len):
+            predicted = qr[pos]
+            # Put the actually-realized token first so sampled_token_in_topk is exercised.
+            ids = [predicted] + [(predicted + offset) % vocab_size for offset in (1, 2, 3)]
+            teacher_ids[0, pos] = torch.tensor(ids[: self.K], dtype=torch.long, device=self.device)
+            teacher_logprobs[0, pos] = resp_lp
+
+        return query_responses, attention_mask, position_ids, response_mask, teacher_ids, teacher_logprobs
+
+    def test_opd_loss_backprops_through_real_model(self):
+        qr, attn, pos, response_mask, teacher_ids_full, teacher_lp_full = self._build_batch()
+
+        # Mirror train_batch: teacher tensors and labels are shifted by one.
+        teacher_ids = teacher_ids_full[:, 1:, :]
+        teacher_lp = teacher_lp_full[:, 1:, :]
+        response_mask_shifted = response_mask[:, 1:]
+
+        self.model.zero_grad(set_to_none=True)
+        new_logprobs, _, student_topk_logprobs = grpo_utils.forward_for_logprobs_and_topk(
+            self.model,
+            qr,
+            attn,
+            pos,
+            self.pad_token_id,
+            temperature=0.7,
+            return_entropy=False,
+            pass_olmo_core_doc_lens=False,
+            topk_token_ids=teacher_ids,
+        )
+        self.assertEqual(student_topk_logprobs.shape, teacher_ids.shape)
+
+        signal = SparseTeacherSignal(token_ids=teacher_ids, logprobs=teacher_lp)
+        opd_output = forward_kl_topk_from_logprobs(student_topk_logprobs, signal)
+        opd_loss = masked_mean(opd_output.loss, response_mask_shifted)
+
+        # Loss is a finite scalar that still carries gradient to the model.
+        self.assertEqual(opd_loss.shape, ())
+        self.assertTrue(torch.isfinite(opd_loss))
+        self.assertTrue(opd_loss.requires_grad)
+
+        opd_loss.backward()
+        embed_grad = self.model.get_input_embeddings().weight.grad
+        self.assertIsNotNone(embed_grad, "OPD loss did not backprop into the model embeddings")
+        self.assertTrue(torch.isfinite(embed_grad).all())
+        self.assertGreater(embed_grad.abs().sum().item(), 0.0)
+
+        # teacher_topk_mass is a real (0, 1] diagnostic on response positions.
+        mass = masked_mean(opd_output.teacher_topk_mass, response_mask_shifted)
+        self.assertGreater(mass.item(), 0.0)
+        self.assertLessEqual(mass.item(), 1.0 + 1e-5)
+
+        # sampled_token_in_topk: we seeded the realized token into the teacher top-k,
+        # so it must be 1.0 averaged over response positions.
+        sampled_tokens = qr[:, 1:].unsqueeze(-1)
+        sampled_in_topk = (teacher_ids == sampled_tokens).any(dim=-1).float()
+        self.assertAlmostEqual(masked_mean(sampled_in_topk, response_mask_shifted).item(), 1.0, places=5)
+
+    def test_opd_topk_logprobs_are_temperature_invariant(self):
+        """The student OPD view uses raw T=1 logits, so it must not move with rollout temperature,
+        while the GRPO sampled-token logprobs must."""
+        qr, attn, pos, _, teacher_ids_full, _ = self._build_batch()
+        teacher_ids = teacher_ids_full[:, 1:, :]
+
+        with torch.no_grad():
+            sampled_a, _, topk_a = grpo_utils.forward_for_logprobs_and_topk(
+                self.model, qr, attn, pos, self.pad_token_id, temperature=1.0, topk_token_ids=teacher_ids
+            )
+            sampled_b, _, topk_b = grpo_utils.forward_for_logprobs_and_topk(
+                self.model, qr, attn, pos, self.pad_token_id, temperature=0.5, topk_token_ids=teacher_ids
+            )
+
+        # OPD top-k logprobs come from raw logits -> identical regardless of temperature.
+        torch.testing.assert_close(topk_a, topk_b)
+        # GRPO sampled-token logprobs are temperature-scaled -> must differ.
+        self.assertFalse(torch.allclose(sampled_a, sampled_b))
 
 
 if __name__ == "__main__":
