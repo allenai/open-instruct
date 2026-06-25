@@ -1150,6 +1150,12 @@ def accumulate_inference_batches(
         progress_bar.update(1)
         groups.append(group)
 
+    if stale_results_dropped > 0:
+        logger.info(
+            f"[accumulate_inference_batches] training_step={training_step}: dropped {stale_results_dropped} "
+            f"stale result(s) this batch (max_result_age_steps={max_result_age_steps})"
+        )
+
     if len(groups) == 0:
         logging.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
