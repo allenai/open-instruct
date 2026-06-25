@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `SWERLVanilluxSandboxEnv` (`swerl_vanillux_sandbox`), a self-contained bash-only sandbox RL environment mirroring the offline mini-swe-agent "vanillux" solver harness: a persistent shell, head/tail observation truncation, `(exit_code=N)` suffixes, vendored prompt templates, and opt-in turns-remaining / tool-call-format-error feedback (https://github.com/allenai/open-instruct/pull/1739).
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).

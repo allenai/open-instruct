@@ -1,0 +1,113 @@
+# Vanillux harness prompts — vendored from mini-swe-agent v2.2.x.
+#
+# Source: https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/config/default.yaml
+# License: MIT (see https://github.com/SWE-agent/mini-swe-agent/blob/main/LICENSE)
+#
+# These prompts mirror the templates used by
+# https://github.com/hamishivi/tmax/blob/master/rl_data/generator/vanillux_solver.py
+# so the SWERLVanilluxSandboxEnv exposes the same instruction surface as the
+# offline vanillux solver harness.
+#
+# Adaptation notes
+# ----------------
+# * mini-swe-agent v1 expected the model to emit ` ```mswea_bash_command ` blocks
+#   that the harness parses out of free-form text. Our environment uses native
+#   tool-calling (the same `bash` tool schema as the legacy bash harness in
+#   sample_solutions.py / sft/preprocessing/config/tool_schemas.json), so the
+#   prompts here drop the ` ```mswea_bash_command ` formatting directives and
+#   instruct the model to call the `bash` tool directly. Everything else
+#   (the THOUGHT section, the recommended workflow, the submit marker, the
+#   observation truncation rules) is preserved verbatim.
+# * Submission marker ``COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`` is identical
+#   between mini-swe-agent and our existing bash harness.
+# * Templates use Jinja2-style ``{{task}}`` / ``{{error}}`` placeholders that
+#   the environment substitutes literally (no Jinja2 dependency).
+
+system_template: |
+  You are a helpful assistant that can interact with a computer.
+
+  Your response must include a THOUGHT section before your action where you
+  explain your reasoning. After the THOUGHT, you must call the `bash` tool
+  with EXACTLY ONE bash command (multiple commands chained with `&&` or `||`
+  count as a single action).
+
+  Failure to follow these rules — calling no tool, calling a tool other than
+  `bash`, or omitting the THOUGHT — will cause your response to be rejected.
+
+instance_template: |
+  Please solve this task:
+
+  {{task}}
+
+  You can execute bash commands and edit files (with `sed`, `cat > file << 'EOF'`,
+  etc.) to implement the necessary changes.
+
+  ## Recommended Workflow
+
+  This workflow should be done step-by-step so that you can iterate on your
+  changes and any possible problems.
+
+  1. Analyze the codebase / environment by finding and reading relevant files.
+  2. If applicable, create a script to reproduce the issue or expected behaviour.
+  3. Implement the change(s) by editing the source code or environment state.
+  4. Verify your fix works by running your script (or relevant test) again.
+  5. Test edge cases to ensure your fix is robust.
+  6. Submit your changes and finish your work by issuing the following command:
+     `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+     Do not combine it with any other command. After this command, you cannot
+     continue working on this task.
+
+  ## Important Rules
+
+  1. Every response must contain exactly one tool call to `bash`.
+  2. Directory and environment-variable changes ARE persistent across calls
+     in this harness — you can `cd` and `export` and subsequent commands will
+     see the change. (This differs from upstream mini-swe-agent's subshell
+     model; treat the shell as a long-running login shell.)
+  3. Long-running commands: wrap with `timeout`, e.g. `timeout 30 <command>`.
+  4. Interactive commands are not possible. Use `yes`/`no` piping or
+     non-interactive flags as appropriate.
+  5. Output may be truncated. Use `head`, `tail`, `grep`, `sed -n 'A,Bp'`,
+     etc. to filter large outputs.
+
+  ## Useful command examples
+
+  ### Create a new file:
+  `cat <<'EOF' > newfile.py
+  import numpy as np
+  hello = "world"
+  print(hello)
+  EOF`
+
+  ### Edit files with sed:
+  `sed -i 's/old_string/new_string/g' filename.py`        # all occurrences
+  `sed -i '1s/old_string/new_string/' filename.py`         # first on line 1
+  `sed -i '1,10s/old_string/new_string/g' filename.py`     # lines 1-10
+
+  ### View file content:
+  `nl -ba filename.py | sed -n '10,20p'`
+
+# Observation handling — these mirror mini-swe-agent's templates and are
+# applied by the environment when it returns tool results.
+observation:
+  max_chars: 10000
+  head_chars: 5000
+  tail_chars: 5000
+  too_long_hint: |
+    The output of your last command was too long.
+    Please try a different command that produces less output.
+    If you're looking at a file you can try use head, tail or sed to view a
+    smaller number of lines selectively. If you're using grep or find and it
+    produced too much output, you can use a more selective search pattern.
+    If you really need to see something from the full command's output, you
+    can redirect output to a file and then search in that file.
+
+# Format-error handling — emitted when the model didn't call the `bash` tool
+# at all, or called a different tool. Mirrors mini-swe-agent's
+# `format_error_template` semantics.
+format_error_template: |
+  Format error: {{error}}
+
+  Please always provide EXACTLY ONE call to the `bash` tool. If you want to
+  end the task, please issue the command `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+  via the `bash` tool, with no other content in the command.

@@ -23,6 +23,15 @@ class ExecutionResult:
     exit_code: int
 
 
+class SandboxOOMError(RuntimeError):
+    """Raised when the sandbox container was killed by the OOM reaper.
+
+    Callers should treat this as a terminal condition for the current
+    episode (reward 0, done=True) rather than retrying, because the
+    agent's next command will almost certainly trip the same limit.
+    """
+
+
 class SandboxBackend(ABC):
     """Abstract interface for code/command execution backends."""
 
