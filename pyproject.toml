@@ -45,7 +45,6 @@ dependencies = [
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
     "flash-linear-attention>=0.4.2",
-    "causal-conv1d>=1.4.0; platform_system != 'Darwin'",
 ]
 
 [build-system]
@@ -98,6 +97,9 @@ dr-tulu = [
     "dr_agent",
     "authlib",
     "scipy",
+]
+cuda-kernels = [
+    "causal-conv1d>=1.4.0; platform_system != 'Darwin'",
 ]
 
 [tool.uv]

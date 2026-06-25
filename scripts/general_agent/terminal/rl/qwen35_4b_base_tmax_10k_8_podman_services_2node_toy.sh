@@ -22,7 +22,7 @@ uv run python mason.py \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
-       --env DOCKERHUB_USERNAME=shashankg209 \
+       --env DOCKERHUB_USERNAME=pdasigi \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_DOCKER_AUTO_REMOVE=1 \
        --env SWERL_PODMAN_SERVICE_COUNT=4 \
@@ -35,7 +35,8 @@ uv run python mason.py \
        --env MIRROR_URL=jupiter-cs-aus-193.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
-       --secret DOCKER_PAT=shashankg_DOCKER_PAT \
+       --secret DOCKER_PAT=pradeepd_DOCKER_PAT \
+       --secret WANDB_API_KEY=pradeepd_WANDB_API_KEY \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
@@ -55,7 +56,7 @@ uv run python mason.py \
     --total_episodes 1280 \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
-    --sequence_parallel_size 2 \
+    --sequence_parallel_size 4 \
     --num_epochs 1 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
