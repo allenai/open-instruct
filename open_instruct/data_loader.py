@@ -14,6 +14,7 @@
 
 import copy
 import os
+import re
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -62,6 +63,30 @@ from open_instruct.utils import combine_reward_metrics
 logger = logger_utils.setup_logger(__name__)
 
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
+
+
+def _sanitize_metric_name(name: str) -> str:
+    return re.sub(r"[^0-9A-Za-z_]+", "_", name).strip("_")
+
+
+def _normalize_dataset_metric_key(dataset_name: Any) -> str:
+    """Convert dataset identifiers to a stable string key for metric grouping."""
+    if isinstance(dataset_name, str):
+        return dataset_name
+    if isinstance(dataset_name, (list, tuple)):
+        if len(dataset_name) == 1:
+            return _normalize_dataset_metric_key(dataset_name[0])
+        return "__".join(_normalize_dataset_metric_key(item) for item in dataset_name)
+    if isinstance(dataset_name, set):
+        if len(dataset_name) == 1:
+            return _normalize_dataset_metric_key(next(iter(dataset_name)))
+        return "__".join(sorted(_normalize_dataset_metric_key(item) for item in dataset_name))
+    return str(dataset_name)
+
+
+def dataset_metric_key(dataset_name: Any) -> str:
+    """Metric-safe key for a dataset identifier, used to group per-dataset metrics."""
+    return _sanitize_metric_name(_normalize_dataset_metric_key(dataset_name))
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -710,6 +735,12 @@ class BatchStatistics:
     prompt_baseline_sample_counts: list[int] = field(default_factory=list)
     prompt_baseline_reward_sums: list[float] = field(default_factory=list)
     per_group_generation_times: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    nonzero_prompts_by_dataset: dict[str, int] = field(default_factory=dict)
+    completions_used_by_dataset: dict[str, int] = field(default_factory=dict)
+    filtered_prompts_by_dataset: dict[str, int] = field(default_factory=dict)
+    filtered_prompts_zero_by_dataset: dict[str, int] = field(default_factory=dict)
+    filtered_prompts_solved_by_dataset: dict[str, int] = field(default_factory=dict)
+    filtered_prompts_nonzero_by_dataset: dict[str, int] = field(default_factory=dict)
 
 
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1050,6 +1081,10 @@ def make_batch_from_groups(
     filtered_prompts_solved: int = 0,
     filtered_prompts_nonzero: int = 0,
     no_resampled_prompts: int = 0,
+    filtered_prompts_by_dataset: dict[str, int] | None = None,
+    filtered_prompts_zero_by_dataset: dict[str, int] | None = None,
+    filtered_prompts_solved_by_dataset: dict[str, int] | None = None,
+    filtered_prompts_nonzero_by_dataset: dict[str, int] | None = None,
 ) -> tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]:
     assert len(groups) > 0, "make_batch_from_groups requires at least one group"
 
@@ -1188,6 +1223,17 @@ def make_batch_from_groups(
     total_prompts = len(groups)
     total_seen = filtered_prompts + total_prompts
     filtered_prompts_pct = filtered_prompts / total_seen if total_seen > 0 else 0.0
+
+    # Accepted (trained-on) prompts per dataset subset. These are the "nonzero" prompts that
+    # survived filtering, mirroring the scalar counts above but broken down by dataset.
+    # `completions_used_by_dataset` counts the completions those prompts contribute to the batch.
+    nonzero_prompts_by_dataset: dict[str, int] = {}
+    completions_used_by_dataset: dict[str, int] = {}
+    for group in groups:
+        key = dataset_metric_key(group.dataset)
+        nonzero_prompts_by_dataset[key] = nonzero_prompts_by_dataset.get(key, 0) + 1
+        completions_used_by_dataset[key] = completions_used_by_dataset.get(key, 0) + group.sample_count
+
     batch_stats = BatchStatistics(
         prompt_lengths=prompt_lengths,
         response_lengths=response_lengths,
@@ -1204,6 +1250,12 @@ def make_batch_from_groups(
         prompt_baseline_sample_counts=all_prompt_baseline_sample_counts,
         prompt_baseline_reward_sums=all_prompt_baseline_reward_sums,
         per_group_generation_times=np.array(per_group_generation_times, dtype=float),
+        nonzero_prompts_by_dataset=nonzero_prompts_by_dataset,
+        completions_used_by_dataset=completions_used_by_dataset,
+        filtered_prompts_by_dataset=filtered_prompts_by_dataset or {},
+        filtered_prompts_zero_by_dataset=filtered_prompts_zero_by_dataset or {},
+        filtered_prompts_solved_by_dataset=filtered_prompts_solved_by_dataset or {},
+        filtered_prompts_nonzero_by_dataset=filtered_prompts_nonzero_by_dataset or {},
     )
     return combined_result, batch, combined_reward_metrics, batch_stats
 
@@ -1263,6 +1315,10 @@ def accumulate_inference_batches(
     filtered_prompt_zero = 0
     filtered_prompt_solved = 0
     filtered_prompt_nonzero = 0
+    filtered_prompts_by_dataset: dict[str, int] = {}
+    filtered_prompts_zero_by_dataset: dict[str, int] = {}
+    filtered_prompts_solved_by_dataset: dict[str, int] = {}
+    filtered_prompts_nonzero_by_dataset: dict[str, int] = {}
     total_no_resampled = 0
     progress_bar = tqdm(
         total=accumulation_target,
@@ -1277,16 +1333,24 @@ def accumulate_inference_batches(
     num_accumulated = 0
     collected_results = []
 
-    def record_filtered_prompt(filtered_result: data_types.GenerationResult) -> None:
+    def record_filtered_prompt(filtered_result: data_types.GenerationResult, dataset_key: str) -> None:
         nonlocal total_filtered_prompts, filtered_prompt_zero, filtered_prompt_solved, filtered_prompt_nonzero
         assert filtered_result.reward_scores is not None
         total_filtered_prompts += 1
+        filtered_prompts_by_dataset[dataset_key] = filtered_prompts_by_dataset.get(dataset_key, 0) + 1
         if filtered_result.reward_scores[0] == 0:
             filtered_prompt_zero += 1
+            filtered_prompts_zero_by_dataset[dataset_key] = filtered_prompts_zero_by_dataset.get(dataset_key, 0) + 1
         elif filtered_result.reward_scores[0] == max_possible_score:
             filtered_prompt_solved += 1
+            filtered_prompts_solved_by_dataset[dataset_key] = (
+                filtered_prompts_solved_by_dataset.get(dataset_key, 0) + 1
+            )
         else:
             filtered_prompt_nonzero += 1
+            filtered_prompts_nonzero_by_dataset[dataset_key] = (
+                filtered_prompts_nonzero_by_dataset.get(dataset_key, 0) + 1
+            )
 
     while num_accumulated < accumulation_target:
         logger.info(
@@ -1343,8 +1407,9 @@ def accumulate_inference_batches(
             maintain_pending_ngu_completions=maintain_pending_ngu_completions,
         )
 
+        filtered_dataset_key = dataset_metric_key(group.dataset)
         for filtered_result in group_filter_result.filtered_results:
-            record_filtered_prompt(filtered_result)
+            record_filtered_prompt(filtered_result, filtered_dataset_key)
 
         if group_filter_result.counted_as_sampled:
             if batch_by == "completions":
@@ -1398,6 +1463,10 @@ def accumulate_inference_batches(
         filtered_prompts_solved=filtered_prompt_solved,
         filtered_prompts_nonzero=filtered_prompt_nonzero,
         no_resampled_prompts=total_no_resampled,
+        filtered_prompts_by_dataset=filtered_prompts_by_dataset,
+        filtered_prompts_zero_by_dataset=filtered_prompts_zero_by_dataset,
+        filtered_prompts_solved_by_dataset=filtered_prompts_solved_by_dataset,
+        filtered_prompts_nonzero_by_dataset=filtered_prompts_nonzero_by_dataset,
     )
 
 
@@ -1553,6 +1622,9 @@ class DataPreparationActor:
         self.model_dims = model_dims
         self.verbose = verbose
         self.dataset = dataset
+        self.dataset_metric_names = sorted(
+            {dataset_metric_key(dataset_name) for dataset_name in dataset[VERIFIER_SOURCE_KEY]}
+        )
         self.tool_names = tool_names
         self.run_name = run_name
         self.model_name = model_name
@@ -1762,7 +1834,27 @@ class DataPreparationActor:
             stop_rate = sum(int(fr == "stop") for fr in result.finish_reasons) / len(result.finish_reasons)
 
             batch_metrics_dict = asdict(batch_stats)
+            # Per-dataset breakdowns are expanded into flat `batch/<metric>/<dataset>` keys below,
+            # so drop the raw dicts to keep them out of the scalar metrics.
+            per_dataset_metric_fields = {
+                "nonzero_prompts": "nonzero_prompts_by_dataset",
+                "completions_used": "completions_used_by_dataset",
+                "filtered_prompts": "filtered_prompts_by_dataset",
+                "filtered_prompts_zero": "filtered_prompts_zero_by_dataset",
+                "filtered_prompts_solved": "filtered_prompts_solved_by_dataset",
+                "filtered_prompts_nonzero": "filtered_prompts_nonzero_by_dataset",
+            }
+            for field_name in per_dataset_metric_fields.values():
+                batch_metrics_dict.pop(field_name, None)
             batch_metrics_prefixed = {f"batch/{k}": v for k, v in batch_metrics_dict.items()}
+            for metric_name, field_name in per_dataset_metric_fields.items():
+                counts = getattr(batch_stats, field_name)
+                for dataset_name in self.dataset_metric_names:
+                    batch_metrics_prefixed[f"batch/{metric_name}/{dataset_name}"] = counts.get(dataset_name, 0)
+                # Surface any dataset key not present in the precomputed list (e.g. from mixed batches).
+                for dataset_name, count in counts.items():
+                    if dataset_name not in self.dataset_metric_names:
+                        batch_metrics_prefixed[f"batch/{metric_name}/{dataset_name}"] = count
 
             step_metrics = {
                 "time/generation_waiting_for_trainer": generation_wait_time,

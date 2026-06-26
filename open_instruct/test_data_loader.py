@@ -156,6 +156,71 @@ class TestGroupedAdvantages(unittest.TestCase):
         self.assertEqual(get_never_give_up_chain_id("7_0"), "7_0")
         self.assertEqual(get_never_give_up_chain_id("7_0_1"), "7_0")
 
+    def test_accumulate_inference_batches_reports_per_dataset_breakdown(self):
+        class MockTokenizer:
+            eos_token_id = 0
+
+            def batch_decode(self, responses, skip_special_tokens=False):
+                return [str(response) for response in responses]
+
+        def make_result(index, prompt_id, reward_scores):
+            return GenerationResult(
+                responses=[[1], [2]],
+                finish_reasons=["stop", "stop"],
+                masks=[[1], [1]],
+                request_info=RequestInfo(
+                    num_calls=[0, 0],
+                    timeouts=[0, 0],
+                    tool_errors=["", ""],
+                    tool_outputs=["", ""],
+                    tool_runtimes=[0.0, 0.0],
+                    tool_calleds=[False, False],
+                    tool_call_stats=[[], []],
+                    rollout_states=[{}, {}],
+                ),
+                index=index,
+                prompt_id=prompt_id,
+                token_statistics=TokenStatistics(num_prompt_tokens=1, num_response_tokens=2, generation_time=1.0),
+                logprobs=[[0.0], [0.0]],
+                reward_scores=reward_scores,
+                reward_metrics={},
+                model_step=0,
+            )
+
+        inference_results = Queue()
+        # quartile0 prompt is all-solved -> filtered as "solved"; quartile1 prompt has nonzero std -> accepted.
+        inference_results.put(make_result(0, "0_0", [1.0, 1.0]))
+        inference_results.put(make_result(1, "0_1", [0.0, 1.0]))
+        generation_config = Mock(n=2)
+        dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: [[10], [20]],
+                GROUND_TRUTHS_KEY: [[11], [21]],
+                VERIFIER_SOURCE_KEY: ["math_deepscaler_quartile0", "math_deepscaler_quartile1"],
+                RAW_PROMPT_KEY: ["prompt0", "prompt1"],
+                "index": [0, 1],
+            }
+        )
+
+        _, _, _, batch_stats = data_loader.accumulate_inference_batches(
+            inference_results,
+            generation_config,
+            num_prompts=1,
+            model_dims=Mock(),
+            tokenizer=MockTokenizer(),
+            dataset=dataset,
+            base_env_config=EnvConfig(),
+            training_step=0,
+            active_sampling=True,
+            filter_zero_std_samples=True,
+        )
+
+        self.assertEqual(batch_stats.filtered_prompts_solved, 1)
+        self.assertEqual(batch_stats.filtered_prompts_solved_by_dataset, {"math_deepscaler_quartile0": 1})
+        self.assertEqual(batch_stats.nonzero_prompts_by_dataset, {"math_deepscaler_quartile1": 1})
+        # The accepted quartile1 prompt contributes its 2 completions to the batch.
+        self.assertEqual(batch_stats.completions_used_by_dataset, {"math_deepscaler_quartile1": 2})
+
     def test_accumulate_inference_batches_merges_never_give_up_retry(self):
         class MockTokenizer:
             eos_token_id = 0
