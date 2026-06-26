@@ -570,6 +570,12 @@ class StreamingDataLoaderConfig:
                 logger.warning("Disabling `filter_zero_std_samples` for pure OPD because rewards are neutral.")
                 self.filter_zero_std_samples = False
 
+        if not self.opd_use_task_rewards and not self.opd_enabled:
+            raise ValueError(
+                "`opd_use_task_rewards=False` only makes sense with `opd_enabled=True`; it suppresses the GRPO "
+                "task loss in favor of the OPD distillation loss. Enable OPD or leave `opd_use_task_rewards=True`."
+            )
+
         has_reward = (
             self.apply_verifiable_reward
             or self.apply_r1_style_format_reward

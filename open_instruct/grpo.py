@@ -247,7 +247,10 @@ def main(
             model_revision=streaming_config.opd_teacher_model_revision,
             seed=args.seed,
             enable_prefix_caching=streaming_config.opd_teacher_enable_prefix_caching,
-            max_model_len=streaming_config.max_prompt_token_length + streaming_config.response_length,
+            # +1 leaves room for the single dummy token vLLM must generate (max_tokens=1)
+            # when scoring a full-length query+response, which can otherwise reach exactly
+            # max_prompt_token_length + response_length and overflow max_model_len.
+            max_model_len=streaming_config.max_prompt_token_length + streaming_config.response_length + 1,
             gpu_memory_utilization=streaming_config.opd_teacher_gpu_memory_utilization,
             topk=streaming_config.opd_topk,
             dtype=streaming_config.opd_teacher_dtype,
