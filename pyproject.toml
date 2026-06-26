@@ -27,7 +27,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.9.0,<2.10",
     "transformers>=4.57.0",
-    "vllm==0.14.1; platform_system != 'Darwin'",
+    "vllm>=0.14.1; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
@@ -58,6 +58,9 @@ torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
+# OLMo-hybrid small suite: architecture lives in maintainer forks of transformers + vLLM.
+transformers = { git = "https://github.com/yashassamaga/transformers.git", rev = "hybrid-small-suite" }
+vllm = { git = "https://github.com/YashasSamaga/vllm.git", rev = "olmo-hybrid-small", marker = "platform_system != 'Darwin'" }
 
 [[tool.uv.index]]
 name = "pytorch-cu129"
