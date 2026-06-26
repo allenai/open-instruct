@@ -1304,10 +1304,7 @@ def accumulate_inference_batches(
         never_give_up_state = NeverGiveUpAccumulationState()
 
     completions_per_prompt = generation_config.n
-    if batch_by == "completions":
-        accumulation_target = num_prompts * completions_per_prompt
-    else:
-        accumulation_target = num_prompts
+    accumulation_target = num_prompts * completions_per_prompt if batch_by == "completions" else num_prompts
     accumulation_unit = batch_by
 
     groups: list[Group] = []
