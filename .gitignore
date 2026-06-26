@@ -163,3 +163,8 @@ cache/
 local_dataset_cache/
 scratch/
 .claude/worktrees/
+
+# Jupyter / notebooks
+.jupyter/
+.jupyter_ystore.db
+notebooks/

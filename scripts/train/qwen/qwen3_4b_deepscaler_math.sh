@@ -58,7 +58,7 @@ uv run mason.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --temperature 1.0 \
-    --dataset_mixer_list mnoukhov/deepscaler_20k_medhard_nolatex_rlvr 1.0 \
+    --dataset_mixer_list mnoukhov/deepscaler-10k-qwen3-4b-base-32samples-quartiles 1.0 \
     --dataset_mixer_list_splits "train" \
     --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits "train" \

@@ -230,6 +230,39 @@ class TestLMJudgeVerifier(unittest.TestCase):
         self.assertIsNone(asyncio.run(cleanup_all_llm_judge_clients()))
 
 
+class TestApplyVerifiableRewardResolution(unittest.TestCase):
+    """Dataset-specific source names (e.g. difficulty-quartile splits) should resolve to a base verifier."""
+
+    def test_math_prefixed_source_resolves_to_math_verifier(self):
+        reward_fn_mapping = {"math": ground_truth_utils.MathVerifier()}
+        rewards, per_func = asyncio.run(
+            ground_truth_utils.apply_verifiable_reward(
+                reward_fn_mapping=reward_fn_mapping,
+                responses=[[1]],
+                decoded_responses=[r"The answer is \boxed{42}"],
+                ground_truths=["42"],
+                datasets=["math_deepscaler_quartile0"],
+            )
+        )
+        self.assertEqual(rewards, [1.0])
+        # The per-function reward is keyed by the resolved verifier name, not the source split.
+        self.assertEqual(per_func, [{"math": 1.0}])
+
+    def test_unknown_source_is_skipped(self):
+        reward_fn_mapping = {"math": ground_truth_utils.MathVerifier()}
+        rewards, per_func = asyncio.run(
+            ground_truth_utils.apply_verifiable_reward(
+                reward_fn_mapping=reward_fn_mapping,
+                responses=[[1]],
+                decoded_responses=[r"The answer is \boxed{42}"],
+                ground_truths=["42"],
+                datasets=["some_unknown_source"],
+            )
+        )
+        self.assertEqual(rewards, [0])
+        self.assertEqual(per_func, [{}])
+
+
 class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
     """Regression test for PR #1655: IFEvalVerifier crashed with
     ZeroDivisionError when the constraint's instruction_id list was empty."""
