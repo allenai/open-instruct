@@ -231,8 +231,8 @@ Pure OPD:     total = opd_loss_coef·<span class="f">opd_loss</span>          <s
         </tr>
         <tr>
           <td><span class="pill distill">distillkit/losses.py</span></td>
-          <td>The forward-KL-top-k math + the student top-k gather helper. Mode-agnostic, no GRPO imports.</td>
-          <td><code>forward_kl_topk_from_logprobs(...)</code>, <code>gather_student_logprobs_at_teacher_topk(...)</code></td>
+          <td>The forward-KL-top-k math. Mode-agnostic, no GRPO imports. (The student top-k gather lives in <code>grpo_utils.forward_for_logprobs_and_topk</code>, which reuses the GRPO forward.)</td>
+          <td><code>forward_kl_topk_from_logprobs(...)</code></td>
         </tr>
         <tr>
           <td><span class="pill distill">distillkit/vllm_logprobs.py</span></td>

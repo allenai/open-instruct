@@ -18,28 +18,6 @@ class ForwardKLTopKOutput:
     teacher_topk_mass: torch.Tensor
 
 
-def gather_student_logprobs_at_teacher_topk(
-    student_logits: torch.Tensor, teacher_token_ids: torch.Tensor
-) -> torch.Tensor:
-    """Gather student logprobs at teacher-selected top-k token ids.
-
-    Args:
-        student_logits: Tensor of shape `[..., vocab_size]`.
-        teacher_token_ids: Tensor of shape `[..., k]`.
-
-    Returns:
-        Tensor of shape `[..., k]` containing log-softmax student values.
-    """
-    if student_logits.shape[:-1] != teacher_token_ids.shape[:-1]:
-        raise ValueError(
-            f"student_logits prefix shape {student_logits.shape[:-1]} does not match "
-            f"teacher_token_ids prefix shape {teacher_token_ids.shape[:-1]}"
-        )
-    safe_token_ids = teacher_token_ids.to(student_logits.device).clamp(min=0, max=student_logits.shape[-1] - 1)
-    student_logprobs = torch.log_softmax(student_logits.float(), dim=-1)
-    return torch.gather(student_logprobs, dim=-1, index=safe_token_ids)
-
-
 def forward_kl_topk_from_logprobs(
     student_topk_logprobs: torch.Tensor, teacher_signal: SparseTeacherSignal, *, normalize_topk: bool = False
 ) -> ForwardKLTopKOutput:

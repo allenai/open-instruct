@@ -602,11 +602,16 @@ def forward_for_logprobs_and_topk(
             raise ValueError(
                 f"topk_token_ids shape {topk_token_ids.shape} does not align to logits shape {policy_logits.shape}"
             )
-        policy_log_probs = torch.log_softmax(policy_logits.float(), dim=-1)
-        logprob_BT = torch.gather(policy_log_probs, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-        safe_topk_token_ids = topk_token_ids.to(policy_logits.device).clamp(min=0, max=policy_logits.shape[-1] - 1)
-        raw_log_probs = torch.log_softmax(raw_logits.float(), dim=-1)
-        topk_logprobs = torch.gather(raw_log_probs, dim=-1, index=safe_topk_token_ids)
+        # Sampled-token logprob (GRPO importance ratio): use the fused/compiled gather so we do not
+        # materialize a full-vocab [B, T, V] log-softmax tensor just to read one column per position.
+        logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
+        # Teacher top-k logprob (OPD): from raw T=1 logits. Normalize via logsumexp so we only
+        # allocate [B, T, K] + [B, T, 1] instead of a second full-vocab [B, T, V] log-softmax.
+        safe_topk_token_ids = topk_token_ids.to(raw_logits.device).clamp(min=0, max=raw_logits.shape[-1] - 1)
+        raw_logits_f = raw_logits.float()
+        topk_logprobs = torch.gather(raw_logits_f, dim=-1, index=safe_topk_token_ids) - torch.logsumexp(
+            raw_logits_f, dim=-1, keepdim=True
+        )
     else:
         logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
 
