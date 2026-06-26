@@ -19,10 +19,10 @@ k = `--num_samples_per_prompt_rollout`.
 
 | Name | n (prompts) | k (samples) | Status / Beaker |
 | --- | --- | --- | --- |
-| `2k_baseline_dapo_n16_k8` | 16 | 8 | TODO |
-| `2k_baseline_dapo_n8_k16` | 8 | 16 | TODO |
-| `2k_baseline_dapo_n4_k32` | 4 | 32 | TODO |
-| `2k_baseline_dapo_n2_k64` | 2 | 64 | TODO |
+| `2k_baseline_dapo_n16_k8` | 16 | 8 | [01KW2Y5BBT0KAJRPRYD18AEPH0](https://beaker.org/ex/01KW2Y5BBT0KAJRPRYD18AEPH0) |
+| `2k_baseline_dapo_n8_k16` | 8 | 16 | [01KW2Y5F9NZJJJ9DGBDYPXAWXV](https://beaker.org/ex/01KW2Y5F9NZJJJ9DGBDYPXAWXV) |
+| `2k_baseline_dapo_n4_k32` | 4 | 32 | [01KW2Y5K5X36G079XXGBH4AS59](https://beaker.org/ex/01KW2Y5K5X36G079XXGBH4AS59) |
+| `2k_baseline_dapo_n2_k64` | 2 | 64 | [01KW2Y5PSGZ9CFS1D4QMWT8HGF](https://beaker.org/ex/01KW2Y5PSGZ9CFS1D4QMWT8HGF) |
 
 ### Launch commands
 
@@ -52,10 +52,10 @@ Everything else matches the baseline sweep (`--total_episodes 256000`,
 
 | Name | n | k | never_give_up | Status / Beaker |
 | --- | --- | --- | --- | --- |
-| `2k_ngu05_dapo_n16_k8` | 16 | 8 | 0.5 | TODO |
-| `2k_ngu09_dapo_n16_k8` | 16 | 8 | 0.9 | TODO |
-| `2k_ngu05_dapo_n8_k16` | 8 | 16 | 0.5 | TODO |
-| `2k_ngu09_dapo_n8_k16` | 8 | 16 | 0.9 | TODO |
+| `2k_ngu05_dapo_n16_k8` | 16 | 8 | 0.5 | [01KW2Y5TEEM0KGZ937HG0KQ7FX](https://beaker.org/ex/01KW2Y5TEEM0KGZ937HG0KQ7FX) |
+| `2k_ngu09_dapo_n16_k8` | 16 | 8 | 0.9 | [01KW2Y5Y5WRKHR3F34PEK10XHY](https://beaker.org/ex/01KW2Y5Y5WRKHR3F34PEK10XHY) |
+| `2k_ngu05_dapo_n8_k16` | 8 | 16 | 0.5 | [01KW2Y61T14JN8832P1B21J5B7](https://beaker.org/ex/01KW2Y61T14JN8832P1B21J5B7) |
+| `2k_ngu09_dapo_n8_k16` | 8 | 16 | 0.9 | [01KW2Y65JEYJR4CN4B4YCNHFFY](https://beaker.org/ex/01KW2Y65JEYJR4CN4B4YCNHFFY) |
 
 ### Launch commands
 
