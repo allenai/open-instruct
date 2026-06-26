@@ -848,10 +848,15 @@ def maybe_evaluate(
         scores = np.array(eval_batch.scores)
         eval_k = eval_generation_config.n
 
+        # One row per eval prompt: its dataset index and exact accuracy (fraction of eval_k samples solved).
+        prompt_solve_rate_rows: list[list[float]] = []
         if scores.size and scores.size % eval_k == 0:
             scores_per_prompt = scores.reshape(-1, eval_k)
             correct_per_prompt = scores_per_prompt >= max_possible_score - 1e-8
             eval_pass_at_k_metrics.update(compute_pass_at_k_metrics(correct_per_prompt))
+            prompt_solve_rates = correct_per_prompt.mean(axis=1)
+            prompt_indices = np.array(eval_batch.indices, dtype=int).reshape(-1, eval_k)[:, 0]
+            prompt_solve_rate_rows = [[int(idx), float(rate)] for idx, rate in zip(prompt_indices, prompt_solve_rates)]
         else:
             logger.warning(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
@@ -885,6 +890,10 @@ def maybe_evaluate(
 
         if args.with_tracking:
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
+            if prompt_solve_rate_rows:
+                eval_metrics["eval/prompt_solve_rate_by_index_table"] = wandb.Table(
+                    columns=["dataset_index", "solve_rate"], data=prompt_solve_rate_rows
+                )
             wandb.log(eval_metrics, step=training_step)
         else:
             model_utils.print_rich_table(df.iloc[:1])
