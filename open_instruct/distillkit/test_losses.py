@@ -32,6 +32,22 @@ class TestForwardKLTopK(unittest.TestCase):
         torch.testing.assert_close(output.loss, expected.reshape(1, 1))
         torch.testing.assert_close(output.teacher_topk_mass, torch.exp(torch.tensor([[-0.5]])))
 
+    def test_missing_entry_with_neg_inf_student_logprob_stays_finite(self):
+        # Regression: at a missing teacher slot (-inf) the student logprob may also be
+        # -inf; teacher_probs is 0 there, so without masking the student term this would
+        # compute 0 * inf = NaN.
+        signal = SparseTeacherSignal(
+            token_ids=torch.tensor([[[1, 0]]], dtype=torch.long),
+            logprobs=torch.tensor([[[-0.5, float("-inf")]]], dtype=torch.float32),
+        )
+        student_logprobs = torch.tensor([[[-0.25, float("-inf")]]], dtype=torch.float32)
+
+        output = forward_kl_topk_from_logprobs(student_logprobs, signal)
+
+        expected = torch.exp(torch.tensor(-0.5)) * (-0.5 + 0.25)
+        self.assertTrue(torch.isfinite(output.loss).all())
+        torch.testing.assert_close(output.loss, expected.reshape(1, 1))
+
     def test_normalized_topk_changes_mass_to_one_in_loss(self):
         signal = SparseTeacherSignal(
             token_ids=torch.tensor([[[1, 2]]], dtype=torch.long),

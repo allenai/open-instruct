@@ -35,7 +35,7 @@ def gather_student_logprobs_at_teacher_topk(
             f"student_logits prefix shape {student_logits.shape[:-1]} does not match "
             f"teacher_token_ids prefix shape {teacher_token_ids.shape[:-1]}"
         )
-    safe_token_ids = teacher_token_ids.clamp(min=0, max=student_logits.shape[-1] - 1)
+    safe_token_ids = teacher_token_ids.to(student_logits.device).clamp(min=0, max=student_logits.shape[-1] - 1)
     student_logprobs = torch.log_softmax(student_logits.float(), dim=-1)
     return torch.gather(student_logprobs, dim=-1, index=safe_token_ids)
 
@@ -75,5 +75,11 @@ def forward_kl_topk_from_logprobs(
             finite_teacher, safe_teacher_logprobs - torch.log(denom), torch.zeros_like(safe_teacher_logprobs)
         )
 
-    loss = (teacher_probs * (safe_teacher_logprobs - student_topk_logprobs.float())).sum(dim=-1)
+    # Zero the student term where the teacher entry is missing (-inf). Otherwise a
+    # non-finite student logprob there would give 0 * inf = NaN, since teacher_probs
+    # is already 0 at those positions.
+    safe_student_logprobs = torch.where(
+        finite_teacher, student_topk_logprobs.float(), torch.zeros_like(student_topk_logprobs.float())
+    )
+    loss = (teacher_probs * (safe_teacher_logprobs - safe_student_logprobs)).sum(dim=-1)
     return ForwardKLTopKOutput(loss=loss, teacher_topk_mass=teacher_topk_mass)

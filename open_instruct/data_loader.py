@@ -1414,6 +1414,8 @@ class DataPreparationActor:
     ) -> tuple[list[torch.Tensor], list[torch.Tensor], dict[str, float]]:
         if not self.teacher_scorers:
             raise ValueError("OPD teacher scoring requested but no teacher scorers are configured.")
+        if not responses:
+            return [], [], {}
 
         wall_start = time.perf_counter()
         num_scorers = min(len(self.teacher_scorers), len(responses))
