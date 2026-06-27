@@ -296,6 +296,7 @@ frozenlist==1.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') 
 fsspec==2025.10.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   datasets
+    #   gradio-client
     #   huggingface-hub
     #   torch
 gguf==0.17.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -332,6 +333,8 @@ googleapis-common-protos==1.72.0 ; (platform_machine == 'aarch64' and sys_platfo
     #   google-api-core
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
+gradio-client==2.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via trackio
 greenlet==3.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   patchright
@@ -350,7 +353,7 @@ h2==4.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (plat
     # via httpx
 hf-transfer==0.1.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
-hf-xet==1.4.2 ; (platform_machine == 'AMD64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'darwin') or (platform_machine == 'amd64' and sys_platform == 'darwin') or (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+hf-xet==1.5.0 ; (platform_machine == 'AMD64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'darwin') or (platform_machine == 'amd64' and sys_platform == 'darwin') or (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via huggingface-hub
 hjson==3.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via deepspeed
@@ -358,7 +361,7 @@ hpack==4.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     # via h2
 httpcore==1.0.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via httpx
-httptools==0.7.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+httptools==0.7.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via uvicorn
 httpx==0.28.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -369,6 +372,7 @@ httpx==0.28.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   fastapi
     #   fastapi-cloud-cli
     #   fastmcp
+    #   gradio-client
     #   huggingface-hub
     #   litellm
     #   mcp
@@ -376,14 +380,16 @@ httpx==0.28.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     #   openai
 httpx-sse==0.4.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mcp
-huggingface-hub==1.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+huggingface-hub==1.16.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   accelerate
     #   cached-path
     #   datasets
+    #   gradio-client
     #   openenv-core
     #   peft
     #   tokenizers
+    #   trackio
     #   transformers
 humanize==4.15.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via crawl4ai
@@ -582,6 +588,7 @@ numpy==2.2.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     #   tensorboard
     #   tilelang
     #   torchvision
+    #   trackio
     #   transformers
     #   trimesh
     #   vllm
@@ -751,6 +758,8 @@ opentelemetry-semantic-conventions==0.60b1 ; (platform_machine == 'aarch64' and 
     #   opentelemetry-semantic-conventions-ai
 opentelemetry-semantic-conventions-ai==0.5.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
+orjson==3.11.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via trackio
 outlines-core==0.2.11 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
 packaging==25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -764,6 +773,7 @@ packaging==25.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     #   deepspeed
     #   flash-attn-3
     #   flashinfer-python
+    #   gradio-client
     #   huggingface-hub
     #   lm-format-enforcer
     #   matplotlib
@@ -804,6 +814,7 @@ pillow==12.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or 
     #   pdfplumber
     #   tensorboard
     #   torchvision
+    #   trackio
     #   vllm
 platformdirs==4.5.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -968,6 +979,7 @@ python-multipart==0.0.21 ; (platform_machine == 'aarch64' and sys_platform == 'l
     # via
     #   fastapi
     #   mcp
+    #   trackio
 pytz==2025.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pandas
 pyyaml==6.0.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -1139,6 +1151,7 @@ starlette==0.50.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') 
     #   model-hosting-container-standards
     #   prometheus-fastapi-instrumentator
     #   sse-starlette
+    #   trackio
 supervisor==4.3.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via model-hosting-container-standards
 sympy==1.14.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
@@ -1247,6 +1260,8 @@ tqdm==4.67.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     #   tilelang
     #   transformers
     #   vllm
+trackio==0.25.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+    # via open-instruct
 transformers==5.4.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   compressed-tensors
@@ -1286,6 +1301,7 @@ typing-extensions==4.15.0 ; (platform_machine == 'aarch64' and sys_platform == '
     #   exceptiongroup
     #   fastapi
     #   flash-attn-4
+    #   gradio-client
     #   grpcio
     #   huggingface-hub
     #   mcp
@@ -1338,7 +1354,8 @@ uvicorn==0.40.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     #   mcp
     #   open-instruct
     #   openenv-core
-uvloop==0.22.1 ; (platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux')
+    #   trackio
+uvloop==0.22.1 ; (platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_python_implementation != 'PyPy' and sys_platform == 'darwin')
     # via uvicorn
 virtualenv==20.36.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -1350,7 +1367,7 @@ wandb==0.23.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     # via open-instruct
 watchdog==6.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs
-watchfiles==1.1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+watchfiles==1.1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   uvicorn
     #   vllm
