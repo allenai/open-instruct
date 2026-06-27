@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from open_instruct import logger_utils
+from open_instruct.environments.appworld_env import AppWorldEnvConfig
 from open_instruct.environments.base import BaseEnvConfig, EnvCall, StepResult
 from open_instruct.environments.examples import CounterEnvConfig, GuessNumberEnvConfig, WordleTextEnvConfig
 from open_instruct.environments.generic_sandbox import GenericSandboxEnvConfig
@@ -663,4 +664,5 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     SWERLSandboxEnvConfig.tool_class.config_name: SWERLSandboxEnvConfig,
     SWERLVanilluxSandboxEnvConfig.tool_class.config_name: SWERLVanilluxSandboxEnvConfig,
     WordleTextEnvConfig.tool_class.config_name: WordleTextEnvConfig,
+    AppWorldEnvConfig.tool_class.config_name: AppWorldEnvConfig,
 }
