@@ -64,7 +64,7 @@ options:
 
 ```bash
 uv run python scripts/data/convert_appworld_to_rl.py \
-    --data_root $APPWORLD_ROOT --split train \
+    --data_root $APPWORLD_ROOT --splits train,dev,test_normal,test_challenge --private \
     --push_to_hub <org>/appworld-train-rl
 ```
 

@@ -31,7 +31,7 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
 # RL dataset built by scripts/data/convert_appworld_to_rl.py (one row per task).
-APPWORLD_DATASET="${APPWORLD_DATASET:-rl-research/appworld-train-rl}"
+APPWORLD_DATASET="${APPWORLD_DATASET:-shatu/appworld-rl}"
 DATASETS="${APPWORLD_DATASET} 1.0"
 DATASET_SPLITS="train"
 
@@ -86,7 +86,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits $DATASET_SPLITS \
     --dataset_mixer_eval_list ${APPWORLD_DATASET} 8 \
-    --dataset_mixer_eval_list_splits train \
+    --dataset_mixer_eval_list_splits dev \
     --max_prompt_token_length 4096 \
     --response_length 16384 \
     --pack_length 20480 \

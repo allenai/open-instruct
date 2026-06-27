@@ -14,7 +14,7 @@
 #        docker build -t appworld-data:test <appworld_root>
 #   2. A local RL parquet built by scripts/data/convert_appworld_to_rl.py:
 #        uv run python scripts/data/convert_appworld_to_rl.py \
-#          --data_root <appworld_root> --split train --limit 16 --max_steps 10 \
+#          --data_root <appworld_root> --splits train --limit 16 --max_steps 10 \
 #          --output_parquet $APPWORLD_DEBUG_PARQUET
 
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1

@@ -16,7 +16,7 @@ Point --data_root at an AppWorld data root (the dir containing ``data/tasks`` an
 
 Example:
     uv run python scripts/data/convert_appworld_to_rl.py \
-        --data_root /weka/.../appworld_root --split train \
+        --data_root /weka/.../appworld_root --splits train,dev,test_normal,test_challenge --private \
         --push_to_hub <org>/appworld-train-rl
 """
 
@@ -24,7 +24,7 @@ import argparse
 import json
 import os
 
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 
 from open_instruct import logger_utils
 from open_instruct.environments.appworld_env import build_prompt_messages
@@ -35,11 +35,17 @@ logger = logger_utils.setup_logger(__name__)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data_root", required=True, help="AppWorld data root (contains data/tasks, data/datasets).")
-    parser.add_argument("--split", default="train", help="Split file under data/datasets (train/dev/test_normal/...).")
+    parser.add_argument(
+        "--splits",
+        default="train",
+        help="Comma-separated split files under data/datasets (e.g. train,dev,test_normal,test_challenge). "
+        "Each becomes a named split in the pushed dataset.",
+    )
     parser.add_argument("--max_steps", type=int, default=50, help="Per-rollout interaction budget (env max_steps).")
     parser.add_argument("--push_to_hub", default="", help="HF repo id to push to (optional).")
-    parser.add_argument("--output_parquet", default="", help="Local parquet path to write (optional).")
-    parser.add_argument("--limit", type=int, default=0, help="Keep only the first N tasks (0 = all).")
+    parser.add_argument("--private", action="store_true", help="Push as a private dataset (AppWorld license).")
+    parser.add_argument("--output_parquet", default="", help="Local parquet path for the first split (optional).")
+    parser.add_argument("--limit", type=int, default=0, help="Keep only the first N tasks per split (0 = all).")
     return parser.parse_args()
 
 
@@ -67,23 +73,26 @@ def build_row(data_root: str, task_id: str, max_steps: int) -> dict:
     }
 
 
+def build_split(data_root: str, split: str, max_steps: int, limit: int) -> Dataset:
+    task_ids = load_task_ids(data_root, split)
+    if limit:
+        task_ids = task_ids[:limit]
+    logger.info(f"Building AppWorld split '{split}': {len(task_ids)} tasks.")
+    return Dataset.from_list([build_row(data_root, task_id, max_steps) for task_id in task_ids])
+
+
 def main() -> None:
     args = parse_args()
-    task_ids = load_task_ids(args.data_root, args.split)
-    if args.limit:
-        task_ids = task_ids[: args.limit]
-    logger.info(f"Building RL dataset for AppWorld split '{args.split}': {len(task_ids)} tasks.")
-
-    rows = [build_row(args.data_root, task_id, args.max_steps) for task_id in task_ids]
-    dataset = Dataset.from_list(rows)
-    logger.info(f"Built dataset with {len(dataset)} rows. Columns: {dataset.column_names}")
+    splits = [s.strip() for s in args.splits.split(",") if s.strip()]
+    dataset_dict = DatasetDict({split: build_split(args.data_root, split, args.max_steps, args.limit) for split in splits})
+    logger.info(f"Built DatasetDict with splits {list(dataset_dict)}; columns {dataset_dict[splits[0]].column_names}")
 
     if args.output_parquet:
-        dataset.to_parquet(args.output_parquet)
-        logger.info(f"Wrote {args.output_parquet}")
+        dataset_dict[splits[0]].to_parquet(args.output_parquet)
+        logger.info(f"Wrote {args.output_parquet} (split '{splits[0]}')")
     if args.push_to_hub:
-        dataset.push_to_hub(args.push_to_hub)
-        logger.info(f"Pushed to hub: {args.push_to_hub}")
+        dataset_dict.push_to_hub(args.push_to_hub, private=args.private)
+        logger.info(f"Pushed to hub: {args.push_to_hub} (private={args.private})")
     if not args.output_parquet and not args.push_to_hub:
         logger.warning("Neither --output_parquet nor --push_to_hub set; dataset was built but not saved.")
 
