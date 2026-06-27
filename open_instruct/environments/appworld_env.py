@@ -188,6 +188,7 @@ class AppWorldEnv(RLEnvironment):
         mem_limit: str = "4g",
         experiment_prefix: str = "appworld_rl",
         backend: str = "docker",
+        publish_port: bool = False,
         docker_host: str | None = None,
         **kwargs: Any,
     ):
@@ -208,6 +209,7 @@ class AppWorldEnv(RLEnvironment):
         self._dense_reward = dense_reward
         self._mem_limit = mem_limit
         self._experiment_prefix = experiment_prefix
+        self._publish_port = publish_port
         self._docker_host = docker_host
 
         self._client: Any = None  # docker client (lazily imported)
@@ -263,17 +265,43 @@ class AppWorldEnv(RLEnvironment):
             command=["environment", "--port", str(self._server_port), "--no-show-usage"],
             environment={"APPWORLD_ROOT": self._in_container_root},
             volumes=volumes,
-            # Always publish the port so both reachability paths (published host port and
-            # the container's bridge IP) are available; sibling-container networking under
-            # podman/Beaker varies, so _wait_for_server probes whichever responds.
-            ports={f"{self._server_port}/tcp": None},
+            # Port publishing is OFF by default: under Beaker's rootless/sharded podman
+            # services, publishing a host port can make the container fail to start (swerl
+            # never publishes — it uses docker exec). We reach the server by the container's
+            # bridge IP instead (see _candidate_base_urls). Enable only if your daemon
+            # supports publish and you need the host-port path.
+            ports={f"{self._server_port}/tcp": None} if self._publish_port else None,
             mem_limit=self._mem_limit,
+            memswap_limit=self._mem_limit,
             detach=True,
-            auto_remove=True,
+            # auto_remove is intentionally OFF: an instantly-exiting container would be
+            # deleted before we could read its logs/exit code. We remove it ourselves in
+            # teardown / on startup failure instead.
+            auto_remove=False,
             labels={"appworld_rl": "1"},
         )
         self._container = container
-        self._base_url = self._wait_for_server(container)
+        try:
+            self._base_url = self._wait_for_server(container)
+        except Exception:
+            self._remove_container(container)
+            self._container = None
+            raise
+
+    @staticmethod
+    def _remove_container(container: Any) -> None:
+        with contextlib.suppress(Exception):
+            container.remove(force=True)
+
+    def _container_exit_detail(self, container: Any) -> str:
+        """Exit code + log tail of a container that died — the actual failure reason."""
+        try:
+            container.reload()
+            state = container.attrs.get("State", {}) or {}
+            logs = container.logs(tail=60).decode("utf-8", "replace")
+            return f"exit_code={state.get('ExitCode')} error={state.get('Error')!r}\n--- container logs (tail) ---\n{logs}"
+        except Exception as e:
+            return f"(could not read container logs: {e})"
 
     def _candidate_base_urls(self, container: Any) -> list[str]:
         """Candidate base URLs to reach the in-container server, most-portable first.
@@ -299,10 +327,18 @@ class AppWorldEnv(RLEnvironment):
         deadline = time.monotonic() + self._startup_timeout
         candidates: list[str] = []
         while time.monotonic() < deadline:
-            container.reload()
+            try:
+                container.reload()
+            except Exception as e:
+                raise RuntimeError(
+                    f"AppWorld container vanished during startup (cannot inspect): {e}. "
+                    "If this is podman with auto-remove, the container exited instantly."
+                ) from e
             if container.status not in ("created", "running"):
-                logs = container.logs(tail=20).decode("utf-8", "replace")
-                raise RuntimeError(f"AppWorld container exited (status={container.status}). Logs:\n{logs}")
+                raise RuntimeError(
+                    f"AppWorld container exited early (status={container.status}). "
+                    f"{self._container_exit_detail(container)}"
+                )
             candidates = self._candidate_base_urls(container)
             for base_url in candidates:
                 with contextlib.suppress(requests.RequestException):
@@ -311,7 +347,8 @@ class AppWorldEnv(RLEnvironment):
                         return base_url
             time.sleep(1.0)
         raise RuntimeError(
-            f"AppWorld server did not become ready within {self._startup_timeout}s (tried {candidates})."
+            f"AppWorld server did not become ready within {self._startup_timeout}s "
+            f"(tried {candidates}). {self._container_exit_detail(container)}"
         )
 
     def _http(self, method: str, **body: Any) -> Any:
@@ -454,4 +491,5 @@ class AppWorldEnvConfig(BaseEnvConfig):
     mem_limit: str = "4g"
     experiment_prefix: str = "appworld_rl"
     backend: str = "docker"
+    publish_port: bool = False
     docker_host: str | None = None
