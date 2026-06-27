@@ -351,19 +351,32 @@ Launch with **`scripts/train/build_image_and_launch_dirty.sh <script>`** when th
 is dirty (the non-`_dirty` builder refuses uncommitted changes). It builds the trainer image
 and passes it to the script as `$1` (`BEAKER_IMAGE`).
 
-### Networking to the container (style B only)
+### Networking to the container (style B only) — the big one
 
-A sibling container is reachable two ways, and which works depends on the host's network
-setup (the "use the bridge IP, not localhost" trap from the harbor/tmax evals):
+**Beaker's podman services run every container on the _host_ network.** Verified by probe:
+`NetworkSettings.Networks = {"host": …}`, `IPAddress=""`, `Ports={}` even when you ask to
+publish. So:
 
-1. **published host port** on `127.0.0.1:<HostPort>` (works when the trainer shares the host net), or
-2. the **container bridge IP** `:<in-container port>` (works when the trainer can route to podman's bridge).
+- There is **no bridge IP** and **port publishing is a no-op** — `docker exec` (style A) doesn't
+  care, but an HTTP client (style B) has nothing to connect to via those paths.
+- The server **is** reachable at **`127.0.0.1:<port>`** from the trainer process, because the
+  podman services run inside the trainer's beaker container, so its host netns *is* the
+  trainer's netns. (Probe: `GET http://127.0.0.1:<port>/ → 200`.)
+- Because all containers share that one netns, **they collide on a single port** → each
+  container must bind a **unique port**. Allocate a free port per container in the trainer
+  process (same netns) and pass it as the server's `--port`.
 
-Style A (bash-exec) sidesteps this entirely — `docker exec` needs no network. For style B,
-**always publish the port and probe both** candidates, using whichever answers (see
-`AppWorldEnv._candidate_base_urls` / `_wait_for_server`). If neither is reachable on beaker
-you'll see reset-failures / all-zero rewards (not a crash), and need a networking fix
-(host-network for the container, or the service's routable IP).
+So for style B on Beaker: **don't publish; give each container a unique free port; reach it at
+`127.0.0.1:<that port>`.** Keep the container **bridge IP** as a fallback candidate for *local
+docker* (default bridge network, where `127.0.0.1` won't reach it but the bridge IP will). See
+`AppWorldEnv._pick_free_port` / `_candidate_base_urls` / `_wait_for_server`.
+
+This was the cause of a 4h "hang": the env only probed the (empty) bridge IP and published
+port, never `127.0.0.1`, so every reset failed → zero-reward no-ops → idle GPUs. Diagnose with
+[scripts/general_agent/appworld/debug/probe_container.py](../../scripts/general_agent/appworld/debug/probe_container.py)
+(a no-training job that starts the container and prints status/exit/logs/`NetworkSettings`/reachability),
+and **keep `auto_remove=False` + capture container logs on early exit** — `auto_remove=True`
+deletes the evidence and you go blind.
 
 ---
 
@@ -432,8 +445,10 @@ model (4B+) to actually exercise the tool, but the small model still validates t
 7. **Local `.parquet`/`.jsonl` in `dataset_mixer_list`** now works in
    `_discover_tools_from_datasets` too (it previously only worked in `DatasetConfig` and threw
    `FileNotFoundError` in discovery — fixed). Keep both paths in mind if you add more loaders.
-8. **Container networking** (style B): publish the port AND probe bridge-IP + published-port;
-   localhost-only assumptions fail under sibling-container podman.
+8. **Container networking** (style B): Beaker podman = **host network** (no bridge IP, publish is
+   a no-op). Give each container a **unique free port** and reach it at **`127.0.0.1:<port>`**;
+   keep the bridge IP as a local-docker fallback. (And `auto_remove=False` so you can read a
+   dead container's logs.)
 9. **Dev-box docker has no shared FS with the daemon sometimes** (e.g. this sandbox: daemon root
    `/media/8TBNVME`, no `/tmp` sharing) → bind mounts silently mount empty dirs. Validate by
    `docker run --rm -v <src>:/x alpine ls /x`; if empty, **bake data into the image** instead.
