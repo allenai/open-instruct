@@ -29,6 +29,7 @@ code runs inside the container, isolating it from the trainer.
 """
 
 import contextlib
+import socket
 import time
 import uuid
 from dataclasses import dataclass
@@ -214,6 +215,7 @@ class AppWorldEnv(RLEnvironment):
 
         self._client: Any = None  # docker client (lazily imported)
         self._container: Any = None
+        self._port = server_port  # per-container server port (reassigned in _start_container)
         self._base_url: str | None = None
         self._task_id: str | None = None
         self._experiment_name: str | None = None
@@ -247,6 +249,20 @@ class AppWorldEnv(RLEnvironment):
                 return parsed.hostname
         return "127.0.0.1"
 
+    @staticmethod
+    def _pick_free_port() -> int:
+        """Grab a currently-free TCP port in this process's network namespace.
+
+        On Beaker the podman services run containers on the *host* network (shared with this
+        trainer netns), so every AppWorld server binds 127.0.0.1 here and concurrent
+        containers must use distinct ports — hence one free port per container. A bind race
+        (container takes the port between close() and start) just fails startup and the reset
+        retries with a new port.
+        """
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
     def _start_container(self) -> None:
         # Bind-mount the host data when data_root is set (Beaker/weka nodes); when it
         # is empty, the image is expected to already contain the data at
@@ -260,17 +276,15 @@ class AppWorldEnv(RLEnvironment):
                     "mode": "rw",
                 },
             }
+        # Unique port per container: Beaker's podman defaults containers onto the *host*
+        # network (no bridge IP, publishing is a no-op), so the server is reached at
+        # 127.0.0.1:<port> and concurrent containers cannot share one port.
+        self._port = self._pick_free_port()
         container = self._client.containers.run(
             self._image,
-            command=["environment", "--port", str(self._server_port), "--no-show-usage"],
+            command=["environment", "--port", str(self._port), "--no-show-usage"],
             environment={"APPWORLD_ROOT": self._in_container_root},
             volumes=volumes,
-            # Port publishing is OFF by default: under Beaker's rootless/sharded podman
-            # services, publishing a host port can make the container fail to start (swerl
-            # never publishes — it uses docker exec). We reach the server by the container's
-            # bridge IP instead (see _candidate_base_urls). Enable only if your daemon
-            # supports publish and you need the host-port path.
-            ports={f"{self._server_port}/tcp": None} if self._publish_port else None,
             mem_limit=self._mem_limit,
             memswap_limit=self._mem_limit,
             detach=True,
@@ -306,21 +320,23 @@ class AppWorldEnv(RLEnvironment):
     def _candidate_base_urls(self, container: Any) -> list[str]:
         """Candidate base URLs to reach the in-container server, most-portable first.
 
-        Networking differs across setups (local docker, remote/podman, Beaker sibling
-        containers), so we offer both the published host port and the container bridge IP
-        and let the readiness probe pick whichever actually answers.
+        Reachability differs by setup, so we probe and use whichever answers:
+        - ``127.0.0.1:<port>`` — Beaker podman defaults containers onto the host network
+          (shared with this netns), so the server is here. Primary path.
+        - container bridge IP — local docker with the default bridge network.
+        - published host port — only if port publishing was enabled and honored.
         """
+        candidates: list[str] = [f"http://127.0.0.1:{self._port}"]
         container.reload()
         net = container.attrs.get("NetworkSettings", {}) or {}
-        candidates: list[str] = []
-        mapping = (net.get("Ports") or {}).get(f"{self._server_port}/tcp")
-        if mapping:
-            candidates.append(f"http://{self._resolve_host()}:{mapping[0]['HostPort']}")
         ip = net.get("IPAddress") or next(
             (n.get("IPAddress") for n in (net.get("Networks") or {}).values() if n.get("IPAddress")), None
         )
         if ip:
-            candidates.append(f"http://{ip}:{self._server_port}")
+            candidates.append(f"http://{ip}:{self._port}")
+        mapping = (net.get("Ports") or {}).get(f"{self._port}/tcp")
+        if mapping:
+            candidates.append(f"http://{self._resolve_host()}:{mapping[0]['HostPort']}")
         return candidates
 
     def _wait_for_server(self, container: Any) -> str:
