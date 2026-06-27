@@ -190,6 +190,7 @@ class AppWorldEnv(RLEnvironment):
         experiment_prefix: str = "appworld_rl",
         backend: str = "docker",
         publish_port: bool = False,
+        start_retries: int = 5,
         docker_host: str | None = None,
         **kwargs: Any,
     ):
@@ -211,6 +212,7 @@ class AppWorldEnv(RLEnvironment):
         self._mem_limit = mem_limit
         self._experiment_prefix = experiment_prefix
         self._publish_port = publish_port
+        self._start_retries = start_retries
         self._docker_host = docker_host
 
         self._client: Any = None  # docker client (lazily imported)
@@ -278,29 +280,45 @@ class AppWorldEnv(RLEnvironment):
             }
         # Unique port per container: Beaker's podman defaults containers onto the *host*
         # network (no bridge IP, publishing is a no-op), so the server is reached at
-        # 127.0.0.1:<port> and concurrent containers cannot share one port.
-        self._port = self._pick_free_port()
-        container = self._client.containers.run(
-            self._image,
-            command=["environment", "--port", str(self._port), "--no-show-usage"],
-            environment={"APPWORLD_ROOT": self._in_container_root},
-            volumes=volumes,
-            mem_limit=self._mem_limit,
-            memswap_limit=self._mem_limit,
-            detach=True,
-            # auto_remove is intentionally OFF: an instantly-exiting container would be
-            # deleted before we could read its logs/exit code. We remove it ourselves in
-            # teardown / on startup failure instead.
-            auto_remove=False,
-            labels={"appworld_rl": "1"},
+        # 127.0.0.1:<port> and concurrent containers cannot share one port. There's an
+        # inherent race between picking a free port and the container binding it (another
+        # container can grab it in between -> "address already in use" -> the server exits),
+        # so retry with a fresh port each attempt. On exhaustion raise with "reset failed
+        # after" so the rollout is zero-rewarded (not fatal) per RESET_FAILURE_ZERO_REWARD.
+        last_error: Exception | None = None
+        for attempt in range(1, self._start_retries + 1):
+            self._port = self._pick_free_port()
+            container = self._client.containers.run(
+                self._image,
+                command=["environment", "--port", str(self._port), "--no-show-usage"],
+                environment={"APPWORLD_ROOT": self._in_container_root},
+                volumes=volumes,
+                mem_limit=self._mem_limit,
+                memswap_limit=self._mem_limit,
+                detach=True,
+                # auto_remove is intentionally OFF: an instantly-exiting container would be
+                # deleted before we could read its logs/exit code. We remove it ourselves.
+                auto_remove=False,
+                labels={"appworld_rl": "1"},
+            )
+            self._container = container
+            try:
+                self._base_url = self._wait_for_server(container)
+                return
+            except Exception as e:
+                last_error = e
+                self._remove_container(container)
+                self._container = None
+                logger.warning(
+                    "AppWorld container start attempt %d/%d failed (port %d): %s",
+                    attempt,
+                    self._start_retries,
+                    self._port,
+                    e,
+                )
+        raise RuntimeError(
+            f"AppWorld reset failed after {self._start_retries} container-start attempts: {last_error}"
         )
-        self._container = container
-        try:
-            self._base_url = self._wait_for_server(container)
-        except Exception:
-            self._remove_container(container)
-            self._container = None
-            raise
 
     @staticmethod
     def _remove_container(container: Any) -> None:
@@ -508,4 +526,5 @@ class AppWorldEnvConfig(BaseEnvConfig):
     experiment_prefix: str = "appworld_rl"
     backend: str = "docker"
     publish_port: bool = False
+    start_retries: int = 5
     docker_host: str | None = None
