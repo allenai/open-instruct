@@ -5,7 +5,8 @@ Produces one row per AppWorld task with the columns the GRPO pipeline routes on:
     messages     : [system (with supervisor creds), user (task instruction)]
     ground_truth : task_id (the AppWorldEnv verifies internally via world.evaluate)
     dataset      : "passthrough" (no extra verifier; the env emits the reward)
-    tools        : ["appworld"] (added to allowed_tools at dispatch)
+    tools        : ["execute_python"] (the tool *call name*; selects the schema injected
+                   into the prompt and gates dispatch — pair with --tool_call_names execute_python)
     env_config   : {"env_configs": [{"env_name": "appworld", "task_id": ...}], "max_steps": N}
 
 Reads AppWorld task data straight off disk (split file + per-task ``specs.json``) so it
@@ -57,8 +58,12 @@ def build_row(data_root: str, task_id: str, max_steps: int) -> dict:
         "messages": build_prompt_messages(specs["instruction"], specs["supervisor"]),
         "ground_truth": task_id,
         "dataset": "passthrough",
-        "tools": ["appworld"],
-        "env_config": {"env_configs": [{"env_name": "appworld", "task_id": task_id}], "max_steps": max_steps},
+        "tools": ["execute_python"],
+        # env_name must match the pool key, which is the *call name* (execute_python),
+        # not the registry config_name (appworld) — otherwise tool discovery creates a
+        # duplicate pool and per-row task_id routing misses. Pair with:
+        #   --tools appworld --tool_call_names execute_python
+        "env_config": {"env_configs": [{"env_name": "execute_python", "task_id": task_id}], "max_steps": max_steps},
     }
 
 
