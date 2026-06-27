@@ -21,7 +21,13 @@ MODEL=Qwen/Qwen3.5-4B
 TOKENIZER=Qwen/Qwen3.5-4B
 DATASET=shatu/appworld-rl
 APPWORLD_IMAGE=shatu/appworld-data:latest
-MAX_STEPS=30
+# Shakeout config (smaller/shorter/less-concurrent than a full run). The first run wedged on a
+# weight-sync hang after 1 step, with acquire_reset_pools at 150-260s/rollout (pool contention +
+# heavy AppWorld /initialize) and many rollouts truncating at 24k tokens. So: fewer concurrent
+# containers (8x8=64), pool headroom (96), shorter rollouts (20 turns / 16k tokens / 4k per turn),
+# no active_sampling (bounds concurrency to the batch), and inflight_updates off (sync weights
+# between steps, not during generation) to avoid the weight-sync/engine deadlock.
+MAX_STEPS=20
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -59,11 +65,11 @@ uv run python mason.py \
     --dataset_mixer_eval_list $DATASET 8 \
     --dataset_mixer_eval_list_splits dev \
     --max_prompt_token_length 2048 \
-    --per_turn_max_tokens 8192 \
-    --response_length 24576 \
-    --pack_length 26624 \
+    --per_turn_max_tokens 4096 \
+    --response_length 16384 \
+    --pack_length 18432 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
+    --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 8 \
     --async_steps 4 \
     --model_name_or_path $MODEL \
@@ -91,14 +97,13 @@ uv run python mason.py \
     --tools appworld \
     --tool_call_names execute_python \
     --tool_configs "{\"image\": \"${APPWORLD_IMAGE}\", \"data_root\": \"\", \"max_interactions\": ${MAX_STEPS}, \"startup_timeout\": 600, \"dense_reward\": true}" \
-    --pool_size 128 \
+    --pool_size 96 \
     --max_steps ${MAX_STEPS} \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
-    --active_sampling \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
-    --inflight_updates true \
+    --inflight_updates false \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
