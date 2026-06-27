@@ -39,12 +39,12 @@ def make_client() -> docker.DockerClient:
     return docker.DockerClient(base_url=dh) if dh else docker.from_env()
 
 
-def run_test(cl: docker.DockerClient, publish: bool) -> None:
-    label = "WITH host-port publish" if publish else "NO publish (bridge IP only)"
-    print(f"\n================ TEST: {label} ================", flush=True)
+def run_test(cl: docker.DockerClient, publish: bool, host_network: bool = False, port: int = PORT) -> None:
+    label = "network_mode=host" if host_network else ("WITH host-port publish" if publish else "NO publish (bridge IP only)")
+    print(f"\n================ TEST: {label} (port {port}) ================", flush=True)
     kwargs = dict(
         image=IMAGE,
-        command=["environment", "--port", str(PORT), "--no-show-usage"],
+        command=["environment", "--port", str(port), "--no-show-usage"],
         environment={"APPWORLD_ROOT": "/run"},
         detach=True,
         auto_remove=False,
@@ -52,8 +52,10 @@ def run_test(cl: docker.DockerClient, publish: bool) -> None:
         memswap_limit="4g",
         labels={"appworld_probe": "1"},
     )
-    if publish:
-        kwargs["ports"] = {f"{PORT}/tcp": None}
+    if host_network:
+        kwargs["network_mode"] = "host"
+    elif publish:
+        kwargs["ports"] = {f"{port}/tcp": None}
 
     try:
         c = cl.containers.run(**kwargs)
@@ -84,12 +86,13 @@ def run_test(cl: docker.DockerClient, publish: bool) -> None:
         )
         ports = net.get("Ports")
         print(f"bridge IP: {ip} | published ports: {ports}", flush=True)
+        print(f"full NetworkSettings: {net}", flush=True)
 
-        urls = []
+        urls = [f"http://127.0.0.1:{port}/"]  # works if host_network (shared netns)
         if ip:
-            urls.append(f"http://{ip}:{PORT}/")
-        if ports and ports.get(f"{PORT}/tcp"):
-            urls.append(f"http://127.0.0.1:{ports[f'{PORT}/tcp'][0]['HostPort']}/")
+            urls.append(f"http://{ip}:{port}/")
+        if ports and ports.get(f"{port}/tcp"):
+            urls.append(f"http://127.0.0.1:{ports[f'{port}/tcp'][0]['HostPort']}/")
         for url in urls:
             try:
                 r = requests.get(url, timeout=5)
@@ -115,6 +118,7 @@ def main() -> None:
 
     run_test(cl, publish=False)
     run_test(cl, publish=True)
+    run_test(cl, publish=False, host_network=True, port=8137)  # candidate fix: reach via 127.0.0.1
     print("\nPROBE DONE", flush=True)
 
 
