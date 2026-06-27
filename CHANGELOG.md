@@ -18,3 +18,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Fix `--preemptible` parsing in Beaker submit scripts so `--no-preemptible` actually disables preemptible jobs (https://github.com/allenai/open-instruct/pull/1742).
