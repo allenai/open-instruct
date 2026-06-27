@@ -1,125 +1,108 @@
 #!/bin/bash
-# AppWorld code-as-action RL with Qwen 3.5 4B.
+
+# AppWorld code-as-action RL with Qwen3.5-4B (GRPO + appworld env).
 #
-# The policy solves AppWorld tasks by writing Python through a single
-# `execute_python` tool (AppWorldEnv, config_name "appworld"). Reward is
-# AppWorld's own evaluation (fraction of unit tests passed) emitted by the env;
-# the dataset uses the `passthrough` verifier so no extra reward is added.
+# Modeled on scripts/general_agent/terminal/rl/qwen35_4b_base_tmax_10k.sh (the swerl
+# podman-services recipe) — AppWorld reuses the same per-rollout container infra, but
+# each rollout runs an AppWorld server container and the env talks to it over HTTP.
 #
-# Execution model (mirrors the swerl podman workflow): each rollout gets its own
-# AppWorld container (ghcr.io/stonybrooknlp/appworld:latest, pydantic-1) running
-# `appworld serve environment`; AppWorldEnv is a pydantic-2-clean HTTP client. The
-# trainer therefore needs a docker/podman socket (as swerl does).
+# Reward is AppWorld's own /evaluate (fraction of unit tests passed), emitted by the env;
+# the dataset uses the `passthrough` verifier so no extra reward is added. The prompt
+# (incl. supervisor creds) is baked into the dataset messages, so NO system_prompt_override.
 #
-# Prerequisites:
-#   1. Build the RL dataset once with scripts/data/convert_appworld_to_rl.py and
-#      push it to HF (set APPWORLD_DATASET below).
-#   2. The AppWorld task data must be reachable by the *docker daemon* of each node.
-#      Two options:
-#        a) stage the data root on weka and bind-mount it (set APPWORLD_ROOT); or
-#        b) bake the data into the image and set APPWORLD_ROOT="" (no mount). See
-#           scripts/general_agent/appworld/README.md.
+# Data: the AppWorld task data is baked into the container image (shatu/appworld-data:latest,
+# data_root="" => no bind mount). The image is pulled through the cluster registry mirror.
 #
-# Launch via Beaker:
-#   ./scripts/train/build_image_and_launch.sh scripts/general_agent/appworld/rl/qwen35_4b_appworld.sh
+# Launch (dirty tree is fine via the _dirty variant):
+#   ./scripts/train/build_image_and_launch_dirty.sh scripts/general_agent/appworld/rl/qwen35_4b_appworld.sh
 
-EXP_NAME="${EXP_NAME:-appworld_rl_qwen35_4b}"
-RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
+MODEL=Qwen/Qwen3.5-4B
+TOKENIZER=Qwen/Qwen3.5-4B
+DATASET=shatu/appworld-rl
+APPWORLD_IMAGE=shatu/appworld-data:latest
+MAX_STEPS=30
 
-MODEL_NAME_OR_PATH="Qwen/Qwen3.5-4B"
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-
-# RL dataset built by scripts/data/convert_appworld_to_rl.py (one row per task).
-APPWORLD_DATASET="${APPWORLD_DATASET:-shatu/appworld-rl}"
-DATASETS="${APPWORLD_DATASET} 1.0"
-DATASET_SPLITS="train"
-
-# AppWorld container image (per-rollout). Use the official image with a bind-mounted
-# data root, or a data-baked derivative (then set APPWORLD_ROOT="").
-APPWORLD_IMAGE="${APPWORLD_IMAGE:-ghcr.io/stonybrooknlp/appworld:latest}"
-
-# AppWorld data root visible to the docker daemon (contains data/ and experiments/outputs/).
-# Set to "" when using a data-baked image.
-APPWORLD_ROOT="${APPWORLD_ROOT:-/weka/oe-adapt-default/shashankg/appworld_root}"
-
-# Per-rollout interaction budget; keep env max_interactions >= max_steps.
-MAX_STEPS="${MAX_STEPS:-40}"
-
-PRIORITY="${PRIORITY:-high}"
-
-# Checkpoint state lives on a persistent weka path keyed on EXP_NAME (NOT the
-# timestamped RUN_NAME) so re-running this script resumes the same run.
-CHECKPOINT_STATE_DIR="${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${EXP_NAME}}"
-
-uv run mason.py \
-    --task_name ${EXP_NAME} \
-    --description "${RUN_NAME}" \
-    --cluster "ai2/jupiter" \
-    --workspace ai2/general-tool-use \
-    --priority ${PRIORITY} \
-    --pure_docker_mode \
-    --image ${BEAKER_IMAGE} \
-    --preemptible \
-    --num_nodes 2 \
-    --max_retries 5 \
-    --gpus 8 \
-    --budget ai2/oe-omai \
-    --no_auto_dataset_cache \
-    --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
-    --env APPWORLD_ROOT="${APPWORLD_ROOT}" \
-    -- \
-source configs/beaker_configs/ray_node_setup.sh \
-\&\& uv run open_instruct/grpo_fast.py \
-    --run_name "${RUN_NAME}" \
-    --exp_name "${EXP_NAME}" \
-    --beta 0.001 \
-    --load_ref_policy True \
-    --async_steps 4 \
-    --active_sampling \
-    --inflight_updates \
-    --num_samples_per_prompt_rollout 16 \
-    --num_unique_prompts_rollout 8 \
-    --num_mini_batches 1 \
-    --learning_rate 5e-7 \
-    --per_device_train_batch_size 1 \
-    --dataset_mixer_list $DATASETS \
-    --dataset_mixer_list_splits $DATASET_SPLITS \
-    --dataset_mixer_eval_list ${APPWORLD_DATASET} 8 \
+uv run python mason.py \
+       --cluster ai2/jupiter \
+       --image "$BEAKER_IMAGE" \
+       --description "AppWorld GRPO with Qwen3.5-4B" \
+       --pure_docker_mode \
+       --workspace ai2/general-tool-use \
+       --priority urgent \
+       --preemptible \
+       --num_nodes 2 \
+       --max_retries 5 \
+       --env REPO_PATH=/stage \
+       --env BEAKER_ALLOW_SUBCONTAINERS=1 \
+       --env BEAKER_SKIP_DOCKER_SOCKET=1 \
+       --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
+       --env VLLM_DISABLE_COMPILE_CACHE=1 \
+       --env VLLM_USE_V1=1 \
+       --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
+       --env DOCKERHUB_USERNAME=shashankg209 \
+       --env SWERL_SANDBOX_TIMING_LOGS=1 \
+       --env SWERL_DOCKER_AUTO_REMOVE=1 \
+       --env SWERL_RESET_FAILURE_ZERO_REWARD=1 \
+       --env SWERL_PODMAN_SERVICE_COUNT=8 \
+       --env SWERL_DOCKER_START_CONCURRENCY=128 \
+       --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
+       --env MIRROR_URL=jupiter-cs-aus-193.reviz.ai2.in:5000 \
+       --env PODMAN_NUM_LOCKS=65536 \
+       --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
+       --secret DOCKER_PAT=shashankg_DOCKER_PAT \
+       --gpus 8 \
+       --no_auto_dataset_cache \
+       -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
+    --dataset_mixer_list $DATASET 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list $DATASET 8 \
     --dataset_mixer_eval_list_splits dev \
-    --max_prompt_token_length 4096 \
-    --response_length 16384 \
-    --pack_length 20480 \
-    --model_name_or_path ${MODEL_NAME_OR_PATH} \
-    --non_stop_penalty False \
+    --max_prompt_token_length 2048 \
+    --per_turn_max_tokens 8192 \
+    --response_length 24576 \
+    --pack_length 26624 \
+    --per_device_train_batch_size 1 \
+    --num_unique_prompts_rollout 16 \
+    --num_samples_per_prompt_rollout 8 \
+    --async_steps 4 \
+    --model_name_or_path $MODEL \
+    --tokenizer_name_or_path $TOKENIZER \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --sft_messages_key messages \
-    --total_episodes 51200 \
+    --learning_rate 1e-6 \
+    --total_episodes 64000 \
+    --lr_scheduler_type constant \
     --deepspeed_stage 3 \
+    --sequence_parallel_size 2 \
+    --num_epochs 1 \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
-    --lr_scheduler_type constant \
-    --apply_verifiable_reward true \
-    --tool_parser_type vllm_qwen3_xml \
-    --tools appworld \
-    --tool_call_names execute_python \
-    --tool_configs "{\"image\": \"${APPWORLD_IMAGE}\", \"data_root\": \"${APPWORLD_ROOT}\", \"max_interactions\": ${MAX_STEPS}, \"dense_reward\": true}" \
-    --pool_size 128 \
-    --max_steps ${MAX_STEPS} \
-    --backend_timeout 1800 \
-    --save_traces \
-    --seed 1 \
-    --local_eval_every 100 \
-    --save_freq 100 \
-    --output_dir /output \
-    --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
-    --checkpoint_state_freq 100 \
+    --vllm_tensor_parallel_size 1 \
+    --beta 0.0 \
+    --use_vllm_logprobs true \
+    --truncated_importance_sampling_ratio_cap 0.0 \
+    --seed 42 \
     --gradient_checkpointing \
-    --report_to wandb \
+    --vllm_enable_prefix_caching \
+    --push_to_hub false \
     --with_tracking \
     --wandb_project oe-general-agents \
-    --vllm_enable_prefix_caching \
-    --keep_last_n_checkpoints -1 \
-    --kl_estimator 3 \
-    --push_to_hub False
+    --save_traces \
+    --tools appworld \
+    --tool_call_names execute_python \
+    --tool_configs "{\"image\": \"${APPWORLD_IMAGE}\", \"data_root\": \"\", \"max_interactions\": ${MAX_STEPS}, \"startup_timeout\": 600, \"dense_reward\": true}" \
+    --pool_size 128 \
+    --max_steps ${MAX_STEPS} \
+    --verification_reward 1.0 \
+    --tool_parser_type vllm_qwen3_xml \
+    --active_sampling \
+    --backend_timeout 1200 \
+    --checkpoint_state_freq 10 \
+    --inflight_updates true \
+    --advantage_normalization_type centered \
+    --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
+    --output_dir /output \
+    --exp_name appworld_qwen35_4b_grpo \
+    --local_eval_every 10 \
+    --save_freq 20 \
+    --try_launch_beaker_eval_jobs_on_weka False

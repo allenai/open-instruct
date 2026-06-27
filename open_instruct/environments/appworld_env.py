@@ -263,9 +263,10 @@ class AppWorldEnv(RLEnvironment):
             command=["environment", "--port", str(self._server_port), "--no-show-usage"],
             environment={"APPWORLD_ROOT": self._in_container_root},
             volumes=volumes,
-            # Publish the port only for a remote docker host; locally we reach the
-            # container directly on its bridge IP (sibling-container networking).
-            ports={f"{self._server_port}/tcp": None} if self._docker_host else None,
+            # Always publish the port so both reachability paths (published host port and
+            # the container's bridge IP) are available; sibling-container networking under
+            # podman/Beaker varies, so _wait_for_server probes whichever responds.
+            ports={f"{self._server_port}/tcp": None},
             mem_limit=self._mem_limit,
             detach=True,
             auto_remove=True,
@@ -274,36 +275,43 @@ class AppWorldEnv(RLEnvironment):
         self._container = container
         self._base_url = self._wait_for_server(container)
 
-    def _container_base_url(self, container: Any) -> str | None:
-        """Reachable base URL: bridge IP + server port locally, published port if remote."""
+    def _candidate_base_urls(self, container: Any) -> list[str]:
+        """Candidate base URLs to reach the in-container server, most-portable first.
+
+        Networking differs across setups (local docker, remote/podman, Beaker sibling
+        containers), so we offer both the published host port and the container bridge IP
+        and let the readiness probe pick whichever actually answers.
+        """
         container.reload()
         net = container.attrs.get("NetworkSettings", {}) or {}
-        if self._docker_host:
-            mapping = (net.get("Ports") or {}).get(f"{self._server_port}/tcp")
-            if not mapping:
-                return None
-            return f"http://{self._resolve_host()}:{mapping[0]['HostPort']}"
+        candidates: list[str] = []
+        mapping = (net.get("Ports") or {}).get(f"{self._server_port}/tcp")
+        if mapping:
+            candidates.append(f"http://{self._resolve_host()}:{mapping[0]['HostPort']}")
         ip = net.get("IPAddress") or next(
             (n.get("IPAddress") for n in (net.get("Networks") or {}).values() if n.get("IPAddress")), None
         )
-        return f"http://{ip}:{self._server_port}" if ip else None
+        if ip:
+            candidates.append(f"http://{ip}:{self._server_port}")
+        return candidates
 
     def _wait_for_server(self, container: Any) -> str:
         deadline = time.monotonic() + self._startup_timeout
-        base_url = None
+        candidates: list[str] = []
         while time.monotonic() < deadline:
             container.reload()
             if container.status not in ("created", "running"):
                 logs = container.logs(tail=20).decode("utf-8", "replace")
                 raise RuntimeError(f"AppWorld container exited (status={container.status}). Logs:\n{logs}")
-            base_url = self._container_base_url(container)
-            if base_url:
+            candidates = self._candidate_base_urls(container)
+            for base_url in candidates:
                 with contextlib.suppress(requests.RequestException):
                     if requests.get(f"{base_url}/", timeout=5).status_code == 200:
+                        logger.info(f"[{self._task_id}] AppWorld server reachable at {base_url}")
                         return base_url
             time.sleep(1.0)
         raise RuntimeError(
-            f"AppWorld server did not become ready within {self._startup_timeout}s (base_url={base_url})."
+            f"AppWorld server did not become ready within {self._startup_timeout}s (tried {candidates})."
         )
 
     def _http(self, method: str, **body: Any) -> Any:
