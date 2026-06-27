@@ -187,12 +187,17 @@ class AppWorldEnv(RLEnvironment):
         dense_reward: bool = True,
         mem_limit: str = "4g",
         experiment_prefix: str = "appworld_rl",
+        backend: str = "docker",
         docker_host: str | None = None,
         **kwargs: Any,
     ):
         # Tolerate generic config kwargs injected by the pool (e.g. call_name, penalty).
         kwargs.pop("call_name", None)
         kwargs.pop("penalty", None)
+        # ``backend`` exists so EnvironmentPool engages SWERL_PODMAN_DOCKER_HOSTS
+        # rotation (it keys on backend == "docker") and injects a docker_host into
+        # reset kwargs on beaker; we always use the docker SDK regardless of value.
+        self._backend = backend
         self._image = image
         self._data_root = data_root
         self._in_container_root = in_container_root.rstrip("/")
@@ -440,4 +445,5 @@ class AppWorldEnvConfig(BaseEnvConfig):
     dense_reward: bool = True
     mem_limit: str = "4g"
     experiment_prefix: str = "appworld_rl"
+    backend: str = "docker"
     docker_host: str | None = None
