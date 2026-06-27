@@ -95,18 +95,27 @@ A few non-obvious facts that follow from this flow (and bite people):
 
 ## The two ways an environment can work
 
-- **Style A — "run a command, get output" (stateless).** Each turn is a self-contained shell
-  command; state lives in the container's files. This reuses the repo's ready-made container
-  helper. Example: the terminal/coding sandboxes (`swerl`).
-- **Style B — "talk to a long-running program" (stateful).** The agent needs a *session* that
-  remembers things between turns — a Python interpreter with variables, a live "world" object,
-  a browser. So the container runs a small **server**, and our environment is a thin **client**
-  that sends it requests over HTTP. Example: **AppWorld**.
+Both kinds of environment are *stateful* — the difference is **where the state lives** and
+whether a brand-new process can still see it:
 
-AppWorld is style B for two reasons: it's a Python REPL where the agent's variables must persist
-across turns, **and** its software requires an old library version that conflicts with the
+- **Style A — "run a command, get output."** State lives in the container's **files**. Each turn
+  is a fresh shell, but it sees everything previous turns wrote to disk, so a simple "run this
+  command in the box" model works (the repo's ready-made container helper does this). The only
+  thing a fresh shell forgets is the current folder and environment variables, which the terminal
+  envs quietly save to a file and reload each turn. Example: the terminal/coding sandboxes (`swerl`).
+- **Style B — "talk to a long-running program."** State lives in a **live program's memory** — a
+  Python session with variables, a loaded "world", open connections, a browser. You can't save
+  that to a file and reload it the way you can a folder path, so the container has to keep **one
+  long-running program** alive; our environment is a thin **client** that sends it requests over
+  HTTP. Example: **AppWorld**.
+
+AppWorld is style B for two reasons: it's a Python session where the agent's variables must
+persist across turns, **and** its software needs an old library version that clashes with the
 trainer's — so it *has* to live in its own container, talked to over HTTP, never imported into
 the trainer. The container is both the sandbox and the "keep its dependencies away from ours" wall.
+
+(And don't worry that style B is heavy: the container is started **once and reused** for many
+tasks — not per attempt — so the setup cost is amortized, just like the terminal sandboxes.)
 
 ## What "adding an environment" therefore means
 
@@ -145,22 +154,46 @@ Part 2 is the precise, file-by-file version of those five steps, plus every trap
 
 There are two ways a sandboxed env runs, and which one you pick decides everything else:
 
-| | **A. Stateless bash (swerl model)** | **B. Stateful server (AppWorld model)** |
+| | **A. Filesystem-state (swerl model)** | **B. Live-session server (AppWorld model)** |
 |---|---|---|
 | Interaction | `docker exec bash -c <cmd>` per turn | long-lived server in the container; env is an HTTP client |
-| State between turns | lives in the container FS | lives in a process (REPL vars, in-memory world) |
+| State between turns | container **filesystem** (+ cwd/env serialized to files) | a **live process**: REPL vars, imports, in-memory world/handles |
 | Reuses `backends.py` | **Yes** (`DockerBackend.run_command`) | **No** — needs network reachability to the container |
 | In-process possible? | n/a (always container) | only if the env's deps don't conflict with the trainer's |
 | Examples | `swerl_sandbox`, `swerl_vanillux_sandbox`, `generic_sandbox` | `appworld` |
 
-Pick **A** if each action is a self-contained shell command and state can live on disk.
-Pick **B** if the agent needs a persistent interpreter/session (Python REPL, a stateful
-world object, a browser session) — i.e. variables/objects must survive across turns.
+**"Stateful vs stateless" is the wrong axis — both are stateful. The real question is *where the
+state lives* and whether a fresh process can see it:**
 
-> AppWorld forced style B for two reasons: (1) it's a Python REPL where the agent's
-> variables persist across turns, and (2) AppWorld pins `pydantic<2` while
-> open-instruct/openenv need `pydantic>=2`, so it **cannot be imported in the trainer
-> process at all**. The container is both the sandbox *and* the dependency quarantine.
+- **Style A:** state is the container **filesystem**, which every new `docker exec` shell sees.
+  The only per-shell state a fresh `exec` loses is **cwd + env vars**, and swerl explicitly
+  serializes those to files and reloads them each call (see the bash wrapper in
+  `swerl_vanillux_sandbox.py`). Everything serializable → stateless-per-call `exec` works, no
+  network, no ports.
+- **Style B:** state is a **live in-memory session** — Python REPL variables, imported modules,
+  an `apis` object with open DB handles. You cannot serialize/reload that between fresh
+  processes the way you can cwd/env, so you need **one long-lived process** holding it = a
+  server, reached by a client. (AppWorld persists its *world DB* to disk each step, but the
+  agent's REPL namespace — `x = apis.amazon.search(...)` reused next turn — only lives in the
+  process.)
+
+Decision rule: filesystem (or trivially serializable) state → **A**; live interpreter/browser/
+session state → **B**.
+
+> AppWorld forced style B for two reasons: (1) it's a Python REPL where the agent's in-memory
+> variables persist across turns, and (2) AppWorld pins `pydantic<2` while open-instruct/openenv
+> need `pydantic>=2`, so it **cannot be imported in the trainer process at all**. The container
+> is both the sandbox *and* the dependency quarantine.
+
+**Does style B scale?** Yes — the per-container cost people worry about isn't per-rollout. The
+container (and its port) is created **once per pool actor** and reused across all tasks (each
+`reset()` just re-`/initialize`s over HTTP; each turn is one HTTP call) — exactly how swerl
+reuses its `sleep infinity` container. Allocating a free port is a single `bind(0)`/`getsockname`
+syscall done ~once per actor (a few hundred times over a multi-hour run), and HTTP-over-localhost
+per turn costs about the same as a `docker exec`. The real per-node costs (container RAM, podman
+create throughput) are the same shape as swerl; AppWorld's only extra is its server loading
+apps/DBs at startup. Ephemeral ports (~28k) vastly exceed containers-per-node, and the tiny
+bind→start race self-heals via reset retry.
 
 ---
 
