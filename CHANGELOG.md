@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add Podman/DinD setup helpers and registry diagnostics for sandboxed SWERL runs (https://github.com/allenai/open-instruct/pull/1749).
+- Add Podman/DinD setup helpers for sandboxed SWERL runs (https://github.com/allenai/open-instruct/pull/1749).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
