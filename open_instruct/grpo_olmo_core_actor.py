@@ -357,7 +357,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if self.with_tracking:
             trainer_callbacks["wandb"] = callbacks.WandBCallback(
-                name=self.run_name, project=self.wandb_project, entity=self.wandb_entity, config=self.json_config
+                name=self.run_name,
+                project=self.wandb_project,
+                entity=self.wandb_entity,
+                config=self.json_config,
+                tags=utils.get_wandb_tags(extra_tags=[self.grpo_config.exp_name]),
             )
 
         if self.rank == 0 and self.eval_dataset is not None and self.grpo_config.local_eval_every > 0:
