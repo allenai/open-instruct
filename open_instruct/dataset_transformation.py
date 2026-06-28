@@ -943,8 +943,39 @@ ENV_CONFIG_KEY = "env_config"
 EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
-DATASET_CACHE_VERSION = "v6"
+# to invalidate old caches. v7: SFT tokenization passes the tools column to the chat
+# template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
+DATASET_CACHE_VERSION = "v7"
+
+
+def _normalize_tools_for_chat_template(tools: Any) -> list | None:
+    """Normalize dataset tool schemas before passing them to chat templates."""
+    # pandas/CSV-backed datasets may represent a missing object cell as float('nan').
+    if tools is None or tools == "" or (isinstance(tools, float) and np.isnan(tools)):
+        return None
+
+    if isinstance(tools, str):
+        try:
+            tools = json.loads(tools)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{TOOLS_COLUMN_KEY} must be a JSON-encoded tool schema list, got: {tools!r}") from exc
+        # Re-check after parsing: a JSON "null" or "" decodes to None / "".
+        if tools is None or tools == "":
+            return None
+
+    if isinstance(tools, dict):
+        tools = [tools]
+
+    if not isinstance(tools, list):
+        raise TypeError(f"{TOOLS_COLUMN_KEY} must be a list, dict, JSON string, or None, got {type(tools).__name__}")
+
+    if not tools:
+        return None
+
+    if not all(isinstance(tool, dict) for tool in tools):
+        raise TypeError(f"{TOOLS_COLUMN_KEY} must contain JSON-schema dictionaries, got: {tools!r}")
+
+    return tools
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1173,52 +1204,126 @@ def mask_labels(
             break
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def _tokenize_tulu_sft_with_assistant_labels(
+    messages: list[dict[str, Any]],
+    tokenizer: PreTrainedTokenizer,
+    tools: list | None,
+    max_seq_length: int | None,
+    last_turn_only: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Assistant label spans are derived from `return_offsets_mapping`, which slow
+    # (Python) tokenizers do not support. Fail with a clear message instead of the
+    # opaque ValueError/NotImplementedError the tokenizer would raise.
+    if not getattr(tokenizer, "is_fast", False):
+        raise ValueError(
+            f"SFT tokenization requires a fast tokenizer because it relies on "
+            f"`return_offsets_mapping` to derive assistant label spans, but got a slow tokenizer "
+            f"({type(tokenizer).__name__}). Load the tokenizer with `use_fast=True`."
+        )
+    rendered = tokenizer.apply_chat_template(
+        conversation=messages, tools=tools, tokenize=False, add_generation_prompt=False
+    )
+    assert isinstance(rendered, str)
+    tokenized = tokenizer(
+        rendered,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
+        return_tensors="pt",
+        padding=False,
+        truncation=max_seq_length is not None,
+        max_length=max_seq_length,
+    )
+    input_ids = tokenized[INPUT_IDS_KEY]
+    attention_mask = tokenized[ATTENTION_MASK_KEY]
+    offsets = tokenized["offset_mapping"][0].tolist()
+    labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
+
+    assistant_indices = [idx for idx, m in enumerate(messages) if m["role"] == "assistant"]
+    last_assistant_idx = assistant_indices[-1] if assistant_indices else -1
+
+    trainable_char_spans: list[tuple[int, int]] = []
+    for message_idx, message in enumerate(messages):
+        if message["role"] != "assistant":
+            continue
+        if last_turn_only and message_idx != last_assistant_idx:
+            continue
+
+        # The trainable span runs from the end of the assistant header (the generation
+        # prompt the template emits before the assistant's content) to the end of the
+        # assistant turn, i.e. content + closing tokens. ``header`` and ``through`` are
+        # taken as char offsets into the full ``rendered`` string (which is what we
+        # tokenize), so both must be a prefix of it; if not, the template/conversation
+        # is not prefix-stable (e.g. eos appended only on the final turn) and we error
+        # rather than silently mis-masking. ``messages[:0]`` is empty for an assistant
+        # opening turn, so the header is taken as empty there.
+        if message_idx == 0:
+            header = ""
+        else:
+            header = tokenizer.apply_chat_template(
+                conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=True
+            )
+        through = tokenizer.apply_chat_template(
+            conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
+        )
+        assert isinstance(header, str)
+        assert isinstance(through, str)
+        if not (len(header) <= len(through) and rendered.startswith(header) and rendered.startswith(through)):
+            raise ValueError(
+                "Cannot compute assistant label spans for this chat template/conversation: the "
+                "rendered conversation is not prefix-stable. This happens, for example, when the "
+                "template appends eos_token only on the final turn or does not support "
+                "add_generation_prompt."
+            )
+        trainable_char_spans.append((len(header), len(through)))
+
+    for token_idx, (token_start, token_end) in enumerate(offsets):
+        if token_start == token_end:
+            continue
+        # Train a token if it overlaps a trainable span. Overlap (rather than full
+        # containment) keeps a boundary token that straddles the header/content edge —
+        # e.g. a leading-space-merged " ok" token in "Assistant: ok" — trainable.
+        if any(token_start < span_end and span_start < token_end for span_start, span_end in trainable_char_spans):
+            labels[0, token_idx] = input_ids[0, token_idx]
+
+    return input_ids, attention_mask, labels
+
+
+def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    input_ids_result = tokenizer.apply_chat_template(
-        conversation=messages,
-        tokenize=True,
-        return_tensors="pt",
-        return_dict=False,
-        padding=False,
-        truncation=True,
-        max_length=max_seq_length,
-        add_generation_prompt=False,
+    tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
+    input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
+        messages, tokenizer, tools, max_seq_length
     )
-    assert isinstance(input_ids_result, torch.Tensor)
-    input_ids = input_ids_result
-    labels = input_ids.clone()
-    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant")
-    attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
     return row
 
 
+def sft_tulu_tokenize_without_truncation_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
+    return _sft_tulu_tokenize(row, tokenizer, max_seq_length=None)
+
+
+def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+    return _sft_tulu_tokenize(row, tokenizer, max_seq_length=max_seq_length)
+
+
 def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
-    """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
+    """Tokenize a conversation, training only on the final assistant turn.
+
+    Reuses the offset-based assistant-label derivation (which forwards the tools
+    column to the chat template) rather than the legacy mask_labels path.
+    """
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-    input_ids_result = tokenizer.apply_chat_template(
-        conversation=messages,
-        tokenize=True,
-        return_tensors="pt",
-        return_dict=False,
-        padding=False,
-        truncation=True,
-        max_length=max_seq_length,
-        add_generation_prompt=False,
+    tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
+    input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
+        messages, tokenizer, tools, max_seq_length, last_turn_only=True
     )
-    assert isinstance(input_ids_result, torch.Tensor)
-    input_ids = input_ids_result
-    labels = input_ids.clone()
-    mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, _msg, msgs: idx < len(msgs) - 1)
-    attention_mask = torch.ones_like(input_ids)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
@@ -1535,14 +1640,25 @@ TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
     "sft_filter_v1": (sft_filter_v1, "filter"),
+    "sft_tulu_tokenize_without_truncation_v1": (sft_tulu_tokenize_without_truncation_v1, "map"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
+    "last_turn_tulu_tokenize_and_truncate_v1": (last_turn_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
+}
+
+# SFT tokenization functions that consume the tools column — don't re-add it to target_columns
+_SFT_TOKENIZE_FNS = {
+    "sft_tokenize_v1",
+    "sft_tokenize_mask_out_prompt_v1",
+    "sft_tulu_tokenize_without_truncation_v1",
+    "sft_tulu_tokenize_and_truncate_v1",
+    "last_turn_tulu_tokenize_and_truncate_v1",
 }
 
 
@@ -1731,7 +1847,11 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
-        target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        # SFT tokenization consumes the tools column and must not persist it; other transforms keep it.
+        if fn_name not in _SFT_TOKENIZE_FNS:
+            target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
+        else:
+            target_columns = [col for col in target_columns if col != TOOLS_COLUMN_KEY]
         target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
         if fn_type == "map":
