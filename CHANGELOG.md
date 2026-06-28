@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Add `SWERLVanilluxSandboxEnv` (`swerl_vanillux_sandbox`), a self-contained bash-only sandbox RL environment mirroring the offline mini-swe-agent "vanillux" solver harness: a persistent shell, head/tail observation truncation, `(exit_code=N)` suffixes, vendored prompt templates, and opt-in turns-remaining / tool-call-format-error feedback (https://github.com/allenai/open-instruct/pull/PR_NUMBER).
+- Add `SWERLVanilluxSandboxEnv` (`swerl_vanillux_sandbox`), a self-contained bash-only sandbox RL environment mirroring the offline mini-swe-agent "vanillux" solver harness: a persistent shell, head/tail observation truncation, `(exit_code=N)` suffixes, vendored prompt templates, and opt-in turns-remaining / tool-call-format-error feedback (https://github.com/allenai/open-instruct/pull/1748).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
