@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+import os
+
+
+DEFAULT_NUM_LOCKS = 8192
+STORAGE_CONF_PATH = "/etc/containers/storage.conf"
+CONTAINERS_CONF_PATH = "/etc/containers/containers.conf"
+
+
+def generate_registries_conf():
+    mirror_urls = os.environ.get("MIRROR_URL", "")
+
+    if not mirror_urls:
+        print("No MIRROR_URL environment variable set")
+        return
+
+    mirrors = [url.strip() for url in mirror_urls.split(",") if url.strip()]
+
+    config = """[[registry]]
+location = "docker.io"
+
+"""
+
+    for mirror_url in mirrors:
+        config += f"""[[registry.mirror]]
+location = "{mirror_url}"
+insecure = true
+
+"""
+
+    with open("/etc/containers/registries.conf", "w") as f:
+        f.write(config)
+
+
+def generate_storage_conf():
+    if os.path.exists(STORAGE_CONF_PATH):
+        with open(STORAGE_CONF_PATH) as f:
+            config = f.read()
+    else:
+        config = ""
+
+    lines = config.splitlines()
+    in_storage = False
+    in_storage_options = False
+    storage_line = None
+    storage_driver_line = None
+    num_locks_lines = []
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_storage = stripped == "[storage]"
+            in_storage_options = stripped == "[storage.options]"
+            if in_storage:
+                storage_line = idx
+            continue
+        if in_storage and stripped.startswith("driver"):
+            storage_driver_line = idx
+        if in_storage_options and stripped.startswith("num_locks"):
+            num_locks_lines.append(idx)
+
+    for idx in reversed(num_locks_lines):
+        del lines[idx]
+
+    if storage_driver_line is not None:
+        lines[storage_driver_line] = 'driver = "overlay"'
+    elif storage_line is not None:
+        lines.insert(storage_line + 1, 'driver = "overlay"')
+    else:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.extend(["[storage]", 'driver = "overlay"'])
+
+    with open(STORAGE_CONF_PATH, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def generate_containers_conf():
+    num_locks = int(os.environ.get("PODMAN_NUM_LOCKS", DEFAULT_NUM_LOCKS))
+
+    if os.path.exists(CONTAINERS_CONF_PATH):
+        with open(CONTAINERS_CONF_PATH) as f:
+            config = f.read()
+    else:
+        config = ""
+
+    lines = config.splitlines()
+    in_engine = False
+    engine_line = None
+    num_locks_line = None
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_engine = stripped == "[engine]"
+            if in_engine:
+                engine_line = idx
+            continue
+        if in_engine and stripped.startswith("num_locks"):
+            num_locks_line = idx
+            break
+
+    if num_locks_line is not None:
+        lines[num_locks_line] = f"num_locks = {num_locks}"
+    elif engine_line is not None:
+        lines.insert(engine_line + 1, f"num_locks = {num_locks}")
+    else:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.extend(["[engine]", f"num_locks = {num_locks}"])
+
+    with open(CONTAINERS_CONF_PATH, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+if __name__ == "__main__":
+    generate_storage_conf()
+    generate_containers_conf()
+    generate_registries_conf()
