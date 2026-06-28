@@ -102,7 +102,6 @@ if [ ! -x "$PREFIX/dockerd" ]; then
     curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz" \
         | tar xz -C "$PREFIX" --strip-components=1 \
         || dind_fail "failed to install Docker ${DOCKER_VERSION}"
-    ln -sf "$PREFIX/docker" /usr/local/bin/docker || dind_fail "failed to link Docker CLI"
 fi
 
 [ -x "$PREFIX/runc" ] || dind_fail "Docker install did not create $PREFIX/runc"

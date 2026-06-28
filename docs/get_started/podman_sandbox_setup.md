@@ -21,8 +21,8 @@ The repository `Dockerfile` installs Podman, `crun`, container config files unde
 
 Podman mode also symlinks `docker` to `podman` in `/usr/local/bin` so command-line
 Docker calls inside sandbox tasks go through Podman by default. DinD mode
-overrides that symlink after it installs the static Docker CLI under
-`DIND_PREFIX`.
+prepends `DIND_PREFIX` to `PATH`, so the static Docker CLI installed there is
+found first without needing to write into `/usr/local/bin`.
 
 ## Beaker Launch Requirements
 
