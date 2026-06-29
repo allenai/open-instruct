@@ -233,6 +233,13 @@ def main(
             student_name=tc.tokenizer_name_or_path,
             teacher_name=streaming_config.opd_teacher_model_name_or_path,
         )
+        opd_validation.validate_teacher_student_output_vocab(
+            student_model_name_or_path=model_config.model_name_or_path,
+            student_revision=model_config.model_revision,
+            teacher_model_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            teacher_revision=streaming_config.opd_teacher_model_revision,
+            trust_remote_code=tc.trust_remote_code,
+        )
         teacher_scorers = opd_utils.create_teacher_scorers(
             num_engines=streaming_config.opd_teacher_num_engines,
             tensor_parallel_size=streaming_config.opd_teacher_tensor_parallel_size,

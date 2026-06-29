@@ -1,5 +1,11 @@
 from typing import Any
 
+import transformers
+
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
+
 
 def validate_pure_opd_reference_config(*, opd_use_task_rewards: bool, beta: float, load_ref_policy: bool) -> None:
     if opd_use_task_rewards:
@@ -64,4 +70,46 @@ def validate_teacher_student_tokenizer_compatibility(
             "OPD requires teacher and student tokenizers to share token ids because teacher top-k ids are "
             "used to gather student logprobs. "
             f"Student tokenizer: {student_name}; teacher tokenizer: {teacher_name}. " + " ".join(details)
+        )
+
+
+def validate_teacher_student_output_vocab(
+    *,
+    student_model_name_or_path: str,
+    student_revision: str | None,
+    teacher_model_name_or_path: str,
+    teacher_revision: str | None,
+    trust_remote_code: bool,
+) -> None:
+    """Validate that the teacher's output vocab fits within the student's.
+
+    The tokenizer check guarantees teacher and student agree on token *ids*. This
+    additionally guarantees the teacher's model *output dimension* is not wider
+    than the student's: teacher top-k ids are used as gather indices into the
+    student model's logits (and the gather clamps to the student range), so a
+    teacher whose vocab exceeds the student's could emit an id that is silently
+    clamped to the wrong token. The student dim is read from its HF config; for a
+    non-HF (OLMo-core) student checkpoint we log and skip the check (the
+    tokenizer-id check still applies and the gather clamp backstops the rest).
+    """
+
+    def _vocab_size(name: str, revision: str | None, role: str) -> int | None:
+        try:
+            config = transformers.AutoConfig.from_pretrained(
+                name, revision=revision, trust_remote_code=trust_remote_code
+            )
+        except Exception as e:  # noqa: BLE001 - config may be an OLMo-core checkpoint or otherwise unloadable
+            logger.warning("Could not load %s config (%s) to validate OPD output vocab size; skipping check.", role, e)
+            return None
+        return getattr(config, "vocab_size", None)
+
+    teacher_vocab_size = _vocab_size(teacher_model_name_or_path, teacher_revision, "teacher")
+    student_vocab_size = _vocab_size(student_model_name_or_path, student_revision, "student")
+    if teacher_vocab_size is None or student_vocab_size is None:
+        return
+    if teacher_vocab_size > student_vocab_size:
+        raise ValueError(
+            f"Teacher output vocab ({teacher_vocab_size}) is larger than student output vocab ({student_vocab_size}). "
+            "Teacher top-k token ids could exceed the student's logit range and be silently clamped to the wrong "
+            f"token. Student: {student_model_name_or_path}; teacher: {teacher_model_name_or_path}."
         )

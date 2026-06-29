@@ -1,4 +1,6 @@
+import types
 import unittest
+from unittest import mock
 
 from open_instruct import opd_validation
 
@@ -93,6 +95,52 @@ class TestTokenizerCompatibility(unittest.TestCase):
             opd_validation.validate_teacher_student_tokenizer_compatibility(
                 student_tokenizer=student, teacher_tokenizer=teacher, student_name="student", teacher_name="teacher"
             )
+
+
+class TestOutputVocabValidation(unittest.TestCase):
+    def _patch_configs(self, by_name: dict):
+        def fake_from_pretrained(name, revision=None, trust_remote_code=False):
+            value = by_name[name]
+            if isinstance(value, Exception):
+                raise value
+            return types.SimpleNamespace(vocab_size=value) if value is not None else types.SimpleNamespace()
+
+        return mock.patch.object(
+            opd_validation.transformers.AutoConfig, "from_pretrained", side_effect=fake_from_pretrained
+        )
+
+    def _call(self):
+        opd_validation.validate_teacher_student_output_vocab(
+            student_model_name_or_path="student",
+            student_revision=None,
+            teacher_model_name_or_path="teacher",
+            teacher_revision=None,
+            trust_remote_code=False,
+        )
+
+    def test_allows_teacher_vocab_within_student(self):
+        with self._patch_configs({"teacher": 1000, "student": 1024}):
+            self._call()  # no raise
+
+    def test_allows_equal_vocab(self):
+        with self._patch_configs({"teacher": 1024, "student": 1024}):
+            self._call()
+
+    def test_rejects_teacher_vocab_larger_than_student(self):
+        with (
+            self._patch_configs({"teacher": 2048, "student": 1024}),
+            self.assertRaisesRegex(ValueError, "larger than student output vocab"),
+        ):
+            self._call()
+
+    def test_skips_when_a_config_fails_to_load(self):
+        # e.g. an OLMo-core student checkpoint without an HF config.
+        with self._patch_configs({"teacher": 2048, "student": RuntimeError("no hf config")}):
+            self._call()  # skipped, no raise even though teacher > (unknown) student
+
+    def test_skips_when_vocab_size_missing(self):
+        with self._patch_configs({"teacher": None, "student": 1024}):
+            self._call()  # teacher has no vocab_size -> skip
 
 
 if __name__ == "__main__":
