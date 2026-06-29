@@ -99,7 +99,10 @@ class OPDTeacherScorerRayActor:
             raise ValueError(f"queries length {len(queries)} != responses length {len(responses)}")
 
         start_time = time.perf_counter()
-        prompts = [{"prompt_token_ids": list(query) + list(response)} for query, response in zip(queries, responses)]
+        prompts = [
+            vllm.TokensPrompt(prompt_token_ids=list(query) + list(response))
+            for query, response in zip(queries, responses)
+        ]
         outputs = self.llm.generate(prompts, sampling_params=self.sampling_params, use_tqdm=False)
 
         teacher_topk_token_ids = []
