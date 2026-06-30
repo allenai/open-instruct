@@ -644,10 +644,12 @@ class PolicyTrainerRayProcess(RayProcess):
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
         device = token_counts_per_sample.device
         grad_norms: list[float] = []  # May include nan/inf values reported by DeepSpeed.
-        rho_histograms: dict[str, list[torch.Tensor]] = {}
+        off_policy_histograms: dict[str, list[torch.Tensor]] = {}
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
+            loss_stats_B = grpo_utils.create_loss_stats(
+                num_samples, device, record_entropy=self.args.record_entropy, config=self.args
+            )
             for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
@@ -701,10 +703,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
                     ratio_BT = torch.exp(logprobs_diff_BT)
-                    rho_BT = grpo_utils.compute_rho_correction(
+                    off_policy_BT = grpo_utils.compute_off_policy_correction(
                         old_logprob_BT, vllm_logprobs_BT, response_mask_BT, data_BT.advantages[i][:, 1:], self.args
                     )
-                    grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
+                    grpo_utils.accumulate_off_policy_histograms(off_policy_histograms, off_policy_BT)
 
                     pg_loss_BT, clipfrac_BT, kl_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
@@ -712,7 +714,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         config=self.args,
-                        rho_weights=rho_BT.weights,
+                        off_policy_weights=off_policy_BT.weights,
                     )
 
                     per_token_loss_BT = pg_loss_BT + self.args.beta * kl_BT
@@ -745,7 +747,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         entropy_BT,
                         self.args,
-                        rho_metrics=rho_BT.metrics,
+                        off_policy_metrics=off_policy_BT.metrics,
                     )
 
             batch_metrics = batch_data["metrics"]
@@ -761,7 +763,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     else:
                         array_metrics[key] = value
                 if self.rank == 0:
-                    array_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
+                    array_metrics.update(grpo_utils.finalize_off_policy_histograms(off_policy_histograms))
                 return self.local_metrics.get_metrics_list(), array_metrics
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: dict[str, Any]) -> None:
@@ -1017,8 +1019,8 @@ def setup_runtime_variables(
     tools_config: EnvsConfig,
 ) -> grpo_utils.GRPOExperimentConfig:
     """Set up runtime variables for the experiment."""
-    if tools_config.enabled and (args.use_vllm_logprobs or args.use_rho_correction):
-        assert streaming_config.mask_tool_use, "Must mask tool use when using vLLM logprobs or the ρ correction."
+    if tools_config.enabled and (args.use_vllm_logprobs or grpo_utils.off_policy_correction_enabled(args)):
+        assert streaming_config.mask_tool_use, "Must mask tool use when using vLLM logprobs or off-policy correction."
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -1574,9 +1576,15 @@ def one_training_step(
         "policy/entropy_avg",
         "val/ratio",
         "val/ratio_var",
+        "val/rho_weight",
         "val/rho_drop_frac",
         "val/rho_drop_low_frac",
         "val/rho_drop_high_frac",
+        "val/rho_clipfrac",
+        "val/binary_kl_fwd",
+        "val/binary_kl_rev",
+        "val/binary_kl_max",
+        "val/binary_kl_drop_frac",
     }
     average_metrics = {}
     # Average scalar metrics from each worker

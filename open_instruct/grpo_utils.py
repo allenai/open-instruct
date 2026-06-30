@@ -71,6 +71,54 @@ class GRPOLossType(enum.StrEnum):
     cispo = "cispo"
 
 
+class OffPolicyCorrectionType(enum.StrEnum):
+    none = "none"
+    importance_sampling = "importance_sampling"
+    truncated_importance_sampling = "truncated_importance_sampling"
+    icepop = "icepop"
+    kpop = "kpop"
+
+
+class KPopBinaryKlDirection(enum.StrEnum):
+    symmetric = "symmetric"
+    fwd = "fwd"
+    rev = "rev"
+
+
+def _coerce_off_policy_correction(value: OffPolicyCorrectionType | str) -> OffPolicyCorrectionType:
+    if isinstance(value, OffPolicyCorrectionType):
+        return value
+    try:
+        return OffPolicyCorrectionType(value)
+    except ValueError as err:
+        valid = ", ".join(c.value for c in OffPolicyCorrectionType)
+        raise ValueError(f"off_policy_correction must be one of {valid}; got {value!r}.") from err
+
+
+def _coerce_kpop_binary_kl_direction(value: KPopBinaryKlDirection | str) -> KPopBinaryKlDirection:
+    if isinstance(value, KPopBinaryKlDirection):
+        return value
+    try:
+        return KPopBinaryKlDirection(value)
+    except ValueError as err:
+        valid = ", ".join(c.value for c in KPopBinaryKlDirection)
+        raise ValueError(f"kpop_binary_kl_direction must be one of {valid}; got {value!r}.") from err
+
+
+def get_off_policy_correction_type(config: Any) -> OffPolicyCorrectionType:
+    """Return the configured off-policy correction mode.
+
+    ``off_policy_correction`` is the source of truth for correction behavior.
+    """
+    return _coerce_off_policy_correction(
+        getattr(config, "off_policy_correction", OffPolicyCorrectionType.truncated_importance_sampling)
+    )
+
+
+def off_policy_correction_enabled(config: Any) -> bool:
+    return get_off_policy_correction_type(config) != OffPolicyCorrectionType.none
+
+
 @dataclass
 class GRPOExperimentConfig(
     olmo_core_utils.ExperimentConfig,
@@ -107,12 +155,9 @@ class GRPOExperimentConfig(
     """the lower clip range"""
     clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    use_rho_correction: bool = True
-    """Master switch for the train/infer ratio ρ = π^train_old / π^infer_old correction.
-    When True, ρ is clamped to [rho_clamp_lower_bound, rho_clamp_upper_bound] and tokens
-    whose ρ falls outside [rho_mask_lower_bound, rho_mask_upper_bound] have their
-    per-token policy loss zeroed out. This unifies truncated importance sampling
-    (https://fengyao.notion.site/off-policy-rl) and IcePop (https://arxiv.org/abs/2510.18855)."""
+    off_policy_correction: OffPolicyCorrectionType = OffPolicyCorrectionType.truncated_importance_sampling
+    """Named off-policy correction mode. New configs should set this to one of:
+    none, importance_sampling, truncated_importance_sampling, icepop, or kpop."""
     rho_clamp_lower_bound: float = 0.0
     """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
     rho_clamp_upper_bound: float = 2.0
@@ -131,6 +176,10 @@ class GRPOExperimentConfig(
     maintains same rho for correction but masks using bounds and sequence-level TV divergence abs(p_seq - 1)
     won't mask tokens that purport to decrease TV divergence: advantage * logprob_diff <= 0
     """
+    kpop_binary_kl_upper_bound: float = 0.0
+    """KPop threshold φ for symmetric binary-KL masking over train/inference token probabilities."""
+    kpop_binary_kl_direction: KPopBinaryKlDirection = KPopBinaryKlDirection.symmetric
+    """Direction used for binary-KL masking. Use symmetric for KPop; fwd/rev are ablations."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -239,14 +288,17 @@ class GRPOExperimentConfig(
     """Optional eval-only top_p override. If None, uses training top_p."""
 
     def __post_init__(self):
+        self.off_policy_correction = _coerce_off_policy_correction(self.off_policy_correction)
+        off_policy_correction = self.off_policy_correction
+
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
             )
-        if self.use_vllm_logprobs and self.use_rho_correction:
+        if self.use_vllm_logprobs and off_policy_correction != OffPolicyCorrectionType.none:
             raise ValueError(
-                "Cannot use both `use_vllm_logprobs` and `use_rho_correction`. "
-                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making the ρ correction pointless."
+                "Cannot use both `use_vllm_logprobs` and off-policy correction. "
+                "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making the correction pointless."
             )
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
@@ -322,19 +374,26 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
-        if self.use_rho_correction:
+        if off_policy_correction == OffPolicyCorrectionType.truncated_importance_sampling:
+            if self.rho_clamp_lower_bound > 0.0 and not (0.0 < self.rho_clamp_lower_bound < 1.0):
+                raise ValueError(
+                    f"rho_clamp_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_clamp_lower_bound}."
+                )
+            if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
+                raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
+        if off_policy_correction == OffPolicyCorrectionType.icepop:
             if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
                 raise ValueError(
                     f"rho_mask_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_mask_lower_bound}."
                 )
             if self.rho_mask_upper_bound > 0.0 and self.rho_mask_upper_bound <= 1.0:
                 raise ValueError(f"rho_mask_upper_bound must be > 1 when set, got {self.rho_mask_upper_bound}.")
-            if self.rho_clamp_lower_bound > 0.0 and self.rho_clamp_lower_bound >= 1.0:
-                raise ValueError(
-                    f"rho_clamp_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_clamp_lower_bound}."
-                )
-            if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
-                raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
+        if self.rho_mask_tv_divergence and off_policy_correction != OffPolicyCorrectionType.icepop:
+            raise ValueError("rho_mask_tv_divergence is only valid with off_policy_correction='icepop'.")
+        if off_policy_correction == OffPolicyCorrectionType.kpop:
+            self.kpop_binary_kl_direction = _coerce_kpop_binary_kl_direction(self.kpop_binary_kl_direction)
+            if self.kpop_binary_kl_upper_bound <= 0.0:
+                raise ValueError("kpop_binary_kl_upper_bound must be > 0 when off_policy_correction='kpop'.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -391,7 +450,7 @@ def _sequence_level_mean(values: torch.Tensor, response_mask: torch.Tensor) -> t
 
 
 @dataclass
-class RhoCorrection:
+class OffPolicyCorrection:
     """Per-token stop-gradient correction for the train/infer engine mismatch.
 
     ``weights`` is multiplied into the policy loss (all-ones disables the correction).
@@ -407,68 +466,122 @@ class RhoCorrection:
     histogram_metrics: dict[str, torch.Tensor] = field(default_factory=dict)
 
 
-def compute_rho_correction(
+def compute_binary_kl_from_logprobs(log_p: torch.Tensor, log_q: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Binary KL for sampled-token probabilities parameterized by log probabilities.
+
+    Each token is treated as a Bernoulli event: the sampled token versus all
+    other vocabulary items.
+    """
+    p = torch.exp(log_p.float()).clamp(eps, 1.0 - eps)
+    q = torch.exp(log_q.float()).clamp(eps, 1.0 - eps)
+    return p * (torch.log(p) - torch.log(q)) + (1.0 - p) * (torch.log1p(-p) - torch.log1p(-q))
+
+
+def compute_off_policy_correction(
     old_logprob: torch.Tensor,
     vllm_logprobs: torch.Tensor,
     response_mask: torch.Tensor,
     advantages: torch.Tensor,
     config: GRPOExperimentConfig,
-) -> RhoCorrection:
-    """Compute the unified ρ = π^train_old / π^infer_old correction (clamp + mask)."""
+) -> OffPolicyCorrection:
+    """Compute the configured off-policy correction between train and inference logprobs."""
     logprob_diff = torch.where(
         response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
     )
     rho = torch.exp(logprob_diff)
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
-    if not config.use_rho_correction:
-        return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
+    correction_type = get_off_policy_correction_type(config)
 
-    rho_effective = (
-        torch.exp(_sequence_level_mean(logprob_diff, response_mask)) if config.rho_mask_sequence_level else rho
-    )
+    if correction_type == OffPolicyCorrectionType.none:
+        return OffPolicyCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
 
-    if config.rho_mask_tv_divergence:
-        # don't change rho_effective as it is our truncated importance sampling
-        # calculate sequence-level TV divergence with abs(rho - 1)
-        # filter if TV divergence > delta and advantage * logprob_diff > 0
-        tv_divergence = torch.abs(rho - 1.0)
-        tv_sequence_level = _sequence_level_mean(tv_divergence, response_mask)
-        tv_dropped_low, tv_dropped_high = _rho_drop_masks(
-            tv_sequence_level, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
-        )
-        tokens_increase_tv = torch.sign(logprob_diff) * advantages > 0
-        dropped_low = tv_dropped_low & tokens_increase_tv
-        dropped_high = tv_dropped_high & tokens_increase_tv
-    else:
-        dropped_low, dropped_high = _rho_drop_masks(
-            rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+    if correction_type == OffPolicyCorrectionType.importance_sampling:
+        return OffPolicyCorrection(
+            weights=torch.where(response_mask, rho, torch.zeros_like(rho)),
+            metrics={"val/rho_weight": torch.where(response_mask, rho, torch.zeros_like(rho)).float()},
+            histogram_metrics=rho_hist,
         )
 
-    in_range = response_mask & ~dropped_low & ~dropped_high
+    if correction_type == OffPolicyCorrectionType.truncated_importance_sampling:
+        rho_clamped = rho
+        if config.rho_clamp_lower_bound > 0.0:
+            rho_clamped = torch.clamp(rho_clamped, min=config.rho_clamp_lower_bound)
+        if config.rho_clamp_upper_bound > 0.0:
+            rho_clamped = torch.clamp(rho_clamped, max=config.rho_clamp_upper_bound)
+        weights = torch.where(response_mask, rho_clamped, torch.zeros_like(rho_clamped))
+        return OffPolicyCorrection(
+            weights=weights,
+            metrics={
+                "val/rho_weight": weights.float(),
+                "val/rho_clipfrac": ((rho_clamped != rho) & response_mask).float(),
+            },
+            histogram_metrics=rho_hist,
+        )
 
-    rho_clamped = rho_effective
-    if config.rho_clamp_lower_bound > 0.0:
-        rho_clamped = torch.clamp(rho_clamped, min=config.rho_clamp_lower_bound)
-    if config.rho_clamp_upper_bound > 0.0:
-        rho_clamped = torch.clamp(rho_clamped, max=config.rho_clamp_upper_bound)
+    if correction_type == OffPolicyCorrectionType.icepop:
+        rho_effective = (
+            torch.exp(_sequence_level_mean(logprob_diff, response_mask)) if config.rho_mask_sequence_level else rho
+        )
+        if config.rho_mask_tv_divergence:
+            tv_divergence = torch.abs(rho - 1.0)
+            tv_sequence_level = _sequence_level_mean(tv_divergence, response_mask)
+            tv_dropped_low, tv_dropped_high = _rho_drop_masks(
+                tv_sequence_level, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+            )
+            tokens_increase_tv = torch.sign(logprob_diff) * advantages > 0
+            dropped_low = tv_dropped_low & tokens_increase_tv
+            dropped_high = tv_dropped_high & tokens_increase_tv
+        else:
+            dropped_low, dropped_high = _rho_drop_masks(
+                rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+            )
+        keep = response_mask & ~dropped_low & ~dropped_high
+        weights = torch.where(keep, rho_effective, torch.zeros_like(rho_effective))
+        return OffPolicyCorrection(
+            weights=weights,
+            metrics={
+                "val/rho_drop_frac": (dropped_low | dropped_high).float(),
+                "val/rho_drop_low_frac": dropped_low.float(),
+                "val/rho_drop_high_frac": dropped_high.float(),
+                "val/rho_weight": weights.float(),
+            },
+            histogram_metrics=rho_hist,
+        )
 
-    weights = torch.where(in_range, rho_clamped, torch.zeros_like(rho_clamped))
-    metrics = {
-        "val/rho_drop_frac": (dropped_low | dropped_high).float(),
-        "val/rho_drop_low_frac": dropped_low.float(),
-        "val/rho_drop_high_frac": dropped_high.float(),
-        "val/rho_weight": weights.float(),
-        "val/rho_clipfrac": (rho_clamped != rho_effective).float(),
-    }
-    return RhoCorrection(weights=weights, metrics=metrics, histogram_metrics=rho_hist)
+    if correction_type == OffPolicyCorrectionType.kpop:
+        kpop_binary_kl_direction = _coerce_kpop_binary_kl_direction(config.kpop_binary_kl_direction)
+        kl_fwd = compute_binary_kl_from_logprobs(old_logprob.detach(), vllm_logprobs.detach())
+        kl_rev = compute_binary_kl_from_logprobs(vllm_logprobs.detach(), old_logprob.detach())
+        kl_max = torch.maximum(kl_fwd, kl_rev)
+        if kpop_binary_kl_direction == KPopBinaryKlDirection.fwd:
+            dropped = (kl_fwd > config.kpop_binary_kl_upper_bound) & response_mask
+        elif kpop_binary_kl_direction == KPopBinaryKlDirection.rev:
+            dropped = (kl_rev > config.kpop_binary_kl_upper_bound) & response_mask
+        else:
+            dropped = (kl_max > config.kpop_binary_kl_upper_bound) & response_mask
+        keep = response_mask & ~dropped
+        weights = torch.where(keep, rho, torch.zeros_like(rho))
+        return OffPolicyCorrection(
+            weights=weights,
+            metrics={
+                "val/rho_weight": weights.float(),
+                "val/binary_kl_fwd": torch.where(response_mask, kl_fwd, torch.zeros_like(kl_fwd)).float(),
+                "val/binary_kl_rev": torch.where(response_mask, kl_rev, torch.zeros_like(kl_rev)).float(),
+                "val/binary_kl_max": torch.where(response_mask, kl_max, torch.zeros_like(kl_max)).float(),
+                "val/binary_kl_drop_frac": dropped.float(),
+            },
+            histogram_metrics={**rho_hist, "val/binary_kl_hist": kl_max[response_mask].detach().float()},
+        )
+
+    raise ValueError(f"Unsupported off_policy_correction={correction_type!r}.")
 
 
-def accumulate_rho_histograms(acc: dict[str, list[torch.Tensor]], correction: RhoCorrection) -> None:
+def accumulate_off_policy_histograms(acc: dict[str, list[torch.Tensor]], correction: OffPolicyCorrection) -> None:
     for key, values in correction.histogram_metrics.items():
         acc.setdefault(key, []).append(values.detach().cpu())
 
 
-def finalize_rho_histograms(acc: dict[str, list[torch.Tensor]]) -> dict[str, np.ndarray]:
+def finalize_off_policy_histograms(acc: dict[str, list[torch.Tensor]]) -> dict[str, np.ndarray]:
     return {key: torch.cat(chunks).numpy() for key, chunks in acc.items()}
 
 
@@ -507,7 +620,7 @@ def compute_grpo_loss(
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
     config: GRPOExperimentConfig,
-    rho_weights: torch.Tensor,
+    off_policy_weights: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
@@ -522,8 +635,8 @@ def compute_grpo_loss(
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    pg_loss *= rho_weights
-    clipfrac *= (rho_weights != 0).float()
+    pg_loss *= off_policy_weights
+    clipfrac *= (off_policy_weights != 0).float()
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
@@ -671,7 +784,7 @@ def calculate_token_counts(
     return accumulation_counts
 
 
-_SCALAR_LOSS_STAT_KEYS = [
+_BASE_SCALAR_LOSS_STAT_KEYS = [
     "loss/kl_avg",
     "loss/policy_avg",
     "loss/total_avg",
@@ -681,16 +794,50 @@ _SCALAR_LOSS_STAT_KEYS = [
     "objective/kl3_avg",
     "policy/clipfrac_avg",
     "val/ratio",
-    "val/rho_clipfrac",
+]
+
+_RHO_TRUNCATION_SCALAR_LOSS_STAT_KEYS = ["val/rho_clipfrac", "val/rho_weight"]
+
+_ICEPOP_SCALAR_LOSS_STAT_KEYS = [
     "val/rho_weight",
     "val/rho_drop_frac",
     "val/rho_drop_low_frac",
     "val/rho_drop_high_frac",
 ]
 
+_KPOP_SCALAR_LOSS_STAT_KEYS = [
+    "val/rho_weight",
+    "val/binary_kl_fwd",
+    "val/binary_kl_rev",
+    "val/binary_kl_max",
+    "val/binary_kl_drop_frac",
+]
 
-def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bool = False) -> dict[str, torch.Tensor]:
-    stats = {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
+
+def correction_scalar_loss_stat_keys(config: Any | None) -> list[str]:
+    correction_type = (
+        get_off_policy_correction_type(config)
+        if config is not None
+        else OffPolicyCorrectionType.truncated_importance_sampling
+    )
+    if correction_type == OffPolicyCorrectionType.none:
+        return []
+    if correction_type == OffPolicyCorrectionType.importance_sampling:
+        return ["val/rho_weight"]
+    if correction_type == OffPolicyCorrectionType.truncated_importance_sampling:
+        return list(_RHO_TRUNCATION_SCALAR_LOSS_STAT_KEYS)
+    if correction_type == OffPolicyCorrectionType.icepop:
+        return list(_ICEPOP_SCALAR_LOSS_STAT_KEYS)
+    if correction_type == OffPolicyCorrectionType.kpop:
+        return list(_KPOP_SCALAR_LOSS_STAT_KEYS)
+    raise ValueError(f"Unsupported off_policy_correction={correction_type!r}.")
+
+
+def create_loss_stats(
+    num_samples: int, device: torch.device, record_entropy: bool = False, config: GRPOExperimentConfig | None = None
+) -> dict[str, torch.Tensor]:
+    keys = _BASE_SCALAR_LOSS_STAT_KEYS + correction_scalar_loss_stat_keys(config)
+    stats = {key: torch.zeros(num_samples, device=device) for key in dict.fromkeys(keys)}
     if record_entropy:
         stats |= {"policy/entropy_avg": torch.zeros(num_samples, device=device)}
     return stats
@@ -708,7 +855,7 @@ def populate_sample_loss_stats(
     ref_logprobs: torch.Tensor | None,
     entropy: torch.Tensor | None,
     config: GRPOExperimentConfig,
-    rho_metrics: dict[str, torch.Tensor] | None = None,
+    off_policy_metrics: dict[str, torch.Tensor] | None = None,
 ) -> None:
     with torch.no_grad():
         if config.load_ref_policy and ref_logprobs is not None:
@@ -718,9 +865,10 @@ def populate_sample_loss_stats(
             for j in range(4):
                 loss_stats_B[f"objective/kl{j}_avg"][sample_idx] = kl_values[j]
             loss_stats_B["loss/kl_avg"][sample_idx] = kl_values[config.kl_estimator] * config.beta
-        if rho_metrics is not None:
-            for key, value in rho_metrics.items():
-                loss_stats_B[key][sample_idx] = masked_mean(value, response_mask)
+        if off_policy_metrics is not None:
+            for key, value in off_policy_metrics.items():
+                if key in loss_stats_B:
+                    loss_stats_B[key][sample_idx] = masked_mean(value, response_mask)
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(clipfrac, response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss

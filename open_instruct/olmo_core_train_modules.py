@@ -497,7 +497,7 @@ class GRPOTrainModule(TransformerTrainModule):
             [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
         )
         loss_stats_B = grpo_utils.create_loss_stats(
-            num_samples, self.device, record_entropy=self.grpo_config.record_entropy
+            num_samples, self.device, record_entropy=self.grpo_config.record_entropy, config=self.grpo_config
         )
 
         debug_metrics_sum: dict[str, float] = {}
@@ -505,7 +505,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
         num_steps = 0
         local_step = 0
-        rho_histograms: dict[str, list[torch.Tensor]] = {}
+        off_policy_histograms: dict[str, list[torch.Tensor]] = {}
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
@@ -547,10 +547,10 @@ class GRPOTrainModule(TransformerTrainModule):
                 log_ratio = new_logprobs - old_logprob
                 ratio = torch.exp(log_ratio)
 
-                rho = grpo_utils.compute_rho_correction(
+                off_policy = grpo_utils.compute_off_policy_correction(
                     old_logprob, vllm_logprobs, response_mask, advantages[:, 1:], self.grpo_config
                 )
-                grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
+                grpo_utils.accumulate_off_policy_histograms(off_policy_histograms, off_policy)
 
                 pg_loss, clipfrac, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
@@ -558,7 +558,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     config=self.grpo_config,
-                    rho_weights=rho.weights,
+                    off_policy_weights=off_policy.weights,
                 )
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
@@ -580,7 +580,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     entropy,
                     self.grpo_config,
-                    rho_metrics=rho.metrics,
+                    off_policy_metrics=off_policy.metrics,
                 )
 
                 num_steps += 1
@@ -624,7 +624,7 @@ class GRPOTrainModule(TransformerTrainModule):
 
             self._record_step_counter_metrics(int(global_tokens))
             data_prep_metrics = dict(batch.get("metrics") or {})
-            data_prep_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
+            data_prep_metrics.update(grpo_utils.finalize_off_policy_histograms(off_policy_histograms))
             self._record_data_prep_metrics(data_prep_metrics)
             for k, v in debug_metrics_sum.items():
                 self.record_metric(k, v / debug_metrics_count, reduce_type=None)
