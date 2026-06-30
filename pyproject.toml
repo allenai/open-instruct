@@ -28,6 +28,10 @@ dependencies = [
     "torch>=2.9.0,<2.11",
     "transformers>=4.57.0",
     "vllm>=0.14.1; platform_system != 'Darwin'",
+    # Fast linear-attention kernels for the OLMo-hybrid training path: the transformers
+    # fork gates its fast `olmo_hybrid_small` path on `fla` (>=0.2.2) + CUDA, otherwise it
+    # falls back to a slow pure-torch implementation. The vLLM fork bundles its own kernels.
+    "flash-linear-attention==0.5.1; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
