@@ -228,7 +228,7 @@ else
     echo "WARNING: podman not found; Docker SDK will use $DOCKER_HOST if available"
 fi
 
-if [ -n "$DOCKER_PAT" ]; then
+if [ -n "${DOCKER_PAT:-}" ]; then
     python -c "
 import base64, json, os
 username = os.environ.get('DOCKERHUB_USERNAME', 'hamishivi')

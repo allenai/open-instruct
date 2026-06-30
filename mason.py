@@ -725,17 +725,23 @@ def main():
         console.print(Text(full_command))
     if is_external_user:
         return
-    experiment_spec_kwargs = {
-        "description": args.description,
-        "tasks": [
-            make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable)
-            for i, full_command in enumerate(full_commands)
-        ],
-        "retry": beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
-    }
+    task_specs = [
+        make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable)
+        for i, full_command in enumerate(full_commands)
+    ]
     if args.budget is not None:
-        experiment_spec_kwargs["budget"] = args.budget
-    experiment_spec = beaker.BeakerExperimentSpec(**experiment_spec_kwargs)
+        experiment_spec = beaker.BeakerExperimentSpec(
+            description=args.description,
+            tasks=task_specs,
+            budget=args.budget,
+            retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
+        )
+    else:
+        experiment_spec = beaker.BeakerExperimentSpec(
+            description=args.description,
+            tasks=task_specs,
+            retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
+        )
 
     @backoff.on_exception(
         backoff.expo,
