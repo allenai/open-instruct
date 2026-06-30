@@ -13,7 +13,6 @@ from open_instruct.distillkit.compression import (
     unpack_from_bytes,
 )
 from open_instruct.distillkit.losses import ForwardKLTopKOutput, forward_kl_topk_from_logprobs
-from open_instruct.distillkit.signals import SparseTeacherSignal
 from open_instruct.distillkit.vllm_logprobs import extract_response_topk_from_prompt_logprobs, process_prompt_logprobs
 
 __all__ = [
@@ -21,7 +20,6 @@ __all__ = [
     "ForwardKLTopKOutput",
     "LogprobCompressor",
     "QuantizationBin",
-    "SparseTeacherSignal",
     "SpecialTerm",
     "extract_response_topk_from_prompt_logprobs",
     "forward_kl_topk_from_logprobs",

@@ -387,8 +387,7 @@ Use `logger_utils.setup_logger(__name__)`.
 
 Reusable sparse distillation pieces live under DistillKit:
 
-- `signals.py`: `SparseTeacherSignal`
-- `losses.py`: student top-k gather helper and `forward_kl_topk_from_logprobs`
+- `losses.py`: `forward_kl_topk_from_logprobs` (teacher-top-k forward KL from sparse logprobs)
 - `vllm_logprobs.py`: vLLM prompt-logprob extraction helpers
 
 This keeps distributional distillation math reusable for future offline

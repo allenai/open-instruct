@@ -115,26 +115,12 @@ class CollatedBatchData:
     teacher_topk_logprobs: list[torch.Tensor] | None = None
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
-        def select(values: list[torch.Tensor]) -> list[torch.Tensor]:
-            if isinstance(idx, slice):
-                return values[idx]
-            return [values[idx]]
-
-        def select_optional(values: list[torch.Tensor] | None) -> list[torch.Tensor] | None:
+        def select(values: list[torch.Tensor] | None) -> list[torch.Tensor] | None:
             if values is None:
                 return None
-            return select(values)
+            return values[idx] if isinstance(idx, slice) else [values[idx]]
 
-        return CollatedBatchData(
-            query_responses=select(self.query_responses),
-            attention_masks=select(self.attention_masks),
-            position_ids=select(self.position_ids),
-            advantages=select(self.advantages),
-            response_masks=select(self.response_masks),
-            vllm_logprobs=select(self.vllm_logprobs),
-            teacher_topk_token_ids=select_optional(self.teacher_topk_token_ids),
-            teacher_topk_logprobs=select_optional(self.teacher_topk_logprobs),
-        )
+        return dataclasses.replace(self, **{f.name: select(getattr(self, f.name)) for f in dataclasses.fields(self)})
 
     def __len__(self) -> int:
         return len(self.query_responses)

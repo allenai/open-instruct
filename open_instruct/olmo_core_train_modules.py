@@ -27,7 +27,6 @@ from transformers import PreTrainedTokenizer
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
 from open_instruct.distillkit.losses import forward_kl_topk_from_logprobs
-from open_instruct.distillkit.signals import SparseTeacherSignal
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -589,8 +588,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 if self.streaming_config.opd_enabled:
                     if teacher_token_ids is None or teacher_logprobs is None or student_topk_logprobs is None:
                         raise ValueError("OPD top-k tensors were not available for loss computation.")
-                    teacher_signal = SparseTeacherSignal(token_ids=teacher_token_ids, logprobs=teacher_logprobs)
-                    opd_output = forward_kl_topk_from_logprobs(student_topk_logprobs, teacher_signal)
+                    opd_output = forward_kl_topk_from_logprobs(student_topk_logprobs, teacher_logprobs)
                     opd_loss = opd_output.loss
                     opd_topk_mass = opd_output.teacher_topk_mass
                     sampled_tokens = data_BT.query_responses[sample_idx][:, 1:].unsqueeze(-1)

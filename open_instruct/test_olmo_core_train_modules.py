@@ -7,7 +7,6 @@ from parameterized import parameterized
 
 from open_instruct import data_types, grpo_utils
 from open_instruct.distillkit.losses import forward_kl_topk_from_logprobs
-from open_instruct.distillkit.signals import SparseTeacherSignal
 from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import INVALID_LOGPROB
 
@@ -556,8 +555,7 @@ class TestOPDLearnerLossEndToEnd(unittest.TestCase):
         )
         self.assertEqual(student_topk_logprobs.shape, teacher_ids.shape)
 
-        signal = SparseTeacherSignal(token_ids=teacher_ids, logprobs=teacher_lp)
-        opd_output = forward_kl_topk_from_logprobs(student_topk_logprobs, signal)
+        opd_output = forward_kl_topk_from_logprobs(student_topk_logprobs, teacher_lp)
         opd_loss = masked_mean(opd_output.loss, response_mask_shifted)
 
         # Loss is a finite scalar that still carries gradient to the model.
