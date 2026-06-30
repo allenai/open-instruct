@@ -3,6 +3,13 @@ import subprocess
 
 from transformers.utils import hub as transformers_hub
 
+# `TRANSFORMERS_CACHE` was removed from `transformers.utils.hub` in transformers 5.x;
+# fall back to huggingface_hub's cache constant for newer versions.
+try:
+    TRANSFORMERS_CACHE = transformers_hub.TRANSFORMERS_CACHE
+except AttributeError:
+    from huggingface_hub.constants import HF_HUB_CACHE as TRANSFORMERS_CACHE
+
 WEKA_CLUSTERS = ["ai2/jupiter", "ai2/saturn", "ai2/titan", "ai2/neptune", "ai2/ceres", "ai2/triton", "ai2/rhea"]
 
 
@@ -17,7 +24,7 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str | N
         resolved_file = transformers_hub.try_to_load_from_cache(
             model_name_or_path,
             filename,
-            cache_dir=transformers_hub.TRANSFORMERS_CACHE,
+            cache_dir=TRANSFORMERS_CACHE,
             revision=revision,
             repo_type=repo_type,
         )

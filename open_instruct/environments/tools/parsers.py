@@ -20,7 +20,11 @@ from typing import Any
 
 import ray
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+try:
+    from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+except ModuleNotFoundError:
+    # vLLM relocated the OpenAI protocol models in newer versions.
+    from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from vllm.tool_parsers import ToolParser as VllmNativeToolParser
 
 from open_instruct.environments.base import EnvCall
