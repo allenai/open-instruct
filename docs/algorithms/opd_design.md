@@ -98,7 +98,13 @@ is identical for GRPO, GRPO + OPD, and pure OPD.
 
 `OPDTeacherScorerRayActor` (`opd_utils.py`) owns one frozen teacher vLLM
 replica on its own placement-group GPU bundle (it never shares the learner or
-rollout GPUs, and never receives weight updates). Scoring requests
+rollout GPUs, and never receives weight updates). This holds in
+`single_gpu_mode` too: that flag co-locates the rollout vLLM with the learner,
+but the teacher always needs
+`opd_teacher_num_engines * opd_teacher_tensor_parallel_size` additional GPUs,
+and startup waits for the combined learner + teacher GPU count before creating
+scorers so an under-provisioned cluster reports what it is waiting for instead
+of hanging. Scoring requests
 `prompt_logprobs=opd_topk` with `logprobs_mode="raw_logprobs"` over
 `prompt_tokens + response_tokens` and extracts the response-token rows,
 returning:

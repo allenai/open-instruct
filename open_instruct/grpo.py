@@ -211,10 +211,25 @@ def main(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
+    num_learner_gpus = sum(args.num_learners_per_node)
     teacher_scorers = []
     if streaming_config.opd_enabled:
         if streaming_config.opd_teacher_model_name_or_path is None:
             raise ValueError("`opd_teacher_model_name_or_path` is required when `opd_enabled=True`.")
+        # The teacher scorers reserve their own placement group before the learner
+        # placement group is created below, so wait for the combined GPU count here;
+        # otherwise an under-provisioned cluster hangs inside pg.ready() with no
+        # indication of what is missing. single_gpu_mode co-locates the rollout vLLM
+        # with the learner but never with the teacher.
+        num_teacher_gpus = (
+            streaming_config.opd_teacher_num_engines * streaming_config.opd_teacher_tensor_parallel_size
+        )
+        logger.info(
+            f"OPD requires {num_learner_gpus + num_teacher_gpus} GPUs: "
+            f"{num_learner_gpus} learner (+ co-located rollout vLLM in single_gpu_mode) "
+            f"+ {num_teacher_gpus} dedicated teacher scorer GPU(s)."
+        )
+        wait_for_gpus(num_learner_gpus + num_teacher_gpus)
         opd_validation.validate_pure_opd_reference_config(
             opd_use_task_rewards=streaming_config.opd_use_task_rewards,
             beta=args.beta,
@@ -293,7 +308,7 @@ def main(
         initial_state=None,
     )
 
-    wait_for_gpus(sum(args.num_learners_per_node))
+    wait_for_gpus(num_learner_gpus)
 
     bundles = [{"GPU": n, "CPU": n * 10} for n in args.num_learners_per_node]
     logger.info(f"Requesting bundles: {bundles}")
