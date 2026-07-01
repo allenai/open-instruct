@@ -29,11 +29,7 @@ else
     ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0
 
     cleanup() {
-        exit_code="${1:-1}"
-        if [ "$exit_code" -eq 0 ]; then
-            echo "[ray_node_setup] Worker cleanup requested exit 0; forcing exit 1."
-            exit_code=1
-        fi
+        exit_code="${1:-0}"
         echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting ${exit_code}"
         ray stop --force >/dev/null 2>&1 || true
         trap - TERM INT HUP EXIT
@@ -43,22 +39,23 @@ else
     trap 'cleanup 143' TERM
     trap 'cleanup 130' INT
     trap 'cleanup 129' HUP
-    trap 'cleanup 1' EXIT
+    trap 'cleanup $?' EXIT
 
     RAY_HEAD_MONITOR_INTERVAL_S="${RAY_HEAD_MONITOR_INTERVAL_S:-5}"
     RAY_HEAD_MONITOR_MAX_MISSES="${RAY_HEAD_MONITOR_MAX_MISSES:-6}"
     ray_head_monitor_misses=0
 
     echo "[ray_node_setup] Monitoring Ray head at ${RAY_ADDRESS}"
-    # Poll head availability. Workers should never report success on shutdown.
+    # Poll head availability. Once the head exits, workers can shut down cleanly;
+    # Beaker failure propagation should come from the head replica itself.
     # Require consecutive misses so transient Ray status hiccups don't kill the worker.
     while true; do
         if ! ray status --address="${RAY_ADDRESS}" >/dev/null 2>&1; then
             ray_head_monitor_misses=$((ray_head_monitor_misses + 1))
             echo "[ray_node_setup] Head status check failed (${ray_head_monitor_misses}/${RAY_HEAD_MONITOR_MAX_MISSES})."
             if [ "$ray_head_monitor_misses" -ge "$RAY_HEAD_MONITOR_MAX_MISSES" ]; then
-                echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 1."
-                cleanup 1
+                echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 0."
+                cleanup 0
             fi
         else
             if [ "$ray_head_monitor_misses" -gt 0 ]; then

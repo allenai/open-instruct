@@ -29,6 +29,7 @@ import concurrent.futures
 import json
 import re
 import subprocess
+import sys
 import tarfile
 import threading
 import urllib.error
@@ -52,6 +53,21 @@ _WARMED_BLOBS: set[str] = set()
 _WARMED_BLOBS_LOCK = threading.Lock()
 
 
+def _safe_extract_tar(tar: tarfile.TarFile, destination: Path) -> None:
+    if sys.version_info >= (3, 12):
+        tar.extractall(destination, filter="data")
+        return
+
+    destination_resolved = destination.resolve()
+    for member in tar.getmembers():
+        member_path = (destination / member.name).resolve()
+        if member_path != destination_resolved and destination_resolved not in member_path.parents:
+            raise ValueError(f"Unsafe path in tar archive: {member.name}")
+        if member.issym() or member.islnk():
+            raise ValueError(f"Unsafe link in tar archive: {member.name}")
+    tar.extractall(destination)
+
+
 def resolve_task_data_dir(dataset: str, revision: str | None = None) -> Path:
     repo_dir = Path(snapshot_download(dataset, repo_type="dataset", revision=revision))
     tarball = repo_dir / "task-data.tar.gz"
@@ -65,7 +81,7 @@ def resolve_task_data_dir(dataset: str, revision: str | None = None) -> Path:
 
     extract_dir.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tarball, mode="r:gz") as tar:
-        tar.extractall(extract_dir)
+        _safe_extract_tar(tar, extract_dir)
     marker.write_text("ok\n", encoding="utf-8")
     return extract_dir
 
