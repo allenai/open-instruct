@@ -221,9 +221,7 @@ def main(
         # otherwise an under-provisioned cluster hangs inside pg.ready() with no
         # indication of what is missing. single_gpu_mode co-locates the rollout vLLM
         # with the learner but never with the teacher.
-        num_teacher_gpus = (
-            streaming_config.opd_teacher_num_engines * streaming_config.opd_teacher_tensor_parallel_size
-        )
+        num_teacher_gpus = streaming_config.opd_teacher_num_engines * streaming_config.opd_teacher_tensor_parallel_size
         logger.info(
             f"OPD requires {num_learner_gpus + num_teacher_gpus} GPUs: "
             f"{num_learner_gpus} learner (+ co-located rollout vLLM in single_gpu_mode) "
