@@ -253,9 +253,8 @@ rewards are computed, but they never contribute to the loss.
   (end-to-end learner loss with real backprop, temperature invariance).
 - GPU: `test_opd_gpu.py` (live teacher scorer) runs in
   `scripts/test/run_gpu_pytest.sh`.
-- Smoke scripts: `scripts/train/debug/opd_grpo_smoke.sh`,
-  `scripts/train/debug/opd_pure_smoke.sh`; example tracked run:
-  `scripts/train/debug/opd_grpo_wandb_qwen3_0p6b.sh`.
+- Example launch: `scripts/train/debug/opd.sh` (GRPO + OPD on 2 GPUs; the
+  header comments show the pure-OPD and larger-teacher variants).
 
 ## Limitations and Future Work
 

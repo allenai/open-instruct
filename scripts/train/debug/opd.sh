@@ -1,4 +1,14 @@
 #!/bin/bash
+# GRPO + on-policy distillation (OPD) example on Beaker: 2 GPUs, ~10 minutes.
+# GPU 0 holds the learner and the rollout vLLM (single_gpu_mode); GPU 1 holds
+# the frozen teacher vLLM scorer.
+#
+# The student is the regular GRPO policy (--model_name_or_path); OPD only adds
+# the teacher. For pure OPD (distillation loss only, no task rewards), set:
+#   --opd_use_task_rewards false --apply_verifiable_reward false
+# To distill from a larger teacher, point --opd_teacher_model_name_or_path at a
+# model with a compatible tokenizer (e.g. Qwen/Qwen3-4B for a Qwen3 student)
+# and add --with_tracking for a W&B-tracked run.
 set -euo pipefail
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -12,7 +22,7 @@ uv run python mason.py \
        --cluster ai2/ceres \
        --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
-       --description "OLMo-core GRPO + OPD smoke test." \
+       --description "OLMo-core GRPO + OPD test." \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
@@ -25,7 +35,7 @@ uv run python mason.py \
        --no_auto_dataset_cache \
        --artifact_ttl 1d \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
-    --exp_name opd_grpo_smoke \
+    --exp_name opd_grpo_test \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 256 \
