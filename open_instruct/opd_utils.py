@@ -39,13 +39,7 @@ class OPDTeacherScoringResult:
 
 def build_teacher_sampling_params(topk: int) -> vllm.SamplingParams:
     return vllm.SamplingParams(
-        top_k=-1,
-        prompt_logprobs=topk,
-        logprobs=topk,
-        flat_logprobs=True,
-        max_tokens=1,
-        detokenize=False,
-        skip_special_tokens=False,
+        top_k=-1, prompt_logprobs=topk, flat_logprobs=True, max_tokens=1, detokenize=False, skip_special_tokens=False
     )
 
 

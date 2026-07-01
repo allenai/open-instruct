@@ -236,6 +236,7 @@ def main(
         opd_validation.validate_teacher_student_output_vocab(
             student_model_name_or_path=model_config.model_name_or_path,
             student_revision=model_config.model_revision,
+            student_vocab_size=transformer_config.vocab_size,
             teacher_model_name_or_path=streaming_config.opd_teacher_model_name_or_path,
             teacher_revision=streaming_config.opd_teacher_model_revision,
             trust_remote_code=tc.trust_remote_code,

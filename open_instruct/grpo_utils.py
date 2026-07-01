@@ -607,7 +607,15 @@ def forward_for_logprobs_and_topk(
         logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
         # Teacher top-k logprob (OPD): from raw T=1 logits. Normalize via logsumexp so we only
         # allocate [B, T, K] + [B, T, 1] instead of a second full-vocab [B, T, V] log-softmax.
-        safe_topk_token_ids = topk_token_ids.to(raw_logits.device).clamp(min=0, max=raw_logits.shape[-1] - 1)
+        safe_topk_token_ids = topk_token_ids.to(raw_logits.device)
+        invalid_topk_token_ids = (safe_topk_token_ids < 0) | (safe_topk_token_ids >= raw_logits.shape[-1])
+        if invalid_topk_token_ids.any().item():
+            invalid_values = safe_topk_token_ids[invalid_topk_token_ids]
+            raise ValueError(
+                "OPD teacher top-k token ids must be valid student logit indices. "
+                f"Got min invalid id={invalid_values.min().item()}, max invalid id={invalid_values.max().item()}, "
+                f"student_vocab_size={raw_logits.shape[-1]}."
+            )
         raw_logits_f = raw_logits.float()
         topk_logprobs = torch.gather(raw_logits_f, dim=-1, index=safe_topk_token_ids) - torch.logsumexp(
             raw_logits_f, dim=-1, keepdim=True

@@ -138,6 +138,20 @@ class TestOutputVocabValidation(unittest.TestCase):
         with self._patch_configs({"teacher": 2048, "student": RuntimeError("no hf config")}):
             self._call()  # skipped, no raise even though teacher > (unknown) student
 
+    def test_uses_explicit_student_vocab_size(self):
+        with (
+            self._patch_configs({"teacher": 2048}),
+            self.assertRaisesRegex(ValueError, "larger than student output vocab"),
+        ):
+            opd_validation.validate_teacher_student_output_vocab(
+                student_model_name_or_path="student",
+                student_revision=None,
+                student_vocab_size=1024,
+                teacher_model_name_or_path="teacher",
+                teacher_revision=None,
+                trust_remote_code=False,
+            )
+
     def test_skips_when_vocab_size_missing(self):
         with self._patch_configs({"teacher": None, "student": 1024}):
             self._call()  # teacher has no vocab_size -> skip

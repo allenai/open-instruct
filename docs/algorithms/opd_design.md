@@ -332,12 +332,18 @@ Current validation:
 - `opd_teacher_tensor_parallel_size > 0`.
 - `opd_teacher_prompt_mode` must be `student_prompt`.
 - Pure OPD disables `filter_zero_std_samples` because rewards are neutral.
+- Pure OPD rejects `active_sampling=True` because active sampling depends on
+  reward filtering.
 - At least one reward must be configured unless running pure OPD.
 - `grpo.py` requires `opd_teacher_model_name_or_path` when OPD is enabled.
 - Pure OPD hard-errors unless `beta == 0.0` and `load_ref_policy=false`.
 - Teacher and student tokenizers must be compatible: every teacher vocab token
   must have the same id in the student tokenizer. Student-only extra tokens above
   the teacher vocab range are allowed to support harmless added pad tokens.
+- Teacher output vocab must fit within the student's output vocab when both are
+  known at startup.
+- The learner hard-errors if any teacher top-k id is outside the student logit
+  range; invalid ids are not clamped.
 
 ## Data Model Changes
 

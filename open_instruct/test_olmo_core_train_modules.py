@@ -199,6 +199,26 @@ class TestForwardForLogprobs(unittest.TestCase):
         torch.testing.assert_close(topk_logprobs, expected_topk_raw)
         self.assertFalse(torch.allclose(topk_logprobs, expected_topk_policy))
 
+    def test_forward_for_logprobs_and_topk_rejects_out_of_range_topk_ids(self):
+        batch_size, seq_len, vocab_size = 1, 3, 4
+        model = _make_mock_model(vocab_size, seq_len, batch_size)
+        model.return_value = torch.randn(batch_size, seq_len, vocab_size)
+        query_responses = torch.tensor([[0, 1, 2]])
+        attention_mask = torch.ones(batch_size, seq_len)
+        position_ids = torch.arange(seq_len).unsqueeze(0)
+        topk_token_ids = torch.tensor([[[0, 4], [1, 2]]])
+
+        with self.assertRaisesRegex(ValueError, "valid student logit indices"):
+            grpo_utils.forward_for_logprobs_and_topk(
+                model,
+                query_responses,
+                attention_mask,
+                position_ids,
+                pad_token_id=99,
+                temperature=1.0,
+                topk_token_ids=topk_token_ids,
+            )
+
 
 class TestDAPOLoss(unittest.TestCase):
     def test_negative_advantages_clipping(self):

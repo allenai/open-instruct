@@ -528,6 +528,28 @@ class StreamingDataLoaderConfig:
         if self.eval_response_length is None:
             self.eval_response_length = self.response_length
 
+        pure_opd = self.opd_enabled and not self.opd_use_task_rewards
+        if self.opd_enabled:
+            if self.opd_loss_mode != "forward_kl_topk":
+                raise ValueError("V1 OPD supports only `opd_loss_mode=forward_kl_topk`.")
+            if self.opd_topk <= 0:
+                raise ValueError(f"`opd_topk` must be positive, got {self.opd_topk}")
+            if self.opd_loss_coef < 0:
+                raise ValueError(f"`opd_loss_coef` must be non-negative, got {self.opd_loss_coef}")
+            if self.opd_teacher_num_engines <= 0:
+                raise ValueError(f"`opd_teacher_num_engines` must be positive, got {self.opd_teacher_num_engines}")
+            if self.opd_teacher_tensor_parallel_size <= 0:
+                raise ValueError(
+                    f"`opd_teacher_tensor_parallel_size` must be positive, got {self.opd_teacher_tensor_parallel_size}"
+                )
+            if self.opd_teacher_prompt_mode != "student_prompt":
+                raise ValueError("V1 OPD supports only `opd_teacher_prompt_mode=student_prompt`.")
+            if pure_opd and self.active_sampling:
+                raise ValueError("`active_sampling=True` is not supported for pure OPD because rewards are neutral.")
+            if pure_opd and self.filter_zero_std_samples:
+                logger.warning("Disabling `filter_zero_std_samples` for pure OPD because rewards are neutral.")
+                self.filter_zero_std_samples = False
+
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
             "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
         )
@@ -552,23 +574,6 @@ class StreamingDataLoaderConfig:
             )
         if self.async_steps < 1:
             raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
-
-        if self.opd_enabled:
-            if self.opd_topk <= 0:
-                raise ValueError(f"`opd_topk` must be positive, got {self.opd_topk}")
-            if self.opd_loss_coef < 0:
-                raise ValueError(f"`opd_loss_coef` must be non-negative, got {self.opd_loss_coef}")
-            if self.opd_teacher_num_engines <= 0:
-                raise ValueError(f"`opd_teacher_num_engines` must be positive, got {self.opd_teacher_num_engines}")
-            if self.opd_teacher_tensor_parallel_size <= 0:
-                raise ValueError(
-                    f"`opd_teacher_tensor_parallel_size` must be positive, got {self.opd_teacher_tensor_parallel_size}"
-                )
-            if self.opd_teacher_prompt_mode != "student_prompt":
-                raise ValueError("V1 OPD supports only `opd_teacher_prompt_mode=student_prompt`.")
-            if not self.opd_use_task_rewards and self.filter_zero_std_samples:
-                logger.warning("Disabling `filter_zero_std_samples` for pure OPD because rewards are neutral.")
-                self.filter_zero_std_samples = False
 
         if not self.opd_use_task_rewards and not self.opd_enabled:
             raise ValueError(
@@ -708,6 +713,39 @@ def collate_fn(tensors_list: list[torch.Tensor], pad_token_id: int | float, pin_
     if pin_memory and torch.cuda.is_available():
         padded_tensor = padded_tensor.pin_memory()
     return padded_tensor
+
+
+def _make_token_balanced_ranges(
+    queries: list[list[int]], responses: list[list[int]], num_ranges: int
+) -> list[tuple[int, int]]:
+    """Split rollout rows into contiguous chunks with roughly balanced token counts."""
+    if len(queries) != len(responses):
+        raise ValueError(f"queries length {len(queries)} != responses length {len(responses)}")
+    if num_ranges <= 0:
+        raise ValueError(f"num_ranges must be positive, got {num_ranges}")
+    if not responses:
+        return []
+
+    num_ranges = min(num_ranges, len(responses))
+    token_lengths = [len(query) + len(response) for query, response in zip(queries, responses)]
+    target_tokens = max(1, int(np.ceil(sum(token_lengths) / num_ranges)))
+
+    ranges = []
+    start = 0
+    current_tokens = 0
+    for idx, token_length in enumerate(token_lengths):
+        current_tokens += token_length
+        items_left_after_current = len(token_lengths) - idx - 1
+        ranges_left_after_current = num_ranges - len(ranges) - 1
+        should_split_for_balance = current_tokens >= target_tokens and ranges_left_after_current > 0
+        must_split_to_avoid_empty_ranges = items_left_after_current == ranges_left_after_current
+        if idx < len(token_lengths) - 1 and (should_split_for_balance or must_split_to_avoid_empty_ranges):
+            ranges.append((start, idx + 1))
+            start = idx + 1
+            current_tokens = 0
+
+    ranges.append((start, len(responses)))
+    return ranges
 
 
 @dataclass
@@ -1481,14 +1519,9 @@ class DataPreparationActor:
             return [], [], {}
 
         wall_start = time.perf_counter()
-        num_scorers = min(len(self.teacher_scorers), len(responses))
-        chunk_size = int(np.ceil(len(responses) / num_scorers))
+        ranges = _make_token_balanced_ranges(queries, responses, len(self.teacher_scorers))
         futures = []
-        for scorer_idx in range(num_scorers):
-            start = scorer_idx * chunk_size
-            end = min(start + chunk_size, len(responses))
-            if start >= end:
-                continue
+        for scorer_idx, (start, end) in enumerate(ranges):
             scorer = self.teacher_scorers[scorer_idx % len(self.teacher_scorers)]
             futures.append((start, end, scorer.score.remote(queries[start:end], responses[start:end])))
 

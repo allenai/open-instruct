@@ -77,6 +77,7 @@ def validate_teacher_student_output_vocab(
     *,
     student_model_name_or_path: str,
     student_revision: str | None,
+    student_vocab_size: int | None = None,
     teacher_model_name_or_path: str,
     teacher_revision: str | None,
     trust_remote_code: bool,
@@ -86,11 +87,11 @@ def validate_teacher_student_output_vocab(
     The tokenizer check guarantees teacher and student agree on token *ids*. This
     additionally guarantees the teacher's model *output dimension* is not wider
     than the student's: teacher top-k ids are used as gather indices into the
-    student model's logits (and the gather clamps to the student range), so a
-    teacher whose vocab exceeds the student's could emit an id that is silently
-    clamped to the wrong token. The student dim is read from its HF config; for a
-    non-HF (OLMo-core) student checkpoint we log and skip the check (the
-    tokenizer-id check still applies and the gather clamp backstops the rest).
+    student model's logits, so a teacher whose vocab exceeds the student's could
+    emit an id that the learner cannot score. The student dim is read from the
+    already-built learner config when available, otherwise from its HF config. If
+    a non-HF config cannot be loaded, the learner forward still hard-errors on
+    out-of-range teacher ids.
     """
 
     def _vocab_size(name: str, revision: str | None, role: str) -> int | None:
@@ -103,13 +104,18 @@ def validate_teacher_student_output_vocab(
             return None
         return getattr(config, "vocab_size", None)
 
-    teacher_vocab_size = _vocab_size(teacher_model_name_or_path, teacher_revision, "teacher")
-    student_vocab_size = _vocab_size(student_model_name_or_path, student_revision, "student")
-    if teacher_vocab_size is None or student_vocab_size is None:
+    teacher_output_vocab_size = _vocab_size(teacher_model_name_or_path, teacher_revision, "teacher")
+    student_output_vocab_size = (
+        student_vocab_size
+        if student_vocab_size is not None
+        else _vocab_size(student_model_name_or_path, student_revision, "student")
+    )
+    if teacher_output_vocab_size is None or student_output_vocab_size is None:
         return
-    if teacher_vocab_size > student_vocab_size:
+    if teacher_output_vocab_size > student_output_vocab_size:
         raise ValueError(
-            f"Teacher output vocab ({teacher_vocab_size}) is larger than student output vocab ({student_vocab_size}). "
-            "Teacher top-k token ids could exceed the student's logit range and be silently clamped to the wrong "
-            f"token. Student: {student_model_name_or_path}; teacher: {teacher_model_name_or_path}."
+            f"Teacher output vocab ({teacher_output_vocab_size}) is larger than "
+            f"student output vocab ({student_output_vocab_size}). "
+            "Teacher top-k token ids could exceed the student's logit range and fail during learner gather. "
+            f"Student: {student_model_name_or_path}; teacher: {teacher_model_name_or_path}."
         )

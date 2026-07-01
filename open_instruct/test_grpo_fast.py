@@ -781,8 +781,41 @@ class TestAccumulateInferenceBatches(TestGrpoFastBase):
         self.assertIsNone(batch_stats)
 
 
+class TestStreamingDataLoaderConfig(unittest.TestCase):
+    def test_pure_opd_allows_single_sample_and_disables_zero_std_filter(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(
+            opd_enabled=True,
+            opd_use_task_rewards=False,
+            num_samples_per_prompt_rollout=1,
+            filter_zero_std_samples=True,
+        )
+
+        self.assertFalse(config.filter_zero_std_samples)
+
+    def test_rejects_unknown_opd_loss_mode(self):
+        with self.assertRaisesRegex(ValueError, "opd_loss_mode=forward_kl_topk"):
+            data_loader_lib.StreamingDataLoaderConfig(**{"opd_enabled": True, "opd_loss_mode": "reverse_kl"})
+
+
 class TestDataPreparation(TestGrpoFastBase):
     """Test prepare_collated_data_for_workers function."""
+
+    def test_teacher_scoring_ranges_balance_tokens(self):
+        queries = [[1] * 5, [2] * 5, [3] * 5, [4] * 5]
+        responses = [[10], [11] * 40, [12], [13]]
+
+        ranges = data_loader_lib._make_token_balanced_ranges(queries, responses, num_ranges=2)
+
+        self.assertEqual(ranges, [(0, 2), (2, 4)])
+        self.assertEqual(sum(end - start for start, end in ranges), len(responses))
+
+    def test_teacher_scoring_ranges_keep_available_workers_busy(self):
+        queries = [[1], [2], [3], [4]]
+        responses = [[10] * 100, [11], [12], [13]]
+
+        ranges = data_loader_lib._make_token_balanced_ranges(queries, responses, num_ranges=4)
+
+        self.assertEqual(ranges, [(0, 1), (1, 2), (2, 3), (3, 4)])
 
     @parameterized.expand(
         [
