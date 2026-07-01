@@ -15,6 +15,9 @@ DIND_SLIRP_LOG="${DIND_SLIRP_LOG:-${DIND_LOG_DIR}/slirp.log}"
 DIND_NS_PID_FILE="${DIND_NS_PID_FILE:-/tmp/dind_ns_pid}"
 DIND_SLIRP_READY_FILE="${DIND_SLIRP_READY_FILE:-/tmp/dind_slirp_ready}"
 DIND_STORAGE_DRIVER="${DIND_STORAGE_DRIVER:-vfs}"
+DIND_BRIDGE="${DIND_BRIDGE:-docker0}"
+DIND_IPTABLES="${DIND_IPTABLES:-true}"
+DIND_IP_FORWARD="${DIND_IP_FORWARD:-true}"
 DIND_SMOKE_TEST="${DIND_SMOKE_TEST:-1}"
 DIND_SMOKE_IMAGE="${DIND_SMOKE_IMAGE:-python:3.12-slim}"
 
@@ -72,7 +75,7 @@ else
 fi
 
 need_pkgs() {
-    for p in slirp4netns jq iproute2 gcc libc6-dev curl ca-certificates; do
+    for p in slirp4netns jq iproute2 iptables gcc libc6-dev curl ca-certificates; do
         dpkg -s "$p" >/dev/null 2>&1 || return 1
     done
 }
@@ -81,7 +84,7 @@ if ! need_pkgs; then
     command -v apt-get >/dev/null 2>&1 || dind_fail "apt-get not found; cannot install DinD prerequisites"
     apt-get update -qq || dind_fail "apt-get update failed"
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        slirp4netns jq iproute2 gcc libc6-dev curl ca-certificates >/dev/null \
+        slirp4netns jq iproute2 iptables gcc libc6-dev curl ca-certificates >/dev/null \
         || dind_fail "failed to install DinD prerequisites"
 fi
 
@@ -200,10 +203,10 @@ dockerd_args=(
     --exec-root="$RUNDIR"
     --pidfile="$RUNDIR/docker.pid"
     --storage-driver="$DIND_STORAGE_DRIVER"
-    --iptables=false
+    --iptables="$DIND_IPTABLES"
     --ip6tables=false
-    --bridge=none
-    --ip-forward=false
+    --bridge="$DIND_BRIDGE"
+    --ip-forward="$DIND_IP_FORWARD"
     --userland-proxy-path="$PREFIX/docker-proxy"
     --dns=10.0.2.3
     --host=unix://"$SOCK"

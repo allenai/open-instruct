@@ -130,6 +130,9 @@ Common DinD flags:
 | `DIND_DATA_ROOT` | `/var/lib/docker` | Docker data root. |
 | `DIND_SOCKET` | `$DIND_RUN_DIR/docker.sock` | Docker daemon socket path. |
 | `DIND_STORAGE_DRIVER` | `vfs` | Storage driver passed to `dockerd`. |
+| `DIND_BRIDGE` | `docker0` | Bridge network passed to `dockerd`; set to `none` only for workloads that do not need network inside sandbox containers. |
+| `DIND_IPTABLES` | `true` | Whether `dockerd` manages iptables for container NAT. |
+| `DIND_IP_FORWARD` | `true` | Whether `dockerd` enables IP forwarding for bridge networking. |
 | `DIND_SMOKE_TEST` | `1` | Run a tiny container after startup. |
 | `DIND_SMOKE_IMAGE` | `python:3.12-slim` | Image used by the smoke test. |
 | `DIND_SLIRP4NETNS_BIN` | auto-detected | Override the `slirp4netns` binary path. |
