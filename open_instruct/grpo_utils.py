@@ -731,11 +731,8 @@ def calculate_token_counts(
 
 _SCALAR_LOSS_STAT_KEYS = [
     "loss/kl_avg",
-    "loss/opd_avg",
     "loss/policy_avg",
     "loss/total_avg",
-    "opd/sampled_token_in_topk",
-    "opd/teacher_topk_mass",
     "objective/kl0_avg",
     "objective/kl1_avg",
     "objective/kl2_avg",
@@ -749,9 +746,14 @@ _SCALAR_LOSS_STAT_KEYS = [
     "val/rho_drop_high_frac",
 ]
 
+_OPD_LOSS_STAT_KEYS = ["loss/opd_avg", "opd/sampled_token_in_topk", "opd/teacher_topk_mass"]
 
-def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bool = False) -> dict[str, torch.Tensor]:
-    stats = {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
+
+def create_loss_stats(
+    num_samples: int, device: torch.device, record_entropy: bool = False, record_opd: bool = False
+) -> dict[str, torch.Tensor]:
+    keys = _SCALAR_LOSS_STAT_KEYS + _OPD_LOSS_STAT_KEYS if record_opd else _SCALAR_LOSS_STAT_KEYS
+    stats = {key: torch.zeros(num_samples, device=device) for key in keys}
     if record_entropy:
         stats |= {"policy/entropy_avg": torch.zeros(num_samples, device=device)}
     return stats

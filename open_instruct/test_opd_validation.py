@@ -133,10 +133,18 @@ class TestOutputVocabValidation(unittest.TestCase):
         ):
             self._call()
 
-    def test_skips_when_a_config_fails_to_load(self):
+    def test_skips_when_student_config_fails_to_load(self):
         # e.g. an OLMo-core student checkpoint without an HF config.
         with self._patch_configs({"teacher": 2048, "student": RuntimeError("no hf config")}):
             self._call()  # skipped, no raise even though teacher > (unknown) student
+
+    def test_rejects_unloadable_teacher_config(self):
+        # The teacher is served by vLLM, which needs an HF config — fail at validation, not at vLLM load.
+        with (
+            self._patch_configs({"teacher": RuntimeError("no hf config"), "student": 1024}),
+            self.assertRaisesRegex(ValueError, "Could not load the OPD teacher config"),
+        ):
+            self._call()
 
     def test_uses_explicit_student_vocab_size(self):
         with (
@@ -152,9 +160,12 @@ class TestOutputVocabValidation(unittest.TestCase):
                 trust_remote_code=False,
             )
 
-    def test_skips_when_vocab_size_missing(self):
-        with self._patch_configs({"teacher": None, "student": 1024}):
-            self._call()  # teacher has no vocab_size -> skip
+    def test_rejects_teacher_config_without_vocab_size(self):
+        with (
+            self._patch_configs({"teacher": None, "student": 1024}),
+            self.assertRaisesRegex(ValueError, "has no `vocab_size`"),
+        ):
+            self._call()
 
 
 if __name__ == "__main__":

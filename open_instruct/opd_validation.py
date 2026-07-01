@@ -88,27 +88,39 @@ def validate_teacher_student_output_vocab(
     additionally guarantees the teacher's model *output dimension* is not wider
     than the student's: teacher top-k ids are used as gather indices into the
     student model's logits, so a teacher whose vocab exceeds the student's could
-    emit an id that the learner cannot score. The student dim is read from the
-    already-built learner config when available, otherwise from its HF config. If
-    a non-HF config cannot be loaded, the learner forward still hard-errors on
-    out-of-range teacher ids.
+    emit an id that the learner cannot score. The teacher config must be
+    HF-loadable — the teacher is served by vLLM, which requires an HF config, so
+    an unloadable teacher config is an error here rather than a later vLLM
+    failure. The student dim is read from the already-built learner config when
+    available, otherwise from its HF config; if a non-HF student config cannot
+    be loaded we skip (the learner forward still hard-errors on out-of-range
+    teacher ids).
     """
 
-    def _vocab_size(name: str, revision: str | None, role: str) -> int | None:
+    def _vocab_size(name: str, revision: str | None, role: str, required: bool) -> int | None:
         try:
             config = transformers.AutoConfig.from_pretrained(
                 name, revision=revision, trust_remote_code=trust_remote_code
             )
-        except Exception as e:  # noqa: BLE001 - config may be an OLMo-core checkpoint or otherwise unloadable
+        except Exception as e:
+            if required:
+                raise ValueError(
+                    f"Could not load the OPD {role} config for {name}: {e}. "
+                    "The teacher must be an HF-format model because it is served by vLLM."
+                ) from e
+            # The student may be an OLMo-core checkpoint without an HF config.
             logger.warning("Could not load %s config (%s) to validate OPD output vocab size; skipping check.", role, e)
             return None
-        return getattr(config, "vocab_size", None)
+        size = getattr(config, "vocab_size", None)
+        if size is None and required:
+            raise ValueError(f"OPD {role} config for {name} has no `vocab_size`; cannot validate output vocab.")
+        return size
 
-    teacher_output_vocab_size = _vocab_size(teacher_model_name_or_path, teacher_revision, "teacher")
+    teacher_output_vocab_size = _vocab_size(teacher_model_name_or_path, teacher_revision, "teacher", required=True)
     student_output_vocab_size = (
         student_vocab_size
         if student_vocab_size is not None
-        else _vocab_size(student_model_name_or_path, student_revision, "student")
+        else _vocab_size(student_model_name_or_path, student_revision, "student", required=False)
     )
     if teacher_output_vocab_size is None or student_output_vocab_size is None:
         return
