@@ -67,10 +67,19 @@ flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+# The vLLM fork only adds Python files on top of upstream commit b1388b1f, so reuse the
+# precompiled binaries from that commit's nightly wheel instead of compiling from source
+# (which takes hours). The version-suffix skip keeps the built version identical to the
+# non-precompiled one recorded in uv.lock (`+...cu128`).
+vllm = { VLLM_USE_PRECOMPILED = "TRUE", VLLM_PRECOMPILED_WHEEL_COMMIT = "b1388b1fbf5aaef47937fabe98931211684666a6", VLLM_SKIP_PRECOMPILED_VERSION_SUFFIX = "1" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "9aa3280fd5331b93fc766206eadec42ee73befc0" }
+# OLMo-hybrid small suite: the `olmo_hybrid_small` architecture lives in maintainer
+# forks of transformers + vLLM + OLMo-core (not yet upstreamed).
+ai2-olmo-core = { git = "https://github.com/YashasSamaga/OLMo-core.git", rev = "hybrid-final" }
+transformers = { git = "https://github.com/yashassamaga/transformers.git", rev = "hybrid-small-suite" }
+vllm = { git = "https://github.com/YashasSamaga/vllm.git", rev = "olmo-hybrid-small", marker = "platform_system != 'Darwin'" }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
@@ -120,7 +129,9 @@ environments = [
 
 [dependency-groups]
 dev = [
-    "beaker-py>=2.5.7",
+    # >=2.7.0: older versions fail to parse Beaker server responses containing the
+    # newer `min_runtime` task-context field.
+    "beaker-py>=2.7.0",
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
     "ruff>=0.11.13",

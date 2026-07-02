@@ -3,8 +3,12 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import json
 import os
-from dataclasses import dataclass, field
+import re
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import Any, Literal
 
 import accelerate
@@ -28,6 +32,7 @@ from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingMode,
 )
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -156,8 +161,14 @@ def build_ac_config(
     activation_memory_budget: float, compile_model: bool, mode: str = "budget", modules: list[str] | None = None
 ) -> TransformerActivationCheckpointingConfig | None:
     if mode == "selected_modules":
+        # The OLMo-hybrid small suite's maintainer OLMo-core fork predates the configurable
+        # determinism check (needed to suppress the opaque fla kernel's recompute metadata
+        # check); only pass it when the installed olmo-core supports it.
+        kwargs = {}
+        if any(f.name == "determinism_check" for f in fields(TransformerActivationCheckpointingConfig)):
+            kwargs["determinism_check"] = "none"
         return TransformerActivationCheckpointingConfig(
-            mode=TransformerActivationCheckpointingMode.selected_modules, modules=modules, determinism_check="none"
+            mode=TransformerActivationCheckpointingMode.selected_modules, modules=modules, **kwargs
         )
     if activation_memory_budget < 1.0 and compile_model:
         return TransformerActivationCheckpointingConfig(
@@ -281,7 +292,7 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     """
     logger.info("Reloading HuggingFace weights after parallelization...")
     sd = train_module.model.state_dict()
-    load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    load_hf_model_with_hybrid_support(model_name_or_path, sd, work_dir=work_dir)
     train_module.model.load_state_dict(sd)
 
 
@@ -348,6 +359,52 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
 }
 
 
+def _override_attn_backend(config_dict: Any, attn_backend: str) -> None:
+    """Recursively override any `AttentionConfig.backend` field in-place.
+
+    Maintainer-pipeline checkpoints (e.g. OLMo-hybrid small suite) bake in the backend
+    (e.g. `flash_3`, H100-only) used at training time. Force it to match the requested
+    `attn_backend` so the config also builds on other hardware (e.g. `flash_2`).
+    """
+    if isinstance(config_dict, dict):
+        if config_dict.get("_CLASS_", "").endswith("AttentionConfig") and "backend" in config_dict:
+            config_dict["backend"] = attn_backend
+        for value in config_dict.values():
+            _override_attn_backend(value, attn_backend)
+    elif isinstance(config_dict, list):
+        for item in config_dict:
+            _override_attn_backend(item, attn_backend)
+
+
+def _load_native_transformer_config(model_name_or_path: str, attn_backend: str | None) -> TransformerConfig | None:
+    """Load a `TransformerConfig` from a maintainer-pipeline checkpoint's own config.
+
+    Maintainer pipelines (e.g. OLMo-hybrid small suite) write a full HF-format checkpoint
+    (suffixed `-hf`) next to the olmo-core-native checkpoint it was converted from. The
+    native checkpoint's `config.json` embeds the exact `TransformerConfig` (as a `_CLASS_`-
+    tagged dict) used to train it, so we can deserialize it directly instead of requiring a
+    hardcoded named preset (there is no `olmo_hybrid_small` preset in `TransformerConfig`).
+
+    Returns None if `model_name_or_path` doesn't look like such a checkpoint.
+    """
+    path = Path(model_name_or_path)
+    if not path.is_dir() or not path.name.endswith("-hf"):
+        return None
+    native_dir = path.with_name(path.name[: -len("-hf")])
+    config_path = native_dir / "config.json"
+    if not config_path.is_file():
+        return None
+    with open(config_path) as f:
+        data = json.load(f)
+    model_dict = data.get("model")
+    if model_dict is None:
+        return None
+    if attn_backend is not None:
+        _override_attn_backend(model_dict, str(AttentionBackendName(attn_backend)))
+    logger.info(f"Loading native TransformerConfig from '{config_path}'")
+    return TransformerConfig.from_dict(model_dict)
+
+
 def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_backend: str) -> TransformerConfig:
     """Get the appropriate TransformerConfig for a given model name or config name.
 
@@ -367,6 +424,11 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
         config_name = model_name_or_config
 
     if not hasattr(TransformerConfig, config_name):
+        native_config = _load_native_transformer_config(model_name_or_config, attn_backend)
+        if native_config is not None:
+            native_config.vocab_size = vocab_size
+            return native_config
+
         available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
         available_configs = [
             name for name in dir(TransformerConfig) if name.startswith(("olmo", "qwen")) and not name.startswith("_")
@@ -486,6 +548,164 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
+# olmo-core <-> HF weight-name mappings for the OLMo-hybrid small suite (`olmo_hybrid_small`
+# architecture, a GatedDeltaNet linear-attention + full-attention hybrid). These match the
+# maintainer's own `convert_olmo_hybrid_small_weights_to_hf.py` in the transformers fork.
+# The olmo-core fork's generic `load_hf_model`/`convert_state_to_hf` only know the standard
+# (non-hybrid) key mappings, so we implement the conversion ourselves.
+HYBRID_SMALL_MODEL_TYPE = "olmo_hybrid_small"
+
+_HYBRID_SMALL_TOP_LEVEL_TO_HF: dict[str, str] = {
+    "embeddings.weight": "model.embed_tokens.weight",
+    "embedding_norm.weight": "model.embed_norm.weight",
+    "lm_head.norm.weight": "model.norm.weight",
+    "lm_head.w_out.weight": "lm_head.weight",
+}
+
+# Per-block mappings shared by both layer types (peri-norm blocks + SwiGLU MLP).
+_HYBRID_SMALL_COMMON_LAYER_TO_HF: dict[str, str] = {
+    "feed_forward.w1.weight": "mlp.gate_proj.weight",
+    "feed_forward.w2.weight": "mlp.down_proj.weight",
+    "feed_forward.w3.weight": "mlp.up_proj.weight",
+    "attention_norm.weight": "input_layernorm.weight",
+    "post_attention_norm.weight": "post_attention_layernorm.weight",
+    "feed_forward_norm.weight": "ffn_layernorm.weight",
+    "post_feed_forward_norm.weight": "post_feedforward_layernorm.weight",
+}
+
+# GatedDeltaNet linear-attention blocks.
+_HYBRID_SMALL_GDN_LAYER_TO_HF: dict[str, str] = {
+    "attention.w_q.weight": "linear_attn.q_proj.weight",
+    "attention.w_k.weight": "linear_attn.k_proj.weight",
+    "attention.w_v.weight": "linear_attn.v_proj.weight",
+    "attention.w_out.weight": "linear_attn.o_proj.weight",
+    "attention.w_g.weight": "linear_attn.g_proj.weight",
+    "attention.w_a.weight": "linear_attn.a_proj.weight",
+    "attention.w_b.weight": "linear_attn.b_proj.weight",
+    "attention.o_norm.weight": "linear_attn.o_norm.weight",
+    "attention.q_conv1d.weight": "linear_attn.q_conv1d.weight",
+    "attention.k_conv1d.weight": "linear_attn.k_conv1d.weight",
+    "attention.v_conv1d.weight": "linear_attn.v_conv1d.weight",
+    "attention.A_log": "linear_attn.A_log",
+    "attention.dt_bias": "linear_attn.dt_bias",
+}
+
+# Gated full-attention blocks.
+_HYBRID_SMALL_FULL_ATTN_LAYER_TO_HF: dict[str, str] = {
+    "attention.w_q.weight": "self_attn.q_proj.weight",
+    "attention.w_k.weight": "self_attn.k_proj.weight",
+    "attention.w_v.weight": "self_attn.v_proj.weight",
+    "attention.w_out.weight": "self_attn.o_proj.weight",
+    "attention.w_g.weight": "self_attn.attn_gate.weight",
+    "attention.q_norm.weight": "self_attn.q_norm.weight",
+    "attention.k_norm.weight": "self_attn.k_norm.weight",
+}
+
+_HYBRID_SMALL_BLOCK_RE = re.compile(r"blocks\.(\d+)\.(.*)")
+
+
+def is_hybrid_small_checkpoint(model_name_or_path: str) -> bool:
+    """Whether an HF checkpoint uses the OLMo-hybrid small suite architecture."""
+    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    return getattr(hf_config, "model_type", None) == HYBRID_SMALL_MODEL_TYPE
+
+
+def _hybrid_small_layer_mapping(layer_type: str) -> dict[str, str]:
+    mapping = dict(_HYBRID_SMALL_COMMON_LAYER_TO_HF)
+    mapping.update(
+        _HYBRID_SMALL_GDN_LAYER_TO_HF if layer_type == "linear_attention" else _HYBRID_SMALL_FULL_ATTN_LAYER_TO_HF
+    )
+    return mapping
+
+
+def _convert_hybrid_small_state_from_hf(
+    hf_state_dict: dict[str, torch.Tensor], n_layers: int
+) -> dict[str, torch.Tensor]:
+    """Convert an HF `olmo_hybrid_small` state dict to olmo-core naming.
+
+    Per-layer types are detected by the presence of the GDN-specific `A_log` parameter.
+    """
+    layer_types = [
+        "linear_attention" if f"model.layers.{i}.linear_attn.A_log" in hf_state_dict else "full_attention"
+        for i in range(n_layers)
+    ]
+    converted = {oc_key: hf_state_dict[hf_key] for oc_key, hf_key in _HYBRID_SMALL_TOP_LEVEL_TO_HF.items()}
+    for layer_i, layer_type in enumerate(layer_types):
+        for oc_key, hf_key in _hybrid_small_layer_mapping(layer_type).items():
+            converted[f"blocks.{layer_i}.{oc_key}"] = hf_state_dict[f"model.layers.{layer_i}.{hf_key}"]
+    return converted
+
+
+def convert_hybrid_small_state_to_hf(state_dict: dict[str, torch.Tensor], n_layers: int) -> dict[str, torch.Tensor]:
+    """Convert an olmo-core `olmo_hybrid_small` state dict to HF naming (inverse of the above)."""
+    layer_types = [
+        "linear_attention" if f"blocks.{i}.attention.A_log" in state_dict else "full_attention"
+        for i in range(n_layers)
+    ]
+    converted = {hf_key: state_dict[oc_key] for oc_key, hf_key in _HYBRID_SMALL_TOP_LEVEL_TO_HF.items()}
+    for layer_i, layer_type in enumerate(layer_types):
+        for oc_key, hf_key in _hybrid_small_layer_mapping(layer_type).items():
+            converted[f"model.layers.{layer_i}.{hf_key}"] = state_dict[f"blocks.{layer_i}.{oc_key}"]
+    return converted
+
+
+def make_hybrid_small_name_mapper(state_dict_keys: Iterable[str]) -> Callable[[str], str]:
+    """Build an olmo-core -> HF weight-name mapper for `olmo_hybrid_small` models.
+
+    Used during GRPO weight sync to translate learner parameter names to the HF names the
+    vLLM model expects. The mapping is layer-type dependent (`attention.w_q` becomes
+    `linear_attn.q_proj` in GDN blocks but `self_attn.q_proj` in full-attention blocks), so
+    GDN layers are detected up front from the GDN-specific `A_log` key.
+    """
+    gdn_layers = {
+        int(match.group(1))
+        for key in state_dict_keys
+        if (match := _HYBRID_SMALL_BLOCK_RE.match(key)) and match.group(2) == "attention.A_log"
+    }
+
+    def mapper(name: str) -> str:
+        if name in _HYBRID_SMALL_TOP_LEVEL_TO_HF:
+            return _HYBRID_SMALL_TOP_LEVEL_TO_HF[name]
+        match = _HYBRID_SMALL_BLOCK_RE.match(name)
+        if match:
+            layer_idx, rest = match.group(1), match.group(2)
+            layer_type = "linear_attention" if int(layer_idx) in gdn_layers else "full_attention"
+            mapping = _hybrid_small_layer_mapping(layer_type)
+            if rest in mapping:
+                return f"model.layers.{layer_idx}.{mapping[rest]}"
+        return name
+
+    return mapper
+
+
+def load_hf_model_with_hybrid_support(
+    model_name_or_path: str, model_state_dict: dict[str, Any], work_dir: str
+) -> None:
+    """Load HF checkpoint weights into an olmo-core state dict, with OLMo-hybrid small support.
+
+    The olmo-core fork's `load_hf_model` only implements the generic (non-hybrid) HF ->
+    olmo-core weight conversion, which doesn't know about `olmo_hybrid_small`'s GatedDeltaNet
+    linear-attention layers. Dispatch to our own conversion for that architecture; delegate to
+    olmo-core otherwise.
+
+    Note: entries of ``model_state_dict`` may be *replaced* (not copied into in-place), so
+    callers must apply the result with ``model.load_state_dict(model_state_dict)``.
+    """
+    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    if getattr(hf_config, "model_type", None) != HYBRID_SMALL_MODEL_TYPE:
+        load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
+        return
+
+    hf_model = transformers.AutoModelForCausalLM.from_pretrained(model_name_or_path)
+    converted = _convert_hybrid_small_state_from_hf(hf_model.state_dict(), hf_config.num_hidden_layers)
+    for key in sorted(converted.keys()):
+        state = converted[key]
+        current = model_state_dict[key]
+        if isinstance(current, DTensor):
+            state = distribute_tensor(state, current.device_mesh, current.placements)
+        model_state_dict[key] = state
+
+
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -497,7 +717,10 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
+    if getattr(hf_config, "model_type", None) == HYBRID_SMALL_MODEL_TYPE:
+        converted = convert_hybrid_small_state_to_hf(olmo_core_state, hf_config.num_hidden_layers)
+    else:
+        converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
@@ -532,7 +755,10 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+    if getattr(hf_config, "model_type", None) == HYBRID_SMALL_MODEL_TYPE:
+        converted = convert_hybrid_small_state_to_hf(state_dict, hf_config.num_hidden_layers)
+    else:
+        converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():

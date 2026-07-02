@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Support GRPO and DPO training of the OLMo-hybrid small suite (`olmo_hybrid_small` architecture, a GatedDeltaNet linear-attention + full-attention hybrid): pin transformers + vLLM + OLMo-core to the maintainer forks via `[tool.uv.sources]` (vLLM reuses the upstream base commit's precompiled binaries via `VLLM_USE_PRECOMPILED`, so no source compile), deserialize the sibling olmo-core-native checkpoint's own `TransformerConfig` when pointing at an `-hf` checkpoint (no hardcoded preset needed, with the baked-in H100-only `flash_3` attention backend overridden to the requested one), add hand-written HF<->olmo-core weight converters and a layer-type-aware vLLM weight-sync name mapper for the hybrid GatedDeltaNet layers (the olmo-core fork's generic converters don't support them; round-trip verified byte-identical), and add single-GPU GRPO/DPO debug scripts for the 275M SFT checkpoint (https://github.com/allenai/open-instruct/pull/TODO).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed

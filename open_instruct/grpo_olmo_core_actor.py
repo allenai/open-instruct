@@ -15,7 +15,6 @@ import transformers
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
-from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -79,6 +78,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
+        self.name_mapper = olmo_core_to_hf_name
         self.vllm_engines: list[ray.actor.ActorHandle] = []
         self.model_update_group = None
         self.actor_manager = None
@@ -133,7 +133,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
             self.ref_policy = self.model_config.build(init_device="cpu")
-            load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir)
+            ref_sd = self.ref_policy.state_dict()
+            olmo_core_utils.load_hf_model_with_hybrid_support(
+                self.model_name_or_path, ref_sd, work_dir=self.grpo_config.output_dir
+            )
+            self.ref_policy.load_state_dict(ref_sd)
             self.ref_policy = self.ref_policy.to(device=device, dtype=torch_dtype).eval()
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
@@ -201,10 +205,18 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
         # We must reload HF weights after parallelization (FSDP-first loading pattern).
-        logger.info(f"[Rank {self.rank}] Reloading HuggingFace weights after parallelization...")
-        sd = self.train_module.model.state_dict()
-        load_hf_model(self.model_name_or_path, sd, work_dir=self.grpo_config.output_dir)
-        self.train_module.model.load_state_dict(sd)
+        olmo_core_utils.reload_hf_checkpoint_after_parallelization(
+            self.train_module, self.model_name_or_path, self.grpo_config.output_dir
+        )
+
+        # The generic olmo-core -> HF name mapper doesn't cover the OLMo-hybrid small
+        # suite's GatedDeltaNet layers (and maps the peri-norm block norms differently).
+        if olmo_core_utils.is_hybrid_small_checkpoint(self.model_name_or_path):
+            self.name_mapper = olmo_core_utils.make_hybrid_small_name_mapper(
+                self.train_module.model.state_dict().keys()
+            )
+        else:
+            self.name_mapper = olmo_core_to_hf_name
 
         if self.grpo_config.single_gpu_mode:
             logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode")
@@ -260,7 +272,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             model_step=0,
-            name_mapper=olmo_core_to_hf_name,
+            name_mapper=self.name_mapper,
         )
         if self.rank == 0:
             utils.ray_get_with_progress(refs, desc="Initial vLLM weight sync", enable=False)
@@ -334,7 +346,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
-            name_mapper=olmo_core_to_hf_name,
+            name_mapper=self.name_mapper,
         )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
