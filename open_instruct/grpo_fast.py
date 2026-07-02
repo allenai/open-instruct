@@ -2316,8 +2316,6 @@ def main(
 
 
 if __name__ == "__main__":
-    utils.check_oe_eval_internal()
-
     parser = ArgumentParserPlus(
         (
             grpo_utils.ExperimentConfig,
@@ -2337,5 +2335,9 @@ if __name__ == "__main__":
     assert isinstance(streaming_config, data_loader_lib.StreamingDataLoaderConfig)
     assert isinstance(vllm_config, data_loader_lib.VLLMConfig)
     assert isinstance(tools_config, EnvsConfig)
+
+    # oe-eval-internal is only needed when we launch eval jobs after training.
+    if args.try_launch_beaker_eval_jobs_on_weka:
+        utils.check_oe_eval_internal()
 
     main(args, tokenizer_config, model_config, streaming_config, vllm_config, tools_config)

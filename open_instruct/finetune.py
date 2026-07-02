@@ -952,8 +952,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
 
 if __name__ == "__main__":
-    utils.check_oe_eval_internal()
-
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
+    # oe-eval-internal is only needed when we launch eval jobs after training.
+    if args.try_launch_beaker_eval_jobs:
+        utils.check_oe_eval_internal()
     main(args, tc)
