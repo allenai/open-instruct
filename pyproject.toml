@@ -32,6 +32,12 @@ dependencies = [
     # fork gates its fast `olmo_hybrid_small` path on `fla` (>=0.2.2) + CUDA, otherwise it
     # falls back to a slow pure-torch implementation. The vLLM fork bundles its own kernels.
     "flash-linear-attention==0.5.1; platform_system != 'Darwin'",
+    # fla's Triton GDN backward is wrong on Hopper with Triton >= 3.4 (fla-org #640);
+    # with tilelang installed fla dispatches to its TileLang backend instead.
+    "tilelang==0.1.11; platform_system != 'Darwin'",
+    # tilelang 0.1.11 aborts at import ("TypeAttr `__ffi_repr__` is already registered")
+    # with apache-tvm-ffi 0.1.12; hold it back.
+    "apache-tvm-ffi==0.1.10; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
