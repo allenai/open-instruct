@@ -321,7 +321,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
         work_dir=args.output_dir,
         collator=collator,
         device=device,
-        drop_last=True,
+        # We need to process every example to cache reference logprobs, so we can't drop the last batch.
+        drop_last=False,
     )
 
     forward_fn = dpo_utils.concatenated_forward_olmo if args.concatenated_forward else dpo_utils.separate_forward_olmo
