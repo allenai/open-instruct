@@ -20,7 +20,7 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-other \
     --no_auto_dataset_cache \
     --no-host-networking \
     --env 'TORCH_LOGS=graph_breaks,recompiles' \
