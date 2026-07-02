@@ -64,6 +64,26 @@ class TestLogSoftmaxAndGather(unittest.TestCase):
         self.assertTrue(torch.all(torch.isfinite(result)))
 
 
+class TestLogsumexpFP32Chunked(unittest.TestCase):
+    def test_matches_full_fp32_logsumexp_value_and_grad(self):
+        torch.manual_seed(0)
+        base = torch.randn(2, 7, 33, dtype=torch.bfloat16) * 10
+
+        logits_chunked = base.clone().requires_grad_(True)
+        # chunk_size=3 does not divide seq_len=7, exercising the ragged final chunk.
+        result = open_instruct.model_utils.logsumexp_fp32_chunked(logits_chunked, chunk_size=3)
+        result.sum().backward()
+
+        logits_full = base.clone().requires_grad_(True)
+        expected = torch.logsumexp(logits_full.float(), dim=-1, keepdim=True)
+        expected.sum().backward()
+
+        self.assertEqual(result.dtype, torch.float32)
+        self.assertEqual(result.shape, (2, 7, 1))
+        torch.testing.assert_close(result, expected)
+        torch.testing.assert_close(logits_chunked.grad, logits_full.grad)
+
+
 class TestTensorCache(unittest.TestCase):
     def test_getitem_returns_correct_tensors(self):
         chosen_logps = torch.tensor([[1.0, 2.0], [3.0, 4.0]])

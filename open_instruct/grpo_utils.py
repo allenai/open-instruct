@@ -596,17 +596,15 @@ def forward_for_logprobs_and_topk(
     labels = query_responses[:, 1:].clone().to(policy_logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
+    # Sampled-token logprob (GRPO importance ratio): use the fused/compiled gather so we do not
+    # materialize a full-vocab [B, T, V] log-softmax tensor just to read one column per position.
+    logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
     topk_logprobs = None
     if topk_token_ids is not None:
         if topk_token_ids.shape[:2] != policy_logits.shape[:2]:
             raise ValueError(
                 f"topk_token_ids shape {topk_token_ids.shape} does not align to logits shape {policy_logits.shape}"
             )
-        # Sampled-token logprob (GRPO importance ratio): use the fused/compiled gather so we do not
-        # materialize a full-vocab [B, T, V] log-softmax tensor just to read one column per position.
-        logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
-        # Teacher top-k logprob (OPD): from raw T=1 logits. Normalize via logsumexp so we only
-        # allocate [B, T, K] + [B, T, 1] instead of a second full-vocab [B, T, V] log-softmax.
         safe_topk_token_ids = topk_token_ids.to(raw_logits.device)
         invalid_topk_token_ids = (safe_topk_token_ids < 0) | (safe_topk_token_ids >= raw_logits.shape[-1])
         if invalid_topk_token_ids.any().item():
@@ -616,12 +614,12 @@ def forward_for_logprobs_and_topk(
                 f"Got min invalid id={invalid_values.min().item()}, max invalid id={invalid_values.max().item()}, "
                 f"student_vocab_size={raw_logits.shape[-1]}."
             )
-        raw_logits_f = raw_logits.float()
-        topk_logprobs = torch.gather(raw_logits_f, dim=-1, index=safe_topk_token_ids) - torch.logsumexp(
-            raw_logits_f, dim=-1, keepdim=True
+        # Teacher top-k logprob (OPD): from raw T=1 logits. Normalize via a chunked fp32 logsumexp
+        # so we only allocate [B, T, K] + [B, T, 1] (plus one fp32 chunk at a time) instead of a
+        # full-vocab fp32 copy or a second [B, T, V] log-softmax.
+        topk_logprobs = torch.gather(raw_logits, dim=-1, index=safe_topk_token_ids).float() - (
+            model_utils.logsumexp_fp32_chunked(raw_logits)
         )
-    else:
-        logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
 
     # For now, entropy is just for monitoring, and we don't pass gradients through it.
     entropy = None

@@ -115,7 +115,11 @@ teacher_topk_logprobs:  Tensor[response_len, K]
 ```
 
 Alignment: the entry at the position of `y_t` represents the teacher
-distribution conditioned on `prompt + y_<t`. vLLM may omit the first
+distribution conditioned on `prompt + y_<t`. Responses are pad-filtered before
+scoring — vLLM can emit pad tokens mid-response, `pack_sequences` strips them
+from what the learner trains on, and pad ids may not exist in the teacher
+vocab — so teacher rows align with the pad-filtered response, and the scorer
+hard-errors on any token id outside the teacher vocab. vLLM may omit the first
 prompt-token slot; extraction accepts both alignments
 (`distillkit/vllm_logprobs.py`). The teacher's `max_model_len` is
 `max_prompt_token_length + response_length + 1` (headroom for the single dummy
@@ -150,7 +154,7 @@ config object is threaded through the stack):
 ```python
 opd_enabled: bool = False
 opd_loss_mode: Literal["forward_kl_topk"] = "forward_kl_topk"
-opd_topk: int = 128
+opd_topk: int = 16
 opd_loss_coef: float = 1.0
 opd_use_task_rewards: bool = True
 opd_teacher_model_name_or_path: str | None = None

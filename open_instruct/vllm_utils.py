@@ -1185,6 +1185,78 @@ def get_cuda_arch_list() -> str:
     return cuda_arch_list
 
 
+def get_vllm_distributed_executor_backend(tensor_parallel_size: int) -> str:
+    # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
+    # Using "ray" executor causes placement group context loss in vLLM v1's
+    # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
+    return "uni" if tensor_parallel_size == 1 else "mp"
+
+
+def create_vllm_ray_actors(
+    actor_cls: type,
+    *,
+    num_engines: int,
+    tensor_parallel_size: int,
+    num_gpus: float,
+    pg: PlacementGroup | None,
+    remote_kwargs_fn: Callable[[int, list[int]], dict[str, Any]],
+    ready_message: str,
+    ready_timeout: float | None = None,
+) -> list[ray.actor.ActorHandle]:
+    """Launch vLLM-hosting Ray actors with the shared placement/runtime-env scaffolding.
+
+    Owns the PACK placement-group construction (when no external `pg` is given), per-engine
+    bundle-index selection, scheduling strategy, and the runtime env vLLM needs inside Ray
+    actors. `remote_kwargs_fn(engine_idx, bundle_indices)` supplies the actor constructor
+    kwargs. Used by both the rollout engines and the OPD teacher scorers so vLLM bring-up
+    fixes land in one place.
+    """
+    use_existing_pg = pg is not None
+    if pg is None:
+        # Create a placement group to ensure that all engines are packed.
+        # Each bundle reserves tensor_parallel_size GPUs for one engine.
+        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
+        pg = placement_group(bundles, strategy="PACK")
+        ray.get(pg.ready())
+
+    # ensure we use bundles on the same node where possible if tp>1.
+    bundle_indices_list = get_bundle_indices_list(pg)
+
+    actors = []
+    for i in range(num_engines):
+        if use_existing_pg:
+            bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        else:
+            bundle_indices = [bundle_indices_list[i]]
+
+        scheduling_strategy = PlacementGroupSchedulingStrategy(
+            placement_group=pg,
+            placement_group_capture_child_tasks=True,
+            placement_group_bundle_index=bundle_indices[0],
+        )
+
+        actors.append(
+            ray.remote(actor_cls)
+            .options(
+                num_cpus=num_gpus,
+                num_gpus=num_gpus,
+                scheduling_strategy=scheduling_strategy,
+                runtime_env=ray.runtime_env.RuntimeEnv(
+                    env_vars={
+                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
+                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
+                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
+                    }
+                ),
+            )
+            .remote(**remote_kwargs_fn(i, bundle_indices))
+        )
+
+    utils.ray_get_with_progress([actor.ready.remote() for actor in actors], ready_message, timeout=ready_timeout)
+
+    return actors
+
+
 def create_vllm_engines(
     num_engines: int,
     tensor_parallel_size: int,
@@ -1216,11 +1288,7 @@ def create_vllm_engines(
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
 ) -> list[ray.actor.ActorHandle]:
-    vllm_engines = []
-    # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
-    # Using "ray" executor causes placement group context loss in vLLM v1's
-    # subprocess-based EngineCore architecture. See: https://github.com/vllm-project/vllm/issues/30016
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "mp"
+    distributed_executor_backend = get_vllm_distributed_executor_backend(tensor_parallel_size)
     use_hybrid_engine = pg is not None
     if tensor_parallel_size != 1 and use_hybrid_engine:
         raise ValueError("tensor_parallel_size > 1 is not supported with single_gpu_mode")
@@ -1231,86 +1299,55 @@ def create_vllm_engines(
 
     logger.info(f"num_gpus: {num_gpus}")
 
-    if not use_hybrid_engine:
-        # Create a placement group to ensure that all engines are packed.
-        # Each bundle reserves tensor_parallel_size GPUs for one engine.
-        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
-        pg = placement_group(bundles, strategy="PACK")
-        ray.get(pg.ready())
-
-    # ensure we use bundles on the same node where possible if tp>1.
-    bundle_indices_list = get_bundle_indices_list(pg)
-
-    for i in range(num_engines):
-        if use_hybrid_engine:
-            bundle_indices = bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
-        else:
-            bundle_indices = [bundle_indices_list[i]]
-
-        scheduling_strategy = PlacementGroupSchedulingStrategy(
-            placement_group=pg,
-            placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=bundle_indices[0],
+    def remote_kwargs(engine_idx: int, bundle_indices: list[int]) -> dict[str, Any]:
+        return dict(
+            model=pretrain,
+            revision=revision,
+            tokenizer=tokenizer_name_or_path,
+            tokenizer_revision=revision,
+            weight_transfer_config=WeightTransferConfig(backend="ipc" if use_hybrid_engine else "nccl"),
+            tensor_parallel_size=tensor_parallel_size,
+            enforce_eager=enforce_eager,
+            dtype="bfloat16",
+            seed=seed + engine_idx,
+            distributed_executor_backend=distributed_executor_backend,
+            enable_prefix_caching=enable_prefix_caching,
+            max_model_len=max_model_len,
+            gpu_memory_utilization=vllm_gpu_memory_utilization,
+            logprobs_mode="processed_logprobs",
+            bundle_indices=bundle_indices,
+            num_gpus=0.2 if use_hybrid_engine else 1,
+            noset_visible_devices=ray_noset_visible_devices(),
+            prompt_queue=prompt_queue,
+            results_queue=results_queue,
+            eval_results_queue=eval_results_queue,
+            actor_manager=actor_manager,
+            tool_parser_type=tool_parser_type,
+            tool_definitions=tool_definitions,
+            tool_stop_sequences=tool_stop_sequences,
+            max_steps=max_steps,
+            per_turn_max_tokens=per_turn_max_tokens,
+            mask_tool_use=mask_tool_use,
+            pools=pools,
+            inflight_updates=inflight_updates,
+            reward_config=reward_config,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            trust_remote_code=trust_remote_code,
+            attention_backend=vllm_attention_backend,
+            language_model_only=True,
         )
 
-        vllm_engines.append(
-            ray.remote(LLMRayActor)
-            .options(
-                num_cpus=num_gpus,
-                num_gpus=num_gpus,
-                scheduling_strategy=scheduling_strategy,
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={
-                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
-                        "TORCH_CUDA_ARCH_LIST": get_cuda_arch_list(),
-                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
-                    }
-                ),
-            )
-            .remote(
-                model=pretrain,
-                revision=revision,
-                tokenizer=tokenizer_name_or_path,
-                tokenizer_revision=revision,
-                weight_transfer_config=WeightTransferConfig(backend="ipc" if use_hybrid_engine else "nccl"),
-                tensor_parallel_size=tensor_parallel_size,
-                enforce_eager=enforce_eager,
-                dtype="bfloat16",
-                seed=seed + i,
-                distributed_executor_backend=distributed_executor_backend,
-                enable_prefix_caching=enable_prefix_caching,
-                max_model_len=max_model_len,
-                gpu_memory_utilization=vllm_gpu_memory_utilization,
-                logprobs_mode="processed_logprobs",
-                bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
-                noset_visible_devices=ray_noset_visible_devices(),
-                prompt_queue=prompt_queue,
-                results_queue=results_queue,
-                eval_results_queue=eval_results_queue,
-                actor_manager=actor_manager,
-                tool_parser_type=tool_parser_type,
-                tool_definitions=tool_definitions,
-                tool_stop_sequences=tool_stop_sequences,
-                max_steps=max_steps,
-                per_turn_max_tokens=per_turn_max_tokens,
-                mask_tool_use=mask_tool_use,
-                pools=pools,
-                inflight_updates=inflight_updates,
-                reward_config=reward_config,
-                train_dataset=train_dataset,
-                eval_dataset=eval_dataset,
-                trust_remote_code=trust_remote_code,
-                attention_backend=vllm_attention_backend,
-                language_model_only=True,
-            )
-        )
-
-    utils.ray_get_with_progress(
-        [engine.ready.remote() for engine in vllm_engines], "Initializing vLLM engines", timeout=1200
+    return create_vllm_ray_actors(
+        LLMRayActor,
+        num_engines=num_engines,
+        tensor_parallel_size=tensor_parallel_size,
+        num_gpus=num_gpus,
+        pg=pg,
+        remote_kwargs_fn=remote_kwargs,
+        ready_message="Initializing vLLM engines",
+        ready_timeout=1200,
     )
-
-    return vllm_engines
 
 
 def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]]:

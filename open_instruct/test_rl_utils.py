@@ -162,12 +162,13 @@ class TestRLUtils(unittest.TestCase):
         responses = [[4, 0], [5]]
         masks = [[1, 0], [1]]
         vllm_logprobs = [[-0.1, -0.2], [-0.3]]
+        # Teacher rows align with the pad-filtered responses ([4] and [5]), not the raw ones.
         teacher_topk_token_ids = [
-            torch.tensor([[10, 11], [0, 0]], dtype=torch.long),
+            torch.tensor([[10, 11]], dtype=torch.long),
             torch.tensor([[12, 13]], dtype=torch.long),
         ]
         teacher_topk_logprobs = [
-            torch.tensor([[-0.4, -0.5], [float("-inf"), float("-inf")]], dtype=torch.float32),
+            torch.tensor([[-0.4, -0.5]], dtype=torch.float32),
             torch.tensor([[-0.6, -0.7]], dtype=torch.float32),
         ]
 

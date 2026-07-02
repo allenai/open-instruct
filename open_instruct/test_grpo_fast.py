@@ -848,6 +848,8 @@ class TestDataPreparation(TestGrpoFastBase):
             "response_masks",
             "vllm_logprobs",
         }
+        # OPD-only fields; None in this non-OPD test, so only membership is checked below.
+        optional_fields = {"teacher_topk_token_ids", "teacher_topk_logprobs"}
 
         expected_samples_per_worker = batch_size // world_size
         expected_num_microbatches = (
@@ -855,7 +857,9 @@ class TestDataPreparation(TestGrpoFastBase):
         ) // per_device_train_batch_size
 
         for worker_data in result:
-            self.assertTrue(expected_fields.issubset(set(f.name for f in worker_data.__dataclass_fields__.values())))
+            self.assertEqual(
+                set(f.name for f in worker_data.__dataclass_fields__.values()), expected_fields | optional_fields
+            )
 
             total_samples = sum(len(batch) for batch in worker_data.query_responses)
             self.assertEqual(total_samples, expected_samples_per_worker)

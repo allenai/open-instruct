@@ -21,10 +21,9 @@ from typing import Any
 import ray
 import torch
 import vllm
-from ray.util.placement_group import PlacementGroup, placement_group
-from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from ray.util.placement_group import PlacementGroup
 
-from open_instruct import logger_utils, utils, vllm_utils
+from open_instruct import logger_utils, vllm_utils
 from open_instruct.distillkit.vllm_logprobs import extract_response_topk_from_prompt_logprobs
 
 logger = logger_utils.setup_logger(__name__)
@@ -87,16 +86,25 @@ class OPDTeacherScorerRayActor:
         self.llm = vllm.LLM(**llm_kwargs)
         self.sampling_params = build_teacher_sampling_params(topk)
         self.topk = topk
+        self.vocab_size = self.llm.llm_engine.model_config.get_vocab_size()
 
     def score(self, queries: list[list[int]], responses: list[list[int]]) -> OPDTeacherScoringResult:
         if len(queries) != len(responses):
             raise ValueError(f"queries length {len(queries)} != responses length {len(responses)}")
 
         start_time = time.perf_counter()
-        prompts = [
-            vllm.TokensPrompt(prompt_token_ids=list(query) + list(response))
-            for query, response in zip(queries, responses)
-        ]
+        prompts = []
+        for i, (query, response) in enumerate(zip(queries, responses)):
+            prompt_token_ids = list(query) + list(response)
+            bad_token_id = next((t for t in prompt_token_ids if t < 0 or t >= self.vocab_size), None)
+            if bad_token_id is not None:
+                raise ValueError(
+                    f"Request {i} contains token id {bad_token_id}, outside the teacher vocab "
+                    f"(size {self.vocab_size}). Student rollouts may only be scored by a teacher whose "
+                    "vocab covers every sampled token; a student-only added token (e.g. a pad or chat "
+                    "special token) likely reached the teacher."
+                )
+            prompts.append(vllm.TokensPrompt(prompt_token_ids=prompt_token_ids))
         outputs = self.llm.generate(prompts, sampling_params=self.sampling_params, use_tqdm=False)
 
         teacher_topk_token_ids = []
@@ -143,63 +151,35 @@ def create_teacher_scorers(
     attention_backend: str | None,
     pg: PlacementGroup | None = None,
 ) -> list[ray.actor.ActorHandle]:
-    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "mp"
-    use_existing_pg = pg is not None
-    num_gpus = tensor_parallel_size
+    distributed_executor_backend = vllm_utils.get_vllm_distributed_executor_backend(tensor_parallel_size)
 
-    if pg is None:
-        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
-        pg = placement_group(bundles, strategy="PACK")
-        ray.get(pg.ready())
-
-    bundle_indices_list = vllm_utils.get_bundle_indices_list(pg)
-    teacher_scorers = []
-    for i in range(num_engines):
-        bundle_indices = (
-            bundle_indices_list[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
-            if use_existing_pg
-            else [bundle_indices_list[i]]
-        )
-        scheduling_strategy = PlacementGroupSchedulingStrategy(
-            placement_group=pg,
-            placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=bundle_indices[0],
-        )
-        teacher_scorers.append(
-            ray.remote(OPDTeacherScorerRayActor)
-            .options(
-                num_cpus=num_gpus,
-                num_gpus=num_gpus,
-                scheduling_strategy=scheduling_strategy,
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={
-                        "VLLM_ENABLE_V1_MULTIPROCESSING": "0",
-                        "TORCH_CUDA_ARCH_LIST": vllm_utils.get_cuda_arch_list(),
-                        "RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO": "0",
-                    }
-                ),
-            )
-            .remote(
-                model_name_or_path=model_name_or_path,
-                tokenizer_name_or_path=tokenizer_name_or_path,
-                model_revision=model_revision,
-                tokenizer_revision=tokenizer_revision,
-                tensor_parallel_size=tensor_parallel_size,
-                enforce_eager=enforce_eager,
-                dtype=dtype,
-                seed=seed + i,
-                enable_prefix_caching=enable_prefix_caching,
-                max_model_len=max_model_len,
-                gpu_memory_utilization=gpu_memory_utilization,
-                topk=topk,
-                distributed_executor_backend=distributed_executor_backend,
-                trust_remote_code=trust_remote_code,
-                attention_backend=attention_backend,
-            )
+    def remote_kwargs(engine_idx: int, bundle_indices: list[int]) -> dict[str, Any]:
+        return dict(
+            model_name_or_path=model_name_or_path,
+            tokenizer_name_or_path=tokenizer_name_or_path,
+            model_revision=model_revision,
+            tokenizer_revision=tokenizer_revision,
+            tensor_parallel_size=tensor_parallel_size,
+            enforce_eager=enforce_eager,
+            dtype=dtype,
+            seed=seed + engine_idx,
+            enable_prefix_caching=enable_prefix_caching,
+            max_model_len=max_model_len,
+            gpu_memory_utilization=gpu_memory_utilization,
+            topk=topk,
+            distributed_executor_backend=distributed_executor_backend,
+            trust_remote_code=trust_remote_code,
+            attention_backend=attention_backend,
         )
 
-    utils.ray_get_with_progress(
-        [scorer.ready.remote() for scorer in teacher_scorers], "Initializing OPD teacher scorers"
+    teacher_scorers = vllm_utils.create_vllm_ray_actors(
+        OPDTeacherScorerRayActor,
+        num_engines=num_engines,
+        tensor_parallel_size=tensor_parallel_size,
+        num_gpus=tensor_parallel_size,
+        pg=pg,
+        remote_kwargs_fn=remote_kwargs,
+        ready_message="Initializing OPD teacher scorers",
     )
     logger.info("Initialized %d OPD teacher scorer(s)", len(teacher_scorers))
     return teacher_scorers

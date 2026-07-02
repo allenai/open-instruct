@@ -310,22 +310,17 @@ def pack_sequences(
 
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
-        response_teacher_ids_unfiltered = None
-        response_teacher_logprobs_unfiltered = None
+        response_teacher_ids = None
+        response_teacher_logprobs = None
         if use_teacher_topk:
             assert teacher_topk_token_ids is not None
             assert teacher_topk_logprobs is not None
-            response_teacher_ids_unfiltered = torch.as_tensor(teacher_topk_token_ids[i], dtype=torch.long)
-            response_teacher_logprobs_unfiltered = torch.as_tensor(teacher_topk_logprobs[i], dtype=torch.float32)
-            if response_teacher_ids_unfiltered.shape != response_teacher_logprobs_unfiltered.shape:
+            response_teacher_ids = torch.as_tensor(teacher_topk_token_ids[i], dtype=torch.long)
+            response_teacher_logprobs = torch.as_tensor(teacher_topk_logprobs[i], dtype=torch.float32)
+            if response_teacher_ids.shape != response_teacher_logprobs.shape:
                 raise ValueError(
-                    f"Response {i}: teacher token ids shape {response_teacher_ids_unfiltered.shape} != "
-                    f"teacher logprobs shape {response_teacher_logprobs_unfiltered.shape}"
-                )
-            if response_teacher_ids_unfiltered.shape[0] != len(response):
-                raise ValueError(
-                    f"Response {i}: teacher top-k length ({response_teacher_ids_unfiltered.shape[0]}) != "
-                    f"response length ({len(response)})"
+                    f"Response {i}: teacher token ids shape {response_teacher_ids.shape} != "
+                    f"teacher logprobs shape {response_teacher_logprobs.shape}"
                 )
 
         assert len(response_logprobs_unfiltered) == len(response), (
@@ -335,18 +330,21 @@ def pack_sequences(
         filtered_response = []
         filtered_mask = []
         filtered_logprobs = []
-        filtered_teacher_ids = []
-        filtered_teacher_logprobs = []
         for j, (token, mask_val) in enumerate(zip(response, mask)):
             if token != pad_token_id:
                 filtered_response.append(token)
                 filtered_mask.append(mask_val)
                 filtered_logprobs.append(response_logprobs_unfiltered[j])
-                if use_teacher_topk:
-                    assert response_teacher_ids_unfiltered is not None
-                    assert response_teacher_logprobs_unfiltered is not None
-                    filtered_teacher_ids.append(response_teacher_ids_unfiltered[j])
-                    filtered_teacher_logprobs.append(response_teacher_logprobs_unfiltered[j])
+
+        if use_teacher_topk:
+            assert response_teacher_ids is not None and response_teacher_logprobs is not None
+            if response_teacher_ids.shape[0] != len(filtered_response):
+                # Teacher scoring runs on the pad-filtered responses so its targets condition on the
+                # same context the learner trains on; rows must therefore match the filtered length.
+                raise ValueError(
+                    f"Response {i}: teacher top-k length ({response_teacher_ids.shape[0]}) != "
+                    f"pad-filtered response length ({len(filtered_response)})"
+                )
 
         response = filtered_response
         response_tool_mask = filtered_mask
@@ -364,15 +362,8 @@ def pack_sequences(
         )
         combined_logprobs = query_logprobs + response_logprobs
         if use_teacher_topk:
-            if filtered_teacher_ids:
-                response_teacher_ids = torch.stack(filtered_teacher_ids)
-                response_teacher_logprobs = torch.stack(filtered_teacher_logprobs)
-                topk = response_teacher_ids.shape[-1]
-            else:
-                assert teacher_topk_token_ids is not None
-                topk = torch.as_tensor(teacher_topk_token_ids[i]).shape[-1]
-                response_teacher_ids = torch.empty((0, topk), dtype=torch.long)
-                response_teacher_logprobs = torch.empty((0, topk), dtype=torch.float32)
+            assert response_teacher_ids is not None and response_teacher_logprobs is not None
+            topk = response_teacher_ids.shape[-1]
             query_teacher_ids = torch.zeros((len(query), topk), dtype=torch.long)
             query_teacher_logprobs = torch.full((len(query), topk), float("-inf"), dtype=torch.float32)
             combined_teacher_ids = torch.cat([query_teacher_ids, response_teacher_ids], dim=0)
@@ -387,8 +378,8 @@ def pack_sequences(
             dones.append(cur_dones)
             packed_vllm_logprobs.append(cur_vllm_logprobs)
             if use_teacher_topk:
-                packed_teacher_topk_token_ids.append(torch.stack(cur_teacher_topk_token_ids))
-                packed_teacher_topk_logprobs.append(torch.stack(cur_teacher_topk_logprobs))
+                packed_teacher_topk_token_ids.append(torch.cat(cur_teacher_topk_token_ids, dim=0))
+                packed_teacher_topk_logprobs.append(torch.cat(cur_teacher_topk_logprobs, dim=0))
             cur_data = []
             cur_response_mask = []
             cur_attention_mask = []
@@ -402,8 +393,8 @@ def pack_sequences(
         cur_data.extend(query_response)
         cur_vllm_logprobs.extend(combined_logprobs)
         if use_teacher_topk:
-            cur_teacher_topk_token_ids.extend(combined_teacher_ids)
-            cur_teacher_topk_logprobs.extend(combined_teacher_logprobs)
+            cur_teacher_topk_token_ids.append(combined_teacher_ids)
+            cur_teacher_topk_logprobs.append(combined_teacher_logprobs)
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
@@ -423,8 +414,8 @@ def pack_sequences(
         dones.append(cur_dones)
         packed_vllm_logprobs.append(cur_vllm_logprobs)
         if use_teacher_topk:
-            packed_teacher_topk_token_ids.append(torch.stack(cur_teacher_topk_token_ids))
-            packed_teacher_topk_logprobs.append(torch.stack(cur_teacher_topk_logprobs))
+            packed_teacher_topk_token_ids.append(torch.cat(cur_teacher_topk_token_ids, dim=0))
+            packed_teacher_topk_logprobs.append(torch.cat(cur_teacher_topk_logprobs, dim=0))
     attention_masks_list = [torch.tensor(t) for t in attention_masks]
     return PackedSequences(
         query_responses=[torch.tensor(t) for t in query_responses],

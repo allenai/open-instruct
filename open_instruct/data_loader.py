@@ -447,8 +447,9 @@ class StreamingDataLoaderConfig:
     """Enable online teacher scoring and distillation loss for OLMo-core GRPO."""
     opd_loss_mode: Literal["forward_kl_topk"] = "forward_kl_topk"
     """OPD loss variant. V1 supports only direct teacher-top-k forward KL."""
-    opd_topk: int = 128
-    """Number of teacher top-k logits to request per response token."""
+    opd_topk: int = 16
+    """Number of teacher top-k logits to request per response token. Teacher tensors are carried
+    densely as [B, T, K] through packing/collation, so memory and transfer scale linearly in K."""
     opd_loss_coef: float = 1.0
     """Coefficient applied to the OPD distillation loss."""
     opd_use_task_rewards: bool = True
@@ -598,6 +599,13 @@ class StreamingDataLoaderConfig:
             self.max_possible_score += self.verification_reward
         if self.apply_r1_style_format_reward and self.additive_format_reward:
             self.max_possible_score += self.r1_style_format_reward
+        if self.max_possible_score <= 0 and not pure_opd:
+            raise ValueError(
+                "The configured rewards leave `max_possible_score` at 0, so `percent_solved` (and features "
+                "built on it, like `no_resampling_pass_rate`) would be meaningless. Enable a reward that "
+                "contributes to it (`apply_verifiable_reward`, or `apply_r1_style_format_reward` with "
+                "`additive_format_reward`) or run pure OPD (`opd_enabled=True, opd_use_task_rewards=False`)."
+            )
 
         if self.save_traces and not self.rollouts_save_path:
             raise ValueError("`rollouts_save_path` must be provided when `save_traces` is True.")
@@ -914,6 +922,8 @@ def process_group(
 
     decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=False)
 
+    # max_possible_score can only be 0 for pure OPD (enforced in StreamingDataLoaderConfig.__post_init__),
+    # where rewards are neutral and percent_solved is reported as 0.0.
     percent_solved = 0.0 if max_possible_score <= 0 else np.mean(result.reward_scores).item() / max_possible_score
     if no_resampling_pass_rate is not None and percent_solved >= no_resampling_pass_rate:
         assert iter_dataloader is not None
@@ -1519,6 +1529,12 @@ class DataPreparationActor:
             return [], [], {}
 
         wall_start = time.perf_counter()
+        # Score the pad-filtered responses: `pack_sequences` drops pad tokens (vLLM can emit them
+        # mid-response), so the learner trains on the pad-stripped context. Scoring the raw response
+        # would condition the teacher on a different prefix — and pad ids may not even exist in the
+        # teacher's vocab.
+        pad_token_id = self.tokenizer.pad_token_id
+        responses = [[token for token in response if token != pad_token_id] for response in responses]
         ranges = _make_token_balanced_ranges(queries, responses, len(self.teacher_scorers))
         futures = []
         for scorer_idx, (start, end) in enumerate(ranges):
