@@ -549,6 +549,38 @@ def forward_for_logprobs(
     pass_olmo_core_doc_lens: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Forward pass to compute log probabilities."""
+    logprob_BT, entropy, _ = forward_for_logprobs_and_topk(
+        model,
+        query_responses,
+        attention_mask,
+        position_ids,
+        pad_token_id,
+        temperature,
+        return_entropy,
+        pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
+        topk_token_ids=None,
+    )
+    return logprob_BT, entropy
+
+
+def forward_for_logprobs_and_topk(
+    model: torch.nn.Module,
+    query_responses: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    position_ids: torch.Tensor,
+    pad_token_id: int,
+    temperature: float,
+    return_entropy: bool = False,
+    pass_olmo_core_doc_lens: bool = False,
+    topk_token_ids: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    """Forward pass to compute sampled-token and optional sparse top-k logprobs.
+
+    Sampled-token logprobs use the rollout temperature because GRPO importance
+    ratios are defined over the policy that generated the rollout. Sparse top-k
+    logprobs are used for OPD teacher matching and therefore use raw T=1 model
+    logits to match teacher `raw_logprobs`.
+    """
     extra_kwargs = {}
     if pass_olmo_core_doc_lens:
         assert attention_mask is not None
@@ -556,22 +588,46 @@ def forward_for_logprobs(
         extra_kwargs = {"doc_lens": doc_lens, "max_doc_lens": max_doc_lens}
         attention_mask = None
     output = model(input_ids=query_responses, attention_mask=attention_mask, position_ids=position_ids, **extra_kwargs)
-    logits = getattr(output, "logits", output)
-    logits = logits / temperature
+    raw_logits = getattr(output, "logits", output)
+    policy_logits = raw_logits / temperature
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
-    logits = logits[:, :-1]
-    labels = query_responses[:, 1:].clone().to(logits.device)
+    raw_logits = raw_logits[:, :-1]
+    policy_logits = policy_logits[:, :-1]
+    labels = query_responses[:, 1:].clone().to(policy_logits.device)
     # Replace pad tokens with 0 to avoid index out of bounds errors in gather
     labels[labels == pad_token_id] = 0
-    logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
+    # Sampled-token logprob (GRPO importance ratio): use the fused/compiled gather so we do not
+    # materialize a full-vocab [B, T, V] log-softmax tensor just to read one column per position.
+    logprob_BT = model_utils.log_softmax_and_gather(policy_logits, labels)
+    topk_logprobs = None
+    if topk_token_ids is not None:
+        if topk_token_ids.shape[:2] != policy_logits.shape[:2]:
+            raise ValueError(
+                f"topk_token_ids shape {topk_token_ids.shape} does not align to logits shape {policy_logits.shape}"
+            )
+        safe_topk_token_ids = topk_token_ids.to(raw_logits.device)
+        invalid_topk_token_ids = (safe_topk_token_ids < 0) | (safe_topk_token_ids >= raw_logits.shape[-1])
+        if invalid_topk_token_ids.any().item():
+            invalid_values = safe_topk_token_ids[invalid_topk_token_ids]
+            raise ValueError(
+                "OPD teacher top-k token ids must be valid student logit indices. "
+                f"Got min invalid id={invalid_values.min().item()}, max invalid id={invalid_values.max().item()}, "
+                f"student_vocab_size={raw_logits.shape[-1]}."
+            )
+        # Teacher top-k logprob (OPD): from raw T=1 logits. Normalize via a chunked fp32 logsumexp
+        # so we only allocate [B, T, K] + [B, T, 1] (plus one fp32 chunk at a time) instead of a
+        # full-vocab fp32 copy or a second [B, T, V] log-softmax.
+        topk_logprobs = torch.gather(raw_logits, dim=-1, index=safe_topk_token_ids).float() - (
+            model_utils.logsumexp_fp32_chunked(raw_logits)
+        )
 
     # For now, entropy is just for monitoring, and we don't pass gradients through it.
     entropy = None
     if return_entropy:
         with torch.no_grad():
-            entropy = model_utils.entropy_from_logits(logits)
+            entropy = model_utils.entropy_from_logits(policy_logits)
 
-    return logprob_BT, entropy
+    return logprob_BT, entropy, topk_logprobs
 
 
 def compute_logprobs(
@@ -688,9 +744,14 @@ _SCALAR_LOSS_STAT_KEYS = [
     "val/rho_drop_high_frac",
 ]
 
+_OPD_LOSS_STAT_KEYS = ["loss/opd_avg", "opd/sampled_token_in_topk", "opd/teacher_topk_mass"]
 
-def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bool = False) -> dict[str, torch.Tensor]:
-    stats = {key: torch.zeros(num_samples, device=device) for key in _SCALAR_LOSS_STAT_KEYS}
+
+def create_loss_stats(
+    num_samples: int, device: torch.device, record_entropy: bool = False, record_opd: bool = False
+) -> dict[str, torch.Tensor]:
+    keys = _SCALAR_LOSS_STAT_KEYS + _OPD_LOSS_STAT_KEYS if record_opd else _SCALAR_LOSS_STAT_KEYS
+    stats = {key: torch.zeros(num_samples, device=device) for key in keys}
     if record_entropy:
         stats |= {"policy/entropy_avg": torch.zeros(num_samples, device=device)}
     return stats

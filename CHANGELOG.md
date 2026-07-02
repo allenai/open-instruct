@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
+- Add On-Policy Distillation (OPD) for OLMo-core GRPO: a reusable teacher-scoring + distillation-loss layer (`open_instruct/distillkit/`, `opd_utils.py`) that scores student rollouts with a frozen teacher vLLM (`prompt_logprobs` top-k) and trains a direct teacher-top-k forward KL, runnable as GRPO + OPD or pure OPD. Threads optional `teacher_topk_*` `[B, T, K]` tensors through packing/collation/Ulysses-SP and gathers student top-k logprobs from the existing GRPO forward (raw `T=1` logits to match the teacher's `raw_logprobs`); adds startup validation for pure-OPD config and teacher/student tokenizer vocab compatibility. Disabled by default (`opd_enabled=False`), so existing runs are unchanged (https://github.com/allenai/open-instruct/pull/1740).
 - Increase default environment pool acquire timeout to 7200s (https://github.com/allenai/open-instruct/pull/1729).
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
 - Bump OLMo-core to the latest `main` commit (`9aa3280`) (https://github.com/allenai/open-instruct/pull/1723).

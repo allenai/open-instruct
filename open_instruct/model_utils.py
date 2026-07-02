@@ -600,6 +600,47 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
     return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
 
 
+class _ChunkedLogsumexpFP32(torch.autograd.Function):
+    """fp32 logsumexp over the vocab dim without materializing a full-vocab fp32 copy.
+
+    Upcasting `[B, T, V]` logits to fp32 doubles the largest allocation of the forward pass, and
+    `torch.logsumexp` keeps that copy alive for backward. Chunking over the sequence dim keeps
+    fp32 numerics while only ever holding one `[B, chunk, V]` fp32 slice; backward recomputes the
+    softmax chunk-wise from the saved low-precision logits.
+    """
+
+    @staticmethod
+    def forward(ctx, logits: torch.Tensor, chunk_size: int) -> torch.Tensor:
+        logsumexp = torch.cat(
+            [
+                torch.logsumexp(logits[:, start : start + chunk_size].float(), dim=-1, keepdim=True)
+                for start in range(0, logits.shape[1], chunk_size)
+            ],
+            dim=1,
+        )
+        ctx.save_for_backward(logits, logsumexp)
+        ctx.chunk_size = chunk_size
+        return logsumexp
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None]:
+        logits, logsumexp = ctx.saved_tensors
+        chunk_size = ctx.chunk_size
+        grad_chunks = []
+        for start in range(0, logits.shape[1], chunk_size):
+            softmax = torch.exp(
+                logits[:, start : start + chunk_size].float() - logsumexp[:, start : start + chunk_size]
+            )
+            grad_chunks.append((grad_output[:, start : start + chunk_size] * softmax).to(logits.dtype))
+        return torch.cat(grad_chunks, dim=1), None
+
+
+def logsumexp_fp32_chunked(logits: torch.Tensor, chunk_size: int = 256) -> torch.Tensor:
+    """Compute `torch.logsumexp(logits.float(), dim=-1, keepdim=True)` for `[B, T, V]` logits
+    without allocating the full-vocab fp32 copy (see `_ChunkedLogsumexpFP32`)."""
+    return _ChunkedLogsumexpFP32.apply(logits, chunk_size)
+
+
 @retry_on_exception()
 def push_folder_to_hub(
     output_dir: str, hf_repo_id: str | None = None, hf_repo_revision: str | None = None, private: bool = True
