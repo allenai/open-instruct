@@ -40,6 +40,7 @@ import torch
 import torch.distributed
 import uvicorn
 import vllm
+from packaging.version import parse as parse_version
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -57,6 +58,7 @@ from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
+from vllm.v1.kv_cache_interface import MambaSpec
 
 from open_instruct import logger_utils
 from open_instruct.data_types import GenerationResult, PromptRequest, RequestInfo, TokenStatistics, ToolCallStats
@@ -67,6 +69,13 @@ from open_instruct.ground_truth_utils import RewardConfig
 from open_instruct.utils import ModelDims, get_device_name, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
+
+# `MambaSpec.dtypes` is annotated as a fixed 1-element tuple, but hybrid mamba
+# layers (e.g. GatedDeltaNet, used by OLMo-hybrid) return 2 dtypes from
+# `get_state_dtype()`. msgspec enforces the fixed-length annotation strictly,
+# so decoding the KV cache spec RPC result raises `msgspec.ValidationError:
+# Expected array of length 1, got 2`. Widen the annotation to variable-length.
+MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
@@ -404,7 +413,9 @@ def init_process_group(
     # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
     # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
     # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
+    pg_options_param_name = (
+        "backend_options" if parse_version(torch.__version__) >= parse_version("2.6") else "pg_options"
+    )
     pg, _ = _new_process_group_helper(
         world_size,
         rank,

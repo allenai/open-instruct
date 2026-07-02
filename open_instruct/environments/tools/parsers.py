@@ -20,6 +20,7 @@ from typing import Any
 
 import ray
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+
 try:
     from vllm.entrypoints.openai.protocol import ChatCompletionRequest
 except ModuleNotFoundError:
@@ -167,7 +168,7 @@ class VllmToolParser(ToolParser):
 
         Usually these only need the list of tools.
         """
-        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)  # type: ignore[arg-type]
+        return ChatCompletionRequest(model="dummy", messages=[], tools=self._tool_definitions)
 
     def get_tool_calls(self, text: str) -> list[EnvCall]:
         """Extract tool calls from model output.

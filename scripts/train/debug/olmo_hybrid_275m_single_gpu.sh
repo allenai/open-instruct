@@ -24,6 +24,7 @@ uv run python mason.py \
        --max_retries 0 \
        --timeout 15m \
        --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+       --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \

@@ -18,7 +18,7 @@ dependencies = [
     "multiprocess<0.70.18", # avoid AttributeError in ResourceTracker.__del__
     "nltk>=3.9.1",
     "numpy>=2",
-    "ai2-olmo-core==2.3.0",
+    "ai2-olmo-core>=2.3.0",
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
@@ -53,18 +53,16 @@ py-modules = ["open_instruct"]
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
 
-[tool.uv.extra-build-variables]
-flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
-
 # pytorch related setups
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu129", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
 ]
-# OLMo-hybrid small suite: architecture lives in maintainer forks of transformers + vLLM.
+# OLMo-hybrid small suite: architecture lives in maintainer forks of transformers + vLLM + OLMo-core.
 transformers = { git = "https://github.com/yashassamaga/transformers.git", rev = "hybrid-small-suite" }
 vllm = { git = "https://github.com/YashasSamaga/vllm.git", rev = "olmo-hybrid-small", marker = "platform_system != 'Darwin'" }
+ai2-olmo-core = { git = "https://github.com/YashasSamaga/OLMo-core.git", rev = "hybrid-final" }
 
 [[tool.uv.index]]
 name = "pytorch-cu129"

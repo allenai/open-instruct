@@ -1073,7 +1073,8 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
         padding=False,
         truncation=True,
         max_length=max_seq_length,
-        add_generation_prompt=False, return_dict=False,
+        add_generation_prompt=False,
+        return_dict=False,
     )
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
@@ -1092,7 +1093,8 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
                     padding=False,
                     truncation=True,
                     max_length=max_seq_length,
-                    add_generation_prompt=False, return_dict=False,
+                    add_generation_prompt=False,
+                    return_dict=False,
                 ).shape[1]
             # next, we calculate the end index of this non-assistant message
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
@@ -1106,7 +1108,8 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
                     padding=False,
                     truncation=True,
                     max_length=max_seq_length,
-                    add_generation_prompt=True, return_dict=False,
+                    add_generation_prompt=True,
+                    return_dict=False,
                 ).shape[1]
             else:
                 # for the last message or the message that doesn't follow with an assistant message,
@@ -1118,7 +1121,8 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
                     padding=False,
                     truncation=True,
                     max_length=max_seq_length,
-                    add_generation_prompt=False, return_dict=False,
+                    add_generation_prompt=False,
+                    return_dict=False,
                 ).shape[1]
             # set the label to -100 for the non-assistant part
             labels[:, message_start_idx:message_end_idx] = -100
@@ -1143,7 +1147,8 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
         padding=False,
         truncation=True,
         max_length=max_seq_length,
-        add_generation_prompt=False, return_dict=False,
+        add_generation_prompt=False,
+        return_dict=False,
     )
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
@@ -1162,7 +1167,8 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
                     padding=False,
                     truncation=True,
                     max_length=max_seq_length,
-                    add_generation_prompt=False, return_dict=False,
+                    add_generation_prompt=False,
+                    return_dict=False,
                 ).shape[1]
             # next, we calculate the end index of this non-assistant message
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
@@ -1176,7 +1182,8 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
                     padding=False,
                     truncation=True,
                     max_length=max_seq_length,
-                    add_generation_prompt=True, return_dict=False,
+                    add_generation_prompt=True,
+                    return_dict=False,
                 ).shape[1]
             else:
                 # for the last message or the message that doesn't follow with an assistant message,
@@ -1188,7 +1195,8 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
                     padding=False,
                     truncation=True,
                     max_length=max_seq_length,
-                    add_generation_prompt=False, return_dict=False,
+                    add_generation_prompt=False,
+                    return_dict=False,
                 ).shape[1]
             # set the label to -100 for the non-assistant part
             labels[:, message_start_idx:message_end_idx] = -100
@@ -1352,7 +1360,8 @@ def rlvr_tokenize_v1(
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
-        tools=tools_for_template, return_dict=False,  # type: ignore[arg-type]
+        tools=tools_for_template,  # type: ignore[arg-type]
+        return_dict=False,
     )
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key], return_dict=False)
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
@@ -1451,7 +1460,8 @@ def rlvr_tokenize_v3(
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
-        tools=tools_for_template, return_dict=False,  # type: ignore[arg-type]
+        tools=tools_for_template,  # type: ignore[arg-type]
+        return_dict=False,
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]

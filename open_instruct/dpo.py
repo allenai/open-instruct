@@ -18,7 +18,6 @@ from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.backend import has_flash_attn_3
-from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import CheckpointerCallback, ProfilerCallback
@@ -386,7 +385,8 @@ def main(args: dpo_utils.ExperimentConfig, tc: dataset_transformation.TokenizerC
     # reinitializing all model weights from scratch. We must reload the HF checkpoint.
     logger.info("Reloading HuggingFace weights after parallelization...")
     sd = train_module.model.state_dict()
-    load_hf_model(args.model_name_or_path, sd, work_dir=args.output_dir)
+    hf_checkpoint_path = olmo_core_utils.ensure_hf_checkpoint_sentinel_file(args.model_name_or_path, args.output_dir)
+    olmo_core_utils.load_hf_model_with_hybrid_support(hf_checkpoint_path, sd, work_dir=args.output_dir)
     train_module.model.load_state_dict(sd)
 
     logger.info("Caching reference logprobs...")
