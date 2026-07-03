@@ -95,6 +95,29 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
     return {"name": name, "value": value}
 
 
+def resolve_is_external_user(launcher: str | None, has_beaker_config: bool, has_beaker_token: bool) -> bool:
+    """Decide whether to run in non-Ai2 ('local') mode.
+
+    An explicit --launcher wins. Otherwise fall back to the historical
+    auto-detection: a user with neither a Beaker config file nor a BEAKER_TOKEN
+    is treated as external.
+    """
+    if launcher == "local":
+        return True
+    if launcher == "beaker":
+        return False
+    return not has_beaker_config and not has_beaker_token
+
+
+def validate_cluster_for_beaker(is_external_user: bool, cluster: list[str] | None) -> None:
+    """--cluster is a Beaker concept, so it is only required for the Beaker launcher."""
+    if not is_external_user and not cluster:
+        raise ValueError(
+            "--cluster is required when launching on Beaker. "
+            "Pass one or more clusters (e.g. --cluster ai2/jupiter), or use --launcher local."
+        )
+
+
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
 # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).

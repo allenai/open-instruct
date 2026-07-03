@@ -194,5 +194,35 @@ class TestExperimentSpec(unittest.TestCase):
         self.assertEqual(actual_spec, expected_spec)
 
 
+class TestResolveIsExternalUser(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("explicit_local_wins", "local", True, True, True),
+            ("explicit_beaker_wins", "beaker", False, False, False),
+            ("auto_no_config_no_token_external", None, False, False, True),
+            ("auto_config_present_internal", None, True, False, False),
+            ("auto_token_present_internal", None, False, True, False),
+        ]
+    )
+    def test_resolve(self, name, launcher, has_config, has_token, expected):
+        self.assertEqual(mason.resolve_is_external_user(launcher, has_config, has_token), expected)
+
+
+class TestValidateClusterForBeaker(unittest.TestCase):
+    def test_beaker_without_cluster_raises(self):
+        with self.assertRaises(ValueError):
+            mason.validate_cluster_for_beaker(is_external_user=False, cluster=None)
+
+    def test_beaker_with_empty_cluster_raises(self):
+        with self.assertRaises(ValueError):
+            mason.validate_cluster_for_beaker(is_external_user=False, cluster=[])
+
+    def test_beaker_with_cluster_ok(self):
+        mason.validate_cluster_for_beaker(is_external_user=False, cluster=["ai2/jupiter"])
+
+    def test_local_without_cluster_ok(self):
+        mason.validate_cluster_for_beaker(is_external_user=True, cluster=None)
+
+
 if __name__ == "__main__":
     unittest.main()
