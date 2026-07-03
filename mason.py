@@ -263,6 +263,18 @@ def get_args():
         )
     mason_args.resumable = is_resumable
 
+    # Resolve the launcher and validate --cluster here, where the parser lives, so a
+    # missing --cluster on the beaker path yields a clean argparse usage error instead
+    # of an unhandled traceback out of main().
+    config_path = os.path.expanduser("~/.beaker/config.yml")
+    mason_args.is_external_user = resolve_is_external_user(
+        mason_args.launcher, os.path.exists(config_path), "BEAKER_TOKEN" in os.environ
+    )
+    try:
+        validate_cluster_for_beaker(mason_args.is_external_user, mason_args.cluster)
+    except ValueError as e:
+        parser.error(str(e))
+
     return mason_args, commands
 
 
@@ -436,13 +448,16 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
         # Once it's cached, we don't need to cache it again.
 
-        # Add the whoami parts if not already present
-        if not any("hf_entity" in c for c in command):
-            command.append("--hf_entity")
-            command.append("allenai")
-        if not any("wandb_entity" in c for c in command):
-            command.append("--wandb_entity")
-            command.append("ai2-llm")
+        # Add the Ai2-specific whoami parts if not already present. Only for Ai2
+        # users: a local (`--launcher local`) command must not be silently rewritten
+        # to push to Ai2's HuggingFace/Weights & Biases orgs.
+        if not is_external_user:
+            if not any("hf_entity" in c for c in command):
+                command.append("--hf_entity")
+                command.append("allenai")
+            if not any("wandb_entity" in c for c in command):
+                command.append("--wandb_entity")
+                command.append("ai2-llm")
 
         dataset_cache_paths = []
         dataset_config_hashes = []
@@ -727,12 +742,8 @@ def maybe_override_checkpoint_dir(
 
 def main():
     args, commands = get_args()
-    # If the user is not in Ai2 (or explicitly passed --launcher local), we run the command as is
-    config_path = os.path.expanduser("~/.beaker/config.yml")
-    is_external_user = resolve_is_external_user(
-        args.launcher, os.path.exists(config_path), "BEAKER_TOKEN" in os.environ
-    )
-    validate_cluster_for_beaker(is_external_user, args.cluster)
+    # Launcher resolution + --cluster validation happen in get_args() (clean CLI errors).
+    is_external_user = args.is_external_user
     if is_external_user:
         whoami = "external_user"
         beaker_secrets = []
