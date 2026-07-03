@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `--launcher {beaker,local}` to `mason.py`: `local` prints the fully-resolved command without requiring Beaker or a `--cluster`, so it can be run on non-Ai2 infra; `--cluster` is now required only for the `beaker` launcher (https://github.com/allenai/open-instruct/pull/PRNUM).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
