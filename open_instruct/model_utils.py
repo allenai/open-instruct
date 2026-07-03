@@ -626,13 +626,14 @@ class _ChunkedLogsumexpFP32(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None]:
         logits, logsumexp = ctx.saved_tensors
         chunk_size = ctx.chunk_size
-        grad_chunks = []
+        # Write into a preallocated grad so peak memory is one full-size grad plus a single
+        # fp32 chunk, rather than a chunk list plus its torch.cat copy.
+        grad_input = torch.empty_like(logits)
         for start in range(0, logits.shape[1], chunk_size):
-            softmax = torch.exp(
-                logits[:, start : start + chunk_size].float() - logsumexp[:, start : start + chunk_size]
-            )
-            grad_chunks.append((grad_output[:, start : start + chunk_size] * softmax).to(logits.dtype))
-        return torch.cat(grad_chunks, dim=1), None
+            sl = slice(start, start + chunk_size)
+            softmax = torch.exp(logits[:, sl].float() - logsumexp[:, sl])
+            grad_input[:, sl] = (grad_output[:, sl] * softmax).to(logits.dtype)
+        return grad_input, None
 
 
 def logsumexp_fp32_chunked(logits: torch.Tensor, chunk_size: int = 256) -> torch.Tensor:
