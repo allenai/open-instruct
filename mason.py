@@ -118,6 +118,16 @@ def validate_cluster_for_beaker(is_external_user: bool, cluster: list[str] | Non
         )
 
 
+def validate_beaker_credentials(launcher: str | None, has_beaker_config: bool, has_beaker_token: bool) -> None:
+    """An explicit --launcher beaker with no Beaker credentials would otherwise fail with an
+    unhandled SDK error at client construction in main(); fail early with a clear message."""
+    if launcher == "beaker" and not has_beaker_config and not has_beaker_token:
+        raise ValueError(
+            "--launcher beaker requires Beaker credentials "
+            "(a ~/.beaker/config.yml file or the BEAKER_TOKEN environment variable)."
+        )
+
+
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
 # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
@@ -137,7 +147,8 @@ def get_args():
         type=str,
         nargs="+",
         default=None,
-        help="Beaker clusters on which the job could be run. Required when --launcher beaker.",
+        help="Beaker clusters on which the job could be run. "
+        "Required for the beaker launcher (the default when Beaker credentials are present).",
     )
     parser.add_argument(
         "--launcher",
@@ -267,11 +278,12 @@ def get_args():
     # missing --cluster on the beaker path yields a clean argparse usage error instead
     # of an unhandled traceback out of main().
     config_path = os.path.expanduser("~/.beaker/config.yml")
-    mason_args.is_external_user = resolve_is_external_user(
-        mason_args.launcher, os.path.exists(config_path), "BEAKER_TOKEN" in os.environ
-    )
+    has_beaker_config = os.path.exists(config_path)
+    has_beaker_token = "BEAKER_TOKEN" in os.environ
+    mason_args.is_external_user = resolve_is_external_user(mason_args.launcher, has_beaker_config, has_beaker_token)
     try:
         validate_cluster_for_beaker(mason_args.is_external_user, mason_args.cluster)
+        validate_beaker_credentials(mason_args.launcher, has_beaker_config, has_beaker_token)
     except ValueError as e:
         parser.error(str(e))
 

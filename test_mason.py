@@ -224,6 +224,24 @@ class TestValidateClusterForBeaker(unittest.TestCase):
         mason.validate_cluster_for_beaker(is_external_user=True, cluster=None)
 
 
+class TestValidateBeakerCredentials(unittest.TestCase):
+    def test_explicit_beaker_without_credentials_raises(self):
+        with self.assertRaises(ValueError):
+            mason.validate_beaker_credentials(launcher="beaker", has_beaker_config=False, has_beaker_token=False)
+
+    def test_explicit_beaker_with_config_ok(self):
+        mason.validate_beaker_credentials(launcher="beaker", has_beaker_config=True, has_beaker_token=False)
+
+    def test_explicit_beaker_with_token_ok(self):
+        mason.validate_beaker_credentials(launcher="beaker", has_beaker_config=False, has_beaker_token=True)
+
+    def test_local_without_credentials_ok(self):
+        mason.validate_beaker_credentials(launcher="local", has_beaker_config=False, has_beaker_token=False)
+
+    def test_unset_launcher_without_credentials_ok(self):
+        mason.validate_beaker_credentials(launcher=None, has_beaker_config=False, has_beaker_token=False)
+
+
 class TestMakeInternalCommandLocal(unittest.TestCase):
     """The --launcher local path: no cluster, and no Ai2-org rewriting of the command."""
 
