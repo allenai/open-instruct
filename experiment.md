@@ -181,9 +181,28 @@ stalled Beaker jobs and relaunched all four against the same
 | `2k_baseline_dapo_n8_k16_seed3` | — | 3 | [01KWDYTXAD4D7SXP5MMAE69VVB](https://beaker.org/ex/01KWDYTXAD4D7SXP5MMAE69VVB) (stalled) | [01KWK57GZ3TNVA1WPVXX4H482S](https://beaker.org/ex/01KWK57GZ3TNVA1WPVXX4H482S) |
 | `2k_ngu0875_dapo_n8_k16_seed2` | 0.875 | 2 | [01KWFA2RGJZ1K6WDHRX4KZF7Q4](https://beaker.org/ex/01KWFA2RGJZ1K6WDHRX4KZF7Q4) (crashed) | [01KWK57SNVNP9EMJKHC3R6JRDT](https://beaker.org/ex/01KWK57SNVNP9EMJKHC3R6JRDT) |
 
-Note: `2k_baseline_dapo_n4_k32_seed2` and `2k_ngu0875_dapo_n8_k16_seed{1,3}`
-also look stuck (running 33-48h with no finalize) as of this writing but
-weren't part of this relaunch batch — worth checking separately.
+Checked the other long-running unfinalized jobs: `2k_ngu0875_dapo_n8_k16_seed{1,3}`
+are progressing normally (training_step advancing steadily), just slow — left
+alone. `2k_baseline_dapo_n4_k32_seed2` was genuinely stalled too (stuck at
+`training_step=1896`, same all-zero-reward-filtering spin as the others).
+Killed it and relaunched resuming from its existing checkpoint state rather
+than from scratch, by passing the original `--checkpoint_state_dir` (mason.py
+only auto-replaces that path if it isn't already under `/weka/`):
+
+| Name | Prior Beaker (stalled) | New Beaker (resumed) |
+| --- | --- | --- |
+| `2k_baseline_dapo_n4_k32_seed2` | [01KWDYV1187B947VMM72YRD1W2](https://beaker.org/ex/01KWDYV1187B947VMM72YRD1W2) | [01KWK5Z2DR49G5XGDDT8DVWRD4](https://beaker.org/ex/01KWK5Z2DR49G5XGDDT8DVWRD4) |
+
+Confirmed resume via logs: `[DataPreparationActor] Restored state:
+training_step=1800, last_consumed_step=1799` (the last checkpoint before the
+stall at step 1896, `checkpoint_state_freq=100`).
+
+```bash
+OC=true EXP=2k_baseline_dapo_n4_k32_seed2 BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 4 --num_samples_per_prompt_rollout 32 --max_grad_norm 5.0 --seed 2 \
+  --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1782879978_178800
+```
 
 ### Launch commands (repeat per config/seed)
 
