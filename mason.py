@@ -133,7 +133,20 @@ DEFAULT_ENV_VARS = {
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--cluster", type=str, nargs="+", help="Beaker clusters on which the job could be run.", required=True
+        "--cluster",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Beaker clusters on which the job could be run. Required when --launcher beaker.",
+    )
+    parser.add_argument(
+        "--launcher",
+        type=str,
+        choices=["beaker", "local"],
+        default=None,
+        help="How to launch: 'beaker' submits to Beaker (default for Ai2 users); "
+        "'local' prints the fully-resolved command without Beaker (run it on your own infra). "
+        "If unset, inferred from whether a Beaker config/token is present.",
     )
     parser.add_argument(
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
@@ -513,7 +526,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
         # Otherwise, we'll set a default path in the user's directory on Weka
-        if any(c in launch_utils.WEKA_CLUSTERS for c in args.cluster):
+        if args.cluster and any(c in launch_utils.WEKA_CLUSTERS for c in args.cluster):
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
@@ -714,9 +727,12 @@ def maybe_override_checkpoint_dir(
 
 def main():
     args, commands = get_args()
-    # If the user is not in Ai2, we run the command as is
+    # If the user is not in Ai2 (or explicitly passed --launcher local), we run the command as is
     config_path = os.path.expanduser("~/.beaker/config.yml")
-    is_external_user = not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ
+    is_external_user = resolve_is_external_user(
+        args.launcher, os.path.exists(config_path), "BEAKER_TOKEN" in os.environ
+    )
+    validate_cluster_for_beaker(is_external_user, args.cluster)
     if is_external_user:
         whoami = "external_user"
         beaker_secrets = []
