@@ -123,8 +123,8 @@ def validate_beaker_credentials(launcher: str | None, has_beaker_config: bool, h
     unhandled SDK error at client construction in main(); fail early with a clear message."""
     if launcher == "beaker" and not has_beaker_config and not has_beaker_token:
         raise ValueError(
-            "--launcher beaker requires Beaker credentials "
-            "(a ~/.beaker/config.yml file or the BEAKER_TOKEN environment variable)."
+            "--launcher beaker requires Beaker credentials (a ~/.beaker/config.yml file, "
+            "a BEAKER_CONFIG path, or the BEAKER_TOKEN environment variable)."
         )
 
 
@@ -283,7 +283,11 @@ def get_args():
     mason_args.is_external_user = resolve_is_external_user(mason_args.launcher, has_beaker_config, has_beaker_token)
     try:
         validate_cluster_for_beaker(mason_args.is_external_user, mason_args.cluster)
-        validate_beaker_credentials(mason_args.launcher, has_beaker_config, has_beaker_token)
+        # The credentials guard accepts any source beaker.Beaker.from_env() supports, including a
+        # BEAKER_CONFIG path override; auto-detection above keeps its historical signals only.
+        validate_beaker_credentials(
+            mason_args.launcher, has_beaker_config or "BEAKER_CONFIG" in os.environ, has_beaker_token
+        )
     except ValueError as e:
         parser.error(str(e))
 
