@@ -26,6 +26,7 @@ from transformers import PreTrainedTokenizer
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
+from open_instruct.distillkit.losses import forward_kl_topk_from_logprobs
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -440,7 +441,11 @@ class GRPOTrainModule(TransformerTrainModule):
         data_BT = batch["batch"].to(self.device)
 
         with torch.no_grad():
-            if self.grpo_config.load_ref_policy and self.ref_policy is not None:
+            if (
+                self.streaming_config.opd_use_task_rewards
+                and self.grpo_config.load_ref_policy
+                and self.ref_policy is not None
+            ):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy,
                     data_BT,
@@ -497,7 +502,10 @@ class GRPOTrainModule(TransformerTrainModule):
             [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
         )
         loss_stats_B = grpo_utils.create_loss_stats(
-            num_samples, self.device, record_entropy=self.grpo_config.record_entropy
+            num_samples,
+            self.device,
+            record_entropy=self.grpo_config.record_entropy,
+            record_opd=self.streaming_config.opd_enabled,
         )
 
         debug_metrics_sum: dict[str, float] = {}
@@ -509,7 +517,15 @@ class GRPOTrainModule(TransformerTrainModule):
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
-                new_logprobs, entropy = grpo_utils.forward_for_logprobs(
+                teacher_token_ids = None
+                teacher_logprobs = None
+                if self.streaming_config.opd_enabled:
+                    if data_BT.teacher_topk_token_ids is None or data_BT.teacher_topk_logprobs is None:
+                        raise ValueError("OPD is enabled but teacher top-k tensors are missing from the batch.")
+                    teacher_token_ids = data_BT.teacher_topk_token_ids[sample_idx][:, 1:, :]
+                    teacher_logprobs = data_BT.teacher_topk_logprobs[sample_idx][:, 1:, :]
+
+                new_logprobs, entropy, student_topk_logprobs = grpo_utils.forward_for_logprobs_and_topk(
                     self.model,
                     data_BT.query_responses[sample_idx],
                     data_BT.attention_masks[sample_idx],
@@ -518,6 +534,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.temperature,
                     return_entropy=self.grpo_config.record_entropy,
                     pass_olmo_core_doc_lens=True,
+                    topk_token_ids=teacher_token_ids,
                 )
 
                 response_mask = data_BT.response_masks[sample_idx][:, 1:]
@@ -563,7 +580,25 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
                 loss_denominator = accumulation_token_counts[batch_start]
-                loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
+                task_loss = pg_loss + self.grpo_config.beta * kl
+                if not self.streaming_config.opd_use_task_rewards:
+                    task_loss = torch.zeros_like(task_loss)
+                loss = masked_mean(task_loss, response_mask, None, loss_denominator)
+
+                opd_loss = None
+                opd_topk_mass = None
+                sampled_token_in_topk = None
+                if self.streaming_config.opd_enabled:
+                    if teacher_token_ids is None or teacher_logprobs is None or student_topk_logprobs is None:
+                        raise ValueError("OPD top-k tensors were not available for loss computation.")
+                    opd_output = forward_kl_topk_from_logprobs(student_topk_logprobs, teacher_logprobs)
+                    opd_loss = opd_output.loss
+                    opd_topk_mass = opd_output.teacher_topk_mass
+                    sampled_tokens = data_BT.query_responses[sample_idx][:, 1:].unsqueeze(-1)
+                    sampled_token_in_topk = (teacher_token_ids == sampled_tokens).any(dim=-1).float()
+                    loss = loss + self.streaming_config.opd_loss_coef * masked_mean(
+                        opd_loss, response_mask, None, loss_denominator
+                    )
 
                 loss = loss * dp_world_size
                 loss.backward()
@@ -582,6 +617,16 @@ class GRPOTrainModule(TransformerTrainModule):
                     self.grpo_config,
                     rho_metrics=rho.metrics,
                 )
+                if self.streaming_config.opd_enabled:
+                    assert opd_loss is not None
+                    assert opd_topk_mass is not None
+                    assert sampled_token_in_topk is not None
+                    with torch.no_grad():
+                        loss_stats_B["loss/opd_avg"][sample_idx] = masked_mean(opd_loss, response_mask)
+                        loss_stats_B["opd/teacher_topk_mass"][sample_idx] = masked_mean(opd_topk_mass, response_mask)
+                        loss_stats_B["opd/sampled_token_in_topk"][sample_idx] = masked_mean(
+                            sampled_token_in_topk, response_mask
+                        )
 
                 num_steps += 1
                 local_step += 1
@@ -623,6 +668,17 @@ class GRPOTrainModule(TransformerTrainModule):
             self.record_metric("_token_count", global_tokens, reduce_type=None)
 
             self._record_step_counter_metrics(int(global_tokens))
+            if self.streaming_config.opd_enabled and dist_utils.get_rank() == 0:
+                logger.info(
+                    "OPD learner metrics step=%d use_task_rewards=%s loss/opd_avg=%.6f "
+                    "teacher_topk_mass=%.6f sampled_token_in_topk=%.6f total_loss=%.6f",
+                    self.trainer.global_step,
+                    self.streaming_config.opd_use_task_rewards,
+                    local_metrics.get("loss/opd_avg", float("nan")),
+                    local_metrics.get("opd/teacher_topk_mass", float("nan")),
+                    local_metrics.get("opd/sampled_token_in_topk", float("nan")),
+                    local_metrics.get("loss/total_avg", float("nan")),
+                )
             data_prep_metrics = dict(batch.get("metrics") or {})
             data_prep_metrics.update(grpo_utils.finalize_rho_histograms(rho_histograms))
             self._record_data_prep_metrics(data_prep_metrics)

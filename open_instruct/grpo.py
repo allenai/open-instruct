@@ -31,7 +31,16 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_fast, grpo_utils, logger_utils, olmo_core_utils, utils, vllm_utils
+from open_instruct import (
+    grpo_fast,
+    grpo_utils,
+    logger_utils,
+    olmo_core_utils,
+    opd_utils,
+    opd_validation,
+    utils,
+    vllm_utils,
+)
 from open_instruct.actor_manager import ActorManager
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.environments.tools.utils import EnvsConfig
@@ -202,6 +211,73 @@ def main(
     model_dims = utils.ModelDims.from_hf_config(model_config.model_name_or_path)
 
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
+    num_learner_gpus = sum(args.num_learners_per_node)
+    teacher_scorers = []
+    if streaming_config.opd_enabled:
+        if streaming_config.opd_teacher_model_name_or_path is None:
+            raise ValueError("`opd_teacher_model_name_or_path` is required when `opd_enabled=True`.")
+        # The teacher scorers reserve their own placement group before the learner
+        # placement group is created below, so wait for the combined GPU count here;
+        # otherwise an under-provisioned cluster hangs inside pg.ready() with no
+        # indication of what is missing. single_gpu_mode co-locates the rollout vLLM
+        # with the learner but never with the teacher.
+        num_teacher_gpus = streaming_config.opd_teacher_num_engines * streaming_config.opd_teacher_tensor_parallel_size
+        logger.info(
+            f"OPD requires {num_learner_gpus + num_teacher_gpus} GPUs: "
+            f"{num_learner_gpus} learner (+ co-located rollout vLLM in single_gpu_mode) "
+            f"+ {num_teacher_gpus} dedicated teacher scorer GPU(s)."
+        )
+        wait_for_gpus(num_learner_gpus + num_teacher_gpus)
+        opd_validation.validate_pure_opd_reference_config(
+            opd_use_task_rewards=streaming_config.opd_use_task_rewards,
+            beta=args.beta,
+            load_ref_policy=args.load_ref_policy,
+        )
+        assert tc.tokenizer_name_or_path is not None, "tokenizer_name_or_path must be set after make_tokenizer"
+        teacher_tokenizer_config = dataclasses.replace(
+            tc,
+            tokenizer_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            tokenizer_revision=streaming_config.opd_teacher_model_revision,
+        )
+        teacher_tokenizer = teacher_tokenizer_config.tokenizer
+        opd_validation.validate_teacher_student_tokenizer_compatibility(
+            student_tokenizer=tokenizer,
+            teacher_tokenizer=teacher_tokenizer,
+            student_name=tc.tokenizer_name_or_path,
+            teacher_name=streaming_config.opd_teacher_model_name_or_path,
+        )
+        opd_validation.validate_teacher_student_output_vocab(
+            student_model_name_or_path=model_config.model_name_or_path,
+            student_revision=model_config.model_revision,
+            student_vocab_size=transformer_config.vocab_size,
+            teacher_model_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            teacher_revision=streaming_config.opd_teacher_model_revision,
+            trust_remote_code=tc.trust_remote_code,
+        )
+        teacher_scorers = opd_utils.create_teacher_scorers(
+            num_engines=streaming_config.opd_teacher_num_engines,
+            tensor_parallel_size=streaming_config.opd_teacher_tensor_parallel_size,
+            enforce_eager=streaming_config.opd_teacher_enforce_eager,
+            # Load the teacher vLLM with the teacher's own tokenizer, not the student's.
+            # Scoring runs on pre-tokenized ids and validate_teacher_student_tokenizer_compatibility
+            # has already confirmed the vocabularies share ids, so this is behavior-preserving for
+            # valid configs while avoiding loading the teacher model with a foreign tokenizer.
+            tokenizer_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            tokenizer_revision=streaming_config.opd_teacher_model_revision,
+            model_name_or_path=streaming_config.opd_teacher_model_name_or_path,
+            model_revision=streaming_config.opd_teacher_model_revision,
+            seed=args.seed,
+            enable_prefix_caching=streaming_config.opd_teacher_enable_prefix_caching,
+            # +1 leaves room for the single dummy token vLLM must generate (max_tokens=1)
+            # when scoring a full-length query+response, which can otherwise reach exactly
+            # max_prompt_token_length + response_length and overflow max_model_len.
+            max_model_len=streaming_config.max_prompt_token_length + streaming_config.response_length + 1,
+            gpu_memory_utilization=streaming_config.opd_teacher_gpu_memory_utilization,
+            topk=streaming_config.opd_topk,
+            dtype=streaming_config.opd_teacher_dtype,
+            trust_remote_code=tc.trust_remote_code,
+            attention_backend=vllm_config.vllm_attention_backend,
+        )
 
     _data_prep_actor = data_loader_lib.DataPreparationActor.options(  # type: ignore[unresolved-attribute]
         name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
@@ -226,10 +302,11 @@ def main(
         run_name=args.run_name,
         model_name=model_config.model_name_or_path,
         base_env_config=base_env_config,
+        teacher_scorers=teacher_scorers,
         initial_state=None,
     )
 
-    wait_for_gpus(sum(args.num_learners_per_node))
+    wait_for_gpus(num_learner_gpus)
 
     bundles = [{"GPU": n, "CPU": n * 10} for n in args.num_learners_per_node]
     logger.info(f"Requesting bundles: {bundles}")

@@ -377,7 +377,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if self.grpo_config.checkpoint_state_freq > 0:
             trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
-                checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
+                checkpointing_steps=self.grpo_config.checkpoint_state_freq,
+                ephemeral_save_interval=None,
+                # GRPO initializes weights from the HF checkpoint, so the step-0 checkpoint
+                # olmo-core would otherwise write on a fresh run is redundant; skip it.
+                pre_train_checkpoint=False,
             )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 

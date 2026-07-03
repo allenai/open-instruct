@@ -880,6 +880,10 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         advantages = [torch.ones(1, length) * (i + 1) for i, length in enumerate(seq_lengths)]
         response_masks = [torch.ones(1, length, dtype=torch.long) for length in seq_lengths]
         vllm_logprobs = [torch.zeros(1, length) - 0.5 for length in seq_lengths]
+        teacher_topk_token_ids = [
+            torch.arange(length * 2, dtype=torch.long).reshape(1, length, 2) for length in seq_lengths
+        ]
+        teacher_topk_logprobs = [torch.zeros(1, length, 2) - 1.0 for length in seq_lengths]
 
         return data_types.CollatedBatchData(
             query_responses=query_responses,
@@ -888,6 +892,8 @@ class TestUlyssesSPSplitter(unittest.TestCase):
             advantages=advantages,
             response_masks=response_masks,
             vllm_logprobs=vllm_logprobs,
+            teacher_topk_token_ids=teacher_topk_token_ids,
+            teacher_topk_logprobs=teacher_topk_logprobs,
         )
 
     @mock.patch("open_instruct.utils.dist.all_gather")
@@ -969,6 +975,8 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.query_responses[0][0, -1].item(), pad_token_id)
         # vllm_logprobs should pad with INVALID_LOGPROB (1.0)
         self.assertEqual(result.vllm_logprobs[0][0, -1].item(), utils.INVALID_LOGPROB)
+        assert result.teacher_topk_logprobs is not None
+        self.assertTrue(torch.isneginf(result.teacher_topk_logprobs[0][0, -1]).all())
         # attention_masks should pad with 0
         self.assertEqual(result.attention_masks[0][0, -1].item(), 0)
         # response_masks should pad with 0
@@ -1020,6 +1028,10 @@ class TestUlyssesSPSplitter(unittest.TestCase):
         self.assertEqual(result.advantages[0].shape[-1], chunk_len)
         self.assertEqual(result.response_masks[0].shape[-1], chunk_len)
         self.assertEqual(result.vllm_logprobs[0].shape[-1], chunk_len)
+        assert result.teacher_topk_token_ids is not None
+        assert result.teacher_topk_logprobs is not None
+        self.assertEqual(result.teacher_topk_token_ids[0].shape, (1, chunk_len, 2))
+        self.assertEqual(result.teacher_topk_logprobs[0].shape, (1, chunk_len, 2))
 
     @mock.patch("open_instruct.utils.dist.all_gather")
     def test_global_max_seqlen_respected(self, mock_all_gather):

@@ -2203,6 +2203,13 @@ def main(
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
 
+    if streaming_config.opd_enabled:
+        raise ValueError(
+            "On-policy distillation (`opd_enabled=True`) is only supported on the OLMo-core GRPO path "
+            "(open_instruct/grpo.py); grpo_fast.py does not set up teacher scorers. Launch with grpo.py, "
+            "or set `--opd_enabled false`."
+        )
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         for handler in logging.getLogger().handlers:
