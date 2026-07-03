@@ -277,6 +277,7 @@ class EvalCallback(Callback):
     actor_manager: ray.actor.ActorHandle | None = None
 
     _last_eval_collected: bool = field(default=True, init=False, repr=False)
+    _eval_pending: bool = field(default=False, init=False, repr=False)
 
     def pre_step(self, batch: dict[str, Any]) -> None:
         if not (
@@ -299,9 +300,15 @@ class EvalCallback(Callback):
                 base_env_config=self.base_env_config,
             )
         self.eval_data_loader.reset()
+        self._eval_pending = True
 
     def post_step(self) -> None:
-        self._last_eval_collected = grpo_utils.maybe_evaluate(
+        assert self.args.num_training_steps is not None
+        is_final_step = self.trainer.global_step >= self.args.num_training_steps
+        if not self._eval_pending and not is_final_step:
+            return
+
+        eval_collected = grpo_utils.maybe_evaluate(
             args=self.args,
             training_step=self.trainer.global_step,
             evaluation_inference_results_Q=self.evaluation_inference_results_Q,
@@ -314,3 +321,6 @@ class EvalCallback(Callback):
             max_possible_score=self.max_possible_score,
             actor_manager=self.actor_manager,
         )
+        self._last_eval_collected = eval_collected
+        if eval_collected:
+            self._eval_pending = False

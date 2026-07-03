@@ -16,6 +16,7 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
+from open_instruct.grpo_callbacks import EvalCallback
 from open_instruct.grpo_fast import create_generation_configs
 from open_instruct.grpo_utils import maybe_evaluate
 
@@ -134,6 +135,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             queries=[[1, 2, 3], [1, 2, 3]],
             decoded_responses=["resp_a", "resp_b"],
             ground_truths=["42", "42"],
+            indices=[0, 0],
             active_tools=None,
         )
         reward_metrics = {"model_step_min": 102.0, "model_step_max": 104.0, "model_step_mean": 103.0}
@@ -183,6 +185,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             queries=[[1, 2, 3]] * 4,
             decoded_responses=["resp_a", "resp_b", "resp_c", "resp_d"],
             ground_truths=["42"] * 4,
+            indices=[0, 0, 1, 1],
             active_tools=None,
         )
 
@@ -212,6 +215,62 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/pass_at_2"], 1.0)
         self.assertEqual(logged["eval/pass_at_1_unbiased"], 0.5)
         self.assertEqual(logged["eval/pass_at_2_unbiased"], 1.0)
+
+
+class TestEvalCallback(unittest.TestCase):
+    def _build_callback(self, *, global_step: int = 1, num_training_steps: int = 10) -> EvalCallback:
+        eval_data_loader = Mock()
+        eval_data_loader.__iter__ = Mock(return_value=iter([{"index": 0, INPUT_IDS_PROMPT_KEY: [1, 2, 3]}]))
+        eval_data_loader.reset = Mock()
+
+        callback = EvalCallback(
+            args=SimpleNamespace(eval_on_step_0=False, local_eval_every=5, num_training_steps=num_training_steps),
+            prompt_Q=Mock(),
+            evaluation_inference_results_Q=Mock(),
+            eval_dataset=Mock(),
+            eval_data_loader=eval_data_loader,
+            eval_generation_config=Mock(),
+            model_dims=Mock(),
+            base_env_config=EnvConfig(),
+            tokenizer=Mock(),
+            max_possible_score=1.0,
+        )
+        callback.trainer = SimpleNamespace(global_step=global_step)
+        return callback
+
+    def test_post_step_skips_when_no_eval_is_pending(self):
+        callback = self._build_callback(global_step=1)
+
+        with patch("open_instruct.grpo_callbacks.grpo_utils.maybe_evaluate") as mock_maybe_evaluate:
+            callback.post_step()
+
+        mock_maybe_evaluate.assert_not_called()
+
+    def test_pre_step_marks_eval_pending_on_eval_cadence(self):
+        callback = self._build_callback(global_step=5)
+
+        with patch("open_instruct.grpo_callbacks.data_loader_lib.add_prompt_to_generator") as mock_add_prompt:
+            callback.pre_step({})
+
+        mock_add_prompt.assert_called_once()
+        callback.eval_data_loader.reset.assert_called_once()
+        self.assertTrue(callback._eval_pending)
+
+    def test_post_step_retries_until_eval_is_collected(self):
+        callback = self._build_callback(global_step=5)
+        callback._eval_pending = True
+
+        with patch("open_instruct.grpo_callbacks.grpo_utils.maybe_evaluate", return_value=False):
+            callback.post_step()
+
+        self.assertFalse(callback._last_eval_collected)
+        self.assertTrue(callback._eval_pending)
+
+        with patch("open_instruct.grpo_callbacks.grpo_utils.maybe_evaluate", return_value=True):
+            callback.post_step()
+
+        self.assertTrue(callback._last_eval_collected)
+        self.assertFalse(callback._eval_pending)
 
 
 class TestComputePassAtKMetrics(unittest.TestCase):
