@@ -20,6 +20,7 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test-${SANITIZED_BRANCH}}"
+[[ $# -gt 0 ]] && shift
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
