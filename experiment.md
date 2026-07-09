@@ -224,6 +224,30 @@ OC=true EXP=2k_ngu0875_dapo_n8_k16_seed2 BEAKER_IMAGE=michaeln/open-instruct-int
   --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 --max_grad_norm 5.0 --never_give_up 0.875 --seed 2
 ```
 
+## Seed 4 for p=0.5 and p=0.75 (n=8, k=16)
+
+Both `p = 0.5` and `p = 0.75` already had seeds 1–3, so this adds a 4th seed
+to each, against the same `michaeln/open-instruct-integration-test-ngu` image
+(still current as of `6667e6ea5`; no code changes since the `59ba75962`
+rebuild).
+
+| Name | never_give_up | Seed | Beaker |
+| --- | --- | --- | --- |
+| `2k_ngu05_dapo_n8_k16_seed4` | 0.5 | 4 | [01KX48X5PRGBKCHEABHA393W3N](https://beaker.org/ex/01KX48X5PRGBKCHEABHA393W3N) |
+| `2k_ngu075_dapo_n8_k16_seed4` | 0.75 | 4 | [01KX48XFQRW22M1F06QECM80H0](https://beaker.org/ex/01KX48XFQRW22M1F06QECM80H0) |
+
+### Launch commands
+
+```bash
+OC=true EXP=2k_ngu05_dapo_n8_k16_seed4 BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 --max_grad_norm 5.0 --never_give_up 0.5 --seed 4
+
+OC=true EXP=2k_ngu075_dapo_n8_k16_seed4 BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 --max_grad_norm 5.0 --never_give_up 0.75 --seed 4
+```
+
 ## Smoke test (2 GPU, before launching the sweep)
 
 Quick NGU + per-quartile-metrics check on a small model via
