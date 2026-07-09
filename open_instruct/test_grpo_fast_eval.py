@@ -216,6 +216,59 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/pass_at_1_unbiased"], 0.5)
         self.assertEqual(logged["eval/pass_at_2_unbiased"], 1.0)
 
+    def test_records_per_dataset_pass_at_k_metrics(self):
+        args = SimpleNamespace(num_training_steps=200, with_tracking=False)
+        eval_dataset = self._build_eval_dataset(num_prompts=2)
+        eval_queue = _QueueWithSize(size=2)
+        eval_generation_config = SimpleNamespace(n=2)
+        tokenizer = Mock()
+        tokenizer.batch_decode.return_value = ["prompt"] * 4
+        tokenizer.pad_token = "<pad>"
+
+        eval_result = SimpleNamespace(
+            responses=[[1], [2], [3], [4]],
+            finish_reasons=["stop", "stop", "stop", "stop"],
+            token_statistics=SimpleNamespace(num_prompt_tokens=10, num_response_tokens=4, generation_time=2.0),
+        )
+        eval_batch = SimpleNamespace(
+            scores=[1.0, 0.0, 0.0, 0.0],
+            queries=[[1, 2, 3]] * 4,
+            decoded_responses=["resp_a", "resp_b", "resp_c", "resp_d"],
+            ground_truths=["42"] * 4,
+            indices=[0, 0, 1, 1],
+            datasets=["math_brumo_2025", "math_brumo_2025", "math_aime_2025", "math_aime_2025"],
+            active_tools=None,
+        )
+
+        with (
+            patch(
+                "open_instruct.grpo_utils.data_loader_lib.accumulate_inference_batches",
+                return_value=(eval_result, eval_batch, {}, None),
+            ),
+            patch("open_instruct.grpo_utils.model_utils.print_rich_single_line_metrics") as mock_print_metrics,
+            patch("open_instruct.grpo_utils.model_utils.print_rich_table"),
+        ):
+            maybe_evaluate(
+                args=args,
+                training_step=100,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=tokenizer,
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                base_env_config=EnvConfig(),
+                max_possible_score=1.0,
+            )
+
+        logged = mock_print_metrics.call_args.args[0]
+        # Pooled metrics are unchanged by the per-dataset breakdown.
+        self.assertEqual(logged["eval/pass_at_1"], 0.25)
+        self.assertEqual(logged["eval/pass_at_1/math_brumo_2025"], 0.5)
+        self.assertEqual(logged["eval/pass_at_1/math_aime_2025"], 0.0)
+        self.assertEqual(logged["eval/pass_at_2/math_brumo_2025"], 1.0)
+        self.assertEqual(logged["eval/pass_at_2/math_aime_2025"], 0.0)
+
 
 class TestEvalCallback(unittest.TestCase):
     def _build_callback(self, *, global_step: int = 1, num_training_steps: int = 10) -> EvalCallback:

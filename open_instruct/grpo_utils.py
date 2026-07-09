@@ -237,8 +237,33 @@ class GRPOExperimentConfig(
     """Number of completions per eval prompt for local pass@k metrics."""
     eval_top_p: float | None = None
     """Optional eval-only top_p override. If None, uses training top_p."""
+    eval_only: bool = False
+    """Run a single local evaluation round on `dataset_mixer_eval_list` and exit, without any training.
+    Requires no learner GPUs; the model is served by vLLM directly from `model_name_or_path`."""
+    eval_only_set_checkpoint: int | None = None
+    """In eval-only mode, the training step to attribute the eval metrics to (e.g. the checkpoint's
+    training step). Defaults to 1."""
 
     def __post_init__(self):
+        if self.eval_only:
+            if self.eval_only_set_checkpoint is not None and self.eval_only_set_checkpoint < 1:
+                raise ValueError(f"`eval_only_set_checkpoint` must be >= 1, got {self.eval_only_set_checkpoint}")
+            if self.checkpoint_state_freq > 0 or self.checkpoint_state_dir is not None:
+                logger.info("`--eval_only` detected; disabling checkpoint-state saves.")
+                self.checkpoint_state_freq = -1
+                self.checkpoint_state_dir = None
+            if self.save_freq > 0:
+                logger.info("`--eval_only` detected; disabling model saves by setting `save_freq=-1`.")
+                self.save_freq = -1
+            if self.push_to_hub:
+                logger.info("`--eval_only` detected; disabling `push_to_hub`.")
+                self.push_to_hub = False
+            if self.try_launch_beaker_eval_jobs_on_weka:
+                logger.info("`--eval_only` detected; disabling `try_launch_beaker_eval_jobs_on_weka`.")
+                self.try_launch_beaker_eval_jobs_on_weka = False
+            self.try_auto_save_to_beaker = False
+        elif self.eval_only_set_checkpoint is not None:
+            raise ValueError("`eval_only_set_checkpoint` requires `--eval_only`.")
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
@@ -857,6 +882,22 @@ def maybe_evaluate(
             prompt_solve_rates = correct_per_prompt.mean(axis=1)
             prompt_indices = np.array(eval_batch.indices, dtype=int).reshape(-1, eval_k)[:, 0]
             prompt_solve_rate_rows = [[int(idx), float(rate)] for idx, rate in zip(prompt_indices, prompt_solve_rates)]
+            # Additive per-dataset breakdown for mixed eval sets: group prompts by their raw
+            # `dataset` label and emit `eval/<metric>/<label>` alongside the pooled metrics.
+            batch_datasets = getattr(eval_batch, "datasets", None) or []
+            if len(batch_datasets) == scores.size:
+                prompt_dataset_keys = np.array(
+                    [
+                        data_loader_lib.dataset_metric_key(batch_datasets[row * eval_k])
+                        for row in range(correct_per_prompt.shape[0])
+                    ]
+                )
+                unique_dataset_keys = sorted(set(prompt_dataset_keys))
+                if len(unique_dataset_keys) > 1:
+                    for dataset_key in unique_dataset_keys:
+                        per_dataset_correct = correct_per_prompt[prompt_dataset_keys == dataset_key]
+                        for metric_name, value in compute_pass_at_k_metrics(per_dataset_correct).items():
+                            eval_pass_at_k_metrics[f"{metric_name}/{dataset_key}"] = value
         else:
             logger.warning(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k

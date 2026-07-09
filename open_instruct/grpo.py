@@ -23,6 +23,7 @@ Uses Ray for distributed training with Beaker.
 import dataclasses
 import os
 import shutil
+import time
 
 import backoff
 import ray
@@ -42,6 +43,7 @@ from open_instruct.model_utils import ModelConfig, push_folder_to_hub
 logger = logger_utils.setup_logger(__name__)
 
 CLUSTER_STARTUP_TIMEOUT_S = 1200
+EVAL_ONLY_POLL_INTERVAL_S = 15
 
 
 @backoff.on_predicate(backoff.constant, interval=5, max_time=CLUSTER_STARTUP_TIMEOUT_S)
@@ -100,6 +102,69 @@ def save_and_cleanup(
         )
 
 
+def run_eval_only(
+    args: grpo_utils.GRPOExperimentConfig,
+    eval_dataset,
+    prompt_Q: ray_queue.Queue,
+    evaluation_inference_results_Q: ray_queue.Queue,
+    generation_configs: dict,
+    tokenizer,
+    model_dims: utils.ModelDims,
+    max_possible_score: float,
+    base_env_config,
+    actor_manager,
+) -> None:
+    """Run a single local evaluation round and return, without any training.
+
+    Mirrors EvalCallback.pre_step/post_step (grpo_callbacks.py), but drives the round from
+    the driver process: no learner GPUs, weight sync, or trainer are involved, and vLLM
+    serves `model_name_or_path` directly.
+    """
+    eval_step = args.eval_only_set_checkpoint or 1
+    # Keep num_training_steps above eval_step so maybe_evaluate stays on the non-final-step
+    # path, which defers collection until every eval result is queued.
+    args.num_training_steps = eval_step + 1
+
+    eval_data_loader = data_loader_lib.HFDataLoader(
+        dataset=eval_dataset,
+        batch_size=1,
+        seed=args.seed,
+        dp_rank=0,
+        dp_world_size=1,
+        work_dir=args.output_dir,
+        automatic_reshuffle=False,
+        collator=data_loader_lib.single_example_collator,
+    )
+    logger.info(f"Eval-only mode: submitting {len(eval_dataset)} eval prompts at step {eval_step}")
+    for eval_example in iter(eval_data_loader):
+        data_loader_lib.add_prompt_to_generator(
+            eval_example,
+            eval_step,
+            prompt_Q,
+            generation_configs["eval"],
+            is_eval=True,
+            base_env_config=base_env_config,
+        )
+
+    while True:
+        eval_collected = grpo_utils.maybe_evaluate(
+            args=args,
+            training_step=eval_step,
+            evaluation_inference_results_Q=evaluation_inference_results_Q,
+            tokenizer=tokenizer,
+            episode=0,
+            eval_dataset=eval_dataset,
+            eval_generation_config=generation_configs["eval"],
+            model_dims=model_dims,
+            base_env_config=base_env_config,
+            max_possible_score=max_possible_score,
+            actor_manager=actor_manager,
+        )
+        if eval_collected:
+            break
+        time.sleep(EVAL_ONLY_POLL_INTERVAL_S)
+
+
 def main(
     args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
@@ -121,16 +186,25 @@ def main(
     if args.verbose:
         logger.setLevel("DEBUG")
 
-    beaker_config = utils.maybe_get_beaker_config()
+    if args.eval_only:
+        # Driver-side wandb init: the training path only inits wandb inside the actor's
+        # WandBCallback, which eval-only mode never reaches.
+        beaker_config, _ = grpo_fast.setup_experiment_tracking(args, tc, model_config, streaming_config, vllm_config)
+    else:
+        beaker_config = utils.maybe_get_beaker_config()
 
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
-    oc_model_config = olmo_core_utils.ModelConfig(
-        model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
-    )
-    _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
-    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
+    if not args.eval_only:
+        # Skipped in eval-only mode: no OLMo-core model is built (vLLM serves the HF
+        # checkpoint directly), and `model_name_or_path` may be a local HF export that
+        # has no OLMo-core transformer-config mapping.
+        oc_model_config = olmo_core_utils.ModelConfig(
+            model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
+        )
+        _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
+        olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
 
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",
@@ -165,7 +239,10 @@ def main(
         tools_config.pass_tools_to_chat_template,
     )
 
-    if len(train_dataset) < (
+    if args.eval_only and (eval_dataset is None or len(eval_dataset) == 0):
+        raise ValueError("`--eval_only` requires a non-empty `--dataset_mixer_eval_list`.")
+
+    if not args.eval_only and len(train_dataset) < (
         needed := max(streaming_config.async_steps, 1) * streaming_config.num_unique_prompts_rollout
     ):
         raise ValueError(f"Train dataset is too small! Is {len(train_dataset)} prompts, but {needed} are needed.")
@@ -203,56 +280,60 @@ def main(
 
     base_env_config = grpo_fast.build_base_env_config(tools_config, pools)
 
-    _data_prep_actor = data_loader_lib.DataPreparationActor.options(  # type: ignore[unresolved-attribute]
-        name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
-    ).remote(
-        dataset=train_dataset,
-        inference_results_Q=inference_results_Q,
-        param_prompt_Q=prompt_Q,
-        tokenizer=tokenizer,
-        config=streaming_config,
-        generation_config=generation_configs["train"],
-        num_training_steps=args.num_training_steps,
-        seed=args.seed,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        global_batch_size=streaming_config.num_unique_prompts_rollout,
-        dp_world_size=args.world_size,
-        max_possible_score=streaming_config.max_possible_score,
-        actor_manager=actor_manager,
-        model_dims=model_dims,
-        verbose=args.verbose,
-        work_dir=args.output_dir,
-        tool_names=tools_config.tool_call_names if tools_config else [],
-        run_name=args.run_name,
-        model_name=model_config.model_name_or_path,
-        base_env_config=base_env_config,
-        initial_state=None,
-    )
+    if not args.eval_only:
+        _data_prep_actor = data_loader_lib.DataPreparationActor.options(  # type: ignore[unresolved-attribute]
+            name=data_loader_lib.DATA_PREP_ACTOR_NAME, num_cpus=2
+        ).remote(
+            dataset=train_dataset,
+            inference_results_Q=inference_results_Q,
+            param_prompt_Q=prompt_Q,
+            tokenizer=tokenizer,
+            config=streaming_config,
+            generation_config=generation_configs["train"],
+            num_training_steps=args.num_training_steps,
+            seed=args.seed,
+            per_device_train_batch_size=args.per_device_train_batch_size,
+            global_batch_size=streaming_config.num_unique_prompts_rollout,
+            dp_world_size=args.world_size,
+            max_possible_score=streaming_config.max_possible_score,
+            actor_manager=actor_manager,
+            model_dims=model_dims,
+            verbose=args.verbose,
+            work_dir=args.output_dir,
+            tool_names=tools_config.tool_call_names if tools_config else [],
+            run_name=args.run_name,
+            model_name=model_config.model_name_or_path,
+            base_env_config=base_env_config,
+            initial_state=None,
+        )
 
-    wait_for_gpus(sum(args.num_learners_per_node))
+    pg = None
+    policy_group = None
+    if not args.eval_only:
+        wait_for_gpus(sum(args.num_learners_per_node))
 
-    bundles = [{"GPU": n, "CPU": n * 10} for n in args.num_learners_per_node]
-    logger.info(f"Requesting bundles: {bundles}")
-    pg = placement_group(bundles, strategy="SPREAD")
-    utils.ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
+        bundles = [{"GPU": n, "CPU": n * 10} for n in args.num_learners_per_node]
+        logger.info(f"Requesting bundles: {bundles}")
+        pg = placement_group(bundles, strategy="SPREAD")
+        utils.ray_get_with_progress([pg.ready()], desc="Waiting for placement group")
 
-    assert model_config.attn_implementation is not None
-    policy_group = OLMoCoreModelGroup(
-        pg=pg,
-        num_gpus_per_node=args.num_learners_per_node,
-        model_name_or_path=model_config.model_name_or_path,
-        grpo_config=args,
-        max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
-        streaming_config=streaming_config,
-        vllm_config=vllm_config,
-        tokenizer=tokenizer,
-        attn_implementation=model_config.attn_implementation,
-    )
-    logger.info("======== Policy group created =========")
+        assert model_config.attn_implementation is not None
+        policy_group = OLMoCoreModelGroup(
+            pg=pg,
+            num_gpus_per_node=args.num_learners_per_node,
+            model_name_or_path=model_config.model_name_or_path,
+            grpo_config=args,
+            max_sequence_length=streaming_config.max_prompt_token_length + streaming_config.response_length,
+            streaming_config=streaming_config,
+            vllm_config=vllm_config,
+            tokenizer=tokenizer,
+            attn_implementation=model_config.attn_implementation,
+        )
+        logger.info("======== Policy group created =========")
 
-    model_setup_futures = [m.setup_model.remote() for m in policy_group.models]
-    utils.ray_get_with_progress(model_setup_futures, desc="Setting up OLMo-core models")
-    logger.info("======== OLMo-core models initialized =========")
+        model_setup_futures = [m.setup_model.remote() for m in policy_group.models]
+        utils.ray_get_with_progress(model_setup_futures, desc="Setting up OLMo-core models")
+        logger.info("======== OLMo-core models initialized =========")
 
     assert tc.tokenizer_name_or_path is not None, "tokenizer_name_or_path must be set after make_tokenizer"
     vllm_engines = vllm_utils.create_vllm_engines(
@@ -289,6 +370,25 @@ def main(
 
     kv_cache_max_concurrency = ray.get(vllm_engines[0].get_kv_cache_info.remote())
     ray.get(actor_manager.set_kv_cache_max_concurrency.remote(kv_cache_max_concurrency))
+
+    if args.eval_only:
+        utils.ray_get_with_progress(
+            [engine.ready.remote() for engine in vllm_engines], desc="Checking vLLM engines are ready"
+        )
+        run_eval_only(
+            args=args,
+            eval_dataset=eval_dataset,
+            prompt_Q=prompt_Q,
+            evaluation_inference_results_Q=evaluation_inference_results_Q,
+            generation_configs=generation_configs,
+            tokenizer=tokenizer,
+            model_dims=model_dims,
+            max_possible_score=streaming_config.max_possible_score,
+            base_env_config=base_env_config,
+            actor_manager=actor_manager,
+        )
+        logger.info("Eval-only run complete.")
+        return
 
     utils.ray_get_with_progress(
         [m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models],

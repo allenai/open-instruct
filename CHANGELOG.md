@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `--eval_only` / `--eval_only_set_checkpoint` to the OLMo-core GRPO path (`open_instruct/grpo.py`): runs a single local evaluation round on `dataset_mixer_eval_list` with vLLM serving `model_name_or_path` directly (no learner GPUs, weight sync, or trainer), plus additive per-dataset eval metrics (`eval/pass_at_1/<dataset>` etc.) in `maybe_evaluate` for mixed eval sets, and fix `scripts/train/convert_olmo_core_to_hf.py` to read checkpoints with OLMo-core's DCP loader.
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
