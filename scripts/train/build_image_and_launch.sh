@@ -68,8 +68,8 @@ fi
 echo "Installing dependencies with uv..."
 uv sync
 
-# Run the provided script with the image name and all remaining arguments
+# Run the provided script with the image set via BEAKER_IMAGE and all remaining arguments
 echo "Made image $beaker_user/$image_name"
 script="$1"
 shift
-bash "$script" "$beaker_user/$image_name" "$@"
+BEAKER_IMAGE="$beaker_user/$image_name" bash "$script" "$@"
