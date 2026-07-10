@@ -245,7 +245,11 @@ Smoke test (Qwen3-0.6B-Base, pass@2, 1k tokens):
 [01KX4B0RSSC259B0GQB1N2GNE9](https://beaker.org/ex/01KX4B0RSSC259B0GQB1N2GNE9).
 
 Launched via `scripts/train/qwen/qwen3_4b_deepscaler_eval_best_all.sh` with the
-`michaeln/open-instruct-integration-test-ngu` image:
+`michaeln/open-instruct-integration-test-ngu` image. Four first-attempt jobs died
+at Ray head startup (transient Redis session-name mismatch) and were relaunched;
+the table links point at the successful attempts. The `ngu0875_dapo_n8_k16` seed 1
+job exited 134 during post-eval teardown but had already completed the eval and
+logged all metrics (wandb `rjyxvuxy`), so it was not rerun.
 
 | Config | Seed | Best AIME step | Source wandb | Eval Beaker |
 | --- | --- | --- | --- | --- |
@@ -254,18 +258,19 @@ Launched via `scripts/train/qwen/qwen3_4b_deepscaler_eval_best_all.sh` with the
 | `baseline_dapo_n16_k8` | 3 | 1900 | xpmxgh19 | [01KX4CTSG18B94WVBVJE21SAXT](https://beaker.org/ex/01KX4CTSG18B94WVBVJE21SAXT) |
 | `baseline_dapo_n8_k16` | 1 | 900 | cmoi4l53 | [01KX4CY838RPWJ9YJ1755DZGZ0](https://beaker.org/ex/01KX4CY838RPWJ9YJ1755DZGZ0) |
 | `baseline_dapo_n8_k16` | 2 | 1400 | v12nc9i8 | [01KX4D1TSG0EQ8T4F45A1M150A](https://beaker.org/ex/01KX4D1TSG0EQ8T4F45A1M150A) |
-| `baseline_dapo_n8_k16` | 3 | 1500 | 02frsm05 | [01KX4D4Y8C93DZD467W703TVBE](https://beaker.org/ex/01KX4D4Y8C93DZD467W703TVBE) |
-| `baseline_dapo_n4_k32` | 1 | 1200 | t68pmy9s | [01KX4D7Y4NNHT69JTAHM58CJ7X](https://beaker.org/ex/01KX4D7Y4NNHT69JTAHM58CJ7X) |
+| `baseline_dapo_n8_k16` | 3 | 1500 | 02frsm05 | [01KX6B8SB5FB5SRB3XSMCHE3X3](https://beaker.org/ex/01KX6B8SB5FB5SRB3XSMCHE3X3) |
+| `baseline_dapo_n4_k32` | 1 | 1200 | t68pmy9s | [01KX6B96SMH1GBC4ZW6V4A6WD0](https://beaker.org/ex/01KX6B96SMH1GBC4ZW6V4A6WD0) |
 | `baseline_dapo_n4_k32` | 2 | 800 | midlg5cv+txilsd7o | [01KX4DBJM8GS524VXW6BGRZAP0](https://beaker.org/ex/01KX4DBJM8GS524VXW6BGRZAP0) |
 | `baseline_dapo_n4_k32` | 3 | 1200 | z4448u5r | [01KX4DEK3TA05HTZAPQ95ES9ZQ](https://beaker.org/ex/01KX4DEK3TA05HTZAPQ95ES9ZQ) |
 | `baseline_dapo_n2_k64` | 1 | 1000 | pxlpna71 | [01KX4DHTHWVEDPV9CM27KR3MM3](https://beaker.org/ex/01KX4DHTHWVEDPV9CM27KR3MM3) |
 | `baseline_dapo_n2_k64` | 2 | 1600 | blfze1rc | [01KX4DMW5BYJBSKD2T99VYYBCH](https://beaker.org/ex/01KX4DMW5BYJBSKD2T99VYYBCH) |
 | `baseline_dapo_n2_k64` | 3 | 800 | hl3d7uml | [01KX4DRF974YG8JWCWRP1JGD12](https://beaker.org/ex/01KX4DRF974YG8JWCWRP1JGD12) |
-| `ngu05_dapo_n8_k16` | 1 | 1600 | 6rxe8lh5 | [01KX4DV9MHCYM2HEFPTZBD5W4Y](https://beaker.org/ex/01KX4DV9MHCYM2HEFPTZBD5W4Y) |
-| `ngu05_dapo_n8_k16` | 2 | 1400 | rg4c490m | [01KX4DYP2980G5WGHF46GJVX85](https://beaker.org/ex/01KX4DYP2980G5WGHF46GJVX85) |
-| `ngu05_dapo_n8_k16` | 3 | 1000 | pdm9oqd6 | [01KX4E28ET07HCKJD9C72PGEYB](https://beaker.org/ex/01KX4E28ET07HCKJD9C72PGEYB) |
+| `ngu05_dapo_n8_k16` | 1 | 1600 | 6rxe8lh5 | [01KX6B9KJGHYBSTDWCN1HJJ2R7](https://beaker.org/ex/01KX6B9KJGHYBSTDWCN1HJJ2R7) |
+| `ngu05_dapo_n8_k16` | 2 | 1300 | ivrq5tsx | [01KX6BK7S6RDN9Q81FZSF8N492](https://beaker.org/ex/01KX6BK7S6RDN9Q81FZSF8N492) |
+| `ngu05_dapo_n8_k16` | 3 | 1000 | pdm9oqd6 | [01KX6BA0RD5E5A9BPQPSAAWE6R](https://beaker.org/ex/01KX6BA0RD5E5A9BPQPSAAWE6R) |
 | `ngu075_dapo_n8_k16` | 1 | 1000 | i12fv1iu | [01KX4E68AKMJS75B05WCD3ZBFX](https://beaker.org/ex/01KX4E68AKMJS75B05WCD3ZBFX) |
 | `ngu075_dapo_n8_k16` | 3 | 1100 | ai4avb1d | [01KX4E9B224W6HDAZGS8564BAB](https://beaker.org/ex/01KX4E9B224W6HDAZGS8564BAB) |
+| `ngu075_dapo_n8_k16` | 4 | 900 | kg4ycwi8 | [01KX6BRBXR0HKPK19K87MNA2NE](https://beaker.org/ex/01KX6BRBXR0HKPK19K87MNA2NE) |
 | `ngu0875_dapo_n8_k16` | 1 | 1700 | x5rkqi9n | [01KX4ECBJNV5NG1PDXTFJ3TWJK](https://beaker.org/ex/01KX4ECBJNV5NG1PDXTFJ3TWJK) |
 | `ngu0875_dapo_n8_k16` | 2 | 1700 | ux8zlyun | [01KX4EFPEA1F4WMAMQSKY982H3](https://beaker.org/ex/01KX4EFPEA1F4WMAMQSKY982H3) |
 | `ngu0875_dapo_n8_k16` | 3 | 1000 | 0f6tb0za | [01KX4EK2WFQPKYQBFWCECN5YM5](https://beaker.org/ex/01KX4EK2WFQPKYQBFWCECN5YM5) |
