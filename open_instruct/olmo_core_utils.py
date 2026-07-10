@@ -250,6 +250,8 @@ class LoggingConfig:
 class CheckpointConfig:
     """Configuration for checkpointing."""
 
+    checkpointing_enabled: bool = True
+    """Whether OLMo-core should save any checkpoints, including the final checkpoint."""
     output_dir: str = "output/"
     """The output directory where the model predictions and checkpoints will be written."""
     checkpointing_steps: int = 500
@@ -308,6 +310,7 @@ def build_checkpointer_callback(
     ephemeral_save_interval: int | None,
     keep_last_n_checkpoints: int = -1,
     save_async: bool = True,
+    enabled: bool = True,
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
     return RetainedCheckpointerCallback(
@@ -315,6 +318,7 @@ def build_checkpointer_callback(
         ephemeral_save_interval=ephemeral_save_interval,
         keep_last_n_checkpoints=keep_last_n_checkpoints,
         save_async=save_async,
+        enabled=enabled,
     )
 
 
@@ -361,6 +365,7 @@ def build_base_callbacks(
     checkpointing_steps: int,
     ephemeral_save_interval: int | None,
     keep_last_n_checkpoints: int = 3,
+    checkpointing_enabled: bool = True,
     with_tracking: bool = False,
     wandb_project: str | None = None,
     wandb_entity: str | None = None,
@@ -375,6 +380,7 @@ def build_base_callbacks(
             ephemeral_save_interval,
             keep_last_n_checkpoints,
             save_async=save_async,
+            enabled=checkpointing_enabled,
         ),
     }
     if with_tracking and wandb_project:

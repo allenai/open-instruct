@@ -86,6 +86,15 @@ class IsHfCheckpointTest(unittest.TestCase):
 
 
 class RetainedCheckpointerCallbackTest(unittest.TestCase):
+    def test_build_checkpointer_can_disable_all_saves(self) -> None:
+        callback = olmo_core_utils.build_checkpointer_callback(
+            checkpointing_steps=1000,
+            ephemeral_save_interval=None,
+            enabled=False,
+        )
+
+        self.assertFalse(callback.enabled)
+
     def test_permanent_checkpoint_removes_ephemeral_and_old_permanent(self) -> None:
         callback = olmo_core_utils.RetainedCheckpointerCallback(keep_last_n_checkpoints=1)
         callback._checkpoints = ["step100", "step200"]
