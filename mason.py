@@ -286,6 +286,11 @@ def get_env_vars(
         [beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars]
     )
 
+    # Lets ray_node_setup.sh skip `ray start` on single-node jobs, where ray.init()
+    # starts its own cluster on random ports instead of a fixed one that collides
+    # with other jobs sharing the node's host network.
+    env_vars.append(beaker.BeakerEnvVar(name="MASON_NUM_NODES", value=str(num_nodes)))
+
     # add user-specific secrets
     env_vars.extend(
         [beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets]

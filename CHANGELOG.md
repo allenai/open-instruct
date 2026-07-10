@@ -17,3 +17,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Skip `ray start` in `configs/beaker_configs/ray_node_setup.sh` for single-node jobs (detected via the new `MASON_NUM_NODES` env var injected by `mason.py`), letting `ray.init()` pick random ports; previously two sub-node jobs packed onto one Beaker node collided on the hardcoded Ray head port and crashed at startup.
