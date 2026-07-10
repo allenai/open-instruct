@@ -34,7 +34,7 @@ uv run python mason.py \
     --tokenizer_name_or_path Qwen/Qwen3-30B-A3B \
     --pretokenized_dataset_path "$DATASET_PATH" \
     --output_dir "$OUTPUT_DIR" \
-    --attn_implementation torch \
+    --attn_implementation flash_4 \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \

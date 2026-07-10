@@ -39,7 +39,9 @@ dependencies = [
     # The flat FA3 wheel index can publish a newer aarch64-only build than the latest x86_64 build.
     # Pin the Linux x86_64 wheel directly so uv doesn't resolve to an aarch64-only version.
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "flash-attn-4[cu13]==4.0.0b18; platform_system != 'Darwin'",
+    # FA4 beta 21 contains the compatibility fixes for the matching CuTe DSL prerelease.
+    "flash-attn-4[cu13]==4.0.0b21; platform_system != 'Darwin'",
+    "nvidia-cutlass-dsl[cu13]==4.6.0.dev0; platform_system != 'Darwin'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
@@ -72,7 +74,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "e921a2c5c7be45980fc22c3844a1ece71e3c3cb3" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "1b06816c70ca0cfd5985bd6a87b0bcbc1e481b5b" }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
