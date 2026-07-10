@@ -18,3 +18,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Skip `ray start` in `ray_node_setup.sh` for single-node jobs (detected via the `MASON_NUM_NODES` env var injected by `mason.py`), letting `ray.init()` pick a random port; previously two single-node jobs packed onto the same Beaker node collided on the hardcoded Ray head port and crashed at startup (https://github.com/allenai/open-instruct/pull/1752).

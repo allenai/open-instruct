@@ -13,11 +13,21 @@ echo PATH=$PATH
 
 # python3 -c "import os, ray; print(os.path.dirname(ray.__file__))"
 
-BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
-
 RAY_NODE_PORT=8888
 mkdir -p "$HOME/.triton/autotune"  # Create Triton autotune cache directory to silence warnings
 ray stop --force
+
+if [ "${MASON_NUM_NODES:-1}" == "1" ]; then
+    # Single-node job: skip `ray start` entirely and let `ray.init()` pick a
+    # random port. Beaker can pack multiple single-node jobs onto the same
+    # physical node, and a hardcoded Ray head port causes them to collide.
+    # This script is `source`d, so `return` (not `exit`) lets the caller's
+    # `&&`-chained training command still run.
+    echo "Single-node job detected (MASON_NUM_NODES=1); skipping ray start, ray.init() will use a random port"
+    return 0
+fi
+
+BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
