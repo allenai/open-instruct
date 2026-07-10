@@ -86,6 +86,8 @@ class ModelConfig:
     """Destination capacity factor for expert-parallel communication."""
     moe_recompute_each_block: bool = True
     """Recompute each Qwen MoE block during backward to reduce activation memory."""
+    moe_checkpoint_block_internals: bool = True
+    """Checkpoint Qwen MoE attention and expert-permutation internals in addition to whole blocks."""
 
     def __post_init__(self):
         if self.attn_implementation is None:
@@ -517,9 +519,10 @@ def setup_model(
             vocab_size=vocab_size,
             dtype=DType.bfloat16,
             attention_backend=AttentionBackendName(model_config_args.attn_implementation),
-            compile_friendly_recompute=model_config_args.moe_recompute_each_block,
+            compile_friendly_recompute=model_config_args.moe_checkpoint_block_internals,
             ep=ep,
         )
+        model_config.recompute_each_block = model_config_args.moe_recompute_each_block
     else:
         model_config = get_transformer_config(
             config_source,

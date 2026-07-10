@@ -5,9 +5,11 @@ NUM_NODES="${NUM_NODES:-1}"
 MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-6}"
 COMPILE_MODEL="${COMPILE_MODEL:-false}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
+MOE_RECOMPUTE_EACH_BLOCK="${MOE_RECOMPUTE_EACH_BLOCK:-true}"
+MOE_CHECKPOINT_BLOCK_INTERNALS="${MOE_CHECKPOINT_BLOCK_INTERNALS:-true}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
-EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${NUM_NODES}n-ga${GRADIENT_ACCUMULATION_STEPS}"
+EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${NUM_NODES}n-ga${GRADIENT_ACCUMULATION_STEPS}-recompute${MOE_RECOMPUTE_EACH_BLOCK}-internal${MOE_CHECKPOINT_BLOCK_INTERNALS}"
 RUN_NAME="${EXP_NAME}-$(date +%Y%m%d-%H%M%S)"
 PROJECT_ROOT="/weka/oe-adapt-default/jacobm/olmoe3/post-training"
 MODEL_PATH="${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-base-olmo"
@@ -65,7 +67,8 @@ uv run python mason.py \
     --max_grad_norm 1.0 \
     --moe_expert_parallel_degree 8 \
     --moe_expert_parallel_path sync_1d \
-    --moe_recompute_each_block true \
+    --moe_recompute_each_block "$MOE_RECOMPUTE_EACH_BLOCK" \
+    --moe_checkpoint_block_internals "$MOE_CHECKPOINT_BLOCK_INTERNALS" \
     --compile_model "$COMPILE_MODEL" \
     --activation_memory_budget 1.0 \
     --checkpointing_enabled false \
