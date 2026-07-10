@@ -5,6 +5,7 @@ NUM_NODES="${NUM_NODES:-1}"
 MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-6}"
 LOGGING_STEPS="${LOGGING_STEPS:-1}"
 COMPILE_MODEL="${COMPILE_MODEL:-false}"
+PER_DEVICE_TRAIN_BATCH_SIZE="${PER_DEVICE_TRAIN_BATCH_SIZE:-1}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 MOE_RECOMPUTE_EACH_BLOCK="${MOE_RECOMPUTE_EACH_BLOCK:-true}"
 MOE_CHECKPOINT_BLOCK_INTERNALS="${MOE_CHECKPOINT_BLOCK_INTERNALS:-true}"
@@ -12,7 +13,7 @@ MOE_EXPERT_PARALLEL_PATH="${MOE_EXPERT_PARALLEL_PATH:-sync_1d}"
 MOE_EXPERT_PARALLEL_CAPACITY_FACTOR="${MOE_EXPERT_PARALLEL_CAPACITY_FACTOR:-1.25}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
-EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${NUM_NODES}n-ga${GRADIENT_ACCUMULATION_STEPS}-recompute${MOE_RECOMPUTE_EACH_BLOCK}-internal${MOE_CHECKPOINT_BLOCK_INTERNALS}-${MOE_EXPERT_PARALLEL_PATH}"
+EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${NUM_NODES}n-mb${PER_DEVICE_TRAIN_BATCH_SIZE}-ga${GRADIENT_ACCUMULATION_STEPS}-compile${COMPILE_MODEL}-recompute${MOE_RECOMPUTE_EACH_BLOCK}-internal${MOE_CHECKPOINT_BLOCK_INTERNALS}-${MOE_EXPERT_PARALLEL_PATH}"
 RUN_NAME="${EXP_NAME}-$(date +%Y%m%d-%H%M%S)"
 PROJECT_ROOT="/weka/oe-adapt-default/jacobm/olmoe3/post-training"
 MODEL_PATH="${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-base-olmo"
@@ -63,7 +64,7 @@ uv run python mason.py \
     --output_dir "$OUTPUT_DIR" \
     --attn_implementation flash_4 \
     --max_seq_length 32768 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS" \
     --max_train_steps "$MAX_TRAIN_STEPS" \
     --num_epochs 1 \
