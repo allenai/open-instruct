@@ -9,9 +9,8 @@ Example usage:
 
 import argparse
 
-import torch
-import torch.distributed.checkpoint.state_dict as dcp_state_dict
 import transformers
+from olmo_core.distributed import checkpoint as olmo_core_checkpoint
 
 from open_instruct import logger_utils, olmo_core_utils
 
@@ -34,11 +33,12 @@ def main():
     model_config = olmo_core_utils.get_transformer_config(args.model_name, vocab_size, attn_backend="torch")
     model = model_config.build(init_device="cpu")
 
-    state_dict = {"model": model.state_dict()}
-    dcp_state_dict.load_state_dict(state_dict, checkpoint_id=args.checkpoint_dir)
+    # The checkpoint metadata is written by OLMo-core's vendored DCP filesystem writer,
+    # so it must be read with OLMo-core's loader (torch's dcp.load cannot unpickle it).
+    olmo_core_checkpoint.load_model_and_optim_state(args.checkpoint_dir, model)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
-    olmo_core_utils.save_state_dict_as_hf(state_dict["model"], args.output_dir, args.model_name, tokenizer)
+    olmo_core_utils.save_state_dict_as_hf(model.state_dict(), args.output_dir, args.model_name, tokenizer)
     logger.info(f"Saved HuggingFace checkpoint to {args.output_dir}")
 
 

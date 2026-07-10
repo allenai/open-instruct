@@ -13,6 +13,17 @@ echo PATH=$PATH
 
 # python3 -c "import os, ray; print(os.path.dirname(ray.__file__))"
 
+# Single-node jobs don't need an explicit `ray start`: ray.init() in the training
+# script starts its own cluster on random ports, which avoids colliding on the
+# fixed port below when Beaker packs multiple jobs onto one node (jobs share the
+# host network). Only multi-node jobs need a fixed port for workers to join the
+# head. MASON_NUM_NODES is set by mason.py; when it's missing (non-mason launch),
+# keep the old always-start behavior. This file is sourced, hence `return`.
+if [ "${MASON_NUM_NODES:-0}" == "1" ]; then
+    echo "Single-node job: skipping ray start; ray.init() will start its own cluster"
+    return 0 2>/dev/null || exit 0
+fi
+
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
 RAY_NODE_PORT=8888

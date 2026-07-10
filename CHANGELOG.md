@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `--eval_only` / `--eval_only_set_checkpoint` to the OLMo-core GRPO path (`open_instruct/grpo.py`): runs a single local evaluation round on `dataset_mixer_eval_list` with vLLM serving `model_name_or_path` directly (no learner GPUs, weight sync, or trainer), plus additive per-dataset eval metrics (`eval/pass_at_1/<dataset>` etc.) in `maybe_evaluate` for mixed eval sets, and fix `scripts/train/convert_olmo_core_to_hf.py` to read checkpoints with OLMo-core's DCP loader.
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
@@ -16,3 +17,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Skip `ray start` in `configs/beaker_configs/ray_node_setup.sh` for single-node jobs (detected via the new `MASON_NUM_NODES` env var injected by `mason.py`), letting `ray.init()` pick random ports; previously two sub-node jobs packed onto one Beaker node collided on the hardcoded Ray head port and crashed at startup.
