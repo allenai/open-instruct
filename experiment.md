@@ -247,6 +247,35 @@ OC=true EXP=2k_ngu075_dapo_n8_k16_seed4 BEAKER_IMAGE=michaeln/open-instruct-inte
   bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
   --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 --max_grad_norm 5.0 --never_give_up 0.75 --seed 4
 ```
+
+## Additional seeds with grad norm 1.0
+
+One new seed for every baseline except k=8, and one new seed for every NGU
+configuration above. Unlike the earlier runs, all of these use
+`--max_grad_norm 1.0`.
+
+| Name | n | k | never_give_up | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- |
+| `2k_baseline_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | — | 1 | Pending |
+| `2k_baseline_dapo_n4_k32_gradnorm1_seed1` | 4 | 32 | — | 1 | Pending |
+| `2k_baseline_dapo_n2_k64_gradnorm1_seed1` | 2 | 64 | — | 1 | Pending |
+| `2k_ngu05_dapo_n16_k8_gradnorm1_seed1` | 16 | 8 | 0.5 | 1 | Pending |
+| `2k_ngu09_dapo_n16_k8_gradnorm1_seed1` | 16 | 8 | 0.9 | 1 | Pending |
+| `2k_ngu05_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.5 | 1 | Pending |
+| `2k_ngu09_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.9 | 1 | Pending |
+| `2k_ngu06_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.6 | 1 | Pending |
+| `2k_ngu075_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.75 | 1 | Pending |
+| `2k_ngu0875_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.875 | 1 | Pending |
+
+### Launch command (repeat per row)
+
+```bash
+OC=true EXP=$NAME \
+  ./scripts/train/build_image_and_launch.sh scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout $N --num_samples_per_prompt_rollout $K \
+  --max_grad_norm 1.0 --seed $SEED [--never_give_up $P]
+```
+
 ## Best-step held-out evals (BRUMO / HMMT / AIME 2025)
 
 Eval-only runs (`open_instruct/grpo.py --eval_only`, commit `23fcabfe5`) of every
