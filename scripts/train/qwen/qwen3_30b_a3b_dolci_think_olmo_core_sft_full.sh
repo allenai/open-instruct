@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-NUM_NODES="${NUM_NODES:-10}"
+NUM_NODES="${NUM_NODES:-8}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-2}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
@@ -31,7 +31,7 @@ uv run python mason.py \
     --workspace ai2/olmo-instruct \
     --priority urgent \
     --max_retries 5 \
-    --timeout 18h \
+    --timeout 24h \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --preemptible \
