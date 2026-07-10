@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-NUM_NODES="${NUM_NODES:-18}"
+NUM_NODES="${NUM_NODES:-16}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-full}"
@@ -61,7 +61,8 @@ uv run python mason.py \
     --weight_decay 0.0 \
     --max_grad_norm 1.0 \
     --moe_expert_parallel_degree 8 \
-    --moe_expert_parallel_path sync_1d \
+    --moe_expert_parallel_path rowwise_nvshmem \
+    --moe_expert_parallel_capacity_factor 2.0 \
     --moe_recompute_each_block true \
     --moe_checkpoint_block_internals false \
     --compile_model false \

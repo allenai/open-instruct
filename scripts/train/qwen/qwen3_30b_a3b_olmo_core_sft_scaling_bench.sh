@@ -3,11 +3,13 @@ set -euo pipefail
 
 NUM_NODES="${NUM_NODES:-1}"
 MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-6}"
+LOGGING_STEPS="${LOGGING_STEPS:-1}"
 COMPILE_MODEL="${COMPILE_MODEL:-false}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 MOE_RECOMPUTE_EACH_BLOCK="${MOE_RECOMPUTE_EACH_BLOCK:-true}"
 MOE_CHECKPOINT_BLOCK_INTERNALS="${MOE_CHECKPOINT_BLOCK_INTERNALS:-true}"
 MOE_EXPERT_PARALLEL_PATH="${MOE_EXPERT_PARALLEL_PATH:-sync_1d}"
+MOE_EXPERT_PARALLEL_CAPACITY_FACTOR="${MOE_EXPERT_PARALLEL_CAPACITY_FACTOR:-1.25}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${NUM_NODES}n-ga${GRADIENT_ACCUMULATION_STEPS}-recompute${MOE_RECOMPUTE_EACH_BLOCK}-internal${MOE_CHECKPOINT_BLOCK_INTERNALS}-${MOE_EXPERT_PARALLEL_PATH}"
@@ -68,11 +70,12 @@ uv run python mason.py \
     --max_grad_norm 1.0 \
     --moe_expert_parallel_degree 8 \
     --moe_expert_parallel_path "$MOE_EXPERT_PARALLEL_PATH" \
+    --moe_expert_parallel_capacity_factor "$MOE_EXPERT_PARALLEL_CAPACITY_FACTOR" \
     --moe_recompute_each_block "$MOE_RECOMPUTE_EACH_BLOCK" \
     --moe_checkpoint_block_internals "$MOE_CHECKPOINT_BLOCK_INTERNALS" \
     --compile_model "$COMPILE_MODEL" \
     --activation_memory_budget 1.0 \
     --checkpointing_enabled false \
     --checkpointing_steps 1000000 \
-    --logging_steps 1 \
+    --logging_steps "$LOGGING_STEPS" \
     --seed 123
