@@ -3,6 +3,7 @@ set -euo pipefail
 
 NUM_NODES="${NUM_NODES:-8}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
+COMPILE_MODEL="${COMPILE_MODEL:-true}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-full}"
@@ -70,7 +71,7 @@ uv run python mason.py \
     --moe_expert_parallel_capacity_factor 2.0 \
     --moe_recompute_each_block true \
     --moe_checkpoint_block_internals false \
-    --compile_model false \
+    --compile_model "$COMPILE_MODEL" \
     --activation_memory_budget 1.0 \
     --checkpointing_enabled true \
     --checkpointing_steps 1000000 \
