@@ -159,6 +159,7 @@ def run_eval_only(
             base_env_config=base_env_config,
             max_possible_score=max_possible_score,
             actor_manager=actor_manager,
+            eval_step=eval_step,
         )
         if eval_collected:
             break

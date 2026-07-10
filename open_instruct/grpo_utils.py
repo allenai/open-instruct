@@ -822,11 +822,19 @@ def maybe_evaluate(
     base_env_config: data_types.EnvConfig,
     max_possible_score: float,
     actor_manager=None,
+    eval_step: int | None = None,
 ) -> bool:
     """Optionally evaluate the model.
 
+    `eval_step` is the training step the eval prompts were queued for (i.e. the step of the
+    model checkpoint being evaluated). It can differ from `training_step`, the *current*
+    training step, when eval-result collection is deferred to a later step. Defaults to
+    `training_step` when not provided.
+
     Returns True if evaluation results were successfully collected, False otherwise.
     """
+    if eval_step is None:
+        eval_step = training_step
     if eval_dataset is None:
         return True
 
@@ -903,6 +911,7 @@ def maybe_evaluate(
                 "Eval scores size %s is not divisible by eval_k %s; skipping pass@k metrics.", scores.size, eval_k
             )
         eval_metrics: dict[str, Any] = {
+            "eval_step": eval_step,
             "eval/scores": scores.mean(),
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),

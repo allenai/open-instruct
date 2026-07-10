@@ -278,6 +278,7 @@ class EvalCallback(Callback):
 
     _last_eval_collected: bool = field(default=True, init=False, repr=False)
     _eval_pending: bool = field(default=False, init=False, repr=False)
+    _eval_step: int | None = field(default=None, init=False, repr=False)
 
     def pre_step(self, batch: dict[str, Any]) -> None:
         if not (
@@ -301,6 +302,7 @@ class EvalCallback(Callback):
             )
         self.eval_data_loader.reset()
         self._eval_pending = True
+        self._eval_step = self.trainer.global_step
 
     def post_step(self) -> None:
         assert self.args.num_training_steps is not None
@@ -320,6 +322,7 @@ class EvalCallback(Callback):
             base_env_config=self.base_env_config,
             max_possible_score=self.max_possible_score,
             actor_manager=self.actor_manager,
+            eval_step=self._eval_step,
         )
         self._last_eval_collected = eval_collected
         if eval_collected:

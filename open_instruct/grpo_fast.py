@@ -1925,6 +1925,7 @@ def run_training(
         wandb_url=wandb_url,
     )
     last_eval_collected = True
+    last_eval_step = None
 
     ray_get_with_progress(
         [m.warmup_for_weight_sync.remote() for m in policy_group.models],
@@ -1963,6 +1964,7 @@ def run_training(
                     base_env_config=base_env_config,
                 )
             eval_data_loader.reset()
+            last_eval_step = training_step
 
         episode += streaming_config.num_unique_prompts_rollout * streaming_config.num_samples_per_prompt_rollout
 
@@ -2042,6 +2044,7 @@ def run_training(
             base_env_config,
             streaming_config.max_possible_score,
             actor_manager,
+            eval_step=last_eval_step,
         )
 
         maybe_update_beaker_description(
