@@ -58,6 +58,12 @@ class IsHfCheckpointTest(unittest.TestCase):
             _touch(os.path.join(tmp, "model.pt"))
             self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
 
+    def test_converted_olmo_core_dir_with_config_json_is_not_hf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _touch(os.path.join(tmp, "config.json"))
+            _touch(os.path.join(tmp, "model_and_optim", ".metadata"))
+            self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
+
     def test_relative_local_olmo_core_dir_is_olmo_core(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = os.getcwd()
