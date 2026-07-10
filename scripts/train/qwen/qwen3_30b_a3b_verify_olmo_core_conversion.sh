@@ -27,6 +27,7 @@ uv run python mason.py \
     -- python "$VERIFY_SCRIPT" \
     --hf-model Qwen/Qwen3-30B-A3B-Base \
     --checkpoint-path "$MODEL_PATH" \
+    --hf-device cpu \
     --device cuda \
     --dtype bfloat16 \
     --rtol 0.02 \
