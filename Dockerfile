@@ -73,6 +73,11 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
+# Holmes B300 nodes use the feature-specific compute capability 10.3 target.
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    CMAKE_CUDA_ARCHITECTURES=103a uv run --frozen python -m \
+    olmo_core.kernels.build_symm_mem_vdev2d_ext --inplace --backend cmake
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
