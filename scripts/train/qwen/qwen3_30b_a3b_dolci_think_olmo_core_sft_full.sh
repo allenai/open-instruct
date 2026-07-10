@@ -41,6 +41,8 @@ uv run python mason.py \
     --env OLMO_SHARED_FS=1 \
     --env OLMO_DDP_INIT_SYNC=0 \
     --env OLMO_EP_MP_HIGH_PRIORITY_GROUP=0 \
+    --env NVSHMEM_ENABLE_NIC_PE_MAPPING=1 \
+    --env NVSHMEM_HCA_LIST=^mlx5_bond_0 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     -- torchrun \
     "${torchrun_args[@]}" \
