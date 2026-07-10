@@ -77,7 +77,8 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 
 # Holmes B300 nodes use the feature-specific compute capability 10.3 target.
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    CMAKE_CUDA_ARCHITECTURES=103a uv run --frozen python -m \
+    uv pip install --python .venv/bin/python 'cmake==3.31.6' && \
+    PATH=/stage/.venv/bin:${PATH} CMAKE_CUDA_ARCHITECTURES=103a uv run --frozen python -m \
     olmo_core.kernels.build_symm_mem_vdev2d_ext --inplace --backend cmake
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
