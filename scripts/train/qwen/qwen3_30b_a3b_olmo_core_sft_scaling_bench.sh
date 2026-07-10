@@ -4,9 +4,10 @@ set -euo pipefail
 NUM_NODES="${NUM_NODES:-1}"
 MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-6}"
 COMPILE_MODEL="${COMPILE_MODEL:-false}"
+GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
-EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${NUM_NODES}n"
+EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${NUM_NODES}n-ga${GRADIENT_ACCUMULATION_STEPS}"
 RUN_NAME="${EXP_NAME}-$(date +%Y%m%d-%H%M%S)"
 PROJECT_ROOT="/weka/oe-adapt-default/jacobm/olmoe3/post-training"
 MODEL_PATH="${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-base-olmo"
@@ -54,7 +55,7 @@ uv run python mason.py \
     --attn_implementation flash_4 \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS" \
     --max_train_steps "$MAX_TRAIN_STEPS" \
     --num_epochs 1 \
     --learning_rate 4e-5 \
