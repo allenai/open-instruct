@@ -252,16 +252,18 @@ OC=true EXP=2k_ngu075_dapo_n8_k16_seed4 BEAKER_IMAGE=michaeln/open-instruct-inte
 
 One new seed for every baseline except k=8, plus one new n=8/k=16 NGU seed at
 each of `p = 0.5`, `p = 0.75`, and `p = 0.875`. Unlike the earlier runs, all
-six use `--max_grad_norm 1.0`.
+six use `--max_grad_norm 1.0`. The original submissions to `ai2/olmo-instruct`
+were canceled and rerun in `ai2/open-instruct-dev`; the table links point to
+the replacement runs.
 
 | Name | n | k | never_give_up | Seed | Beaker |
 | --- | --- | --- | --- | --- | --- |
-| `2k_baseline_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | — | 1 | [01KX6VGB98S6MRT5FWY2WTFYJ1](https://beaker.org/ex/01KX6VGB98S6MRT5FWY2WTFYJ1) |
-| `2k_baseline_dapo_n4_k32_gradnorm1_seed1` | 4 | 32 | — | 1 | [01KX6VGVE15SX40F089KZB3VM0](https://beaker.org/ex/01KX6VGVE15SX40F089KZB3VM0) |
-| `2k_baseline_dapo_n2_k64_gradnorm1_seed1` | 2 | 64 | — | 1 | [01KX6VH09F9KZ97HNM6KJ548RX](https://beaker.org/ex/01KX6VH09F9KZ97HNM6KJ548RX) |
-| `2k_ngu05_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.5 | 1 | [01KX6VHGEMJBGGGX3DNKGGA4TV](https://beaker.org/ex/01KX6VHGEMJBGGGX3DNKGGA4TV) |
-| `2k_ngu075_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.75 | 1 | [01KX6VJ1BF00FZXBSDH5QX6ADG](https://beaker.org/ex/01KX6VJ1BF00FZXBSDH5QX6ADG) |
-| `2k_ngu0875_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.875 | 1 | [01KX6VJ7FN7DQHHWWVWF91174W](https://beaker.org/ex/01KX6VJ7FN7DQHHWWVWF91174W) |
+| `2k_baseline_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | — | 1 | [01KX6VR8B6EWBFYGH511ATKMXX](https://beaker.org/ex/01KX6VR8B6EWBFYGH511ATKMXX) |
+| `2k_baseline_dapo_n4_k32_gradnorm1_seed1` | 4 | 32 | — | 1 | [01KX6VRNKA2NFV0PJ8AFHEVJZF](https://beaker.org/ex/01KX6VRNKA2NFV0PJ8AFHEVJZF) |
+| `2k_baseline_dapo_n2_k64_gradnorm1_seed1` | 2 | 64 | — | 1 | [01KX6VS3H0MCNPK01R33N5NXWW](https://beaker.org/ex/01KX6VS3H0MCNPK01R33N5NXWW) |
+| `2k_ngu05_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.5 | 1 | [01KX6VSBVN4E657KCJG301Y36H](https://beaker.org/ex/01KX6VSBVN4E657KCJG301Y36H) |
+| `2k_ngu075_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.75 | 1 | [01KX6VSKVPWQ27BPJW8859G80G](https://beaker.org/ex/01KX6VSKVPWQ27BPJW8859G80G) |
+| `2k_ngu0875_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.875 | 1 | [01KX6VSWZ49DB9RH461EZEYZ8R](https://beaker.org/ex/01KX6VSWZ49DB9RH461EZEYZ8R) |
 
 ### Launch command (repeat per row)
 
