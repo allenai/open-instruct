@@ -24,7 +24,7 @@ if [ "${MASON_NUM_NODES:-1}" == "1" ]; then
     # This script is `source`d, so `return` (not `exit`) lets the caller's
     # `&&`-chained training command still run.
     echo "Single-node job detected (MASON_NUM_NODES=1); skipping ray start, ray.init() will use a random port"
-    return 0
+    return 0 2>/dev/null || exit 0
 fi
 
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
