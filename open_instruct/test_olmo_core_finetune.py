@@ -85,5 +85,31 @@ class IsHfCheckpointTest(unittest.TestCase):
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
 
 
+class RetainedCheckpointerCallbackTest(unittest.TestCase):
+    def test_permanent_checkpoint_removes_ephemeral_and_old_permanent(self) -> None:
+        callback = olmo_core_utils.RetainedCheckpointerCallback(keep_last_n_checkpoints=1)
+        callback._checkpoints = ["step100", "step200"]
+        callback._ephemeral_checkpoints = ["step150"]
+        callback._latest_checkpoint_path = "step200"
+
+        callback._apply_retention()
+
+        self.assertEqual(["step200"], callback._checkpoints)
+        self.assertEqual([], callback._ephemeral_checkpoints)
+        self.assertEqual(["step150", "step100"], callback._checkpoints_to_remove)
+
+    def test_final_ephemeral_checkpoint_replaces_permanent_history(self) -> None:
+        callback = olmo_core_utils.RetainedCheckpointerCallback(keep_last_n_checkpoints=1)
+        callback._checkpoints = ["step100"]
+        callback._ephemeral_checkpoints = ["step150"]
+        callback._latest_checkpoint_path = "step150"
+
+        callback._apply_retention(training_complete=True)
+
+        self.assertEqual([], callback._checkpoints)
+        self.assertEqual(["step150"], callback._ephemeral_checkpoints)
+        self.assertEqual(["step100"], callback._checkpoints_to_remove)
+
+
 if __name__ == "__main__":
     unittest.main()

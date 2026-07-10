@@ -335,6 +335,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         run_name=run_name,
         checkpointing_steps=args.checkpoint.checkpointing_steps,
         ephemeral_save_interval=args.checkpoint.ephemeral_save_interval,
+        keep_last_n_checkpoints=args.checkpoint.keep_last_n_checkpoints,
         with_tracking=args.logging.with_tracking,
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",

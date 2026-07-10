@@ -262,12 +262,59 @@ class CheckpointConfig:
     """If the training should continue from a checkpoint folder."""
 
 
+@dataclass
+class RetainedCheckpointerCallback(CheckpointerCallback):
+    """OLMo-core checkpointer that bounds permanent and ephemeral checkpoint storage."""
+
+    keep_last_n_checkpoints: int = 3
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.keep_last_n_checkpoints < -1:
+            raise ValueError("keep_last_n_checkpoints must be -1 or non-negative")
+
+    def _apply_retention(self, *, training_complete: bool = False) -> None:
+        latest_is_permanent = self._latest_checkpoint_path in self._checkpoints
+        latest_is_ephemeral = self._latest_checkpoint_path in self._ephemeral_checkpoints
+
+        if latest_is_permanent:
+            for path in self._ephemeral_checkpoints:
+                self._schedule_for_removal(path)
+            self._ephemeral_checkpoints.clear()
+
+        if training_complete and latest_is_ephemeral:
+            for path in self._checkpoints:
+                self._schedule_for_removal(path)
+            self._checkpoints.clear()
+            return
+
+        if self.keep_last_n_checkpoints >= 0:
+            checkpoints_to_keep = max(1, self.keep_last_n_checkpoints)
+            while len(self._checkpoints) > checkpoints_to_keep:
+                self._schedule_for_removal(self._checkpoints.pop(0))
+
+    def post_train_batch(self) -> None:
+        super().post_train_batch()
+        self._apply_retention()
+
+    def post_train(self) -> None:
+        super().post_train()
+        self._apply_retention(training_complete=True)
+        self._remove_old_checkpoints()
+
+
 def build_checkpointer_callback(
-    checkpointing_steps: int, ephemeral_save_interval: int | None, save_async: bool = True
+    checkpointing_steps: int,
+    ephemeral_save_interval: int | None,
+    keep_last_n_checkpoints: int = -1,
+    save_async: bool = True,
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
-    return CheckpointerCallback(
-        save_interval=checkpointing_steps, ephemeral_save_interval=ephemeral_save_interval, save_async=save_async
+    return RetainedCheckpointerCallback(
+        save_interval=checkpointing_steps,
+        ephemeral_save_interval=ephemeral_save_interval,
+        keep_last_n_checkpoints=keep_last_n_checkpoints,
+        save_async=save_async,
     )
 
 
@@ -313,6 +360,7 @@ def build_base_callbacks(
     run_name: str | None,
     checkpointing_steps: int,
     ephemeral_save_interval: int | None,
+    keep_last_n_checkpoints: int = 3,
     with_tracking: bool = False,
     wandb_project: str | None = None,
     wandb_entity: str | None = None,
@@ -323,7 +371,10 @@ def build_base_callbacks(
         "beaker": olmo_core_callbacks.BeakerCallbackV2(config=config_dict),
         "gpu_monitor": train_callbacks.GPUMemoryMonitorCallback(),
         "checkpointer": build_checkpointer_callback(
-            checkpointing_steps, ephemeral_save_interval, save_async=save_async
+            checkpointing_steps,
+            ephemeral_save_interval,
+            keep_last_n_checkpoints,
+            save_async=save_async,
         ),
     }
     if with_tracking and wandb_project:
