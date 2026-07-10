@@ -44,7 +44,7 @@ uv run python mason.py \
     --gpus 8 \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    --env PYTHONPATH="${PROJECT_ROOT}/open-instruct:${PROJECT_ROOT}/OLMo-core/src" \
+    --env PYTHONPATH="${PROJECT_ROOT}/open-instruct" \
     -- torchrun \
     "${torchrun_args[@]}" \
     "${PROJECT_ROOT}/open-instruct/open_instruct/olmo_core_finetune.py" \
