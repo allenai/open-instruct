@@ -60,7 +60,7 @@ uv run mason.py \
     --temperature 1.0 \
     --dataset_mixer_list mnoukhov/deepscaler-10k-qwen3-4b-base-32samples-quartiles 1.0 \
     --dataset_mixer_list_splits "train" \
-    --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list mnoukhov/brumo_2025_openinstruct 1.0 mnoukhov/aime_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits "train" \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
@@ -83,6 +83,7 @@ uv run mason.py \
     --send_slack_alerts \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
+    --max_grad_norm 1.0 \
     --use_rho_correction \
     --rho_clamp_upper_bound 2.0 \
     --mask_truncated_completions False \
