@@ -4,13 +4,14 @@ set -euo pipefail
 NUM_NODES="${NUM_NODES:-8}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 COMPILE_MODEL="${COMPILE_MODEL:-true}"
+DATASET_VARIANT="${DATASET_VARIANT:-full}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
-EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-full}"
+EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-${DATASET_VARIANT}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 PROJECT_ROOT="/weka/oe-adapt-default/jacobm/olmoe3/post-training"
 MODEL_PATH="${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-base-olmo"
-DATASET_PATH="${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker/full"
+DATASET_PATH="${DATASET_PATH:-${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker/${DATASET_VARIANT}}"
 OUTPUT_DIR="${PROJECT_ROOT}/checkpoints/${RUN_NAME}"
 
 torchrun_args=(--nproc_per_node=8)
