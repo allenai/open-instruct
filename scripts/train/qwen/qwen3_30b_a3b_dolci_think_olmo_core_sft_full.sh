@@ -2,7 +2,7 @@
 set -euo pipefail
 
 NUM_NODES="${NUM_NODES:-8}"
-GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-2}"
+GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-full}"
@@ -60,7 +60,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS" \
     --num_epochs 1 \
-    --learning_rate 6e-5 \
+    --learning_rate 4e-5 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
@@ -74,7 +74,7 @@ uv run python mason.py \
     --activation_memory_budget 1.0 \
     --checkpointing_enabled true \
     --checkpointing_steps 1000000 \
-    --ephemeral_save_interval 500 \
+    --ephemeral_save_interval 1000 \
     --keep_last_n_checkpoints 1 \
     --logging_steps 10 \
     --seed 33333 \
