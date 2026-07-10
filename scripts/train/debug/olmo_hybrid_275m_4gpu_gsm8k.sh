@@ -12,6 +12,7 @@
 
 EXP_NAME="olmo_hybrid_275m_gsm8k"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
+EVAL_DATASETS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
 MODEL_PATH=/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/hybrid-small-sft-think-275M-lr2e-4/step23206-hf
 
 # Default to this branch's integration test image, as built by
@@ -46,8 +47,8 @@ uv run python mason.py \
     --run_name ${EXP_NAME} \
     --dataset_mixer_list $DATASETS \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list $DATASETS \
-    --dataset_mixer_eval_list_splits train \
+    --dataset_mixer_eval_list $EVAL_DATASETS \
+    --dataset_mixer_eval_list_splits test \
     --beta 0.0 \
     --async_steps 4 \
     --inflight_updates \
