@@ -8,6 +8,12 @@ OUTPUT_PATH="${OUTPUT_PATH:-${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-dolci-thin
 HF_CACHE="${HF_CACHE:-${PROJECT_ROOT}/checkpoints/.hf-cache}"
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-sft-100k-convert-to-hf}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
+VERIFY_ONLY="${VERIFY_ONLY:-false}"
+
+verify_args=()
+if [[ "$VERIFY_ONLY" == "true" ]]; then
+    verify_args+=(--verify-only)
+fi
 
 uv run python mason.py \
     --task_name "$EXP_NAME" \
@@ -30,4 +36,5 @@ uv run python mason.py \
     --hf-model-name Qwen/Qwen3-30B-A3B-Base \
     --tokenizer-name Qwen/Qwen3-30B-A3B \
     --dtype bfloat16 \
-    --max-shard-size 5GB
+    --max-shard-size 5GB \
+    "${verify_args[@]}"

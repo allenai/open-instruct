@@ -11,12 +11,30 @@ DTYPE="${DTYPE:-bfloat16}"
 RTOL="${RTOL:-0.02}"
 ATOL="${ATOL:-0.02}"
 LAYERWISE="${LAYERWISE:-true}"
+SKIP_ASSERT_CLOSE="${SKIP_ASSERT_CLOSE:-false}"
+MAX_MEAN_ABS_DIFF="${MAX_MEAN_ABS_DIFF:-}"
+MIN_COSINE_SIMILARITY="${MIN_COSINE_SIMILARITY:-}"
+MIN_TOP1_AGREEMENT="${MIN_TOP1_AGREEMENT:-}"
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-sft-100k-verify-hf-export}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 
 layerwise_args=()
 if [[ "$LAYERWISE" == "true" ]]; then
     layerwise_args+=(--layerwise)
+fi
+
+acceptance_args=()
+if [[ "$SKIP_ASSERT_CLOSE" == "true" ]]; then
+    acceptance_args+=(--skip-assert-close)
+fi
+if [[ -n "$MAX_MEAN_ABS_DIFF" ]]; then
+    acceptance_args+=(--max-mean-abs-diff "$MAX_MEAN_ABS_DIFF")
+fi
+if [[ -n "$MIN_COSINE_SIMILARITY" ]]; then
+    acceptance_args+=(--min-cosine-similarity "$MIN_COSINE_SIMILARITY")
+fi
+if [[ -n "$MIN_TOP1_AGREEMENT" ]]; then
+    acceptance_args+=(--min-top1-agreement "$MIN_TOP1_AGREEMENT")
 fi
 
 uv run python mason.py \
@@ -43,4 +61,5 @@ uv run python mason.py \
     --rtol "$RTOL" \
     --atol "$ATOL" \
     "${layerwise_args[@]}" \
+    "${acceptance_args[@]}" \
     --output-json "$OUTPUT_JSON"
