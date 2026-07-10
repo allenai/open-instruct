@@ -249,7 +249,11 @@ Launched via `scripts/train/qwen/qwen3_4b_deepscaler_eval_best_all.sh` with the
 at Ray head startup (transient Redis session-name mismatch) and were relaunched;
 the table links point at the successful attempts. The `ngu0875_dapo_n8_k16` seed 1
 job exited 134 during post-eval teardown but had already completed the eval and
-logged all metrics (wandb `rjyxvuxy`), so it was not rerun.
+logged all metrics (wandb `rjyxvuxy`), so it was not rerun. The failures happen
+when Beaker packs two of these 4-GPU jobs onto one node: `ray_node_setup.sh`
+hardcodes the Ray head port on host networking, so the second job joins the
+first job's Ray cluster and dies. The `ngu05` seed 2 and `ngu075` seed 4 evals
+were relaunched as full-node `NUM_GPUS=8` jobs to avoid packing.
 
 | Config | Seed | Best AIME step | Source wandb | Eval Beaker |
 | --- | --- | --- | --- | --- |
@@ -266,11 +270,11 @@ logged all metrics (wandb `rjyxvuxy`), so it was not rerun.
 | `baseline_dapo_n2_k64` | 2 | 1600 | blfze1rc | [01KX4DMW5BYJBSKD2T99VYYBCH](https://beaker.org/ex/01KX4DMW5BYJBSKD2T99VYYBCH) |
 | `baseline_dapo_n2_k64` | 3 | 800 | hl3d7uml | [01KX4DRF974YG8JWCWRP1JGD12](https://beaker.org/ex/01KX4DRF974YG8JWCWRP1JGD12) |
 | `ngu05_dapo_n8_k16` | 1 | 1600 | 6rxe8lh5 | [01KX6B9KJGHYBSTDWCN1HJJ2R7](https://beaker.org/ex/01KX6B9KJGHYBSTDWCN1HJJ2R7) |
-| `ngu05_dapo_n8_k16` | 2 | 1300 | ivrq5tsx | [01KX6BK7S6RDN9Q81FZSF8N492](https://beaker.org/ex/01KX6BK7S6RDN9Q81FZSF8N492) |
+| `ngu05_dapo_n8_k16` | 2 | 1300 | ivrq5tsx | [01KX6BWQQ0S5C24TTMV69XW3N4](https://beaker.org/ex/01KX6BWQQ0S5C24TTMV69XW3N4) |
 | `ngu05_dapo_n8_k16` | 3 | 1000 | pdm9oqd6 | [01KX6BA0RD5E5A9BPQPSAAWE6R](https://beaker.org/ex/01KX6BA0RD5E5A9BPQPSAAWE6R) |
 | `ngu075_dapo_n8_k16` | 1 | 1000 | i12fv1iu | [01KX4E68AKMJS75B05WCD3ZBFX](https://beaker.org/ex/01KX4E68AKMJS75B05WCD3ZBFX) |
 | `ngu075_dapo_n8_k16` | 3 | 1100 | ai4avb1d | [01KX4E9B224W6HDAZGS8564BAB](https://beaker.org/ex/01KX4E9B224W6HDAZGS8564BAB) |
-| `ngu075_dapo_n8_k16` | 4 | 900 | kg4ycwi8 | [01KX6BRBXR0HKPK19K87MNA2NE](https://beaker.org/ex/01KX6BRBXR0HKPK19K87MNA2NE) |
+| `ngu075_dapo_n8_k16` | 4 | 900 | kg4ycwi8 | [01KX6BX4K3SQZ7E4F9YM1Y2XAR](https://beaker.org/ex/01KX6BX4K3SQZ7E4F9YM1Y2XAR) |
 | `ngu0875_dapo_n8_k16` | 1 | 1700 | x5rkqi9n | [01KX4ECBJNV5NG1PDXTFJ3TWJK](https://beaker.org/ex/01KX4ECBJNV5NG1PDXTFJ3TWJK) |
 | `ngu0875_dapo_n8_k16` | 2 | 1700 | ux8zlyun | [01KX4EFPEA1F4WMAMQSKY982H3](https://beaker.org/ex/01KX4EFPEA1F4WMAMQSKY982H3) |
 | `ngu0875_dapo_n8_k16` | 3 | 1000 | 0f6tb0za | [01KX4EK2WFQPKYQBFWCECN5YM5](https://beaker.org/ex/01KX4EK2WFQPKYQBFWCECN5YM5) |
