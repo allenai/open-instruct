@@ -7,8 +7,17 @@ CHECKPOINT_PATH="${CHECKPOINT_PATH:-${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-do
 HF_MODEL_PATH="${HF_MODEL_PATH:-${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-dolci-think-olmo-core-sft-100k-20260710-174355-hf}"
 HF_CACHE="${HF_CACHE:-${PROJECT_ROOT}/checkpoints/.hf-cache}"
 OUTPUT_JSON="${OUTPUT_JSON:-${HF_MODEL_PATH}/logit-verification.json}"
+DTYPE="${DTYPE:-bfloat16}"
+RTOL="${RTOL:-0.02}"
+ATOL="${ATOL:-0.02}"
+LAYERWISE="${LAYERWISE:-true}"
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-sft-100k-verify-hf-export}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
+
+layerwise_args=()
+if [[ "$LAYERWISE" == "true" ]]; then
+    layerwise_args+=(--layerwise)
+fi
 
 uv run python mason.py \
     --task_name "$EXP_NAME" \
@@ -30,8 +39,8 @@ uv run python mason.py \
     --checkpoint-path "$CHECKPOINT_PATH" \
     --hf-device cuda \
     --device cuda \
-    --dtype bfloat16 \
-    --rtol 0.02 \
-    --atol 0.02 \
-    --layerwise \
+    --dtype "$DTYPE" \
+    --rtol "$RTOL" \
+    --atol "$ATOL" \
+    "${layerwise_args[@]}" \
     --output-json "$OUTPUT_JSON"
