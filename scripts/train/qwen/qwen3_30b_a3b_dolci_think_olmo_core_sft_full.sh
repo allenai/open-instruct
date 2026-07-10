@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-NUM_NODES="${NUM_NODES:-16}"
+NUM_NODES="${NUM_NODES:-15}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-full}"
