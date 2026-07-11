@@ -7,6 +7,7 @@ AUTO_CREATED_BEAKER_CONFIG_DIR = "configs/beaker_configs/auto_created"
 
 WEKA_CLUSTERS = [
     "ai2/jupiter",
+    "ai2/holmes",
     "ai2/saturn",
     "ai2/titan",
     "ai2/neptune",

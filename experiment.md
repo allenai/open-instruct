@@ -344,6 +344,42 @@ OC=true EXP=2k_ngu${P}_dapo_n8_k16_gradnorm1_async2_seed1 \
   --max_grad_norm 1.0 --seed 1 --never_give_up $P --async_steps 2
 ```
 
+## Holmes (B300) cluster test: NGU 0.75 gradnorm1 async2
+
+Test of the `ai2/holmes` cluster (B300 SXM6 nodes, Blackwell Ultra / sm_103)
+with the existing CUDA 12.8 image `michaeln/open-instruct-integration-test-ngu`.
+Same config as `2k_ngu075_dapo_n8_k16_gradnorm1_async2_seed1`. Compatibility
+notes: torch 2.10+cu128, flash-attn 2, and the vLLM 0.19.1 kernels all ship
+plain `sm_100` SASS, which is binary-compatible with sm_103; FA3 ships only
+sm_80/sm_90a kernels (no Blackwell) but is not selected on Blackwell —
+`detect_attn_implementation` picks `flash_4` (JIT CuTe DSL) on compute
+capability 10.x, so attention backends were left at their defaults. Residual
+risk is any `sm_100a`-only kernel path (won't load on sm_103, "no kernel image
+available"). Added `ai2/holmes` to `WEKA_CLUSTERS` in
+`open_instruct/launch_utils.py` so mason mounts weka and sets the usual
+checkpoint/output dirs.
+
+First attempt ([01KX9H0REJ739F314KTSDQ21CY](https://beaker.org/ex/01KX9H0REJ739F314KTSDQ21CY))
+confirmed the CUDA analysis — FA4 auto-selected, all kernels loaded — but died
+in our own code: `get_device_name` raised on the unrecognized device string
+`NVIDIA B300 SXM6 AC`. Added a `b300` entry to `GPU_SPECS` in
+`open_instruct/utils.py` (288 GB HBM3e, 8 TB/s, dense BF16 ~2.25 PFLOPS same
+as B200) and relaunched on a rebuilt image.
+
+| Name | n | k | never_give_up | async_steps | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- | --- |
+| `2k_ngu075_dapo_n8_k16_gradnorm1_async2_holmes_seed1` | 8 | 16 | 0.75 | 2 | 1 | ~~[01KX9H0REJ739F314KTSDQ21CY](https://beaker.org/ex/01KX9H0REJ739F314KTSDQ21CY)~~ (GPU_SPECS crash) TBD |
+
+### Launch command
+
+```bash
+OC=true EXP=2k_ngu075_dapo_n8_k16_gradnorm1_async2_holmes_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/holmes \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up 0.75 --async_steps 2
+```
+
 ## Best-step held-out evals (BRUMO / HMMT / AIME 2025)
 
 Eval-only runs (`open_instruct/grpo.py --eval_only`, commit `23fcabfe5`) of every
