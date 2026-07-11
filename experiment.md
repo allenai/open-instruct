@@ -364,11 +364,20 @@ confirmed the CUDA analysis — FA4 auto-selected, all kernels loaded — but di
 in our own code: `get_device_name` raised on the unrecognized device string
 `NVIDIA B300 SXM6 AC`. Added a `b300` entry to `GPU_SPECS` in
 `open_instruct/utils.py` (288 GB HBM3e, 8 TB/s, dense BF16 ~2.25 PFLOPS same
-as B200) and relaunched on a rebuilt image.
+as B200, commit `843258932`) and relaunched on a rebuilt image.
+
+Second attempt ([01KX9HHB3KA075PKQ4DM886RXT](https://beaker.org/ex/01KX9HHB3KA075PKQ4DM886RXT))
+got through FSDP setup but crashed in weight init: `tensor.erfinv_()` →
+`nvrtc: error: invalid value for --gpu-architecture` — torch's jiterator ops
+are runtime-compiled via NVRTC, and the NVRTC 12.8 pinned by torch cu128
+can't target compute_103. Fixed by overriding `nvidia-cuda-nvrtc-cu12` to
+12.9.86 (same `libnvrtc.so.12` soname; linux/x86_64 only) in pyproject
+(commit `0b69301e7`). Triton / `torch.compile` needs no fix — it selects its
+bundled 12.9 `ptxas-blackwell` for arch >= 100.
 
 | Name | n | k | never_give_up | async_steps | Seed | Beaker |
 | --- | --- | --- | --- | --- | --- | --- |
-| `2k_ngu075_dapo_n8_k16_gradnorm1_async2_holmes_seed1` | 8 | 16 | 0.75 | 2 | 1 | ~~[01KX9H0REJ739F314KTSDQ21CY](https://beaker.org/ex/01KX9H0REJ739F314KTSDQ21CY)~~ (GPU_SPECS crash) TBD |
+| `2k_ngu075_dapo_n8_k16_gradnorm1_async2_holmes_seed1` | 8 | 16 | 0.75 | 2 | 1 | ~~[01KX9H0REJ739F314KTSDQ21CY](https://beaker.org/ex/01KX9H0REJ739F314KTSDQ21CY)~~ (GPU_SPECS crash) ~~[01KX9HHB3KA075PKQ4DM886RXT](https://beaker.org/ex/01KX9HHB3KA075PKQ4DM886RXT)~~ (NVRTC crash) TBD |
 
 ### Launch command
 
