@@ -7,6 +7,7 @@
 
 
 # Workflow
+- Track research progress in two docs at the repo root: `experiment.md` (raw run log — configs, launch commands, Beaker links, appended per launch batch) and `research.md` (the questions/ideas being pursued, one section per idea, each linking to its section(s) in `experiment.md`). When launching runs for a new question, add a `research.md` entry (status `ACTIVE`) linking to the new `experiment.md` section. When a question is resolved (a bug root-caused, a sweep concluded, a config decision made), update that entry's status and write the finding directly into `research.md` under that idea — don't just leave it in `experiment.md` prose.
 - When creating a PR, always add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
