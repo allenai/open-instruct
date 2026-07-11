@@ -314,6 +314,36 @@ OC=true EXP=2k_baseline_dapo_n4_k32_gradnorm1_async2_seed1 \
   --max_grad_norm 1.0 --seed 1 --async_steps 2
 ```
 
+## NGU relaunch with rank-0 state-saving fix + async_steps 2
+
+Codex fix (commit `7c8919d2f`): `DataPreparationActorCheckpointCallback` now
+saves/restores the DataPreparationActor state (which holds the never_give_up
+bookkeeping) from global rank 0 only. Previously all 4 FSDP ranks snapshotted
+the live actor independently and all 4 restored on resume, so the last
+`set_state` won with a potentially inconsistent snapshot.
+
+Status of the gradnorm1 NGU runs at relaunch time: `ngu05` exited 1 at 97%,
+`ngu075` exited 1 at 20%, `ngu0875` still running at 64% — killed. All three
+relaunched from scratch on a rebuilt `michaeln/open-instruct-integration-test-ngu`
+(commit `bdc538338`) with `--async_steps 2` added (see the n4_k32 stall
+diagnosis above), workspace `ai2/open-instruct-dev`.
+
+| Name | n | k | never_give_up | async_steps | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- | --- |
+| `2k_ngu05_dapo_n8_k16_gradnorm1_async2_seed1` | 8 | 16 | 0.5 | 2 | 1 | [01KX9FFKCW1NYPKAY16AXAWBM7](https://beaker.org/ex/01KX9FFKCW1NYPKAY16AXAWBM7) |
+| `2k_ngu075_dapo_n8_k16_gradnorm1_async2_seed1` | 8 | 16 | 0.75 | 2 | 1 | [01KX9FG1G7G4BPHAHK2DANH727](https://beaker.org/ex/01KX9FG1G7G4BPHAHK2DANH727) |
+| `2k_ngu0875_dapo_n8_k16_gradnorm1_async2_seed1` | 8 | 16 | 0.875 | 2 | 1 | [01KX9FGGQ5QGBTXGCKESYB8C91](https://beaker.org/ex/01KX9FGGQ5QGBTXGCKESYB8C91) |
+
+### Launch command (repeat per row; first row built the image via build_image_and_launch.sh)
+
+```bash
+OC=true EXP=2k_ngu${P}_dapo_n8_k16_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up $P --async_steps 2
+```
+
 ## Best-step held-out evals (BRUMO / HMMT / AIME 2025)
 
 Eval-only runs (`open_instruct/grpo.py --eval_only`, commit `23fcabfe5`) of every
