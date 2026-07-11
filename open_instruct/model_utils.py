@@ -16,7 +16,6 @@
 
 import asyncio
 import functools
-import importlib.util
 import itertools
 import pathlib
 import tempfile
@@ -65,10 +64,6 @@ def detect_hf_attn_implementation() -> str:
     return olmo_core_attn_to_hf(detect_attn_implementation())
 
 
-def _is_flash_attn_4_available() -> bool:
-    return importlib.util.find_spec("flash_attn.cute") is not None
-
-
 @functools.lru_cache(maxsize=1)
 def _gpu_compute_major() -> int | None:
     """Return the CUDA compute capability major version (e.g. 9=Hopper, 10=Blackwell)."""
@@ -82,7 +77,7 @@ def _gpu_compute_major() -> int | None:
 def detect_attn_implementation() -> AttentionBackendName:
     if not torch.cuda.is_available():
         result = AttentionBackendName.torch
-    elif _is_flash_attn_4_available() and _gpu_compute_major() >= 10:
+    elif transformers.utils.is_flash_attn_4_available() and _gpu_compute_major() >= 10:
         result = AttentionBackendName.flash_4
     elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() >= 9:
         result = AttentionBackendName.flash_3

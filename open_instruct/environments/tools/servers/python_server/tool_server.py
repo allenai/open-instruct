@@ -158,11 +158,25 @@ def _compile_repl(code: str):
 
 
 ###############################################################################
+# FastAPI schema
+###############################################################################
+class CodeRequest(BaseModel):
+    code: str
+    timeout: int = 5
+
+
+class CodeResponse(BaseModel):
+    output: str
+    error: str | None = None
+    success: bool
+
+
+###############################################################################
 # Worker function (executes user code)
 ###############################################################################
 
 
-def _run_user_code(code: str, timeout: int = 5):
+def _run_user_code(code: str, timeout: int = 5) -> CodeResponse:
     def _timeout_handler(signum, frame):  # noqa: D401, ANN001, ARG001
         raise TimeoutError("execution timed out")
 
@@ -176,27 +190,13 @@ def _run_user_code(code: str, timeout: int = 5):
             # 👉 compile() directly without REPL transformation
             compiled = compile(code, "<user-snippet>", "exec")
             exec(compiled, {})  # noqa: S102
-        result = {"output": stdout.getvalue(), "error": stderr.getvalue() or None, "success": True}
+        result = CodeResponse(output=stdout.getvalue(), error=stderr.getvalue() or None, success=True)
     except Exception as exc:  # pylint: disable=broad-except
-        result = {"output": "", "error": f"{exc}\n{traceback.format_exc()}", "success": False}
+        result = CodeResponse(output="", error=f"{exc}\n{traceback.format_exc()}", success=False)
     finally:
         signal.alarm(0)
 
     return result
-
-
-###############################################################################
-# FastAPI schema
-###############################################################################
-class CodeRequest(BaseModel):
-    code: str
-    timeout: int | None = 5
-
-
-class CodeResponse(BaseModel):
-    output: str
-    error: str | None = None
-    success: bool
 
 
 ###############################################################################
@@ -218,25 +218,27 @@ async def execute_code(req: CodeRequest):  # noqa: D401
         result = await asyncio.wait_for(fut, timeout=req.timeout + 1)
     except asyncio.TimeoutError:
         fut.cancel()
-        result = {"output": "", "error": f"Execution timed out after {req.timeout} seconds (outer)", "success": False}
+        result = CodeResponse(
+            output="", error=f"Execution timed out after {req.timeout} seconds (outer)", success=False
+        )
     except BrokenProcessPool:
         logger.error("Pool broken — recreating")
         process_pool = ProcessPoolExecutor(max_workers=POOL_SIZE, initializer=_worker_init)
-        result = {"output": "", "error": "Worker pool crashed and was restarted. Please retry.", "success": False}
+        result = CodeResponse(output="", error="Worker pool crashed and was restarted. Please retry.", success=False)
 
     latency_ms = (time.perf_counter() - start) * 1000
     logger.info(
         "📤 Responding success=%s latency=%.1f ms output_len=%s error=%s, output=\n%s",
-        result["success"],
+        result.success,
         latency_ms,
-        len(result["output"] or ""),
-        bool(result["error"]),
-        result["output"],
+        len(result.output),
+        bool(result.error),
+        result.output,
     )
-    if result["error"] is not None:
-        logger.debug("Error: %s", result["error"])
+    if result.error is not None:
+        logger.debug("Error: %s", result.error)
 
-    return CodeResponse(**result)
+    return result
 
 
 @app.get("/")

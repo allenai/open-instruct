@@ -300,23 +300,21 @@ def verify_postscript(text, postscript_marker):
 
 # Number Placeholder: The response must contain at least {N} placeholders represented by square brackets,
 # such as [address].
-def validate_placeholders(text: str, N: int) -> tuple[bool, list[str]]:
+def validate_placeholders(text: str, N: int) -> bool:
     """
     Validates if a text contains at least the specified number of placeholders in square brackets.
 
     Args:
         text (str): The text to check for placeholders
-        min_placeholders (int): Minimum number of placeholders required
+        N (int): Minimum number of placeholders required
 
     Returns:
-        tuple[bool, List[str]]: A tuple containing:
-            - Boolean indicating if the text meets the placeholder requirement
-            - List of found placeholders
+        bool: True if the text contains at least N placeholders, False otherwise.
 
     Example:
         >>> text = "Hello [name], your [item] will be delivered to [address]"
         >>> validate_placeholders(text, 2)
-        (True, ['name', 'item', 'address'])
+        True
     """
     # Find all placeholders using regex
     pattern = r"\[(.*?)\]"
@@ -330,17 +328,16 @@ def validate_placeholders(text: str, N: int) -> tuple[bool, list[str]]:
 
 # Number Bullets: Your answer must contain exactly {N} bullet points. Use the markdown bullet points such as: * This
 # is a point.
-def verify_bullet_points(text: str, N: int) -> tuple[bool, str]:
+def verify_bullet_points(text: str, N: int) -> bool:
     """
     Verifies if a text contains exactly N bullet points in markdown format.
-    Returns a tuple of (is_valid, message).
 
     Args:
         text (str): The text to check
-        expected_count (int): The expected number of bullet points
+        N (int): The expected number of bullet points
 
     Returns:
-        tuple[bool, str]: (True if constraint is met, explanation message)
+        bool: True if the text contains exactly N bullet points, False otherwise.
     """
     # Split text into lines and count lines starting with * or -
     lines = text.split("\n")

@@ -15,7 +15,7 @@ from transformers import (
     LlamaForCausalLM,
 )
 
-from open_instruct import model_utils
+from open_instruct import model_utils, padding_free_collator
 from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
 from open_instruct.olmo_core_train_modules import DPOLMHead
@@ -397,3 +397,27 @@ class TestDPOLMHead(unittest.TestCase):
         output = head(x, labels=None)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (1, seq_len, vocab_size))
+
+
+class TestBatchCounters(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("single_branch", {"cu_seq_lens_k": torch.tensor([0, 3, 7])}, 2),
+            (
+                "dpo_two_branches",
+                {"chosen_cu_seq_lens_k": torch.tensor([0, 3, 7]), "rejected_cu_seq_lens_k": torch.tensor([0, 4])},
+                3,
+            ),
+            ("non_packed", {"chosen_input_ids": torch.zeros(2, 5), "rejected_input_ids": torch.zeros(2, 5)}, 4),
+        ]
+    )
+    def test_get_num_sequences(self, name, batch, expected):
+        self.assertEqual(int(padding_free_collator.get_num_sequences(batch)), expected)
+
+    def test_get_num_padded_tokens(self):
+        batch = {"chosen_input_ids": torch.zeros(2, 5), "rejected_input_ids": torch.zeros(2, 5)}
+        self.assertEqual(padding_free_collator.get_num_padded_tokens(batch), 20)
+
+
+if __name__ == "__main__":
+    unittest.main()

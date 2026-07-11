@@ -23,12 +23,14 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pprint import pformat
+from typing import cast
 
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
 from litellm import acompletion
 from tqdm.asyncio import tqdm_asyncio
 from transformers import HfArgumentParser
+from transformers.hf_argparser import DataClassType
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -52,7 +54,7 @@ class Args:
 
     # judgement config
     model: str = "gpt-4o-2024-08-06"
-    max_parallel_requests: int | None = None
+    max_parallel_requests: int = 100
 
     def __post_init__(self):
         # these are just experience numbers to avoid rate limits, but feel free to adjust
@@ -219,6 +221,6 @@ args:
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((Args,))
-    args = parser.parse_args_into_dataclasses()[0]
+    parser = HfArgumentParser(cast(DataClassType, Args))
+    args = cast(Args, parser.parse_args_into_dataclasses()[0])
     main(args)

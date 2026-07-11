@@ -249,14 +249,25 @@ def get_num_tokens(batch: dict[str, Any]) -> int:
     return sum(v.numel() for k, v in batch.items() if "input_ids" in k and isinstance(v, torch.Tensor))
 
 
-def get_num_sequences(batch: dict[str, Any]) -> int | None:
-    """Return total sequence count from a training batch, or None for non-packing batches.
+def get_num_padded_tokens(batch: dict[str, Any]) -> int:
+    """Return total token count including padding from a training batch.
 
-    For packed batches, reads cu_seq_lens_k tensors which each have num_seqs + 1
-    elements (including a leading 0). Returns None if no cu_seq_lens_k keys are found.
+    Counts all elements of input_ids tensors.
+    """
+    return sum(v.numel() for k, v in batch.items() if k.endswith("input_ids") and isinstance(v, torch.Tensor))
+
+
+def get_num_sequences(batch: dict[str, Any]) -> torch.Tensor:
+    """Return total sequence count from a training batch as a scalar tensor.
+
+    For packed batches, counts strictly-increasing boundaries in each
+    cu_seq_lens_k tensor (each has num_seqs + 1 elements including a leading 0).
+    For non-packed batches, counts rows of each input_ids tensor.
+
+    Returns a tensor rather than an int so callers on the training hot path can
+    record or accumulate it without forcing a per-step host-device sync.
     """
     cu_keys = [k for k in batch if k.endswith("cu_seq_lens_k")]
     if cu_keys:
-        # Each cu_seq_lens tensor has num_seqs + 1 elements (leading 0 boundary).
-        return sum(len(batch[k]) - 1 for k in cu_keys)
-    return None
+        return sum((batch[k][..., 1:] > batch[k][..., :-1]).sum() for k in cu_keys)
+    return torch.tensor(sum(batch[k].shape[0] for k in batch if k.endswith("input_ids")))
