@@ -111,6 +111,9 @@ python-preference = "only-managed"
 link-mode = "hardlink"
 override-dependencies = [
     "transformers>=5.4.0",
+    # torch cu128 pins NVRTC 12.8, which cannot compile for sm_103 (B300 / Blackwell
+    # Ultra); NVRTC 12.9 adds sm_103 and is a drop-in libnvrtc.so.12 replacement.
+    "nvidia-cuda-nvrtc-cu12==12.9.86 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
