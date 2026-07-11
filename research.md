@@ -7,6 +7,34 @@ repeating that detail here.
 
 Status values: `ACTIVE`, `PAUSED`, `DONE`, `BLOCKED`.
 
+## Current focus
+
+**Main goal:** get `--never_give_up` (NGU) to reliably beat baseline DAPO on
+the DeepScaleR dataset via `scripts/train/qwen/qwen3_4b_deepscaler_math.sh`
+— not just at a cherry-picked checkpoint, and especially on the hardest
+problems.
+
+**Where things stand (2026-07-11):**
+- At `max_grad_norm=5.0`, all configs "overfit" — AIME eval performance
+  degrades after ~step 1000. Picking the best checkpoint per seed (early
+  stopping) and comparing NGU vs. baseline: NGU wins, but by a small margin,
+  and *not* on the subset that matters most — the hardest AIME problems
+  (initial pass@64=0) are improved slightly *more* by the plain `N=2,K=64`
+  baseline than by any NGU `p`. NGU's edge shows up on the medium-difficulty
+  subset instead. See the figure in the NGU idea below.
+- Working hypothesis: the grad_norm=5.0 overfitting is confounding the
+  comparison, so we're rerunning the full sweep (baselines + NGU) at
+  `max_grad_norm=1.0` to remove it.
+- Hit a second problem along the way: the `N=4,K=32` gradnorm=1.0 baseline
+  collapsed mid-run (`val/rho_weight` crashed 1.0→0.9 over ~20 steps,
+  triggered by completion-length growth pushing off-policyness up). Possibly
+  the same failure mode threatens `N=2,K=64` given the shared
+  "few-prompts-many-samples" shape — watch for it there too. Mitigated, not
+  fully solved, by dropping `--async_steps` 4→2.
+- **Next:** finish the grad_norm=1.0 sweep (baselines + NGU p-sweep), rerun
+  the difficulty-stratified best-checkpoint comparison, and check whether the
+  hard-subset gap closes.
+
 ---
 
 ## [ACTIVE] DAPO n×k allocation: how to split n×k=128 between prompts and samples/prompt
@@ -45,8 +73,30 @@ n×k configs to test NGU on, alongside n=16,k=8).
 
 **Findings:** p=0.5 was the leading candidate after the first sweep (drove
 the decision to replicate it over 4 seeds and bracket it with p=0.6/0.75).
-No final numeric verdict recorded yet across p ∈ {0.5, 0.6, 0.75, 0.875, 0.9}
-— pull from the eval Beaker links / wandb group `deepscaler_eval_best`.
+
+**grad_norm=5.0 result (early-stopping best-checkpoint, held-out AIME/BRUMO/HMMT):**
+all configs overfit past ~step 1000 at this grad_norm, so comparison uses
+each seed's best in-training-AIME checkpoint (table in
+[Best-step held-out evals](experiment.md#best-step-held-out-evals-brumo--hmmt--aime-2025)).
+Breaking the improvement-over-`initial_eval` pass@1 down by problem
+difficulty (analysis in `notebooks/deepscaler_ngu_dapo.ipynb`):
+
+![NGU p sweep vs. baselines, pass@1 improvement by difficulty](notebooks/figures/deepscaler_ngu_pass_at_1_improvement_by_difficulty.png)
+
+- **Hard (n=17, initial pass@64=0):** NGU does *not* help here — if anything
+  the `N=2,K=64` baseline is slightly ahead of every NGU `p`. This is the
+  subset we most want to move and currently aren't.
+- **Medium (n=6):** NGU clearly wins — all three `p` values beat all three
+  baselines by a solid margin (~19–22% vs ~14–19%).
+- **Easy (n=7):** all configs converge to roughly the same ~37–40%
+  improvement; NGU doesn't hurt here but doesn't help either.
+
+Net effect: NGU's overall edge over baseline is real but small, and it's
+coming entirely from the medium tier, not the hard tier — the opposite of
+what we want given the goal is to move problems the model currently can't
+solve at all. Open question this is meant to inform: does the grad_norm=1.0
+rerun (see below) change this picture, or is the medium-only effect a real
+property of NGU as configured?
 
 **Blocking infra bug (found + fixed):** NGU relies on per-prompt bookkeeping
 in the `DataPreparationActor`. All 4 FSDP ranks were independently
@@ -58,27 +108,37 @@ Any NGU conclusions drawn from runs *before* this fix are suspect.
 
 ---
 
-## [DONE] max_grad_norm: 5.0 vs 1.0
+## [ACTIVE] max_grad_norm: 5.0 vs 1.0 — fixing the overfitting problem
 
-**Question:** does a tighter grad-norm clip (1.0 vs the original 5.0) change
-stability or final performance.
+**Motivation:** at `max_grad_norm=5.0`, AIME eval performance degrades after
+~step 1000 across configs ("overfitting"). This confounds the NGU-vs-baseline
+comparison above — early-stopping to the best checkpoint recovers a small,
+hard-tier-unfavorable NGU edge, but it's not clear how much of that shape is
+real vs. an artifact of training past the point of instability. Switching to
+`max_grad_norm=1.0` to see if it removes the degradation and gives a cleaner
+comparison, especially on the hard tier.
 
 **Runs:** [Additional seeds with grad norm 1.0](experiment.md#additional-seeds-with-grad-norm-10)
 (one extra seed per baseline config except n16k8, plus one NGU seed at each
 of p=0.5/0.75/0.875).
 
-**Findings:** grad_norm=1.0 didn't itself cause the n4_k32 collapse — see the
-async_steps finding below — but it's the config where that failure mode
-first surfaced. No clean stability/performance comparison against grad_norm=5.0
-recorded yet.
+**Findings so far:** grad_norm=1.0 didn't itself cause the n4_k32 collapse
+(see the rho_weight-collapse entry below) — but it's the config where that
+failure mode first surfaced, and it may recur on `N=2,K=64`. Clean
+overfitting/AIME-degradation comparison against grad_norm=5.0, and the
+difficulty-stratified breakdown at grad_norm=1.0, not finished yet — that's
+the open question this sweep is for.
 
 ---
 
-## [DONE] n4_k32 collapse: root cause + fix
+## [ACTIVE] rho_weight collapse under grad_norm=1.0 (n4_k32, watch n2_k64 too): root cause + partial fix
 
 **Question:** `2k_baseline_dapo_n4_k32_gradnorm1_seed1` entered an
 all-zero-reward filtering spin around step ~547 and crawled (13 steps/9h) —
-why, and is it config-specific or a general async off-policy risk?
+why, and is it config-specific or a general async off-policy risk? Same
+`val/rho_weight` 1.0→0.9-over-~20-steps signature is the thing to watch for
+on the `N=2,K=64` baseline too, given both configs share the
+"few-prompts-many-samples-each" shape that drives long completions.
 
 **Runs:** [n4_k32 gradnorm1 stall → rerun with async_steps 2](experiment.md#n4_k32-gradnorm1-stall--rerun-with-async_steps-2)
 
@@ -91,9 +151,12 @@ weights agreed post-collapse, ruling out weight-sync/optimizer corruption.
 Mechanism: the completion-length distribution crossed the 8192 truncation
 cliff, so ~60% of completions came back unfinished ⇒ nearly all groups had
 all-zero reward ⇒ active-sampling filtered everything out, and the loop
-starved. **Fix:** reduce `--async_steps` 4→2 to bound the off-policy feedback
-loop. Applied to the n4_k32 rerun and (preventatively) to all later NGU
-gradnorm1 relaunches.
+starved. **Fix (partial):** reduce `--async_steps` 4→2 to bound the
+off-policy feedback loop. Applied to the n4_k32 rerun and (preventatively)
+to all later NGU gradnorm1 relaunches. This mitigates the loop but isn't
+considered a full fix — it bounds staleness rather than addressing why
+completion lengths drift toward the cap in the first place, so recurrence
+(e.g. on `N=2,K=64`) is still possible.
 
 **Implication:** any future run with growing completion lengths near the
 truncation cap + `--active_sampling` is at risk of this collapse; watch
@@ -145,8 +208,10 @@ just the training-time metric.
 infra gotcha found — Beaker's Ray head port is hardcoded on host networking
 in `ray_node_setup.sh`, so packing two 4-GPU eval jobs onto one node makes
 the second job join the first job's Ray cluster and die. Worked around by
-requesting full-node (`NUM_GPUS=8`) for the affected jobs. Actual cross-config
-pass@1 comparison not yet summarized here — numbers live in the per-config
+requesting full-node (`NUM_GPUS=8`) for the affected jobs. Concrete output so
+far: the difficulty-stratified pass@1-improvement comparison in the NGU entry
+above (grad_norm=5.0, best checkpoint per seed). Full cross-config numeric
+table not yet written up here — numbers live in the per-config
 `eval/pass_at_1/<label>` wandb metrics linked from the table.
 
 ---
