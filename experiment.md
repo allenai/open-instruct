@@ -258,12 +258,12 @@ the replacement runs.
 
 | Name | n | k | never_give_up | Seed | Beaker |
 | --- | --- | --- | --- | --- | --- |
-| `2k_baseline_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | — | 1 | [01KX6VR8B6EWBFYGH511ATKMXX](https://beaker.org/ex/01KX6VR8B6EWBFYGH511ATKMXX) |
-| `2k_baseline_dapo_n4_k32_gradnorm1_seed1` | 4 | 32 | — | 1 | [01KX6VRNKA2NFV0PJ8AFHEVJZF](https://beaker.org/ex/01KX6VRNKA2NFV0PJ8AFHEVJZF) |
-| `2k_baseline_dapo_n2_k64_gradnorm1_seed1` | 2 | 64 | — | 1 | [01KX6VS3H0MCNPK01R33N5NXWW](https://beaker.org/ex/01KX6VS3H0MCNPK01R33N5NXWW) |
-| `2k_ngu05_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.5 | 1 | [01KX6VSBVN4E657KCJG301Y36H](https://beaker.org/ex/01KX6VSBVN4E657KCJG301Y36H) |
-| `2k_ngu075_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.75 | 1 | [01KX6VSKVPWQ27BPJW8859G80G](https://beaker.org/ex/01KX6VSKVPWQ27BPJW8859G80G) |
-| `2k_ngu0875_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.875 | 1 | [01KX6VSWZ49DB9RH461EZEYZ8R](https://beaker.org/ex/01KX6VSWZ49DB9RH461EZEYZ8R) |
+| `2k_baseline_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | — | 1 | ~~[01KX6VR8B6EWBFYGH511ATKMXX](https://beaker.org/ex/01KX6VR8B6EWBFYGH511ATKMXX)~~ [01KX6ZB67JSWDTBBH78T4JG0KV](https://beaker.org/ex/01KX6ZB67JSWDTBBH78T4JG0KV) |
+| `2k_baseline_dapo_n4_k32_gradnorm1_seed1` | 4 | 32 | — | 1 | ~~[01KX6VRNKA2NFV0PJ8AFHEVJZF](https://beaker.org/ex/01KX6VRNKA2NFV0PJ8AFHEVJZF)~~ [01KX6ZC4NV9D7X7HJ1WR8WHS0P](https://beaker.org/ex/01KX6ZC4NV9D7X7HJ1WR8WHS0P) |
+| `2k_baseline_dapo_n2_k64_gradnorm1_seed1` | 2 | 64 | — | 1 | ~~[01KX6VS3H0MCNPK01R33N5NXWW](https://beaker.org/ex/01KX6VS3H0MCNPK01R33N5NXWW)~~ [01KX6ZCNJ4GVGDHWP141RXET3K](https://beaker.org/ex/01KX6ZCNJ4GVGDHWP141RXET3K) |
+| `2k_ngu05_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.5 | 1 | ~~[01KX6VSBVN4E657KCJG301Y36H](https://beaker.org/ex/01KX6VSBVN4E657KCJG301Y36H)~~ [01KX6ZDE9RD8TEVZ2WBTGJFYWM](https://beaker.org/ex/01KX6ZDE9RD8TEVZ2WBTGJFYWM) |
+| `2k_ngu075_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.75 | 1 | ~~[01KX6VSKVPWQ27BPJW8859G80G](https://beaker.org/ex/01KX6VSKVPWQ27BPJW8859G80G)~~ [01KX6ZE3HNM57WW32XBQ0K1NA2](https://beaker.org/ex/01KX6ZE3HNM57WW32XBQ0K1NA2) |
+| `2k_ngu0875_dapo_n8_k16_gradnorm1_seed1` | 8 | 16 | 0.875 | 1 | ~~[01KX6VSWZ49DB9RH461EZEYZ8R](https://beaker.org/ex/01KX6VSWZ49DB9RH461EZEYZ8R)~~ [01KX6ZENECP864C2SJ2NBDM8KA](https://beaker.org/ex/01KX6ZENECP864C2SJ2NBDM8KA) |
 
 ### Launch command (repeat per row)
 
@@ -272,6 +272,46 @@ OC=true EXP=$NAME \
   ./scripts/train/build_image_and_launch.sh scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
   --total_episodes 256000 --num_unique_prompts_rollout $N --num_samples_per_prompt_rollout $K \
   --max_grad_norm 1.0 --seed $SEED [--never_give_up $P]
+```
+
+### Relaunch with `eval_step` metric fix (commit `c9d6c8453`)
+
+Original 6 runs above (commit `263fdca36`) were canceled ~14% in and relaunched
+fresh (not resumed — new `--checkpoint_state_dir`) after fixing `maybe_evaluate`
+to log an explicit `eval_step` metric alongside eval results, so evals for a
+given checkpoint step are always tagged with that step even if result
+collection is deferred to a later training step. Same configs, still
+`ai2/open-instruct-dev` workspace / `ai2/jupiter` cluster.
+
+## n4_k32 gradnorm1 stall → rerun with async_steps 2
+
+`2k_baseline_dapo_n4_k32_gradnorm1_seed1`
+([01KX6ZC4NV9D7X7HJ1WR8WHS0P](https://beaker.org/ex/01KX6ZC4NV9D7X7HJ1WR8WHS0P))
+entered the all-zero-reward filtering spin at step ~547 and crawled (13
+steps/9h). Log analysis + wandb: completion lengths drifted up to the 8192
+cap all run; `val/rho_weight` declined 1.0 → 0.9 over steps ~535–546 (growing
+async off-policyness as long generations slowed, negative advantage dominating)
+then snapped back to 1.0 post-collapse (steps became rare ⇒ on-policy again) —
+so trainer and vLLM agree post-collapse, ruling out weight-sync/OLMo-core
+optimizer corruption. Mechanism: length distribution crossed the truncation
+cliff, ~60% of completions unfinished ⇒ nearly all groups all-zero ⇒ active
+sampling filters everything. Canceled and rerun from scratch with
+`--async_steps 2` (was 4) to bound the off-policy feedback loop; same image
+(`michaeln/open-instruct-integration-test-ngu` @ `c9d6c8453`), workspace
+`ai2/open-instruct-dev`.
+
+| Name | n | k | async_steps | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- |
+| `2k_baseline_dapo_n4_k32_gradnorm1_async2_seed1` | 4 | 32 | 2 | 1 | [01KX9EKWT8Z7A0XJ7V70FC3D26](https://beaker.org/ex/01KX9EKWT8Z7A0XJ7V70FC3D26) |
+
+### Launch command
+
+```bash
+OC=true EXP=2k_baseline_dapo_n4_k32_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 4 --num_samples_per_prompt_rollout 32 \
+  --max_grad_norm 1.0 --seed 1 --async_steps 2
 ```
 
 ## Best-step held-out evals (BRUMO / HMMT / AIME 2025)
