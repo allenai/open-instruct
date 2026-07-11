@@ -6,7 +6,7 @@ accelerate==1.12.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux')
     # via
     #   open-instruct
     #   peft
-ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@76c239cab3ef3774aa1e3d0e35d1c0fc70e665c7 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
+ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@fa6c5014c9f6e9ee789da2d9c20d5126fee8df0d ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via open-instruct
 aiofiles==25.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via crawl4ai
@@ -250,11 +250,11 @@ fastapi==0.128.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') o
     #   open-instruct
     #   openenv-core
     #   vllm
-fastapi-cli==0.0.20 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+fastapi-cli==0.0.20 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via fastapi
-fastapi-cloud-cli==0.11.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+fastapi-cloud-cli==0.11.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via fastapi-cli
-fastar==0.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+fastar==0.8.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via fastapi-cloud-cli
 fastavro==1.12.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via cohere
@@ -358,7 +358,7 @@ hpack==4.1.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     # via h2
 httpcore==1.0.9 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via httpx
-httptools==0.7.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+httptools==0.7.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via uvicorn
 httpx==0.28.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -881,7 +881,7 @@ pyasn1-modules==0.4.2 ; (platform_machine == 'aarch64' and sys_platform == 'linu
     # via google-auth
 pybase64==1.4.3 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via vllm
-pycountry==24.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+pycountry==24.6.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via pydantic-extra-types
 pycparser==2.23 ; (implementation_name != 'PyPy' and platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'aarch64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux') or (implementation_name != 'PyPy' and platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (implementation_name == 'pypy' and platform_machine == 'x86_64' and platform_python_implementation == 'PyPy' and sys_platform == 'linux') or (implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' and sys_platform == 'darwin')
     # via cffi
@@ -918,7 +918,7 @@ pydantic-core==2.41.5 ; (platform_machine == 'aarch64' and sys_platform == 'linu
     # via
     #   cohere
     #   pydantic
-pydantic-extra-types==2.11.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+pydantic-extra-types==2.11.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   fastapi
     #   mistral-common
@@ -1063,11 +1063,11 @@ rich==13.9.4 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (p
     #   typer
 rich-rst==1.3.2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via cyclopts
-rich-toolkit==0.17.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+rich-toolkit==0.17.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   fastapi-cli
     #   fastapi-cloud-cli
-rignore==0.7.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+rignore==0.7.6 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via fastapi-cloud-cli
 rpds-py==0.30.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -1338,7 +1338,7 @@ uvicorn==0.40.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or
     #   mcp
     #   open-instruct
     #   openenv-core
-uvloop==0.22.1 ; (platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux')
+uvloop==0.22.1 ; (platform_machine == 'aarch64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation != 'PyPy' and sys_platform == 'linux') or (platform_python_implementation != 'PyPy' and sys_platform == 'darwin')
     # via uvicorn
 virtualenv==20.36.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
@@ -1350,7 +1350,7 @@ wandb==0.23.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (
     # via open-instruct
 watchdog==6.0.0 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via mkdocs
-watchfiles==1.1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+watchfiles==1.1.1 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'
     # via
     #   uvicorn
     #   vllm
