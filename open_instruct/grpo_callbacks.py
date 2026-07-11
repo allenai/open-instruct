@@ -19,6 +19,7 @@ import ray.util.queue as ray_queue
 import torch
 import torch.nn as nn
 from datasets import Dataset
+from olmo_core.distributed import utils as dist_utils
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
 from torch.distributed._composable.fsdp import FSDPModule
@@ -234,7 +235,10 @@ class DataPreparationActorCheckpointCallback(Callback):
     """Callback to save and restore DataPreparationActor state during checkpointing."""
 
     def state_dict(self) -> dict[str, Any]:
-        """Save DataPreparationActor state before checkpointing."""
+        """Save DataPreparationActor state in the global rank-0 trainer state."""
+        if dist_utils.get_rank() != 0:
+            return {}
+
         try:
             data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
             return {"data_prep_state": ray.get(data_prep_actor.get_state.remote())}
@@ -243,8 +247,8 @@ class DataPreparationActorCheckpointCallback(Callback):
             return {}
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore DataPreparationActor state after loading checkpoint."""
-        if "data_prep_state" not in state_dict:
+        """Restore DataPreparationActor state once, from global rank 0."""
+        if dist_utils.get_rank() != 0 or "data_prep_state" not in state_dict:
             return
 
         try:
