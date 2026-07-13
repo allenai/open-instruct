@@ -544,26 +544,22 @@ class GRPOTrainModule(TransformerTrainModule):
 
                 advantages = data_BT.advantages[sample_idx]
 
-                log_ratio = new_logprobs - old_logprob
-                ratio = torch.exp(log_ratio)
-
-                rho = grpo_utils.compute_rho_correction(
-                    old_logprob, vllm_logprobs, response_mask, advantages[:, 1:], self.grpo_config
-                )
-                grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
-
-                pg_loss, clipfrac, kl = grpo_utils.compute_grpo_loss(
+                loss_output = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
-                    ratio=ratio,
+                    old_logprobs=old_logprob,
+                    vllm_logprobs=vllm_logprobs,
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
+                    response_mask=response_mask,
                     config=self.grpo_config,
-                    rho_weights=rho.weights,
                 )
+                grpo_utils.accumulate_rho_histograms(rho_histograms, loss_output.rho)
 
                 batch_start = (sample_idx // accumulation_steps) * accumulation_steps
                 loss_denominator = accumulation_token_counts[batch_start]
-                loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
+                loss = masked_mean(
+                    loss_output.pg_loss + self.grpo_config.beta * loss_output.kl, response_mask, None, loss_denominator
+                )
 
                 loss = loss * dp_world_size
                 loss.backward()
@@ -571,16 +567,13 @@ class GRPOTrainModule(TransformerTrainModule):
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
                     sample_idx,
-                    pg_loss,
-                    clipfrac,
-                    ratio,
+                    loss_output,
                     loss,
                     response_mask,
                     new_logprobs,
                     ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     entropy,
                     self.grpo_config,
-                    rho_metrics=rho.metrics,
                 )
 
                 num_steps += 1

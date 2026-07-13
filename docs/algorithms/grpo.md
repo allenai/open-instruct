@@ -50,7 +50,8 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | **GRPO Algorithm** | `--beta` | KL coefficient for RLHF objective | `0.05` |
 | | `--clip_lower` | Lower clip range | `0.2` |
 | | `--clip_higher` | Higher clip range (see DAPO) | `0.2` |
-| | `--loss_fn` | Loss function: `dapo` or `cispo` | `dapo` |
+| | `--loss_fn` | Loss function: `dapo`, `cispo`, or `dppo` | `dapo` |
+| | `--rho_divergence_type` | Divergence for the ρ token-drop mask: `rho`, `tv` (VACO), `dppo_tv`, or `dppo_kl` (DPPO) | `rho` |
 | | `--load_ref_policy` | Load and use reference policy for KL | `True` |
 | **Rollout / Sampling** | `--num_unique_prompts_rollout` | Unique prompts per rollout | `16` |
 | | `--num_samples_per_prompt_rollout` | Samples per prompt in rollout | `4` |
