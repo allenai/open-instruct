@@ -5,6 +5,7 @@ NUM_NODES="${NUM_NODES:-8}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 COMPILE_MODEL="${COMPILE_MODEL:-true}"
 DATASET_VARIANT="${DATASET_VARIANT:-full}"
+LEARNING_RATE="${LEARNING_RATE:-4e-5}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-${DATASET_VARIANT}}"
@@ -62,7 +63,7 @@ uv run python mason.py \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS" \
     --num_epochs 1 \
-    --learning_rate 4e-5 \
+    --learning_rate "$LEARNING_RATE" \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0.0 \
