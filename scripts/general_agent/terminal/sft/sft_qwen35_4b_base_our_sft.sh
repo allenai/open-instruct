@@ -15,7 +15,7 @@ DATASET_CONFIG=skill_tax_20260505_2.2k_combined_balanced_thinking_all
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/terminalmaxxing \
+    --workspace ai2/oe-agents \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -49,6 +49,8 @@ uv run python mason.py \
     --dataset_mixer_list_splits \
         train \
     --gradient_checkpointing \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
     --report_to wandb \
     --with_tracking \
     --wandb_project_name oe-general-agents \

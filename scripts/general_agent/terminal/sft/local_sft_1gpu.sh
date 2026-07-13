@@ -23,6 +23,8 @@ uv run accelerate launch \
     --weight_decay 0.0 \
     --num_train_epochs 1 \
     --gradient_checkpointing \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
     --dataset_mixer_list $DATASET 50 \
     --dataset_mixer_list_splits nvidia__Nemotron_Terminal_Corpus__dataset_adapters \
     --report_to none \

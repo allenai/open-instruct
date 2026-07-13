@@ -12,7 +12,7 @@ DATASET=hamishivi/tmax-sft-full-20260317
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/general-tool-use \
+    --workspace ai2/oe-agents \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -56,6 +56,8 @@ uv run python mason.py \
         open_thoughts__OpenThoughts_Agent_v1_SFT \
     --add_bos \
     --gradient_checkpointing \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
     --report_to wandb \
     --with_tracking \
     --logging_steps 1 \
