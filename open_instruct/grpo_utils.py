@@ -73,13 +73,12 @@ class GRPOLossType(enum.StrEnum):
 
 
 class RhoDivergenceType(enum.StrEnum):
-    """Which divergence measure the masking algorithm uses (see :class:`RhoDivergenceAlgo`).
+    """Which binary (Bernoulli) divergence measure the masking algorithm uses.
 
-    ``tv``: total variation — ``vaco`` uses the ratio-space |ρ - 1|; ``dppo`` uses the
-    binary (Bernoulli) |μ - π| (Eq. 13 of https://arxiv.org/abs/2602.04879).
-    ``kl``: KL — ``vaco`` uses the k3 estimator ρ - 1 - log ρ of KL(μ ‖ π^train_old);
-    ``dppo`` uses the binary (Bernoulli) KL (Eq. 14).
-    Ignored by the ``icepop`` algorithm, which masks on ρ itself.
+    ``tv``: total variation |μ - π| (Eq. 13 of https://arxiv.org/abs/2602.04879);
+    ``kl``: KL of the Bernoulli collapse over {sampled token, all others} (Eq. 14).
+    Computed by :func:`compute_binary_divergence`. Ignored by the ``icepop``
+    algorithm, which masks on ρ itself.
     """
 
     tv = "tv"
@@ -93,11 +92,11 @@ class RhoDivergenceAlgo(enum.StrEnum):
     ρ = π^train_old / π^infer_old itself (per token, or per sequence with
     ``rho_mask_sequence_level``).
     ``vaco``: VACO (https://arxiv.org/abs/2603.01365) — sequence-level mean of the
-    per-token divergence between π^train_old and the rollout policy μ, dropping only
-    tokens whose update would increase the divergence.
-    ``dppo``: DPPO (https://arxiv.org/abs/2602.04879) — per-token binary (Bernoulli)
-    divergence between the *current* policy π_θ and the rollout policy μ, dropping only
-    tokens whose update would push π_θ further from μ (Eq. 12).
+    per-token binary divergence between π^train_old and the rollout policy μ, dropping
+    only tokens whose update would increase the divergence.
+    ``dppo``: DPPO (https://arxiv.org/abs/2602.04879) — per-token binary divergence
+    between the *current* policy π_θ and the rollout policy μ, dropping only tokens
+    whose update would push π_θ further from μ (Eq. 12).
     """
 
     icepop = "icepop"
@@ -176,8 +175,8 @@ class GRPOExperimentConfig(
     whose update would *decrease* the divergence are never masked. The ρ clamp/reweighting
     (truncated importance sampling) is unaffected by this choice."""
     rho_divergence_type: RhoDivergenceType = RhoDivergenceType.tv
-    """Which divergence measure `rho_divergence_algo` thresholds: `tv` or `kl`.
-    See :class:`RhoDivergenceType` for the per-algorithm definitions. Ignored by `icepop`."""
+    """Which binary (Bernoulli) divergence measure `rho_divergence_algo` thresholds:
+    `tv` or `kl` (Eqs. 13/14 of https://arxiv.org/abs/2602.04879). Ignored by `icepop`."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -195,7 +194,9 @@ class GRPOExperimentConfig(
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
-    """Whether to use DAPO or CISPO loss function."""
+    """Which policy-loss function to use: `dapo`, `cispo`, or `dppo`. `dppo` is `dapo`
+    with the symmetric ratio clipping disabled; its trust region comes entirely from the
+    `rho_divergence_algo=dppo` drop mask."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -513,7 +514,9 @@ def compute_binary_divergence(
     (https://arxiv.org/abs/2602.04879): collapse the categorical distribution
     over the vocabulary into a Bernoulli over ``{sampled_token, all_others}``
     using only the per-token logprobs. This is a memory-cheap lower bound on
-    the true policy divergence that requires no extra forward passes.
+    the true policy divergence that requires no extra forward passes. It is the
+    shared divergence measure behind both the ``vaco`` and ``dppo`` masking
+    algorithms in :func:`compute_rho_correction`.
 
     Args:
         behavior_logprobs: log μ(a_t|s_t), the rollout (vLLM) policy.
@@ -561,66 +564,59 @@ def compute_rho_correction(
     ρ = π^train_old / π^infer_old corrects the train/infer engine mismatch; when
     ``use_rho_correction`` is on, in-range tokens are reweighted by clamped ρ
     (truncated importance sampling). The drop mask is controlled by
-    ``rho_divergence_algo`` (see :class:`RhoDivergenceAlgo`) using the divergence
+    ``rho_divergence_algo`` (see :class:`RhoDivergenceAlgo`) using the binary divergence
     measure ``rho_divergence_type``; the ``dppo`` algorithm compares the *current*
     policy (``new_logprobs``, detached here) against the rollout policy and therefore
     also applies when ``use_vllm_logprobs`` is on.
     """
+    orig_dtype = old_logprob.dtype
+    # Upcast to float32 and clamp to the valid logprob range before exponentiating.
+    # Real logprobs are <= 0; non-response sentinel positions and NaN replacements can
+    # be > 0 (see ``mask_logprobs`` / INVALID_LOGPROB).
+    old_logprob_f = old_logprob.to(torch.float32).clamp(min=-30.0, max=0.0)
+    vllm_logprobs_f = vllm_logprobs.to(torch.float32).clamp(min=-30.0, max=0.0)
     logprob_diff = torch.where(
-        response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
+        response_mask, (old_logprob_f - vllm_logprobs_f).clamp(-10.0, 10.0), torch.zeros_like(old_logprob_f)
     )
     rho = torch.exp(logprob_diff)
-    rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
+    rho_hist = {"val/rho_hist": rho[response_mask].detach()}
     is_dppo_algo = config.rho_divergence_algo == RhoDivergenceAlgo.dppo
     if not config.use_rho_correction and not is_dppo_algo:
-        return RhoCorrection(weights=torch.ones_like(rho), metrics={}, histogram_metrics=rho_hist)
+        return RhoCorrection(weights=torch.ones_like(old_logprob), metrics={}, histogram_metrics=rho_hist)
 
     rho_effective = (
         torch.exp(_sequence_level_mean(logprob_diff, response_mask)) if config.rho_mask_sequence_level else rho
     )
 
     metrics: dict[str, torch.Tensor] = {}
-    if config.rho_divergence_algo == RhoDivergenceAlgo.vaco:
-        # VACO: keep rho_effective for the truncated importance sampling weights, but mask
-        # on the sequence-level mean of a per-token divergence between π^train_old and μ,
-        # dropping only tokens whose update would increase it: advantage * logprob_diff > 0.
-        if config.rho_divergence_type == RhoDivergenceType.tv:
-            token_divergence = torch.abs(rho - 1.0)
-        else:
-            # k3 estimator of KL(μ ‖ π^train_old): ρ - 1 - log ρ >= 0 (Schulman,
-            # http://joschu.net/blog/kl-approx.html), with tokens sampled from μ.
-            token_divergence = rho - 1.0 - logprob_diff
-        sequence_divergence = _sequence_level_mean(token_divergence, response_mask)
-        divergence_dropped_low, divergence_dropped_high = _rho_drop_masks(
-            sequence_divergence, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+    if config.rho_divergence_algo == RhoDivergenceAlgo.icepop:
+        dropped_low, dropped_high = _rho_drop_masks(
+            rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
         )
-        tokens_increase_divergence = torch.sign(logprob_diff) * advantages > 0
-        dropped_low = divergence_dropped_low & tokens_increase_divergence
-        dropped_high = divergence_dropped_high & tokens_increase_divergence
-        metrics["val/rho_divergence"] = sequence_divergence.detach().float()
-    elif is_dppo_algo:
-        # DPPO (Eq. 12): drop tokens outside the trust region δ on the binary divergence
-        # between the current policy π_θ and the rollout policy μ, but only when the update
-        # would push π_θ further from μ: A>0 with π_θ>μ, or A<0 with π_θ<μ.
+    else:
+        # VACO and DPPO share the same structure: a binary divergence against the rollout
+        # policy μ is thresholded by the mask bounds, dropping only tokens whose update
+        # would *increase* the divergence: sign(log(π/μ)) * advantage > 0. They differ in
+        # the compared policy π and the aggregation level: VACO uses π^train_old at the
+        # sequence level; DPPO uses the current π_θ per token (Eq. 12).
         with torch.no_grad():
-            policy_logprobs = new_logprobs.detach()
+            policy_logprobs = new_logprobs.detach() if is_dppo_algo else old_logprob
             divergence = compute_binary_divergence(
                 behavior_logprobs=vllm_logprobs,
                 policy_logprobs=policy_logprobs,
                 response_mask=response_mask,
                 divergence_type=config.rho_divergence_type,
             )
-            outside_region = (divergence > config.rho_mask_upper_bound) & response_mask
-            policy_log_ratio = torch.where(
-                response_mask, policy_logprobs - vllm_logprobs, torch.zeros_like(policy_logprobs)
+            if config.rho_divergence_algo == RhoDivergenceAlgo.vaco:
+                divergence = _sequence_level_mean(divergence, response_mask)
+            divergence_low, divergence_high = _rho_drop_masks(
+                divergence, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
             )
-            dropped_high = outside_region & (advantages > 0) & (policy_log_ratio > 0)
-            dropped_low = outside_region & (advantages < 0) & (policy_log_ratio < 0)
+            policy_log_ratio = policy_logprobs.to(torch.float32).clamp(min=-30.0, max=0.0) - vllm_logprobs_f
+            moving_away = torch.sign(policy_log_ratio) * advantages > 0
+            dropped_low = divergence_low & moving_away
+            dropped_high = divergence_high & moving_away
             metrics["val/rho_divergence"] = divergence.float()
-    else:
-        dropped_low, dropped_high = _rho_drop_masks(
-            rho_effective, response_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
-        )
 
     in_range = response_mask & ~dropped_low & ~dropped_high
 
@@ -632,7 +628,7 @@ def compute_rho_correction(
 
     # Without the ρ correction (e.g. DPPO with use_vllm_logprobs), kept tokens keep weight 1.
     kept_weights = rho_clamped if config.use_rho_correction else torch.ones_like(rho_clamped)
-    weights = torch.where(in_range, kept_weights, torch.zeros_like(kept_weights))
+    weights = torch.where(in_range, kept_weights, torch.zeros_like(kept_weights)).to(orig_dtype)
     metrics |= {
         "val/rho_drop_frac": (dropped_low | dropped_high).float(),
         "val/rho_drop_low_frac": dropped_low.float(),
@@ -715,9 +711,17 @@ def compute_grpo_loss(
     ratio = torch.exp(new_logprobs - old_logprobs)
     rho = compute_rho_correction(old_logprobs, vllm_logprobs, new_logprobs, response_mask, advantages, config)
 
-    if config.loss_fn == GRPOLossType.dapo:
+    if config.loss_fn in (GRPOLossType.dapo, GRPOLossType.dppo):
+        # DPPO (https://arxiv.org/abs/2602.04879) Eq. 11 (L = E[Σ_t M_t · r_t · A_t]) is
+        # DAPO with the symmetric ratio clipping disabled: its trust-region mask M_t is
+        # enforced through the ρ weights via rho_divergence_algo=dppo (validated in
+        # __post_init__), so the clamp is widened to a no-op.
+        if config.loss_fn == GRPOLossType.dapo:
+            clip_lower, clip_higher = config.clip_lower, config.clip_higher
+        else:
+            clip_lower, clip_higher = math.inf, math.inf
         pg_losses = -advantages * ratio
-        pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - clip_lower, 1.0 + clip_higher)
         clipfrac = (pg_losses2 > pg_losses).float()
         pg_loss = torch.max(pg_losses, pg_losses2)
     elif config.loss_fn == GRPOLossType.cispo:
@@ -725,12 +729,6 @@ def compute_grpo_loss(
         # reinforce loss, so multiply by new logprobs
         clipfrac = (ratio > 1.0 + config.clip_higher).float()
         pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
-    elif config.loss_fn == GRPOLossType.dppo:
-        # DPPO (https://arxiv.org/abs/2602.04879) Eq. 11: L = E[Σ_t M_t · r_t · A_t].
-        # No symmetric clipping; the trust-region mask M_t is enforced through the ρ
-        # weights via rho_divergence_algo=dppo (validated in __post_init__).
-        pg_loss = -advantages * ratio
-        clipfrac = torch.zeros_like(pg_loss)
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 

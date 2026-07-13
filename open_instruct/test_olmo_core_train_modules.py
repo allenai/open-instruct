@@ -298,7 +298,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         # ρ = π_old / μ = 2 everywhere; with clamps disabled the kept tokens are reweighted by 2.
         config = _make_grpo_config(use_rho_correction=True)
         new_logprobs = torch.randn(2, 4)
-        old_logprobs = torch.randn(2, 4)
+        old_logprobs = -torch.rand(2, 4) - 0.1
         vllm_logprobs = old_logprobs - torch.log(torch.tensor(2.0))
         advantages = torch.randn(2, 4)
         response_mask = torch.ones(2, 4, dtype=torch.bool)
@@ -322,8 +322,8 @@ class TestComputeGRPOLoss(unittest.TestCase):
         response_mask = torch.tensor([[True, True, True, True, True]])
         # ρ values: 0.25 (drop, < lower=0.5), 0.5 (keep), 1.0 (keep), 2.0 (keep), 4.0 (drop, > upper=2.0).
         # In-range tokens are reweighted by ρ, not gated to 1.
-        old_logprob = torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
-        vllm_logprobs = torch.zeros_like(old_logprob)
+        vllm_logprobs = torch.log(torch.full((1, 5), 0.2))
+        old_logprob = vllm_logprobs + torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
         advantages = torch.ones_like(old_logprob)
         correction = grpo_utils.compute_rho_correction(
             old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
@@ -352,8 +352,8 @@ class TestComputeGRPOLoss(unittest.TestCase):
         # Row 0: per-token ρ = [0.25, 1.0, 4.0]; mean log ρ = 0 → ρ_seq = 1 (kept).
         # Row 1: per-token ρ = [4.0, 4.0, 4.0]; mean log ρ = log 4 → ρ_seq = 4 (drop high).
         # Row 2: per-token ρ = [0.25, 0.25, 0.25]; ρ_seq = 0.25 (drop low).
-        old_logprob = torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0], [0.25, 0.25, 0.25]]))
-        vllm_logprobs = torch.zeros_like(old_logprob)
+        vllm_logprobs = torch.log(torch.full((3, 3), 0.2))
+        old_logprob = vllm_logprobs + torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0], [0.25, 0.25, 0.25]]))
         response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
         advantages = torch.ones_like(old_logprob)
         correction = grpo_utils.compute_rho_correction(
@@ -375,26 +375,28 @@ class TestComputeGRPOLoss(unittest.TestCase):
         config = _make_grpo_config(
             use_rho_correction=True,
             rho_mask_lower_bound=0.0,
-            rho_mask_upper_bound=2.0,
+            rho_mask_upper_bound=0.3,
             rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
         )
-        # Row 0: mean |ρ - 1| = 1.25, below upper=2.0, so it is kept.
-        # Row 1: mean |ρ - 1| = 3.0, above upper=2.0, so TV-increasing tokens are dropped.
-        old_logprob = torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0]]))
-        vllm_logprobs = torch.zeros_like(old_logprob)
+        # Sequence-level mean binary TV |μ - π_old| per row:
+        # Row 0: |0.5 - 0.4| = 0.1 < 0.3 → kept, reweighted by ρ = 0.4/0.5 = 0.8.
+        # Row 1: |0.1 - 0.6| = 0.5 > 0.3 and A>0 with π_old>μ increases it → dropped.
+        # Row 2: same divergence but A<0 with π_old>μ *decreases* it → kept, ρ = 6.
+        vllm_logprobs = torch.log(torch.tensor([[0.5] * 3, [0.1] * 3, [0.1] * 3]))
+        old_logprob = torch.log(torch.tensor([[0.4] * 3, [0.6] * 3, [0.6] * 3]))
         response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
-        advantages = torch.ones_like(old_logprob)
+        advantages = torch.tensor([[1.0] * 3, [1.0] * 3, [-1.0] * 3])
 
         correction = grpo_utils.compute_rho_correction(
             old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
         )
 
-        torch.testing.assert_close(correction.weights, torch.tensor([[0.25, 1.0, 4.0], [0.0, 0.0, 0.0]]))
+        torch.testing.assert_close(correction.weights, torch.tensor([[0.8] * 3, [0.0] * 3, [6.0] * 3]))
         torch.testing.assert_close(
-            correction.metrics["val/rho_drop_high_frac"], torch.tensor([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+            correction.metrics["val/rho_drop_high_frac"], torch.tensor([[0.0] * 3, [1.0] * 3, [0.0] * 3])
         )
         torch.testing.assert_close(
-            correction.metrics["val/rho_divergence"], torch.tensor([[1.25, 1.25, 1.25], [3.0, 3.0, 3.0]])
+            correction.metrics["val/rho_divergence"], torch.tensor([[0.1] * 3, [0.5] * 3, [0.5] * 3])
         )
 
     def test_vaco_kl_divergence(self):
@@ -405,10 +407,11 @@ class TestComputeGRPOLoss(unittest.TestCase):
             rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
             rho_divergence_type=grpo_utils.RhoDivergenceType.kl,
         )
-        # k3 = ρ - 1 - log ρ. Row 0: ρ = 1 everywhere → divergence 0 (kept).
-        # Row 1: ρ = 4 everywhere → k3 = 3 - log 4 ≈ 1.614 > 1.0 (dropped).
-        old_logprob = torch.log(torch.tensor([[1.0, 1.0, 1.0], [4.0, 4.0, 4.0]]))
-        vllm_logprobs = torch.zeros_like(old_logprob)
+        # Sequence-level mean binary KL(μ ‖ π_old) per row:
+        # Row 0: μ = π_old → 0 (kept, ρ = 1).
+        # Row 1: μ=0.1, π_old=0.9 → 0.8·log(9) ≈ 1.76 > 1.0, and A>0 with π_old>μ → dropped.
+        vllm_logprobs = torch.log(torch.tensor([[0.5, 0.5], [0.1, 0.1]]))
+        old_logprob = torch.log(torch.tensor([[0.5, 0.5], [0.9, 0.9]]))
         response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
         advantages = torch.ones_like(old_logprob)
 
@@ -416,17 +419,20 @@ class TestComputeGRPOLoss(unittest.TestCase):
             old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
         )
 
-        torch.testing.assert_close(correction.weights, torch.tensor([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0]]))
-        expected_divergence = 3.0 - torch.log(torch.tensor(4.0))
+        torch.testing.assert_close(correction.weights, torch.tensor([[1.0, 1.0], [0.0, 0.0]]))
+        expected_divergence = 0.8 * torch.log(torch.tensor(9.0))
         torch.testing.assert_close(
-            correction.metrics["val/rho_divergence"], torch.stack([torch.zeros(3), expected_divergence.expand(3)])
+            correction.metrics["val/rho_divergence"],
+            torch.stack([torch.zeros(2), expected_divergence.expand(2)]),
+            atol=1e-4,
+            rtol=1e-4,
         )
 
     def test_rho_mask_zeroes_loss(self):
         # ρ values [1.0, 4.0, 1.0] with mask bounds (0.5, 2.0): the middle token is dropped.
         config = _make_grpo_config(use_rho_correction=True, rho_mask_lower_bound=0.5, rho_mask_upper_bound=2.0)
         new_logprobs = torch.randn(1, 3)
-        old_logprobs = torch.randn(1, 3)
+        old_logprobs = -torch.rand(1, 3) - 0.1
         vllm_logprobs = old_logprobs - torch.log(torch.tensor([[1.0, 4.0, 1.0]]))
         advantages = torch.randn(1, 3)
 
@@ -571,7 +577,7 @@ class TestDPPODivergenceMask(unittest.TestCase):
         )
 
         torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 1.0]]))
-        torch.testing.assert_close(correction.metrics["val/rho_drop_low_frac"], torch.tensor([[1.0, 0.0]]))
+        torch.testing.assert_close(correction.metrics["val/rho_drop_high_frac"], torch.tensor([[1.0, 0.0]]))
 
     def test_padding_positions_zeroed(self):
         config = _make_dppo_config()
