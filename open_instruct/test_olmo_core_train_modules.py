@@ -165,7 +165,8 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "rho_clamp_upper_bound": 0.0,
         "rho_mask_lower_bound": 0.0,
         "rho_mask_upper_bound": 0.0,
-        "rho_divergence_type": grpo_utils.RhoDivergenceType.rho,
+        "rho_divergence_algo": grpo_utils.RhoDivergenceAlgo.icepop,
+        "rho_divergence_type": grpo_utils.RhoDivergenceType.tv,
         "use_rho_correction": False,
     }
     defaults.update(kwargs)
@@ -370,12 +371,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
             torch.tensor([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]]),
         )
 
-    def test_rho_mask_tv_divergence(self):
+    def test_vaco_tv_divergence(self):
         config = _make_grpo_config(
             use_rho_correction=True,
             rho_mask_lower_bound=0.0,
             rho_mask_upper_bound=2.0,
-            rho_divergence_type=grpo_utils.RhoDivergenceType.tv,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
         )
         # Row 0: mean |ρ - 1| = 1.25, below upper=2.0, so it is kept.
         # Row 1: mean |ρ - 1| = 3.0, above upper=2.0, so TV-increasing tokens are dropped.
@@ -394,6 +395,31 @@ class TestComputeGRPOLoss(unittest.TestCase):
         )
         torch.testing.assert_close(
             correction.metrics["val/rho_divergence"], torch.tensor([[1.25, 1.25, 1.25], [3.0, 3.0, 3.0]])
+        )
+
+    def test_vaco_kl_divergence(self):
+        config = _make_grpo_config(
+            use_rho_correction=True,
+            rho_mask_lower_bound=0.0,
+            rho_mask_upper_bound=1.0,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
+            rho_divergence_type=grpo_utils.RhoDivergenceType.kl,
+        )
+        # k3 = ρ - 1 - log ρ. Row 0: ρ = 1 everywhere → divergence 0 (kept).
+        # Row 1: ρ = 4 everywhere → k3 = 3 - log 4 ≈ 1.614 > 1.0 (dropped).
+        old_logprob = torch.log(torch.tensor([[1.0, 1.0, 1.0], [4.0, 4.0, 4.0]]))
+        vllm_logprobs = torch.zeros_like(old_logprob)
+        response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
+        advantages = torch.ones_like(old_logprob)
+
+        correction = grpo_utils.compute_rho_correction(
+            old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
+        )
+
+        torch.testing.assert_close(correction.weights, torch.tensor([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0]]))
+        expected_divergence = 3.0 - torch.log(torch.tensor(4.0))
+        torch.testing.assert_close(
+            correction.metrics["val/rho_divergence"], torch.stack([torch.zeros(3), expected_divergence.expand(3)])
         )
 
     def test_rho_mask_zeroes_loss(self):
@@ -442,7 +468,7 @@ class TestComputeBinaryDivergence(unittest.TestCase):
             behavior_logprobs=behavior_logprobs,
             policy_logprobs=policy_logprobs,
             response_mask=response_mask,
-            divergence_type=grpo_utils.RhoDivergenceType.dppo_tv,
+            divergence_type=grpo_utils.RhoDivergenceType.tv,
         )
 
         torch.testing.assert_close(divergence, torch.tensor([[0.1, 0.0, 0.6]]), atol=1e-5, rtol=1e-5)
@@ -455,7 +481,7 @@ class TestComputeBinaryDivergence(unittest.TestCase):
             behavior_logprobs=logprobs,
             policy_logprobs=logprobs,
             response_mask=response_mask,
-            divergence_type=grpo_utils.RhoDivergenceType.dppo_kl,
+            divergence_type=grpo_utils.RhoDivergenceType.kl,
         )
 
         torch.testing.assert_close(divergence, torch.zeros_like(divergence), atol=1e-5, rtol=1e-5)
@@ -469,26 +495,27 @@ class TestComputeBinaryDivergence(unittest.TestCase):
             behavior_logprobs=behavior_logprobs,
             policy_logprobs=policy_logprobs,
             response_mask=response_mask,
-            divergence_type=grpo_utils.RhoDivergenceType.dppo_tv,
+            divergence_type=grpo_utils.RhoDivergenceType.tv,
         )
 
         self.assertEqual(float(divergence[0, 0]), 0.0)
         self.assertGreater(float(divergence[0, 1]), 0.0)
 
-    def test_non_dppo_divergence_type_raises(self):
+    def test_unknown_divergence_type_raises(self):
         with self.assertRaises(ValueError):
             grpo_utils.compute_binary_divergence(
                 behavior_logprobs=torch.zeros(1, 1),
                 policy_logprobs=torch.zeros(1, 1),
                 response_mask=torch.ones(1, 1, dtype=torch.bool),
-                divergence_type=grpo_utils.RhoDivergenceType.tv,
+                divergence_type="not_a_divergence",
             )
 
 
 def _make_dppo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
     defaults = {
         "use_rho_correction": False,
-        "rho_divergence_type": grpo_utils.RhoDivergenceType.dppo_tv,
+        "rho_divergence_algo": grpo_utils.RhoDivergenceAlgo.dppo,
+        "rho_divergence_type": grpo_utils.RhoDivergenceType.tv,
         "rho_mask_upper_bound": 0.05,
         "rho_mask_lower_bound": 0.0,
     }
@@ -617,18 +644,18 @@ class TestDPPOLoss(unittest.TestCase):
 
 
 class TestDPPOConfigValidation(unittest.TestCase):
-    def test_dppo_loss_requires_dppo_divergence_type(self):
-        with self.assertRaisesRegex(ValueError, "rho_divergence_type"):
+    def test_dppo_loss_requires_dppo_divergence_algo(self):
+        with self.assertRaisesRegex(ValueError, "rho_divergence_algo"):
             grpo_utils.GRPOExperimentConfig(loss_fn=grpo_utils.GRPOLossType.dppo)
 
-    def test_dppo_divergence_requires_threshold(self):
+    def test_dppo_algo_requires_threshold(self):
         with self.assertRaisesRegex(ValueError, "rho_mask_upper_bound"):
-            grpo_utils.GRPOExperimentConfig(rho_divergence_type=grpo_utils.RhoDivergenceType.dppo_tv)
+            grpo_utils.GRPOExperimentConfig(rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo)
 
-    def test_dppo_divergence_requires_rollout_anchoring(self):
+    def test_dppo_algo_requires_rollout_anchoring(self):
         with self.assertRaisesRegex(ValueError, "rollout policy"):
             grpo_utils.GRPOExperimentConfig(
-                rho_divergence_type=grpo_utils.RhoDivergenceType.dppo_tv,
+                rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo,
                 rho_mask_upper_bound=0.1,
                 use_rho_correction=False,
             )
@@ -636,21 +663,32 @@ class TestDPPOConfigValidation(unittest.TestCase):
     def test_dppo_with_rho_correction_is_valid(self):
         grpo_utils.GRPOExperimentConfig(
             loss_fn=grpo_utils.GRPOLossType.dppo,
-            rho_divergence_type=grpo_utils.RhoDivergenceType.dppo_kl,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo,
+            rho_divergence_type=grpo_utils.RhoDivergenceType.kl,
             rho_mask_upper_bound=0.1,
         )
 
     def test_dppo_with_vllm_logprobs_is_valid(self):
         grpo_utils.GRPOExperimentConfig(
             loss_fn=grpo_utils.GRPOLossType.dppo,
-            rho_divergence_type=grpo_utils.RhoDivergenceType.dppo_tv,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo,
             rho_mask_upper_bound=0.1,
             use_rho_correction=False,
             use_vllm_logprobs=True,
         )
 
-    def test_tv_divergence_allows_sub_one_threshold(self):
-        grpo_utils.GRPOExperimentConfig(rho_divergence_type=grpo_utils.RhoDivergenceType.tv, rho_mask_upper_bound=0.5)
+    def test_vaco_allows_sub_one_threshold(self):
+        grpo_utils.GRPOExperimentConfig(
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco, rho_mask_upper_bound=0.5
+        )
+
+    def test_vaco_requires_rho_correction(self):
+        with self.assertRaisesRegex(ValueError, "use_rho_correction"):
+            grpo_utils.GRPOExperimentConfig(
+                rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
+                rho_mask_upper_bound=0.5,
+                use_rho_correction=False,
+            )
 
 
 if __name__ == "__main__":
