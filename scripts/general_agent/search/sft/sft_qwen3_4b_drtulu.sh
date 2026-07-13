@@ -1,19 +1,18 @@
 #!/bin/bash
 
-# SFT on Qwen3-4B-Instruct-2507 using rl-rag/browsecomp-gptoss-clean-qwen35-sft
+# SFT on Qwen3-4B-Instruct-2507 using rl-rag-2/sft_ablations_bc_only_v1
 # 10k seq len, 2e-5 LR, 1 nodes x 8 GPUs
 # To use flash attention instead, pass --use_flash_attn
 
 BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
 MODEL="Qwen/Qwen3-4B-Instruct-2507"
 TOKENIZER="Qwen/Qwen3-4B-Instruct-2507"
-DATASET=rl-rag/browsecomp-gptoss-clean-qwen35-sft
-# DATASET="hamishivi/sft_ablations_bc_only_v1_sanitized"
+DATASET=rl-rag-2/sft_ablations_bc_only_v1
 
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/general-tool-use \
+    --workspace ai2/oe-agents \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -47,6 +46,8 @@ uv run python mason.py \
     --dataset_mixer_list_splits \
         train \
     --gradient_checkpointing \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
     --report_to wandb \
     --with_tracking \
     --wandb_project_name oe-general-agents \

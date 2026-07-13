@@ -1,19 +1,21 @@
 #!/bin/bash
 
-# SFT for Qwen3.5-9B on hamishivi/sft_ablations_bc_only_v1_sanitized
-# 4 nodes x 32 GPUs = 8 GPUs
+# SFT for Qwen3.5-9B on rl-rag-2/sft_ablations_bc_only_v1
+# 4 nodes x 8 GPUs = 32 GPUs
 
 BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
-# MODEL="Qwen/Qwen3.5-9B"
-MODEL="hamishivi/Qwen3.5-9B"
-# TOKENIZER="Qwen/Qwen3.5-9B"
-TOKENIZER="hamishivi/Qwen3.5-9B"
+
+MODEL="Qwen/Qwen3.5-9B"
+TOKENIZER="Qwen/Qwen3.5-9B"
+
+DATASET="rl-rag-2/sft_ablations_bc_only_v1"
 # DATASET="rl-rag/browsecomp-gptoss-clean-qwen35-sft"
-DATASET="hamishivi/sft_ablations_bc_only_v1_sanitized"
+
+EXP_NAME="drtulu_sft_qwen35_9b_128k_sft_ablations_bc_only_v1"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/general-tool-use \
+    --workspace ai2/oe-agents \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -28,7 +30,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name drtulu_sft_qwen35_9b_v1_sanitized_full_reasoning \
+    --exp_name $EXP_NAME \
     --model_name_or_path $MODEL \
     --tokenizer_name $TOKENIZER \
     --sequence_parallel_size 4 \
@@ -46,6 +48,11 @@ uv run python mason.py \
     --dataset_mixer_list_splits \
         train \
     --gradient_checkpointing \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
+    --timeout 7200 \
+    --try_launch_beaker_eval_jobs false \
+    --push_to_hub false \
     --report_to wandb \
     --with_tracking \
     --wandb_project_name oe-general-agents \

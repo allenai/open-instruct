@@ -4,13 +4,18 @@
 # Uses Qwen3-0.6B + tiny dataset slice instead of the full 9B job.
 # No Beaker, no DeepSpeed, no mason.py -- just runs directly.
 
+# DATASET=rl-rag/browsecomp-gptoss-clean-qwen35-sft
+DATASET=rl-rag-2/sft_ablations_bc_only_v1
+MODEL_NAME=Qwen/Qwen3-0.6B
+TOKENIZER_NAME=Qwen/Qwen3-0.6B
+
 uv run accelerate launch \
     --mixed_precision bf16 \
     --num_processes 1 \
     open_instruct/finetune.py \
     --exp_name drtulu_local_sft_1gpu \
-    --model_name_or_path Qwen/Qwen3-0.6B \
-    --tokenizer_name Qwen/Qwen3-0.6B \
+    --model_name_or_path $MODEL_NAME \
+    --tokenizer_name $TOKENIZER_NAME \
     --use_liger_kernel \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \
@@ -21,7 +26,9 @@ uv run accelerate launch \
     --weight_decay 0.0 \
     --num_train_epochs 1 \
     --gradient_checkpointing \
-    --dataset_mixer_list rl-rag/browsecomp-gptoss-clean-qwen35-sft 50 \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
+    --dataset_mixer_list $DATASET 50 \
     --report_to none \
     --logging_steps 1 \
     --seed 42 \
