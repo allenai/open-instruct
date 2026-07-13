@@ -92,12 +92,12 @@ command after the `--` directly (adjusting `--num_processes`/node settings for y
 hardware). To launch on the cluster, just run the script with a Beaker image:
 
 ```bash
-bash scripts/tmax/SFT/sft_qwen3_8b_small.sh <beaker-image>
+bash scripts/tmax/SFT_Released/sft_qwen3_8b_small.sh <beaker-image>
 ```
 
 For people at Ai2, you can just run the script with a Beaker image. I recommend using the build and launch scripts, e.g.:
 ```bash
-bash scripts/train/build_image_and_launch.sh training/open-instruct/scripts/tmax/RL/qwen35_2b.sh
+bash scripts/train/build_image_and_launch.sh scripts/tmax/RL_Released/qwen35_2b.sh
 ```
 
 ## General Tips
