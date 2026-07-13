@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `keep_last_n_saves` to `grpo.py`/`grpo_fast.py` to bound the number of intermediate HuggingFace-format model saves kept under `{output_dir}_checkpoints` (-1 for unlimited, matching current behavior); on the OLMo-core (`grpo.py`) training path, periodic HF-format saves following `save_freq` are now performed via a new `HFCheckpointCallback`, since previously `save_freq` was a no-op there (only the final model was saved in HF format). Builds on the `keep_last_n_checkpoints`/`max_checkpoints` wiring from https://github.com/allenai/open-instruct/pull/1701 (https://github.com/allenai/open-instruct/pull/1754).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed

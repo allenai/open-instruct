@@ -113,6 +113,7 @@ from open_instruct.utils import (
     RayProcess,
     UlyssesSPSplitter,
     _z3_params_to_fetch,
+    clean_last_n_checkpoints,
     clean_last_n_checkpoints_deepspeed,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
@@ -1675,6 +1676,7 @@ def maybe_save_checkpoint(
                 ],
                 desc=f"Saving model at step {training_step}",
             )
+            clean_last_n_checkpoints(checkpoint_dir, args.keep_last_n_saves)
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                 for i in range(args.world_size):

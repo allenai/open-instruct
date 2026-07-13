@@ -93,6 +93,10 @@ class GRPOExperimentConfig(
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
+    keep_last_n_saves: int = -1
+    """How many intermediate HuggingFace-format model saves (under `{output_dir}_checkpoints`) to
+    keep on disk. -1 for all (default). Distinct from `keep_last_n_checkpoints`, which bounds the
+    OLMo-core native/resumable checkpoints under `output_dir` (or `checkpoint_state_dir`)."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
     model_dtype: str = "bfloat16"

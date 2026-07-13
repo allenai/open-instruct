@@ -32,6 +32,7 @@ from open_instruct import grpo_callbacks as grpo_callbacks_lib
 from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.grpo_callbacks import (
     EvalCallback,
+    HFCheckpointCallback,
     RefPolicyUpdateCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
@@ -378,6 +379,15 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.grpo_config.checkpoint_state_freq > 0:
             trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
                 checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
+            )
+        if self.grpo_config.save_freq > 0:
+            trainer_callbacks["hf_checkpoint"] = HFCheckpointCallback(
+                model_name_or_path=self.model_name_or_path,
+                tokenizer=self.tokenizer,
+                checkpoint_dir=f"{self.grpo_config.output_dir}_checkpoints",
+                save_freq=self.grpo_config.save_freq,
+                keep_last_n_saves=self.grpo_config.keep_last_n_saves,
+                rank=self.rank,
             )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 
