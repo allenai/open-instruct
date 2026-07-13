@@ -61,31 +61,47 @@ tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
 
 ## `convert_qwen35_causallm_to_cg.py` — make a Qwen3.5 SFT checkpoint vLLM-servable
 
-open-instruct SFT saves Qwen3.5 checkpoints as `architectures=[Qwen3_5ForCausalLM]` /
-`model_type=qwen3_5_text` (flat text config). vLLM defines but **does not register** that
-class (checked 0.19.1–0.22.0) — only the multimodal `Qwen3_5ForConditionalGeneration`
-(`model_type=qwen3_5`, nested `text_config` + `vision_config`) is registered. The text
-weights of the two layouts are byte-for-byte interchangeable, so this script grafts the SFT
-text weights onto a canonical CG donor to produce a checkpoint vLLM loads via the registered
-class. (Vendored from tmax `scripts/beaker/` / dr-tulu `agent/scripts/` — identical copy.)
+Both open-instruct SFT (`finetune.py`) **and** RL (`grpo_fast.py`) save Qwen3.5 checkpoints as
+`architectures=[Qwen3_5ForCausalLM]` / `model_type=qwen3_5_text` (flat text config). vLLM
+defines but **does not register** that class (checked vLLM 0.19.1–0.22.0) — only the multimodal
+`Qwen3_5ForConditionalGeneration` (`model_type=qwen3_5`, nested `text_config` + `vision_config`)
+is registered, so it refuses to load them:
+`Model architectures ['Qwen3_5ForCausalLM'] are not supported for now`. The text weights of the
+two layouts are byte-for-byte interchangeable, so this script grafts the checkpoint's text
+weights onto a canonical CG donor to produce a checkpoint vLLM loads via the registered class.
+(Vendored from tmax `scripts/beaker/` / dr-tulu `agent/scripts/` — identical copy.)
 
 It combines: text weights (`model.language_model.*` + `lm_head`) from `--src`, vision/mtp
 weights + canonical CG config/processor from `--donor`, and tokenizer + chat template from
 `--src`. The vision tower is never exercised for text-only work; it just has to be present so
 vLLM's loader doesn't error on missing params. Source is read-only; output goes to a new dir.
+**Proven lossless** — all text tensors copy bit-identical; the effective text config is
+unchanged (the vision tower is unused).
 
 ```bash
 python scripts/general_agent/utils/convert_qwen35_causallm_to_cg.py \
-    --src  <hf_epoch_dir_or_final_output_dir> \
+    --src  <hf_epoch_dir_or_final_output_dir_or_rl_step_N> \
     --donor Qwen/Qwen3.5-9B \
-    --out  <hf_epoch_dir>_cg
+    --out  <src_name>_cg
 ```
 
 - `--donor` may be a local dir or an HF repo id (e.g. `Qwen/Qwen3.5-9B`, `hamishivi/Qwen3.5-9B`);
   it MUST be the same base arch/size as `--src` (the script asserts matching text dims).
+- **You do NOT need this for the canonical bases.** `Qwen/Qwen3.5-*` and `hamishivi/Qwen3.5-*`
+  already ship the CG arch + processor and load in vLLM directly — conversion is only for
+  *our own* SFT/RL saves. `--language-model-only` does **not** substitute for conversion (it
+  only skips the image processor on an already-CG arch); once converted, do **not** pass it.
 - Chain it after `convert_sft_epoch_checkpoints.sh` for SFT epochs, or run it directly on an
-  RL `--save_freq` checkpoint (already HF safetensors).
+  RL `--save_freq` checkpoint (those are already HF `save_pretrained` dirs — no ZeRO
+  consolidation needed, but still `Qwen3_5ForCausalLM`, so vLLM still needs the CG form).
+- **Warm-starting GRPO RL** from a prior checkpoint needs the `_cg` form too, not just eval:
+  `grpo_fast.py` serves the policy through vLLM for rollouts, so a raw `Qwen3_5ForCausalLM`
+  crashes at vLLM engine init. Point `--model_name_or_path` at the `_cg` dir. (The trainer→vLLM
+  weight-sync name-mapper now also matches dot-less names like `..._qwen35_..._cg`, so the
+  `language_model.` prefix is applied correctly — see `_build_vlm_name_mapper` in
+  `open_instruct/grpo_fast.py`.)
 - When serving, use a **clean `--served-model-name`** — a path containing `ada` (e.g.
   `oe-adapt`) trips the client's commercial-API detector.
 
-See memory `reference_qwen35_causallm_to_cg_conversion` / `project_drtulu_qwen35_eval_toolformat`.
+See memory `reference_qwen35_causallm_to_cg_conversion`, `reference_warmstart_rl_from_checkpoint`,
+and `project_drtulu_qwen35_eval_toolformat`.
