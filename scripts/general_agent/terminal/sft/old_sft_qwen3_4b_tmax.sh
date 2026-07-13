@@ -8,7 +8,10 @@ BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
+MODEL=Qwen/Qwen3-4B-Instruct-2507
+TOKENIZER=Qwen/Qwen3-4B-Instruct-2507
 DATASET=hamishivi/tmax-sft-full-20260317
+EXP_NAME=sft_qwen3_4b_tmax
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -30,9 +33,9 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name sft_qwen3_4b_tmax \
-    --model_name_or_path Qwen/Qwen3-4B-Instruct-2507 \
-    --tokenizer_name Qwen/Qwen3-4B-Instruct-2507 \
+    --exp_name $EXP_NAME \
+    --model_name_or_path $MODEL \
+    --tokenizer_name $TOKENIZER \
     --use_liger_kernel \
     --max_seq_length 20480 \
     --per_device_train_batch_size 1 \

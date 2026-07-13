@@ -4,7 +4,10 @@
 # Uses Qwen3-0.6B + a single small dataset split with DeepSpeed ZeroStage 2 (no offloading).
 # No Beaker, no mason.py -- just runs directly.
 
+MODEL="Qwen/Qwen3-0.6B"
+TOKENIZER="Qwen/Qwen3-0.6B"
 DATASET="hamishivi/tmax-sft-full-20260317"
+EXP_NAME="terminal_local_sft_tmax_2gpu"
 
 uv run accelerate launch \
     --mixed_precision bf16 \
@@ -12,9 +15,9 @@ uv run accelerate launch \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage2_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
-    --exp_name terminal_local_sft_tmax_2gpu \
-    --model_name_or_path Qwen/Qwen3-0.6B \
-    --tokenizer_name Qwen/Qwen3-0.6B \
+    --exp_name $EXP_NAME \
+    --model_name_or_path $MODEL \
+    --tokenizer_name $TOKENIZER \
     --use_liger_kernel \
     --max_seq_length 1024 \
     --per_device_train_batch_size 1 \

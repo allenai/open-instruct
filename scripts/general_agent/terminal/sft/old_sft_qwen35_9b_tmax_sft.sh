@@ -4,8 +4,10 @@
 # 4 nodes x 8 GPUs = 32 GPUs, SP=2, 32k seq len.
 
 BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
-MODEL="Qwen/Qwen3.5-9B"
+MODEL="hamishivi/Qwen3.5-9B"
+TOKENIZER="hamishivi/Qwen3.5-9B"
 DATASET="hamishivi/tmax-sft-full-20260317"
+EXP_NAME="qwen35_9b_tmax_sft"
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -27,9 +29,9 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name qwen35_9b_tmax_sft \
+    --exp_name $EXP_NAME \
     --model_name_or_path $MODEL \
-    --tokenizer_name $MODEL \
+    --tokenizer_name $TOKENIZER \
     --use_liger_kernel \
     --max_seq_length 32768 \
     --sequence_parallel_size 2 \

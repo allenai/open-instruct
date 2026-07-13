@@ -9,6 +9,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 MODEL=hamishivi/Qwen3.5-4B
 TOKENIZER=hamishivi/Qwen3.5-4B
+EXP_NAME=terminal_sft_qwen35_4b_all_sft
 
 DATASET=osieosie/tmax-sft-full-20260513
 DATASET_CONFIGS=(
@@ -44,7 +45,7 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name terminal_sft_qwen35_4b_our_sft \
+    --exp_name $EXP_NAME \
     --model_name_or_path $MODEL \
     --tokenizer_name $TOKENIZER \
     --sequence_parallel_size 4 \
