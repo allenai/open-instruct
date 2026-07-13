@@ -56,11 +56,36 @@ tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
   `architectures=[Qwen3_5ForCausalLM]` / `model_type=qwen3_5_text`, which **no vLLM version
   registers** (only `Qwen3_5ForConditionalGeneration`). vLLM errors with
   `Model architectures ['Qwen3_5ForCausalLM'] are not supported`. Run the (lossless)
-  CG-conversion first, then serve the `_cg` output:
+  CG-conversion below first, then serve the `_cg` output. (`--language-model-only` does
+  **not** help here.)
 
-  ```bash
-  python agent/scripts/convert_qwen35_causallm_to_cg.py <epoch_dir> <epoch_dir>_cg
-  ```
+## `convert_qwen35_causallm_to_cg.py` — make a Qwen3.5 SFT checkpoint vLLM-servable
 
-  (`--language-model-only` does **not** help here.) See memory
-  `reference_qwen35_causallm_to_cg_conversion` / `project_drtulu_qwen35_eval_toolformat`.
+open-instruct SFT saves Qwen3.5 checkpoints as `architectures=[Qwen3_5ForCausalLM]` /
+`model_type=qwen3_5_text` (flat text config). vLLM defines but **does not register** that
+class (checked 0.19.1–0.22.0) — only the multimodal `Qwen3_5ForConditionalGeneration`
+(`model_type=qwen3_5`, nested `text_config` + `vision_config`) is registered. The text
+weights of the two layouts are byte-for-byte interchangeable, so this script grafts the SFT
+text weights onto a canonical CG donor to produce a checkpoint vLLM loads via the registered
+class. (Vendored from tmax `scripts/beaker/` / dr-tulu `agent/scripts/` — identical copy.)
+
+It combines: text weights (`model.language_model.*` + `lm_head`) from `--src`, vision/mtp
+weights + canonical CG config/processor from `--donor`, and tokenizer + chat template from
+`--src`. The vision tower is never exercised for text-only work; it just has to be present so
+vLLM's loader doesn't error on missing params. Source is read-only; output goes to a new dir.
+
+```bash
+python scripts/general_agent/utils/convert_qwen35_causallm_to_cg.py \
+    --src  <hf_epoch_dir_or_final_output_dir> \
+    --donor Qwen/Qwen3.5-9B \
+    --out  <hf_epoch_dir>_cg
+```
+
+- `--donor` may be a local dir or an HF repo id (e.g. `Qwen/Qwen3.5-9B`, `hamishivi/Qwen3.5-9B`);
+  it MUST be the same base arch/size as `--src` (the script asserts matching text dims).
+- Chain it after `convert_sft_epoch_checkpoints.sh` for SFT epochs, or run it directly on an
+  RL `--save_freq` checkpoint (already HF safetensors).
+- When serving, use a **clean `--served-model-name`** — a path containing `ada` (e.g.
+  `oe-adapt`) trips the client's commercial-API detector.
+
+See memory `reference_qwen35_causallm_to_cg_conversion` / `project_drtulu_qwen35_eval_toolformat`.

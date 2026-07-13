@@ -28,8 +28,9 @@
 #
 # vLLM NOTE (Qwen3.5-9B only): the output loads in HF transformers, but Qwen3.5-9B SFT
 # configs use architectures=[Qwen3_5ForCausalLM]/model_type=qwen3_5_text which no vLLM
-# version registers. To SERVE in vLLM, additionally run the CG-conversion from dr-tulu:
-#   python agent/scripts/convert_qwen35_causallm_to_cg.py <epoch_dir> <epoch_dir>_cg
+# version registers. To SERVE in vLLM, additionally run the sibling CG-conversion:
+#   python scripts/general_agent/utils/convert_qwen35_causallm_to_cg.py \
+#       --src <epoch_dir> --donor Qwen/Qwen3.5-9B --out <epoch_dir>_cg
 # (proven lossless; see memory project_drtulu_qwen35_eval_toolformat). Not needed for
 # plain HF loading, and not applicable to Qwen3-8B runs.
 set -euo pipefail
