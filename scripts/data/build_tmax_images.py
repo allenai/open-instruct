@@ -194,6 +194,24 @@ def _parse_post(container_def: str) -> tuple[str, str]:
     return base_image, "\n".join(post_commands).strip()
 
 
+# Verifier dependency baked into every task image. Some multi_protocol verifiers
+# import `requests`; it was provided by base_intricate.sif at solve time but is
+# not part of the per-task container.def, so the published prebuilt image must
+# add it. Emitted as the final layer, after the task %post has installed pip, so
+# it is a fast no-op for tasks that already pull it in.
+_BAKE_REQUESTS = "RUN pip3 install --no-cache-dir requests"
+
+
+def _parse_task_id_values(values: list[str] | None) -> set[str]:
+    """Parse repeated comma/whitespace-separated task-id arguments."""
+    task_ids: set[str] = set()
+    for value in values or []:
+        for token in re.split(r"[\s,]+", value.strip()):
+            if token:
+                task_ids.add(token)
+    return task_ids
+
+
 def container_def_to_dockerfile(
     container_def: str, *, split_pkg_layers: bool = False
 ) -> tuple[str, str]:
@@ -212,6 +230,7 @@ def container_def_to_dockerfile(
             f"ENV DEBIAN_FRONTEND=noninteractive\n"
             f"COPY setup.sh /tmp/setup.sh\n"
             f"RUN bash /tmp/setup.sh && rm -f /tmp/setup.sh\n"
+            f"{_BAKE_REQUESTS}\n"
         ), post_script
 
     apt_pkgs, pip_pkgs, residual = split_package_installs(post_script)
@@ -241,6 +260,7 @@ def container_def_to_dockerfile(
     if residual:
         lines.append("COPY setup.sh /tmp/setup.sh")
         lines.append("RUN bash /tmp/setup.sh && rm -f /tmp/setup.sh")
+    lines.append(_BAKE_REQUESTS)
     dockerfile = "\n".join(lines) + "\n"
     return dockerfile, residual
 
@@ -314,6 +334,20 @@ def main():
             "Implies --use-buildx."
         ),
     )
+    parser.add_argument(
+        "--task-ids",
+        action="append",
+        default=None,
+        help=(
+            "Optional comma/whitespace-separated task ids to rebuild and update. "
+            "Can be passed multiple times."
+        ),
+    )
+    parser.add_argument(
+        "--task-ids-file",
+        default=None,
+        help="Optional file containing task ids to rebuild, separated by commas or whitespace.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -328,7 +362,15 @@ def main():
     if args.max_tasks:
         ds = ds.select(range(min(args.max_tasks, len(ds))))
 
-    repair_task_ids: set[str] | None = None
+    selected_task_ids = _parse_task_id_values(args.task_ids)
+    if args.task_ids_file:
+        with open(args.task_ids_file) as f:
+            selected_task_ids.update(_parse_task_id_values([f.read()]))
+    if selected_task_ids:
+        logger.info(f"--task-ids: selected {len(selected_task_ids)} task(s).")
+
+    target_task_ids: set[str] | None = set(selected_task_ids) if selected_task_ids else None
+    out_ds_probe = None
     if args.repair_missing:
         if args.dry_run:
             logger.info("--repair-missing is a no-op under --dry-run (dataset is not written).")
@@ -336,20 +378,38 @@ def main():
             f"--repair-missing: scanning {args.output_dataset} for tasks with image=='ubuntu:22.04'..."
         )
         out_ds_probe = load_dataset(args.output_dataset, split="train")
-        repair_task_ids = set()
+        fallback_task_ids = set()
         for row in out_ds_probe:
             env_config = row.get("env_config") or {}
             image = env_config.get("image")
             tid = env_config.get("task_id")
             if image == "ubuntu:22.04" and tid:
-                repair_task_ids.add(tid)
+                fallback_task_ids.add(tid)
         logger.info(
-            f"--repair-missing: {len(repair_task_ids)} task(s) in {args.output_dataset} "
+            f"--repair-missing: {len(fallback_task_ids)} task(s) in {args.output_dataset} "
             "are fallbacks and will be rebuilt."
         )
-        if not repair_task_ids:
+        target_task_ids = (
+            fallback_task_ids if target_task_ids is None else target_task_ids.intersection(fallback_task_ids)
+        )
+        if not target_task_ids:
             logger.info("Nothing to repair. Exiting.")
             return
+
+    if target_task_ids is not None:
+        if out_ds_probe is None:
+            out_ds_probe = load_dataset(args.output_dataset, split="train")
+        output_task_ids = {
+            row.get("env_config", {}).get("task_id")
+            for row in out_ds_probe
+            if isinstance(row.get("env_config"), dict)
+        }
+        missing_output_ids = target_task_ids - output_task_ids
+        if missing_output_ids:
+            raise KeyError(
+                f"{args.output_dataset} is missing {len(missing_output_ids)} selected task id(s): "
+                f"{sorted(missing_output_ids)}"
+            )
 
     client = None if args.dry_run else docker_sdk.from_env()
 
@@ -357,6 +417,7 @@ def main():
     hash_to_tasks: dict[str, list[str]] = {}
     hash_to_dockerfile: dict[str, str] = {}
     task_to_image: dict[str, str] = {}
+    seen_task_ids: set[str] = set()
 
     for row in ds:
         env_config = row.get("env_config") if isinstance(row, dict) else None
@@ -366,7 +427,8 @@ def main():
         if not task_id:
             raise KeyError("Missing task identifier: expected task_id, ground_truth, or env_config.task_id")
 
-        if repair_task_ids is not None and task_id not in repair_task_ids:
+        seen_task_ids.add(task_id)
+        if target_task_ids is not None and task_id not in target_task_ids:
             continue
 
         container_def = row.get("container_def")
@@ -385,10 +447,15 @@ def main():
         if content_hash not in hash_to_dockerfile:
             hash_to_dockerfile[content_hash] = (dockerfile_content, setup_script)
 
-    if repair_task_ids is not None:
+    if target_task_ids is not None:
+        missing_source_ids = target_task_ids - seen_task_ids
+        if missing_source_ids:
+            raise KeyError(
+                f"{args.input} is missing {len(missing_source_ids)} selected task id(s): "
+                f"{sorted(missing_source_ids)}"
+            )
         logger.info(
-            f"{len(hash_to_dockerfile)} unique images to rebuild for {len(repair_task_ids)} "
-            "fallback tasks."
+            f"{len(hash_to_dockerfile)} unique images to rebuild for {len(target_task_ids)} selected task(s)."
         )
     else:
         logger.info(f"{len(hash_to_dockerfile)} unique images for {len(ds)} tasks")
@@ -556,8 +623,8 @@ def main():
     # Under --repair-missing we only overwrite the tasks we rebuilt and keep the
     # existing image for every other row.
     logger.info(f"Updating dataset {args.output_dataset} with image tags...")
-    out_ds = load_dataset(args.output_dataset, split="train")
-    allowed_overrides = repair_task_ids if repair_task_ids is not None else None
+    out_ds = out_ds_probe if out_ds_probe is not None else load_dataset(args.output_dataset, split="train")
+    allowed_overrides = target_task_ids
 
     def update_image(example):
         tid = example["env_config"]["task_id"]
