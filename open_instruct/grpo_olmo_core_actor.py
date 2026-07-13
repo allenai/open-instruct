@@ -418,13 +418,17 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         are collective operations when FSDP is enabled.
         """
         state_dict = self.train_module.model.state_dict()
+        if self.rank != 0:
+            # full_tensor() is a collective and must still be called on every rank to avoid
+            # hanging, but only rank 0 needs the gathered tensors to write the checkpoint.
+            for v in state_dict.values():
+                if hasattr(v, "full_tensor"):
+                    v.full_tensor()
+            return
+
         state_dict = {
             k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
         }
-
-        if self.rank != 0:
-            return
-
         os.makedirs(output_dir, exist_ok=True)
         olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
