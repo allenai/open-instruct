@@ -37,7 +37,7 @@ uv run python mason.py \
     --cluster "ai2/jupiter" \
     --image ${BEAKER_IMAGE} \
     --pure_docker_mode \
-    --workspace ai2/general-tool-use \
+    --workspace ai2/oe-agents \
     --priority ${PRIORITY} \
     --preemptible \
     --num_nodes 2 \

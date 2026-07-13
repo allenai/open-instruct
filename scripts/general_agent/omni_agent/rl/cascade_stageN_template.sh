@@ -54,7 +54,7 @@ uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster "ai2/jupiter" \
-    --workspace ai2/general-tool-use \
+    --workspace ai2/oe-agents \
     --priority "${PRIORITY:-urgent}" \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
