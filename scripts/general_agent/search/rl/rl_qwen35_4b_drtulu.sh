@@ -17,19 +17,26 @@ DATASET_SPLITS="train"
 
 PRIORITY="${PRIORITY:-urgent}"
 
+# Checkpoint state lives on a persistent weka path keyed on EXP_NAME (NOT the
+# timestamped RUN_NAME) so that re-running this script resumes the same run.
+# To start fresh from scratch, change EXP_NAME (or delete this directory).
+CHECKPOINT_STATE_DIR="${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${EXP_NAME}}"
+
 uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster "ai2/jupiter" \
-    --workspace ai2/general-tool-use \
+    --workspace ai2/oe-agents \
     --priority ${PRIORITY} \
     --pure_docker_mode \
     --image ${BEAKER_IMAGE} \
     --preemptible \
     --num_nodes 2 \
+    --max_retries 5 \
     --gpus 8 \
     --budget ai2/oe-omai \
     --no_auto_dataset_cache \
+    --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
     --env RUBRIC_JUDGE_MODEL=gpt-4.1 \
     --env RUBRIC_GENERATION_MODEL=gpt-4.1 \
     --secret SERPER_API_KEY=shashankg_SERPER_API_KEY \
@@ -84,6 +91,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --seed 1 \
     --local_eval_every 100 \
     --save_freq 100 \
+    --output_dir /output \
+    --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --report_to wandb \
