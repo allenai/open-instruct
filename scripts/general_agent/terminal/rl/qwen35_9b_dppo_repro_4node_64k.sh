@@ -1,32 +1,26 @@
 #!/bin/bash
 
-# Reproduction of the tmax RELEASED 9B DPPO run
-# (scripts/tmax/RL_Released/qwen35_9b.sh), with OUR infra swapped in:
-#   - workspace ai2/oe-agents (was ai2/olmo-instruct)
-#   - DOCKERHUB_USERNAME=shashankg209 / --secret DOCKER_PAT=shashankg_DOCKER_PAT
-#   - MIRROR_URL=jupiter-cs-aus-137.reviz.ai2.in:5000 (our live mirror; aus-218 was theirs)
-#   - --wandb_project oe-general-agents
-#   - exp_name qwen35_9b_dppo_repro
-# The training recipe (DPPO loss, allenai/tmax-15k-open-instruct dataset,
-# hamishivi/Qwen3.5-9B, 8 nodes / 64 GPU, 48 vLLM engines, 16k/64k budget,
-# 8 prompts x 32 samples, Liger GRPO loss + fp32 lm_head) is UNCHANGED.
+# 4-node / 32 GPU DPPO throughput probe @ 64k max length (full DPPO_repro recipe).
+# Same as qwen35_9b_dppo_repro.sh (8-node) but --num_nodes 4 / --vllm_num_engines 16
+# (16 learners 8 8 + 16 engines). Launched on ai2/general-tool-use to gather 4-node
+# throughput numbers at 64k vs its 32k twin (qwen35_9b_dppo_repro_4node_32k.sh).
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
 
-EXP_NAME=swerl_qwen35_9b_dppo_repro
+EXP_NAME=swerl_qwen35_9b_dppo_repro_4node_64k
 
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro of released; our infra)" \
+       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; throughput probe)" \
        --pure_docker_mode \
-       --workspace ai2/oe-agents \
+       --workspace ai2/general-tool-use \
        --priority urgent \
        --preemptible \
-       --num_nodes 8 \
+       --num_nodes 4 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
@@ -74,7 +68,7 @@ uv run python mason.py \
     --sequence_parallel_size 4 \
     --num_epochs 1 \
     --num_learners_per_node 8 8 \
-    --vllm_num_engines 48 \
+    --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --use_vllm_logprobs true \

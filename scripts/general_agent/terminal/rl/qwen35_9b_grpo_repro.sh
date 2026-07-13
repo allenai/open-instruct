@@ -1,27 +1,25 @@
 #!/bin/bash
 
-# Reproduction of the tmax RELEASED 9B DPPO run
-# (scripts/tmax/RL_Released/qwen35_9b.sh), with OUR infra swapped in:
-#   - workspace ai2/oe-agents (was ai2/olmo-instruct)
-#   - DOCKERHUB_USERNAME=shashankg209 / --secret DOCKER_PAT=shashankg_DOCKER_PAT
-#   - MIRROR_URL=jupiter-cs-aus-137.reviz.ai2.in:5000 (our live mirror; aus-218 was theirs)
-#   - --wandb_project oe-general-agents
-#   - exp_name qwen35_9b_dppo_repro
-# The training recipe (DPPO loss, allenai/tmax-15k-open-instruct dataset,
-# hamishivi/Qwen3.5-9B, 8 nodes / 64 GPU, 48 vLLM engines, 16k/64k budget,
-# 8 prompts x 32 samples, Liger GRPO loss + fp32 lm_head) is UNCHANGED.
+# GRPO counterpart of qwen35_9b_dppo_repro.sh (the tmax RELEASED 9B run, our infra).
+# IDENTICAL to the DPPO repro except the policy loss: this uses the default GRPO
+# loss instead of DPPO (drops --loss_fn dppo / --dppo_divergence_type / _threshold).
+# Everything else is unchanged for an apples-to-apples DPPO-vs-GRPO comparison:
+#   - allenai/tmax-15k-open-instruct dataset, hamishivi/Qwen3.5-9B
+#   - 8 nodes / 64 GPU, 48 vLLM engines, 16k/64k budget, 8 prompts x 32 samples
+#   - Liger GRPO loss + fp32 lm_head, beta 0.0, centered advantage norm
+#   - our infra: workspace ai2/oe-agents, shashankg docker creds, mirror aus-137
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
 
-EXP_NAME=swerl_qwen35_9b_dppo_repro
+EXP_NAME=swerl_qwen35_9b_grpo_repro
 
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro of released; our infra)" \
+       --description "tmax-15k GRPO Qwen35 9b (repro of released; our infra)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -103,9 +101,6 @@ uv run python mason.py \
     --use_liger_grpo_loss \
     --liger_grpo_loss_chunk_size 8 \
     --advantage_normalization_type centered \
-    --loss_fn dppo \
-    --dppo_divergence_type tv \
-    --dppo_divergence_threshold 0.1 \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
     --exp_name $EXP_NAME \
