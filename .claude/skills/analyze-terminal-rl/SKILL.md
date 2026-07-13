@@ -9,6 +9,9 @@ When the user points you at a Terminal-RL / agentic-RL run (a wandb URL like
 `https://wandb.ai/<entity>/<project>/runs/<id>`, or an `exp_name`), run the
 analysis tooling and report insights — don't make them ask for each piece.
 
+> **Launching** a terminal-RL job (not analyzing one)? See the `launch-terminal-rl` skill —
+> it covers the pre-launch image-mirror check, GPU sizing, and monitoring setup.
+
 ## Instructions
 
 1. **Run the one-shot analyzer** from the repo root:
