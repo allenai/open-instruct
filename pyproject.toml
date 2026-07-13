@@ -58,6 +58,11 @@ py-modules = ["open_instruct"]
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
 flash-attn-3 = [{ requirement = "torch", match-runtime = true }]
+# causal-conv1d builds a CUDA extension from source and its build-system requires
+# an unpinned "torch"; without match-runtime, uv's build isolation pulls the current
+# PyPI-default torch (now cu130/CUDA-13) and fails against the cuda:12.8 base image.
+# Inject the project's runtime (cu128) torch into its build, same as flash-attn.
+causal-conv1d = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
