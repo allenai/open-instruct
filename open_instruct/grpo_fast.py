@@ -183,9 +183,13 @@ EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 def _build_vlm_name_mapper(model_name: str):
     """Sometimes we have different weight names btw vLLM and HF, so we build
-    a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF."""
-    if any(qwen_version in model_name.lower() for qwen_version in ("qwen3.5", "qwen3.6")):
-        return lambda name: f"language_model.{name}"
+    a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF.
+    Match the "qwen35"/"qwen3_5" spellings too — local checkpoint dirs (e.g.
+    warm-start paths like .../swerl_qwen35_9b_..._cg) drop the dot, and missing the
+    mapper makes the trainer->vLLM weight sync fail with 'no module named model'."""
+    name = model_name.lower()
+    if any(v in name for v in ("qwen3.5", "qwen3.6", "qwen35", "qwen36", "qwen3_5", "qwen3_6")):
+        return lambda weight_name: f"language_model.{weight_name}"
     return None
 
 
@@ -3209,7 +3213,11 @@ def main(
     barrier_file = os.path.join(hf_cache, f".model_download_done_{os.environ.get('BEAKER_JOB_ID', 'local')}")
     if rank == 0:
         logger.info(f"Pre-downloading model {model_config.model_name_or_path}...")
-        snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+        # Local checkpoint dirs (e.g. weka warm-start paths) are already present;
+        # snapshot_download would reject them as invalid HF repo ids. Guard as in
+        # utils.ensure_hf_repo_cached (utils.py:990).
+        if not os.path.exists(model_config.model_name_or_path):
+            snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
         open(barrier_file, "w").close()
         logger.info("Model pre-download complete.")
     else:
