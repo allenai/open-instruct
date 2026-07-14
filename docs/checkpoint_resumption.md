@@ -138,6 +138,65 @@ checkpoint_state_dir/
 - Reference policy weights (in `ref_policy/pytorch_model.bin`, outside the DeepSpeed checkpoint)
 - Data prep actor state (position in the streaming data pipeline)
 
+### What the data-pipeline restore does (the dataset position is preserved)
+
+The "data prep actor state" is **not** just the step counter — the `ShufflingIterator`
+(`open_instruct/data_loader.py`) checkpoints enough to resume the dataset *exactly where it
+left off*, not from example 0. Its `state_dict` saves three things:
+
+- **`epoch`** — which pass over the dataset. The shuffle is **deterministic per epoch**:
+  `_reshard(epoch)` seeds `torch.randperm` with `seed + epoch`, so restoring the epoch
+  reproduces the *identical* shuffled order.
+- **`batches_processed`** — the position within that epoch. On resume, `_iter_batches` skips
+  the already-consumed batches (`if batch_idx < batches_processed: continue`, or
+  `start_example = batches_processed * per_rank_batch_size`), so iteration continues from the
+  exact next batch.
+- **`excluded_indices`** — any prompts dropped from iteration (e.g. via active-sampling
+  exclusion) stay excluded.
+
+Net: a resumed run keeps consuming the *not-yet-seen* prompts in the same order — **dataset
+coverage and ordering are preserved across the restart, not reset**. Combined with the
+restored model / optimizer / LR schedule / RNG, an exact-config resume is a faithful
+continuation of the original run (not a warm-start). This requires the **same parallelism
+config** (world size / SP / DeepSpeed stage) as when the checkpoint was saved, unless you pass
+`--deepspeed_checkpoint_load_universal`.
+
+### Verifying a resume actually loaded the state
+
+Grep the **leader** job's logs for these lines — all present on a successful resume:
+
+```
+Found latest checkpoint: global_stepN ... updated 'latest' file to global_stepN
+grpo_fast.py - Restored episode count: <M>
+grpo_fast.py - Restored data prep actor state from checkpoint with training_step=<N>
+[DataPreparationActor] Restored state: training_step=<N>, last_consumed_step=<N-1>
+[DataPreparationActor] Started preparation loop from training_step=<N>
+[accumulate_inference_batches] Starting to accumulate ... training_step=<N>
+```
+
+Then confirm in W&B that the **first logged `training_step` ≈ N (not 0/1)**. If instead you see
+`training_step=1` and none of the `Restored …` lines, the resume silently did **not** take —
+almost always because `--checkpoint_state_dir` wasn't pinned (mason auto-assigned a fresh, empty
+directory). Note: the W&B `training_step` may read `None` briefly right after start because the
+first step hasn't *completed* yet — the log lines above are the earlier, definitive signal.
+
+### Resuming a run that died / exhausted `max_retries`
+
+Beaker auto-retries resume automatically (same command → same baked-in `checkpoint_state_dir`).
+But if a run **exhausts `max_retries`** (e.g. repeated preemptions) and finalizes, you must
+relaunch manually. Because it's a launch-config-only change, **reuse the existing image** (pass
+it as `$1`) rather than rebuilding — just pin the dead run's state dir:
+
+```bash
+# in the launch script, set the original run's auto-assigned state dir explicitly:
+CHECKPOINT_STATE_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/<user>/<ts>_<rand>
+#   ... --checkpoint_state_dir "$CHECKPOINT_STATE_DIR" ...
+bash <launch_script>.sh <existing-beaker-image>
+```
+
+Keep `keep_last_n_checkpoints` in mind (default **3**): you can only resume from the last ~3
+saved `global_step` dirs, so relaunch before they're pruned by a still-running twin.
+
 ### Arguments
 
 | Argument | Default | Description |
