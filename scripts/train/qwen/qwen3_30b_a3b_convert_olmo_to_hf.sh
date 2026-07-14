@@ -6,6 +6,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-/weka/oe-adapt-default/jacobm/olmoe3/post-training
 CHECKPOINT_PATH="${CHECKPOINT_PATH:-${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-dolci-think-olmo-core-sft-100k-20260710-174355/step247}"
 OUTPUT_PATH="${OUTPUT_PATH:-${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-dolci-think-olmo-core-sft-100k-20260710-174355-hf}"
 HF_CACHE="${HF_CACHE:-${PROJECT_ROOT}/checkpoints/.hf-cache}"
+TOKENIZER_NAME="${TOKENIZER_NAME:-${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker/full/tokenizer}"
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-sft-100k-convert-to-hf}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 VERIFY_ONLY="${VERIFY_ONLY:-false}"
@@ -34,7 +35,7 @@ uv run python mason.py \
     --checkpoint-path "$CHECKPOINT_PATH" \
     --output-path "$OUTPUT_PATH" \
     --hf-model-name Qwen/Qwen3-30B-A3B-Base \
-    --tokenizer-name Qwen/Qwen3-30B-A3B \
+    --tokenizer-name "$TOKENIZER_NAME" \
     --dtype bfloat16 \
     --max-shard-size 5GB \
     "${verify_args[@]}"
