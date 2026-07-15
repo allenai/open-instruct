@@ -11,10 +11,11 @@ if [[ ${#PYTEST_ARGS[@]} -gt 0 ]]; then
     echo "Pytest filter: ${PYTEST_ARGS[*]}"
 fi
 
+# The CUDA 13 image requires NVIDIA driver >= 580, which currently only the
+# B300 cluster (ai2/holmes) has. Re-add ai2/jupiter, ai2/ceres, and ai2/saturn
+# once their drivers are upgraded.
 uv run python mason.py \
-       --cluster ai2/jupiter \
-       --cluster ai2/ceres \
-       --cluster ai2/saturn \
+       --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
        --description "GPU tests for test_*_gpu.py" \
        --pure_docker_mode \
