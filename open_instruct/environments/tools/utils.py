@@ -142,6 +142,10 @@ class EnvStatistics:
         self._counts: defaultdict[str, int] = defaultdict(int)
         self._failures: defaultdict[str, int] = defaultdict(int)
         self._runtimes: defaultdict[str, float] = defaultdict(float)
+        # Failed calls bucketed by ToolCallStats.failure_kind, so we can split
+        # infra failures (oom/timeout/infra/reset) from model errors -- which the
+        # single tools/*/failure_rate metric conflates.
+        self._kind_counts: defaultdict[str, int] = defaultdict(int)
 
     def add_rollout(self, tool_call_stats: list[ToolCallStats]) -> None:
         """Add statistics from a single rollout."""
@@ -151,6 +155,8 @@ class EnvStatistics:
             self._counts[s.tool_name] += 1
             self._failures[s.tool_name] += not s.success
             self._runtimes[s.tool_name] += s.runtime
+            if not s.success:
+                self._kind_counts[s.failure_kind or "unknown"] += 1
 
     def compute_metrics(self) -> dict[str, float]:
         """Compute per-tool and aggregate metrics.
@@ -163,6 +169,12 @@ class EnvStatistics:
             - tools/aggregate/avg_calls_per_rollout
             - tools/aggregate/failure_rate
             - tools/aggregate/avg_runtime
+            - tools/aggregate/failure_rate_infra  (oom+timeout+infra+reset, per call)
+            - tools/aggregate/failure_rate_model  (bad tool call / command, per call)
+            - sandbox/oom_rate                    (OOM-killed episodes per rollout)
+            - sandbox/timeout_rate                (tool-step timeouts per call)
+            - sandbox/reset_failure_rate          (env-reset failures per rollout)
+            - sandbox/infra_failure_per_rollout   (all infra failures per rollout)
         """
         if not self.num_rollouts or not self.tool_names:
             return {}
@@ -184,6 +196,18 @@ class EnvStatistics:
         metrics["tools/aggregate/avg_calls_per_rollout"] = total_calls / self.num_rollouts
         metrics["tools/aggregate/failure_rate"] = total_failures / total_calls if total_calls else 0.0
         metrics["tools/aggregate/avg_runtime"] = total_runtime / total_calls if total_calls else 0.0
+
+        # Split infra failures from model errors, and surface the Podman failure
+        # modes that tools/*/failure_rate hides (OOM was scored success before this).
+        infra_failures = sum(self._kind_counts[k] for k in ("oom", "timeout", "infra", "reset"))
+        model_failures = self._kind_counts["model"]
+        if total_calls:
+            metrics["tools/aggregate/failure_rate_infra"] = infra_failures / total_calls
+            metrics["tools/aggregate/failure_rate_model"] = model_failures / total_calls
+            metrics["sandbox/timeout_rate"] = self._kind_counts["timeout"] / total_calls
+        metrics["sandbox/oom_rate"] = self._kind_counts["oom"] / self.num_rollouts
+        metrics["sandbox/reset_failure_rate"] = self._kind_counts["reset"] / self.num_rollouts
+        metrics["sandbox/infra_failure_per_rollout"] = infra_failures / self.num_rollouts
 
         return metrics
 
