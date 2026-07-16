@@ -11,11 +11,18 @@ if [[ ${#PYTEST_ARGS[@]} -gt 0 ]]; then
     echo "Pytest filter: ${PYTEST_ARGS[*]}"
 fi
 
-# The CUDA 13 image requires NVIDIA driver >= 580, which currently only the
-# B300 cluster (ai2/holmes) has. Re-add ai2/jupiter, ai2/ceres, and ai2/saturn
-# once their drivers are upgraded.
+case "${OPEN_INSTRUCT_CUDA_VERSION:-12}" in
+    12) CLUSTER=ai2/jupiter ;;
+    13) CLUSTER=ai2/holmes ;;
+    *)
+        echo "Error: OPEN_INSTRUCT_CUDA_VERSION must be 12 or 13."
+        exit 1
+        ;;
+esac
+
+echo "Using CUDA ${OPEN_INSTRUCT_CUDA_VERSION:-12} test cluster: $CLUSTER"
 uv run python mason.py \
-       --cluster ai2/holmes \
+       --cluster "$CLUSTER" \
        --image "$BEAKER_IMAGE" \
        --description "GPU tests for test_*_gpu.py" \
        --pure_docker_mode \

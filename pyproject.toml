@@ -28,9 +28,8 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
-    # torchvision/torchaudio are only needed transitively (via vllm), but they must be
-    # listed as direct dependencies for the tool.uv.sources cu130 index pins to apply,
-    # otherwise the PyPI (cu128) builds are used and torchvision fails to import.
+    # torchvision/torchaudio are only needed transitively (via vllm), but they must
+    # remain direct dependencies so the CUDA-group source pins apply to them.
     "torchvision>=0.25.0; platform_system == 'Linux'",
     "torchaudio>=2.10.0; platform_system == 'Linux'",
     "transformers>=5.4.0",
@@ -39,9 +38,6 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    # The flat FA3 wheel index can publish a newer aarch64-only build than the latest x86_64 build.
-    # Pin the Linux x86_64 wheel directly so uv doesn't resolve to an aarch64-only version.
-    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
@@ -77,23 +73,30 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "9aa3280fd5331b93fc766206eadec42ee73befc0" }
 flash-attn = [
-  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
+  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda12" },
+  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda13" },
 ]
 
 torch = [
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
+  { index = "pytorch-cu128", group = "cuda12" },
+  { index = "pytorch-cu130", group = "cuda13" },
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
 ]
 torchvision = [
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
+  { index = "pytorch-cu128", group = "cuda12" },
+  { index = "pytorch-cu130", group = "cuda13" },
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
 ]
 torchaudio = [
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux'"},
+  { index = "pytorch-cu128", group = "cuda12" },
+  { index = "pytorch-cu130", group = "cuda13" },
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
 ]
 
-# vLLM wheels on PyPI are built against CUDA 12.8 on x86_64; the +cu130 builds
-# (needed for B300/CUDA 13) are only published on the vLLM wheel index.
+# vLLM wheels on PyPI are built against CUDA 12.8 on x86_64. The +cu130 builds
+# are only published on the version-specific vLLM wheel index.
 vllm = [
-  { index = "vllm-cu130", marker = "platform_system == 'Linux'"},
+  { index = "vllm-cu130", group = "cuda13" },
 ]
 
 [[tool.uv.index]]
@@ -104,6 +107,11 @@ explicit = true
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
@@ -126,6 +134,13 @@ dr-tulu = [
 preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
+default-groups = ["dev", "cuda12"]
+conflicts = [
+    [
+        { group = "cuda12" },
+        { group = "cuda13" },
+    ],
+]
 override-dependencies = [
     "transformers>=5.4.0",
 ]
@@ -136,6 +151,23 @@ environments = [
 ]
 
 [dependency-groups]
+cuda12 = [
+    "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    # The flat FA3 index can publish a newer aarch64-only build than the latest x86_64 build.
+    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
+cuda13 = [
+    "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
 dev = [
     "beaker-py>=2.5.7",
     "mkdocs-material>=9.6.8",

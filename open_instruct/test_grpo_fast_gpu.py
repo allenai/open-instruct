@@ -36,6 +36,7 @@ will fail. To update the expected data:
 import inspect
 import json
 import logging
+import os
 import pathlib
 import subprocess
 import time
@@ -167,7 +168,11 @@ class TestGeneration(TestGrpoFastBase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_generation_deterministic(self, name: str, prompt: str, use_tools: bool, max_tokens: int):
         """Test generation produces expected output and tool invocation behavior."""
-        test_data_filename = f"generation_{name}_expected.json"
+        cuda_version = os.environ.get("OPEN_INSTRUCT_CUDA_VERSION")
+        if not use_tools and cuda_version == "12":
+            test_data_filename = f"generation_{name}_cuda12_expected.json"
+        else:
+            test_data_filename = f"generation_{name}_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-0.6B"
