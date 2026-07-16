@@ -92,6 +92,7 @@ fi
 
 # Install Python dependencies
 echo "Installing dependencies with uv..."
+export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-.venv-launcher}"
 uv sync
 
 # Run the provided script with the image name and all remaining arguments
