@@ -1,6 +1,6 @@
 """RL Environments for open-instruct."""
 
-from .backends import ApptainerBackend, DockerBackend, ExecutionResult, SandboxBackend, create_backend
+from .backends import ApptainerBackend, DockerBackend, ExecutionResult, ModalBackend, SandboxBackend, create_backend
 from .base import BaseEnvConfig, EnvCall, RLEnvironment, RolloutState, StepResult, TextRLEnvironment
 from .generic_sandbox import GenericSandboxEnv, GenericSandboxEnvConfig
 from .pool import EnvironmentPool
@@ -18,6 +18,7 @@ __all__ = [
     "SandboxBackend",
     "DockerBackend",
     "ApptainerBackend",
+    "ModalBackend",
     "ExecutionResult",
     "create_backend",
     "GenericSandboxEnv",

@@ -7,6 +7,7 @@ import fcntl
 import io
 import os
 import random
+import re
 import shlex
 import shutil
 import subprocess
@@ -17,6 +18,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import docker as docker_sdk
+
+try:
+    import modal
+except ImportError:
+    # Modal is an optional dependency, only needed for ModalBackend.
+    modal = None
 
 from open_instruct import logger_utils
 
@@ -770,11 +777,261 @@ class ApptainerBackend(SandboxBackend):
             )
 
 
+# ---------------------------------------------------------------------------
+# Modal
+# ---------------------------------------------------------------------------
+
+
+# Track live Modal sandboxes so we can terminate them if the Python process
+# exits abruptly. Modal bills wall-clock for every second a sandbox is alive,
+# so a leaked sandbox costs money until its lifetime timeout expires.
+_MODAL_LIVE_SANDBOXES: set = set()
+
+
+def _modal_cleanup_all() -> None:
+    for sandbox in list(_MODAL_LIVE_SANDBOXES):
+        with contextlib.suppress(Exception):
+            sandbox.terminate()
+    _MODAL_LIVE_SANDBOXES.clear()
+
+
+atexit.register(_modal_cleanup_all)
+
+
+# ``modal.App.lookup`` is a network RPC; cache apps per-process by
+# (name, environment).
+_MODAL_APPS: dict = {}
+
+
+def _modal_lookup_app(app_name: str, environment_name: str | None):
+    key = (app_name, environment_name)
+    if key not in _MODAL_APPS:
+        _MODAL_APPS[key] = modal.App.lookup(app_name, create_if_missing=True, environment_name=environment_name)
+    return _MODAL_APPS[key]
+
+
+_MEM_LIMIT_UNIT_MIB = {"b": 1 / (1024 * 1024), "k": 1 / 1024, "m": 1, "g": 1024, "t": 1024 * 1024}
+
+
+def parse_mem_limit_mib(mem_limit: str | int | None, default_mib: int = 4096) -> int:
+    """Convert a Docker-style memory limit (``"4g"``, ``"512m"``, int bytes) to MiB."""
+    if mem_limit is None:
+        return default_mib
+    if isinstance(mem_limit, int):
+        return max(1, round(mem_limit / (1024 * 1024)))
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([bkmgt]?)b?", mem_limit.strip().lower())
+    if not match:
+        raise ValueError(f"Cannot parse memory limit: {mem_limit!r}")
+    value, unit = float(match.group(1)), match.group(2) or "b"
+    return max(1, round(value * _MEM_LIMIT_UNIT_MIB[unit]))
+
+
+class ModalBackend(SandboxBackend):
+    """Modal cloud backend using ``modal.Sandbox``.
+
+    Runs each sandbox as a container in Modal's cloud instead of on the local
+    node (see ``docs/sandbox_modal_vs_podman.md``). Requires the ``modal``
+    package, Modal credentials (``MODAL_TOKEN_ID`` / ``MODAL_TOKEN_SECRET`` env
+    vars or ``modal token new``), and outbound network access.
+
+    All file I/O goes through ``exec`` with stdin/stdout piping — the same
+    approach as ``ApptainerBackend`` — so exception semantics match the other
+    backends. Note that every command is a network RPC, so per-call latency is
+    tens of milliseconds rather than microseconds.
+
+    The sandbox is created with a hard lifetime (``sandbox_lifetime``); Modal
+    reaps it after that even if ``close()`` is never called, bounding the cost
+    of leaked sandboxes.
+    """
+
+    _MAX_OUTPUT_BYTES = 1_000_000
+    # Distinct exit codes let read_file classify failures in a single exec
+    # (one network RPC) instead of the three probes ApptainerBackend uses.
+    _READ_FILE_MISSING_EXIT = 40
+    _READ_FILE_ISDIR_EXIT = 41
+
+    def __init__(
+        self,
+        image: str = "python:3.12-slim",
+        timeout: int = 1800,
+        mem_limit: str | int | None = "4g",
+        cpu: float | None = None,
+        app_name: str | None = None,
+        environment_name: str | None = None,
+        sandbox_lifetime: int | None = None,
+    ):
+        """
+        Args:
+            image: Public registry image tag (e.g. ``python:3.12-slim``),
+                passed to ``modal.Image.from_registry``.
+            timeout: Per-command timeout in seconds (default: 1800 / 30 min).
+            mem_limit: Memory limit, Docker-style string or int bytes
+                (default: 4g). Converted to MiB for Modal.
+            cpu: CPU cores to reserve. Defaults to ``SWERL_MODAL_CPU`` (1.0).
+            app_name: Modal app to attach sandboxes to. Defaults to
+                ``SWERL_MODAL_APP_NAME`` (``open-instruct-sandbox``).
+            environment_name: Modal environment (workspace namespace) to
+                create the app in. Must already exist in the workspace.
+                Defaults to ``SWERL_MODAL_ENVIRONMENT`` (``agent-training``).
+            sandbox_lifetime: Hard lifetime of the sandbox in seconds; Modal
+                terminates it after this even if never closed. Defaults to
+                ``SWERL_MODAL_SANDBOX_LIFETIME_S`` (3600). Must exceed the
+                longest expected rollout.
+        """
+        if modal is None:
+            raise RuntimeError(
+                "The 'modal' package is required for ModalBackend. Install it with `pip install modal`."
+            )
+        self._image = image
+        self._timeout = timeout
+        self._memory_mib = parse_mem_limit_mib(mem_limit)
+        self._cpu = cpu if cpu is not None else _env_float("SWERL_MODAL_CPU", 1.0)
+        self._app_name = app_name or os.getenv("SWERL_MODAL_APP_NAME", "open-instruct-sandbox")
+        self._environment_name = environment_name or os.getenv("SWERL_MODAL_ENVIRONMENT", "agent-training")
+        self._sandbox_lifetime = (
+            sandbox_lifetime if sandbox_lifetime is not None else _env_int("SWERL_MODAL_SANDBOX_LIFETIME_S", 3600)
+        )
+        self._sandbox = None
+
+    def _ensure_started(self) -> None:
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+    # ---- lifecycle --------------------------------------------------------
+
+    def start(self) -> None:
+        # Terminate any previous sandbox before starting a new one (supports
+        # the "close then start" pattern used in SWERLSandboxEnv._do_reset).
+        if self._sandbox is not None:
+            self.close()
+        logger.info(
+            "Starting Modal sandbox (image=%s, app=%s, environment=%s, cpu=%s, memory_mib=%s, lifetime=%ss)",
+            self._image,
+            self._app_name,
+            self._environment_name,
+            self._cpu,
+            self._memory_mib,
+            self._sandbox_lifetime,
+        )
+        start_time = time.perf_counter()
+        self._sandbox = modal.Sandbox.create(
+            app=_modal_lookup_app(self._app_name, self._environment_name),
+            image=modal.Image.from_registry(self._image),
+            timeout=self._sandbox_lifetime,
+            cpu=self._cpu,
+            memory=self._memory_mib,
+        )
+        _MODAL_LIVE_SANDBOXES.add(self._sandbox)
+        logger.info("Modal sandbox started: %s (%.3fs)", self._sandbox.object_id, time.perf_counter() - start_time)
+
+    def close(self) -> None:
+        if self._sandbox is None:
+            return
+        sandbox = self._sandbox
+        logger.info(f"Closing Modal sandbox: {sandbox.object_id} (image={self._image})")
+        with contextlib.suppress(Exception):
+            sandbox.terminate()
+        _MODAL_LIVE_SANDBOXES.discard(sandbox)
+        self._sandbox = None
+
+    # ---- exec -------------------------------------------------------------
+
+    def _exec(self, argv: list[str], *, stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
+        """Run ``argv`` in the sandbox and return ``(exit_code, stdout, stderr)``.
+
+        Always closes stdin (after writing ``stdin`` if given) so commands
+        that read from it don't hang.
+        """
+        self._ensure_started()
+        process = self._sandbox.exec(*argv, text=False)
+        if stdin is not None:
+            process.stdin.write(stdin)
+        process.stdin.write_eof()
+        process.stdin.drain()
+        exit_code = process.wait()
+        return exit_code, process.stdout.read() or b"", process.stderr.read() or b""
+
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
+        self._ensure_started()
+        effective_timeout = self._timeout if timeout is None else timeout
+        wrapped = (
+            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(effective_timeout))} "
+            f"bash -c {shlex.quote(command)}"
+        )
+        sandbox_id = self._sandbox.object_id
+        logger.debug(
+            "Modal exec start (sandbox=%s, image=%s, timeout=%ss, command=%r)",
+            sandbox_id,
+            self._image,
+            effective_timeout,
+            command,
+        )
+        try:
+            exit_code, stdout_raw, stderr_raw = self._exec(["bash", "-c", wrapped])
+        except (modal.exception.SandboxTerminatedError, modal.exception.SandboxTimeoutError) as e:
+            logger.warning(
+                "Modal sandbox died during exec (sandbox=%s, image=%s): %s. Restarting and retrying command once.",
+                sandbox_id,
+                self._image,
+                e,
+            )
+            self.start()
+            exit_code, stdout_raw, stderr_raw = self._exec(["bash", "-c", wrapped])
+        stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+        stderr = stderr_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+        if exit_code == 124:
+            stderr = f"Command timed out after {effective_timeout}s.\n" + stderr
+        return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    # ---- file I/O (exec-piped) --------------------------------------------
+
+    def write_file(self, path: str, content: str | bytes) -> None:
+        self._ensure_started()
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        dir_part = os.path.dirname(path) or "/"
+        sh_cmd = f"mkdir -p {shlex.quote(dir_part)} && cat > {shlex.quote(path)}"
+        exit_code, _stdout, stderr = self._exec(["sh", "-c", sh_cmd], stdin=content)
+        if exit_code != 0:
+            raise RuntimeError(
+                f"write_file failed for {path!r} (exit={exit_code}): {stderr.decode('utf-8', 'replace').strip()}"
+            )
+
+    def read_file(self, path: str, binary: bool = False) -> str | bytes:
+        self._ensure_started()
+        quoted = shlex.quote(path)
+        sh_cmd = (
+            f"if [ ! -e {quoted} ]; then exit {self._READ_FILE_MISSING_EXIT}; fi; "
+            f"if [ -d {quoted} ]; then exit {self._READ_FILE_ISDIR_EXIT}; fi; "
+            f"cat {quoted}"
+        )
+        exit_code, stdout, stderr = self._exec(["sh", "-c", sh_cmd])
+        if exit_code == self._READ_FILE_MISSING_EXIT:
+            raise FileNotFoundError(f"File not found in sandbox: '{path}'")
+        if exit_code == self._READ_FILE_ISDIR_EXIT:
+            raise IsADirectoryError(f"Path '{path}' is a directory, not a file.")
+        if exit_code != 0:
+            raise RuntimeError(
+                f"read_file failed for {path!r} (exit={exit_code}): {stderr.decode('utf-8', 'replace').strip()}"
+            )
+        if binary:
+            return stdout
+        return stdout.decode("utf-8", errors="replace")
+
+    def put_archive(self, root: str, tar_bytes: bytes) -> None:
+        self._ensure_started()
+        exit_code, _stdout, stderr = self._exec(["tar", "-xf", "-", "-C", root], stdin=tar_bytes)
+        if exit_code != 0:
+            raise RuntimeError(
+                f"put_archive failed at root={root!r} (exit={exit_code}): {stderr.decode('utf-8', 'replace').strip()}"
+            )
+
+
 def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
     """Factory function to create a sandbox backend.
 
     Args:
-        backend_type: ``"docker"`` or ``"apptainer"``.
+        backend_type: ``"docker"``, ``"apptainer"``, or ``"modal"``.
         **kwargs: Backend-specific arguments.
 
     Returns:
@@ -784,4 +1041,6 @@ def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
         return DockerBackend(**kwargs)
     if backend_type == "apptainer":
         return ApptainerBackend(**kwargs)
-    raise ValueError(f"Unknown backend type: {backend_type}. Supported: 'docker', 'apptainer'.")
+    if backend_type == "modal":
+        return ModalBackend(**kwargs)
+    raise ValueError(f"Unknown backend type: {backend_type}. Supported: 'docker', 'apptainer', 'modal'.")
