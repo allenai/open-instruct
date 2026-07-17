@@ -5,25 +5,31 @@ BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 shift || true
 PYTEST_ARGS=("$@")
-CUDA_VERSION="${OPEN_INSTRUCT_CUDA_VERSION:-12}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 if [[ ${#PYTEST_ARGS[@]} -gt 0 ]]; then
     echo "Pytest filter: ${PYTEST_ARGS[*]}"
 fi
 
-case "$CUDA_VERSION" in
-    12) CLUSTER=ai2/jupiter ;;
-    13) CLUSTER=ai2/holmes ;;
+case "$BEAKER_IMAGE" in
+    *-cuda13)
+        CUDA_VERSION=13
+        CLUSTERS=(ai2/holmes)
+        ;;
     *)
-        echo "Error: OPEN_INSTRUCT_CUDA_VERSION must be 12 or 13."
-        exit 1
+        CUDA_VERSION=12
+        CLUSTERS=(ai2/jupiter ai2/ceres ai2/saturn)
         ;;
 esac
 
-echo "Using CUDA $CUDA_VERSION test cluster: $CLUSTER"
+CLUSTER_ARGS=()
+for cluster in "${CLUSTERS[@]}"; do
+    CLUSTER_ARGS+=(--cluster "$cluster")
+done
+
+echo "Using CUDA $CUDA_VERSION test clusters: ${CLUSTERS[*]}"
 uv run python mason.py \
-       --cluster "$CLUSTER" \
+       "${CLUSTER_ARGS[@]}" \
        --image "$BEAKER_IMAGE" \
        --description "CUDA $CUDA_VERSION GPU tests for test_*_gpu.py" \
        --pure_docker_mode \
