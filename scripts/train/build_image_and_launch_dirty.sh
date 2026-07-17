@@ -58,17 +58,12 @@ else
     --description "Git commit: $git_hash; CUDA: $cuda_version"
 fi
 
-# Ensure uv is installed and sync dependencies before running the script
+# Ensure uv is installed before running the launch script.
 if ! command -v uv &> /dev/null; then
     echo "Installing uv..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
-
-# Install Python dependencies
-echo "Installing dependencies with uv..."
-export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-.venv-launcher}"
-uv sync
 
 # Run the provided script with the image name and all remaining arguments
 script="$1"

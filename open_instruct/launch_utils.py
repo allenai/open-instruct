@@ -1,8 +1,6 @@
 import os
 import subprocess
 
-from transformers.utils import hub as transformers_hub
-
 AUTO_CREATED_BEAKER_CONFIG_DIR = "configs/beaker_configs/auto_created"
 
 WEKA_CLUSTERS = [
@@ -16,31 +14,6 @@ WEKA_CLUSTERS = [
     "ai2/prometheus",
     "ai2/holmes",
 ]
-
-
-def custom_cached_file(model_name_or_path: str, filename: str, revision: str | None = None, repo_type: str = "model"):
-    if os.path.isdir(model_name_or_path):
-        resolved_file = os.path.join(model_name_or_path, filename)
-        if os.path.isfile(resolved_file):
-            return resolved_file
-        else:
-            return None
-    else:
-        resolved_file = transformers_hub.try_to_load_from_cache(
-            model_name_or_path, filename, revision=revision, repo_type=repo_type
-        )
-        if not isinstance(resolved_file, str):
-            return None
-        return resolved_file
-
-
-def get_commit_hash(
-    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
-) -> str | None:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
-    commit_hash = transformers_hub.extract_commit_hash(file, None)
-    return commit_hash
-
 
 INTERCONNECT_CLUSTERS = ["ai2/jupiter", "ai2/ceres", "ai2/titan", "ai2/holmes"]
 

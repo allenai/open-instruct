@@ -28,7 +28,7 @@ for cluster in "${CLUSTERS[@]}"; do
 done
 
 echo "Using CUDA $CUDA_VERSION test clusters: ${CLUSTERS[*]}"
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
        "${CLUSTER_ARGS[@]}" \
        --image "$BEAKER_IMAGE" \
        --description "CUDA $CUDA_VERSION GPU tests for test_*_gpu.py" \

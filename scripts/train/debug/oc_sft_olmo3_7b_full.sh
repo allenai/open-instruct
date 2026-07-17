@@ -14,7 +14,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 MODEL_PATH=/weka/oe-adapt-default/jacobm/repos/cse-579/checkpoints/Olmo-3-7B-Think-SFT/model_and_optim
 
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/open-instruct-dev \
     --priority urgent \

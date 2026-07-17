@@ -8,7 +8,7 @@ SP_SIZE="${2:-4}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Sequence parallel size: $SP_SIZE"
 
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/open-instruct-dev \
     --priority urgent \

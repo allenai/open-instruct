@@ -67,7 +67,7 @@ push, so by the time the tokenize jobs finish the tag may no longer
 match what you ran.
 
 ```bash
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
     --cluster ai2/jupiter \
     --budget ai2/oe-adapt \
     --workspace ai2/olmo-instruct \

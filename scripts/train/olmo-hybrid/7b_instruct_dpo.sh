@@ -12,7 +12,7 @@
 
 BEAKER_IMAGE="${1:-finbarrt/hybrid-dpo-stable}"
 
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
     --cluster ai2/jupiter \
     --description "Hybrid 7B Instruct DPO final, LR=1e-6, 4 nodes, 16k seq, ZeRO-3." \
     --workspace ai2/olmo-instruct \

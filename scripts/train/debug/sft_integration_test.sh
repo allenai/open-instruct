@@ -27,7 +27,7 @@ if [ -n "$1" ]; then
     BEAKER_IMAGE="$1"
     echo "Using Beaker image: $BEAKER_IMAGE"
 
-    uv run python mason.py \
+    uv run --project scripts/mason --frozen python mason.py \
         --cluster ai2/jupiter \
         --workspace ai2/open-instruct-dev \
         --priority normal \

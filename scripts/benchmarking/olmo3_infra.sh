@@ -14,7 +14,7 @@ for split_var in mixin_it_up; do
     exp_name=olmo3_dpo_rl_final_mix_jupiter_${RANDOM}
     exp_name="${exp_name}_${RANDOM}"
 
-    uv run mason.py \
+    uv run --project scripts/mason --frozen python mason.py \
         --description "Ablating infrastructure improvements." \
         --cluster ai2/jupiter --image "$IMAGE_NAME" \
         --pure_docker_mode \
