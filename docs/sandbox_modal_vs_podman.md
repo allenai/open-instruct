@@ -52,8 +52,17 @@ operates it**.
 | Latency | Localhost Unix socket → microseconds/command | Network RPC → tens of ms/command + rate limits |
 | Requirements | Beaker subcontainer perms, rootless kernel features | Outbound internet egress + Modal API tokens |
 | Idle billing | Free (your node) | **You pay wall-clock while the container is alive, busy or idle** |
+| Image fidelity | Runs your image byte-for-byte | **Rebuilds the image before running it** — build requires Python + pip inside the image, else a standalone Python is injected |
 
 The trade is **self-hosted-on-node vs. managed-remote-service**.
+
+The image-fidelity row is subtle but bit us in practice: Modal's `Image.from_registry`
+transforms the image rather than running it as built, so image-dependent behavior (PATH
+resolution, tools under `/usr/local`, anything a task's `setup.sh` baked in) can silently
+differ from Podman. Concretely, the injected standalone Python shadowed the tmax images'
+own `/usr/bin/python3`, so `python3 -m pytest` verification lost its packages and every
+rollout scored 0. `ModalBackend` repairs the `python3` shadowing after a fallback start,
+but any new image-dependent oddity on Modal should be checked against this row first.
 
 ## What the codebase change would look like
 
