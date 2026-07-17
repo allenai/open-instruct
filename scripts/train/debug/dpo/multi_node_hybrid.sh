@@ -4,7 +4,7 @@ MODEL_NAME=allenai/Olmo-Hybrid-Instruct-DPO-7B
 LR=1e-6
 EXP_NAME=hybrid-7b-DPO-test-${LR}-$(date +%s)
 
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
     --cluster ai2/jupiter \
     --description "Hybrid 7B DPO test, 2 nodes, 16k seq, ZeRO-3." \
     --workspace ai2/open-instruct-dev \

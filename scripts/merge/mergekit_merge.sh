@@ -59,7 +59,7 @@ echo "=============================================="
 # INSTALL_CMD="${CUSTOM_INSTALL} && uv pip install mergekit"
 INSTALL_CMD="uv pip install mergekit"
 
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --image "$IMAGE" \

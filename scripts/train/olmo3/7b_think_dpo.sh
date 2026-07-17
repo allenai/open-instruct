@@ -2,7 +2,7 @@
 BEAKER_IMAGE=${1:-nathanl/open_instruct_auto}
 MODEL_NAME=/weka/oe-adapt-default/saumyam/checkpoints/olmo2-7B-sft/rl-sft/olmo2.5-6T-LC-sigma-reasoning-mix-decontam-v2-special-tokens-v3-think-FIX
 EXP_NAME=sm0922-rsn-dpo-delta-yolo_scottmix1_150k-8e-8
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
 	--cluster ai2/jupiter-cirrascale-2 ai2/ceres-cirrascale \
 	--gs_model_name $EXP_NAME \
     --workspace ai2/olmo-instruct \
