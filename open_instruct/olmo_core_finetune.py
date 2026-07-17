@@ -124,7 +124,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
-    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
+    tokenize_transform_args = {"max_seq_length": args.training.max_seq_length}
+    if args.dataset.ensure_terminal_eos_after_truncation:
+        tokenize_transform_args["ensure_terminal_eos_after_truncation"] = True
+    transform_fn_args = [tokenize_transform_args, {}]
 
     if args.dataset.pretokenized_dataset_path is not None:
         numpy_dir = os.path.abspath(args.dataset.pretokenized_dataset_path)
@@ -223,7 +226,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     rank_microbatch_size = args.training.per_device_train_batch_size * args.training.max_seq_length
     dp_world_size = world_size // cp_degree
 
-    oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc, vocab_size=model_config.vocab_size)
+    oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(
+        tc,
+        vocab_size=model_config.vocab_size,
+        document_boundary_start_token=args.dataset.document_boundary_start_token,
+    )
     np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
         tokenizer=oc_tokenizer_config,
         work_dir=args.checkpoint.output_dir,

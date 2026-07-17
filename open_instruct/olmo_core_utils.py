@@ -250,6 +250,10 @@ class DatasetConfig:
     """The user or org name for dataset caching on the Hugging Face Hub."""
     pretokenized_dataset_path: str | None = None
     """Existing packed NumPy SFT directory, bypassing HF dataset tokenization and caching."""
+    ensure_terminal_eos_after_truncation: bool = False
+    """Replace the final truncated token with EOS so every serialized SFT record has a terminal boundary."""
+    document_boundary_start_token: str | None = None
+    """Optional single token that starts records and disambiguates EOS tokens used inside chat templates."""
 
 
 @dataclass
@@ -635,32 +639,47 @@ def to_oc_tokenizer_config(
     tc: TokenizerConfig,
     *,
     vocab_size: int | None = None,
+    document_boundary_start_token: str | None = None,
 ) -> OLMoCoreTokenizerConfig:
     """Map open-instruct TokenizerConfig to olmo-core's TokenizerConfig for NumpyFSL loading.
 
     Prefers the curated `dolma2()` preset for the dolma2/OLMo-2 family (its
     `padded_vocab_size()` rounding matches the trainer expectations); otherwise
-    builds one directly from the HF tokenizer's special tokens.
+    builds one directly from the HF tokenizer's special tokens. An explicit
+    document start token is exposed to olmo-core as its BOS boundary hint without
+    mutating the HF tokenizer.
     """
     identifier = tc.tokenizer_name_or_path or ""
     dolma2_markers = ("dolma2", "OLMo-2-1124", "OLMo-2-0325", "OLMo-2-0425")
     if any(marker in identifier for marker in dolma2_markers):
-        return OLMoCoreTokenizerConfig.dolma2()
-    eos_id = tc.tokenizer.eos_token_id
-    bos_id = tc.tokenizer.bos_token_id
-    # olmo-core's doc-boundary scanner requires an EOS *immediately followed by* BOS
-    # when both are set; when the tokenizer reuses the same id for both (e.g.
-    # olmo-3-tokenizer-instruct-dev has eos==bos==100257), that pattern never
-    # appears in practice, so fall back to the EOS-only scanner.
-    if bos_id == eos_id:
-        bos_id = None
-    return OLMoCoreTokenizerConfig(
-        vocab_size=vocab_size or tc.tokenizer.vocab_size,
-        eos_token_id=eos_id,
-        pad_token_id=tc.tokenizer.pad_token_id,
-        bos_token_id=bos_id,
-        identifier=identifier or None,
-    )
+        config = OLMoCoreTokenizerConfig.dolma2()
+    else:
+        eos_id = tc.tokenizer.eos_token_id
+        bos_id = tc.tokenizer.bos_token_id
+        # olmo-core's doc-boundary scanner requires an EOS *immediately followed by* BOS
+        # when both are set; when the tokenizer reuses the same id for both (e.g.
+        # olmo-3-tokenizer-instruct-dev has eos==bos==100257), that pattern never
+        # appears in practice, so fall back to the EOS-only scanner.
+        if bos_id == eos_id:
+            bos_id = None
+        config = OLMoCoreTokenizerConfig(
+            vocab_size=vocab_size or tc.tokenizer.vocab_size,
+            eos_token_id=eos_id,
+            pad_token_id=tc.tokenizer.pad_token_id,
+            bos_token_id=bos_id,
+            identifier=identifier or None,
+        )
+
+    if document_boundary_start_token is not None:
+        boundary_ids = tc.tokenizer.encode(document_boundary_start_token, add_special_tokens=False)
+        if len(boundary_ids) != 1:
+            raise ValueError(
+                "document_boundary_start_token must encode to exactly one token, "
+                f"but {document_boundary_start_token!r} encoded to {boundary_ids}"
+            )
+        config.bos_token_id = boundary_ids[0]
+
+    return config
 
 
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:

@@ -114,6 +114,9 @@ class ConvertSFTDataArguments:
     """Maximum sequence length. If not provided, no truncation will be performed."""
     max_seq_length: int | None = field(default=None)
 
+    """Ensure every serialized record ends in EOS, including records truncated to max_seq_length."""
+    ensure_terminal_eos_after_truncation: bool = field(default=False)
+
     """Number of examples to process for debugging. 0 means process all examples."""
     num_examples: int = field(default=0)
 
@@ -140,7 +143,10 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
     transform_fn_args = []
     for fn_name in args.dataset_transform_fn:
         if fn_name == "sft_tulu_tokenize_and_truncate_v1":
-            transform_fn_args.append({"max_seq_length": args.max_seq_length})
+            fn_args = {"max_seq_length": args.max_seq_length}
+            if args.ensure_terminal_eos_after_truncation:
+                fn_args["ensure_terminal_eos_after_truncation"] = True
+            transform_fn_args.append(fn_args)
         else:
             transform_fn_args.append({})
 

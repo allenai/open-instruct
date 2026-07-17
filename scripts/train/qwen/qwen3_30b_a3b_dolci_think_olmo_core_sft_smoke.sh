@@ -6,7 +6,7 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 MODEL_PATH="${MODEL_PATH:-/weka/oe-adapt-default/jacobm/olmoe3/post-training/checkpoints/qwen3-30b-a3b-base-olmo}"
-DATASET_PATH="${DATASET_PATH:-/weka/oe-adapt-default/jacobm/olmoe3/post-training/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker/10k}"
+DATASET_PATH="${DATASET_PATH:-/weka/oe-adapt-default/jacobm/olmoe3/post-training/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker-terminal-eos-v2/10k}"
 OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/jacobm/olmoe3/post-training/checkpoints/${RUN_NAME}}"
 
 uv run python mason.py \
@@ -23,6 +23,7 @@ uv run python mason.py \
     --gpus 8 \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env DOCUMENT_BOUNDARY_START_TOKEN='<|im_start|>' \
     -- torchrun \
     --standalone \
     --nproc_per_node=8 \
@@ -33,6 +34,8 @@ uv run python mason.py \
     --config_name Qwen/Qwen3-30B-A3B-Base \
     --tokenizer_name_or_path Qwen/Qwen3-30B-A3B \
     --pretokenized_dataset_path "$DATASET_PATH" \
+    --ensure_terminal_eos_after_truncation true \
+    --document_boundary_start_token \$DOCUMENT_BOUNDARY_START_TOKEN \
     --output_dir "$OUTPUT_DIR" \
     --attn_implementation torch \
     --max_seq_length 4096 \

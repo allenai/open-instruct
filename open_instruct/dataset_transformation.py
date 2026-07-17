@@ -1313,7 +1313,12 @@ def _tokenize_tulu_sft_with_assistant_labels(
     return input_ids, attention_mask, labels
 
 
-def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None):
+def _sft_tulu_tokenize(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int | None,
+    ensure_terminal_eos_after_truncation: bool = False,
+):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
@@ -1322,6 +1327,19 @@ def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_
     input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
         messages, tokenizer, tools, max_seq_length
     )
+    if ensure_terminal_eos_after_truncation:
+        if max_seq_length is None:
+            raise ValueError("ensure_terminal_eos_after_truncation requires a finite max_seq_length")
+        if tokenizer.eos_token_id is None:
+            raise ValueError("ensure_terminal_eos_after_truncation requires a tokenizer EOS token")
+        if input_ids.numel() == 0:
+            raise ValueError("Cannot ensure a terminal EOS on an empty tokenized conversation")
+        if input_ids.shape[-1] == max_seq_length and input_ids[0, -1].item() != tokenizer.eos_token_id:
+            input_ids = input_ids.clone()
+            input_ids[0, -1] = tokenizer.eos_token_id
+            if labels[0, -1].item() != MASKED_TOKEN_VALUE:
+                labels = labels.clone()
+                labels[0, -1] = tokenizer.eos_token_id
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
@@ -1332,8 +1350,18 @@ def sft_tulu_tokenize_without_truncation_v1(row: dict[str, Any], tokenizer: PreT
     return _sft_tulu_tokenize(row, tokenizer, max_seq_length=None)
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
-    return _sft_tulu_tokenize(row, tokenizer, max_seq_length=max_seq_length)
+def sft_tulu_tokenize_and_truncate_v1(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+    ensure_terminal_eos_after_truncation: bool = False,
+):
+    return _sft_tulu_tokenize(
+        row,
+        tokenizer,
+        max_seq_length=max_seq_length,
+        ensure_terminal_eos_after_truncation=ensure_terminal_eos_after_truncation,
+    )
 
 
 def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
