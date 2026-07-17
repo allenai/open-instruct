@@ -34,7 +34,6 @@ uv run python mason.py \
        --max_retries 0 \
        --no-host-networking \
        --gpus 1 \
-       --env OPEN_INSTRUCT_CUDA_VERSION="$CUDA_VERSION" \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)" \
        -- bash scripts/test/run_gpu_tests.sh "${PYTEST_ARGS[@]}"
