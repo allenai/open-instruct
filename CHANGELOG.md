@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
+- Run Mason from a minimal locked uv project so image submission does not modify the main development environment (https://github.com/allenai/open-instruct/pull/1760).
 - Increase default environment pool acquire timeout to 7200s (https://github.com/allenai/open-instruct/pull/1729).
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
 - Bump OLMo-core to the latest `main` commit (`9aa3280`) (https://github.com/allenai/open-instruct/pull/1723).
