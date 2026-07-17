@@ -12,7 +12,7 @@ DATASET_SPLITS="train"
 
 PRIORITY="${PRIORITY:-high}"
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster "ai2/jupiter" \

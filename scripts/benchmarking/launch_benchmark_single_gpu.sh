@@ -46,7 +46,7 @@ for model_name_or_path in "$@"; do
         tokenizer_name_or_path="allenai/OLMo-2-1124-7B"
     fi
 
-    uv run --project scripts/mason --frozen python mason.py \
+    uv run python mason.py \
         --cluster ai2/ceres \
         --cluster ai2/jupiter \
         --cluster ai2/saturn \

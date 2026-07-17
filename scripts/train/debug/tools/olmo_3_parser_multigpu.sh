@@ -12,7 +12,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 export SERPER_API_KEY=$(beaker secret read ${BEAKER_USER}_SERPER_API_KEY --workspace ai2/open-instruct-dev)
 export JINA_API_KEY=$(beaker secret read ${BEAKER_USER}_JINA_API_KEY --workspace ai2/open-instruct-dev)
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
        --description "OLMo-3 multinode tool use test" \

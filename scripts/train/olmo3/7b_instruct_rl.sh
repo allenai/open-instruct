@@ -22,7 +22,7 @@ gs_model_name="olmo3-instruct-dpo-hpz1"
 
 EXP_NAME=${EXP_NAME:-${exp_name}}
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
         --description $exp_name \
         --task_name ${EXP_NAME} \
         --cluster ${cluster} \

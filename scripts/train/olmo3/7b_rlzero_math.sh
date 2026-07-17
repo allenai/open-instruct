@@ -19,7 +19,7 @@ if [[ "$1" == "$BEAKER_USER"* ]]; then
 fi
 
 cluster=ai2/jupiter
-uv run --project scripts/mason --frozen python mason.py \
+uv run mason.py \
     --task_name ${EXP_NAME} \
     --cluster ${cluster} \
     --workspace ai2/olmo-instruct \

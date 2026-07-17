@@ -1,7 +1,7 @@
 #!/bin/bash
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
     --cluster ai2/jupiter \
     --description "2 node DPO run with OLMo2-7B, 16k seq len." \
     --workspace ai2/open-instruct-dev \

@@ -46,7 +46,7 @@ echo "=============================================="
 # Base64 encode the Python module to avoid escaping issues
 SCRIPT_B64=$(base64 < open_instruct/merge_models.py | tr -d '\n')
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/olmo-instruct \
     --image "$IMAGE" \

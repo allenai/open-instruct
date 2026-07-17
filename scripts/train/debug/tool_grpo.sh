@@ -9,7 +9,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 # note: you might have to setup your own search api endpoint. I've been using massive-serve:
 # https://github.com/RulinShao/massive-serve
 # and then set the search_api_endpoint accordingly.
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/augusta \
        --cluster ai2/saturn \

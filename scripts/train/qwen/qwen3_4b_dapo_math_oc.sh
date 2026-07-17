@@ -15,7 +15,7 @@ fi
 CLUSTER="${CLUSTER:-ai2/jupiter ai2/ceres}"
 PRIORITY="${PRIORITY:-urgent}"
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster ${CLUSTER} \

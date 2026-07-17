@@ -54,7 +54,7 @@ extract_experiment_id() {
 }
 
 echo "=== Run 1: Train 1 epoch and save checkpoints ==="
-run1_output=$(uv run --project scripts/mason --frozen python mason.py \
+run1_output=$(uv run python mason.py \
     --cluster ai2/jupiter \
     --description "Checkpoint integration test run 1: train and save checkpoints" \
     --workspace ai2/open-instruct-dev \
@@ -88,7 +88,7 @@ wait_for_experiment "$run1_id" "Run 1"
 
 echo ""
 echo "=== Run 2: Resume from checkpoint and train 2 epochs ==="
-run2_output=$(uv run --project scripts/mason --frozen python mason.py \
+run2_output=$(uv run python mason.py \
     --cluster ai2/jupiter \
     --description "Checkpoint integration test run 2: resume from checkpoint" \
     --workspace ai2/open-instruct-dev \

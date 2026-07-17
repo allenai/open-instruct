@@ -5,7 +5,7 @@ NUM_NODES=16
 for LR in 7e-8 8e-8 9e-8
 do
     EXP_NAME="olmo3-32b-DPO-8k-0.6b-200k-lucafilt-s42-${LR}"
-    uv run --project scripts/mason --frozen python mason.py \
+    uv run python mason.py \
         --cluster ai2/jupiter \
         --gs_model_name olmo3-merge-32b-1e-4-5e-5 \
         --workspace ai2/olmo-instruct \

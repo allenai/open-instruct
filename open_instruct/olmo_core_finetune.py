@@ -153,7 +153,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             f"  expected: {numpy_dir}\n"
             f"  hash:     {cache_hash}\n\n"
             "Launch a CPU-only tokenization job on a Weka-mounted cluster first, e.g.:\n\n"
-            "  uv run --project scripts/mason --frozen python mason.py \\\n"
+            "  uv run python mason.py \\\n"
             "      --cluster ai2/jupiter --workspace ai2/open-instruct-dev \\\n"
             '      --priority urgent --image "$BEAKER_IMAGE" --budget ai2/oe-adapt \\\n'
             "      --gpus 0 --num_nodes 1 --no_auto_dataset_cache \\\n"

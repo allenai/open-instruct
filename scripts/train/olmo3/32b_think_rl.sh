@@ -7,7 +7,7 @@ export data_mix="hamishivi/math_rlvr_mixture_dpo 1.0 hamishivi/code_rlvr_mixture
 export model_path=/weka/oe-adapt-default/hamishi/model_checkpoints/olmo3-merge-32b-1e-4-5e-5/olmo3-merge-32b-1e-4-5e-5/
 
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
     --cluster ai2/jupiter \
     --image $BEAKER_IMAGE \
     --pure_docker_mode \

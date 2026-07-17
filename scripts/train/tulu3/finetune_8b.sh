@@ -4,7 +4,7 @@ BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
     --cluster ai2/jupiter \
     --workspace ai2/open-instruct-dev \
     --priority normal \

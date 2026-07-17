@@ -18,7 +18,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 TOKENIZER=allenai/dolma-2-tokenizer-olmo-3-instruct-final
 tokenizer_path=/weka/oe-adapt-default/saumyam/open-instruct/dolma2-tokenizer-olmo-3-instruct-final
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
   --cluster ai2/jupiter \
   --workspace ai2/open-instruct-dev \
   --image "$BEAKER_IMAGE" \

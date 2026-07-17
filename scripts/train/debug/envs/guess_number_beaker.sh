@@ -4,7 +4,7 @@
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
        --cluster ai2/ceres \

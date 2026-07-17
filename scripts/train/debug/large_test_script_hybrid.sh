@@ -2,7 +2,7 @@
 num_prompts=25376
 exp_name=hybrid_rlvr_test_$(date +%s)
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
         --cluster ai2/jupiter \
         --image "$BEAKER_IMAGE" \
 	--pure_docker_mode \

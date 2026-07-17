@@ -57,13 +57,13 @@ import numpy as np
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
-from huggingface_hub import ModelCard, revision_exists, try_to_load_from_cache
+from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
 from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
 from transformers.utils.hub import extract_commit_hash
 
-from open_instruct import logger_utils
+from open_instruct import launch_utils, logger_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -71,21 +71,10 @@ logger = logger_utils.setup_logger(__name__)
 
 # ----------------------------------------------------------------------------
 # Utilities
-def custom_cached_file(
-    model_name_or_path: str, filename: str, revision: str | None = None, repo_type: str = "model"
-) -> str | None:
-    if os.path.isdir(model_name_or_path):
-        resolved_file = os.path.join(model_name_or_path, filename)
-        return resolved_file if os.path.isfile(resolved_file) else None
-
-    resolved_file = try_to_load_from_cache(model_name_or_path, filename, revision=revision, repo_type=repo_type)
-    return resolved_file if isinstance(resolved_file, str) else None
-
-
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str | None:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
@@ -93,7 +82,7 @@ def get_commit_hash(
 def get_file_hash(
     model_name_or_path: str, revision: str | None, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = launch_utils.custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     if isinstance(file, str):
         with open(file, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()

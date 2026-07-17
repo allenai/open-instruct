@@ -1,7 +1,7 @@
 #!/bin/bash
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
     --cluster ai2/saturn \
     --cluster ai2/jupiter \
     --description "Single GPU DPO run with OLMo-core, for debugging purposes." \

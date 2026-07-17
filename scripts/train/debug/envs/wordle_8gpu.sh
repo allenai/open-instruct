@@ -8,7 +8,7 @@
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
-uv run --project scripts/mason --frozen python mason.py \
+uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
        --description "WordleTextEnv 8-GPU (4L/4E) Qwen3-1.7B Wordle" \

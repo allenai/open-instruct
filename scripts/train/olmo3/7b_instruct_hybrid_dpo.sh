@@ -9,7 +9,7 @@ do
     for LR in 1e-6 # 5e-5 5e-6
     do
         EXP_NAME=hybrid-7b-DPO-SFT-${SFT_LR}-${LR}
-        uv run --project scripts/mason --frozen python mason.py \
+        uv run python mason.py \
             --cluster ai2/jupiter \
             --description "Hybrid 7B DPO, SFT-${SFT_LR}, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
             --workspace ai2/olmo-instruct \
