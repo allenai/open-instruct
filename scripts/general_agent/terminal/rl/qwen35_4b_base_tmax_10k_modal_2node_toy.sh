@@ -16,9 +16,9 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-4B (Modal sandboxes)" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B pool size 768 (Modal sandboxes)" \
        --pure_docker_mode \
-       --workspace ai2/general-tool-use \
+       --workspace ai2/oe-agents \
        --priority urgent \
        --preemptible \
        --num_nodes 2 \
@@ -30,6 +30,7 @@ uv run python mason.py \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
+       --env SWERL_MODAL_SANDBOX_LIFETIME_S=14400 \
        --secret MODAL_TOKEN_ID=pradeepd_MODAL_TOKEN_ID \
        --secret MODAL_TOKEN_SECRET=pradeepd_MODAL_TOKEN_SECRET \
        --secret WANDB_API_KEY=pradeepd_WANDB_API_KEY \
@@ -70,8 +71,8 @@ uv run python mason.py \
     --save_traces \
     --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
-    --tool_configs '{"backend": "modal", "task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim", "sandbox_lifetime": 14400}' \
-    --pool_size 128 \
+    --tool_configs '{"backend": "modal", "task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
+    --pool_size 768 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
@@ -83,7 +84,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_grpo_15k_modal \
+    --exp_name swerl_qwen35_4b_base_tmax_grpo_15k_modal_ps768 \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False
