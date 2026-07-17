@@ -273,6 +273,12 @@ class TestStartAndClose(ModalBackendTestCase):
         )
         self.assertEqual(self.fake.sandboxes[0].create_kwargs["image"], "image:no-python-img:latest:python=3.12")
         self.assertIn("no-python-img:latest", backends._MODAL_IMAGES_NEEDING_PYTHON)
+        # The fallback must repair python3 resolution: the standalone
+        # interpreter would otherwise shadow the image's own python3.
+        repair_calls = [
+            c for c in self.fake.sandboxes[0].exec_calls if "rm -f /usr/local/bin/python" in " ".join(c["argv"])
+        ]
+        self.assertEqual(len(repair_calls), 1)
         backend.close()
 
         # A second backend for the same tag skips the doomed plain attempt.
@@ -280,6 +286,11 @@ class TestStartAndClose(ModalBackendTestCase):
         backend2 = self._started_backend(image="no-python-img:latest")
         self.assertEqual(self.fake.from_registry_calls, [("no-python-img:latest", "3.12")])
         backend2.close()
+
+    def test_start_without_fallback_skips_python_repair(self):
+        backend = self._started_backend()
+        self.assertEqual(self.fake.sandboxes[0].exec_calls, [])
+        backend.close()
 
     def test_start_propagates_non_build_remote_errors(self):
         self.fake.create_failures["image:ubuntu:22.04:python=None"] = _FakeModalExceptions.RemoteError(

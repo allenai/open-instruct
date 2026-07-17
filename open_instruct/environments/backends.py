@@ -862,6 +862,17 @@ class ModalBackend(SandboxBackend):
     # (one network RPC) instead of the three probes ApptainerBackend uses.
     _READ_FILE_MISSING_EXIT = 40
     _READ_FILE_ISDIR_EXIT = 41
+    # ``add_python`` drops a standalone interpreter into /usr/local/bin, which
+    # shadows an image's own /usr/bin/python3 — task verification that runs
+    # ``python3 -m pytest`` then sees a bare interpreter and always fails. If
+    # the image has its own python3 outside /usr/local/bin, remove the
+    # standalone's links so ``python3`` resolves back to the image's.
+    _PYTHON_SHADOW_REPAIR_CMD = (
+        "if [ -x /usr/bin/python3 ] || [ -x /bin/python3 ]; then "
+        "rm -f /usr/local/bin/python /usr/local/bin/python3 /usr/local/bin/python3.[0-9]* "
+        "/usr/local/bin/python3-config /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.[0-9]*; "
+        "fi"
+    )
 
     def __init__(
         self,
@@ -957,6 +968,9 @@ class ModalBackend(SandboxBackend):
                     continue
                 raise
         _MODAL_LIVE_SANDBOXES.add(self._sandbox)
+        if attempt_add_python is not None:
+            logger.info("Repairing python3 resolution after add_python fallback (image=%s)", self._image)
+            self._exec(["sh", "-c", self._PYTHON_SHADOW_REPAIR_CMD])
         logger.info("Modal sandbox started: %s (%.3fs)", self._sandbox.object_id, time.perf_counter() - start_time)
 
     def close(self) -> None:
