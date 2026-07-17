@@ -14,7 +14,7 @@ LOCAL_EVALS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/brumo_2025_openinstruc
 LOCAL_EVAL_SPLITS="train"
 PRIORITY="${PRIORITY:-high}"
 
-uv run mason.py \
+uv run --project scripts/mason --frozen python mason.py \
     --task_name ${EXP_NAME} \
     --description "${RUN_NAME}" \
     --cluster "ai2/jupiter" \

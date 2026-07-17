@@ -44,7 +44,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
         echo "  DPO LR: ${LR}"
         echo "====================================="
 
-        uv run python mason.py \
+        uv run --project scripts/mason --frozen python mason.py \
             --cluster ai2/jupiter \
             --description "Hybrid 7B DPO sweep, SFT-${SFT_LR}, LR=${LR}, 4 nodes, 16k seq, ZeRO-3." \
             --workspace ai2/olmo-instruct \

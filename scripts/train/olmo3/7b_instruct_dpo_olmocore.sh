@@ -4,7 +4,7 @@ MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sf
 for LR in 1e-6
 do
     EXP_NAME=olmo3-7b-DPO-olmocore-${LR}
-    uv run python mason.py \
+    uv run --project scripts/mason --frozen python mason.py \
         --cluster ai2/jupiter \
         --description "OLMo3-7B DPO with OLMo-core, 4 nodes, 16k seq len" \
         --workspace ai2/olmo-instruct \

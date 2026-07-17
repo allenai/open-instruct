@@ -36,6 +36,19 @@ GOLD_PREFERENCE = {"count": 97, "hash": "415d8c34ac25cf04d798f27a88c90df38826f71
 GOLD_RLVR = {"count": 100, "hash": "9ebada598693087c4cd4804d474fbbe07f41a7dffb38104ddee4e93ba0bfd3b1"}
 
 
+class TestCustomCachedFile(unittest.TestCase):
+    def test_local_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            expected_path = os.path.join(temp_dir, "config.json")
+            with open(expected_path, "w") as f:
+                f.write("{}")
+
+            self.assertEqual(
+                open_instruct.dataset_transformation.custom_cached_file(temp_dir, "config.json"), expected_path
+            )
+            self.assertIsNone(open_instruct.dataset_transformation.custom_cached_file(temp_dir, "missing.json"))
+
+
 class TestEnvConfigNormalization(unittest.TestCase):
     def test_normalize_single_dict_env_config(self):
         row = {"env_config": {"env_name": "guess_number", "number": "7"}}

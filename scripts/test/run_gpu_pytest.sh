@@ -11,7 +11,7 @@ if [[ ${#PYTEST_ARGS[@]} -gt 0 ]]; then
     echo "Pytest filter: ${PYTEST_ARGS[*]}"
 fi
 
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/ceres \
        --cluster ai2/saturn \

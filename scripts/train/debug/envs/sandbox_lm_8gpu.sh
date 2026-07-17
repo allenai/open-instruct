@@ -13,7 +13,7 @@
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
-uv run python mason.py \
+uv run --project scripts/mason --frozen python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
        --description "SandboxLM 8-GPU (4L/4E) 32k Qwen3-4B test" \
