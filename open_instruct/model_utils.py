@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 
 import asyncio
@@ -23,15 +24,11 @@ import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Any, Union
 
-import deepspeed
 import pandas as pd
 import torch
 import transformers
-from accelerate import Accelerator
-from accelerate.state import AcceleratorState
-from deepspeed.runtime.engine import DeepSpeedEngine
 from huggingface_hub import HfApi
 from olmo_core.nn.attention import AttentionBackendName
 from rich import print as rprint
@@ -41,10 +38,28 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 from open_instruct import logger_utils
-from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
+
+try:
+    from open_instruct.ground_truth_utils import VerifierFunction
+except Exception:
+    VerifierFunction = Any
+
+try:
+    import deepspeed
+    from deepspeed.runtime.engine import DeepSpeedEngine
+except ModuleNotFoundError:
+    deepspeed = None
+    DeepSpeedEngine = None
+
+try:
+    from accelerate import Accelerator
+    from accelerate.state import AcceleratorState
+except ModuleNotFoundError:
+    Accelerator = None
+    AcceleratorState = None
 
 
 _OLMO_CORE_TO_HF_ATTN: dict[AttentionBackendName, str] = {

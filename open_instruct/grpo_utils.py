@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import enum
 import itertools
 import math
@@ -9,8 +11,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import ray
-import ray.util.queue as ray_queue
 import torch
 import torch.distributed as dist
 import wandb
@@ -29,6 +29,19 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+
+class _MissingRay:
+    def __getattr__(self, name: str):
+        raise ImportError("Ray is required for GRPO/vLLM orchestration, but it is not installed.")
+
+
+try:
+    import ray
+    import ray.util.queue as ray_queue
+except ModuleNotFoundError:
+    ray = _MissingRay()
+    ray_queue = None
 
 
 def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:

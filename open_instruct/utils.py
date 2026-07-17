@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 # isort: off
 import os
 
@@ -56,7 +58,6 @@ from typing import Any, NewType
 import beaker
 import huggingface_hub
 import numpy as np
-import ray
 import requests
 import torch
 import torch.distributed as dist
@@ -66,7 +67,6 @@ from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
-from ray.util import state as ray_state
 from rich.pretty import pprint
 from tqdm import tqdm
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentParser
@@ -74,6 +74,13 @@ from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
 from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
+
+try:
+    import ray
+    from ray.util import state as ray_state
+except ModuleNotFoundError:
+    ray = None
+    ray_state = None
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)

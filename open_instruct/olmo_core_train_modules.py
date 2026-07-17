@@ -17,9 +17,13 @@ from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
+from olmo_core.optim.moe_optimizer import MoEFusedV2OptimizerConfig
 from olmo_core.optim.scheduler import Scheduler
+from olmo_core.train.common import MetricMergeStrategy, ReduceType
+from olmo_core.train.globals import set_global_arg
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
+from olmo_core.train.train_module.transformer.moe_train_module import MoEV2TransformerTrainModule
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
@@ -276,6 +280,206 @@ class DPOTrainModule(TransformerTrainModule):
 
             if "aux_loss" in global_metrics:
                 self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
+
+
+class MoEDPOTrainModule(MoEV2TransformerTrainModule):
+    """DPO train module for native OLMo-core MoE V2 checkpoints.
+
+    This mirrors DPOTrainModule's objective while preserving MoEV2TransformerTrainModule's
+    direct distributed checkpoint loading, expert parallelism, optimizer, and MoE metrics.
+    """
+
+    def __init__(
+        self,
+        model: Transformer,
+        optim: MoEFusedV2OptimizerConfig,
+        sample_microbatch_size: int,
+        max_sequence_length: int,
+        dpo_config: dpo_utils.DPOExperimentConfig,
+        attn_implementation: AttentionBackendName,
+        dp_config: transformer_config.TransformerDataParallelConfig,
+        ep_config: transformer_config.TransformerExpertParallelConfig | None = None,
+        ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
+        compile_model: bool = False,
+        max_grad_norm: float | None = None,
+        scheduler: Scheduler | None = None,
+        device: torch.device | None = None,
+        state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
+        state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
+        reset_optimizer_states_on_load: bool = True,
+    ) -> None:
+        if dpo_config.packing:
+            assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
+                f"MoEDPOTrainModule with packing requires a flash attention backend for intra-document "
+                f"masking via doc_lens/max_doc_lens; got {attn_implementation}."
+            )
+
+        model.lm_head.__class__ = DPOLMHead
+        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
+        super().__init__(
+            model=model,
+            optim=optim,
+            rank_microbatch_size=rank_microbatch_size_tokens,
+            max_sequence_length=max_sequence_length,
+            dp_config=dp_config,
+            ep_config=ep_config,
+            ac_config=ac_config,
+            compile_model=compile_model,
+            max_grad_norm=max_grad_norm,
+            scheduler=scheduler,
+            device=device,
+            state_dict_save_opts=state_dict_save_opts,
+            state_dict_load_opts=state_dict_load_opts,
+            reset_optimizer_states_on_load=reset_optimizer_states_on_load,
+        )
+
+        self.sample_microbatch_size = sample_microbatch_size
+        self.dpo_config = dpo_config
+        self.reference_cache: model_utils.TensorCache | None = None
+
+        self._metrics: dict[str, torch.Tensor] = {
+            k: torch.tensor(0.0, device=self.device)
+            for k in ["loss", "chosen_logps", "rejected_logps", "chosen_rewards", "rejected_rewards", "accuracy"]
+        }
+        if dpo_config.load_balancing_loss:
+            self._metrics["aux_loss"] = torch.tensor(0.0, device=self.device)
+
+        if dpo_config.concatenated_forward or dpo_config.packing:
+            self._forward_fn = dpo_utils.concatenated_forward_olmo
+        else:
+            self._forward_fn = dpo_utils.separate_forward_olmo
+        self._forward_kwargs: dict[str, Any] = {}
+        if dpo_config.packing:
+            self._forward_kwargs["packing"] = True
+
+    def pre_train(self):
+        pass
+
+    def global_num_flops_in_batch(self, batch: dict[str, Any]) -> int | None:
+        global_num_tokens = self.trainer.data_loader.global_num_tokens_in_batch(batch)
+        if global_num_tokens is None:
+            return None
+        flops_per_token = self.num_flops_per_token(seq_len=self.max_sequence_length)
+        return flops_per_token * global_num_tokens if flops_per_token is not None else None
+
+    def _compute_microbatch_loss(self, micro_batch: dict[str, Any]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
+            self.model,
+            micro_batch,
+            average_log_prob=self.dpo_config.loss_type.is_average_loss,
+            output_router_logits=self.dpo_config.load_balancing_loss,
+            **self._forward_kwargs,
+        )
+
+        losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
+            self.dpo_config,
+            micro_batch,
+            policy_chosen_logps,
+            policy_rejected_logps,
+            self.reference_cache if self.dpo_config.loss_type.needs_reference_model else None,
+        )
+
+        loss = losses.mean()
+        if self.dpo_config.load_balancing_loss and aux_loss is not None:
+            loss = loss + self.dpo_config.load_balancing_weight * aux_loss
+
+        step_metrics: dict[str, torch.Tensor] = {
+            "loss": loss,
+            "chosen_logps": policy_chosen_logps.mean(),
+            "rejected_logps": policy_rejected_logps.mean(),
+            "chosen_rewards": chosen_rewards.mean(),
+            "rejected_rewards": rejected_rewards.mean(),
+            "accuracy": (chosen_rewards > rejected_rewards).float().mean(),
+        }
+        if aux_loss is not None and "aux_loss" in self._metrics:
+            step_metrics["aux_loss"] = aux_loss
+
+        return loss, step_metrics
+
+    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
+        self._require_optimizer()
+
+        for model in self.model_parts:
+            model.train()
+
+        micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
+        num_micro_batches = len(micro_batches)
+        device = batch["chosen_input_ids"].device
+        total_tokens = padding_free_collator.get_num_tokens(batch)
+        if total_tokens <= 0:
+            raise RuntimeError("DPO batch contains no trainable tokens")
+
+        for v in self._metrics.values():
+            v.zero_()
+
+        for micro_batch_idx, micro_batch in enumerate(micro_batches):
+            with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
+                loss, step_metrics = self._compute_microbatch_loss(micro_batch)
+                micro_tokens = padding_free_collator.get_num_tokens(micro_batch)
+                weight = micro_tokens / total_tokens
+                for k, v in step_metrics.items():
+                    self._metrics[k] += v.detach() * micro_tokens
+                (loss * weight).backward()
+
+        for model in self.model_parts:
+            model.finalize_grad_reduce()
+
+        for model in self.model_parts:
+            model.post_batch(dry_run=dry_run)
+
+        if dry_run:
+            for model in self.model_parts:
+                model.reset_auxiliary_metrics()
+            torch.cuda.empty_cache()
+            set_global_arg("dry_run_done", True)
+            return
+
+        metric_keys = sorted(self._metrics.keys())
+        local_sums_list = [torch.tensor(total_tokens, dtype=torch.float32, device=device)] + [
+            self._metrics[k] for k in metric_keys
+        ]
+        local_sums = torch.stack(local_sums_list)
+        dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+
+        global_total_tokens = local_sums[0].clamp_min(1.0)
+        global_metrics = {k: local_sums[i + 1] / global_total_tokens for i, k in enumerate(metric_keys)}
+
+        self.record_metric("train/loss", global_metrics["loss"].item(), reduce_type=None)
+        self.record_metric("train/logps_chosen", global_metrics["chosen_logps"].item(), reduce_type=None)
+        self.record_metric("train/logps_rejected", global_metrics["rejected_logps"].item(), reduce_type=None)
+        token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
+        assert token_count is not None
+        self.record_metric("train/token_count", token_count, reduce_type=None)
+
+        if self.dpo_config.loss_type.computes_reward_metrics:
+            margin = global_metrics["chosen_rewards"] - global_metrics["rejected_rewards"]
+            self.record_metric("train/rewards_chosen", global_metrics["chosen_rewards"].item(), reduce_type=None)
+            self.record_metric("train/rewards_rejected", global_metrics["rejected_rewards"].item(), reduce_type=None)
+            self.record_metric(
+                "train/rewards_average",
+                ((global_metrics["chosen_rewards"] + global_metrics["rejected_rewards"]) / 2).item(),
+                reduce_type=None,
+            )
+            self.record_metric("train/rewards_accuracy", global_metrics["accuracy"].item(), reduce_type=None)
+            self.record_metric("train/rewards_margin", margin.item(), reduce_type=None)
+
+        if "aux_loss" in global_metrics:
+            self.record_metric("train/aux_loss", global_metrics["aux_loss"].item(), reduce_type=None)
+
+        for model in self.model_parts:
+            for metric_name, (metric_val, reduction) in model.compute_auxiliary_metrics(reset=True).items():
+                merge_strategy = MetricMergeStrategy.warn
+                if reduction in (ReduceType.sum, ReduceType.mean):
+                    merge_strategy = MetricMergeStrategy.sum
+                elif reduction == ReduceType.max:
+                    merge_strategy = MetricMergeStrategy.max
+                self.record_metric(
+                    metric_name,
+                    metric_val,
+                    reduction,
+                    namespace="train",
+                    merge_strategy=merge_strategy,
+                )
 
 
 class GRPOTrainModule(TransformerTrainModule):

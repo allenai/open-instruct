@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import logging
 import os
@@ -24,12 +25,9 @@ from queue import Empty
 from typing import Any, Literal
 
 import numpy as np
-import ray
 import torch
-import vllm
 from datasets import Dataset
 from olmo_core.data import data_loader
-from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
@@ -43,15 +41,69 @@ from open_instruct.dataset_transformation import (
     TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.environments.tools.utils import EnvStatistics
 from open_instruct.model_utils import Batch
 from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout_metadata, save_rollouts_to_disk
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics
 
+try:
+    from open_instruct.environments.tools.utils import EnvStatistics
+except Exception:
+
+    class EnvStatistics:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_rollout(self, *args, **kwargs):
+            pass
+
+        def compute_metrics(self) -> dict[str, float]:
+            return {}
+
 logger = logging.getLogger(__name__)
 
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
+_TOKEN_TENSOR_SUFFIXES = ("input_ids", "labels", "attention_mask", "position_ids")
+
+
+def _prepare_example_for_collator(example: dict[str, Any]) -> dict[str, Any]:
+    """Convert token columns to tensors without using datasets' torch formatter."""
+    prepared: dict[str, Any] = {}
+    for key, value in example.items():
+        if isinstance(value, torch.Tensor):
+            prepared[key] = value
+        elif isinstance(value, np.generic):
+            prepared[key] = value.item()
+        elif key.endswith(_TOKEN_TENSOR_SUFFIXES) and isinstance(value, np.ndarray):
+            prepared[key] = torch.from_numpy(value).to(torch.long)
+        elif key.endswith(_TOKEN_TENSOR_SUFFIXES) and isinstance(value, list):
+            prepared[key] = torch.tensor(value, dtype=torch.long)
+        else:
+            prepared[key] = value
+    return prepared
+
+
+class _MissingRay:
+    def remote(self, *args, **kwargs):
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+        return lambda wrapped: wrapped
+
+    def __getattr__(self, name: str):
+        raise ImportError("Ray is required for streaming/RL data loading, but it is not installed.")
+
+
+try:
+    import ray
+    from ray.util import queue as ray_queue
+except ModuleNotFoundError:
+    ray = _MissingRay()
+    ray_queue = None
+
+try:
+    import vllm
+except ModuleNotFoundError:
+    vllm = None
 
 
 def to_device(batch: dict[str, Any], device: torch.device | None) -> dict[str, Any]:
@@ -130,7 +182,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
                 "Dataset must have an 'index' column. This is typically added by get_cached_dataset_tulu(). "
                 "If using a custom dataset, add it with: dataset.add_column('index', range(len(dataset)))"
             )
-        self._full_dataset = dataset
+        self._full_dataset = dataset.with_format(None)
         self.seed = seed
         self._batch_size = batch_size
         if batch_size < dp_world_size:
@@ -189,7 +241,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
                     continue
                 examples = []
                 for i in range(offset, offset + batch_size):
-                    example = self.dataset[i]
+                    example = _prepare_example_for_collator(self.dataset[i])
                     examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
                 batch = to_device(self._collator(examples), self._device) | {"is_padding": batch_idx >= num_real}
                 offset += batch_size
@@ -199,7 +251,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         start_example = self.batches_processed * self._per_rank_batch_size
         batch_examples: list[dict[str, Any]] = []
         for i in range(start_example, self.effective_size):
-            example = self.dataset[i]
+            example = _prepare_example_for_collator(self.dataset[i])
             batch_examples.append(example | {"prompt_id": f"{self._epoch}_{example['index']}"})
             if len(batch_examples) == self._per_rank_batch_size:
                 all_examples = self._overflow + batch_examples
@@ -311,10 +363,14 @@ class HFDataLoader(data_loader.DataLoaderBase):
         max_seq_length = self._collator.max_seq_length
         column_names = self._full_dataset.column_names
         subset = self._full_dataset.select(all_indices.tolist())
+        subset_for_lengths = subset.with_format(None)
         if "chosen_input_ids" in column_names:
-            lengths = [[len(c), len(r)] for c, r in zip(subset["chosen_input_ids"], subset["rejected_input_ids"])]
+            lengths = [
+                [len(c), len(r)]
+                for c, r in zip(subset_for_lengths["chosen_input_ids"], subset_for_lengths["rejected_input_ids"])
+            ]
         else:
-            lengths = [[len(x)] for x in subset["input_ids"]]
+            lengths = [[len(x)] for x in subset_for_lengths["input_ids"]]
 
         num_streams = len(lengths[0])
         batches: list[list[int]] = []
@@ -369,7 +425,7 @@ class HFDataLoader(data_loader.DataLoaderBase):
         forward and backward pass before training officially starts.
         """
         num_examples = min(self._per_rank_batch_size, len(self.dataset))
-        examples = [self.dataset[i] for i in range(num_examples)]
+        examples = [_prepare_example_for_collator(self.dataset[i]) for i in range(num_examples)]
         return to_device(self._collator(examples), self._device)
 
     def global_num_tokens_in_batch(self, batch: dict[str, Any]) -> int:

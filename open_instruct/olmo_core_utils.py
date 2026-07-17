@@ -7,7 +7,6 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import accelerate
 import torch
 import torch.distributed as dist
 import transformers
@@ -32,6 +31,11 @@ from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
+
+try:
+    import accelerate
+except ModuleNotFoundError:
+    accelerate = None
 
 
 @dataclass
@@ -454,6 +458,8 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     state-dict converter, and verifies the converted keys exactly cover the HF
     model's expected parameters. Raises before any training starts.
     """
+    if accelerate is None:
+        raise RuntimeError("accelerate is required for HuggingFace export validation.")
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
@@ -492,6 +498,8 @@ def save_state_dict_as_hf(
     an HF model with those weights, and writes the model + tokenizer to
     ``save_dir``.
     """
+    if accelerate is None:
+        raise RuntimeError("accelerate is required for HuggingFace export.")
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
