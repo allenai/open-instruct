@@ -90,6 +90,9 @@ class _FakeModalExceptions:
     class SandboxTimeoutError(Exception):
         pass
 
+    class RemoteError(Exception):
+        pass
+
 
 class _FakeModal:
     """Test double for the ``modal`` module.
@@ -104,7 +107,8 @@ class _FakeModal:
     def __init__(self):
         self.sandboxes: list[_FakeSandbox] = []
         self.lookup_calls: list[tuple[str, bool, str | None]] = []
-        self.from_registry_calls: list[str] = []
+        self.from_registry_calls: list[tuple[str, str | None]] = []
+        self.create_failures: dict[str, Exception] = {}  # image value -> exception
         self._scripted: list[tuple[str, object]] = []
         fake = self
 
@@ -116,13 +120,16 @@ class _FakeModal:
 
         class Image:
             @staticmethod
-            def from_registry(tag: str):
-                fake.from_registry_calls.append(tag)
-                return f"image:{tag}"
+            def from_registry(tag: str, add_python: str | None = None):
+                fake.from_registry_calls.append((tag, add_python))
+                return f"image:{tag}:python={add_python}"
 
         class Sandbox:
             @staticmethod
             def create(**kwargs):
+                failure = fake.create_failures.get(kwargs.get("image"))
+                if failure is not None:
+                    raise failure
                 sandbox = _FakeSandbox(fake, kwargs)
                 fake.sandboxes.append(sandbox)
                 return sandbox
@@ -151,7 +158,9 @@ class ModalBackendTestCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         backends._MODAL_APPS.clear()
+        backends._MODAL_IMAGES_NEEDING_PYTHON.clear()
         self.addCleanup(backends._MODAL_APPS.clear)
+        self.addCleanup(backends._MODAL_IMAGES_NEEDING_PYTHON.clear)
         self.addCleanup(_MODAL_LIVE_SANDBOXES.clear)
 
     def _started_backend(self, **kwargs) -> ModalBackend:
@@ -209,10 +218,10 @@ class TestStartAndClose(ModalBackendTestCase):
             sandbox_lifetime=1234,
         )
         self.assertEqual(self.fake.lookup_calls, [("my-app", True, "staging")])
-        self.assertEqual(self.fake.from_registry_calls, ["ubuntu:22.04"])
+        self.assertEqual(self.fake.from_registry_calls, [("ubuntu:22.04", None)])
         sandbox = self.fake.sandboxes[0]
         self.assertEqual(sandbox.create_kwargs["app"], "app:my-app")
-        self.assertEqual(sandbox.create_kwargs["image"], "image:ubuntu:22.04")
+        self.assertEqual(sandbox.create_kwargs["image"], "image:ubuntu:22.04:python=None")
         self.assertEqual(sandbox.create_kwargs["timeout"], 1234)
         self.assertEqual(sandbox.create_kwargs["cpu"], 2.0)
         self.assertEqual(sandbox.create_kwargs["memory"], 2048)
@@ -251,6 +260,35 @@ class TestStartAndClose(ModalBackendTestCase):
         self.assertTrue(sandbox.terminated)
         self.assertNotIn(sandbox, _MODAL_LIVE_SANDBOXES)
         self.assertIsNone(backend._sandbox)
+
+    def test_start_falls_back_to_add_python_on_image_build_failure(self):
+        # The plain (no add_python) build fails, mimicking an image with no
+        # Python/pip; the add_python build succeeds.
+        self.fake.create_failures["image:no-python-img:latest:python=None"] = _FakeModalExceptions.RemoteError(
+            "Image build for im-123 failed. See build logs for more details."
+        )
+        backend = self._started_backend(image="no-python-img:latest")
+        self.assertEqual(
+            self.fake.from_registry_calls, [("no-python-img:latest", None), ("no-python-img:latest", "3.12")]
+        )
+        self.assertEqual(self.fake.sandboxes[0].create_kwargs["image"], "image:no-python-img:latest:python=3.12")
+        self.assertIn("no-python-img:latest", backends._MODAL_IMAGES_NEEDING_PYTHON)
+        backend.close()
+
+        # A second backend for the same tag skips the doomed plain attempt.
+        self.fake.from_registry_calls.clear()
+        backend2 = self._started_backend(image="no-python-img:latest")
+        self.assertEqual(self.fake.from_registry_calls, [("no-python-img:latest", "3.12")])
+        backend2.close()
+
+    def test_start_propagates_non_build_remote_errors(self):
+        self.fake.create_failures["image:ubuntu:22.04:python=None"] = _FakeModalExceptions.RemoteError(
+            "workspace has reached its container limit"
+        )
+        backend = ModalBackend(image="ubuntu:22.04")
+        with self.assertRaisesRegex(_FakeModalExceptions.RemoteError, "container limit"):
+            backend.start()
+        self.assertNotIn("ubuntu:22.04", backends._MODAL_IMAGES_NEEDING_PYTHON)
 
     def test_start_after_start_replaces_sandbox(self):
         backend = self._started_backend()

@@ -810,6 +810,12 @@ def _modal_lookup_app(app_name: str, environment_name: str | None):
     return _MODAL_APPS[key]
 
 
+# Image tags whose plain ``from_registry`` build failed because the image has
+# no Python/pip; sandboxes for these are created with ``add_python`` instead
+# (see ModalBackend.start). Remembered per-process to skip the doomed attempt.
+_MODAL_IMAGES_NEEDING_PYTHON: set = set()
+
+
 _MEM_LIMIT_UNIT_MIB = {"b": 1 / (1024 * 1024), "k": 1 / 1024, "m": 1, "g": 1024, "t": 1024 * 1024}
 
 
@@ -914,13 +920,35 @@ class ModalBackend(SandboxBackend):
             self._sandbox_lifetime,
         )
         start_time = time.perf_counter()
-        self._sandbox = modal.Sandbox.create(
-            app=_modal_lookup_app(self._app_name, self._environment_name),
-            image=modal.Image.from_registry(self._image),
-            timeout=self._sandbox_lifetime,
-            cpu=self._cpu,
-            memory=self._memory_mib,
-        )
+        app = _modal_lookup_app(self._app_name, self._environment_name)
+        # ``Image.from_registry`` requires Python + pip inside the image and
+        # its build fails otherwise (common for task images). Try the image
+        # as-is first so images that ship their own Python aren't shadowed by
+        # a standalone one, then fall back to ``add_python``.
+        add_python = os.getenv("SWERL_MODAL_ADD_PYTHON_VERSION", "3.12")
+        attempts = [add_python] if self._image in _MODAL_IMAGES_NEEDING_PYTHON else [None, add_python]
+        for attempt_add_python in attempts:
+            try:
+                self._sandbox = modal.Sandbox.create(
+                    app=app,
+                    image=modal.Image.from_registry(self._image, add_python=attempt_add_python),
+                    timeout=self._sandbox_lifetime,
+                    cpu=self._cpu,
+                    memory=self._memory_mib,
+                )
+                break
+            except modal.exception.RemoteError as e:
+                if attempt_add_python is None and "image build" in str(e).lower():
+                    logger.warning(
+                        "Modal image build failed for %s (likely no Python/pip in the image): %s. "
+                        "Retrying with add_python=%s.",
+                        self._image,
+                        e,
+                        add_python,
+                    )
+                    _MODAL_IMAGES_NEEDING_PYTHON.add(self._image)
+                    continue
+                raise
         _MODAL_LIVE_SANDBOXES.add(self._sandbox)
         logger.info("Modal sandbox started: %s (%.3fs)", self._sandbox.object_id, time.perf_counter() - start_time)
 
