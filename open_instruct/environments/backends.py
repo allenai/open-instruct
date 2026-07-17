@@ -14,6 +14,7 @@ import subprocess
 import tarfile
 import time
 import uuid
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -24,6 +25,12 @@ try:
 except ImportError:
     # Modal is an optional dependency, only needed for ModalBackend.
     modal = None
+
+if modal is not None:
+    # Modal warns on every blocking call made from an async context (the env
+    # actors run an asyncio loop), which floods training logs at RL scale.
+    # The blocking usage is deliberate: SandboxBackend is a sync interface.
+    warnings.filterwarnings("ignore", category=modal.exception.AsyncUsageWarning)
 
 from open_instruct import logger_utils
 
