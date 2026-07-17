@@ -6,13 +6,15 @@ GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-1}"
 COMPILE_MODEL="${COMPILE_MODEL:-true}"
 DATASET_VARIANT="${DATASET_VARIANT:-full}"
 LEARNING_RATE="${LEARNING_RATE:-4e-5}"
+MAX_RETRIES="${MAX_RETRIES:-0}"
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/olmo-instruct}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-${DATASET_VARIANT}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 PROJECT_ROOT="/weka/oe-adapt-default/jacobm/olmoe3/post-training"
 MODEL_PATH="${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-base-olmo"
-DATASET_PATH="${DATASET_PATH:-${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker/${DATASET_VARIANT}}"
+DATASET_PATH="${DATASET_PATH:-${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker-terminal-eos-v2/${DATASET_VARIANT}}"
 OUTPUT_DIR="${PROJECT_ROOT}/checkpoints/${RUN_NAME}"
 
 torchrun_args=(--nproc_per_node=8)
@@ -31,9 +33,9 @@ uv run python mason.py \
     --task_name "$EXP_NAME" \
     --description "$RUN_NAME" \
     --cluster ai2/holmes \
-    --workspace ai2/olmo-instruct \
+    --workspace "$BEAKER_WORKSPACE" \
     --priority urgent \
-    --max_retries 5 \
+    --max_retries "$MAX_RETRIES" \
     --timeout 24h \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
@@ -48,15 +50,19 @@ uv run python mason.py \
     --env NVSHMEM_ENABLE_NIC_PE_MAPPING=0 \
     --env NVSHMEM_HCA_LIST= \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env PYTHONPATH="${PROJECT_ROOT}/open-instruct" \
+    --env DOCUMENT_BOUNDARY_START_TOKEN='<|im_start|>' \
     -- torchrun \
     "${torchrun_args[@]}" \
-    open_instruct/olmo_core_finetune.py \
+    "${PROJECT_ROOT}/open-instruct/open_instruct/olmo_core_finetune.py" \
     --run_name "$RUN_NAME" \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_PATH" \
     --config_name Qwen/Qwen3-30B-A3B-Base \
     --tokenizer_name_or_path Qwen/Qwen3-30B-A3B \
     --pretokenized_dataset_path "$DATASET_PATH" \
+    --ensure_terminal_eos_after_truncation true \
+    --document_boundary_start_token \$DOCUMENT_BOUNDARY_START_TOKEN \
     --output_dir "$OUTPUT_DIR" \
     --attn_implementation flash_4 \
     --max_seq_length 32768 \

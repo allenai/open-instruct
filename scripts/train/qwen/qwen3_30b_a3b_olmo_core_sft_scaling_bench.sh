@@ -18,7 +18,7 @@ EXP_NAME="qwen3-30b-a3b-olmo-core-sft-32k-bench-${DATASET_VARIANT}-${NUM_NODES}n
 RUN_NAME="${EXP_NAME}-$(date +%Y%m%d-%H%M%S)"
 PROJECT_ROOT="/weka/oe-adapt-default/jacobm/olmoe3/post-training"
 MODEL_PATH="${PROJECT_ROOT}/checkpoints/qwen3-30b-a3b-base-olmo"
-DATASET_PATH="${DATASET_PATH:-${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker/${DATASET_VARIANT}}"
+DATASET_PATH="${DATASET_PATH:-${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker-terminal-eos-v2/${DATASET_VARIANT}}"
 OUTPUT_DIR="${PROJECT_ROOT}/checkpoints/benchmarks/${RUN_NAME}"
 
 torchrun_args=(--nproc_per_node=8)
@@ -53,6 +53,7 @@ uv run python mason.py \
     --env NVSHMEM_HCA_LIST= \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env PYTHONPATH="${PROJECT_ROOT}/open-instruct" \
+    --env DOCUMENT_BOUNDARY_START_TOKEN='<|im_start|>' \
     -- torchrun \
     "${torchrun_args[@]}" \
     "${PROJECT_ROOT}/open-instruct/open_instruct/olmo_core_finetune.py" \
@@ -62,6 +63,8 @@ uv run python mason.py \
     --config_name Qwen/Qwen3-30B-A3B-Base \
     --tokenizer_name_or_path Qwen/Qwen3-30B-A3B \
     --pretokenized_dataset_path "$DATASET_PATH" \
+    --ensure_terminal_eos_after_truncation true \
+    --document_boundary_start_token \$DOCUMENT_BOUNDARY_START_TOKEN \
     --output_dir "$OUTPUT_DIR" \
     --attn_implementation flash_4 \
     --max_seq_length 32768 \

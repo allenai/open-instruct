@@ -1173,8 +1173,19 @@ def mask_labels(
             break
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
-    """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
+def sft_tulu_tokenize_and_truncate_v1(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+    ensure_terminal_eos_after_truncation: bool = False,
+):
+    """Tokenize an SFT conversation and mask non-assistant labels.
+
+    ``ensure_terminal_eos_after_truncation`` is opt-in because replacing the
+    final truncated token changes existing tokenized datasets. It is useful
+    when the tokenizer's EOS token also appears between chat turns: preserving
+    one terminal EOS lets the packed-data loader distinguish record boundaries.
+    """
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
@@ -1190,6 +1201,14 @@ def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrained
     )
     assert isinstance(input_ids_result, torch.Tensor)
     input_ids = input_ids_result
+    if ensure_terminal_eos_after_truncation:
+        if tokenizer.eos_token_id is None:
+            raise ValueError("ensure_terminal_eos_after_truncation requires a tokenizer EOS token")
+        if input_ids.numel() == 0:
+            raise ValueError("Cannot ensure a terminal EOS on an empty tokenized conversation")
+        if input_ids[0, -1].item() != tokenizer.eos_token_id:
+            input_ids = input_ids.clone()
+            input_ids[:, -1] = tokenizer.eos_token_id
     labels = input_ids.clone()
     mask_labels(labels, messages, tokenizer, max_seq_length, lambda idx, msg, _msgs: msg["role"] != "assistant")
     attention_mask = torch.ones_like(input_ids)
