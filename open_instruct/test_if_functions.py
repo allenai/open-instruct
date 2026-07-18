@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateForbiddenWords(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("absent", "this has a badge", ["bad"], True),
+            ("present", "this is bad", ["bad"], False),
+            ("case_insensitive", "BAD day", ["bad"], False),
+            ("multiple_ok", "all good", ["bad", "evil"], True),
+            ("regex_meta_safe", "costs $5", ["$5"], False),
+        ]
+    )
+    def test_validate_forbidden_words(self, _name, text, words, expected):
+        self.assertEqual(if_functions.validate_forbidden_words(text, words), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
