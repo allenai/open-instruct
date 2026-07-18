@@ -39,5 +39,18 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateSections(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("numbered_with_intro", "Intro\nSection 1\nHello\nSection 2\nWorld", 2, "Section", True),
+            ("bare_splitter_not_enough", "Intro\nSection\nHello\nSection\nWorld", 2, "Section", False),
+            ("at_least_n", "Section 1\na\nSection 2\nb\nSection 3\nc", 2, "Section", True),
+            ("too_few", "Section 1\nonly one", 2, "Section", False),
+        ]
+    )
+    def test_validate_sections(self, _name, text, n, splitter, expected):
+        self.assertEqual(if_functions.validate_sections(text, n, splitter), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
