@@ -38,7 +38,7 @@ from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import DeepSpeedSequenceParallelConfig, InitProcessGroupKwargs, ParallelismConfig, set_seed
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
@@ -55,7 +55,7 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
-from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening, build_block_diagonal_causal_mask
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
@@ -364,6 +364,7 @@ def _create_scheduler(args: FlatArguments, optimizer, num_training_steps: int):
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
+    attn_implementation = model_utils.detect_hf_attn_implementation()
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -389,7 +390,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             sp_size=args.sequence_parallel_size,
             dp_shard_size=dp_shard_size,
             sp_handler=DeepSpeedSequenceParallelConfig(
-                sp_seq_length_is_variable=True, sp_attn_implementation=model_utils.detect_hf_attn_implementation()
+                sp_seq_length_is_variable=True, sp_attn_implementation=attn_implementation
             ),
         )
 
@@ -524,7 +525,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # HF hub cache concurrently.
     model_path = args.config_name or args.model_name_or_path
     if model_path and accelerator.is_main_process:
-        snapshot_download(model_path, revision=args.model_revision)
+        utils.ensure_hf_repo_cached(model_path, revision=args.model_revision)
     accelerator.wait_for_everyone()
 
     # Load pretrained model and tokenizer
@@ -566,7 +567,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 quantization_config=bnb_config,
                 device_map=device_map,
                 dtype=torch.bfloat16,
-                attn_implementation=model_utils.detect_hf_attn_implementation(),
+                attn_implementation=attn_implementation,
             )
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
@@ -581,7 +582,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                attn_implementation=model_utils.detect_hf_attn_implementation(),
+                attn_implementation=attn_implementation,
                 # liger-kernel specific args
                 fused_linear_cross_entropy=True,
             )
@@ -594,7 +595,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 dtype=torch.bfloat16,
-                attn_implementation=model_utils.detect_hf_attn_implementation(),
+                attn_implementation=attn_implementation,
             )
     else:
         logger.info("Training new model from scratch")
@@ -639,6 +640,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # DataLoaders creation:
     if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
+        if attn_implementation == "sdpa":
+            logger.info("Using an explicit block-diagonal causal mask for SDPA packed-sequence isolation.")
     else:
         base_collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
         if args.sequence_parallel_size > 1:
@@ -790,6 +793,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             active_dataloader = train_dataloader
         for batch in active_dataloader:
             batch = {k: v.to(accelerator.device) if hasattr(v, "to") else v for k, v in batch.items()}
+            packed_token_count = batch["cu_seq_lens_q"][-1] if "cu_seq_lens_q" in batch else None
+            if args.packing and attn_implementation == "sdpa":
+                batch["attention_mask"] = build_block_diagonal_causal_mask(
+                    batch.pop("seq_idx"), dtype=next(model.parameters()).dtype
+                )
+                for key in ("cu_seq_lens_q", "cu_seq_lens_k", "max_length_q", "max_length_k"):
+                    batch.pop(key, None)
             if args.sequence_parallel_size > 1 and "shift_labels" not in batch:
                 raise ValueError(
                     "`shift_labels` not found in batch with sequence parallelism enabled. "
@@ -798,7 +808,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             if "shift_labels" in batch and "labels" not in batch:
                 batch["labels"] = batch["shift_labels"]
             pred_tokens_in_batch = (batch["labels"] != -100).sum()
-            if "attention_mask" in batch:
+            if packed_token_count is not None:
+                tokens_in_batch = packed_token_count
+                total_token_including_padding += tokens_in_batch
+            elif "attention_mask" in batch:
                 tokens_in_batch = batch["attention_mask"].sum()
                 total_token_including_padding += batch["attention_mask"].numel()
             elif "position_ids" in batch:
@@ -825,7 +838,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 del outputs
 
                 if args.sequence_parallel_size > 1:
-                    sp_group = accelerator.torch_device_mesh["sp"].get_group()
+                    sp_group = deepspeed.utils.groups._get_sequence_parallel_group()
                     losses_per_rank = torch.distributed.nn.functional.all_gather(loss.unsqueeze(0), group=sp_group)
                     labels_for_counting = batch["shift_labels"]
                     good_tokens = (labels_for_counting != -100).view(-1).sum().float()
@@ -900,10 +913,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "per_device_tps_including_padding": total_tokens_including_padding
                         / accelerator.num_processes
                         / (time.perf_counter() - start_time),
-                        "reserved_mem_GiB": torch.cuda.max_memory_reserved(device=torch.cuda.current_device()) / 2**30,
-                        "allocated_mem_GiB": torch.cuda.max_memory_allocated(device=torch.cuda.current_device())
-                        / 2**30,
                     }
+                    metrics_to_log.update(utils.get_device_memory_metrics(accelerator.device))
 
                     # [Loss Reporting]
                     #

@@ -31,6 +31,7 @@ from typing import Any, TypedDict
 import aiohttp
 import backoff
 import deepspeed
+import httpx
 import openai
 import ray
 import torch
@@ -51,6 +52,21 @@ from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
+
+try:
+    from vllm_ascend.distributed.weight_transfer.hccl_engine import (
+        HCCLTrainerSendWeightsArgs,
+        HCCLWeightTransferEngine,
+    )
+    from vllm_ascend.distributed.weight_transfer.npu_ipc_engine import (
+        NPUIPCTrainerSendWeightsArgs,
+        NPUIPCWeightTransferEngine,
+    )
+except ImportError:
+    HCCLTrainerSendWeightsArgs = None
+    HCCLWeightTransferEngine = None
+    NPUIPCTrainerSendWeightsArgs = None
+    NPUIPCWeightTransferEngine = None
 
 from open_instruct import logger_utils, utils
 from open_instruct.data_types import (
@@ -97,6 +113,37 @@ INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
 
 
+def _get_collective_weight_transfer():
+    if utils.get_accelerator_type() == "npu":
+        if HCCLTrainerSendWeightsArgs is None or HCCLWeightTransferEngine is None:
+            raise RuntimeError("vLLM-Ascend HCCL weight transfer is unavailable")
+        return HCCLTrainerSendWeightsArgs, HCCLWeightTransferEngine
+    return NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
+
+
+def _get_ipc_weight_transfer():
+    if utils.get_accelerator_type() == "npu":
+        if NPUIPCTrainerSendWeightsArgs is None or NPUIPCWeightTransferEngine is None:
+            raise RuntimeError("vLLM-Ascend NPU IPC weight transfer is unavailable")
+        return NPUIPCTrainerSendWeightsArgs, NPUIPCWeightTransferEngine
+    return IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
+
+
+def _get_device_name() -> str | None:
+    return utils.get_current_device_name()
+
+
+def _get_kv_cache_spec_as_dict(worker) -> dict:
+    """Normalize backend-specific mapping subclasses before vLLM serializes them."""
+    return dict(worker.get_kv_cache_spec())
+
+
+def _get_kv_cache_spec_rpc_target():
+    if utils.get_accelerator_type() == "npu":
+        return _get_kv_cache_spec_as_dict
+    return "get_kv_cache_spec"
+
+
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
     model_config = vllm_config.model_config
     hidden_size = model_config.get_hidden_size()
@@ -119,7 +166,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
         head_dim=model_config.get_head_size(),
         sliding_window=sliding_window,
         num_sliding_window_layers=num_sliding_window_layers,
-        device_name=utils.get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
+        device_name=_get_device_name(),
     )
 
 
@@ -593,7 +640,7 @@ class LLMRayActor:
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
-        self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
+        self._setup_accelerator_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
@@ -660,18 +707,20 @@ class LLMRayActor:
             stop_sequences=self._tool_stop_sequences,
         )
 
-    def _setup_gpu_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
+    def _setup_accelerator_visibility(self, noset_visible_devices: bool, distributed_executor_backend: str) -> None:
         # a hack to make the script work.
         # stop ray from manipulating *_VISIBLE_DEVICES
         # at the top-level when the distributed_executor_backend is ray.
         if distributed_executor_backend == "ray":
+            os.environ.pop("ASCEND_RT_VISIBLE_DEVICES", None)
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             os.environ.pop("ROCR_VISIBLE_DEVICES", None)
         elif noset_visible_devices:
-            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
-            # when the distributed_executor_backend is not ray and
-            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
-            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in ray.get_gpu_ids())
+            resource = utils.get_ray_accelerator_resource()
+            if resource is not None:
+                visible_devices_env = "ASCEND_RT_VISIBLE_DEVICES" if resource == "NPU" else "CUDA_VISIBLE_DEVICES"
+                accelerator_ids = ray.get_runtime_context().get_accelerator_ids().get(resource, [])
+                os.environ[visible_devices_env] = ",".join(str(device_id) for device_id in accelerator_ids)
 
     def _setup_and_start_async_engine(self, args, bundle_indices, kwargs) -> None:
         num_gpus = kwargs.pop("num_gpus")
@@ -743,7 +792,9 @@ class LLMRayActor:
 
     def _init_openai_client(self) -> None:
         base_url = f"http://127.0.0.1:{self.server_port}/v1"
-        self.client = openai.AsyncOpenAI(base_url=base_url, api_key="EMPTY", timeout=3600)
+        self.client = openai.AsyncOpenAI(
+            base_url=base_url, api_key="EMPTY", timeout=3600, http_client=httpx.AsyncClient(trust_env=False)
+        )
         self.model_name = self.llm_engine.vllm_config.model_config.model
 
         logger.info(f"Waiting for vLLM OpenAI API server to be ready at {base_url}")
@@ -793,11 +844,28 @@ class LLMRayActor:
 
     def update_weights(self, update_info: WeightUpdateRPCArgs, model_step: int | None = None) -> None:
         # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
-        # `dict(update_info=...)` and no model_step; NCCL callers pass model_step explicitly.
+        # `dict(update_info=...)` and no model_step; collective callers pass model_step explicitly.
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        has_start = hasattr(self.llm_engine, "start_weight_update")
+        has_finish = hasattr(self.llm_engine, "finish_weight_update")
+        if has_start != has_finish:
+            raise RuntimeError("vLLM weight update lifecycle is incomplete")
+
+        if has_start:
+            self._run_async(self.llm_engine.start_weight_update(is_checkpoint_format=True))
+            try:
+                self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+            except Exception:
+                try:
+                    self._run_async(self.llm_engine.finish_weight_update())
+                except Exception:
+                    logger.exception("Failed to close vLLM weight update after an update error")
+                raise
+            self._run_async(self.llm_engine.finish_weight_update())
+        else:
+            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
         if model_step is not None:
             self.current_model_step = model_step
 
@@ -825,11 +893,13 @@ class LLMRayActor:
 
     def get_kv_cache_info(self) -> int:
         """Get KV cache max concurrency from the vLLM engine."""
-        kv_cache_specs = self._run_async(self.llm_engine.collective_rpc("get_kv_cache_spec"))
+        kv_cache_specs = self._run_async(self.llm_engine.collective_rpc(_get_kv_cache_spec_rpc_target()))
 
         vllm_config = self.llm_engine.vllm_config
         gpu_memory_utilization = vllm_config.cache_config.gpu_memory_utilization
-        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        device_type = utils.get_accelerator_type()
+        device_module = utils.get_accelerator_module(torch.device(device_type))
+        total_gpu_memory = device_module.get_device_properties(0).total_memory
         available_memory = int(gpu_memory_utilization * total_gpu_memory)
 
         kv_cache_groups = kv_cache_utils.get_kv_cache_groups(vllm_config, kv_cache_specs[0])
@@ -1224,17 +1294,19 @@ def create_vllm_engines(
     use_hybrid_engine = pg is not None
     if tensor_parallel_size != 1 and use_hybrid_engine:
         raise ValueError("tensor_parallel_size > 1 is not supported with single_gpu_mode")
-    # In single_gpu_mode, use 0.5 GPU so we can schedule 2 instances on the same GPUs.
-    # Otherwise, request tensor_parallel_size GPUs so Ray sets CUDA_VISIBLE_DEVICES
-    # correctly for the "mp" distributed executor backend.
+    accelerator_resource = utils.get_ray_accelerator_resource() or "GPU"
+    # In single_gpu_mode, use 0.5 accelerator so we can schedule 2 instances
+    # on the same device. Otherwise request tensor_parallel_size devices.
     num_gpus = 0.5 if use_hybrid_engine and single_gpu_mode else tensor_parallel_size
 
-    logger.info(f"num_gpus: {num_gpus}")
+    logger.info(f"accelerator_resource={accelerator_resource}, amount={num_gpus}")
 
     if not use_hybrid_engine:
         # Create a placement group to ensure that all engines are packed.
-        # Each bundle reserves tensor_parallel_size GPUs for one engine.
-        bundles = [{"GPU": tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)]
+        # Each bundle reserves tensor_parallel_size accelerators for one engine.
+        bundles = [
+            {accelerator_resource: tensor_parallel_size, "CPU": tensor_parallel_size} for _ in range(num_engines)
+        ]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
@@ -1257,7 +1329,7 @@ def create_vllm_engines(
             ray.remote(LLMRayActor)
             .options(
                 num_cpus=num_gpus,
-                num_gpus=num_gpus,
+                **utils.get_ray_accelerator_options(num_gpus),
                 scheduling_strategy=scheduling_strategy,
                 runtime_env=ray.runtime_env.RuntimeEnv(
                     env_vars={
@@ -1373,9 +1445,13 @@ def _broadcast_weights_ipc(
     with ctx:
         if is_rank_0:
             mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
+            trainer_args_cls, weight_transfer_engine = _get_ipc_weight_transfer()
             for engine in vllm_engines:
-                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
-                IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+                if utils.get_accelerator_type() == "npu":
+                    trainer_args = trainer_args_cls(send_mode="ray", llm_handle=engine)
+                else:
+                    trainer_args = trainer_args_cls(mode="ray", llm_handle=engine)
+                weight_transfer_engine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
 
@@ -1393,8 +1469,8 @@ def broadcast_weights_to_vllm(
     Must be called on ALL ranks when using DeepSpeed stage 3 or FSDP,
     since gathering is a collective operation. Only rank 0 sends weights.
 
-    When model_update_group is None, uses IPC backend (single GPU mode).
-    Otherwise uses NCCL backend.
+    When model_update_group is None, uses IPC backend (single-device mode).
+    Otherwise uses the accelerator's collective backend.
 
     `model_step` is stamped onto each vLLM engine as part of the weight-update RPC,
     so no separate `set_model_step` call is needed.
@@ -1411,7 +1487,8 @@ def broadcast_weights_to_vllm(
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     use_packed = False
-    trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=use_packed)
+    trainer_args_cls, weight_transfer_engine = _get_collective_weight_transfer()
+    trainer_args = trainer_args_cls(group=model_update_group, packed=use_packed)
 
     if isinstance(model, FSDPModule):
         if not fsdp_submodules:
@@ -1430,7 +1507,7 @@ def broadcast_weights_to_vllm(
         # memory access (their `.contiguous().clone()` produces a buffer with global
         # stride backed by only the local shard).
         model.unshard()
-        torch.cuda.synchronize()
+        utils.synchronize_accelerator()
         try:
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
@@ -1441,7 +1518,7 @@ def broadcast_weights_to_vllm(
                 refs = [
                     engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines
                 ]
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+                weight_transfer_engine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             else:
                 refs = []
         finally:
@@ -1475,6 +1552,6 @@ def broadcast_weights_to_vllm(
         with ctx:
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+                weight_transfer_engine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
 
     return refs

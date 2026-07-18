@@ -70,6 +70,7 @@ nav:
   - Overview: index.md
   - Get Started:
     - get_started/installation.md
+    - get_started/npu.md
     - get_started/ai2_internal_setup.md
   - Models:
     - olmo3.md
