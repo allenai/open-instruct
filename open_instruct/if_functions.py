@@ -365,10 +365,19 @@ def validate_choice(text: str, options: list) -> bool:
 # Minimum Number Highlighted Section: Highlight at least {N} sections in your answer with markdown, i.e. *highlighted
 # section*
 def validate_highlighted_sections(text: str, N: int) -> bool:
-    pattern = r"\*(.*?)\*"
-    matches = re.findall(pattern, text)
+    """Count non-empty *single* and **double** markdown highlights (IFEvalG).
 
-    return len(matches) >= N
+    A naive ``*(.*?) *`` pattern treats ``****`` as two empty highlights and
+    over-counts; require non-empty content between the markers.
+    """
+    num_highlights = 0
+    for highlight in re.findall(r"\*[^\n\*]*\*", text):
+        if highlight.strip("*").strip():
+            num_highlights += 1
+    for highlight in re.findall(r"\*\*[^\n\*]*\*\*", text):
+        if highlight.strip("*").strip():
+            num_highlights += 1
+    return num_highlights >= N
 
 
 # Multiple Sections: Your response must have {N} sections. Mark the beginning of each section with {section splitter} X.

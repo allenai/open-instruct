@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateHighlightedSections(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("single_stars", "*one* *two*", 2, True),
+            ("double_star_counts", "**bold**", 1, True),
+            ("empty_stars_not_highlight", "****", 1, False),
+            ("plain_text", "no marks", 1, False),
+            ("single_ok", "*a*", 1, True),
+        ]
+    )
+    def test_validate_highlighted_sections(self, _name, text, n, expected):
+        self.assertEqual(if_functions.validate_highlighted_sections(text, n), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
