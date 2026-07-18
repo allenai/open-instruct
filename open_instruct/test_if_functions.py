@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateEnd(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("exact", "Done.", "Done.", True),
+            ("trailing_newline", "Done.\n", "Done.", True),
+            ("case", "done.", "Done.", True),
+            ("wrapped_quotes", '"Done."', "Done.", True),
+            ("missing", "Almost Done", "Done.", False),
+        ]
+    )
+    def test_validate_end(self, _name, text, phrase, expected):
+        self.assertEqual(if_functions.validate_end(text, phrase), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
