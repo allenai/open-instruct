@@ -24,5 +24,28 @@ class TestStripString(unittest.TestCase):
         self.assertEqual(result, expected_output)
 
 
+class TestLastBoxedOnlyString(unittest.TestCase):
+    def test_brace_form(self):
+        self.assertEqual(math_utils.last_boxed_only_string(r"ans \boxed{42}"), r"\boxed{42}")
+
+    def test_space_form(self):
+        self.assertEqual(math_utils.last_boxed_only_string(r"ans \boxed 7$."), r"\boxed 7")
+
+    def test_earlier_space_mention_does_not_override_later_brace(self):
+        s = r"Hint: write \boxed as a command. The answer is \boxed{42}."
+        self.assertEqual(math_utils.last_boxed_only_string(s), r"\boxed{42}")
+
+    def test_last_space_wins_over_earlier_brace(self):
+        s = r"first \boxed{1} then \boxed 2$ done"
+        self.assertEqual(math_utils.last_boxed_only_string(s), r"\boxed 2")
+
+    def test_nested_braces(self):
+        s = r"\boxed{\frac{1}{2}}"
+        self.assertEqual(math_utils.last_boxed_only_string(s), r"\boxed{\frac{1}{2}}")
+
+    def test_missing_returns_none(self):
+        self.assertIsNone(math_utils.last_boxed_only_string("no box here"))
+
+
 if __name__ == "__main__":
     unittest.main()
