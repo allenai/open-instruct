@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateQuotation(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("wrapped", '"hello"', True),
+            ("lone_quote", '"', False),
+            ("empty_pair", '""', False),
+            ("unquoted", "hello", False),
+            ("trailing_space", '  "ok"  ', True),
+        ]
+    )
+    def test_validate_quotation(self, _name, text, expected):
+        self.assertEqual(if_functions.validate_quotation(text), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

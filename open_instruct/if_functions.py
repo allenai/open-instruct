@@ -444,7 +444,9 @@ def validate_end(text: str, end_phrase: str) -> bool:
 
 # Quotation: Wrap your entire response with double quotation marks.
 def validate_quotation(text: str) -> bool:
-    return bool(text.startswith('"') and text.endswith('"'))
+    """Require wrapping quotes with non-empty content (IFEvalG QuotationChecker)."""
+    text = text.strip()
+    return len(text) > 1 and text[0] == '"' and text[-1] == '"'
 
 
 # No Commas: In your entire response, refrain from the use of any commas.
