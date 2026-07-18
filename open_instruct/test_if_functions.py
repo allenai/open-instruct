@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateTwoResponses(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("ok", "left******right", True),
+            ("empty_left", "******right", False),
+            ("empty_right", "left******", False),
+            ("same", "same******same", False),
+            ("no_sep", "only one", False),
+        ]
+    )
+    def test_validate_two_responses(self, _name, text, expected):
+        self.assertEqual(if_functions.validate_two_responses(text), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
