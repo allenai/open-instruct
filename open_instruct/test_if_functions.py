@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateJsonFormat(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("bare", '{"a": 1}', True),
+            ("fenced_json", '```json\n{"a": 1}\n```', True),
+            ("fenced_plain", '```\n{"a": 1}\n```', True),
+            ("invalid", "not json", False),
+            ("fenced_invalid", "```json\nnot json\n```", False),
+        ]
+    )
+    def test_validate_json_format(self, _name, text, expected):
+        self.assertEqual(if_functions.validate_json_format(text), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
