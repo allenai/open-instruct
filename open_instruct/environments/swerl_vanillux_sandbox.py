@@ -419,6 +419,7 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
                 return self._with_last_step_warning(self._execute_bash(args))
             except SandboxOOMError as e:
                 logger.warning(f"[{self._task_id}] sandbox OOM: {e}")
+                self._close_episode_backend()
                 return StepResult(
                     result=("Sandbox container was killed by the OOM reaper. Ending episode with reward 0."),
                     reward=0.0,
@@ -511,7 +512,19 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
             f"Reward: {reward}"
         )
 
+        # The episode is over: close the sandbox now instead of letting it sit
+        # idle until this env's next reset (idle time is billed on Modal).
+        self._close_episode_backend()
         return StepResult(result=observation, reward=reward, done=True)
+
+    def _close_episode_backend(self) -> None:
+        if self._backend is None:
+            return
+        try:
+            self._backend.close()
+        except Exception as e:
+            logger.warning(f"[{self._task_id}] backend close at episode end failed: {e}")
+        self._backend = None
 
     def _parse_reward(self) -> float:
         """Parse reward from /logs/verifier/reward.txt. Returns 0.0 if not found."""

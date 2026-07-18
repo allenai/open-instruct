@@ -158,6 +158,9 @@ Cost per run (1-core / 4-GiB profile, $0.0000663/sec):
 So a **typical sandbox RL run lands ~$1,500–$2,500**. Halve it for ~90s rollouts or a
 0.5-core/2-GiB profile; double it for ~10-min rollouts.
 
+**Measured (2026-07-17):** the first 1,280-episode toy run billed **$1,219** vs ~$15 from this
+model — the overage was leaked/idle sandboxes, which are free on Podman.
+
 Caveats that move the number:
 - **Team plan required** ($250/mo base): production `pool_size` is 128–1024 concurrent
   sandboxes; Modal's free Starter plan caps at 100 containers (Team allows 1000).

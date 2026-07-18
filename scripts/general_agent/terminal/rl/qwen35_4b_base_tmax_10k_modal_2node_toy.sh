@@ -30,7 +30,8 @@ uv run python mason.py \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
-       --env SWERL_MODAL_SANDBOX_LIFETIME_S=14400 \
+       --env SWERL_MODAL_SANDBOX_LIFETIME_S=3600 \
+       --env SWERL_MODAL_APP_NAME=swerl-tmax-modal-toy \
        --secret MODAL_TOKEN_ID=pradeepd_MODAL_TOKEN_ID \
        --secret MODAL_TOKEN_SECRET=pradeepd_MODAL_TOKEN_SECRET \
        --secret WANDB_API_KEY=pradeepd_WANDB_API_KEY \

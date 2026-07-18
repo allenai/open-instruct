@@ -978,8 +978,25 @@ class ModalBackend(SandboxBackend):
             return
         sandbox = self._sandbox
         logger.info(f"Closing Modal sandbox: {sandbox.object_id} (image={self._image})")
-        with contextlib.suppress(Exception):
-            sandbox.terminate()
+        # A failed terminate is a silent money leak: the sandbox keeps billing
+        # until its lifetime cap. Retry once and log loudly on failure.
+        for attempt in (1, 2):
+            try:
+                sandbox.terminate()
+                break
+            except Exception as e:
+                if attempt == 1:
+                    logger.warning(
+                        "Modal sandbox terminate failed (sandbox=%s): %s. Retrying once.", sandbox.object_id, e
+                    )
+                else:
+                    logger.error(
+                        "Modal sandbox terminate failed twice (sandbox=%s): %s. "
+                        "It will keep billing until its lifetime cap (%ss).",
+                        sandbox.object_id,
+                        e,
+                        self._sandbox_lifetime,
+                    )
         _MODAL_LIVE_SANDBOXES.discard(sandbox)
         self._sandbox = None
 

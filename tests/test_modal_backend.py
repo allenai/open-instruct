@@ -68,6 +68,7 @@ class _FakeSandbox:
         self.object_id = f"sb-{next(self._ids)}"
         self.exec_calls: list[dict] = []
         self.terminated = False
+        self.terminate_exceptions: list[Exception] = []  # raised (and consumed) by successive terminate() calls
 
     def exec(self, *argv, **kwargs):
         call = {"argv": list(argv), **kwargs}
@@ -80,6 +81,8 @@ class _FakeSandbox:
         return process
 
     def terminate(self) -> None:
+        if self.terminate_exceptions:
+            raise self.terminate_exceptions.pop(0)
         self.terminated = True
 
 
@@ -251,6 +254,24 @@ class TestStartAndClose(ModalBackendTestCase):
         backend.start()
         self.assertEqual(len(self.fake.lookup_calls), 1)
         backend.close()
+
+    def test_close_retries_terminate_once(self):
+        backend = self._started_backend()
+        sandbox = self.fake.sandboxes[0]
+        sandbox.terminate_exceptions = [ConnectionError("transient")]
+        backend.close()
+        self.assertTrue(sandbox.terminated)
+        self.assertNotIn(sandbox, _MODAL_LIVE_SANDBOXES)
+        self.assertIsNone(backend._sandbox)
+
+    def test_close_survives_terminate_failing_twice(self):
+        backend = self._started_backend()
+        sandbox = self.fake.sandboxes[0]
+        sandbox.terminate_exceptions = [ConnectionError("down"), ConnectionError("still down")]
+        backend.close()  # must not raise
+        self.assertFalse(sandbox.terminated)
+        self.assertNotIn(sandbox, _MODAL_LIVE_SANDBOXES)
+        self.assertIsNone(backend._sandbox)
 
     def test_close_terminates_and_is_idempotent(self):
         backend = self._started_backend()
