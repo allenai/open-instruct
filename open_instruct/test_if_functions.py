@@ -41,3 +41,30 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVerifyBulletPoints(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("exact_stars", "* one\n* two", 2, True),
+            ("bold_not_bullet", "**Introduction**\n* one\n* two", 2, True),
+            ("bold_false_positive_old", "**Introduction**\n* one\n* two", 3, False),
+            ("dash_bullets", "- a\n- b\n- c", 3, True),
+            ("mixed", "* a\n- b", 2, True),
+        ]
+    )
+    def test_verify_bullet_points(self, _name, text, n, expected):
+        self.assertEqual(if_functions.verify_bullet_points(text, n), expected)
+
+
+class TestVerifyParagraphCount(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("triple_star", "Para1\n***\nPara2\n***\nPara3", 3, True),
+            ("spaced_stars_not_divider", "Para1\n* * *\nPara2\n* * *\nPara3", 3, False),
+            ("inline", "a***b", 2, True),
+            ("wrong_count", "only one", 2, False),
+        ]
+    )
+    def test_verify_paragraph_count(self, _name, text, n, expected):
+        self.assertEqual(if_functions.verify_paragraph_count(text, n), expected)

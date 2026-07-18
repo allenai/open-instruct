@@ -142,44 +142,37 @@ def validate_response_language(text, language):
 
 
 # Number Paragraphs: Your response should contain {N} paragraphs. You separate paragraphs using the markdown divider:
-# * * *
+# ***
 def verify_paragraph_count(text: str, N: int) -> bool:
     """
     Verifies that a text contains the expected number of paragraphs,
-    where paragraphs are separated by markdown dividers '* * *'
+    where paragraphs are separated by the markdown divider ``***``
+    (matching IFEvalG ``ParagraphChecker``).
 
     Args:
         text (str): The text to analyze
-        expected_count (int): Expected number of paragraphs
+        N (int): Expected number of paragraphs
 
     Returns:
         bool: True if the text contains exactly the expected number of paragraphs,
               False otherwise
 
     Example:
-         text = "First paragraph\n* * *\nSecond paragraph"
+         text = "First paragraph\\n***\\nSecond paragraph"
          verify_paragraph_count(text, 2)
         True
     """
+    paragraphs = re.split(r"\s?\*\*\*\s?", text)
+    num_paragraphs = len(paragraphs)
 
-    def clean_text(text: str) -> str:
-        """Remove extra whitespace and normalize line endings"""
-        return "\n".join(line.strip() for line in text.splitlines()).strip()
+    for index, paragraph in enumerate(paragraphs):
+        if not paragraph.strip():
+            if index == 0 or index == len(paragraphs) - 1:
+                num_paragraphs -= 1
+            else:
+                return False
 
-    # Clean the input text
-    text = clean_text(text)
-
-    # Split text by markdown divider
-    # Add 1 to count since n dividers create n+1 paragraphs
-    paragraphs = text.split("* * *")
-    actual_count = len(paragraphs)
-
-    # Verify each split resulted in non-empty content
-    valid_paragraphs = [p.strip() for p in paragraphs if p.strip()]
-    if len(valid_paragraphs) != actual_count:
-        return False
-
-    return actual_count == N
+    return num_paragraphs == N
 
 
 # Number Words: Answer with at least / around / at most {N} words
@@ -332,6 +325,9 @@ def verify_bullet_points(text: str, N: int) -> bool:
     """
     Verifies if a text contains exactly N bullet points in markdown format.
 
+    Matches IFEvalG ``BulletListChecker``: ``*`` bullets must not be bold
+    (``**...``), and ``-`` bullets are counted separately.
+
     Args:
         text (str): The text to check
         N (int): The expected number of bullet points
@@ -339,12 +335,9 @@ def verify_bullet_points(text: str, N: int) -> bool:
     Returns:
         bool: True if the text contains exactly N bullet points, False otherwise.
     """
-    # Split text into lines and count lines starting with * or -
-    lines = text.split("\n")
-    bullet_points = [line.strip() for line in lines if line.strip().startswith(("*", "-"))]
-    actual_count = len(bullet_points)
-
-    return actual_count == N
+    star_bullets = re.findall(r"^\s*\*[^\*].*$", text, flags=re.MULTILINE)
+    dash_bullets = re.findall(r"^\s*-.*$", text, flags=re.MULTILINE)
+    return len(star_bullets) + len(dash_bullets) == N
 
 
 # Title: Your answer must contain a title, wrapped in double angular brackets, such as <<poem of joy>>.
