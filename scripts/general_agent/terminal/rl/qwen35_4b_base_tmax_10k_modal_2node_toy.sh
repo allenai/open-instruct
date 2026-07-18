@@ -16,7 +16,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-4B pool size 768 (Modal sandboxes)" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B pool size 128 (Modal sandboxes)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -73,7 +73,7 @@ uv run python mason.py \
     --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"backend": "modal", "task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 768 \
+    --pool_size 128 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
@@ -85,7 +85,8 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_grpo_15k_modal_ps768 \
+    --exp_name swerl_qwen35_4b_base_tmax_grpo_15k_modal \
     --local_eval_every 10 \
     --save_freq 20 \
-    --try_launch_beaker_eval_jobs_on_weka False
+    --try_launch_beaker_eval_jobs_on_weka False \
+    \; bash scripts/modal/cleanup_modal_sandboxes.sh swerl-tmax-modal-toy agent-training
