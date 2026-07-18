@@ -39,5 +39,20 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+
+
+class TestValidateParagraphs(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("case_insensitive", "Hello world\n\nSecond para", 2, "hello", 1, True),
+            ("exact_case", "Hello world\n\nSecond para", 2, "Hello", 1, True),
+            ("wrong_count", "Only one", 2, "Only", 1, False),
+            ("punct_prefix", '"Hello", there\n\nNext', 2, "hello", 1, True),
+        ]
+    )
+    def test_validate_paragraphs(self, _name, text, n, first, i, expected):
+        self.assertEqual(if_functions.validate_paragraphs(text, n, first, i), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
