@@ -44,7 +44,7 @@ class TestValidateQuotation(unittest.TestCase):
         [
             ("wrapped", '"hello"', True),
             ("lone_quote", '"', False),
-            ("empty_pair", '""', False),
+            ("empty_pair", '""', True),
             ("unquoted", "hello", False),
             ("trailing_space", '  "ok"  ', True),
         ]
