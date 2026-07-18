@@ -135,10 +135,11 @@ def validate_response_language(text, language):
         language = "en"
         result = validate_response_language(text, language)
     """
-    # Detect the language of the text
-    detected_language = langdetect.detect(text)
-    # Check if the detected language matches the expected language
-    return detected_language == language
+    # Match IFEvalG ResponseLanguageChecker: undecidable text counts as following.
+    try:
+        return langdetect.detect(text) == language
+    except langdetect.LangDetectException:
+        return True
 
 
 # Number Paragraphs: Your response should contain {N} paragraphs. You separate paragraphs using the markdown divider:

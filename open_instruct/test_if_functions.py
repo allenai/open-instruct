@@ -39,5 +39,21 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+
+class TestValidateResponseLanguage(unittest.TestCase):
+    def test_empty_does_not_raise(self):
+        self.assertTrue(if_functions.validate_response_language("", "en"))
+
+    def test_punctuation_only_does_not_raise(self):
+        self.assertTrue(if_functions.validate_response_language("!!!", "en"))
+
+    def test_english_ok(self):
+        self.assertTrue(
+            if_functions.validate_response_language(
+                "This is a longer English sentence for language detection.", "en"
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
