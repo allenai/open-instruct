@@ -39,5 +39,30 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+
+class TestValidateUpperLower(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("all_upper", "HELLO WORLD", True),
+            ("mixed", "Hello", False),
+            ("empty", "", False),
+            ("digits_only", "123", False),
+        ]
+    )
+    def test_validate_uppercase(self, _name, text, expected):
+        self.assertEqual(if_functions.validate_uppercase(text), expected)
+
+    @parameterized.expand(
+        [
+            ("all_lower", "hello world", True),
+            ("mixed", "Hello", False),
+            ("empty", "", False),
+            ("digits_only", "123", False),
+        ]
+    )
+    def test_validate_lowercase(self, _name, text, expected):
+        self.assertEqual(if_functions.validate_lowercase(text), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
