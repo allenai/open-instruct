@@ -39,5 +39,20 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+
+class TestVerifyPostscript(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("ps_end", "Body text.\nP.S. extra note", "P.S.", True),
+            ("case_insensitive", "Body.\np.s. note", "P.S.", True),
+            ("marker_only_mid", "P.S. early\nstill going", "P.S.", True),
+            ("missing", "No postscript here", "P.S.", False),
+            ("case_miss_old", "Body p.s. note", "P.S.", True),
+        ]
+    )
+    def test_verify_postscript(self, _name, text, marker, expected):
+        self.assertEqual(if_functions.verify_postscript(text, marker), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
