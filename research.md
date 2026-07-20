@@ -108,6 +108,38 @@ Any NGU conclusions drawn from runs *before* this fix are suspect.
 
 ---
 
+## [ACTIVE] NGU sequence continuation (`ngu_seq_multiplier`): resume unfinished completions instead of discarding them
+
+**Question:** NGU currently treats "unfinished" (hit the `response_length`
+cap) the same as "wrong" — truncated completions score 0 and get thrown away
+on a retry. New `--ngu_seq_multiplier M` resumes those completions on the NGU
+retry (partial response re-fed as prompt, tokens/masks/logprobs carried
+through), granting `response_length` more tokens per retry up to
+`response_length * M` total. M=2 at 8k is like a 16k budget with a halfway
+NGU check-in. Does that beat just training at 16k outright — same max
+sequence length, but cheaper rollouts on prompts that get solved (or dropped)
+early?
+
+**Implementation** (commit `84b617078`): `ContinuationPrefix` payloads ride
+the `PromptRequest`; the vLLM actor seeds resumed sub-requests with the
+prefix; `maybe_filter_group` continues only `finish_reason == "length"`
+completions below the cap, requeues fresh samples for finished-wrong ones,
+and keeps continued completions out of the NGU pending buffer/baseline so
+they aren't double-counted when the stitched version returns. vLLM
+`max_model_len`, trainer `max_sequence_length`, and the `pack_length` check
+all scale by the multiplier.
+
+**Runs:** [NGU sequence-continuation: 8k×2 vs plain 16k](experiment.md#ngu-sequence-continuation---ngu_seq_multiplier-8k2-vs-plain-16k)
+— both arms n=8, k=16, NGU p=0.75, gradnorm 1.0, async_steps 2, seed 1,
+16k eval budget. Watch the continuation arm's `val/stop_rate` and
+`batch/filtered_prompts_*`: the rho_weight-collapse risk (see below) is
+driven by truncation-heavy batches, and continuations should *reduce*
+effective truncation — but also produce very long merged completions.
+
+**Findings:** TBD (smoke test + both arms launching as of 2026-07-20).
+
+---
+
 ## [ACTIVE] max_grad_norm: 5.0 vs 1.0 — fixing the overfitting problem
 
 **Motivation:** at `max_grad_norm=5.0`, AIME eval performance degrades after

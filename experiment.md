@@ -444,6 +444,62 @@ were relaunched as full-node `NUM_GPUS=8` jobs to avoid packing.
 | `ngu0875_dapo_n8_k16` | 2 | 1700 | ux8zlyun | [01KX4EFPEA1F4WMAMQSKY982H3](https://beaker.org/ex/01KX4EFPEA1F4WMAMQSKY982H3) |
 | `ngu0875_dapo_n8_k16` | 3 | 1000 | 0f6tb0za | [01KX4EK2WFQPKYQBFWCECN5YM5](https://beaker.org/ex/01KX4EK2WFQPKYQBFWCECN5YM5) |
 
+## NGU sequence-continuation (`--ngu_seq_multiplier`): 8k×2 vs plain 16k
+
+New feature (commit `84b617078`): with `--ngu_seq_multiplier M > 1`, a
+never-give-up retry *resumes* completions that hit the `response_length` cap
+instead of discarding them — the partial response is re-fed as prompt tokens
+(its tokens/masks/logprobs kept as response state) and gets `response_length`
+more tokens per retry, up to `response_length * M` total. Finished-but-wrong
+completions still get fresh samples; continued completions are excluded from
+the NGU pending buffer/baseline until their stitched version returns. M=2 at
+8k ≈ a 16k budget with a halfway NGU check-in, which is exactly the
+comparison: does the check-in beat just generating 16k outright?
+
+Both arms: n=8, k=16, NGU p=0.75, `--max_grad_norm 1.0 --async_steps 2`,
+seed 1, `--pack_length 18432` (2048 prompt + 16384 max response), and
+`--eval_response_length 16384` so both arms get identical eval budgets.
+Note this makes eval budgets *larger* than the earlier 8k-eval NGU runs, so
+compare these two arms to each other, not directly to the old sweep numbers.
+
+### Smoke test (2 GPU, Qwen3-0.6B-Base, grpo_fast backend)
+
+`scripts/train/debug/ngu_quartiles_2gpu.sh` (now takes the image from the
+`BEAKER_IMAGE` env var and forwards extra args) with `--ngu_seq_multiplier 2
+--pack_length 3072`; `--never_give_up 1.0` + 1k response length force lots of
+truncation → continuations.
+
+| Name | Notes | Beaker |
+| --- | --- | --- |
+| `ngu_quartiles_2gpu` (mult2) | commit `84b617078`, `--ngu_seq_multiplier 2 --pack_length 3072` | TBD [01KXZ13RCYYXXKXAGCVMGTM1JB](https://beaker.org/ex/01KXZ13RCYYXXKXAGCVMGTM1JB) |
+
+### Experiment arms
+
+| Name | response_length | ngu_seq_multiplier | never_give_up | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- |
+| `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | TBD |
+| `2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1` | 16384 | 1 | 0.75 | 1 | TBD |
+
+### Launch commands
+
+```bash
+# Arm 1: continuation (8k chunks, up to 16k via NGU retries)
+OC=true EXP=2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up 0.75 --async_steps 2 \
+  --ngu_seq_multiplier 2 --pack_length 18432 --eval_response_length 16384
+
+# Arm 2: plain 16k baseline (same NGU p, no continuation)
+OC=true EXP=2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up 0.75 --async_steps 2 \
+  --response_length 16384 --pack_length 18432
+```
+
 ## Smoke test (2 GPU, before launching the sweep)
 
 Quick NGU + per-quartile-metrics check on a small model via
