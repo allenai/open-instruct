@@ -749,6 +749,7 @@ class BatchStatistics:
     no_resampled_prompts: int
     total_prompts: int
     prompt_sample_counts: list[int] = field(default_factory=list)
+    prompt_attempt_counts: list[int] = field(default_factory=list)
     prompt_baseline_sample_counts: list[int] = field(default_factory=list)
     prompt_baseline_reward_sums: list[float] = field(default_factory=list)
     per_group_generation_times: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
@@ -863,6 +864,12 @@ class Group:
     sample_count: int
     baseline_sample_count: int
     baseline_reward_sum: float
+    attempt_count: int = 1
+    """Number of `num_samples_per_prompt_rollout`-sized generation rounds behind this group.
+    1 outside NGU, or when NGU merges whole rounds. With `ngu_seq_multiplier` continuations, a
+    round's completions can split across the buffered and continued paths, so `sample_count` is
+    no longer always a multiple of the per-round sample count — `attempt_count` tracks the true
+    round count for utilization accounting instead."""
 
 
 @dataclass
@@ -1091,6 +1098,7 @@ def maybe_filter_group(
 
     group.baseline_sample_count = pending_ngu.response_count + current_sample_count
     group.baseline_reward_sum = pending_ngu.reward_sum + current_reward_sum
+    group.attempt_count = current_attempt_count
 
     return GroupFilterResult(
         group=group,
@@ -1169,6 +1177,7 @@ def make_batch_from_groups(
     all_percent_solved = []
     all_model_steps = []
     all_prompt_sample_counts = []
+    all_prompt_attempt_counts = []
     all_prompt_baseline_sample_counts = []
     all_prompt_baseline_reward_sums = []
 
@@ -1208,6 +1217,7 @@ def make_batch_from_groups(
         all_percent_solved.append(group.percent_solved)
         all_model_steps.extend([result.model_step] * len(result.responses))
         all_prompt_sample_counts.append(group.sample_count)
+        all_prompt_attempt_counts.append(group.attempt_count)
         all_prompt_baseline_sample_counts.append(group.baseline_sample_count)
         all_prompt_baseline_reward_sums.append(group.baseline_reward_sum)
 
@@ -1316,6 +1326,7 @@ def make_batch_from_groups(
         no_resampled_prompts=no_resampled_prompts,
         total_prompts=total_prompts,
         prompt_sample_counts=all_prompt_sample_counts,
+        prompt_attempt_counts=all_prompt_attempt_counts,
         prompt_baseline_sample_counts=all_prompt_baseline_sample_counts,
         prompt_baseline_reward_sums=all_prompt_baseline_reward_sums,
         per_group_generation_times=np.array(per_group_generation_times, dtype=float),

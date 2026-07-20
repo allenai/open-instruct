@@ -1601,8 +1601,13 @@ def one_training_step(
     prompt_lengths = [length for am in sp_leader_metrics for length in am["batch/prompt_lengths"]]
     response_lengths = [length for am in sp_leader_metrics for length in am["batch/response_lengths"]]
     prompt_sample_counts = [count for am in sp_leader_metrics for count in am["batch/prompt_sample_counts"]]
+    prompt_attempt_counts = [count for am in sp_leader_metrics for count in am["batch/prompt_attempt_counts"]]
     utilization_prompt_lengths = utils.expand_prompt_lengths_for_response_groups(
-        prompt_lengths, response_lengths, streaming_config.num_samples_per_prompt_rollout, prompt_sample_counts
+        prompt_lengths,
+        response_lengths,
+        streaming_config.num_samples_per_prompt_rollout,
+        prompt_sample_counts,
+        prompt_attempt_counts,
     )
     num_step_tokens = sum(utilization_prompt_lengths) + sum(response_lengths)
 
@@ -1617,6 +1622,7 @@ def one_training_step(
         training_time=train_timer.duration,
         num_training_gpus=args.world_size,
         prompt_sample_counts=prompt_sample_counts,
+        prompt_attempt_counts=prompt_attempt_counts,
     )
 
     metrics = {

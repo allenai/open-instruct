@@ -453,6 +453,10 @@ class TestNguSeqMultiplier(unittest.TestCase):
         self.assertEqual(sorted(batch.scores), [0.0, 0.0, 1.0])
         self.assertEqual(batch_stats.prompt_sample_counts, [3])
         self.assertEqual(batch_stats.prompt_baseline_sample_counts, [3])
+        # 3 is not a multiple of generation_config.n=2: continuations can make a round finalize
+        # fewer than n samples, so utilization accounting must use the round count (2), not
+        # sample_count // n (which would be 3 // 2 == 1, silently wrong instead of a crash).
+        self.assertEqual(batch_stats.prompt_attempt_counts, [2])
 
     def test_streaming_config_validates_ngu_seq_multiplier(self):
         with self.assertRaises(ValueError):
