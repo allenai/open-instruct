@@ -464,28 +464,71 @@ compare these two arms to each other, not directly to the old sweep numbers.
 
 ### Smoke test (2 GPU, Qwen3-0.6B-Base, grpo_fast backend)
 
-`scripts/train/debug/ngu_quartiles_2gpu.sh` (now takes the image from the
-`BEAKER_IMAGE` env var and forwards extra args) with `--ngu_seq_multiplier 2
---pack_length 3072`; `--never_give_up 1.0` + 1k response length force lots of
-truncation → continuations.
+Run locally (this session had 2 local L40S GPUs available) instead of on
+Beaker: `uv run python open_instruct/grpo_fast.py` with the same args as
+`scripts/train/debug/ngu_quartiles_2gpu.sh` (which now also takes the image
+from `BEAKER_IMAGE` and forwards extra args, for the Beaker path), plus
+`--ngu_seq_multiplier 2 --pack_length 3072`; `--never_give_up 1.0` + 1k
+response length force lots of truncation → continuations. Original Beaker
+smoke job `01KXZ13RCYYXXKXAGCVMGTM1JB` was cancelled before it started.
 
-| Name | Notes | Beaker |
+| Name | Notes | Where |
 | --- | --- | --- |
-| `ngu_quartiles_2gpu` (mult2) | commit `84b617078`, `--ngu_seq_multiplier 2 --pack_length 3072` | TBD [01KXZ13RCYYXXKXAGCVMGTM1JB](https://beaker.org/ex/01KXZ13RCYYXXKXAGCVMGTM1JB) |
+| `ngu_seq_multiplier_local_smoke` (mult2) | commit `84b617078`, `--ngu_seq_multiplier 2 --pack_length 3072` | local, 2x L40S |
+
+Passed on the 3rd fix iteration (first two were local-environment/pre-existing issues, not
+bugs in this feature; the third was a real bug this feature introduced — see below). Final run
+completed cleanly: `episode: 256/256`, model saved, `sequence_lengths_max: 2048.00` (exactly
+`response_length(1024) × ngu_seq_multiplier(2)`, confirming a continuation actually reached the
+multiplied cap), `stop_rate: 0.86`, no crash.
+
+1. `LookupError: setuptools-scm was unable to detect version` — Ray's `uv_runtime_env_hook`
+   auto-triggers when the driver is launched via `uv run`, shipping the working dir (`.git`
+   excluded per `grpo_fast.py`'s `ray.init` runtime_env) to each worker and rebuilding the
+   package there; setuptools-scm can't infer a version without `.git`. Fixed by launching with
+   `.venv/bin/python` directly instead of `uv run python`, which skips the hook. Pre-existing
+   local-execution-only issue, unrelated to this feature.
+2. `TypeError: Object of type <class 'torch.dtype'> is not serializable` in vLLM's EngineCore
+   output-socket encoder, during engine warmup before any generation. Worked around with
+   `VLLM_ALLOW_INSECURE_SERIALIZATION=1`. Pre-existing vLLM/environment issue, unrelated to this
+   feature.
+3. **Real bug, fixed in commit TBD**: `ValueError: Expected each prompt sample count to be a
+   multiple of samples_per_prompt, got sample_count=12 and samples_per_prompt=8` in
+   `expand_prompt_lengths_for_response_groups` (called from `one_training_step`'s utilization/MFU
+   accounting). Root cause: NGU continuations let a merge round finalize *fewer* than
+   `num_samples_per_prompt_rollout` responses (the rest are deferred, resumed into a later round),
+   so a continuation-affected group's `sample_count` is no longer guaranteed to be a multiple of
+   `num_samples_per_prompt_rollout` — an invariant the utilization-metrics code silently relied on
+   (previously always true, since plain NGU always merges whole `k`-sized rounds). Fixed by adding
+   `Group.attempt_count`/`BatchStatistics.prompt_attempt_counts` (the true generation-round count,
+   independent of `sample_count`) for `prefill_flops`'s round-level accounting, and a new
+   `pad_response_lengths_for_attempt_counts` helper that zero-pads each group's response lengths to
+   round-align for `decode_flops`/`decode_memory_bytes`/`calculate_learner_utilization` (zero-padding
+   doesn't change any FLOPs/byte/token sum, so this is exact for everything except
+   `calculate_learner_utilization`'s training-mode accounting, which treats each pad slot as a small,
+   bounded phantom `prompt_length`-only sequence — an observability-only approximation, not a
+   training-correctness issue). All existing MFU/MBU tests (including the bit-exact
+   `test_mbu_reproduction` fixtures) still pass unchanged.
 
 ### Experiment arms
 
-| Name | response_length | ngu_seq_multiplier | never_give_up | Seed | Beaker |
-| --- | --- | --- | --- | --- | --- |
-| `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | TBD |
-| `2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1` | 16384 | 1 | 0.75 | 1 | TBD |
+Workspace note: arm 1 launched under `ai2/olmo-instruct` (per
+mid-session correction); arm 2 had already started under
+`ai2/open-instruct-dev` before that correction landed, so it was left running
+rather than restarted. Workspace is organizational only and doesn't affect
+comparability.
+
+| Name | response_length | ngu_seq_multiplier | never_give_up | Seed | Workspace | Beaker |
+| --- | --- | --- | --- | --- | --- | --- |
+| `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | ai2/olmo-instruct | [01KXZWJMRC4VK0PBPYR281R72M](https://beaker.org/ex/01KXZWJMRC4VK0PBPYR281R72M) |
+| `2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1` | 16384 | 1 | 0.75 | 1 | ai2/open-instruct-dev | [01KXZ3J985XXE89MTGG2BQSTXF](https://beaker.org/ex/01KXZ3J985XXE89MTGG2BQSTXF) |
 
 ### Launch commands
 
 ```bash
 # Arm 1: continuation (8k chunks, up to 16k via NGU retries)
 OC=true EXP=2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1 \
-  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/olmo-instruct \
   bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
   --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
   --max_grad_norm 1.0 --seed 1 --never_give_up 0.75 --async_steps 2 \
