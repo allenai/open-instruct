@@ -346,7 +346,8 @@ def main(
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,
-        streaming_config.max_prompt_token_length + streaming_config.total_response_length,
+        streaming_config.max_prompt_token_length
+        + max(streaming_config.total_response_length, streaming_config.eval_response_length or 0),
         vllm_config.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
