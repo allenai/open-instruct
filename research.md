@@ -48,6 +48,8 @@ completions each (n=2,k=64)?
 - [Replication seeds 2 & 3](experiment.md#replication-runs-seeds-2--3) — all 4 baselines
 - [Additional gradnorm=1.0 seeds](experiment.md#additional-seeds-with-grad-norm-10) — n∈{8,4,2}, one more seed each
 - [Best-step held-out evals](experiment.md#best-step-held-out-evals-brumo--hmmt--aime-2025) — cross-config comparison on BRUMO/HMMT/AIME
+- [2 more seeds (n8_k16, n2_k64) + 3 more seeds (n4_k32), async4](experiment.md#2026-07-13-2-more-seeds-n8_k16-n2_k64--3-more-seeds-n4_k32-all-async_steps4-default) — n4_k32 gets extra seeds specifically to check whether its async4 collapse reproduces
+- [2026-07-16: n4_k32 baseline seed5](experiment.md#2026-07-16-n4_k32-baseline-seed5-and-first-ngu-075-kl-penalty-beta001-run) — 5th seed for the n4_k32 gradnorm1 baseline
 
 **Findings:** n4_k32 has a failure mode under grad_norm=1.0 — see the async_steps
 finding below. Otherwise no quantitative verdict recorded yet (pull final
@@ -70,6 +72,27 @@ n×k configs to test NGU on, alongside n=16,k=8).
 - [Seed 4 for p=0.5 and p=0.75](experiment.md#seed-4-for-p05-and-p075-n8-k16)
 - [gradnorm=1.0 NGU seeds at p ∈ {0.5, 0.75, 0.875}](experiment.md#additional-seeds-with-grad-norm-10)
 - [Best-step held-out evals](experiment.md#best-step-held-out-evals-brumo--hmmt--aime-2025) — ngu05/ngu075/ngu0875 vs baseline_dapo_n8_k16
+- [OC=false NGU parity check](experiment.md#ocfalse-grpo_fastpy-ngu-parity-check) — confirmed `grpo_fast.py` (DeepSpeed) already supports NGU + dataset logging with no porting, since it lives in shared modules; investigating moving sweeps off `grpo.py`/OLMo-core (has been unstable — FSDP stalls, B300 issues)
+- [NGU gradnorm=1.0 p-sweep, OC=false](experiment.md#ngu-gradnorm10-p-sweep-ocfalse-grpo_fastpy) — replicates the p∈{0.5,0.75,0.875} sweep on the DeepSpeed backend
+- [NGU 0.875, 12k response length](experiment.md#ngu-0875-12k-response-length-octrue) — does more room to finish long completions change the hard-tier picture
+- [2 more NGU seeds per p, async4, on ai2/titan](experiment.md#2026-07-13-2-more-ngu-seeds-per-p-async_steps4-default-on-ai2titan) — post-rank-0-fix async4 data points (seed1 async4 predates the fix) to compare against the async2 seed1 runs
+- [2026-07-14: NGU 0.5 seed 3 written off, new seed 4 (async2, jupiter, urgent) + holmes retry](experiment.md#2026-07-14-ngu-05-seed-3-written-off-new-seed-4-async2-jupiter-urgent--holmes-retry)
+- [2026-07-14: NGU 0.875 seed 2 continued on same wandb run, moved to olmo-instruct/urgent](experiment.md#2026-07-14-ngu-0875-seed-2-continued-on-same-wandb-run-moved-to-olmo-instructurgent)
+- [2026-07-14: baseline n8_k16 seed4, NGU 0.75/0.875 async2 seed2, first n16_k8 gradnorm1 NGU (p=0.75) seed1](experiment.md#2026-07-14-baseline-n8_k16-seed4-ngu-0750875-async2-seed2-and-first-n16_k8-gradnorm1-ngu-p075-seed1) — n16_k8 gets its first max_grad_norm=1.0 NGU run (previously only tested at grad_norm=5.0)
+- [2026-07-14: n16_k8 gradnorm1 NGU p=0.825 seed1](experiment.md#2026-07-14-n16_k8-gradnorm1-ngu-p0825-seed1) — second n16_k8 gradnorm1 data point, bracketing 0.75/0.875
+- [2026-07-15: NGU 0.875 async2 seed3, on ai2/titan](experiment.md#2026-07-15-ngu-0875-async2-seed3-on-ai2titan) — third async2 seed for p=0.875
+- [2026-07-16: first NGU 0.75 KL-penalty run (beta=0.01, async2)](experiment.md#2026-07-16-n4_k32-baseline-seed5-and-first-ngu-075-kl-penalty-beta001-run) — new sub-config, seed1; tests whether a nonzero KL-to-ref-policy penalty changes the p=0.75 picture
+- [2026-07-16: n8_k16 baseline seed5, on ai2/titan](experiment.md#2026-07-16-n8_k16-baseline-seed5-on-ai2titan) — 5th seed for the n8_k16 gradnorm1 baseline
+- [2026-07-16: NGU 0.5 async2 seed5](experiment.md#2026-07-16-ngu-05-async2-seed5) — 5th p=0.5 seed (seed3 was written off as bad)
+- [2026-07-16: NGU 0.75 seed3 (gz2ux8w0) resumed from checkpoint after gloo comms crash](experiment.md#2026-07-16-ngu-075-seed3-gz2ux8w0-resumed-from-checkpoint-after-gloo-comms-crash) — transient distributed-comms fault at step 948/2000, resumed (not restarted) via the same `checkpoint_state_dir` and same wandb run id
+- [2026-07-16: NGU 0.75 seed2 (wf6ttda7) resumed after repeated preemption](experiment.md#2026-07-16-ngu-075-seed2-wf6ttda7-resumed-after-repeated-preemption) — 76% done (step 1521/2000) before being preempted 7x on titan/oe-adapt-code/high; resumed on jupiter/open-instruct-dev/urgent, same wandb run
+- [2026-07-16: refreshed best_step across all runs, swapped NGU 0.5 seed3 to zg0thiuz](experiment.md#2026-07-16-refreshed-best_step-across-all-registered-runs-swapped-ngu-05-seed3-to-zg0thiuz) — only gz2ux8w0's best_step actually moved (post-resume progress); NGU 0.5 seed3 slot now zg0thiuz (still running, best_step=800, needs another refresh later)
+- [2026-07-17: NGU 0.75 seed4 (async2) + second KL-penalty attempt (beta=0.001)](experiment.md#2026-07-17-ngu-075-seed4-async2--first-kl-penalty-attempt-at-beta0001) — 4th plain async2 seed for p=0.75; second KL sub-config, an order of magnitude below the first beta=0.01 attempt, own seed1
+- [2026-07-17: NGU 0.75 seed2 (wf6ttda7) finished cleanly](experiment.md#2026-07-17-ngu-075-seed2-wf6ttda7-finished-cleanly--crash-signature-alert-was-teardown-noise-plus-a-stale-cache-bug-found-in-the-process) — background-monitor "crash" alert was benign post-completion teardown noise (exit code 0, 2000/2000); also surfaced and fixed a stale-`.wandb_cache` bug that can affect any other crash-then-resume run
+- [2026-07-17: NGU 0.5 async2 seed6](experiment.md#2026-07-17-ngu-05-async2-seed6) — 6th p=0.5 seed
+- [2026-07-17: NGU 0.75 seed3 (gz2ux8w0) also finished cleanly](experiment.md#2026-07-17-ngu-075-seed3-gz2ux8w0-also-finished-cleanly--same-false-alarm--stale-cache-pattern-as-seed2) — same benign-teardown-noise + stale-cache pattern as seed2, two-for-two now
+- [2026-07-17: NGU 0.5 seed3 (zg0thiuz) finished cleanly, best_step peak shifted](experiment.md#2026-07-17-ngu-05-seed3-zg0thiuz-finished-cleanly-best_step-peak-shifted) — finished 2000/2000; true peak moved from step 1000 to step 1700 (combined AIME+BRUMO 0.2542 vs 0.2490) now that the full run is in
+- [2026-07-17: NGU 0.75 seed3 swapped gz2ux8w0 -> cjr9kfxa (better on hard subset)](experiment.md#2026-07-17-ngu-075-seed3-swapped-gz2ux8w0---cjr9kfxa-better-on-hard-subset) — cjr9kfxa (KL beta=0.001 variant) beats gz2ux8w0, the worst-on-hard registered p=0.75 seed (0.0435 vs 0.0156); still early (1100/2000), best_step will need refreshing
 
 **Findings:** p=0.5 was the leading candidate after the first sweep (drove
 the decision to replicate it over 4 seeds and bracket it with p=0.6/0.75).
@@ -192,7 +215,7 @@ why, and is it config-specific or a general async off-policy risk? Same
 on the `N=2,K=64` baseline too, given both configs share the
 "few-prompts-many-samples-each" shape that drives long completions.
 
-**Runs:** [n4_k32 gradnorm1 stall → rerun with async_steps 2](experiment.md#n4_k32-gradnorm1-stall--rerun-with-async_steps-2)
+**Runs:** [n4_k32 gradnorm1 stall → rerun with async_steps 2](experiment.md#n4_k32-gradnorm1-stall--rerun-with-async_steps-2), [3 more n4_k32 seeds at async4 to test reproducibility](experiment.md#2026-07-13-2-more-seeds-n8_k16-n2_k64--3-more-seeds-n4_k32-all-async_steps4-default) (plus 2 more seeds each at n8_k16/n2_k64, which ran clean at async4, as a control)
 
 **Finding (confirmed via log + wandb analysis):** completion lengths drifted
 up to the 8192 cap over the run; `val/rho_weight` declined 1.0→0.9 over steps
@@ -214,9 +237,23 @@ completion lengths drift toward the cap in the first place, so recurrence
 truncation cap + `--active_sampling` is at risk of this collapse; watch
 `val/rho_weight` and `batch/filtered_prompts_solved` as leading indicators.
 
+**2026-07-13:** this is also diagnosed as the cause of the OC=true NGU runs
+going off the rails more broadly (not just the one n4_k32 stall) — completion
+length exploding toward the response-length cap. Two things launched to
+attack it from different angles: the [OC=false NGU
+sweep](experiment.md#ngu-gradnorm10-p-sweep-ocfalse-grpo_fastpy) (same
+config, different backend — DeepSpeed instead of FSDP/OLMo-core, on the
+hypothesis that `grpo_fast.py` doesn't have whatever's driving the length
+growth on the OC=true path), and the [12k response-length
+run](experiment.md#ngu-0875-12k-response-length-octrue) (same OC=true
+backend, more headroom before hitting the truncation cliff). Watch completion
+length trajectories and `val/rho_weight` on both to see which one (if either)
+actually avoids the collapse — that will also say whether the root cause is
+backend-specific or purely a function of response-length headroom.
+
 ---
 
-## [ACTIVE] Holmes (B300) cluster compatibility
+## [PAUSED] Holmes (B300) cluster compatibility
 
 **Question:** does the existing CUDA 12.8 image work on `ai2/holmes`
 (Blackwell Ultra / sm_103 nodes), or does it need a rebuild.
@@ -242,8 +279,11 @@ infra gaps found and fixed:
    `0b69301e7`). Triton/`torch.compile` needed no fix — it already selects
    its bundled 12.9 `ptxas-blackwell` for arch >= 100.
 
-Third launch on the rebuilt image pending; result TBD (see the `TBD` row in
-experiment.md — check Beaker before treating this as closed).
+**Status (2026-07-12): giving up on this for now.** The three fixes above are
+committed and kept (they're harmless elsewhere), but we're not pursuing the
+third launch or further B300 validation — back to running on the usual weka
+clusters. Reopen from the `TBD` row in experiment.md if holmes capacity
+becomes worth it again.
 
 ---
 
@@ -279,3 +319,40 @@ differently (e.g. does NGU specifically help the hardest quartile get
 non-zero reward more often?).
 
 **Runs:** every run above logs this data; no dedicated analysis yet.
+
+---
+
+## [ACTIVE] Difficulty-bucket eval noise: does 128 samples/prompt change the hard/medium/easy split vs. 64?
+
+**Question:** the hard/medium/easy difficulty buckets used throughout the NGU
+analysis (see [Never-give-up exploration bonus](#active-never-give-up-ngu-exploration-bonus-does-it-beat-baseline-dapo-and-whats-the-best-p))
+come from a single initial-model solve-rate eval at 64 samples/prompt
+(`w47m67sf`). At 64 samples, a "hard" (solve_rate==0) label is only accurate
+to within 1/64 ≈ 1.6%; some borderline prompts could be misbucketed. Does
+doubling to 128 samples/prompt change which prompts land in which bucket, and
+does that shift any of the per-difficulty findings above?
+
+**Runs:** [New initial-model difficulty eval, n=128 samples/prompt](experiment.md#2026-07-16-new-initial-model-difficulty-eval-n128-samplesprompt-replaces-w47m67sf) — replaces `w47m67sf` as `notebooks/deepscaler_ngu_plots.ipynb`'s `DIFFICULTY_RUN_ID`
+
+**Findings:** yes, the split moved. Bucket counts (hard/medium/easy):
+
+| | 64-sample (`w47m67sf`) | 128-sample (`79ol8lss`) |
+| --- | --- | --- |
+| AIME | 17 / 6 / 7 | 15 / 7 / 8 |
+| BRUMO | 16 / 7 / 7 | 13 / 8 / 9 |
+| Combined | 33 / 13 / 14 | 28 / 15 / 17 |
+
+5 combined prompts moved out of "hard" (solve_rate==0 at 64 samples but >0 at
+128) into medium/easy — confirms the 64-sample noise concern: some
+zero-solve-rate labels were false negatives from too few samples, not truly
+unsolved. `notebooks/deepscaler_ngu_plots.ipynb` now uses the 128-sample
+split (`DIFFICULTY_RUN_ID = "79ol8lss"`); the difficulty-bucket plots/tables
+should be treated as updated from any earlier screenshots/numbers taken
+against the old 64-sample buckets.
+
+Also worth noting for future eval-only launches: `w47m67sf` was launched
+months ago on `grpo_fast.py`'s (now-removed) `--eval_only` support and used
+`--async_steps 1`/`--eval_temperature 0.7`, neither of which work on the
+current codebase — see the launch log for the two parse-time fixes needed
+(`--eval_only` now lives only in `open_instruct/grpo.py`/OC=true;
+`--eval_temperature` was removed, use `--temperature` instead).
