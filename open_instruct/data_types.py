@@ -59,6 +59,10 @@ class GenerationResult:
     reward_scores: list[float] | None = None
     reward_metrics: dict[str, Any] | None = None
     model_step: int = 0
+    routed_experts: list | None = None
+    """Per-sample MoE expert selections as nested lists [seq_len][num_moe_layers][top_k],
+    covering prompt + response positions except the final generated token. Populated
+    only when the vLLM engines run with enable_return_routed_experts."""
 
 
 @dataclass

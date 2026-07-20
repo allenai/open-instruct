@@ -156,6 +156,8 @@ class CompletionOutput:
     mask: list[int] | None = None
     rollout_state: dict = dataclasses.field(default_factory=dict)
     """Rollout state dict — rewards, step_count, done, tool_output, tool_error, etc."""
+    routed_experts: list | None = None
+    """MoE expert ids [seq_len][num_moe_layers][top_k] from the last generation turn."""
 
 
 @dataclasses.dataclass
@@ -386,6 +388,11 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
         start_time=metadata["start_time"],
         logprobs=logprobs,
         model_step=metadata.get("model_step"),
+        routed_experts=(
+            [getattr(out, "routed_experts", None) for out in final_output.outputs]
+            if any(getattr(out, "routed_experts", None) is not None for out in final_output.outputs)
+            else None
+        ),
     )
     is_eval = metadata["is_eval"]
 
@@ -590,6 +597,10 @@ class LLMRayActor:
             eval_dataset,
         )
         self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+
+        # Whether to request MoE expert selections per completion; the same flag
+        # also flows into AsyncEngineArgs so the engine records them.
+        self.return_routed_experts = bool(kwargs.get("enable_return_routed_experts", False))
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -810,6 +821,23 @@ class LLMRayActor:
     def set_model_step(self, model_step: int) -> None:
         self.current_model_step = model_step
 
+    def debug_state(self) -> dict:
+        """Snapshot of request-processing state, for diagnosing stuck rollouts."""
+
+        def task_state(t) -> str:
+            if not t.done():
+                return "pending"
+            return f"done_exc:{t.exception()!r}" if t.exception() else "done"
+
+        return {
+            "active_tasks": {rid: task_state(t) for rid, t in list(self.active_tasks.items())},
+            "request_metadata_keys": list(self.request_metadata.keys()),
+            "completion_queue_size": self.completion_queue.qsize(),
+            "inference_batch_size": self.inference_batch_size,
+            "should_stop": self._should_stop(),
+            "loop_thread_alive": self.loop_thread.is_alive(),
+        }
+
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
             self._prefetch_future.result()
@@ -954,6 +982,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     response_logprobs: list[float] = []
     response_masks: list[int] = []
     cumulative_logprob = 0.0
+    routed_experts: list | None = None
     rollout = RolloutState()
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
@@ -1015,11 +1044,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     "include_stop_str_in_output": True,
                     "skip_special_tokens": False,
                     "min_tokens": min_tokens,
+                    "return_routed_experts": actor.return_routed_experts,
                 },
                 **params_dict,
             )
 
             output = api_response.choices[0]
+            # Each turn's array covers the full current prefix, so the latest
+            # turn supersedes earlier ones. (Multi-turn + prefix caching may
+            # not re-record cached positions — revisit before tool use.)
+            turn_routed_experts = getattr(output, "routed_experts", None)
+            if turn_routed_experts is not None:
+                routed_experts = turn_routed_experts
             model_tokens = list(output.token_ids)
             response_tokens.extend(model_tokens)
             current_prompt.extend(model_tokens)
@@ -1149,6 +1185,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
         finish_reason=finish_reason,
         mask=response_masks,
         rollout_state=dataclasses.asdict(rollout),
+        routed_experts=routed_experts,
     )
 
     actor.active_tasks.pop(sub_request_id, None)
@@ -1215,6 +1252,7 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    enable_return_routed_experts: bool = False,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1303,6 +1341,7 @@ def create_vllm_engines(
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
+                enable_return_routed_experts=enable_return_routed_experts,
             )
         )
 
