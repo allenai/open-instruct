@@ -5,7 +5,7 @@
 # (per-quartile) batch metrics are logged. Uses a small model and a handful of steps.
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test-ngu}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/open-instruct-integration-test-ngu}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
@@ -58,4 +58,4 @@ uv run python mason.py \
     --seed 1 \
     --local_eval_every 1000000 \
     --with_tracking \
-    --push_to_hub false
+    --push_to_hub false "$@"

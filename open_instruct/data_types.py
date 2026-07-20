@@ -80,6 +80,22 @@ class EnvConfig:
 
 
 @dataclass
+class ContinuationPrefix:
+    """A length-truncated completion to resume in a never_give_up retry.
+
+    The prefix is re-fed as part of the vLLM prompt; its tokens, loss masks, and
+    logprobs are prepended to the newly generated segment so the finished sample
+    looks like one long completion.
+    """
+
+    tokens: list[int]
+    masks: list[int]
+    logprobs: list[float]
+    max_tokens: int
+    """Total response-token budget (prefix + new tokens) for the resumed completion."""
+
+
+@dataclass
 class PromptRequest:
     """Container for prompt requests sent via Ray queues.
 
@@ -99,6 +115,9 @@ class PromptRequest:
     ground_truth: Any = None
     """Optional ground truth override (e.g. from evolving rubrics). When set, the vLLM
     engine uses this instead of looking up the ground truth from the dataset."""
+    continuations: list[ContinuationPrefix] = field(default_factory=list)
+    """Never-give-up continuation prefixes. Sample j < len(continuations) resumes
+    continuations[j] instead of starting fresh; the remaining samples start fresh."""
 
 
 @dataclass

@@ -10,6 +10,7 @@ from datasets import Dataset
 
 from open_instruct import data_loader
 from open_instruct.data_loader_utils import (
+    NeverGiveUpAccumulationState,
     compute_grouped_advantages,
     get_never_give_up_chain_id,
     get_never_give_up_retry_suffix,
@@ -284,6 +285,192 @@ class TestGroupedAdvantages(unittest.TestCase):
         self.assertEqual(len(result.responses), 4)
         self.assertEqual(batch.scores, [0.0, 0.0, 0.0, 1.0])
         self.assertEqual(batch_stats.prompt_sample_counts, [4])
+
+
+def _make_ngu_result(prompt_id, responses, finish_reasons, reward_scores):
+    num_samples = len(responses)
+    return GenerationResult(
+        responses=[list(response) for response in responses],
+        finish_reasons=list(finish_reasons),
+        masks=[[1] * len(response) for response in responses],
+        request_info=RequestInfo(
+            num_calls=[0] * num_samples,
+            timeouts=[0] * num_samples,
+            tool_errors=[""] * num_samples,
+            tool_outputs=[""] * num_samples,
+            tool_runtimes=[0.0] * num_samples,
+            tool_calleds=[False] * num_samples,
+            tool_call_stats=[[] for _ in range(num_samples)],
+            rollout_states=[{} for _ in range(num_samples)],
+        ),
+        index=0,
+        prompt_id=prompt_id,
+        token_statistics=TokenStatistics(
+            num_prompt_tokens=1, num_response_tokens=sum(len(response) for response in responses), generation_time=1.0
+        ),
+        logprobs=[[0.0] * len(response) for response in responses],
+        reward_scores=list(reward_scores),
+        reward_metrics={},
+        model_step=0,
+    )
+
+
+class TestNguSeqMultiplier(unittest.TestCase):
+    def _make_group(self, result):
+        return data_loader.Group(
+            result=result,
+            query=[10],
+            ground_truth=[11],
+            dataset="unit",
+            raw_query="prompt",
+            active_tools=None,
+            index=0,
+            decoded_responses=[str(response) for response in result.responses],
+            reward_scores=result.reward_scores,
+            reward_metrics={},
+            percent_solved=0.0,
+            sample_count=len(result.responses),
+            baseline_sample_count=len(result.responses),
+            baseline_reward_sum=0.0,
+        )
+
+    def _filter(self, result, state, ngu_seq_multiplier=2, response_length=4):
+        return data_loader.maybe_filter_group(
+            group=self._make_group(result),
+            tokenizer=Mock(),
+            max_possible_score=1.0,
+            filter_zero_std_samples=True,
+            active_sampling=True,
+            never_give_up=1.0,
+            never_give_up_accept_on="better",
+            never_give_up_state=state,
+            never_give_up_state_lock=None,
+            maintain_pending_ngu_age=-1,
+            maintain_pending_ngu_completions=True,
+            ngu_seq_multiplier=ngu_seq_multiplier,
+            response_length=response_length,
+        )
+
+    def test_maybe_filter_group_continues_unfinished_and_buffers_finished(self):
+        state = NeverGiveUpAccumulationState()
+        result = _make_ngu_result("0_0", [[1, 2, 3, 4], [5]], ["length", "stop"], [0.0, 0.0])
+
+        filter_result = self._filter(result, state)
+
+        self.assertTrue(filter_result.never_give_up)
+        self.assertEqual(len(filter_result.continuations), 1)
+        continuation = filter_result.continuations[0]
+        self.assertEqual(continuation.tokens, [1, 2, 3, 4])
+        self.assertEqual(continuation.masks, [1, 1, 1, 1])
+        self.assertEqual(continuation.max_tokens, 8)
+        # Only the finished (stop) completion is buffered and counted toward the NGU baseline.
+        self.assertEqual(state.pending_response_counts["0_0"], 1)
+        self.assertEqual(len(state.pending_results["0_0"]), 1)
+        self.assertEqual(state.pending_results["0_0"][0].responses, [[5]])
+
+    def test_maybe_filter_group_does_not_continue_completions_at_the_cap(self):
+        state = NeverGiveUpAccumulationState()
+        # Both completions already used response_length * multiplier tokens: no continuations.
+        result = _make_ngu_result(
+            "0_0", [[1, 2, 3, 4, 5, 6, 7, 8], [9, 10, 11, 12, 13, 14, 15, 16]], ["length", "length"], [0.0, 0.0]
+        )
+
+        filter_result = self._filter(result, state)
+
+        self.assertTrue(filter_result.never_give_up)
+        self.assertEqual(filter_result.continuations, [])
+        self.assertEqual(state.pending_response_counts["0_0"], 2)
+
+    def test_maybe_filter_group_multiplier_one_keeps_existing_behavior(self):
+        state = NeverGiveUpAccumulationState()
+        result = _make_ngu_result("0_0", [[1, 2, 3, 4], [5]], ["length", "stop"], [0.0, 0.0])
+
+        filter_result = self._filter(result, state, ngu_seq_multiplier=1)
+
+        self.assertTrue(filter_result.never_give_up)
+        self.assertEqual(filter_result.continuations, [])
+        self.assertEqual(state.pending_response_counts["0_0"], 2)
+
+    def test_accumulate_inference_batches_requeues_and_merges_continuations(self):
+        class MockTokenizer:
+            eos_token_id = 0
+
+            def batch_decode(self, responses, skip_special_tokens=False):
+                return [str(response) for response in responses]
+
+        class FakeIterDataloader:
+            _epoch = 0
+
+            def __next__(self):
+                return {"index": 0, INPUT_IDS_PROMPT_KEY: [10]}
+
+        inference_results = Queue()
+        # Attempt 1: one length-truncated completion (continued), one finished wrong one (buffered).
+        inference_results.put(_make_ngu_result("0_0", [[1, 2, 3, 4], [5]], ["length", "stop"], [0.0, 0.0]))
+        # Retry: the continuation comes back stitched (prefix + new tokens) and solved.
+        inference_results.put(_make_ngu_result("0_0_1", [[1, 2, 3, 4, 9, 10], [6]], ["stop", "stop"], [1.0, 0.0]))
+        param_prompt_Q = Queue()
+        generation_config = Mock(n=2, max_tokens=4)
+        dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: [[10]],
+                GROUND_TRUTHS_KEY: [[11]],
+                VERIFIER_SOURCE_KEY: ["unit"],
+                RAW_PROMPT_KEY: ["prompt"],
+                "index": [0],
+            }
+        )
+
+        result, batch, _, batch_stats = data_loader.accumulate_inference_batches(
+            inference_results,
+            generation_config,
+            num_prompts=1,
+            model_dims=Mock(),
+            tokenizer=MockTokenizer(),
+            dataset=dataset,
+            base_env_config=EnvConfig(),
+            training_step=0,
+            active_sampling=True,
+            filter_zero_std_samples=True,
+            never_give_up=1.0,
+            maintain_pending_ngu_completions=True,
+            ngu_seq_multiplier=2,
+            replenish_prompts=True,
+            iter_dataloader=FakeIterDataloader(),
+            param_prompt_Q=param_prompt_Q,
+        )
+
+        # The NGU retry request resumes the unfinished completion with a doubled budget.
+        retry_request = param_prompt_Q.get_nowait()
+        self.assertEqual(retry_request.prompt_id, "0_0_1")
+        self.assertEqual(len(retry_request.continuations), 1)
+        self.assertEqual(retry_request.continuations[0].tokens, [1, 2, 3, 4])
+        self.assertEqual(retry_request.continuations[0].max_tokens, 8)
+
+        # Merged group: buffered stop completion + both retry completions, with no double count
+        # of the continued completion in the batch or the NGU baseline.
+        self.assertEqual(len(result.responses), 3)
+        self.assertEqual(sorted(batch.scores), [0.0, 0.0, 1.0])
+        self.assertEqual(batch_stats.prompt_sample_counts, [3])
+        self.assertEqual(batch_stats.prompt_baseline_sample_counts, [3])
+
+    def test_streaming_config_validates_ngu_seq_multiplier(self):
+        with self.assertRaises(ValueError):
+            data_loader.StreamingDataLoaderConfig(ngu_seq_multiplier=0)
+        with self.assertRaises(ValueError):
+            data_loader.StreamingDataLoaderConfig(ngu_seq_multiplier=2, never_give_up=0.0)
+        with self.assertRaises(AssertionError):
+            data_loader.StreamingDataLoaderConfig(
+                ngu_seq_multiplier=2,
+                never_give_up=0.5,
+                max_prompt_token_length=256,
+                response_length=256,
+                pack_length=512,
+            )
+        config = data_loader.StreamingDataLoaderConfig(
+            ngu_seq_multiplier=2, never_give_up=0.5, max_prompt_token_length=256, response_length=256, pack_length=768
+        )
+        self.assertEqual(config.total_response_length, 512)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import vllm
 from parameterized import parameterized
 
 from open_instruct import vllm_utils
-from open_instruct.data_types import PromptRequest
+from open_instruct.data_types import ContinuationPrefix, PromptRequest
 from open_instruct.utils import ModelDims
 
 
@@ -216,6 +216,31 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
         self.assertEqual(result.request_info.rollout_states, [{}, {}])
+
+
+class TestAddRequestContinuations(unittest.TestCase):
+    def test_add_request_gives_continuations_their_larger_budget(self):
+        actor = MagicMock()
+        actor.request_metadata = {}
+        actor.active_tasks = {}
+        actor.current_model_step = 3
+
+        sampling_config = vllm_utils.SamplingConfig(temperature=1.0, max_tokens=4, n=3, seed=None)
+        continuation = ContinuationPrefix(tokens=[7, 8, 9, 10], masks=[1, 1, 1, 1], logprobs=[0.0] * 4, max_tokens=8)
+        request = PromptRequest(
+            prompt=[1, 2], generation_config=sampling_config, index=0, prompt_id="0_0_1", continuations=[continuation]
+        )
+
+        with (
+            mock.patch.object(vllm_utils, "process_request") as mock_process_request,
+            mock.patch.object(vllm_utils.asyncio, "run_coroutine_threadsafe", return_value=MagicMock()),
+        ):
+            vllm_utils.add_request(actor, request)
+
+        sub_sampling_params = [call.args[2] for call in mock_process_request.call_args_list]
+        # Sample 0 resumes the continuation with its prefix+chunk budget; the rest start fresh.
+        self.assertEqual([params.max_tokens for params in sub_sampling_params], [8, 4, 4])
+        self.assertEqual(actor.request_metadata["train_0_0_1"]["continuations"], [continuation])
 
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):

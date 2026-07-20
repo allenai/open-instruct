@@ -1341,9 +1341,9 @@ def create_model_and_optimizer(
         for model in policy_group.models
     ]
 
-    # vLLM context must cover prompt + max(train rollout length, local eval length).
+    # vLLM context must cover prompt + max(train rollout length incl. NGU continuations, local eval length).
     vllm_max_model_len = streaming_config.max_prompt_token_length + max(
-        streaming_config.response_length, streaming_config.eval_response_length
+        streaming_config.total_response_length, streaming_config.eval_response_length
     )
 
     # TODO: refactor create_vllm_engines to accept a config dataclass instead of ~30 params.
