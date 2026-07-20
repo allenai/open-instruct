@@ -531,6 +531,10 @@ comparability.
 | --- | --- | --- | --- | --- | --- | --- |
 | `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | ai2/olmo-instruct | ~~[01KXZWJMRC4VK0PBPYR281R72M](https://beaker.org/ex/01KXZWJMRC4VK0PBPYR281R72M)~~ (crashed step 18/2000, commit `84b617078`) → ~~[01KY02BGKXQPN68PAVA2XNK4NN](https://beaker.org/ex/01KY02BGKXQPN68PAVA2XNK4NN)~~ (crashed step 18/2000 again — `grpo_callbacks.py` call site fix missing, commit `105426b07`) → [01KY05JXM1NEJWD9T9FJHW96J7](https://beaker.org/ex/01KY05JXM1NEJWD9T9FJHW96J7) (commit `49a043644`, both call sites fixed; confirmed past step 32/2000, running) |
 | `2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1` | 16384 | 1 | 0.75 | 1 | ai2/open-instruct-dev | [01KXZ3J985XXE89MTGG2BQSTXF](https://beaker.org/ex/01KXZ3J985XXE89MTGG2BQSTXF) |
+| `2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k` | 16384 | 1 | 0 (no NGU) | 1 | ai2/olmo-instruct | [01KY0BC34QVCHPPWXBE3GDCZF9](https://beaker.org/ex/01KY0BC34QVCHPPWXBE3GDCZF9) |
+
+Third arm added to isolate whether NGU (in either form) helps at all relative
+to no-revisit at the same 16k sequence-length ceiling.
 
 ### Launch commands
 
@@ -549,6 +553,14 @@ OC=true EXP=2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1 \
   bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
   --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
   --max_grad_norm 1.0 --seed 1 --never_give_up 0.75 --async_steps 2 \
+  --response_length 16384 --pack_length 18432
+
+# Arm 3: no-NGU baseline, same 16k budget
+OC=true EXP=2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/olmo-instruct \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --async_steps 2 \
   --response_length 16384 --pack_length 18432
 ```
 
