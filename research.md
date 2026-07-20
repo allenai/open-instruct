@@ -136,6 +136,26 @@ all scale by the multiplier.
 driven by truncation-heavy batches, and continuations should *reduce*
 effective truncation — but also produce very long merged completions.
 
+**Status (2026-07-20):** both arms launched and running past step 32/2000
+on Beaker (`2k_ngu075_mult2x8k...` at
+[01KY05JXM1NEJWD9T9FJHW96J7](https://beaker.org/ex/01KY05JXM1NEJWD9T9FJHW96J7),
+`2k_ngu075_seq16k...` at
+[01KXZ3J985XXE89MTGG2BQSTXF](https://beaker.org/ex/01KXZ3J985XXE89MTGG2BQSTXF)).
+Getting the continuation arm running required two follow-up fixes beyond the
+initial implementation — both are utilization-metrics (wandb MFU/MBU
+logging) bugs with no effect on training correctness, but both were crash
+bugs that killed the run: NGU continuations can make an accepted merge
+round finalize fewer than `num_samples_per_prompt_rollout` responses (the
+rest get deferred to a later round), breaking an implicit "sample_count is
+always a multiple of samples_per_prompt" assumption baked into the
+FLOPs/MFU accounting. Fixed once in `open_instruct/utils.py`
+(commit `62baca0c5`), then again in `grpo_callbacks.py` (commit
+`49a043644`) once the live Beaker run revealed the OLMo-core backend
+(`OC=true`, what these experiment arms actually use) has a *separate*
+`calculate_utilization_metrics` call site that the first fix missed. Full
+root-cause writeup in the experiment.md smoke-test section. Training
+results TBD — check Beaker/wandb before treating this as resolved.
+
 **Findings:** TBD (smoke test + both arms launching as of 2026-07-20).
 
 ---

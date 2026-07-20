@@ -492,8 +492,8 @@ multiplied cap), `stop_rate: 0.86`, no crash.
    output-socket encoder, during engine warmup before any generation. Worked around with
    `VLLM_ALLOW_INSECURE_SERIALIZATION=1`. Pre-existing vLLM/environment issue, unrelated to this
    feature.
-3. **Real bug, fixed in commit TBD**: `ValueError: Expected each prompt sample count to be a
-   multiple of samples_per_prompt, got sample_count=12 and samples_per_prompt=8` in
+3. **Real bug, fixed in commit `62baca0c5`**: `ValueError: Expected each prompt sample count to be
+   a multiple of samples_per_prompt, got sample_count=12 and samples_per_prompt=8` in
    `expand_prompt_lengths_for_response_groups` (called from `one_training_step`'s utilization/MFU
    accounting). Root cause: NGU continuations let a merge round finalize *fewer* than
    `num_samples_per_prompt_rollout` responses (the rest are deferred, resumed into a later round),
@@ -510,6 +510,15 @@ multiplied cap), `stop_rate: 0.86`, no crash.
    training-correctness issue). All existing MFU/MBU tests (including the bit-exact
    `test_mbu_reproduction` fixtures) still pass unchanged.
 
+**Follow-up bug found via the live Beaker run (commit `49a043644`):** `calculate_utilization_metrics`
+has *two* independent call sites — `grpo_fast.py`'s `one_training_step` (DeepSpeed backend) and
+`grpo_callbacks.py`'s `StepTimingCallback.post_step` (OLMo-core backend, used by `OC=true`/`grpo.py`,
+which is what the experiment arms below actually run). Commit `62baca0c5` only patched the former;
+the continuation arm (`01KXZWJMRC4VK0PBPYR281R72M`) crashed on the exact same `ValueError` at step
+18/2000 the moment a real continuation merge occurred. Fixed by threading
+`prompt_attempt_counts` through `StepTimingCallback` too. Verified against a fresh Beaker run
+(`01KY05JXM1NEJWD9T9FJHW96J7`) reaching step 32/2000 cleanly, well past the prior crash point.
+
 ### Experiment arms
 
 Workspace note: arm 1 launched under `ai2/olmo-instruct` (per
@@ -520,7 +529,7 @@ comparability.
 
 | Name | response_length | ngu_seq_multiplier | never_give_up | Seed | Workspace | Beaker |
 | --- | --- | --- | --- | --- | --- | --- |
-| `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | ai2/olmo-instruct | ~~[01KXZWJMRC4VK0PBPYR281R72M](https://beaker.org/ex/01KXZWJMRC4VK0PBPYR281R72M)~~ (crashed at step 18/2000 on the utilization-metrics bug above, commit `84b617078`) → relaunched at commit `105426b07` (with the fix): [01KY02BGKXQPN68PAVA2XNK4NN](https://beaker.org/ex/01KY02BGKXQPN68PAVA2XNK4NN) |
+| `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | ai2/olmo-instruct | ~~[01KXZWJMRC4VK0PBPYR281R72M](https://beaker.org/ex/01KXZWJMRC4VK0PBPYR281R72M)~~ (crashed step 18/2000, commit `84b617078`) → ~~[01KY02BGKXQPN68PAVA2XNK4NN](https://beaker.org/ex/01KY02BGKXQPN68PAVA2XNK4NN)~~ (crashed step 18/2000 again — `grpo_callbacks.py` call site fix missing, commit `105426b07`) → [01KY05JXM1NEJWD9T9FJHW96J7](https://beaker.org/ex/01KY05JXM1NEJWD9T9FJHW96J7) (commit `49a043644`, both call sites fixed; confirmed past step 32/2000, running) |
 | `2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1` | 16384 | 1 | 0.75 | 1 | ai2/open-instruct-dev | [01KXZ3J985XXE89MTGG2BQSTXF](https://beaker.org/ex/01KXZ3J985XXE89MTGG2BQSTXF) |
 
 ### Launch commands
