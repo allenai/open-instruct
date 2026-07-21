@@ -653,7 +653,7 @@ def maybe_override_checkpoint_dir(
 ):
     """if auto_checkpoint_state_dir is set and task is open_instruct resumable, set checkpoint_state_dir to the default parent_folder/whoami/time_randomint
 
-    --checkpoint_state_dir is not overriden if it is already set and is on /weka (useful for restarting from a checkpoint)
+    --checkpoint_state_dir is not overridden if it is already set and is on /weka (useful for restarting from a checkpoint)
     """
 
     if not any(file in command for file in OPEN_INSTRUCT_RESUMABLES):
