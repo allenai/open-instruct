@@ -61,8 +61,8 @@ uv run python mason.py \
     --learning_rate 1e-6 \
     --per_device_train_batch_size 1 \
     --max_prompt_token_length 512 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --response_length 8192 \
+    --pack_length 16384 \
     --model_name_or_path "$MODEL_PATH" \
     --chat_template_name olmo_thinker \
     --non_stop_penalty False \
