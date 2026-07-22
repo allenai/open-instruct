@@ -27,7 +27,7 @@ import shutil
 import backoff
 import ray
 import transformers
-from olmo_core.nn.moe.v2.olmo3 import build_olmo3_moe_config_from_hf_config
+from olmo_core.config import DType
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from rich.pretty import pprint
@@ -130,7 +130,12 @@ def main(
 
     if args.olmo_core_train_module == "ddp":
         hf_config = transformers.AutoConfig.from_pretrained(model_config.model_name_or_path, trust_remote_code=True)
-        build_olmo3_moe_config_from_hf_config(hf_config)
+        assert model_config.attn_implementation is not None
+        olmo_core_utils.build_olmo_ddp_model_config_from_hf_config(
+            hf_config,
+            dtype={"bfloat16": DType.bfloat16, "float32": DType.float32}[args.model_dtype],
+            attention_backend=model_config.attn_implementation,
+        )
     else:
         oc_model_config = olmo_core_utils.ModelConfig(
             model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
