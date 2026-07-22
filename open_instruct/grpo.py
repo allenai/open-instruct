@@ -296,6 +296,7 @@ def main(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        trust_remote_code=tc.trust_remote_code,
         enable_return_routed_experts=args.router_replay,
     )
     logger.info("======== vLLM engines initialized =========")
