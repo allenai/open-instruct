@@ -102,6 +102,10 @@ class GRPOExperimentConfig(
     router_replay: bool = False
     """Replay vLLM's routed-expert selections in OLMo-core policy, old-policy,
     and reference-policy forwards. Only supported by the OLMo-core GRPO path."""
+    olmo_core_train_module: Literal["transformer", "ddp"] = "transformer"
+    """OLMo-core learner runtime. The DDP runtime enables stage-one expert parallelism."""
+    olmo_core_ep_degree: int = 1
+    """Expert-parallel degree for the OLMoDDP learner runtime."""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
@@ -242,6 +246,26 @@ class GRPOExperimentConfig(
     """Optional eval-only top_p override. If None, uses training top_p."""
 
     def __post_init__(self):
+        if self.olmo_core_train_module == "ddp":
+            total_learner_gpus = sum(self.num_learners_per_node)
+            if self.olmo_core_ep_degree < 1 or total_learner_gpus % self.olmo_core_ep_degree != 0:
+                raise ValueError(
+                    "olmo_core_ep_degree must be positive and evenly divide the learner world size; "
+                    f"got degree={self.olmo_core_ep_degree}, learners={total_learner_gpus}."
+                )
+            if self.cp_degree is not None:
+                raise ValueError("Context parallelism is not supported by open-instruct's OLMoDDP GRPO path yet.")
+            if self.sequence_parallel_size != 1:
+                raise ValueError("Sequence parallelism is not supported by open-instruct's OLMoDDP GRPO path yet.")
+            if self.fsdp_shard_degree is not None or self.fsdp_num_replicas is not None:
+                raise ValueError("FSDP options cannot be combined with olmo_core_train_module='ddp'.")
+            if self.ref_policy_update_freq is not None:
+                raise ValueError("Periodic reference-policy updates are not supported by OLMoDDP GRPO yet.")
+            if not self.gather_whole_model:
+                raise ValueError("OLMoDDP GRPO currently requires gather_whole_model=True for vLLM synchronization.")
+            if self.single_gpu_mode and self.olmo_core_ep_degree != 1:
+                raise ValueError("single_gpu_mode requires olmo_core_ep_degree=1.")
+
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."

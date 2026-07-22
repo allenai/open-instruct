@@ -1419,6 +1419,38 @@ def _broadcast_weights_ipc(
     return []
 
 
+def broadcast_prepared_weights_to_vllm(
+    weights: dict[str, torch.Tensor],
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: Any | None,
+    model_step: int,
+) -> list[ray.ObjectRef]:
+    """Send an already gathered and HF-converted state to vLLM from learner rank zero."""
+    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+    if not is_rank_0:
+        return []
+
+    ray.get([engine.sleep.remote() for engine in vllm_engines])
+    prepared = [(name, tensor.contiguous()) for name, tensor in weights.items()]
+    if model_update_group is None:
+        for engine in vllm_engines:
+            trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+            IPCWeightTransferEngine.trainer_send_weights(iterator=iter(prepared), trainer_args=trainer_args)
+        return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
+
+    update_info = {
+        "names": [name for name, _ in prepared],
+        "dtype_names": [str(tensor.dtype).split(".")[-1] for _, tensor in prepared],
+        "shapes": [list(tensor.shape) for _, tensor in prepared],
+        "packed": False,
+    }
+    refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
+    NCCLWeightTransferEngine.trainer_send_weights(
+        iterator=iter(prepared), trainer_args=NCCLTrainerSendWeightsArgs(group=model_update_group, packed=False)
+    )
+    return refs
+
+
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],

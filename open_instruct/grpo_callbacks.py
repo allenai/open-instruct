@@ -151,6 +151,7 @@ class VLLMWeightSyncCallback(Callback):
     model_update_group: Any | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
+    weight_state_provider: Callable[[], dict[str, torch.Tensor]] | None = None
 
     @property
     def train_module(self) -> TransformerTrainModule:
@@ -162,13 +163,22 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        broadcast_refs = vllm_utils.broadcast_weights_to_vllm(
-            model=self.train_module.model,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            model_step=self.trainer.global_step,
-            name_mapper=self.name_mapper,
-        )
+        if self.weight_state_provider is not None:
+            weights = self.weight_state_provider()
+            broadcast_refs = vllm_utils.broadcast_prepared_weights_to_vllm(
+                weights=weights,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=self.trainer.global_step,
+            )
+        else:
+            broadcast_refs = vllm_utils.broadcast_weights_to_vllm(
+                model=self.train_module.model,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=self.trainer.global_step,
+                name_mapper=self.name_mapper,
+            )
         sync_time_stats, _ = grpo_utils.perform_weight_sync(
             broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
         )

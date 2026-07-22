@@ -26,6 +26,8 @@ import shutil
 
 import backoff
 import ray
+import transformers
+from olmo_core.nn.moe.v2.olmo3 import build_olmo3_moe_config_from_hf_config
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from rich.pretty import pprint
@@ -126,11 +128,15 @@ def main(
     os.makedirs(args.output_dir, exist_ok=True)
     pprint([args, model_config])
 
-    oc_model_config = olmo_core_utils.ModelConfig(
-        model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
-    )
-    _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
-    olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
+    if args.olmo_core_train_module == "ddp":
+        hf_config = transformers.AutoConfig.from_pretrained(model_config.model_name_or_path, trust_remote_code=True)
+        build_olmo3_moe_config_from_hf_config(hf_config)
+    else:
+        oc_model_config = olmo_core_utils.ModelConfig(
+            model_name_or_path=model_config.model_name_or_path, attn_implementation=model_config.attn_implementation
+        )
+        _, transformer_config = olmo_core_utils.setup_model(oc_model_config, tc, init_device="meta")
+        olmo_core_utils.verify_can_save_as_hf(transformer_config, model_config.model_name_or_path)
 
     ray_init_kwargs = {
         "dashboard_host": "0.0.0.0",
