@@ -2,8 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import transformers
+from olmo_core.config import DType
+from olmo_core.nn.attention import AttentionBackendName
 
-from open_instruct import grpo_utils, vllm_utils
+from open_instruct import grpo_utils, olmo_core_utils, vllm_utils
 
 
 def test_olmo_ddp_ep_config_accepts_divisible_learner_world():
@@ -58,3 +61,35 @@ def test_prepared_hf_state_ipc_sync(monkeypatch):
     assert engine.set_model_step.calls == [((7,), {})]
     assert [name for name, _ in sent] == list(weights)
     torch.testing.assert_close(sent[0][1], weights["model.embed_tokens.weight"])
+
+
+def test_olmo_ddp_factory_builds_qwen3_moe_config():
+    hf_config = transformers.Qwen3MoeConfig(
+        vocab_size=64,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+        num_experts=4,
+        num_experts_per_tok=2,
+        moe_intermediate_size=16,
+        max_position_embeddings=32,
+    )
+
+    model_config = olmo_core_utils.build_olmo_ddp_model_config_from_hf_config(
+        hf_config, dtype=DType.float32, attention_backend=AttentionBackendName.torch
+    )
+
+    assert model_config.n_layers == 2
+    assert model_config.block.routed_experts_router.top_k == 2
+    assert model_config.block.routed_experts_router.lb_loss_weight is None
+    assert model_config.block.routed_experts_router.normalize_expert_weights is None
+
+
+def test_olmo_ddp_factory_rejects_unsupported_checkpoint_type():
+    with pytest.raises(ValueError, match="gpt2"):
+        olmo_core_utils.build_olmo_ddp_model_config_from_hf_config(
+            transformers.GPT2Config(), dtype=DType.float32, attention_backend=AttentionBackendName.torch
+        )

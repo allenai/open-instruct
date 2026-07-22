@@ -16,11 +16,7 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.nn.moe.v2.olmo3 import (
-    build_olmo3_moe_config_from_hf_config,
-    gather_olmo3_moe_hf_state,
-    load_olmo3_moe_hf_state,
-)
+from olmo_core.nn.moe.v2.checkpoint import gather_olmo_ddp_hf_state, load_olmo_ddp_hf_state
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup, OLMoDDPOptimizerConfig
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -134,9 +130,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         use_olmo_ddp = self.grpo_config.olmo_core_train_module == "ddp"
         hf_state: dict[str, torch.Tensor] | None = None
         if use_olmo_ddp:
-            logger.info(f"[Rank {self.rank}] Building Olmo3Moe OLMoDDP model from {self.model_name_or_path}")
             self.hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path, trust_remote_code=True)
-            self.model_config = build_olmo3_moe_config_from_hf_config(
+            logger.info(
+                f"[Rank {self.rank}] Building {self.hf_config.model_type} OLMoDDP model from {self.model_name_or_path}"
+            )
+            self.model_config = olmo_core_utils.build_olmo_ddp_model_config_from_hf_config(
                 self.hf_config, dtype=olmo_core_dtype, attention_backend=self.attn_implementation
             )
             self.model = self.model_config.build(init_device="meta")
@@ -172,7 +170,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             self.ref_policy = self.model_config.build(init_device="cpu")
             if use_olmo_ddp:
                 assert self.hf_config is not None and hf_state is not None
-                load_olmo3_moe_hf_state(self.ref_policy, self.hf_config, hf_state)
+                load_olmo_ddp_hf_state(self.ref_policy, self.hf_config, hf_state)
             else:
                 load_hf_model(
                     self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir
@@ -251,7 +249,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 attn_implementation=self.attn_implementation,
             )
             assert self.hf_config is not None and hf_state is not None
-            load_olmo3_moe_hf_state(self.train_module.model, self.hf_config, hf_state)
+            load_olmo_ddp_hf_state(self.train_module.model, self.hf_config, hf_state)
             del hf_state
         else:
             optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
@@ -334,7 +332,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
     def _gather_olmo_ddp_hf_state(self) -> dict[str, torch.Tensor]:
         if self.hf_config is None:
             raise RuntimeError("OLMoDDP HF state requested before its HF config was loaded.")
-        return gather_olmo3_moe_hf_state(self.train_module.model, self.hf_config)
+        return gather_olmo_ddp_hf_state(self.train_module.model, self.hf_config)
 
     def run_initial_weight_sync(self) -> None:
         """Broadcast initial learner weights to vLLM engines before training starts.

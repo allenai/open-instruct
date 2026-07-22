@@ -14,6 +14,7 @@ import torch
 import torch.distributed as dist
 import transformers
 from olmo_core import optim as olmo_optim
+from olmo_core.config import DType
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn import moe as olmo_moe
@@ -21,8 +22,10 @@ from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
+from olmo_core.nn.moe.v2.olmo3 import build_olmo3_moe_config_from_hf_config
+from olmo_core.nn.moe.v2.qwen import build_qwen3_moe_config_from_hf_config, validate_qwen3_moe_checkpoint_config
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
-from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.nn.transformer import OLMoDDPModelConfig, Transformer, TransformerConfig
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -36,6 +39,26 @@ from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
+
+
+SUPPORTED_OLMO_DDP_MODEL_TYPES = frozenset({"olmo3moe", "qwen3_moe"})
+
+
+def build_olmo_ddp_model_config_from_hf_config(
+    hf_config: transformers.PretrainedConfig, *, dtype: DType, attention_backend: AttentionBackendName
+) -> OLMoDDPModelConfig:
+    """Build the stage-one OLMoDDP model for a supported Hugging Face MoE config."""
+    model_type = getattr(hf_config, "model_type", None)
+    common = {"dtype": dtype, "attention_backend": attention_backend, "router_aux_loss_weight": None}
+    if model_type == "olmo3moe":
+        return build_olmo3_moe_config_from_hf_config(hf_config, **common)
+    if model_type == "qwen3_moe":
+        validate_qwen3_moe_checkpoint_config(hf_config)
+        return build_qwen3_moe_config_from_hf_config(hf_config.to_dict(), **common)
+    raise ValueError(
+        f"OLMoDDP GRPO supports model_type in {sorted(SUPPORTED_OLMO_DDP_MODEL_TYPES)}, "
+        f"but the checkpoint reports {model_type!r}."
+    )
 
 
 @dataclass
