@@ -814,6 +814,7 @@ class TestDataPreparation(TestGrpoFastBase):
             "advantages",
             "response_masks",
             "vllm_logprobs",
+            "routed_experts",
         }
 
         expected_samples_per_worker = batch_size // world_size
@@ -832,6 +833,9 @@ class TestDataPreparation(TestGrpoFastBase):
 
             for field_name in expected_fields:
                 value = getattr(worker_data, field_name)
+                if field_name == "routed_experts":
+                    self.assertIsNone(value)
+                    continue
                 self.assertIsInstance(value, list)
                 self.assertEqual(len(value), expected_num_microbatches)
                 for i, tensor in enumerate(value):

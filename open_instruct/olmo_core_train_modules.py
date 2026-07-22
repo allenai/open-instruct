@@ -25,7 +25,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
+from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, olmo_core_utils, padding_free_collator
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -449,6 +449,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     use_grad=False,
                     batch_size=3 * self.rank_microbatch_size,
                     pass_olmo_core_doc_lens=True,
+                    router_replay=self.grpo_config.router_replay,
                 )
             else:
                 ref_logprobs_BT = None
@@ -470,6 +471,7 @@ class GRPOTrainModule(TransformerTrainModule):
                         use_grad=False,
                         batch_size=3 * self.rank_microbatch_size,
                         pass_olmo_core_doc_lens=True,
+                        router_replay=self.grpo_config.router_replay,
                     )
 
                 for i in range(num_samples):
@@ -509,64 +511,70 @@ class GRPOTrainModule(TransformerTrainModule):
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
-                new_logprobs, entropy = grpo_utils.forward_for_logprobs(
-                    self.model,
-                    data_BT.query_responses[sample_idx],
-                    data_BT.attention_masks[sample_idx],
-                    data_BT.position_ids[sample_idx],
-                    self.pad_token_id,
-                    self.temperature,
-                    return_entropy=self.grpo_config.record_entropy,
-                    pass_olmo_core_doc_lens=True,
-                )
+                routed_experts = None
+                if self.grpo_config.router_replay:
+                    if data_BT.routed_experts is None:
+                        raise ValueError("Router replay is enabled, but the training batch has no routed_experts")
+                    routed_experts = data_BT.routed_experts[sample_idx]
+                with olmo_core_utils.replay_router_context(self.model, routed_experts):
+                    new_logprobs, entropy = grpo_utils.forward_for_logprobs(
+                        self.model,
+                        data_BT.query_responses[sample_idx],
+                        data_BT.attention_masks[sample_idx],
+                        data_BT.position_ids[sample_idx],
+                        self.pad_token_id,
+                        self.temperature,
+                        return_entropy=self.grpo_config.record_entropy,
+                        pass_olmo_core_doc_lens=True,
+                    )
 
-                response_mask = data_BT.response_masks[sample_idx][:, 1:]
-                new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
+                    response_mask = data_BT.response_masks[sample_idx][:, 1:]
+                    new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
 
-                vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
+                    vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
 
-                step_debug_metrics = grpo_utils.compute_vllm_local_debug_metrics(
-                    local_logprobs=new_logprobs, vllm_logprobs=vllm_logprobs, response_mask=response_mask
-                )
-                for k, v in step_debug_metrics.items():
-                    debug_metrics_sum[k] = debug_metrics_sum.get(k, 0.0) + v
-                debug_metrics_count += 1
+                    step_debug_metrics = grpo_utils.compute_vllm_local_debug_metrics(
+                        local_logprobs=new_logprobs, vllm_logprobs=vllm_logprobs, response_mask=response_mask
+                    )
+                    for k, v in step_debug_metrics.items():
+                        debug_metrics_sum[k] = debug_metrics_sum.get(k, 0.0) + v
+                    debug_metrics_count += 1
 
-                old_logprob = grpo_utils.resolve_old_logprob(
-                    old_logprobs_BT,
-                    sample_idx,
-                    epoch_idx,
-                    num_mini_batches,
-                    self.grpo_config.use_vllm_logprobs,
-                    vllm_logprobs,
-                    new_logprobs,
-                )
+                    old_logprob = grpo_utils.resolve_old_logprob(
+                        old_logprobs_BT,
+                        sample_idx,
+                        epoch_idx,
+                        num_mini_batches,
+                        self.grpo_config.use_vllm_logprobs,
+                        vllm_logprobs,
+                        new_logprobs,
+                    )
 
-                advantages = data_BT.advantages[sample_idx]
+                    advantages = data_BT.advantages[sample_idx]
 
-                log_ratio = new_logprobs - old_logprob
-                ratio = torch.exp(log_ratio)
+                    log_ratio = new_logprobs - old_logprob
+                    ratio = torch.exp(log_ratio)
 
-                rho = grpo_utils.compute_rho_correction(
-                    old_logprob, vllm_logprobs, response_mask, advantages[:, 1:], self.grpo_config
-                )
-                grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
+                    rho = grpo_utils.compute_rho_correction(
+                        old_logprob, vllm_logprobs, response_mask, advantages[:, 1:], self.grpo_config
+                    )
+                    grpo_utils.accumulate_rho_histograms(rho_histograms, rho)
 
-                pg_loss, clipfrac, kl = grpo_utils.compute_grpo_loss(
-                    new_logprobs=new_logprobs,
-                    ratio=ratio,
-                    advantages=advantages[:, 1:],
-                    ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
-                    config=self.grpo_config,
-                    rho_weights=rho.weights,
-                )
+                    pg_loss, clipfrac, kl = grpo_utils.compute_grpo_loss(
+                        new_logprobs=new_logprobs,
+                        ratio=ratio,
+                        advantages=advantages[:, 1:],
+                        ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
+                        config=self.grpo_config,
+                        rho_weights=rho.weights,
+                    )
 
-                batch_start = (sample_idx // accumulation_steps) * accumulation_steps
-                loss_denominator = accumulation_token_counts[batch_start]
-                loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
+                    batch_start = (sample_idx // accumulation_steps) * accumulation_steps
+                    loss_denominator = accumulation_token_counts[batch_start]
+                    loss = masked_mean(pg_loss + self.grpo_config.beta * kl, response_mask, None, loss_denominator)
 
-                loss = loss * dp_world_size
-                loss.backward()
+                    loss = loss * dp_world_size
+                    loss.backward()
 
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,

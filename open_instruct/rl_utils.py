@@ -210,6 +210,8 @@ class PackedSequences(Generic[T]):
     """
     rewards: list[torch.Tensor] | None = None
     """packed rewards (batch_size, pack_length)"""
+    routed_experts: list[torch.Tensor] | None = None
+    """packed expert IDs, each with shape ``[pack_length, num_moe_layers, top_k]``"""
 
 
 def reset_position_ids(attention_mask):
@@ -233,6 +235,7 @@ def pack_sequences(
     vllm_logprobs: list[list[float]],
     min_num_batches: int = 1,
     mask_tool_use: bool = False,
+    routed_experts: list | None = None,
 ) -> PackedSequences:
     """Pack query-response pairs into sequences for training.
 
@@ -243,6 +246,8 @@ def pack_sequences(
         pack_length: Maximum length of each packed sequence
         pad_token_id: Token ID used for padding
         vllm_logprobs: Log probabilities from vLLM for each response
+        routed_experts: Optional expert IDs for each query-response pair, shaped
+            ``[len(query) + len(response) - 1, num_moe_layers, top_k]``.
         min_num_batches: Minimum number of packed batches to produce.
             Used to ensure we have a batch for each rank in distributed training.
 
@@ -250,6 +255,8 @@ def pack_sequences(
         PackedSequences containing the packed training data.
     """
     assert not any(pad_token_id in query for query in queries)
+    if routed_experts is not None and len(routed_experts) != len(queries):
+        raise ValueError(f"routed_experts has {len(routed_experts)} samples, expected {len(queries)}")
 
     # Calculate total tokens to determine effective pack_length
     total_tokens = 0
@@ -278,6 +285,7 @@ def pack_sequences(
     num_actions = []
     packed_seq_lens = []
     packed_vllm_logprobs = []
+    packed_routed_experts = [] if routed_experts is not None else None
     cur_data = []
     cur_response_mask = []
     cur_num_actions = []
@@ -285,6 +293,7 @@ def pack_sequences(
     cur_attention_mask = []
     cur_dones = []
     cur_vllm_logprobs = []
+    cur_routed_experts = []
     offset = 0
     for i in range(len(queries)):
         query = queries[i]
@@ -295,6 +304,28 @@ def pack_sequences(
 
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
+        sample_routed_experts = None
+        if routed_experts is not None:
+            if routed_experts[i] is None:
+                raise ValueError(f"routed_experts is missing sample {i}")
+            sample_routed_experts = torch.as_tensor(routed_experts[i], dtype=torch.long)
+            expected_route_length = len(query) + len(response) - 1
+            if sample_routed_experts.ndim != 3:
+                raise ValueError(
+                    f"routed_experts[{i}] must have shape [seq_len, num_moe_layers, top_k], "
+                    f"got {tuple(sample_routed_experts.shape)}"
+                )
+            if sample_routed_experts.shape[0] != expected_route_length:
+                raise ValueError(
+                    f"routed_experts[{i}] has sequence length {sample_routed_experts.shape[0]}, "
+                    f"expected {expected_route_length} for query + response - 1"
+                )
+            if sample_routed_experts.shape[0] == 0:
+                raise ValueError(f"routed_experts[{i}] cannot be empty")
+            # vLLM omits the final generated token because that position predicts
+            # no sampled token. The trainer still forwards it, so reuse the last
+            # valid selection for this loss-ignored position.
+            sample_routed_experts = torch.cat((sample_routed_experts, sample_routed_experts[-1:].clone()), dim=0)
 
         assert len(response_logprobs_unfiltered) == len(response), (
             f"Response {i}: logprobs length ({len(response_logprobs_unfiltered)}) != response length ({len(response)})"
@@ -303,11 +334,17 @@ def pack_sequences(
         filtered_response = []
         filtered_mask = []
         filtered_logprobs = []
+        kept_response_indices = []
         for j, (token, mask_val) in enumerate(zip(response, mask)):
             if token != pad_token_id:
                 filtered_response.append(token)
                 filtered_mask.append(mask_val)
                 filtered_logprobs.append(response_logprobs_unfiltered[j])
+                kept_response_indices.append(j)
+
+        if sample_routed_experts is not None:
+            kept_positions = list(range(len(query))) + [len(query) + j for j in kept_response_indices]
+            sample_routed_experts = sample_routed_experts[kept_positions]
 
         response = filtered_response
         response_tool_mask = filtered_mask
@@ -333,6 +370,8 @@ def pack_sequences(
             packed_seq_lens.append(cur_packed_seq_lens)
             dones.append(cur_dones)
             packed_vllm_logprobs.append(cur_vllm_logprobs)
+            if packed_routed_experts is not None:
+                packed_routed_experts.append(torch.cat(cur_routed_experts, dim=0))
             cur_data = []
             cur_response_mask = []
             cur_attention_mask = []
@@ -340,9 +379,12 @@ def pack_sequences(
             cur_packed_seq_lens = []
             cur_dones = []
             cur_vllm_logprobs = []
+            cur_routed_experts = []
             offset = i
         cur_data.extend(query_response)
         cur_vllm_logprobs.extend(combined_logprobs)
+        if sample_routed_experts is not None:
+            cur_routed_experts.append(sample_routed_experts)
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
@@ -361,6 +403,8 @@ def pack_sequences(
         packed_seq_lens.append(cur_packed_seq_lens)
         dones.append(cur_dones)
         packed_vllm_logprobs.append(cur_vllm_logprobs)
+        if packed_routed_experts is not None:
+            packed_routed_experts.append(torch.cat(cur_routed_experts, dim=0))
     attention_masks_list = [torch.tensor(t) for t in attention_masks]
     return PackedSequences(
         query_responses=[torch.tensor(t) for t in query_responses],
@@ -372,6 +416,7 @@ def pack_sequences(
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
         dones=[torch.tensor(t) for t in dones],
         vllm_logprobs=[torch.tensor(t, dtype=torch.float) for t in packed_vllm_logprobs],
+        routed_experts=packed_routed_experts,
     )
 
 

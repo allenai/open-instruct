@@ -249,6 +249,29 @@ class TestRLUtils(unittest.TestCase):
 
         return packed_values, packed_rewards, packed_dones, packed_response_masks
 
+    def test_pack_sequences_preserves_routed_experts(self):
+        queries = [[1, 2], [3]]
+        responses = [[4, 5], [6, 0, 7]]
+        masks = [[1, 1], [1, 1, 1]]
+        logprobs = [[-0.1, -0.2], [-0.3, -0.4, -0.5]]
+        routes = [torch.arange(3).view(3, 1, 1).expand(-1, 2, 2), torch.arange(10, 13).view(3, 1, 1).expand(-1, 2, 2)]
+
+        packed = rl_utils.pack_sequences(
+            queries=queries,
+            responses=responses,
+            masks=masks,
+            pack_length=20,
+            pad_token_id=0,
+            vllm_logprobs=logprobs,
+            routed_experts=routes,
+        )
+
+        self.assertIsNotNone(packed.routed_experts)
+        assert packed.routed_experts is not None
+        self.assertEqual(tuple(packed.routed_experts[0].shape), (7, 2, 2))
+        expected_rows = torch.tensor([0, 1, 2, 2, 10, 11, 12])
+        torch.testing.assert_close(packed.routed_experts[0][:, 0, 0], expected_rows)
+
     def test_pack_sequences_logits(self):
         """Test packed sequence processing with value model and advantage calculation."""
         queries, responses, pad_token_id = get_test_data()

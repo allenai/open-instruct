@@ -227,6 +227,7 @@ def main(
         model_name=model_config.model_name_or_path,
         base_env_config=base_env_config,
         initial_state=None,
+        router_replay=args.router_replay,
     )
 
     wait_for_gpus(sum(args.num_learners_per_node))
@@ -284,6 +285,7 @@ def main(
         reward_config=reward_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        enable_return_routed_experts=args.router_replay,
     )
     logger.info("======== vLLM engines initialized =========")
 

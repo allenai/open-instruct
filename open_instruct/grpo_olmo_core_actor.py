@@ -129,6 +129,20 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
+        has_moe_layers = olmo_core_utils.model_has_moe_layers(self.model)
+        supports_router_replay = olmo_core_utils.model_supports_router_replay(self.model)
+        if self.grpo_config.router_replay and not supports_router_replay:
+            raise ValueError(
+                "Router replay was requested, but the OLMo-core model has no replay-capable "
+                "routed_experts_router modules"
+            )
+        if self.rank == 0 and has_moe_layers and not self.grpo_config.router_replay:
+            logger.warning(
+                "Detected an MoE policy, but router replay is disabled. Set --router_replay true "
+                "to capture and replay vLLM's routed-expert selections."
+            )
+        elif self.rank == 0 and self.grpo_config.router_replay:
+            logger.info("Router replay enabled for vLLM rollouts and OLMo-core policy forwards")
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")

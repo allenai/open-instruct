@@ -99,6 +99,9 @@ class GRPOExperimentConfig(
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 
     # Algorithm
+    router_replay: bool = False
+    """Replay vLLM's routed-expert selections in OLMo-core policy, old-policy,
+    and reference-policy forwards. Only supported by the OLMo-core GRPO path."""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
@@ -582,6 +585,7 @@ def compute_logprobs(
     use_grad: bool = False,
     batch_size: int | None = None,
     pass_olmo_core_doc_lens: bool = False,
+    router_replay: bool = False,
 ) -> list[torch.Tensor]:
     """Compute log probabilities for all samples in batch."""
     logprobs_BT: list[torch.Tensor] = []
@@ -602,16 +606,22 @@ def compute_logprobs(
 
             if len(set(shapes)) != 1:
                 for i in batch_indices:
-                    single_logprobs, _ = forward_for_logprobs(
-                        model,
-                        data_BT.query_responses[i],
-                        data_BT.attention_masks[i] if pass_olmo_core_doc_lens else None,
-                        data_BT.position_ids[i],
-                        pad_token_id,
-                        temperature,
-                        False,
-                        pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
-                    )
+                    routed_experts = None
+                    if router_replay:
+                        if data_BT.routed_experts is None:
+                            raise ValueError("Router replay is enabled, but the training batch has no routed_experts")
+                        routed_experts = data_BT.routed_experts[i]
+                    with olmo_core_utils.replay_router_context(model, routed_experts):
+                        single_logprobs, _ = forward_for_logprobs(
+                            model,
+                            data_BT.query_responses[i],
+                            data_BT.attention_masks[i] if pass_olmo_core_doc_lens else None,
+                            data_BT.position_ids[i],
+                            pad_token_id,
+                            temperature,
+                            False,
+                            pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
+                        )
 
                     response_mask_BT = data_BT.response_masks[i]
                     single_logprobs = mask_logprobs(single_logprobs, response_mask_BT[:, 1:])
@@ -626,16 +636,23 @@ def compute_logprobs(
                 else None
             )
 
-            batch_logprobs, _ = forward_for_logprobs(
-                model,
-                batch_query_responses,
-                batch_attention_mask,
-                batch_position_ids,
-                pad_token_id,
-                temperature,
-                False,
-                pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
-            )
+            batch_routed_experts = None
+            if router_replay:
+                if data_BT.routed_experts is None:
+                    raise ValueError("Router replay is enabled, but the training batch has no routed_experts")
+                batch_routed_experts = torch.cat([data_BT.routed_experts[i] for i in batch_indices], dim=0)
+
+            with olmo_core_utils.replay_router_context(model, batch_routed_experts):
+                batch_logprobs, _ = forward_for_logprobs(
+                    model,
+                    batch_query_responses,
+                    batch_attention_mask,
+                    batch_position_ids,
+                    pad_token_id,
+                    temperature,
+                    False,
+                    pass_olmo_core_doc_lens=pass_olmo_core_doc_lens,
+                )
 
             sample_sizes = [data_BT.query_responses[i].shape[0] for i in batch_indices]
             split_logprobs = torch.split(batch_logprobs, sample_sizes, dim=0)

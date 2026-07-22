@@ -868,6 +868,7 @@ def make_batch_from_groups(
     combined_tool_call_stats = []
     combined_rollout_states = []
     combined_logprobs = []
+    combined_routed_experts = []
 
     earliest_start_time = float("inf")
     prompt_lengths = []
@@ -905,6 +906,13 @@ def make_batch_from_groups(
         combined_rollout_states.extend(result.request_info.rollout_states)
 
         combined_logprobs.extend(result.logprobs)
+        if result.routed_experts is not None:
+            if len(result.routed_experts) != len(result.responses):
+                raise ValueError(
+                    f"GenerationResult has {len(result.routed_experts)} routed-expert samples "
+                    f"for {len(result.responses)} responses"
+                )
+            combined_routed_experts.extend(result.routed_experts)
 
         earliest_start_time = min(earliest_start_time, result.start_time)
 
@@ -945,6 +953,7 @@ def make_batch_from_groups(
         prompt_id=groups[0].result.prompt_id,
         token_statistics=accumulated_stats,
         logprobs=combined_logprobs,
+        routed_experts=combined_routed_experts or None,
     )
 
     if actor_manager is not None:
@@ -1199,6 +1208,8 @@ def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch:
     result.masks = [result.masks[i] for i in stop_idxes]
     result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
     result.logprobs = [result.logprobs[i] for i in stop_idxes]
+    if result.routed_experts is not None:
+        result.routed_experts = [result.routed_experts[i] for i in stop_idxes]
     return batch[stop_idxes]
 
 
@@ -1247,6 +1258,11 @@ def prepare_collated_data_for_workers(
         per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
         per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
         per_device_packed_vllm_logprobs = packed_sequences.vllm_logprobs[B * i : B * (i + 1)]
+        per_device_packed_routed_experts = (
+            packed_sequences.routed_experts[B * i : B * (i + 1)]
+            if packed_sequences.routed_experts is not None
+            else None
+        )
 
         # Shuffle the batch and collate the data
         b_inds = np.random.permutation(len(per_device_packed_query_responses))
@@ -1256,6 +1272,7 @@ def prepare_collated_data_for_workers(
         collated_response_masks = []
         collated_advantages = []
         collated_vllm_logprobs = []
+        collated_routed_experts = [] if per_device_packed_routed_experts is not None else None
         for j in range(0, len(per_device_packed_query_responses), per_device_train_batch_size):
             micro_range = b_inds[j : j + per_device_train_batch_size]
             collated_query_responses.append(
@@ -1276,6 +1293,10 @@ def prepare_collated_data_for_workers(
             collated_vllm_logprobs.append(
                 collate_fn([per_device_packed_vllm_logprobs[idx] for idx in micro_range], 0, pin_memory)
             )
+            if collated_routed_experts is not None and per_device_packed_routed_experts is not None:
+                collated_routed_experts.append(
+                    collate_fn([per_device_packed_routed_experts[idx] for idx in micro_range], 0, pin_memory)
+                )
         collated_data.append(
             data_types.CollatedBatchData(
                 query_responses=collated_query_responses,
@@ -1284,6 +1305,7 @@ def prepare_collated_data_for_workers(
                 advantages=collated_advantages,
                 response_masks=collated_response_masks,
                 vllm_logprobs=collated_vllm_logprobs,
+                routed_experts=collated_routed_experts,
             )
         )
     return collated_data
@@ -1321,6 +1343,7 @@ class DataPreparationActor:
         model_name: str | None,
         base_env_config: EnvConfig,
         initial_state: dict | None = None,
+        router_replay: bool = False,
     ):
         self.inference_results_Q = inference_results_Q
         self.param_prompt_Q = param_prompt_Q
@@ -1340,6 +1363,7 @@ class DataPreparationActor:
         self.run_name = run_name
         self.model_name = model_name
         self.base_env_config = base_env_config
+        self.router_replay = router_replay
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
@@ -1451,6 +1475,11 @@ class DataPreparationActor:
             assert batch_stats is not None
 
             batch = maybe_mask_truncated_completions(result, batch, self.config.mask_truncated_completions)
+            if self.router_replay and result.routed_experts is None:
+                raise RuntimeError(
+                    "Router replay is enabled, but vLLM returned no routed-expert selections. "
+                    "Check that the serving model and OpenAI completions endpoint support route capture."
+                )
 
             if len(result.responses) == 0:
                 logger.warning(
@@ -1503,6 +1532,7 @@ class DataPreparationActor:
                 pack_length=self.config.pack_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 vllm_logprobs=result.logprobs,
+                routed_experts=result.routed_experts if self.router_replay else None,
                 mask_tool_use=self.config.mask_tool_use,
                 min_num_batches=self.dp_world_size,
             )
