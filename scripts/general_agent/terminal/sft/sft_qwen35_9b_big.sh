@@ -3,21 +3,26 @@
 # this is the 'big' SFT
 # We use a version of Qwen 3.5 with an interleaved reasoning chat template
 
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
+MODEL_NAME=hamishivi/Qwen3.5-9B
+TOKENIZER_NAME=hamishivi/Qwen3.5-9B
+EXP_NAME=sft_tmax_qwen35_9b_big
+
 DATASET=allenai/tmax-sft-big
+
+BEAKER_WORKSPACE=ai2/general-tool-use
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/open-instruct-dev \
+    --workspace $BEAKER_WORKSPACE \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
-    --preemptible \
     --num_nodes 4 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 \
     -- \
     accelerate launch \
@@ -27,10 +32,9 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name sft_qwen35_9b_big \
-    --model_name_or_path hamishivi/Qwen3.5-9B \
-    --tokenizer_name hamishivi/Qwen3.5-9B \
-    --use_flash_attn \
+    --exp_name $EXP_NAME \
+    --model_name_or_path $MODEL_NAME \
+    --tokenizer_name $TOKENIZER_NAME \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -41,7 +45,12 @@ uv run python mason.py \
     --num_train_epochs 2 \
     --dataset_mixer_list $DATASET 1.0 \
     --gradient_checkpointing \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
+    --push_to_hub false \
+    --try_launch_beaker_eval_jobs false \
     --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --logging_steps 1 \
     --seed 42

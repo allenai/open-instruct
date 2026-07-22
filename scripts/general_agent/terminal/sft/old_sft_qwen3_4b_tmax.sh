@@ -57,7 +57,6 @@ uv run python mason.py \
         nvidia__Nemotron_Terminal_Corpus__skill_based_medium \
         nvidia__Nemotron_Terminal_Corpus__skill_based_mixed \
         open_thoughts__OpenThoughts_Agent_v1_SFT \
-    --add_bos \
     --gradient_checkpointing \
     --checkpointing_steps epoch \
     --clean_checkpoints_at_end false \

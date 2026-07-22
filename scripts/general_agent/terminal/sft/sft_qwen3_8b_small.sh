@@ -1,21 +1,27 @@
 #!/bin/bash
 # SFT On Qwen3 8B on *just* tmax data ('small' SFT)
 
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
+MODEL_NAME=Qwen/Qwen3-8B
+TOKENIZER_NAME=Qwen/Qwen3-8B
+EXP_NAME=sft_tmax_qwen3_8b_small
+
 DATASET=allenai/tmax-sft
+DATASET_CONFIG=skill_tax_20260505_2.2k_combined_balanced_thinking_all
+
+BEAKER_WORKSPACE=ai2/general-tool-use
 
 uv run python mason.py \
     --cluster ai2/jupiter \
-    --workspace ai2/open-instruct-dev \
+    --workspace $BEAKER_WORKSPACE \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
-    --preemptible \
     --num_nodes 4 \
-    --budget ai2/oe-adapt \
+    --budget ai2/oe-omai \
     --gpus 8 \
     -- \
     accelerate launch \
@@ -25,10 +31,9 @@ uv run python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/finetune.py \
-    --exp_name sft_qwen3_8b_tmax \
-    --model_name_or_path Qwen/Qwen3-8B \
-    --tokenizer_name Qwen/Qwen3-8B \
-    --use_flash_attn \
+    --exp_name $EXP_NAME \
+    --model_name_or_path $MODEL_NAME \
+    --tokenizer_name $TOKENIZER_NAME \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \
@@ -39,10 +44,16 @@ uv run python mason.py \
     --num_train_epochs 2 \
     --dataset_mixer_list $DATASET 1.0 \
     --dataset_mixer_list_config_names \
-        skill_tax_20260505_2.2k_combined_balanced_thinking_all \
-    --add_bos \
+        $DATASET_CONFIG \
+    --dataset_mixer_list_splits \
+        train \
     --gradient_checkpointing \
+    --checkpointing_steps epoch \
+    --clean_checkpoints_at_end false \
+    --push_to_hub false \
+    --try_launch_beaker_eval_jobs false \
     --report_to wandb \
     --with_tracking \
+    --wandb_project_name oe-general-agents \
     --logging_steps 1 \
     --seed 42
