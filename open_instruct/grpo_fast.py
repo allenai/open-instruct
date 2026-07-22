@@ -699,23 +699,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
 
                     # Calculate the policy's loss
-                    logprobs_diff_BT = new_logprobs_BT - old_logprob_BT
-                    ratio_BT = torch.exp(logprobs_diff_BT)
-                    rho_BT = grpo_utils.compute_rho_correction(
-                        old_logprob_BT, vllm_logprobs_BT, response_mask_BT, data_BT.advantages[i][:, 1:], self.args
-                    )
-                    grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
-
-                    pg_loss_BT, clipfrac_BT, kl_BT = grpo_utils.compute_grpo_loss(
+                    loss_output_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
-                        ratio=ratio_BT,
+                        old_logprobs=old_logprob_BT,
+                        vllm_logprobs=vllm_logprobs_BT,
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
+                        response_mask=response_mask_BT,
                         config=self.args,
-                        rho_weights=rho_BT.weights,
                     )
+                    grpo_utils.accumulate_rho_histograms(rho_histograms, loss_output_BT.rho)
 
-                    per_token_loss_BT = pg_loss_BT + self.args.beta * kl_BT
+                    per_token_loss_BT = loss_output_BT.pg_loss + self.args.beta * loss_output_BT.kl
                     loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
                     # we already took world size into account via the tokens
@@ -736,16 +731,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     grpo_utils.populate_sample_loss_stats(
                         loss_stats_B,
                         i,
-                        pg_loss_BT,
-                        clipfrac_BT,
-                        ratio_BT,
+                        loss_output_BT,
                         loss,
                         response_mask_BT,
                         new_logprobs_BT,
                         ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         entropy_BT,
                         self.args,
-                        rho_metrics=rho_BT.metrics,
                     )
 
             batch_metrics = batch_data["metrics"]

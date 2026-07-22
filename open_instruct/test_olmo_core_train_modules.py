@@ -165,7 +165,8 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "rho_clamp_upper_bound": 0.0,
         "rho_mask_lower_bound": 0.0,
         "rho_mask_upper_bound": 0.0,
-        "rho_mask_tv_divergence": False,
+        "rho_divergence_algo": grpo_utils.RhoDivergenceAlgo.icepop,
+        "rho_divergence_type": grpo_utils.RhoDivergenceType.tv,
         "use_rho_correction": False,
     }
     defaults.update(kwargs)
@@ -175,142 +176,158 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
     return config
 
 
+def _old_logprobs_for_ratio(new_logprobs: torch.Tensor, ratio: torch.Tensor) -> torch.Tensor:
+    """Old logprobs such that exp(new - old) equals ``ratio``."""
+    return new_logprobs.detach() - torch.log(ratio)
+
+
 class TestComputeGRPOLoss(unittest.TestCase):
-    @parameterized.expand([("dapo", grpo_utils.GRPOLossType.dapo), ("cispo", grpo_utils.GRPOLossType.cispo)])
+    @parameterized.expand(
+        [
+            ("dapo", grpo_utils.GRPOLossType.dapo),
+            ("cispo", grpo_utils.GRPOLossType.cispo),
+            ("dppo", grpo_utils.GRPOLossType.dppo),
+        ]
+    )
     def test_output_shapes(self, _name, loss_type):
         batch_size, seq_len = 2, 4
         config = _make_grpo_config(loss_fn=loss_type)
         new_logprobs = torch.randn(batch_size, seq_len)
-        ratio = torch.exp(torch.randn(batch_size, seq_len))
+        old_logprobs = torch.randn(batch_size, seq_len)
         advantages = torch.randn(batch_size, seq_len)
 
-        pg_loss, clipfrac, kl = grpo_utils.compute_grpo_loss(
+        output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
-            ratio=ratio,
+            old_logprobs=old_logprobs,
+            vllm_logprobs=old_logprobs,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones(batch_size, seq_len, dtype=torch.bool),
             config=config,
-            rho_weights=torch.ones_like(ratio),
         )
 
-        self.assertEqual(pg_loss.shape, (batch_size, seq_len))
-        self.assertEqual(clipfrac.shape, (batch_size, seq_len))
-        self.assertEqual(kl.shape, (batch_size, seq_len))
+        self.assertEqual(output.pg_loss.shape, (batch_size, seq_len))
+        self.assertEqual(output.clipfrac.shape, (batch_size, seq_len))
+        self.assertEqual(output.kl.shape, (batch_size, seq_len))
+        self.assertEqual(output.ratio.shape, (batch_size, seq_len))
 
     def test_dapo_clipping(self):
         config = _make_grpo_config(clip_lower=0.2, clip_higher=0.2)
         ratio = torch.tensor([[1.5, 0.5, 1.0]])
         new_logprobs = torch.randn(1, 3)
+        old_logprobs = _old_logprobs_for_ratio(new_logprobs, ratio)
         advantages = torch.ones(1, 3)
 
-        pg_loss, clipfrac, _ = grpo_utils.compute_grpo_loss(
+        output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
-            ratio=ratio,
+            old_logprobs=old_logprobs,
+            vllm_logprobs=old_logprobs,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones(1, 3, dtype=torch.bool),
             config=config,
-            rho_weights=torch.ones_like(ratio),
         )
 
         expected_clamped = torch.clamp(ratio, 0.8, 1.2)
         expected_unclipped = -advantages * ratio
         expected_clipped = -advantages * expected_clamped
-        torch.testing.assert_close(pg_loss, torch.max(expected_unclipped, expected_clipped))
-        torch.testing.assert_close(clipfrac, (expected_clipped > expected_unclipped).float())
+        torch.testing.assert_close(output.pg_loss, torch.max(expected_unclipped, expected_clipped))
+        torch.testing.assert_close(output.clipfrac, (expected_clipped > expected_unclipped).float())
 
     def test_cispo_uses_detached_ratio(self):
         config = _make_grpo_config(loss_fn=grpo_utils.GRPOLossType.cispo, clip_higher=0.2)
-        ratio = torch.tensor([[1.5, 0.5, 1.0]], requires_grad=True)
+        ratio = torch.tensor([[1.5, 0.5, 1.0]])
         new_logprobs = torch.randn(1, 3, requires_grad=True)
+        old_logprobs = _old_logprobs_for_ratio(new_logprobs, ratio)
         advantages = torch.ones(1, 3)
 
-        pg_loss, clipfrac, _ = grpo_utils.compute_grpo_loss(
+        output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
-            ratio=ratio,
+            old_logprobs=old_logprobs,
+            vllm_logprobs=old_logprobs,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones(1, 3, dtype=torch.bool),
             config=config,
-            rho_weights=torch.ones_like(ratio),
         )
 
-        pg_loss.sum().backward()
-        self.assertIsNone(ratio.grad)
-        self.assertIsNotNone(new_logprobs.grad)
-        torch.testing.assert_close(clipfrac, torch.tensor([[1.0, 0.0, 0.0]]))
+        output.pg_loss.sum().backward()
+        # The clipped ratio is detached, so the only gradient path is the REINFORCE term.
+        torch.testing.assert_close(new_logprobs.grad, -advantages * torch.clamp(ratio, max=1.2))
+        torch.testing.assert_close(output.clipfrac, torch.tensor([[1.0, 0.0, 0.0]]))
 
     def test_with_ref_logprobs(self):
         config = _make_grpo_config(beta=0.05, kl_estimator=2)
         batch_size, seq_len = 2, 4
         new_logprobs = torch.randn(batch_size, seq_len)
-        ratio = torch.exp(torch.randn(batch_size, seq_len))
+        old_logprobs = torch.randn(batch_size, seq_len)
         advantages = torch.randn(batch_size, seq_len)
         ref_logprobs = torch.randn(batch_size, seq_len)
 
-        _, _, kl = grpo_utils.compute_grpo_loss(
+        output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
-            ratio=ratio,
+            old_logprobs=old_logprobs,
+            vllm_logprobs=old_logprobs,
             advantages=advantages,
             ref_logprobs=ref_logprobs,
+            response_mask=torch.ones(batch_size, seq_len, dtype=torch.bool),
             config=config,
-            rho_weights=torch.ones_like(ratio),
         )
 
-        self.assertFalse(torch.all(kl == 0))
+        self.assertFalse(torch.all(output.kl == 0))
 
     def test_without_ref_logprobs(self):
         config = _make_grpo_config()
         new_logprobs = torch.randn(2, 4)
-        ratio = torch.exp(torch.randn(2, 4))
+        old_logprobs = torch.randn(2, 4)
         advantages = torch.randn(2, 4)
 
-        _, _, kl = grpo_utils.compute_grpo_loss(
+        output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
-            ratio=ratio,
+            old_logprobs=old_logprobs,
+            vllm_logprobs=old_logprobs,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones(2, 4, dtype=torch.bool),
             config=config,
-            rho_weights=torch.ones_like(ratio),
         )
 
-        torch.testing.assert_close(kl, torch.zeros_like(kl))
+        torch.testing.assert_close(output.kl, torch.zeros_like(output.kl))
 
-    def test_rho_weights(self):
-        config = _make_grpo_config()
+    def test_rho_weights_scale_loss(self):
+        # ρ = π_old / μ = 2 everywhere; with clamps disabled the kept tokens are reweighted by 2.
+        config = _make_grpo_config(use_rho_correction=True)
         new_logprobs = torch.randn(2, 4)
-        ratio = torch.exp(torch.randn(2, 4))
+        old_logprobs = -torch.rand(2, 4) - 0.1
+        vllm_logprobs = old_logprobs - torch.log(torch.tensor(2.0))
         advantages = torch.randn(2, 4)
-        rho_weights = torch.full((2, 4), 2.0)
+        response_mask = torch.ones(2, 4, dtype=torch.bool)
 
-        pg_no_rho, clipfrac_no_rho, _ = grpo_utils.compute_grpo_loss(
+        common = dict(
             new_logprobs=new_logprobs,
-            ratio=ratio,
+            old_logprobs=old_logprobs,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=response_mask,
             config=config,
-            rho_weights=torch.ones_like(new_logprobs),
         )
+        output_no_rho = grpo_utils.compute_grpo_loss(vllm_logprobs=old_logprobs, **common)
+        output_rho = grpo_utils.compute_grpo_loss(vllm_logprobs=vllm_logprobs, **common)
 
-        pg_rho, clipfrac_rho, _ = grpo_utils.compute_grpo_loss(
-            new_logprobs=new_logprobs,
-            ratio=ratio,
-            advantages=advantages,
-            ref_logprobs=None,
-            config=config,
-            rho_weights=rho_weights,
-        )
-
-        torch.testing.assert_close(pg_rho, pg_no_rho * 2.0)
-        torch.testing.assert_close(clipfrac_rho, clipfrac_no_rho)
+        torch.testing.assert_close(output_rho.pg_loss, output_no_rho.pg_loss * 2.0)
+        torch.testing.assert_close(output_rho.clipfrac, output_no_rho.clipfrac)
 
     def test_rho_mask(self):
         config = _make_grpo_config(use_rho_correction=True, rho_mask_lower_bound=0.5, rho_mask_upper_bound=2.0)
         response_mask = torch.tensor([[True, True, True, True, True]])
         # ρ values: 0.25 (drop, < lower=0.5), 0.5 (keep), 1.0 (keep), 2.0 (keep), 4.0 (drop, > upper=2.0).
         # In-range tokens are reweighted by ρ, not gated to 1.
-        old_logprob = torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
-        vllm_logprobs = torch.zeros_like(old_logprob)
+        vllm_logprobs = torch.log(torch.full((1, 5), 0.2))
+        old_logprob = vllm_logprobs + torch.log(torch.tensor([[0.25, 0.5, 1.0, 2.0, 4.0]]))
         advantages = torch.ones_like(old_logprob)
-        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, advantages, config)
+        correction = grpo_utils.compute_rho_correction(
+            old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
+        )
         torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 0.5, 1.0, 2.0, 0.0]]))
         torch.testing.assert_close(
             correction.metrics["val/rho_drop_low_frac"], torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0]])
@@ -322,7 +339,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         # Padding tokens (response_mask=False) should always be 0 / not counted as dropped.
         response_mask_with_pad = torch.tensor([[False, True, True, True, False]])
         correction_pad = grpo_utils.compute_rho_correction(
-            old_logprob, vllm_logprobs, response_mask_with_pad, advantages, config
+            old_logprob, vllm_logprobs, old_logprob, response_mask_with_pad, advantages, config
         )
         torch.testing.assert_close(correction_pad.weights, torch.tensor([[0.0, 0.5, 1.0, 2.0, 0.0]]))
         torch.testing.assert_close(correction_pad.metrics["val/rho_drop_low_frac"], torch.zeros((1, 5)))
@@ -335,11 +352,13 @@ class TestComputeGRPOLoss(unittest.TestCase):
         # Row 0: per-token ρ = [0.25, 1.0, 4.0]; mean log ρ = 0 → ρ_seq = 1 (kept).
         # Row 1: per-token ρ = [4.0, 4.0, 4.0]; mean log ρ = log 4 → ρ_seq = 4 (drop high).
         # Row 2: per-token ρ = [0.25, 0.25, 0.25]; ρ_seq = 0.25 (drop low).
-        old_logprob = torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0], [0.25, 0.25, 0.25]]))
-        vllm_logprobs = torch.zeros_like(old_logprob)
+        vllm_logprobs = torch.log(torch.full((3, 3), 0.2))
+        old_logprob = vllm_logprobs + torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0], [0.25, 0.25, 0.25]]))
         response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
         advantages = torch.ones_like(old_logprob)
-        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, advantages, config)
+        correction = grpo_utils.compute_rho_correction(
+            old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
+        )
         torch.testing.assert_close(
             correction.weights, torch.tensor([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
         )
@@ -352,53 +371,329 @@ class TestComputeGRPOLoss(unittest.TestCase):
             torch.tensor([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]]),
         )
 
-    def test_rho_mask_tv_divergence(self):
+    def test_vaco_tv_divergence(self):
         config = _make_grpo_config(
-            use_rho_correction=True, rho_mask_lower_bound=0.0, rho_mask_upper_bound=2.0, rho_mask_tv_divergence=True
+            use_rho_correction=True,
+            rho_mask_lower_bound=0.0,
+            rho_mask_upper_bound=0.3,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
         )
-        # Row 0: mean |ρ - 1| = 1.25, below upper=2.0, so it is kept.
-        # Row 1: mean |ρ - 1| = 3.0, above upper=2.0, so TV-increasing tokens are dropped.
-        old_logprob = torch.log(torch.tensor([[0.25, 1.0, 4.0], [4.0, 4.0, 4.0]]))
-        vllm_logprobs = torch.zeros_like(old_logprob)
+        # Sequence-level mean binary TV |μ - π_old| per row:
+        # Row 0: |0.5 - 0.4| = 0.1 < 0.3 → kept, reweighted by ρ = 0.4/0.5 = 0.8.
+        # Row 1: |0.1 - 0.6| = 0.5 > 0.3 and A>0 with π_old>μ increases it → dropped.
+        # Row 2: same divergence but A<0 with π_old>μ *decreases* it → kept, ρ = 6.
+        vllm_logprobs = torch.log(torch.tensor([[0.5] * 3, [0.1] * 3, [0.1] * 3]))
+        old_logprob = torch.log(torch.tensor([[0.4] * 3, [0.6] * 3, [0.6] * 3]))
+        response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
+        advantages = torch.tensor([[1.0] * 3, [1.0] * 3, [-1.0] * 3])
+
+        correction = grpo_utils.compute_rho_correction(
+            old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
+        )
+
+        torch.testing.assert_close(correction.weights, torch.tensor([[0.8] * 3, [0.0] * 3, [6.0] * 3]))
+        torch.testing.assert_close(
+            correction.metrics["val/rho_drop_high_frac"], torch.tensor([[0.0] * 3, [1.0] * 3, [0.0] * 3])
+        )
+        torch.testing.assert_close(
+            correction.metrics["val/rho_divergence"], torch.tensor([[0.1] * 3, [0.5] * 3, [0.5] * 3])
+        )
+
+    def test_vaco_kl_divergence(self):
+        config = _make_grpo_config(
+            use_rho_correction=True,
+            rho_mask_lower_bound=0.0,
+            rho_mask_upper_bound=1.0,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
+            rho_divergence_type=grpo_utils.RhoDivergenceType.kl,
+        )
+        # Sequence-level mean binary KL(μ ‖ π_old) per row:
+        # Row 0: μ = π_old → 0 (kept, ρ = 1).
+        # Row 1: μ=0.1, π_old=0.9 → 0.8·log(9) ≈ 1.76 > 1.0, and A>0 with π_old>μ → dropped.
+        vllm_logprobs = torch.log(torch.tensor([[0.5, 0.5], [0.1, 0.1]]))
+        old_logprob = torch.log(torch.tensor([[0.5, 0.5], [0.9, 0.9]]))
         response_mask = torch.ones_like(old_logprob, dtype=torch.bool)
         advantages = torch.ones_like(old_logprob)
 
-        correction = grpo_utils.compute_rho_correction(old_logprob, vllm_logprobs, response_mask, advantages, config)
+        correction = grpo_utils.compute_rho_correction(
+            old_logprob, vllm_logprobs, old_logprob, response_mask, advantages, config
+        )
 
-        torch.testing.assert_close(correction.weights, torch.tensor([[0.25, 1.0, 4.0], [0.0, 0.0, 0.0]]))
+        torch.testing.assert_close(correction.weights, torch.tensor([[1.0, 1.0], [0.0, 0.0]]))
+        expected_divergence = 0.8 * torch.log(torch.tensor(9.0))
         torch.testing.assert_close(
-            correction.metrics["val/rho_drop_high_frac"], torch.tensor([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+            correction.metrics["val/rho_divergence"],
+            torch.stack([torch.zeros(2), expected_divergence.expand(2)]),
+            atol=1e-4,
+            rtol=1e-4,
         )
 
     def test_rho_mask_zeroes_loss(self):
-        config = _make_grpo_config()
+        # ρ values [1.0, 4.0, 1.0] with mask bounds (0.5, 2.0): the middle token is dropped.
+        config = _make_grpo_config(use_rho_correction=True, rho_mask_lower_bound=0.5, rho_mask_upper_bound=2.0)
         new_logprobs = torch.randn(1, 3)
-        ratio = torch.exp(torch.randn(1, 3))
+        old_logprobs = -torch.rand(1, 3) - 0.1
+        vllm_logprobs = old_logprobs - torch.log(torch.tensor([[1.0, 4.0, 1.0]]))
         advantages = torch.randn(1, 3)
-        rho_mask = torch.tensor([[1.0, 0.0, 1.0]])
 
-        pg_loss, clipfrac, _ = grpo_utils.compute_grpo_loss(
+        output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
-            ratio=ratio,
+            old_logprobs=old_logprobs,
+            vllm_logprobs=vllm_logprobs,
             advantages=advantages,
             ref_logprobs=None,
+            response_mask=torch.ones(1, 3, dtype=torch.bool),
             config=config,
-            rho_weights=rho_mask,
         )
-        self.assertEqual(pg_loss[0, 1].item(), 0.0)
-        self.assertEqual(clipfrac[0, 1].item(), 0.0)
-        self.assertNotEqual(pg_loss[0, 0].item(), 0.0)
+        self.assertEqual(output.pg_loss[0, 1].item(), 0.0)
+        self.assertEqual(output.clipfrac[0, 1].item(), 0.0)
+        self.assertNotEqual(output.pg_loss[0, 0].item(), 0.0)
 
     def test_invalid_loss_fn(self):
         config = _make_grpo_config(loss_fn="invalid")
         with self.assertRaises(ValueError):
             grpo_utils.compute_grpo_loss(
                 new_logprobs=torch.randn(2, 4),
-                ratio=torch.exp(torch.randn(2, 4)),
+                old_logprobs=torch.randn(2, 4),
+                vllm_logprobs=torch.randn(2, 4),
                 advantages=torch.randn(2, 4),
                 ref_logprobs=None,
+                response_mask=torch.ones(2, 4, dtype=torch.bool),
                 config=config,
-                rho_weights=torch.ones(2, 4),
+            )
+
+
+class TestComputeBinaryDivergence(unittest.TestCase):
+    def test_tv_matches_definition(self):
+        # Eq. 13 in arXiv:2602.04879: D_TV^Bin = |μ - π|.
+        behavior_logprobs = torch.log(torch.tensor([[0.1, 0.5, 0.9]]))
+        policy_logprobs = torch.log(torch.tensor([[0.2, 0.5, 0.3]]))
+        response_mask = torch.ones_like(behavior_logprobs, dtype=torch.bool)
+
+        divergence = grpo_utils.compute_binary_divergence(
+            behavior_logprobs=behavior_logprobs,
+            policy_logprobs=policy_logprobs,
+            response_mask=response_mask,
+            divergence_type=grpo_utils.RhoDivergenceType.tv,
+        )
+
+        torch.testing.assert_close(divergence, torch.tensor([[0.1, 0.0, 0.6]]), atol=1e-5, rtol=1e-5)
+
+    def test_kl_zero_when_distributions_match(self):
+        logprobs = torch.log(torch.tensor([[0.3, 0.7]]))
+        response_mask = torch.ones_like(logprobs, dtype=torch.bool)
+
+        divergence = grpo_utils.compute_binary_divergence(
+            behavior_logprobs=logprobs,
+            policy_logprobs=logprobs,
+            response_mask=response_mask,
+            divergence_type=grpo_utils.RhoDivergenceType.kl,
+        )
+
+        torch.testing.assert_close(divergence, torch.zeros_like(divergence), atol=1e-5, rtol=1e-5)
+
+    def test_response_mask_zeroes_invalid_positions(self):
+        behavior_logprobs = torch.tensor([[INVALID_LOGPROB, -0.1]])
+        policy_logprobs = torch.tensor([[INVALID_LOGPROB, -2.0]])
+        response_mask = torch.tensor([[False, True]])
+
+        divergence = grpo_utils.compute_binary_divergence(
+            behavior_logprobs=behavior_logprobs,
+            policy_logprobs=policy_logprobs,
+            response_mask=response_mask,
+            divergence_type=grpo_utils.RhoDivergenceType.tv,
+        )
+
+        self.assertEqual(float(divergence[0, 0]), 0.0)
+        self.assertGreater(float(divergence[0, 1]), 0.0)
+
+    def test_unknown_divergence_type_raises(self):
+        with self.assertRaises(ValueError):
+            grpo_utils.compute_binary_divergence(
+                behavior_logprobs=torch.zeros(1, 1),
+                policy_logprobs=torch.zeros(1, 1),
+                response_mask=torch.ones(1, 1, dtype=torch.bool),
+                divergence_type="not_a_divergence",
+            )
+
+
+def _make_dppo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
+    defaults = {
+        "use_rho_correction": False,
+        "rho_divergence_algo": grpo_utils.RhoDivergenceAlgo.dppo,
+        "rho_divergence_type": grpo_utils.RhoDivergenceType.tv,
+        "rho_mask_upper_bound": 0.05,
+        "rho_mask_lower_bound": 0.0,
+    }
+    defaults.update(kwargs)
+    return _make_grpo_config(**defaults)
+
+
+class TestDPPODivergenceMask(unittest.TestCase):
+    def test_blocks_only_unsafe_directions(self):
+        config = _make_dppo_config()
+        # μ = 0.1, π_θ = 0.5 → binary TV = 0.4 > δ = 0.05 everywhere; ratio > 1.
+        # Per Eq. 12: A>0 with π_θ>μ is masked; A<0 with π_θ>μ moves back towards μ
+        # (safe), and A=0 contributes no update — neither is masked.
+        vllm_logprobs = torch.log(torch.tensor([[0.1, 0.1, 0.1]]))
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5, 0.5]]))
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+        advantages = torch.tensor([[1.0, -1.0, 0.0]])
+
+        correction = grpo_utils.compute_rho_correction(
+            vllm_logprobs, vllm_logprobs, new_logprobs, response_mask, advantages, config
+        )
+
+        torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 1.0, 1.0]]))
+        torch.testing.assert_close(correction.metrics["val/rho_drop_high_frac"], torch.tensor([[1.0, 0.0, 0.0]]))
+        torch.testing.assert_close(correction.metrics["val/rho_drop_low_frac"], torch.zeros(1, 3))
+        torch.testing.assert_close(
+            correction.metrics["val/rho_divergence"], torch.full((1, 3), 0.4), atol=1e-5, rtol=1e-5
+        )
+
+    def test_below_threshold_keeps_all_tokens(self):
+        config = _make_dppo_config(rho_mask_upper_bound=0.5)
+        vllm_logprobs = torch.log(torch.tensor([[0.4, 0.6]]))
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5]]))
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+        advantages = torch.tensor([[1.0, -1.0]])
+
+        correction = grpo_utils.compute_rho_correction(
+            vllm_logprobs, vllm_logprobs, new_logprobs, response_mask, advantages, config
+        )
+
+        torch.testing.assert_close(correction.weights, torch.ones(1, 2))
+
+    def test_negative_advantage_masked_when_ratio_below_one(self):
+        config = _make_dppo_config()
+        # μ = 0.5, π_θ = 0.1 → TV = 0.4 > δ; ratio < 1, so A<0 is the unsafe direction.
+        vllm_logprobs = torch.log(torch.tensor([[0.5, 0.5]]))
+        new_logprobs = torch.log(torch.tensor([[0.1, 0.1]]))
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+        advantages = torch.tensor([[-1.0, 1.0]])
+
+        correction = grpo_utils.compute_rho_correction(
+            vllm_logprobs, vllm_logprobs, new_logprobs, response_mask, advantages, config
+        )
+
+        torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 1.0]]))
+        torch.testing.assert_close(correction.metrics["val/rho_drop_high_frac"], torch.tensor([[1.0, 0.0]]))
+
+    def test_padding_positions_zeroed(self):
+        config = _make_dppo_config()
+        vllm_logprobs = torch.log(torch.tensor([[0.1, 0.1, 0.1]]))
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5, 0.5]]))
+        response_mask = torch.tensor([[False, True, False]])
+        advantages = torch.full((1, 3), -1.0)
+
+        correction = grpo_utils.compute_rho_correction(
+            vllm_logprobs, vllm_logprobs, new_logprobs, response_mask, advantages, config
+        )
+
+        # A<0 with π_θ>μ is the safe direction, so the middle token is kept; padding is 0.
+        torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 1.0, 0.0]]))
+
+    def test_mask_does_not_propagate_gradients(self):
+        config = _make_dppo_config()
+        vllm_logprobs = torch.log(torch.tensor([[0.1]]))
+        new_logprobs = torch.log(torch.tensor([[0.5]])).requires_grad_(True)
+        response_mask = torch.ones(1, 1, dtype=torch.bool)
+        advantages = torch.ones(1, 1)
+
+        correction = grpo_utils.compute_rho_correction(
+            vllm_logprobs, vllm_logprobs, new_logprobs, response_mask, advantages, config
+        )
+
+        self.assertFalse(correction.weights.requires_grad)
+
+    def test_composes_with_rho_correction(self):
+        # With use_rho_correction, kept tokens are still reweighted by ρ = π_old / μ
+        # while the DPPO mask drops unsafe out-of-region tokens.
+        config = _make_dppo_config(use_rho_correction=True)
+        vllm_logprobs = torch.log(torch.tensor([[0.1, 0.1]]))
+        old_logprobs = vllm_logprobs + torch.log(torch.tensor(2.0))
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5]]))
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+        advantages = torch.tensor([[1.0, -1.0]])
+
+        correction = grpo_utils.compute_rho_correction(
+            old_logprobs, vllm_logprobs, new_logprobs, response_mask, advantages, config
+        )
+
+        torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 2.0]]))
+
+
+class TestDPPOLoss(unittest.TestCase):
+    def test_dppo_loss_masks_and_has_no_symmetric_clip(self):
+        config = _make_dppo_config(loss_fn=grpo_utils.GRPOLossType.dppo, rho_mask_upper_bound=0.1)
+        vllm_logprobs = torch.log(torch.tensor([[0.1, 0.1]]))
+        new_logprobs = torch.log(torch.tensor([[0.5, 0.5]]))
+        advantages = torch.tensor([[1.0, -1.0]])
+        response_mask = torch.ones_like(new_logprobs, dtype=torch.bool)
+
+        output = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            old_logprobs=vllm_logprobs,
+            vllm_logprobs=vllm_logprobs,
+            advantages=advantages,
+            ref_logprobs=None,
+            response_mask=response_mask,
+            config=config,
+        )
+
+        # ratio = π_θ / μ = 5 for both tokens; only the A>0 token is masked (Eq. 12),
+        # and the kept A<0 token is unclipped despite ratio 5 (Eq. 11).
+        expected_mask = torch.tensor([[0.0, 1.0]])
+        torch.testing.assert_close(output.pg_loss, -advantages * output.ratio * expected_mask)
+        torch.testing.assert_close(output.clipfrac, torch.zeros_like(output.clipfrac))
+        torch.testing.assert_close(output.kl, torch.zeros_like(output.kl))
+
+
+class TestDPPOConfigValidation(unittest.TestCase):
+    def test_dppo_loss_requires_dppo_divergence_algo(self):
+        with self.assertRaisesRegex(ValueError, "rho_divergence_algo"):
+            grpo_utils.GRPOExperimentConfig(loss_fn=grpo_utils.GRPOLossType.dppo)
+
+    def test_dppo_algo_requires_threshold(self):
+        with self.assertRaisesRegex(ValueError, "rho_mask_upper_bound"):
+            grpo_utils.GRPOExperimentConfig(rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo)
+
+    def test_dppo_algo_requires_rollout_anchoring(self):
+        with self.assertRaisesRegex(ValueError, "rollout policy"):
+            grpo_utils.GRPOExperimentConfig(
+                rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo,
+                rho_mask_upper_bound=0.1,
+                use_rho_correction=False,
+            )
+
+    def test_dppo_with_rho_correction_is_valid(self):
+        grpo_utils.GRPOExperimentConfig(
+            loss_fn=grpo_utils.GRPOLossType.dppo,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo,
+            rho_divergence_type=grpo_utils.RhoDivergenceType.kl,
+            rho_mask_upper_bound=0.1,
+        )
+
+    def test_dppo_with_vllm_logprobs_is_valid(self):
+        grpo_utils.GRPOExperimentConfig(
+            loss_fn=grpo_utils.GRPOLossType.dppo,
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.dppo,
+            rho_mask_upper_bound=0.1,
+            use_rho_correction=False,
+            use_vllm_logprobs=True,
+        )
+
+    def test_vaco_allows_sub_one_threshold(self):
+        grpo_utils.GRPOExperimentConfig(
+            rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco, rho_mask_upper_bound=0.5
+        )
+
+    def test_vaco_requires_rho_correction(self):
+        with self.assertRaisesRegex(ValueError, "use_rho_correction"):
+            grpo_utils.GRPOExperimentConfig(
+                rho_divergence_algo=grpo_utils.RhoDivergenceAlgo.vaco,
+                rho_mask_upper_bound=0.5,
+                use_rho_correction=False,
             )
 
 

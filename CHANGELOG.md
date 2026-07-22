@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add the DPPO loss function (`--loss_fn dppo`, https://arxiv.org/abs/2602.04879) and generalize the ρ token-drop mask with `--rho_divergence_algo` (`icepop`/`vaco`/`dppo`, replacing `--rho_mask_tv_divergence`) and `--rho_divergence_type` (`tv`/`kl`); `compute_grpo_loss` now computes the ratio and ρ correction internally and returns a `GRPOLossOutput` (https://github.com/allenai/open-instruct/pull/1755).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
