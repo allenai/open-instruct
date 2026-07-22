@@ -694,7 +694,10 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     else:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+                tc.tokenizer_name_or_path,
+                revision=tc.tokenizer_revision,
+                trust_remote_code=tc.trust_remote_code,
+                use_fast=tc.use_fast,
             ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
@@ -758,7 +761,10 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     if tc.chat_template_name is None:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+                tc.tokenizer_name_or_path,
+                revision=tc.tokenizer_revision,
+                trust_remote_code=tc.trust_remote_code,
+                use_fast=tc.use_fast,
             ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
@@ -840,7 +846,10 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     else:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+                tc.tokenizer_name_or_path,
+                revision=tc.tokenizer_revision,
+                trust_remote_code=tc.trust_remote_code,
+                use_fast=tc.use_fast,
             ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
