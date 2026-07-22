@@ -20,3 +20,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Track the CUDA 12 image suffix in the merge-queue Beaker workflow and allow enough time for the larger image build and upload (https://github.com/allenai/open-instruct/pull/1783).

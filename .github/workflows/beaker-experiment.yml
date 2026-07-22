@@ -17,7 +17,7 @@ jobs:
   launch-experiment:
     name: Launch Beaker Experiment
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -euo pipefail {0}
@@ -169,7 +169,7 @@ jobs:
 
           GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-          INTEGRATION_IMAGE="open-instruct-integration-test-${SANITIZED_BRANCH}"
+          INTEGRATION_IMAGE="open-instruct-integration-test-${SANITIZED_BRANCH}-cuda12"
           echo "Integration image tag: ${INTEGRATION_IMAGE}"
 
           if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
