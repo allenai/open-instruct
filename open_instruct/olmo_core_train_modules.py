@@ -441,6 +441,9 @@ class GRPOTrainModule(TransformerTrainModule):
         """
         self.model.train()
         data_BT = batch["batch"].to(self.device)
+        # OLMo-core probes train modules with a synthetic batch before training.
+        # That batch does not come from vLLM and therefore cannot carry routes.
+        router_replay = self.grpo_config.router_replay and not dry_run
 
         with torch.no_grad():
             if self.grpo_config.load_ref_policy and self.ref_policy is not None:
@@ -452,7 +455,7 @@ class GRPOTrainModule(TransformerTrainModule):
                     use_grad=False,
                     batch_size=3 * self.rank_microbatch_size,
                     pass_olmo_core_doc_lens=True,
-                    router_replay=self.grpo_config.router_replay,
+                    router_replay=router_replay,
                 )
             else:
                 ref_logprobs_BT = None
@@ -474,7 +477,7 @@ class GRPOTrainModule(TransformerTrainModule):
                         use_grad=False,
                         batch_size=3 * self.rank_microbatch_size,
                         pass_olmo_core_doc_lens=True,
-                        router_replay=self.grpo_config.router_replay,
+                        router_replay=router_replay,
                     )
 
                 for i in range(num_samples):
@@ -518,7 +521,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 window_size = min(accumulation_steps, num_samples - window_start)
                 microbatch_index = sample_idx - window_start
                 routed_experts = None
-                if self.grpo_config.router_replay:
+                if router_replay:
                     if data_BT.routed_experts is None:
                         raise ValueError("Router replay is enabled, but the training batch has no routed_experts")
                     routed_experts = data_BT.routed_experts[sample_idx]
