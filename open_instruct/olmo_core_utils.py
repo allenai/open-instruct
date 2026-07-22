@@ -2,8 +2,10 @@
 OLMo-core utility functions, shared training configurations, and model configuration mappings.
 """
 
+import contextlib
 import datetime
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -14,6 +16,7 @@ import transformers
 from olmo_core import optim as olmo_optim
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
+from olmo_core.nn import moe as olmo_moe
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
@@ -390,6 +393,47 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     return getattr(TransformerConfig, config_name)(
         vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend)
     )
+
+
+def model_has_moe_layers(model: torch.nn.Module) -> bool:
+    """Return whether the model exposes any MoE block or router."""
+    return any(
+        bool(getattr(module, "is_moe", False))
+        or getattr(module, "feed_forward_moe", None) is not None
+        or getattr(module, "routed_experts_router", None) is not None
+        for module in model.modules()
+    )
+
+
+def model_supports_router_replay(model: torch.nn.Module) -> bool:
+    """Return whether the model has the routed-expert router API used by replay."""
+    return any(
+        callable(getattr(router, "set_replay_expert_indices", None))
+        for module in model.modules()
+        if (router := getattr(module, "routed_experts_router", None)) is not None
+    )
+
+
+@contextlib.contextmanager
+def replay_router_context(model: torch.nn.Module, routed_experts: torch.Tensor | None) -> Iterator[None]:
+    """Replay a collated ``[B, S, L, K]`` route tensor for one model execution."""
+    if routed_experts is None:
+        yield
+        return
+    if routed_experts.ndim != 4:
+        raise ValueError(
+            "routed_experts must have shape [batch, seq_len, num_moe_layers, top_k], "
+            f"got {tuple(routed_experts.shape)}"
+        )
+    replay_routing = getattr(olmo_moe, "replay_routing", None)
+    if replay_routing is None:
+        raise RuntimeError(
+            "The installed OLMo-core does not expose olmo_core.nn.moe.replay_routing; "
+            "update the OLMo-core dependency to a router-replay-capable revision"
+        )
+    per_layer_indices = list(routed_experts.unbind(dim=2))
+    with replay_routing(model, per_layer_indices):
+        yield
 
 
 def setup_model(

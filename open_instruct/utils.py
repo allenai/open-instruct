@@ -2745,6 +2745,10 @@ class UlyssesSPSplitter:
         # slice and pad tensors for this sp rank
         kwargs = {}
         for field in dataclasses.fields(data):
+            field_value = getattr(data, field.name)
+            if field_value is None:
+                kwargs[field.name] = None
+                continue
             if field.name == "query_responses":
                 pad_value = self.pad_token_id
             elif field.name == "vllm_logprobs":
@@ -2752,9 +2756,13 @@ class UlyssesSPSplitter:
             else:
                 pad_value = 0
             sharded = []
-            for t in getattr(data, field.name):
-                # For all tensors in batch, pad tensor to max_seqlen, then slice to get this SP rank's chunk
-                padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
+            for t in field_value:
+                # Route tensors are [B, S, L, K]; all other fields store sequence last.
+                if field.name == "routed_experts":
+                    padded = F.pad(t, (0, 0, 0, 0, 0, max_seqlen - t.shape[1]), value=pad_value)
+                    padded_sliced = padded[:, start_idx:end_idx]
+                else:
+                    padded_sliced = F.pad(t, (0, max_seqlen - t.shape[-1]), value=pad_value)[:, start_idx:end_idx]
                 sharded.append(padded_sliced)
             kwargs[field.name] = sharded
 

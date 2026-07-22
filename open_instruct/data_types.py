@@ -115,9 +115,13 @@ class CollatedBatchData:
     advantages: list[torch.Tensor]
     response_masks: list[torch.Tensor]
     vllm_logprobs: list[torch.Tensor]
+    routed_experts: list[torch.Tensor] | None = None
+    """Per-microbatch expert IDs with shape ``[batch, seq_len, num_moe_layers, top_k]``."""
 
     def __getitem__(self, idx: int | slice) -> "CollatedBatchData":
-        return CollatedBatchData(**{f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self)})
+        values = {f.name: getattr(self, f.name)[idx] for f in dataclasses.fields(self) if f.name != "routed_experts"}
+        values["routed_experts"] = None if self.routed_experts is None else self.routed_experts[idx]
+        return CollatedBatchData(**values)
 
     def __len__(self) -> int:
         return len(self.query_responses)
@@ -126,7 +130,11 @@ class CollatedBatchData:
         return dataclasses.replace(
             self,
             **{
-                f.name: [t.to(device, non_blocking=non_blocking) for t in getattr(self, f.name)]
+                f.name: (
+                    None
+                    if (value := getattr(self, f.name)) is None
+                    else [t.to(device, non_blocking=non_blocking) for t in value]
+                )
                 for f in dataclasses.fields(self)
             },
         )
