@@ -13,7 +13,12 @@
 # epoch_N/ under CKPT_ROOT this script:
 #   1) consolidates the ZeRO shards -> model.safetensors via the bundled zero_to_fp32.py
 #   2) attaches config.json + generation_config.json + tokenizer from CONFIG_SRC
-# Result: $OUT_ROOT/epoch_N loads with AutoModelForCausalLM.from_pretrained(...).
+#   3) (Qwen3.5 only) remaps text keys model.* -> model.language_model.* so the dir
+#      matches the canonical Qwen3_5 layout that from_pretrained / the CG converter
+#      expect. zero_to_fp32 emits the raw runtime names (model.*); Qwen3-8B and other
+#      *ForCausalLM runs genuinely use flat model.* and are left untouched.
+# Result: $OUT_ROOT/epoch_N loads with AutoModelForCausalLM.from_pretrained(...), and
+# for Qwen3.5 feeds straight into the CG converter (no manual key fix-up needed).
 #
 # CPU-only, no GPU needed. Needs ~40-70 GB RAM and ~36 GB disk per epoch (fp32 9B).
 #
@@ -69,6 +74,51 @@ try:
 except Exception as e:
     print("(no generation_config copied:", e, ")")
 print("attached config+tokenizer ->", out)
+PY
+
+    echo "== $name: remapping text keys for Qwen3.5 (model.* -> model.language_model.*) if needed =="
+    uv run python - "$out" <<'PY'
+import sys, glob, json, os
+from safetensors import safe_open
+from safetensors.torch import save_file
+out = sys.argv[1]
+cfg = json.load(open(os.path.join(out, "config.json")))
+mt = str(cfg.get("model_type", "")); arch = " ".join(cfg.get("architectures") or [])
+# Qwen3.5 (Qwen3_5*) stores text weights under model.language_model.* in its canonical
+# HF layout, but zero_to_fp32 emits the raw runtime names model.* (no language_model
+# level) -> CG conversion / from_pretrained then miss every text tensor. Qwen3-8B
+# (Qwen3ForCausalLM) genuinely uses flat model.* and must NOT be touched.
+if not (mt.startswith("qwen3_5") or "Qwen3_5" in arch):
+    print("  model_type=%r not Qwen3.5 family -> no remap needed" % mt); sys.exit(0)
+shards = sorted(glob.glob(os.path.join(out, "*.safetensors")))
+with safe_open(shards[0], framework="pt") as g:
+    ks0 = list(g.keys())
+has_flat = any(k.startswith("model.") and not k.startswith("model.language_model.") for k in ks0)
+has_nested = any(k.startswith("model.language_model.") for k in ks0)
+if has_nested or not has_flat:
+    print("  keys already in model.language_model.* layout -> no remap"); sys.exit(0)
+def nk(k):
+    if k == "lm_head.weight":
+        return k
+    if k.startswith("model.") and not k.startswith("model.language_model."):
+        return "model.language_model." + k[len("model."):]
+    return k
+for f in shards:
+    tensors = {}
+    with safe_open(f, framework="pt") as g:
+        meta = g.metadata() or {}
+        for k in g.keys():
+            tensors[nk(k)] = g.get_tensor(k)
+    if "format" not in meta:
+        meta["format"] = "pt"
+    save_file(tensors, f, metadata=meta)
+    print("  remapped", os.path.basename(f))
+idx = os.path.join(out, "model.safetensors.index.json")
+if os.path.exists(idx):
+    j = json.load(open(idx)); j["weight_map"] = {nk(k): v for k, v in j["weight_map"].items()}
+    json.dump(j, open(idx, "w"))
+    print("  fixed index weight_map")
+print("  remap done -> model.language_model.* (CG-convert ready)")
 PY
     echo "== $name: done -> $out =="
 done

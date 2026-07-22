@@ -37,7 +37,10 @@ scripts/general_agent/utils/convert_sft_epoch_checkpoints.sh CKPT_ROOT [CONFIG_S
 - `OUT_ROOT` — output dir (defaults to `<CKPT_ROOT>/hf`).
 
 For each epoch it (1) runs the bundled `zero_to_fp32.py` to consolidate the ZeRO shards to
-`model.safetensors`, then (2) attaches config + tokenizer from `CONFIG_SRC`. Idempotent
+`model.safetensors`, then (2) attaches config + tokenizer from `CONFIG_SRC`, then (3) for
+Qwen3.5 remaps text keys `model.*` → `model.language_model.*` (zero_to_fp32 emits the raw
+runtime names, which otherwise miss every text tensor on `from_pretrained` / CG conversion;
+Qwen3-8B and other `*ForCausalLM` runs use flat `model.*` and are left untouched). Idempotent
 (skips already-converted epochs). CPU-only; ~40–70 GB RAM and ~36 GB disk per epoch (fp32 9B).
 
 ### Load (HF transformers)
@@ -57,7 +60,8 @@ tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
   registers** (only `Qwen3_5ForConditionalGeneration`). vLLM errors with
   `Model architectures ['Qwen3_5ForCausalLM'] are not supported`. Run the (lossless)
   CG-conversion below first, then serve the `_cg` output. (`--language-model-only` does
-  **not** help here.)
+  **not** help here.) The step-3 key remap above means the converted `epoch_N/` dir feeds
+  straight into the CG converter — no manual `model.language_model.*` fix-up needed.
 
 ## `convert_qwen35_causallm_to_cg.py` — make a Qwen3.5 SFT checkpoint vLLM-servable
 
