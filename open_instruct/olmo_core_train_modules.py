@@ -16,10 +16,10 @@ from olmo_core.distributed import utils as dist_utils
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
-from olmo_core.optim import OptimConfig
+from olmo_core.optim import OLMoDDPOptimizerConfig, OptimConfig
 from olmo_core.optim.scheduler import Scheduler
 from olmo_core.train.common import ReduceType
-from olmo_core.train.train_module import TransformerTrainModule
+from olmo_core.train.train_module import OLMoDDPTrainModule, TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
@@ -416,6 +416,9 @@ class GRPOTrainModule(TransformerTrainModule):
             grad_norm_val = grad_norm.item() if hasattr(grad_norm, "item") else grad_norm
             self._grad_norms.append(float(grad_norm_val))
 
+    def _zero_grads_after_step(self) -> None:
+        self.optim.zero_grad(set_to_none=True)
+
     def state_dict(self, *, optim: bool | None = None) -> dict[str, Any]:
         state = super().state_dict(optim=optim)
         if self.ref_policy is not None:
@@ -511,12 +514,19 @@ class GRPOTrainModule(TransformerTrainModule):
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
+                window_start = (sample_idx // accumulation_steps) * accumulation_steps
+                window_size = min(accumulation_steps, num_samples - window_start)
+                microbatch_index = sample_idx - window_start
                 routed_experts = None
                 if self.grpo_config.router_replay:
                     if data_BT.routed_experts is None:
                         raise ValueError("Router replay is enabled, but the training batch has no routed_experts")
                     routed_experts = data_BT.routed_experts[sample_idx]
-                with olmo_core_utils.replay_router_context(self.model, routed_experts):
+                microbatch_context = getattr(self, "train_microbatch_context", self._train_microbatch_context)
+                with (
+                    microbatch_context(microbatch_index, window_size),
+                    olmo_core_utils.replay_router_context(self.model, routed_experts),
+                ):
                     new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[sample_idx],
@@ -594,15 +604,12 @@ class GRPOTrainModule(TransformerTrainModule):
                 num_steps += 1
                 local_step += 1
 
-                if local_step % accumulation_steps == 0:
+                if microbatch_index == window_size - 1:
+                    finalize_grad_sync = getattr(self, "finalize_grad_sync", lambda: None)
+                    finalize_grad_sync()
                     if not dry_run:
                         self._do_optim_step()
-                    self.optim.zero_grad(set_to_none=True)
-
-        if local_step % accumulation_steps != 0:
-            if not dry_run:
-                self._do_optim_step()
-            self.optim.zero_grad(set_to_none=True)
+                    self._zero_grads_after_step()
 
         # Keep _metrics non-empty on every rank every step so OLMo-core's
         # _log_metrics skip can't fire asymmetrically and deadlock gloo on the
@@ -670,3 +677,86 @@ class GRPOTrainModule(TransformerTrainModule):
                 {k: wandb.Histogram(v) for k, v in histogram_metrics.items()},  # ty: ignore[invalid-argument-type]
                 step=self.trainer.global_step,
             )
+
+
+class GRPOOLMoDDPTrainModule(OLMoDDPTrainModule):
+    """Thin OLMoDDP runtime adapter for the shared GRPO training algorithm."""
+
+    def __init__(
+        self,
+        model: Transformer,
+        optim: OLMoDDPOptimizerConfig,
+        sample_microbatch_size: int,
+        max_sequence_length: int,
+        grpo_config: grpo_utils.GRPOExperimentConfig,
+        temperature: float,
+        tokenizer: PreTrainedTokenizer,
+        streaming_config: data_loader_lib.StreamingDataLoaderConfig,
+        attn_implementation: AttentionBackendName,
+        ref_policy: Transformer | None = None,
+        dp_config: transformer_config.TransformerDataParallelConfig | None = None,
+        ep_config: transformer_config.TransformerExpertParallelConfig | None = None,
+        ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
+        compile_model: bool = False,
+        max_grad_norm: float | None = None,
+        scheduler: Scheduler | None = None,
+        device: torch.device | None = None,
+    ) -> None:
+        assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
+            f"GRPOOLMoDDPTrainModule requires a flash attention backend for doc_lens; got {attn_implementation}."
+        )
+        super().__init__(
+            model=model,
+            optim=optim,
+            rank_microbatch_size=sample_microbatch_size * max_sequence_length,
+            max_sequence_length=max_sequence_length,
+            dp_config=dp_config,
+            ep_config=ep_config,
+            ac_config=ac_config,
+            compile_model=compile_model,
+            max_grad_norm=max_grad_norm,
+            scheduler=scheduler,
+            device=device,
+        )
+        self.sample_microbatch_size = sample_microbatch_size
+        self.grpo_config = grpo_config
+        self.temperature = temperature
+        self.tokenizer = tokenizer
+        self.pad_token_id = tokenizer.pad_token_id
+        self.attn_implementation = attn_implementation
+        self.ref_policy = ref_policy
+        if ref_policy is not None:
+            self.ref_policy = ref_policy.to(device=self.device).eval().requires_grad_(False)
+        self.streaming_config = streaming_config
+        self._num_total_tokens = 0
+        self._grad_norms: list[float] = []
+        self._last_num_step_tokens = 0
+
+    def pre_train(self) -> None:
+        pass
+
+    def optim_step(self) -> None:
+        # The GRPO algorithm performs optimizer steps inside train_batch().
+        pass
+
+    def zero_grads(self) -> None:
+        # The GRPO algorithm clears gradients inside train_batch().
+        pass
+
+    def _do_optim_step(self) -> None:
+        OLMoDDPTrainModule.optim_step(self)
+        grad_norm = getattr(self.optim, "latest_grad_norm", None)
+        if grad_norm is not None:
+            self._grad_norms.append(float(grad_norm))
+
+    def _zero_grads_after_step(self) -> None:
+        OLMoDDPTrainModule.zero_grads(self)
+
+    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
+        GRPOTrainModule.train_batch(self, batch, dry_run=dry_run)
+
+    def _record_step_counter_metrics(self, global_tokens: int) -> None:
+        GRPOTrainModule._record_step_counter_metrics(self, global_tokens)
+
+    def _record_data_prep_metrics(self, data_prep_metrics: dict[str, Any]) -> None:
+        GRPOTrainModule._record_data_prep_metrics(self, data_prep_metrics)

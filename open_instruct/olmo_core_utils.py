@@ -588,6 +588,21 @@ def save_state_dict_as_hf(
     tokenizer.save_pretrained(save_dir)
 
 
+def save_prepared_hf_state(
+    hf_state: dict[str, torch.Tensor],
+    save_dir: str,
+    hf_config: transformers.PretrainedConfig,
+    tokenizer: transformers.PreTrainedTokenizerBase,
+) -> None:
+    """Save an already HF-named full state without applying native conversion again."""
+    with accelerate.init_empty_weights():
+        hf_model = transformers.AutoModelForCausalLM.from_config(hf_config, trust_remote_code=True)
+    hf_model.load_state_dict({key: value.contiguous() for key, value in hf_state.items()}, assign=True)
+    os.makedirs(save_dir, exist_ok=True)
+    hf_model.save_pretrained(save_dir)
+    tokenizer.save_pretrained(save_dir)
+
+
 def doc_lens_from_attention_mask(attention_mask_BS: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
     """Convert an integer-coded packed attention_mask to OLMo-core ``doc_lens`` / ``max_doc_lens``.
 

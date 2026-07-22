@@ -16,12 +16,18 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
+from olmo_core.nn.moe.v2.olmo3 import (
+    build_olmo3_moe_config_from_hf_config,
+    gather_olmo3_moe_hf_state,
+    load_olmo3_moe_hf_state,
+)
+from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup, OLMoDDPOptimizerConfig
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
 from olmo_core.train.train_module.transformer import (
     TransformerDataParallelConfig,
     TransformerDataParallelWrappingStrategy,
+    TransformerExpertParallelConfig,
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
@@ -38,7 +44,7 @@ from open_instruct.grpo_callbacks import (
     olmo_core_to_hf_name,
 )
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
-from open_instruct.olmo_core_train_modules import GRPOTrainModule
+from open_instruct.olmo_core_train_modules import GRPOOLMoDDPTrainModule, GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
 
 logger = logger_utils.setup_logger(__name__)
@@ -79,6 +85,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.attn_implementation = attn_implementation
 
         self.ref_policy = None
+        self.hf_config: transformers.PretrainedConfig | None = None
         self.vllm_engines: list[ray.actor.ActorHandle] = []
         self.model_update_group = None
         self.actor_manager = None
@@ -124,11 +131,27 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
         olmo_core_dtype = {"bfloat16": DType.bfloat16, "float32": DType.float32}[self.grpo_config.model_dtype]
 
-        model_config_args = olmo_core_utils.ModelConfig(
-            model_name_or_path=self.model_name_or_path, attn_implementation=self.attn_implementation
-        )
-        logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
-        self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
+        use_olmo_ddp = self.grpo_config.olmo_core_train_module == "ddp"
+        hf_state: dict[str, torch.Tensor] | None = None
+        if use_olmo_ddp:
+            logger.info(f"[Rank {self.rank}] Building Olmo3Moe OLMoDDP model from {self.model_name_or_path}")
+            self.hf_config = transformers.AutoConfig.from_pretrained(self.model_name_or_path, trust_remote_code=True)
+            self.model_config = build_olmo3_moe_config_from_hf_config(
+                self.hf_config, dtype=olmo_core_dtype, attention_backend=self.attn_implementation
+            )
+            self.model = self.model_config.build(init_device="meta")
+            hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+                self.model_name_or_path, trust_remote_code=True
+            )
+            hf_state = {name: value.detach().cpu() for name, value in hf_model.state_dict().items()}
+            del hf_model
+        else:
+            model_config_args = olmo_core_utils.ModelConfig(
+                model_name_or_path=self.model_name_or_path, attn_implementation=self.attn_implementation
+            )
+            logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
+            self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
+
         has_moe_layers = olmo_core_utils.model_has_moe_layers(self.model)
         supports_router_replay = olmo_core_utils.model_supports_router_replay(self.model)
         if self.grpo_config.router_replay and not supports_router_replay:
@@ -145,9 +168,15 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             logger.info("Router replay enabled for vLLM rollouts and OLMo-core policy forwards")
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
-            logger.info(f"[Rank {self.rank}] Building reference policy...")
+            logger.info(f"[Rank {self.rank}] Building fixed reference policy...")
             self.ref_policy = self.model_config.build(init_device="cpu")
-            load_hf_model(self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir)
+            if use_olmo_ddp:
+                assert self.hf_config is not None and hf_state is not None
+                load_olmo3_moe_hf_state(self.ref_policy, self.hf_config, hf_state)
+            else:
+                load_hf_model(
+                    self.model_name_or_path, self.ref_policy.state_dict(), work_dir=self.grpo_config.output_dir
+                )
             self.ref_policy = self.ref_policy.to(device=device, dtype=torch_dtype).eval()
 
         assert self.grpo_config.num_training_steps is not None, "num_training_steps must be set"
@@ -174,19 +203,6 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         else:
             raise ValueError(f"Unsupported lr_scheduler_type: {self.grpo_config.lr_scheduler_type}")
 
-        optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
-
-        dp_config = None
-        if not self.grpo_config.single_gpu_mode and self.world_size > 1:
-            dp_config = TransformerDataParallelConfig(
-                name=DataParallelType.hsdp,
-                num_replicas=self.grpo_config.fsdp_num_replicas,
-                shard_degree=self.grpo_config.fsdp_shard_degree,
-                param_dtype=olmo_core_dtype,
-                reduce_dtype=DType.float32,
-                wrapping_strategy=TransformerDataParallelWrappingStrategy.full,
-            )
-
         ac_config = olmo_core_utils.build_ac_config(
             self.grpo_config.activation_memory_budget,
             self.grpo_config.compile_model,
@@ -194,35 +210,89 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             self.grpo_config.activation_checkpointing_modules,
         )
 
-        self.train_module = GRPOTrainModule(
-            model=self.model,
-            optim=optim_config,
-            sample_microbatch_size=self.grpo_config.per_device_train_batch_size,
-            max_sequence_length=self.max_sequence_length,
-            grpo_config=self.grpo_config,
-            temperature=self.streaming_config.temperature,
-            tokenizer=self.tokenizer,
-            ref_policy=self.ref_policy,
-            dp_config=dp_config,
-            ac_config=ac_config,
-            compile_model=self.grpo_config.compile_model,
-            max_grad_norm=self.grpo_config.max_grad_norm,
-            scheduler=scheduler,
-            device=device,
-            streaming_config=self.streaming_config,
-            attn_implementation=self.attn_implementation,
-        )
+        if use_olmo_ddp:
+            optim_config = OLMoDDPOptimizerConfig(
+                lr=self.grpo_config.learning_rate,
+                weight_decay=self.grpo_config.weight_decay,
+                max_grad_norm=self.grpo_config.max_grad_norm or 1.0,
+                dtype=olmo_core_dtype,
+            )
+            ddp_config = TransformerDataParallelConfig.from_dict(
+                {
+                    "name": DataParallelType.ddp,
+                    "only_allreduce_last_microbatch": True,
+                    "reduce_grads_in_fp32": True,
+                    "accumulate_grads_in_fp32": True,
+                    "use_reduce_scatter": False,
+                }
+            )
+            ep_config = (
+                TransformerExpertParallelConfig(degree=self.grpo_config.olmo_core_ep_degree)
+                if self.grpo_config.olmo_core_ep_degree > 1
+                else None
+            )
+            self.train_module = GRPOOLMoDDPTrainModule(
+                model=self.model,
+                optim=optim_config,
+                sample_microbatch_size=self.grpo_config.per_device_train_batch_size,
+                max_sequence_length=self.max_sequence_length,
+                grpo_config=self.grpo_config,
+                temperature=self.streaming_config.temperature,
+                tokenizer=self.tokenizer,
+                ref_policy=self.ref_policy,
+                dp_config=ddp_config,
+                ep_config=ep_config,
+                ac_config=ac_config,
+                compile_model=self.grpo_config.compile_model,
+                max_grad_norm=self.grpo_config.max_grad_norm,
+                scheduler=scheduler,
+                device=device,
+                streaming_config=self.streaming_config,
+                attn_implementation=self.attn_implementation,
+            )
+            assert self.hf_config is not None and hf_state is not None
+            load_olmo3_moe_hf_state(self.train_module.model, self.hf_config, hf_state)
+            del hf_state
+        else:
+            optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
+            dp_config = None
+            if not self.grpo_config.single_gpu_mode and self.world_size > 1:
+                dp_config = TransformerDataParallelConfig(
+                    name=DataParallelType.hsdp,
+                    num_replicas=self.grpo_config.fsdp_num_replicas,
+                    shard_degree=self.grpo_config.fsdp_shard_degree,
+                    param_dtype=olmo_core_dtype,
+                    reduce_dtype=DType.float32,
+                    wrapping_strategy=TransformerDataParallelWrappingStrategy.full,
+                )
+            self.train_module = GRPOTrainModule(
+                model=self.model,
+                optim=optim_config,
+                sample_microbatch_size=self.grpo_config.per_device_train_batch_size,
+                max_sequence_length=self.max_sequence_length,
+                grpo_config=self.grpo_config,
+                temperature=self.streaming_config.temperature,
+                tokenizer=self.tokenizer,
+                ref_policy=self.ref_policy,
+                dp_config=dp_config,
+                ac_config=ac_config,
+                compile_model=self.grpo_config.compile_model,
+                max_grad_norm=self.grpo_config.max_grad_norm,
+                scheduler=scheduler,
+                device=device,
+                streaming_config=self.streaming_config,
+                attn_implementation=self.attn_implementation,
+            )
+            logger.info(f"[Rank {self.rank}] Reloading HuggingFace weights after parallelization...")
+            sd = self.train_module.model.state_dict()
+            load_hf_model(self.model_name_or_path, sd, work_dir=self.grpo_config.output_dir)
+            self.train_module.model.load_state_dict(sd)
 
-        # GRPOTrainModule.__init__ calls parallelize_model which reinitializes weights.
-        # We must reload HF weights after parallelization (FSDP-first loading pattern).
-        logger.info(f"[Rank {self.rank}] Reloading HuggingFace weights after parallelization...")
-        sd = self.train_module.model.state_dict()
-        load_hf_model(self.model_name_or_path, sd, work_dir=self.grpo_config.output_dir)
-        self.train_module.model.load_state_dict(sd)
-
-        if self.grpo_config.single_gpu_mode:
-            logger.info(f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode")
-            self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
+            if self.grpo_config.single_gpu_mode:
+                logger.info(
+                    f"[Rank {self.rank}] Converting model to {self.grpo_config.model_dtype} for single_gpu_mode"
+                )
+                self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
 
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
@@ -261,6 +331,11 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         ray.get(refs)
         logger.info(f"[Rank {self.rank}] vLLM weight transfer engines initialized")
 
+    def _gather_olmo_ddp_hf_state(self) -> dict[str, torch.Tensor]:
+        if self.hf_config is None:
+            raise RuntimeError("OLMoDDP HF state requested before its HF config was loaded.")
+        return gather_olmo3_moe_hf_state(self.train_module.model, self.hf_config)
+
     def run_initial_weight_sync(self) -> None:
         """Broadcast initial learner weights to vLLM engines before training starts.
 
@@ -269,13 +344,21 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         """
         if self.rank == 0:
             ray.get(self.actor_manager.set_should_stop.remote(True))
-        refs = vllm_utils.broadcast_weights_to_vllm(
-            model=self.train_module.model,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            model_step=0,
-            name_mapper=olmo_core_to_hf_name,
-        )
+        if self.grpo_config.olmo_core_train_module == "ddp":
+            refs = vllm_utils.broadcast_prepared_weights_to_vllm(
+                weights=self._gather_olmo_ddp_hf_state(),
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=0,
+            )
+        else:
+            refs = vllm_utils.broadcast_weights_to_vllm(
+                model=self.train_module.model,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=0,
+                name_mapper=olmo_core_to_hf_name,
+            )
         if self.rank == 0:
             utils.ray_get_with_progress(refs, desc="Initial vLLM weight sync", enable=False)
             utils.ray_get_with_progress(
@@ -349,6 +432,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             model_update_group=self.model_update_group,
             actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
             name_mapper=olmo_core_to_hf_name,
+            weight_state_provider=(
+                self._gather_olmo_ddp_hf_state if self.grpo_config.olmo_core_train_module == "ddp" else None
+            ),
         )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
@@ -391,7 +477,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
 
         if self.grpo_config.checkpoint_state_freq > 0:
             trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
-                checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
+                checkpointing_steps=self.grpo_config.checkpoint_state_freq,
+                ephemeral_save_interval=None,
+                save_async=self.grpo_config.olmo_core_train_module != "ddp",
             )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 
@@ -421,16 +509,22 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         All ranks must call this method because state_dict() and full_tensor()
         are collective operations when FSDP is enabled.
         """
-        state_dict = self.train_module.model.state_dict()
-        state_dict = {
-            k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
-        }
-
-        if self.rank != 0:
-            return
-
-        os.makedirs(output_dir, exist_ok=True)
-        olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
+        if self.grpo_config.olmo_core_train_module == "ddp":
+            hf_state = {name: value.cpu() for name, value in self._gather_olmo_ddp_hf_state().items()}
+            if self.rank != 0:
+                return
+            assert self.hf_config is not None
+            olmo_core_utils.save_prepared_hf_state(hf_state, output_dir, self.hf_config, tokenizer)
+        else:
+            state_dict = self.train_module.model.state_dict()
+            state_dict = {
+                key: value.full_tensor().cpu() if hasattr(value, "full_tensor") else value.cpu()
+                for key, value in state_dict.items()
+            }
+            if self.rank != 0:
+                return
+            os.makedirs(output_dir, exist_ok=True)
+            olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
 
 
