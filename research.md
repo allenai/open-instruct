@@ -179,6 +179,22 @@ FLOPs/MFU accounting. Fixed once in `open_instruct/utils.py`
 root-cause writeup in the experiment.md smoke-test section. Training
 results TBD — check Beaker/wandb before treating this as resolved.
 
+A third arm (`2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k`, no-NGU,
+same 16k ceiling) was added to isolate whether NGU helps at all vs. plain
+16k. It hit a genuine CUDA OOM at step 290/2000 (`--activation_memory_budget`
+0.5 too tight for `fsdp_shard_degree 4` at `pack_length 18432`) — fixed by
+lowering the budget to 0.25 (commit-free CLI override, no code change
+needed); confirmed fixed on relaunch
+[01KY0T45SY5EF75X6PWC617340](https://beaker.org/ex/01KY0T45SY5EF75X6PWC617340).
+Full root-cause writeup in the experiment.md "Arm 3 OOM root-cause note".
+Same relaunch then showed the exact stall signature this entry already
+flags as a risk (line above): step throughput collapsed ~1.9→0.16 steps/min
+right around step 290-305, with eval `sequence_lengths` mean jumping
+1575→7005 tokens and `stop_rate` dropping 0.97→0.81 — matching the
+[rho_weight collapse](#rho_weight-collapse-under-grad_norm10-n4_k32-watch-n2_k64-too-root-cause--partial-fix)
+pattern. Not yet confirmed as the same collapse (no direct `val/rho_weight`
+in stdout logs), so treat as a watch item, not a resolved finding.
+
 **Findings:** TBD (smoke test + both arms launching as of 2026-07-20).
 
 ---

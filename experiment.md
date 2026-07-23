@@ -631,10 +631,47 @@ comparability.
 | --- | --- | --- | --- | --- | --- | --- |
 | `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | ai2/olmo-instruct | ~~[01KXZWJMRC4VK0PBPYR281R72M](https://beaker.org/ex/01KXZWJMRC4VK0PBPYR281R72M)~~ (crashed step 18/2000, commit `84b617078`) → ~~[01KY02BGKXQPN68PAVA2XNK4NN](https://beaker.org/ex/01KY02BGKXQPN68PAVA2XNK4NN)~~ (crashed step 18/2000 again — `grpo_callbacks.py` call site fix missing, commit `105426b07`) → [01KY05JXM1NEJWD9T9FJHW96J7](https://beaker.org/ex/01KY05JXM1NEJWD9T9FJHW96J7) (commit `49a043644`, both call sites fixed; confirmed past step 32/2000, running) |
 | `2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1` | 16384 | 1 | 0.75 | 1 | ai2/open-instruct-dev | [01KXZ3J985XXE89MTGG2BQSTXF](https://beaker.org/ex/01KXZ3J985XXE89MTGG2BQSTXF) |
-| `2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k` | 16384 | 1 | 0 (no NGU) | 1 | ai2/olmo-instruct | [01KY0BC34QVCHPPWXBE3GDCZF9](https://beaker.org/ex/01KY0BC34QVCHPPWXBE3GDCZF9) |
+| `2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k` | 16384 | 1 | 0 (no NGU) | 1 | ai2/olmo-instruct | ~~[01KY0BC34QVCHPPWXBE3GDCZF9](https://beaker.org/ex/01KY0BC34QVCHPPWXBE3GDCZF9)~~ (CUDA OOM step 290/2000, `torch.OutOfMemoryError` in `feed_forward.w1`, 76.03/79.19 GiB allocated) → ~~[01KY0R82P4PVPAADY1HBFPRWEW](https://beaker.org/ex/01KY0R82P4PVPAADY1HBFPRWEW)~~ (`--activation_memory_budget 0.25`; crashed in ~2min, unrelated `torch.distributed.DistNetworkError: EADDRINUSE` during vLLM engine startup on `jupiter-cs-aus-138` — transient port-collision infra flake, not a memory issue, different node than the OOM run) → [01KY0T45SY5EF75X6PWC617340](https://beaker.org/ex/01KY0T45SY5EF75X6PWC617340) (clean relaunch, same `--activation_memory_budget 0.25`; **fix confirmed** — passed step 290 cleanly (reached step 305+ with no OOM/errors over 2+ hours), running) |
 
 Third arm added to isolate whether NGU (in either form) helps at all relative
 to no-revisit at the same 16k sequence-length ceiling.
+
+**Arm 3 OOM root-cause note (2026-07-20):** crashed at step 290/2000 with
+76.03/79.19 GiB allocated — genuine memory pressure, not a bug.
+`--gradient_checkpointing` on this command line is a no-op on the OLMo-core
+(`OC=true`/`grpo.py`) path — it only wires into `grpo_fast.py`'s DeepSpeed
+backend (see `model_utils.py`'s `gradient_checkpointing` field, never read by
+`grpo_olmo_core_actor.py`/`olmo_core_train_modules.py`). The real
+activation-checkpointing knob for OLMo-core is `--activation_memory_budget`
+(needs `--compile_model` default `True`; see `build_ac_config` in
+`olmo_core_utils.py`), which was already 0.5 here but with `fsdp_shard_degree
+4` (no extra sharding headroom) and `--pack_length 18432` that left too
+little margin. Sibling arm 2 (NGU, same 16k ceiling) ran past step 500
+without issue, so this looks specific to the no-NGU arm — plausibly because
+without NGU retries more completions run close to the full pack length.
+Considered but ruled out: PR #1747's tiled GRPO loss (`--use_liger_grpo_loss`)
+only touches `grpo_fast.py`/`grpo_utils.py`, not the OLMo-core actor, so it
+doesn't apply here. Fix: relaunched with `--activation_memory_budget 0.25`
+(precedented elsewhere for long-context OC=true GRPO, e.g.
+`multi_node_grpo.sh` uses 0.25 with pack_length 20480, albeit with more
+learner-GPU sharding). Not resumed from the step200 checkpoint — relaunched
+fresh from step 0, consistent with how prior crash-relaunches in this file
+were handled. **Confirmed fixed:** relaunch `01KY0T45SY5EF75X6PWC617340` ran
+past step 290 cleanly (reached step 305+ over 2+ hours wall clock, no
+OOM/errors).
+
+**New observation while confirming the fix (2026-07-21):** step throughput on
+this relaunch dropped sharply around the same step range — ~1.9 steps/min
+(steps 217→293) down to ~0.16 steps/min (steps 301→305), ETA growing from
+~8h to ~12h. In-loop eval logs show `sequence_lengths` mean jumping
+1575→7005 tokens and `stop_rate` dropping 0.97→0.81 between the 23:47 and
+01:03 eval prints. This is the same signature as the `val/rho_weight`
+completion-length-drift collapse documented in the [rho_weight collapse
+entry](research.md#rho_weight-collapse-under-grad_norm10-n4_k32-watch-n2_k64-too-root-cause--partial-fix)
+— worth watching whether this arm stalls the way `n4_k32_gradnorm1` did.
+Not yet confirmed as the same collapse (no direct `val/rho_weight` line in
+stdout logs to check, only inferred from sequence-length/stop-rate proxies);
+flagging for follow-up, not treating as resolved.
 
 ### Launch commands
 
