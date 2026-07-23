@@ -113,26 +113,38 @@ False` does **not** skip it). A fresh worktree lacks the dir; the Dockerfile's o
   oe-eval-internal/.git` (37 MB without .git). Then force a rebuild (§5).
 - Not gitignored, but copying it doesn't change the commit hash.
 
-## 8. flash-attn-4 vs Ulysses sequence parallelism on Blackwell — the key one
+## 8. Attention backend on Blackwell + sequence parallelism — the key one
 
-`detect_attn_implementation()` (`model_utils.py`) picks `flash_attention_4` when the fa4
-wheel is present **and GPU compute major ≥ 10** (Blackwell). B300 is sm_10.3 → major 10 →
-fa4. But **Ulysses SP** (`--sequence_parallel_size > 1`, deepspeed) **rejects fa4**:
+**What each stack ends up using (attn auto-detect, `model_utils.detect_attn_implementation`):**
+picks `flash_attention_4` iff fa4 wheel present **and GPU compute major ≥ 10** (Blackwell);
+else fa3 if `major ≥ 9`; else fa2; else sdpa.
+- **cu12 production (Hopper, major 9) → `flash_attention_3`** (prod scripts set no
+  `--attn_implementation`). fa3 *is* the "hopper" impl, so its kernels match Hopper → works.
+- **B300 (major 10) → `flash_attention_4`** (confirmed: local log `Auto-detected ... flash_4`).
 
-```
-ValueError: flash_attention_4 attn_implementation isn't currently supported by Ulysses
-sequence parallelism. Set core_attn_implementation to one of
-['flash_attention_2', 'flash_attention_3', 'sdpa'].
-```
+On B300 with **Ulysses SP** (`--sequence_parallel_size > 1`) you hit a Blackwell catch-22,
+found by trial across three holmes launches:
 
-cu12 production runs on **Hopper (major 9)** auto-select `flash_3`, so they never hit this
-— it is **Blackwell-specific**. Non-SP runs (SP=1) also never hit it (local 2-GPU passed).
+1. **fa4 → SP rejects it.** `deepspeed/.../ulysses_sp.py` has a hardcoded allowlist
+   `supported_attn_implementation = ["flash_attention_2","flash_attention_3","sdpa"]` and
+   raises `ValueError: flash_attention_4 ... isn't currently supported by Ulysses sequence
+   parallelism`. Ulysses wraps a registered HF attention *function* (`ALL_ATTENTION_FUNCTIONS`)
+   with all-to-all resharding; fa4's new `flash_attn.cute` interface isn't adapted/allowlisted.
+   It's a **deepspeed software gap, not fundamental** — fa4 itself runs fine on B300 (the
+   local **SP=1** run used fa4 and passed). So: **no SP → fa4 is great; SP → fa4 blocked.**
+2. **fa3 → no Blackwell kernel.** fa3 passes the SP allowlist but its "hopper" kernels aren't
+   built for sm_103: `CUDA error (flash-attention/hopper/flash_fwd_launch_template.h): no
+   kernel image is available for execution on the device`, in the learner's ZeRO-3 optimizer
+   priming. (This is why prod's implicit fa3 can't just be reused on B300.)
+3. **fa2 → works.** SP-compatible **and** the `flash_attn 2.8.3+cu130` wheel has Blackwell
+   kernels (verified locally: `flash_attn_func` runs on the B300). **This is the fix.**
 
-- **Fix:** `--attn_implementation flash_3` (enum value; fa3 cu130 wheel is installed,
-  SP-compatible, valid on sm_10). Config-only → reuse the existing image.
-- **Candidate codebase fix (TODO):** in `detect_attn_implementation()`, don't pick fa4
-  when sequence parallelism is enabled (fall back to fa3 on Blackwell), so SP runs on B300
-  work out-of-the-box.
+- **Fix:** `--attn_implementation flash_2` on B300 + SP. Config-only → reuse the image.
+- **Perf note:** on B300 you're capped at fa2 whenever SP is on (fa4 > fa3 > fa2 in speed);
+  fa4+SP needs deepspeed to add fa4 to the Ulysses allowlist + adapter. Track upstream.
+- **Candidate codebase fix (TODO):** make `detect_attn_implementation()` SP-aware — when
+  sequence parallelism is enabled, don't pick fa4 (and don't pick fa3 on Blackwell where it
+  has no kernel) → default to fa2, so SP runs on B300 work without the override.
 
 ## 9. Registry mirror (verify before every sandbox-RL launch)
 
