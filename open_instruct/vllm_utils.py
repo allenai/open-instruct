@@ -17,7 +17,9 @@
 
 import argparse
 import asyncio
+import base64
 import dataclasses
+import io
 import os
 import queue
 import sys
@@ -31,6 +33,7 @@ from typing import Any, TypedDict
 import aiohttp
 import backoff
 import deepspeed
+import numpy as np
 import openai
 import ray
 import torch
@@ -95,6 +98,31 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+def decode_routed_experts(routed_experts: str | list | None) -> list | None:
+    """Decode vLLM's base64-encoded NumPy route payload.
+
+    vLLM 0.22+ transports routed experts through the OpenAI API as a base64
+    encoded ``.npy`` byte stream. Lists are accepted for compatibility with
+    direct/offline vLLM outputs and older patched servers.
+    """
+    if routed_experts is None or isinstance(routed_experts, list):
+        return routed_experts
+
+    try:
+        raw = base64.b64decode(routed_experts, validate=True)
+        routes = np.load(io.BytesIO(raw), allow_pickle=False)
+    except (ValueError, TypeError, OSError) as exc:
+        raise ValueError("Could not decode vLLM routed_experts payload as a base64 NumPy array") from exc
+
+    if routes.ndim != 3:
+        raise ValueError(
+            f"Decoded vLLM routed_experts must have shape [seq_len, num_layers, top_k], got {routes.shape}"
+        )
+    if not np.issubdtype(routes.dtype, np.integer):
+        raise ValueError(f"Decoded vLLM routed_experts must contain integer expert IDs, got {routes.dtype}")
+    return routes.tolist()
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -716,8 +744,9 @@ class LLMRayActor:
             inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
             has_chat_template = getattr(inner_tokenizer, "chat_template", None) is not None
             args = _create_server_args(engine_client.vllm_config.model_config.model, has_chat_template)
-            app = build_app(args)
-            await init_app_state(engine_client, app.state, args)
+            supported_tasks = await engine_client.get_supported_tasks()
+            app = build_app(args, supported_tasks, engine_client.model_config)
+            await init_app_state(engine_client, app.state, args, supported_tasks)
 
             # There is a TOCTOU race: another process could claim the port between
             # find_free_port() and uvicorn binding. Unlikely in practice.
@@ -816,7 +845,11 @@ class LLMRayActor:
                 len(update_info["update_info"]["names"]),
                 self.return_routed_experts,
             )
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        self._run_async(self.llm_engine.start_weight_update())
+        try:
+            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        finally:
+            self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
         if self.return_routed_experts:
@@ -1065,7 +1098,6 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     "include_stop_str_in_output": True,
                     "skip_special_tokens": False,
                     "min_tokens": min_tokens,
-                    "return_routed_experts": actor.return_routed_experts,
                 },
                 **params_dict,
             )
@@ -1074,20 +1106,10 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             # Each turn's array covers the full current prefix, so the latest
             # turn supersedes earlier ones. (Multi-turn + prefix caching may
             # not re-record cached positions — revisit before tool use.)
-            turn_routed_experts = getattr(output, "routed_experts", None)
+            turn_routed_experts = decode_routed_experts(getattr(output, "routed_experts", None))
             if actor.return_routed_experts:
                 choice_keys = sorted(output.model_fields_set)
-                route_shape = None
-                if turn_routed_experts is not None:
-                    route_shape = (
-                        len(turn_routed_experts),
-                        len(turn_routed_experts[0]) if len(turn_routed_experts) > 0 else 0,
-                        (
-                            len(turn_routed_experts[0][0])
-                            if len(turn_routed_experts) > 0 and len(turn_routed_experts[0]) > 0
-                            else 0
-                        ),
-                    )
+                route_shape = np.asarray(turn_routed_experts).shape if turn_routed_experts is not None else None
                 logger.info(
                     "Received completion for request_id=%s: choice_keys=%s routed_experts_present=%s "
                     "routed_experts_shape=%s finish_reason=%s",
@@ -1456,7 +1478,7 @@ def _broadcast_weights_ipc(
         if is_rank_0:
             mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
             for engine in vllm_engines:
-                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+                trainer_args = IPCTrainerSendWeightsArgs(send_mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
@@ -1480,7 +1502,7 @@ def broadcast_streamed_weights_to_vllm(
     ray.get([engine.sleep.remote() for engine in vllm_engines])
     if model_update_group is None:
         for engine in vllm_engines:
-            trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+            trainer_args = IPCTrainerSendWeightsArgs(send_mode="ray", llm_handle=engine)
             IPCWeightTransferEngine.trainer_send_weights(iterator=weights, trainer_args=trainer_args)
         return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
 
@@ -1512,7 +1534,7 @@ def broadcast_prepared_weights_to_vllm(
     prepared = [(name, tensor.contiguous()) for name, tensor in weights.items()]
     if model_update_group is None:
         for engine in vllm_engines:
-            trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+            trainer_args = IPCTrainerSendWeightsArgs(send_mode="ray", llm_handle=engine)
             IPCWeightTransferEngine.trainer_send_weights(iterator=iter(prepared), trainer_args=trainer_args)
         return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
 
