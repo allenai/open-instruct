@@ -77,7 +77,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
-    --attn_implementation flash_3 \
+    --attn_implementation flash_2 \
     --num_epochs 1 \
     --num_learners_per_node 2 \
     --vllm_num_engines 2 \
