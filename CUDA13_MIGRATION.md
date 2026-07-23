@@ -152,6 +152,11 @@ found by trial across three holmes launches:
 - **Candidate codebase fix (TODO):** make `detect_attn_implementation()` SP-aware — when
   sequence parallelism is enabled, don't pick fa4 (and don't pick fa3 on Blackwell where it
   has no kernel) → default to fa2, so SP runs on B300 work without the override.
+- **`main` is affected too (upstream candidate).** `origin/main` pins the same
+  `deepspeed>=0.18.3` (→0.18.4, old allowlist) and the same `flash-attn-4` wheel + fa4
+  auto-detect (all introduced by #1758). So SP training on B300 from `main` hits the identical
+  crash — this is not fork-specific. #1758's B300 GPU tests didn't exercise SP>1, so it went
+  unnoticed. The detect fix and/or deepspeed bump belong upstream.
 
 ## 9. Registry mirror (verify before every sandbox-RL launch)
 
