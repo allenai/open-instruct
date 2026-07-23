@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add the DPPO loss function (`--loss_fn dppo`), a binary-divergence trust-region policy update (https://arxiv.org/abs/2602.04879) gated on `--use_vllm_logprobs` (https://github.com/allenai/open-instruct/pull/1745).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Changed
