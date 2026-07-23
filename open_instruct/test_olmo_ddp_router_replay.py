@@ -1,3 +1,4 @@
+import contextlib
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +8,20 @@ from olmo_core.config import DType
 from olmo_core.nn.attention import AttentionBackendName
 
 from open_instruct import grpo_utils, olmo_core_utils, vllm_utils
+
+
+class _ReplayBlock(torch.nn.Module):
+    def __init__(self, *, routed: bool):
+        super().__init__()
+        self.routed_experts_router = torch.nn.Identity() if routed else None
+
+
+class _MixedReplayModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.blocks = torch.nn.ModuleDict(
+            {"0": _ReplayBlock(routed=False), "1": _ReplayBlock(routed=True), "2": _ReplayBlock(routed=True)}
+        )
 
 
 def test_olmo_ddp_ep_config_accepts_divisible_learner_world():
@@ -93,3 +108,41 @@ def test_olmo_ddp_factory_rejects_unsupported_checkpoint_type():
         olmo_core_utils.build_olmo_ddp_model_config_from_hf_config(
             transformers.GPT2Config(), dtype=DType.float32, attention_backend=AttentionBackendName.torch
         )
+
+
+def test_replay_router_context_removes_dense_layer_slots(monkeypatch):
+    captured = []
+
+    @contextlib.contextmanager
+    def capture_replay(_model, per_layer_indices):
+        captured.extend(per_layer_indices)
+        yield
+
+    monkeypatch.setattr(olmo_core_utils.olmo_moe, "replay_routing", capture_replay)
+    routes = torch.arange(3).reshape(1, 1, 3, 1)
+
+    with olmo_core_utils.replay_router_context(_MixedReplayModel(), routes):
+        pass
+
+    assert len(captured) == 2
+    torch.testing.assert_close(captured[0], routes[:, :, 1, :])
+    torch.testing.assert_close(captured[1], routes[:, :, 2, :])
+
+
+def test_replay_router_context_accepts_router_only_layer_axis(monkeypatch):
+    captured = []
+
+    @contextlib.contextmanager
+    def capture_replay(_model, per_layer_indices):
+        captured.extend(per_layer_indices)
+        yield
+
+    monkeypatch.setattr(olmo_core_utils.olmo_moe, "replay_routing", capture_replay)
+    routes = torch.arange(2).reshape(1, 1, 2, 1)
+
+    with olmo_core_utils.replay_router_context(_MixedReplayModel(), routes):
+        pass
+
+    assert len(captured) == 2
+    torch.testing.assert_close(captured[0], routes[:, :, 0, :])
+    torch.testing.assert_close(captured[1], routes[:, :, 1, :])
