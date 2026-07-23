@@ -9,7 +9,7 @@ These callbacks handle:
 import contextlib
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, cast
 
@@ -152,6 +152,9 @@ class VLLMWeightSyncCallback(Callback):
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
     weight_state_provider: Callable[[], dict[str, torch.Tensor]] | None = None
+    weight_stream_provider: (
+        Callable[[], tuple[list[tuple[str, torch.dtype, tuple[int, ...]]], Iterable[tuple[str, torch.Tensor]]]] | None
+    ) = None
 
     @property
     def train_module(self) -> TransformerTrainModule:
@@ -163,7 +166,16 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        if self.weight_state_provider is not None:
+        if self.weight_stream_provider is not None:
+            metadata, weights = self.weight_stream_provider()
+            broadcast_refs = vllm_utils.broadcast_streamed_weights_to_vllm(
+                metadata=metadata,
+                weights=weights,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=self.trainer.global_step,
+            )
+        elif self.weight_state_provider is not None:
             weights = self.weight_state_provider()
             broadcast_refs = vllm_utils.broadcast_prepared_weights_to_vllm(
                 weights=weights,
