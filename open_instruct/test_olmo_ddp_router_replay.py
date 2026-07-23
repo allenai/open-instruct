@@ -146,3 +146,48 @@ def test_replay_router_context_accepts_router_only_layer_axis(monkeypatch):
     assert len(captured) == 2
     torch.testing.assert_close(captured[0], routes[:, :, 0, :])
     torch.testing.assert_close(captured[1], routes[:, :, 1, :])
+
+
+def test_streamed_hf_state_ipc_sync(monkeypatch):
+    engine = SimpleNamespace(sleep=_RemoteMethod("slept"), set_model_step=_RemoteMethod("stepped"))
+    sent = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(vllm_utils.ray, "get", lambda refs: refs)
+    monkeypatch.setattr(
+        vllm_utils.IPCWeightTransferEngine,
+        "trainer_send_weights",
+        lambda iterator, trainer_args: sent.extend(iterator),
+    )
+    weight = torch.arange(4).reshape(2, 2)
+    metadata = [("model.embed_tokens.weight", weight.dtype, tuple(weight.shape))]
+
+    refs = vllm_utils.broadcast_streamed_weights_to_vllm(
+        metadata=metadata,
+        weights=iter([("model.embed_tokens.weight", weight)]),
+        vllm_engines=[engine],
+        model_update_group=None,
+        model_step=9,
+    )
+
+    assert refs == ["stepped"]
+    assert engine.set_model_step.calls == [((9,), {})]
+    assert [name for name, _ in sent] == ["model.embed_tokens.weight"]
+    torch.testing.assert_close(sent[0][1], weight)
+
+
+def test_streamed_hf_state_nonzero_rank_drains_collective_iterator(monkeypatch):
+    drained = []
+
+    def weights():
+        drained.append(True)
+        yield "unused", torch.ones(1)
+
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 1)
+
+    refs = vllm_utils.broadcast_streamed_weights_to_vllm(
+        metadata=[], weights=weights(), vllm_engines=[], model_update_group=object(), model_step=1
+    )
+
+    assert refs == []
+    assert drained == [True]

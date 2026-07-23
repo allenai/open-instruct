@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from concurrent import futures
 from typing import Any, TypedDict
 
@@ -1417,6 +1417,41 @@ def _broadcast_weights_ipc(
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
+
+
+def broadcast_streamed_weights_to_vllm(
+    metadata: list[tuple[str, torch.dtype, tuple[int, ...]]],
+    weights: Iterable[tuple[str, torch.Tensor]],
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: Any | None,
+    model_step: int,
+) -> list[ray.ObjectRef]:
+    """Send an HF weight stream from learner rank zero without materializing a full state dict."""
+    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+    if not is_rank_0:
+        # Advancing the iterator participates in any learner-side gather collectives.
+        for _ in weights:
+            pass
+        return []
+
+    ray.get([engine.sleep.remote() for engine in vllm_engines])
+    if model_update_group is None:
+        for engine in vllm_engines:
+            trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+            IPCWeightTransferEngine.trainer_send_weights(iterator=weights, trainer_args=trainer_args)
+        return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
+
+    update_info = {
+        "names": [name for name, _, _ in metadata],
+        "dtype_names": [str(dtype).split(".")[-1] for _, dtype, _ in metadata],
+        "shapes": [list(shape) for _, _, shape in metadata],
+        "packed": False,
+    }
+    refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
+    NCCLWeightTransferEngine.trainer_send_weights(
+        iterator=weights, trainer_args=NCCLTrainerSendWeightsArgs(group=model_update_group, packed=False)
+    )
+    return refs
 
 
 def broadcast_prepared_weights_to_vllm(
