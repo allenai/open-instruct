@@ -1,9 +1,13 @@
+import base64
+import io
 import logging
 import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
+import numpy as np
 import vllm
+from openai.types.completion import Completion
 from parameterized import parameterized
 
 from open_instruct import vllm_utils
@@ -31,6 +35,80 @@ class TestTruncateEnvOutputTokens(unittest.TestCase):
         )
         self.assertEqual(result, expected_tokens)
         self.assertEqual(excess, expected_excess)
+
+
+class TestDecodeRoutedExperts(unittest.TestCase):
+    def test_decodes_vllm_numpy_payload(self):
+        expected = np.arange(24, dtype=np.uint8).reshape(3, 4, 2)
+        buffer = io.BytesIO()
+        np.save(buffer, expected)
+        payload = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+        actual = vllm_utils.decode_routed_experts(payload)
+
+        self.assertEqual(actual, expected.tolist())
+
+    def test_accepts_legacy_list_payload(self):
+        routes = [[[1, 2], [3, 4]]]
+
+        self.assertIs(vllm_utils.decode_routed_experts(routes), routes)
+
+    def test_rejects_invalid_shape(self):
+        buffer = io.BytesIO()
+        np.save(buffer, np.zeros((3, 4), dtype=np.uint8))
+        payload = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+        with self.assertRaisesRegex(ValueError, "must have shape"):
+            vllm_utils.decode_routed_experts(payload)
+
+    def test_openai_sdk_preserves_vllm_route_field(self):
+        response = Completion.model_validate(
+            {
+                "id": "completion-id",
+                "choices": [
+                    {"finish_reason": "stop", "index": 0, "logprobs": None, "text": "", "routed_experts": "abc"}
+                ],
+                "created": 0,
+                "model": "model",
+                "object": "text_completion",
+            }
+        )
+
+        self.assertEqual(response.choices[0].routed_experts, "abc")
+
+
+class TestVllmWeightUpdate(unittest.TestCase):
+    def _actor(self):
+        actor = object.__new__(vllm_utils.LLMRayActor)
+        actor.inflight_updates = True
+        actor.active_tasks = set()
+        actor.return_routed_experts = False
+        actor.current_model_step = None
+        actor.llm_engine = mock.Mock()
+        actor._run_async = mock.Mock()
+        return actor
+
+    def test_wraps_update_in_reload_lifecycle(self):
+        actor = self._actor()
+        start, update, finish = object(), object(), object()
+        actor.llm_engine.start_weight_update.return_value = start
+        actor.llm_engine.update_weights.return_value = update
+        actor.llm_engine.finish_weight_update.return_value = finish
+
+        actor.update_weights({"update_info": {"names": []}}, model_step=3)
+
+        self.assertEqual(actor._run_async.call_args_list, [mock.call(start), mock.call(update), mock.call(finish)])
+        self.assertEqual(actor.current_model_step, 3)
+
+    def test_finishes_reload_lifecycle_when_update_fails(self):
+        actor = self._actor()
+        actor._run_async.side_effect = [None, RuntimeError("update failed"), None]
+
+        with self.assertRaisesRegex(RuntimeError, "update failed"):
+            actor.update_weights({"update_info": {"names": []}})
+
+        self.assertEqual(actor._run_async.call_count, 3)
+        actor.llm_engine.finish_weight_update.assert_called_once_with()
 
 
 class TestVllmUtils3(unittest.TestCase):
