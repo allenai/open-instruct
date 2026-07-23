@@ -170,15 +170,33 @@ Sandbox images are pulled through a docker.io pull-through cache set by
   `-193` also dead (long known).
 - Check: `curl -m8 http://<host>/v2/` (want 200) and a `.../manifests/3.12-slim` pull-through.
 
-## 10. Validation status
+## 10. Validation status (2026-07-23)
 
 | Run | Config | Result |
 |-----|--------|--------|
-| Local 2-GPU | SP=1, stage 2, `swerl_sandbox`, Qwen3-0.6B, cu130/B300 | **PASSED** — 2 steps, exit 0, wandb `lvb9a3to` |
-| holmes `01KY6KQZ…` | 4-GPU vanillux+DPPO+SP=2 | crashed: missing `oe-eval-internal` (§7) |
-| holmes `01KY6MFA…` | ” (image w/ oe-eval-internal) | crashed later: fa4 vs SP (§8) |
-| holmes `01KY6N9F…` | ” + `--attn_implementation flash_3` | launched, in progress |
+| Local 2-GPU | SP=1, stage 2, `swerl_sandbox`, Qwen3-0.6B | **PASSED** — 2 steps, exit 0, wandb `lvb9a3to` |
+| holmes `01KY6KQZ` | 4-GPU vanillux+DPPO+SP=2, Qwen3-0.6B | crashed: missing `oe-eval-internal` (§7) |
+| holmes `01KY6MFA` | ” (image w/ oe-eval-internal) | crashed later: fa4 vs SP (§8) |
+| holmes `01KY6N9F` | ” + `--attn_implementation flash_3` | crashed later: fa3 no B300 kernel (§8) |
+| holmes `01KY6VRG/VSP` | 4-GPU + `flash_2`, Qwen3-0.6B (4k) | **infra PASSED** exit 0; empty batch (§11) |
+| holmes 9B smokes | 4-GPU `flash_2`, tmax **9B `_cg`** (`step_360_cg`), 4k & 64k | **infra PASSED** exit 0; empty batch (§11) |
+| holmes `01KY6Z9F` | **full prod 4-node/32-B300**, `flash_2`, 64k, SP=4, DPPO, `hamishivi/Qwen3.5-9B`, 8×32 rollouts, `total_episodes 6400` | **PASSED — real gradient steps**: `scores 0.83`, `advantages ∈ [-0.94, 0.38]`, non-empty batches, `seq_len_max 65536` |
 
-The cu13 image, holmes scheduling, Ray, and the cu130 vLLM engine (flashinfer, CUDA
-graphs, KV cache) all came up fine — every failure was a config/hardware-enablement gap,
-not the CUDA-13 math stack.
+Every failure along the way was a config/hardware-enablement gap — the CUDA-13 math stack
+(torch cu130, vLLM cu130 flashinfer/CUDA-graphs/KV, deepspeed) came up first try each time.
+
+## 11. Reward variance ≠ context length (why smokes had empty batches)
+
+The 0.6B and small-N 9B smokes ran the full pipeline to `exit 0` (model load → weight sync
+→ rollouts → training loop → model save) but **skipped the gradient step**:
+```
+All prompts were filtered during accumulation. Filtered: N (zero std: N, solved: 0, nonzero: 0)
+🤡 After packing, there is not enough data to train → Empty batch, skipping training step
+```
+GRPO/DPPO drops any prompt-group with **zero within-group reward std** (needs a solved/unsolved
+mix to form advantages). With only `num_unique_prompts_rollout=4` and all rollouts scoring 0,
+every group had zero variance → empty batch. **This was NOT context length** — even the 64k
+smoke hit it (0 solves in 16 rollouts). The fix is enough prompts × samples to get variance:
+the **full prod run (8×32 = 256 rollouts/step) landed real steps immediately** (`scores 0.83`,
+advantages spanning −0.94…0.38). So for a smoke that must show a real weight update, use the
+production rollout width, not a tiny one.

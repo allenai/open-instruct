@@ -4,8 +4,9 @@
 # Same production recipe as holmes_smoke_4gpu_cuda13.sh (swerl_vanillux_sandbox +
 # allenai/tmax-15k-open-instruct + DPPO + SP=2 + flash_2), but the policy is the
 # tmax Qwen3.5-9B SFT+DPPO checkpoint (step_360, _cg-converted) instead of Qwen3-0.6B.
-# Unlike the 0.6B smoke, this model produces real reward variance, so active_sampling
-# fills batches and training steps actually complete.
+# This variant has active_sampling OFF: it accumulates exactly the batch and steps
+# (no oversampling for reward variance), so a training step completes fast/deterministically
+# regardless of model quality. Companion to holmes_smoke_4gpu_9b_cuda13.sh (active_sampling ON).
 #
 # Model = the DPPO-9B step_360 checkpoint, CG-converted for vLLM serving. Its weka path
 # contains "qwen35", so the trainer->vLLM weight-sync name-mapper (_build_vlm_name_mapper)
@@ -23,12 +24,12 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=/weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360_cg
 TOKENIZER=$MODEL
 DATASET=allenai/tmax-15k-open-instruct
-EXP_NAME=swerl_holmes_smoke_9b_tmax_cuda13
+EXP_NAME=swerl_holmes_smoke_9b_tmax_64k_noAS_cuda13
 
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "CUDA-13/B300 4-GPU terminal RL smoke, 9B tmax step_360_cg (vanillux, DPPO, SP=2, fa2)" \
+       --description "CUDA-13/B300 4-GPU terminal RL smoke, 9B tmax step_360_cg (vanillux, DPPO, SP=2, fa2, NO active_sampling, 64k ctx)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -65,9 +66,9 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --dataset_mixer_list $DATASET 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --per_turn_max_tokens 2048 \
-    --response_length 4096 \
-    --pack_length 8192 \
+    --per_turn_max_tokens 16384 \
+    --response_length 65536 \
+    --pack_length 67584 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 4 \
@@ -104,7 +105,6 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
-    --active_sampling \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
     --inflight_updates true \

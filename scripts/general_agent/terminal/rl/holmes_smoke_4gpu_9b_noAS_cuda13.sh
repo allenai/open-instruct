@@ -65,10 +65,10 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list $DATASET 1.0 \
     --dataset_mixer_list_splits train \
-    --max_prompt_token_length 1024 \
+    --max_prompt_token_length 2048 \
     --per_turn_max_tokens 2048 \
     --response_length 4096 \
-    --pack_length 6144 \
+    --pack_length 8192 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
     --num_samples_per_prompt_rollout 4 \
