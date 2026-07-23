@@ -601,6 +601,7 @@ class LLMRayActor:
         # Whether to request MoE expert selections per completion; the same flag
         # also flows into AsyncEngineArgs so the engine records them.
         self.return_routed_experts = bool(kwargs.get("enable_return_routed_experts", False))
+        logger.info("Configured vLLM actor route capture: enable_return_routed_experts=%s", self.return_routed_experts)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -808,9 +809,22 @@ class LLMRayActor:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+        if self.return_routed_experts:
+            logger.info(
+                "Updating vLLM weights for model_step=%s with %d tensors; route capture enabled=%s",
+                model_step,
+                len(update_info["update_info"]["names"]),
+                self.return_routed_experts,
+            )
         self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
         if model_step is not None:
             self.current_model_step = model_step
+        if self.return_routed_experts:
+            logger.info(
+                "Completed vLLM weight update for model_step=%s; route capture enabled=%s",
+                self.current_model_step,
+                self.return_routed_experts,
+            )
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1035,6 +1049,13 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
+            if actor.return_routed_experts:
+                logger.info(
+                    "Requesting routed experts for request_id=%s model_step=%s rollout_step=%s",
+                    sub_request_id,
+                    actor.current_model_step,
+                    rollout.step_count,
+                )
             api_response = await actor.client.completions.create(
                 model=actor.model_name,
                 prompt=current_prompt,
@@ -1054,6 +1075,28 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             # turn supersedes earlier ones. (Multi-turn + prefix caching may
             # not re-record cached positions — revisit before tool use.)
             turn_routed_experts = getattr(output, "routed_experts", None)
+            if actor.return_routed_experts:
+                choice_keys = sorted(output.model_fields_set)
+                route_shape = None
+                if turn_routed_experts is not None:
+                    route_shape = (
+                        len(turn_routed_experts),
+                        len(turn_routed_experts[0]) if len(turn_routed_experts) > 0 else 0,
+                        (
+                            len(turn_routed_experts[0][0])
+                            if len(turn_routed_experts) > 0 and len(turn_routed_experts[0]) > 0
+                            else 0
+                        ),
+                    )
+                logger.info(
+                    "Received completion for request_id=%s: choice_keys=%s routed_experts_present=%s "
+                    "routed_experts_shape=%s finish_reason=%s",
+                    sub_request_id,
+                    choice_keys,
+                    turn_routed_experts is not None,
+                    route_shape,
+                    output.finish_reason,
+                )
             if turn_routed_experts is not None:
                 routed_experts = turn_routed_experts
             model_tokens = list(output.token_ids)
