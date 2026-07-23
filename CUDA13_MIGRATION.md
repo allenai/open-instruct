@@ -140,8 +140,15 @@ found by trial across three holmes launches:
    kernels (verified locally: `flash_attn_func` runs on the B300). **This is the fix.**
 
 - **Fix:** `--attn_implementation flash_2` on B300 + SP. Config-only → reuse the image.
-- **Perf note:** on B300 you're capped at fa2 whenever SP is on (fa4 > fa3 > fa2 in speed);
-  fa4+SP needs deepspeed to add fa4 to the Ulysses allowlist + adapter. Track upstream.
+- **Perf note:** on B300 you're capped at fa2 whenever SP is on (fa4 > fa3 > fa2 in speed).
+- **Path to fa4+SP (deepspeed bump — verified upstream):** we're on **deepspeed 0.18.4**,
+  whose `ulysses_sp.py` uses the hardcoded allowlist. Deepspeed **master already refactored**
+  this to a blocklist `unsupported_attn_implementation = ["eager","paged|eager"]` and otherwise
+  validates against `transformers.ALL_ATTENTION_FUNCTIONS` — and `flash_attention_4` IS in that
+  registry (transformers 5.4.0). So a newer deepspeed would **permit fa4 with Ulysses SP**.
+  Follow-up: bump deepspeed (re-lock + rebuild), drop the `--attn_implementation flash_2`
+  override (auto-detect → fa4), and verify fa4 runs correctly through Ulysses' all-to-all at
+  runtime (permitted ≠ validated). Confirm which released version has the refactor (0.18.4 lacks it).
 - **Candidate codebase fix (TODO):** make `detect_attn_implementation()` SP-aware — when
   sequence parallelism is enabled, don't pick fa4 (and don't pick fa3 on Blackwell where it
   has no kernel) → default to fa2, so SP runs on B300 work without the override.
