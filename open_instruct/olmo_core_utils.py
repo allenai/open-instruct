@@ -426,6 +426,32 @@ def model_supports_router_replay(model: torch.nn.Module) -> bool:
     )
 
 
+def _select_routed_layer_indices(model: torch.nn.Module, routed_experts: torch.Tensor) -> torch.Tensor:
+    """Map vLLM's absolute transformer-layer axis to OLMo-core's routed layers."""
+    blocks = getattr(model, "blocks", None)
+    if blocks is None:
+        return routed_experts
+
+    block_values = list(blocks.values()) if hasattr(blocks, "values") else list(blocks)
+    routed_block_indices = [
+        idx for idx, block in enumerate(block_values) if getattr(block, "routed_experts_router", None) is not None
+    ]
+    num_route_layers = routed_experts.shape[2]
+
+    # Some vLLM model implementations return only MoE layers, while the
+    # Transformers backend returns one slot per transformer layer (including
+    # dense layers). OLMo-core's replay API consumes one tensor per router.
+    if num_route_layers == len(routed_block_indices):
+        return routed_experts
+    if num_route_layers == len(block_values):
+        return routed_experts[:, :, routed_block_indices, :]
+    raise ValueError(
+        "routed_experts layer dimension matches neither the model's routed layers "
+        f"({len(routed_block_indices)}) nor all transformer layers ({len(block_values)}); "
+        f"got shape {tuple(routed_experts.shape)}"
+    )
+
+
 @contextlib.contextmanager
 def replay_router_context(model: torch.nn.Module, routed_experts: torch.Tensor | None) -> Iterator[None]:
     """Replay a collated ``[B, S, L, K]`` route tensor for one model execution."""
@@ -443,6 +469,7 @@ def replay_router_context(model: torch.nn.Module, routed_experts: torch.Tensor |
             "The installed OLMo-core does not expose olmo_core.nn.moe.replay_routing; "
             "update the OLMo-core dependency to a router-replay-capable revision"
         )
+    routed_experts = _select_routed_layer_indices(model, routed_experts)
     per_layer_indices = list(routed_experts.unbind(dim=2))
     with replay_routing(model, per_layer_indices):
         yield
