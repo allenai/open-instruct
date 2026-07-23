@@ -2,7 +2,7 @@
 # Check whether this host can reach Modal and run a sandbox end-to-end.
 #
 # This is the feasibility gate for using ModalBackend in RL training
-# (see docs/sandbox_modal_vs_podman.md): the training job must have outbound
+# (see docs/sandbox_management.md): the training job must have outbound
 # network access to api.modal.com and be able to drive the full sandbox
 # lifecycle (auth -> app lookup -> sandbox create -> exec -> terminate).
 #

@@ -17,6 +17,7 @@ import uuid
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import timedelta
 
 import docker as docker_sdk
 
@@ -25,6 +26,20 @@ try:
 except ImportError:
     # Modal is an optional dependency, only needed for ModalBackend.
     modal = None
+
+try:
+    from opensandbox import SandboxSync as OpenSandboxSync
+    from opensandbox.config import ConnectionConfigSync as OpenSandboxConnectionConfig
+    from opensandbox.exceptions import SandboxException as OpenSandboxException
+    from opensandbox.models import WriteEntry as OpenSandboxWriteEntry
+    from opensandbox.models.execd import RunCommandOpts as OpenSandboxRunCommandOpts
+except ImportError:
+    # OpenSandbox is an optional dependency, only needed for OpenSandboxBackend.
+    OpenSandboxSync = None
+    OpenSandboxConnectionConfig = None
+    OpenSandboxException = None
+    OpenSandboxRunCommandOpts = None
+    OpenSandboxWriteEntry = None
 
 if modal is not None:
     # Modal warns on every blocking call made from an async context (the env
@@ -843,7 +858,7 @@ class ModalBackend(SandboxBackend):
     """Modal cloud backend using ``modal.Sandbox``.
 
     Runs each sandbox as a container in Modal's cloud instead of on the local
-    node (see ``docs/sandbox_modal_vs_podman.md``). Requires the ``modal``
+    node (see ``docs/sandbox_management.md``). Requires the ``modal``
     package, Modal credentials (``MODAL_TOKEN_ID`` / ``MODAL_TOKEN_SECRET`` env
     vars or ``modal token new``), and outbound network access.
 
@@ -1093,11 +1108,317 @@ class ModalBackend(SandboxBackend):
             )
 
 
+# ---------------------------------------------------------------------------
+# OpenSandbox
+# ---------------------------------------------------------------------------
+
+
+# Track live OpenSandbox sandboxes so we can kill them if the Python process
+# exits abruptly. Each sandbox is a pod on the self-hosted cluster; a leaked
+# one consumes (and on GKE Autopilot, bills for) resources until its lifetime
+# timeout expires.
+_OPENSANDBOX_LIVE_SANDBOXES: set = set()
+
+
+def _opensandbox_cleanup_all() -> None:
+    for sandbox in list(_OPENSANDBOX_LIVE_SANDBOXES):
+        with contextlib.suppress(Exception):
+            sandbox.kill()
+    _OPENSANDBOX_LIVE_SANDBOXES.clear()
+
+
+atexit.register(_opensandbox_cleanup_all)
+
+
+class OpenSandboxBackend(SandboxBackend):
+    """OpenSandbox backend using a self-hosted OpenSandbox service.
+
+    Runs each sandbox as a pod on an OpenSandbox deployment (e.g. GKE
+    Autopilot) instead of on the local node. Unlike Modal, OpenSandbox runs
+    the OCI image as-is — Kubernetes pulls it unmodified — so there is no
+    image-rebuild fidelity gap (see ``docs/sandbox_management.md``).
+    Requires the ``opensandbox`` package, the service endpoint
+    (``SWERL_OPENSANDBOX_DOMAIN``), and an API key (``OPEN_SANDBOX_API_KEY``).
+
+    Command execution and file I/O are network RPCs against the service.
+    ``run_command`` output arrives over an SSE stream whose HTTP read timeout
+    is the connection's ``request_timeout``, so the backend sets it above the
+    per-command timeout — otherwise a long-quiet command severs the stream.
+    Exec output is text-only SSE; file reads go through the filesystem API,
+    which is binary-safe.
+
+    The sandbox is created with a hard lifetime (``sandbox_lifetime``); the
+    service reaps it after that even if ``close()`` is never called, bounding
+    the cost of leaked sandboxes.
+    """
+
+    _MAX_OUTPUT_CHARS = 1_000_000
+    # Distinct exit codes let read_file classify failures in a single exec,
+    # mirroring ModalBackend; content then comes over the filesystem API.
+    _READ_FILE_MISSING_EXIT = 40
+    _READ_FILE_ISDIR_EXIT = 41
+    # Margin added on top of the per-command timeout for the server-side
+    # command kill and the HTTP/SSE read timeout, so the in-sandbox `timeout`
+    # wrapper (exit 124) always fires first.
+    _TIMEOUT_MARGIN_S = 60
+    _REQUEST_TIMEOUT_MARGIN_S = 300
+
+    def __init__(
+        self,
+        image: str = "python:3.12-slim",
+        timeout: int = 1800,
+        mem_limit: str | int | None = "4g",
+        cpu: float | None = None,
+        domain: str | None = None,
+        protocol: str | None = None,
+        api_key: str | None = None,
+        app_name: str | None = None,
+        sandbox_lifetime: int | None = None,
+        ready_timeout: int | None = None,
+    ):
+        """
+        Args:
+            image: Registry image tag (e.g. ``python:3.12-slim``), pulled
+                as-is by the cluster.
+            timeout: Per-command timeout in seconds (default: 1800 / 30 min).
+            mem_limit: Memory limit, Docker-style string or int bytes
+                (default: 4g). Converted to a Kubernetes ``Mi`` quantity.
+            cpu: CPU cores to reserve. Defaults to ``SWERL_OPENSANDBOX_CPU``
+                (1.0).
+            domain: OpenSandbox service endpoint, e.g. ``sandbox.example.com``
+                or ``https://sandbox.example.com``. Defaults to
+                ``SWERL_OPENSANDBOX_DOMAIN``; required.
+            protocol: ``http`` or ``https``; ignored when ``domain`` embeds a
+                scheme. Defaults to ``SWERL_OPENSANDBOX_PROTOCOL`` (``http``).
+            api_key: Service API key. Defaults to the SDK's standard
+                ``OPEN_SANDBOX_API_KEY`` env var.
+            app_name: Tag stored in sandbox metadata so the cleanup janitor
+                can find sandboxes from this job. Defaults to
+                ``SWERL_OPENSANDBOX_APP_NAME`` (``open-instruct-sandbox``).
+            sandbox_lifetime: Hard lifetime of the sandbox in seconds; the
+                service kills it after this even if never closed. Defaults to
+                ``SWERL_OPENSANDBOX_LIFETIME_S`` (3600). Must exceed the
+                longest expected rollout.
+            ready_timeout: Seconds to wait for the sandbox pod to become
+                ready. Defaults to ``SWERL_OPENSANDBOX_READY_TIMEOUT_S``
+                (180) — GKE Autopilot may need to provision a node, which
+                takes minutes, not the SDK's default 30s.
+        """
+        if OpenSandboxSync is None:
+            raise RuntimeError(
+                "The 'opensandbox' package is required for OpenSandboxBackend. "
+                "Install it with `pip install opensandbox`."
+            )
+        self._image = image
+        self._timeout = timeout
+        self._memory_mib = parse_mem_limit_mib(mem_limit)
+        self._cpu = cpu if cpu is not None else _env_float("SWERL_OPENSANDBOX_CPU", 1.0)
+        self._domain = domain or os.getenv("SWERL_OPENSANDBOX_DOMAIN")
+        if not self._domain:
+            raise RuntimeError(
+                "OpenSandboxBackend needs the service endpoint: pass 'domain' or set SWERL_OPENSANDBOX_DOMAIN."
+            )
+        self._protocol = protocol or os.getenv("SWERL_OPENSANDBOX_PROTOCOL", "http")
+        self._api_key = api_key  # None -> the SDK falls back to OPEN_SANDBOX_API_KEY.
+        self._app_name = app_name or os.getenv("SWERL_OPENSANDBOX_APP_NAME", "open-instruct-sandbox")
+        self._sandbox_lifetime = (
+            sandbox_lifetime if sandbox_lifetime is not None else _env_int("SWERL_OPENSANDBOX_LIFETIME_S", 3600)
+        )
+        self._ready_timeout = (
+            ready_timeout if ready_timeout is not None else _env_int("SWERL_OPENSANDBOX_READY_TIMEOUT_S", 180)
+        )
+        self._sandbox = None
+
+    def _ensure_started(self) -> None:
+        if self._sandbox is None:
+            raise RuntimeError("Sandbox not started. Call start() first.")
+
+    def _connection_config(self):
+        return OpenSandboxConnectionConfig(
+            domain=self._domain,
+            protocol=self._protocol,
+            api_key=self._api_key,
+            request_timeout=timedelta(seconds=self._timeout + self._REQUEST_TIMEOUT_MARGIN_S),
+        )
+
+    # ---- lifecycle --------------------------------------------------------
+
+    def start(self) -> None:
+        # Kill any previous sandbox before starting a new one (supports the
+        # "close then start" pattern used in SWERLSandboxEnv._do_reset).
+        if self._sandbox is not None:
+            self.close()
+        logger.info(
+            "Starting OpenSandbox sandbox (image=%s, domain=%s, app=%s, cpu=%s, memory_mib=%s, lifetime=%ss)",
+            self._image,
+            self._domain,
+            self._app_name,
+            self._cpu,
+            self._memory_mib,
+            self._sandbox_lifetime,
+        )
+        start_time = time.perf_counter()
+        self._sandbox = OpenSandboxSync.create(
+            self._image,
+            timeout=timedelta(seconds=self._sandbox_lifetime),
+            ready_timeout=timedelta(seconds=self._ready_timeout),
+            resource={"cpu": str(self._cpu), "memory": f"{self._memory_mib}Mi"},
+            metadata={"open_instruct": "swerl_sandbox", "open_instruct_app": self._app_name},
+            connection_config=self._connection_config(),
+        )
+        _OPENSANDBOX_LIVE_SANDBOXES.add(self._sandbox)
+        logger.info("OpenSandbox sandbox started: %s (%.3fs)", self._sandbox.id, time.perf_counter() - start_time)
+
+    def close(self) -> None:
+        if self._sandbox is None:
+            return
+        sandbox = self._sandbox
+        logger.info(f"Closing OpenSandbox sandbox: {sandbox.id} (image={self._image})")
+        # A failed kill leaks a pod that consumes cluster resources until its
+        # lifetime cap. Retry once and log loudly on failure.
+        for attempt in (1, 2):
+            try:
+                sandbox.kill()
+                break
+            except Exception as e:
+                if attempt == 1:
+                    logger.warning("OpenSandbox kill failed (sandbox=%s): %s. Retrying once.", sandbox.id, e)
+                else:
+                    logger.error(
+                        "OpenSandbox kill failed twice (sandbox=%s): %s. "
+                        "It will keep consuming resources until its lifetime cap (%ss).",
+                        sandbox.id,
+                        e,
+                        self._sandbox_lifetime,
+                    )
+        with contextlib.suppress(Exception):
+            sandbox.close()  # Local HTTP resources only; the remote pod is already dead.
+        _OPENSANDBOX_LIVE_SANDBOXES.discard(sandbox)
+        self._sandbox = None
+
+    def _sandbox_is_alive(self) -> bool:
+        """Best-effort probe for the sandbox's RUNNING state. False on any error."""
+        if self._sandbox is None:
+            return False
+        try:
+            info = self._sandbox.get_info()
+            return info.status.state == "RUNNING"
+        except Exception:
+            return False
+
+    # ---- exec -------------------------------------------------------------
+
+    def _exec(self, command: str, timeout_s: int) -> tuple[int, str, str]:
+        """Run a shell command in the sandbox and return ``(exit_code, stdout, stderr)``."""
+        self._ensure_started()
+        opts = OpenSandboxRunCommandOpts(timeout=timedelta(seconds=timeout_s + self._TIMEOUT_MARGIN_S))
+        execution = self._sandbox.commands.run(command, opts=opts)
+        stdout = "".join(message.text for message in execution.logs.stdout)
+        stderr = "".join(message.text for message in execution.logs.stderr)
+        exit_code = execution.exit_code
+        if exit_code is None:
+            # The stream ended without an exit code (e.g. spawn failure).
+            # Surface the SDK's error record instead of crashing the episode.
+            if execution.error is not None:
+                stderr = f"{stderr}\n[{execution.error.name}] {execution.error.value}".strip()
+            exit_code = -1
+        return exit_code, stdout, stderr
+
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
+        self._ensure_started()
+        effective_timeout = self._timeout if timeout is None else timeout
+        wrapped = (
+            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(effective_timeout))} "
+            f"bash -c {shlex.quote(command)}"
+        )
+        sandbox_id = self._sandbox.id
+        logger.debug(
+            "OpenSandbox exec start (sandbox=%s, image=%s, timeout=%ss, command=%r)",
+            sandbox_id,
+            self._image,
+            effective_timeout,
+            command,
+        )
+        try:
+            exit_code, stdout, stderr = self._exec(wrapped, effective_timeout)
+        except OpenSandboxException as e:
+            # Only restart when the sandbox is actually gone — a restart wipes
+            # sandbox state, so a transient network error must not trigger it.
+            if self._sandbox_is_alive():
+                raise
+            logger.warning(
+                "OpenSandbox sandbox died during exec (sandbox=%s, image=%s): %s. "
+                "Restarting and retrying command once.",
+                sandbox_id,
+                self._image,
+                e,
+            )
+            self.start()
+            exit_code, stdout, stderr = self._exec(wrapped, effective_timeout)
+        stdout = stdout[: self._MAX_OUTPUT_CHARS]
+        stderr = stderr[: self._MAX_OUTPUT_CHARS]
+        if exit_code == 124:
+            stderr = f"Command timed out after {effective_timeout}s.\n" + stderr
+        return ExecutionResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    # ---- file I/O (filesystem API + classify-by-exec) ----------------------
+
+    def write_file(self, path: str, content: str | bytes) -> None:
+        self._ensure_started()
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        dir_part = os.path.dirname(path) or "/"
+        exit_code, _stdout, stderr = self._exec(f"mkdir -p {shlex.quote(dir_part)}", 60)
+        if exit_code != 0:
+            raise RuntimeError(
+                f"write_file failed to create directory {dir_part!r} (exit={exit_code}): {stderr.strip()}"
+            )
+        try:
+            self._sandbox.files.write_files([OpenSandboxWriteEntry(path=path, data=content, mode=644)])
+        except OpenSandboxException as e:
+            raise RuntimeError(f"write_file failed for {path!r}: {e}") from e
+
+    def read_file(self, path: str, binary: bool = False) -> str | bytes:
+        self._ensure_started()
+        quoted = shlex.quote(path)
+        probe = (
+            f"if [ ! -e {quoted} ]; then exit {self._READ_FILE_MISSING_EXIT}; fi; "
+            f"if [ -d {quoted} ]; then exit {self._READ_FILE_ISDIR_EXIT}; fi"
+        )
+        exit_code, _stdout, stderr = self._exec(probe, 60)
+        if exit_code == self._READ_FILE_MISSING_EXIT:
+            raise FileNotFoundError(f"File not found in sandbox: '{path}'")
+        if exit_code == self._READ_FILE_ISDIR_EXIT:
+            raise IsADirectoryError(f"Path '{path}' is a directory, not a file.")
+        if exit_code != 0:
+            raise RuntimeError(f"read_file failed for {path!r} (exit={exit_code}): {stderr.strip()}")
+        try:
+            content = self._sandbox.files.read_bytes(path)
+        except OpenSandboxException as e:
+            raise RuntimeError(f"read_file failed for {path!r}: {e}") from e
+        if binary:
+            return content
+        return content.decode("utf-8", errors="replace")
+
+    def put_archive(self, root: str, tar_bytes: bytes) -> None:
+        self._ensure_started()
+        tmp_path = f"/tmp/.open_instruct_archive_{uuid.uuid4().hex}.tar"
+        try:
+            self._sandbox.files.write_files([OpenSandboxWriteEntry(path=tmp_path, data=tar_bytes, mode=644)])
+        except OpenSandboxException as e:
+            raise RuntimeError(f"put_archive failed to upload archive: {e}") from e
+        exit_code, _stdout, stderr = self._exec(
+            f"tar -xf {shlex.quote(tmp_path)} -C {shlex.quote(root)} && rm -f {shlex.quote(tmp_path)}", 300
+        )
+        if exit_code != 0:
+            raise RuntimeError(f"put_archive failed at root={root!r} (exit={exit_code}): {stderr.strip()}")
+
+
 def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
     """Factory function to create a sandbox backend.
 
     Args:
-        backend_type: ``"docker"``, ``"apptainer"``, or ``"modal"``.
+        backend_type: ``"docker"``, ``"apptainer"``, ``"modal"``, or ``"opensandbox"``.
         **kwargs: Backend-specific arguments.
 
     Returns:
@@ -1109,4 +1430,8 @@ def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
         return ApptainerBackend(**kwargs)
     if backend_type == "modal":
         return ModalBackend(**kwargs)
-    raise ValueError(f"Unknown backend type: {backend_type}. Supported: 'docker', 'apptainer', 'modal'.")
+    if backend_type == "opensandbox":
+        return OpenSandboxBackend(**kwargs)
+    raise ValueError(
+        f"Unknown backend type: {backend_type}. Supported: 'docker', 'apptainer', 'modal', 'opensandbox'."
+    )

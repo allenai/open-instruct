@@ -2784,6 +2784,7 @@ dependencies = [
     { name = "numpy", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "nvitop", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "openenv-core", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "opensandbox", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "packaging", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "peft", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
     { name = "pyarrow", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
@@ -2860,6 +2861,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2" },
     { name = "nvitop", specifier = ">=1.4.2" },
     { name = "openenv-core", specifier = ">=0.2.1" },
+    { name = "opensandbox", specifier = ">=0.1.14" },
     { name = "packaging", specifier = ">=24.2" },
     { name = "peft", specifier = ">=0.13.2" },
     { name = "pyarrow", specifier = ">=20.0.0" },
@@ -3046,6 +3048,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d1/d3/d2cef0e459158c9410f073ffd2ad6eca7c09232e7c53d4987acc0b942d28/openenv_core-0.2.1.tar.gz", hash = "sha256:0caa44411af7d866e451e50744d1adab57cdf9a2cf7a1b3f81042675110aebc7", size = 102728, upload-time = "2026-02-04T10:25:24.263Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a1/5a/a7f8b0e53eac45faedcf6fbfacdd28a104f815d3471f2deceefb4234d8be/openenv_core-0.2.1-py3-none-any.whl", hash = "sha256:5868722833df3220b7a3288f581e6c0825c2d8fae42d932ff90d2bb60765813a", size = 121855, upload-time = "2026-02-04T10:25:22.82Z" },
+]
+
+[[package]]
+name = "opensandbox"
+version = "0.1.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "httpx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "pydantic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+    { name = "python-dateutil", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5f/c7/cfc42df5405752818416f0791fc820b2280159164de4c25bf27d99897f05/opensandbox-0.1.14.tar.gz", hash = "sha256:c030038b168b59526010d66feb1ce3dd7e7b78e23bf263b47cf6cf44f7129fb4", size = 214016, upload-time = "2026-07-13T07:04:30.144Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/68/ffe6646bc081421c81d715e2a024ff197ca0512ed57143b9551c070fa917/opensandbox-0.1.14-py3-none-any.whl", hash = "sha256:2362bfbdca15e0c3c226d29fdb7eea6d1ad3e908f5c924683840e7e3b011e4b1", size = 517406, upload-time = "2026-07-13T07:04:28.907Z" },
 ]
 
 [[package]]

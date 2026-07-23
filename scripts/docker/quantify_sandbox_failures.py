@@ -8,7 +8,7 @@ container death). Today these are only emitted as plain ``WARNING`` /
 particular) are silently scored as tool-call *successes* in the wandb
 ``tools/*/failure_rate`` metric. See
 ``docs/algorithms/monitoring_and_debugging_runs.md`` and
-``docs/sandbox_modal_vs_podman.md``.
+``docs/sandbox_management.md``.
 
 This script scrapes those log lines and tallies them into counts + rates so
 you can size how badly a run is affected. It is post-hoc grep archaeology --
