@@ -7,6 +7,7 @@ These callbacks handle:
 """
 
 import contextlib
+import os
 import re
 import time
 from collections.abc import Callable
@@ -18,6 +19,7 @@ import ray.exceptions
 import ray.util.queue as ray_queue
 import torch
 import torch.nn as nn
+import transformers
 from datasets import Dataset
 from olmo_core.train.callbacks import Callback
 from olmo_core.train.train_module import TransformerTrainModule
@@ -25,7 +27,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, olmo_core_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -224,6 +226,52 @@ class RefPolicyUpdateCallback(Callback):
         finally:
             for m in fsdp2_submodules:
                 m.reshard()
+
+
+@dataclass
+class HFCheckpointCallback(Callback):
+    """Periodically saves a HuggingFace-format model, mirroring grpo_fast.py's
+    maybe_save_checkpoint on the streaming/DeepSpeed path.
+
+    The OLMo-core Trainer's own CheckpointerCallback only saves native (resumable)
+    checkpoints; this callback additionally converts and writes an HF-format copy
+    every ``save_freq`` steps to ``{checkpoint_dir}/step_N``, trimming old saves
+    down to ``keep_last_n_saves``.
+    """
+
+    model_name_or_path: str
+    tokenizer: transformers.PreTrainedTokenizerBase
+    checkpoint_dir: str
+    save_freq: int
+    keep_last_n_saves: int
+    rank: int
+
+    @property
+    def train_module(self) -> TransformerTrainModule:
+        return cast(TransformerTrainModule, self.trainer.train_module)
+
+    def post_step(self) -> None:
+        step = self.trainer.global_step
+        if self.save_freq <= 0 or step % self.save_freq != 0:
+            return
+
+        state_dict = self.train_module.model.state_dict()
+        if self.rank != 0:
+            # full_tensor() is a collective and must still be called on every rank to avoid
+            # hanging, but only rank 0 needs the gathered tensors to write the checkpoint.
+            for v in state_dict.values():
+                if hasattr(v, "full_tensor"):
+                    v.full_tensor()
+            return
+
+        state_dict = {
+            k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
+        }
+        step_dir = os.path.join(self.checkpoint_dir, f"step_{step}")
+        os.makedirs(step_dir, exist_ok=True)
+        olmo_core_utils.save_state_dict_as_hf(state_dict, step_dir, self.model_name_or_path, self.tokenizer)
+        logger.info(f"Saved intermediate HuggingFace checkpoint at step {step} to {step_dir}")
+        utils.clean_last_n_checkpoints(self.checkpoint_dir, self.keep_last_n_saves)
 
 
 @dataclass

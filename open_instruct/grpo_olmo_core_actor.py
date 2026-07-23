@@ -32,6 +32,7 @@ from open_instruct import grpo_callbacks as grpo_callbacks_lib
 from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
 from open_instruct.grpo_callbacks import (
     EvalCallback,
+    HFCheckpointCallback,
     RefPolicyUpdateCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
@@ -381,6 +382,15 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 ephemeral_save_interval=None,
                 max_checkpoints=self.grpo_config.keep_last_n_checkpoints,
             )
+        if self.grpo_config.save_freq > 0:
+            trainer_callbacks["hf_checkpoint"] = HFCheckpointCallback(
+                model_name_or_path=self.model_name_or_path,
+                tokenizer=self.tokenizer,
+                checkpoint_dir=f"{self.grpo_config.output_dir}_checkpoints",
+                save_freq=self.grpo_config.save_freq,
+                keep_last_n_saves=self.grpo_config.keep_last_n_saves,
+                rank=self.rank,
+            )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 
         save_folder = self.grpo_config.checkpoint_state_dir or self.grpo_config.output_dir
@@ -410,13 +420,17 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         are collective operations when FSDP is enabled.
         """
         state_dict = self.train_module.model.state_dict()
+        if self.rank != 0:
+            # full_tensor() is a collective and must still be called on every rank to avoid
+            # hanging, but only rank 0 needs the gathered tensors to write the checkpoint.
+            for v in state_dict.values():
+                if hasattr(v, "full_tensor"):
+                    v.full_tensor()
+            return
+
         state_dict = {
             k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
         }
-
-        if self.rank != 0:
-            return
-
         os.makedirs(output_dir, exist_ok=True)
         olmo_core_utils.save_state_dict_as_hf(state_dict, output_dir, self.model_name_or_path, tokenizer)
         logger.info(f"[Rank {self.rank}] Model saved to {output_dir}")
