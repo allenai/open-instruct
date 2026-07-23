@@ -13,6 +13,7 @@ import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
 import wandb
 from olmo_core.distributed import utils as dist_utils
+from olmo_core.nn import ddp as olmo_ddp
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
@@ -687,7 +688,7 @@ class GRPOOLMoDDPTrainModule(OLMoDDPTrainModule):
 
     def __init__(
         self,
-        model: Transformer,
+        model: olmo_ddp.OLMoDDPModel,
         optim: OLMoDDPOptimizerConfig,
         sample_microbatch_size: int,
         max_sequence_length: int,
@@ -756,10 +757,10 @@ class GRPOOLMoDDPTrainModule(OLMoDDPTrainModule):
         OLMoDDPTrainModule.zero_grads(self)
 
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
-        GRPOTrainModule.train_batch(self, batch, dry_run=dry_run)
+        GRPOTrainModule.train_batch(self, batch, dry_run=dry_run)  # ty: ignore[invalid-argument-type]
 
     def _record_step_counter_metrics(self, global_tokens: int) -> None:
-        GRPOTrainModule._record_step_counter_metrics(self, global_tokens)
+        GRPOTrainModule._record_step_counter_metrics(self, global_tokens)  # ty: ignore[invalid-argument-type]
 
     def _record_data_prep_metrics(self, data_prep_metrics: dict[str, Any]) -> None:
-        GRPOTrainModule._record_data_prep_metrics(self, data_prep_metrics)
+        GRPOTrainModule._record_data_prep_metrics(self, data_prep_metrics)  # ty: ignore[invalid-argument-type]

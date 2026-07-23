@@ -15,6 +15,7 @@ import transformers
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn import ddp as olmo_ddp
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.moe.v2.checkpoint import gather_olmo_ddp_hf_state, load_olmo_ddp_hf_state
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup, OLMoDDPOptimizerConfig
@@ -209,6 +210,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
 
         if use_olmo_ddp:
+            assert isinstance(self.model, olmo_ddp.OLMoDDPModel)
             optim_config = OLMoDDPOptimizerConfig(
                 lr=self.grpo_config.learning_rate,
                 weight_decay=self.grpo_config.weight_decay,
