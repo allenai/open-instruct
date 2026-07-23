@@ -6,13 +6,13 @@ BEAKER_IMAGE="${1:-shashankg/open_instruct_auto}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 
-MODEL_NAME=Qwen/Qwen3-8B
-TOKENIZER_NAME=Qwen/Qwen3-8B
+MODEL_NAME=hamishivi/Qwen3-8B
+TOKENIZER_NAME=hamishivi/Qwen3-8B
 EXP_NAME=sft_tmax_qwen3_8b_big
 
 DATASET=allenai/tmax-sft-big
 
-BEAKER_WORKSPACE=ai2/general-tool-use
+BEAKER_WORKSPACE=ai2/oe-agents
 
 uv run python mason.py \
     --cluster ai2/jupiter \
@@ -20,6 +20,7 @@ uv run python mason.py \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
+    --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-omai \
     --gpus 8 \
@@ -34,9 +35,10 @@ uv run python mason.py \
     --exp_name $EXP_NAME \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $TOKENIZER_NAME \
+    --sequence_parallel_size 4 \
     --max_seq_length 32768 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 8 \
     --learning_rate 2e-5 \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
