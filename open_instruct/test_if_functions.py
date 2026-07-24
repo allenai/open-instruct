@@ -54,6 +54,13 @@ class TestValidateResponseLanguage(unittest.TestCase):
             )
         )
 
+    def test_wrong_language(self):
+        self.assertFalse(
+            if_functions.validate_response_language(
+                "Ceci est une phrase francaise plus longue pour la detection.", "en"
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
