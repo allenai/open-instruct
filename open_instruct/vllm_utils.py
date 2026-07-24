@@ -827,6 +827,9 @@ class LLMRayActor:
         return future.result()
 
     def sleep(self) -> None:
+        while not self.inflight_updates and len(self.active_tasks) > 0:
+            self.check_background_threads()
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
         return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
 
     def wake_up(self) -> None:
