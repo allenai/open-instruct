@@ -4,7 +4,7 @@ export PYTHONPATH=$REPO_PATH
 export PATH="/root/.local/bin:$PATH"
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
-export NCCL_CUMEM_ENABLE=0
+export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-0}"
 
 
 echo CURRENT_DATETIME=$CURRENT_DATETIME
