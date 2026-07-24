@@ -78,15 +78,28 @@ class TestDecodeRoutedExperts(unittest.TestCase):
 
 
 class TestVllmWeightUpdate(unittest.TestCase):
-    def _actor(self):
+    def _actor(self, split_reload_lifecycle: bool = True):
         actor = object.__new__(vllm_utils.LLMRayActor)
         actor.inflight_updates = True
         actor.active_tasks = set()
         actor.return_routed_experts = False
         actor.current_model_step = None
-        actor.llm_engine = mock.Mock()
+        engine_methods = ["update_weights", "sleep", "wake_up", "reset_prefix_cache"]
+        if split_reload_lifecycle:
+            engine_methods.extend(["start_weight_update", "finish_weight_update"])
+        actor.llm_engine = mock.Mock(spec=engine_methods)
         actor._run_async = mock.Mock()
         return actor
+
+    def test_uses_native_update_lifecycle_when_split_methods_are_absent(self):
+        actor = self._actor(split_reload_lifecycle=False)
+        update = object()
+        actor.llm_engine.update_weights.return_value = update
+
+        actor.update_weights({"update_info": {"names": []}}, model_step=3)
+
+        actor._run_async.assert_called_once_with(update)
+        self.assertEqual(actor.current_model_step, 3)
 
     def test_wraps_update_in_reload_lifecycle(self):
         actor = self._actor()

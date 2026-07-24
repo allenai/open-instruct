@@ -848,15 +848,22 @@ class LLMRayActor:
                 len(update_info["update_info"]["names"]),
                 self.return_routed_experts,
             )
-        logger.info("Starting vLLM layerwise weight reload for model_step=%s", model_step)
-        self._run_async(self.llm_engine.start_weight_update())
+        start_weight_update = getattr(self.llm_engine, "start_weight_update", None)
+        finish_weight_update = getattr(self.llm_engine, "finish_weight_update", None)
+        uses_split_reload_lifecycle = callable(start_weight_update) and callable(finish_weight_update)
+        if callable(start_weight_update) != callable(finish_weight_update):
+            raise RuntimeError("vLLM exposes only part of the split weight-reload lifecycle")
+        if uses_split_reload_lifecycle:
+            logger.info("Starting legacy vLLM layerwise weight reload for model_step=%s", model_step)
+            self._run_async(start_weight_update())
         logger.info("Receiving vLLM weight tensors for model_step=%s", model_step)
         try:
             self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
             logger.info("Received vLLM weight tensors for model_step=%s", model_step)
         finally:
-            logger.info("Finishing vLLM layerwise weight reload for model_step=%s", model_step)
-            self._run_async(self.llm_engine.finish_weight_update())
+            if uses_split_reload_lifecycle:
+                logger.info("Finishing legacy vLLM layerwise weight reload for model_step=%s", model_step)
+                self._run_async(finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
         if self.return_routed_experts:
