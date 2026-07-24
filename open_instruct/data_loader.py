@@ -607,11 +607,11 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             self.current_epoch = epoch
 
     def get_mock_batch(self) -> dict[str, Any]:
-        # Use enough tokens to exercise every expert-parallel rank during the
+        # Use enough diverse tokens to exercise every expert-parallel rank during the
         # trainer's forward/backward dry run. A two-token mock can leave an EP
         # rank with no routed tokens and stall the all-to-all backward path.
         mock_seq_len = 128
-        dummy_qr = torch.full((1, mock_seq_len), self.tokenizer.eos_token_id, dtype=torch.long)
+        dummy_qr = torch.arange(mock_seq_len, dtype=torch.long).unsqueeze(0)
         dummy_qr[:, 0] = self.tokenizer.pad_token_id
         dummy_attention = torch.ones_like(dummy_qr)
         dummy_position_ids = torch.arange(dummy_qr.shape[-1], dtype=torch.long).unsqueeze(0)
