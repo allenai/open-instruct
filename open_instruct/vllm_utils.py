@@ -848,10 +848,14 @@ class LLMRayActor:
                 len(update_info["update_info"]["names"]),
                 self.return_routed_experts,
             )
+        logger.info("Starting vLLM layerwise weight reload for model_step=%s", model_step)
         self._run_async(self.llm_engine.start_weight_update())
+        logger.info("Receiving vLLM weight tensors for model_step=%s", model_step)
         try:
             self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+            logger.info("Received vLLM weight tensors for model_step=%s", model_step)
         finally:
+            logger.info("Finishing vLLM layerwise weight reload for model_step=%s", model_step)
             self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
@@ -1569,10 +1573,12 @@ def broadcast_cpu_staged_weights_to_vllm(
         "packed": True,
     }
     refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
+    logger.info("Starting trainer-side packed vLLM weight broadcast for model_step=%s", model_step)
     NCCLWeightTransferEngine.trainer_send_weights(
         iterator=iter(_iter_device_staged_weights(weights, device)),
         trainer_args=NCCLTrainerSendWeightsArgs(group=model_update_group, packed=True),
     )
+    logger.info("Finished trainer-side packed vLLM weight broadcast for model_step=%s", model_step)
     return refs
 
 
