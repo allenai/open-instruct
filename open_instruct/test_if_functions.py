@@ -47,6 +47,9 @@ class TestValidateTitle(unittest.TestCase):
             ("whitespace", "<<  >>", False),
             ("missing", "no title here", False),
             ("with_prose", "Here is <<my title>> ok", True),
+            # Greedy <<[^\n]+>> would glue these into a false non-empty title.
+            ("adjacent_empty", "Please read <<>> or <<>>.", False),
+            ("empty_then_trailing", "<<>> and some other text >>", False),
         ]
     )
     def test_validate_title(self, _name, text, expected):
