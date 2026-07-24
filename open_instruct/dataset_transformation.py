@@ -1256,15 +1256,31 @@ def _tokenize_tulu_sft_with_assistant_labels(
         # is not prefix-stable (e.g. eos appended only on the final turn) and we error
         # rather than silently mis-masking. ``messages[:0]`` is empty for an assistant
         # opening turn, so the header is taken as empty there.
-        if message_idx == 0:
-            header = ""
-        else:
-            header = tokenizer.apply_chat_template(
-                conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=True
+        #
+        # Rendering a partial conversation is itself template-dependent: some templates
+        # (e.g. Qwen3.5) raise when handed a prefix containing only system/tool turns and
+        # no user turn, which happens when the first assistant turn is not preceded by a
+        # user turn (``[system, assistant, ...]``). We cannot derive the span boundary
+        # without that render, so surface an actionable error rather than the template's
+        # opaque one.
+        try:
+            if message_idx == 0:
+                header = ""
+            else:
+                header = tokenizer.apply_chat_template(
+                    conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=True
+                )
+            through = tokenizer.apply_chat_template(
+                conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
             )
-        through = tokenizer.apply_chat_template(
-            conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
-        )
+        except Exception as exc:
+            roles = [m["role"] for m in messages[: message_idx + 1]]
+            raise ValueError(
+                f"Chat template {type(tokenizer).__name__} failed to render the conversation prefix "
+                f"{roles} while deriving assistant label spans for message {message_idx}. Some "
+                f"templates reject prefixes that contain no user turn; such conversations are not "
+                f"supported by this tokenization path."
+            ) from exc
         assert isinstance(header, str)
         assert isinstance(through, str)
         if not (len(header) <= len(through) and rendered.startswith(header) and rendered.startswith(through)):
@@ -1652,10 +1668,12 @@ TRANSFORM_FNS = {
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
 
-# SFT tokenization functions that consume the tools column — don't re-add it to target_columns
+# SFT tokenization functions that consume the tools column — don't re-add it to target_columns.
+# Only list functions that actually forward `tools` to the chat template: for a function that
+# ignores the column, dropping it here would silently discard the tool schemas instead of
+# rendering them. `sft_tokenize_v1` / `sft_tokenize_mask_out_prompt_v1` do not support tools,
+# so they keep the column (as before tool support was added).
 _SFT_TOKENIZE_FNS = {
-    "sft_tokenize_v1",
-    "sft_tokenize_mask_out_prompt_v1",
     "sft_tulu_tokenize_without_truncation_v1",
     "sft_tulu_tokenize_and_truncate_v1",
     "last_turn_tulu_tokenize_and_truncate_v1",

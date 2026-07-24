@@ -186,6 +186,43 @@ class TestCachedDataset(unittest.TestCase):
         )
         self.assertNotIn(open_instruct.dataset_transformation.TOOLS_COLUMN_KEY, dataset.column_names)
 
+    def test_tools_column_preserved_for_transforms_that_do_not_consume_it(self):
+        # sft_tokenize_v1 does not forward `tools` to the chat template, so the column must
+        # survive tokenization. Dropping it there would silently discard the tool schemas
+        # without ever rendering them into the prompt.
+        tc = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH,
+            tokenizer_revision="main",
+            use_fast=True,
+            chat_template_name="tulu",
+            add_bos=False,
+        )
+        jsonl_path = os.path.join(self.temp_dir.name, "sft_with_tools_preserved.jsonl")
+        tools = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
+        with open(jsonl_path, "w") as f:
+            for _ in range(3):
+                f.write(
+                    json.dumps(
+                        {
+                            "messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
+                            "tools": tools,
+                        }
+                    )
+                    + "\n"
+                )
+
+        dataset = open_instruct.dataset_transformation.get_cached_dataset_tulu(
+            [jsonl_path, "1.0"],
+            ["train"],
+            tc,
+            ["sft_tokenize_v1"],
+            [{}],
+            target_columns=None,
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=self.temp_dir.name,
+        )
+        self.assertIn(open_instruct.dataset_transformation.TOOLS_COLUMN_KEY, dataset.column_names)
+
     def test_get_cached_dataset_tulu_preference(self):
         tc = open_instruct.dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path=TOKENIZER_PATH,
@@ -457,6 +494,30 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertIn("done", trained_text)
         self.assertNotIn("Assistant", trained_text)
         self.assertNotIn("User", trained_text)
+
+    def test_template_rejecting_prefix_without_user_turn_raises_clear_error(self):
+        # Some templates (e.g. Qwen3.5) raise when handed a prefix containing only
+        # system/tool turns. That happens here for the assistant at index 1, whose prefix
+        # is [system]. The error should name the situation, not surface the template's.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% if messages | selectattr('role', 'equalto', 'user') | list | length == 0 %}"
+            "{{ raise_exception('conversation must contain a user turn') }}{% endif %}"
+            "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}\n{% endfor %}"
+            "{% if add_generation_prompt %}assistant: {% endif %}"
+        )
+        row = {
+            "messages": [
+                {"role": "system", "content": "be nice"},
+                {"role": "assistant", "content": "hello"},
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "bye"},
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "no user turn"):
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+                dict(row), tokenizer, max_seq_length=4096
+            )
 
     def test_template_appending_eos_only_on_last_turn_raises(self):
         # A template that appends eos_token only on the final turn (loop.last) is not
