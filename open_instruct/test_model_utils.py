@@ -1,11 +1,43 @@
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 
 import open_instruct.model_utils
 from open_instruct.model_utils import Batch, TensorCache
+
+
+class TestAttentionDetection(unittest.TestCase):
+    def tearDown(self):
+        open_instruct.model_utils.detect_attn_implementation.cache_clear()
+        open_instruct.model_utils._gpu_compute_major.cache_clear()
+
+    def test_selects_backend_for_supported_gpu_generation(self):
+        expected_by_major = {
+            9: open_instruct.model_utils.AttentionBackendName.flash_3,
+            10: open_instruct.model_utils.AttentionBackendName.flash_4,
+            11: open_instruct.model_utils.AttentionBackendName.flash_4,
+            12: open_instruct.model_utils.AttentionBackendName.flash_2,
+        }
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(
+                open_instruct.model_utils.transformers.utils, "is_flash_attn_2_available", return_value=True
+            ),
+            mock.patch.object(
+                open_instruct.model_utils.transformers.utils, "is_flash_attn_3_available", return_value=True
+            ),
+            mock.patch.object(
+                open_instruct.model_utils.transformers.utils, "is_flash_attn_4_available", return_value=True
+            ),
+        ):
+            for major, expected in expected_by_major.items():
+                with self.subTest(major=major):
+                    open_instruct.model_utils.detect_attn_implementation.cache_clear()
+                    with mock.patch.object(open_instruct.model_utils, "_gpu_compute_major", return_value=major):
+                        self.assertEqual(open_instruct.model_utils.detect_attn_implementation(), expected)
 
 
 class TestBatchSlicing(unittest.TestCase):

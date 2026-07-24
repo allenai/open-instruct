@@ -75,11 +75,12 @@ def _gpu_compute_major() -> int | None:
 
 @functools.lru_cache(maxsize=1)
 def detect_attn_implementation() -> AttentionBackendName:
+    compute_major = _gpu_compute_major()
     if not torch.cuda.is_available():
         result = AttentionBackendName.torch
-    elif transformers.utils.is_flash_attn_4_available() and _gpu_compute_major() >= 10:
+    elif transformers.utils.is_flash_attn_4_available() and compute_major in {10, 11}:
         result = AttentionBackendName.flash_4
-    elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() >= 9:
+    elif transformers.utils.is_flash_attn_3_available() and compute_major == 9:
         result = AttentionBackendName.flash_3
     elif transformers.utils.is_flash_attn_2_available():
         result = AttentionBackendName.flash_2
