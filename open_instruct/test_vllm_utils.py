@@ -110,6 +110,21 @@ class TestVllmWeightUpdate(unittest.TestCase):
         self.assertEqual(actor._run_async.call_count, 3)
         actor.llm_engine.finish_weight_update.assert_called_once_with()
 
+    def test_sleep_drains_active_tasks_before_suspending_scheduling(self):
+        actor = self._actor()
+        actor.inflight_updates = False
+        actor.active_tasks = {object()}
+        actor.check_background_threads = mock.Mock()
+        sleep_request = object()
+        actor.llm_engine.sleep.return_value = sleep_request
+
+        with mock.patch.object(vllm_utils.time, "sleep", side_effect=lambda _: actor.active_tasks.clear()):
+            actor.sleep()
+
+        actor.check_background_threads.assert_called_once_with()
+        actor.llm_engine.sleep.assert_called_once_with(level=0, mode="keep")
+        actor._run_async.assert_called_once_with(sleep_request)
+
 
 class TestVllmUtils3(unittest.TestCase):
     def setUp(self):
