@@ -22,3 +22,4 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Exclude nested virtualenvs (e.g. `oe-eval-internal/.venv/`) from the Docker build context, so a uv venv inside a nested clone no longer fails the image build on a dangling host-interpreter symlink (https://github.com/allenai/open-instruct/pull/1786).
