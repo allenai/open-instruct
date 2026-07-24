@@ -607,11 +607,17 @@ class StreamingDataLoader(data_loader.DataLoaderBase):
             self.current_epoch = epoch
 
     def get_mock_batch(self) -> dict[str, Any]:
-        dummy_qr = torch.tensor([[self.tokenizer.pad_token_id, self.tokenizer.eos_token_id]], dtype=torch.long)
-        dummy_attention = torch.tensor([[1, 1]], dtype=torch.long)
+        # Use enough tokens to exercise every expert-parallel rank during the
+        # trainer's forward/backward dry run. A two-token mock can leave an EP
+        # rank with no routed tokens and stall the all-to-all backward path.
+        mock_seq_len = 128
+        dummy_qr = torch.full((1, mock_seq_len), self.tokenizer.eos_token_id, dtype=torch.long)
+        dummy_qr[:, 0] = self.tokenizer.pad_token_id
+        dummy_attention = torch.ones_like(dummy_qr)
         dummy_position_ids = torch.arange(dummy_qr.shape[-1], dtype=torch.long).unsqueeze(0)
-        dummy_response_mask = torch.tensor([[False, True]], dtype=torch.bool)
-        dummy_advantage = torch.tensor([[0.0, 1.0]], dtype=torch.float)
+        dummy_response_mask = torch.ones_like(dummy_qr, dtype=torch.bool)
+        dummy_response_mask[:, 0] = False
+        dummy_advantage = dummy_response_mask.to(dtype=torch.float)
 
         batch = data_types.CollatedBatchData(
             query_responses=[dummy_qr],
