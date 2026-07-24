@@ -298,6 +298,8 @@ def main(
         eval_dataset=eval_dataset,
         trust_remote_code=tc.trust_remote_code,
         enable_return_routed_experts=args.router_replay,
+        vllm_moe_backend=vllm_config.vllm_moe_backend,
+        vllm_max_num_batched_tokens=vllm_config.vllm_max_num_batched_tokens,
     )
     logger.info("======== vLLM engines initialized =========")
 

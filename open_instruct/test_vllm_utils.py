@@ -126,6 +126,50 @@ class TestVllmWeightUpdate(unittest.TestCase):
         actor._run_async.assert_called_once_with(sleep_request)
 
 
+class TestCreateVllmEngines(unittest.TestCase):
+    def test_passes_runtime_kernel_and_batch_settings_to_vllm(self):
+        engine = MagicMock()
+        actor_options = MagicMock()
+        actor_options.remote.return_value = engine
+        actor_cls = MagicMock()
+        actor_cls.options.return_value = actor_options
+        placement_group = MagicMock()
+
+        with (
+            mock.patch.object(vllm_utils.ray, "remote", return_value=actor_cls),
+            mock.patch.object(vllm_utils.ray, "get"),
+            mock.patch.object(vllm_utils.ray.runtime_env, "RuntimeEnv"),
+            mock.patch.object(vllm_utils, "placement_group", return_value=placement_group),
+            mock.patch.object(vllm_utils, "get_bundle_indices_list", return_value=[0]),
+            mock.patch.object(vllm_utils, "get_cuda_arch_list", return_value="9.0"),
+            mock.patch.object(vllm_utils, "ray_noset_visible_devices", return_value=False),
+            mock.patch.object(vllm_utils, "PlacementGroupSchedulingStrategy"),
+            mock.patch.object(vllm_utils.utils, "ray_get_with_progress"),
+        ):
+            engines = vllm_utils.create_vllm_engines(
+                num_engines=1,
+                tensor_parallel_size=1,
+                enforce_eager=True,
+                tokenizer_name_or_path="tokenizer",
+                pretrain="model",
+                revision=None,
+                seed=42,
+                enable_prefix_caching=False,
+                max_model_len=384,
+                prompt_queue=MagicMock(),
+                results_queue=MagicMock(),
+                eval_results_queue=MagicMock(),
+                actor_manager=MagicMock(),
+                vllm_moe_backend="triton",
+                vllm_max_num_batched_tokens=384,
+            )
+
+        self.assertEqual(engines, [engine])
+        engine_kwargs = actor_options.remote.call_args.kwargs
+        self.assertEqual(engine_kwargs["moe_backend"], "triton")
+        self.assertEqual(engine_kwargs["max_num_batched_tokens"], 384)
+
+
 class TestVllmUtils3(unittest.TestCase):
     def setUp(self):
         logging.disable(logging.CRITICAL)
