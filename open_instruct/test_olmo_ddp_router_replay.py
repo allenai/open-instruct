@@ -215,7 +215,7 @@ def test_cpu_staged_hf_state_nccl_sync(monkeypatch):
         "names": list(weights),
         "dtype_names": ["int64", "int64"],
         "shapes": [[2, 2], [2]],
-        "packed": False,
+        "packed": True,
     }
     assert [name for name, _ in sent] == list(weights)
     for (name, tensor), expected in zip(sent, weights.values()):
