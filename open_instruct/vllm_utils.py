@@ -1338,6 +1338,8 @@ def create_vllm_engines(
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
     enable_return_routed_experts: bool = False,
+    vllm_moe_backend: str = "auto",
+    vllm_max_num_batched_tokens: int | None = None,
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1403,7 +1405,9 @@ def create_vllm_engines(
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
+                max_num_batched_tokens=vllm_max_num_batched_tokens,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
+                moe_backend=vllm_moe_backend,
                 logprobs_mode="processed_logprobs",
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,

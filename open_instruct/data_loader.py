@@ -396,6 +396,8 @@ class VLLMConfig:
     vllm_tensor_parallel_size: int = 1
     vllm_enforce_eager: bool = False
     vllm_attention_backend: str | None = None
+    vllm_moe_backend: str = "auto"
+    vllm_max_num_batched_tokens: int | None = None
     vllm_sync_backend: str = "nccl"
     vllm_gpu_memory_utilization: float = 0.9
     vllm_enable_prefix_caching: bool = False

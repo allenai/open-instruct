@@ -268,6 +268,8 @@ def setup_vllm_engines(
         ),
         train_dataset=dataset,
         trust_remote_code=tokenizer_config.trust_remote_code,
+        vllm_moe_backend=vllm_config.vllm_moe_backend,
+        vllm_max_num_batched_tokens=vllm_config.vllm_max_num_batched_tokens,
     )
 
     logger.info("vLLM engines ready")
