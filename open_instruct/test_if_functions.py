@@ -48,6 +48,8 @@ class TestValidateParagraphs(unittest.TestCase):
             ("exact_case", "Hello world\n\nSecond para", 2, "Hello", 1, True),
             ("wrong_count", "Only one", 2, "Only", 1, False),
             ("punct_prefix", '"Hello", there\n\nNext', 2, "hello", 1, True),
+            # Empty middle paragraph must not shift the 2nd non-empty index.
+            ("empty_paragraph", "Hello world\n\n\n\nSecond para", 2, "second", 2, True),
         ]
     )
     def test_validate_paragraphs(self, _name, text, n, first, i, expected):
