@@ -54,7 +54,7 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
 
-    write_header = not csv_path.exists()
+    write_header = not csv_path.exists() or csv_path.stat().st_size == 0
     with open(csv_path, "a", newline="") as csvfile:
         fieldnames = ["batch_num", "prompt_num", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -142,7 +142,7 @@ def save_benchmark_results_to_csv(
     csv_dir = csv_path.parent
     csv_dir.mkdir(parents=True, exist_ok=True)
 
-    write_header = not csv_path.exists()
+    write_header = not csv_path.exists() or csv_path.stat().st_size == 0
     with csv_path.open("a", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=list(row_data.keys()))
         if write_header:
