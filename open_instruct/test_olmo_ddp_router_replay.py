@@ -191,3 +191,33 @@ def test_streamed_hf_state_nonzero_rank_drains_collective_iterator(monkeypatch):
 
     assert refs == []
     assert drained == [True]
+
+
+def test_cpu_staged_hf_state_nccl_sync(monkeypatch):
+    engine = SimpleNamespace(sleep=_RemoteMethod("slept"), update_weights=_RemoteMethod("updated"))
+    sent = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(vllm_utils.ray, "get", lambda refs: refs)
+    monkeypatch.setattr(
+        vllm_utils.NCCLWeightTransferEngine,
+        "trainer_send_weights",
+        lambda iterator, trainer_args: sent.extend(iterator),
+    )
+    weights = {"model.embed_tokens.weight": torch.arange(4).reshape(2, 2), "model.norm.weight": torch.arange(2)}
+
+    refs = vllm_utils.broadcast_cpu_staged_weights_to_vllm(
+        weights=weights, vllm_engines=[engine], model_update_group=object(), model_step=11, staging_device="cpu"
+    )
+
+    assert refs == ["updated"]
+    update_request = engine.update_weights.calls[0][0][0]
+    assert update_request["update_info"] == {
+        "names": list(weights),
+        "dtype_names": ["int64", "int64"],
+        "shapes": [[2, 2], [2]],
+        "packed": False,
+    }
+    assert [name for name, _ in sent] == list(weights)
+    for (name, tensor), expected in zip(sent, weights.values()):
+        assert tensor.device.type == "cpu", name
+        torch.testing.assert_close(tensor, expected)

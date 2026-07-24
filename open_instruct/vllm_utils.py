@@ -1522,6 +1522,60 @@ def broadcast_streamed_weights_to_vllm(
     return refs
 
 
+def _iter_device_staged_weights(
+    weights: dict[str, torch.Tensor], device: torch.device | str | int
+) -> Iterable[tuple[str, torch.Tensor]]:
+    """Copy a CPU state dict to a transfer device one tensor at a time."""
+    total = len(weights)
+    for index, (name, tensor) in enumerate(weights.items(), start=1):
+        staged = tensor.to(device=device, non_blocking=True).contiguous()
+        if index == 1 or index % 256 == 0 or index == total:
+            logger.info(f"Staged {index}/{total} weights for vLLM transfer")
+        yield name, staged
+
+
+def broadcast_cpu_staged_weights_to_vllm(
+    weights: dict[str, torch.Tensor],
+    vllm_engines: list[ray.actor.ActorHandle],
+    model_update_group: Any | None,
+    model_step: int,
+    staging_device: torch.device | str | int | None = None,
+) -> list[ray.ObjectRef]:
+    """Send a CPU state dict to vLLM while holding only one weight on the trainer GPU.
+
+    The caller can finish learner-side sharded gathers into host memory before
+    invoking this function. This keeps those collectives separate from the
+    trainer-to-vLLM NCCL broadcasts and avoids materializing a full unsharded
+    state dict on the trainer GPU.
+    """
+    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+    if not is_rank_0:
+        return []
+
+    ray.get([engine.sleep.remote() for engine in vllm_engines])
+    device = staging_device if staging_device is not None else torch.device("cuda", torch.cuda.current_device())
+    if model_update_group is None:
+        for engine in vllm_engines:
+            trainer_args = IPCTrainerSendWeightsArgs(send_mode="ray", llm_handle=engine)
+            IPCWeightTransferEngine.trainer_send_weights(
+                iterator=iter(_iter_device_staged_weights(weights, device)), trainer_args=trainer_args
+            )
+        return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
+
+    update_info = {
+        "names": list(weights),
+        "dtype_names": [str(tensor.dtype).split(".")[-1] for tensor in weights.values()],
+        "shapes": [list(tensor.shape) for tensor in weights.values()],
+        "packed": False,
+    }
+    refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
+    NCCLWeightTransferEngine.trainer_send_weights(
+        iterator=iter(_iter_device_staged_weights(weights, device)),
+        trainer_args=NCCLTrainerSendWeightsArgs(group=model_update_group, packed=False),
+    )
+    return refs
+
+
 def broadcast_prepared_weights_to_vllm(
     weights: dict[str, torch.Tensor],
     vllm_engines: list[ray.actor.ActorHandle],
