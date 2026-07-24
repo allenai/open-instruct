@@ -34,7 +34,7 @@ import pathlib
 from concurrent import futures
 from datetime import timedelta
 
-os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+os.environ.setdefault("NCCL_CUMEM_ENABLE", "0")  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF

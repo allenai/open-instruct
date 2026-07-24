@@ -14,9 +14,10 @@
 # isort: off
 import os
 
-# We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
+# Default to NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
-os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+# Allow launchers to override this for hardware where the legacy allocator is unsafe.
+os.environ.setdefault("NCCL_CUMEM_ENABLE", "0")  # NOQA
 try:
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum, OffloadStateTypeEnum
