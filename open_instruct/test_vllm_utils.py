@@ -90,6 +90,7 @@ class TestVllmWeightUpdate(unittest.TestCase):
 
     def test_wraps_update_in_reload_lifecycle(self):
         actor = self._actor()
+        actor.return_routed_experts = True
         start, update, finish = object(), object(), object()
         actor.llm_engine.start_weight_update.return_value = start
         actor.llm_engine.update_weights.return_value = update
