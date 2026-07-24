@@ -50,6 +50,49 @@ class _FakeWriteEntry:
         self.mode = mode
 
 
+class _FakeSandboxState:
+    PENDING = "Pending"
+    RUNNING = "Running"
+    TERMINATED = "Terminated"
+
+
+class _FakeSandboxFilter:
+    def __init__(self, states=None, metadata=None, page=None, page_size=None):
+        self.states = states
+        self.metadata = metadata
+        self.page = page
+        self.page_size = page_size
+
+
+class _FakeManager:
+    def __init__(self, fake: _FakeOpenSandboxSync):
+        self.fake = fake
+        self.killed: list[str] = []
+        self.closed = False
+        self.last_filter: _FakeSandboxFilter | None = None
+
+    def list_sandbox_infos(self, filter):
+        self.last_filter = filter
+        infos = self.fake.adoption_pages.pop(0) if self.fake.adoption_pages else []
+        return SimpleNamespace(sandbox_infos=infos)
+
+    def kill_sandbox(self, sandbox_id: str) -> None:
+        self.killed.append(sandbox_id)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeManagerFactory:
+    def __init__(self, fake: _FakeOpenSandboxSync):
+        self.fake = fake
+
+    def create(self, connection_config=None) -> _FakeManager:
+        manager = _FakeManager(self.fake)
+        self.fake.managers.append(manager)
+        return manager
+
+
 class _FakeCommands:
     def __init__(self, sandbox: _FakeSandbox):
         self._sandbox = sandbox
@@ -90,7 +133,7 @@ class _FakeSandbox:
         self.fake = fake
         self.create_kwargs = create_kwargs
         self.id = f"osb-{next(self._ids)}"
-        self.state = "RUNNING"
+        self.state = _FakeSandboxState.RUNNING
         self.killed = False
         self.closed = False
         self.kill_exceptions: list[Exception] = []  # raised (and consumed) by successive kill() calls
@@ -104,7 +147,7 @@ class _FakeSandbox:
         if self.kill_exceptions:
             raise self.kill_exceptions.pop(0)
         self.killed = True
-        self.state = "TERMINATED"
+        self.state = _FakeSandboxState.TERMINATED
 
     def close(self) -> None:
         self.closed = True
@@ -121,12 +164,22 @@ class _FakeOpenSandboxSync:
     def __init__(self):
         self.sandboxes: list[_FakeSandbox] = []
         self.create_exceptions: list[Exception] = []  # raised (and consumed) by successive create() calls
+        self.adoption_pages: list[list] = []  # successive list_sandbox_infos results for _FakeManager
+        self.managers: list[_FakeManager] = []
+        self.connect_calls: list[str] = []
         self._scripted: list[dict] = []
 
     def create(self, image, **kwargs):
         if self.create_exceptions:
             raise self.create_exceptions.pop(0)
         sandbox = _FakeSandbox(self, {"image": image, **kwargs})
+        self.sandboxes.append(sandbox)
+        return sandbox
+
+    def connect(self, sandbox_id, connection_config=None, **kwargs):
+        self.connect_calls.append(sandbox_id)
+        sandbox = _FakeSandbox(self, {"connected": sandbox_id})
+        sandbox.id = sandbox_id
         self.sandboxes.append(sandbox)
         return sandbox
 
@@ -153,6 +206,9 @@ class OpenSandboxBackendTestCase(unittest.TestCase):
             ("OpenSandboxException", _FakeOpenSandboxException),
             ("OpenSandboxRunCommandOpts", _FakeRunCommandOpts),
             ("OpenSandboxWriteEntry", _FakeWriteEntry),
+            ("OpenSandboxManagerSync", _FakeManagerFactory(self.fake)),
+            ("OpenSandboxFilter", _FakeSandboxFilter),
+            ("OpenSandboxState", _FakeSandboxState),
         ]:
             patcher = patch.object(backends, name, replacement)
             patcher.start()
@@ -314,14 +370,14 @@ class TestRunCommand(OpenSandboxBackendTestCase):
     def test_run_command_restarts_and_retries_once_when_sandbox_died(self):
         backend = self._started_backend()
         [first] = self.fake.sandboxes
-        first.state = "TERMINATED"
+        first.state = _FakeSandboxState.TERMINATED
         self.fake.script_for_substring("echo hi", _FakeOpenSandboxException("sandbox gone"), once=True)
         self.fake.script_for_substring("echo hi", _make_execution(exit_code=0, stdout="hi\n"))
         result = backend.run_command("echo hi")
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.stdout, "hi\n")
         self.assertEqual(len(self.fake.sandboxes), 2)
-        self.assertTrue(first.killed or first.state == "TERMINATED")
+        self.assertTrue(first.killed or first.state == _FakeSandboxState.TERMINATED)
 
     def test_run_command_does_not_restart_on_transient_error_while_alive(self):
         backend = self._started_backend()
@@ -412,6 +468,85 @@ class TestFileIO(OpenSandboxBackendTestCase):
         self.fake.script_for_substring("tar -xf", _make_execution(exit_code=2, stderr="bad archive"))
         with self.assertRaisesRegex(RuntimeError, "bad archive"):
             backend.put_archive("/workspace", b"not a tar")
+
+
+class TestAdoptOnGatewayTimeout(OpenSandboxBackendTestCase):
+    def setUp(self):
+        super().setUp()
+        patcher = patch.object(OpenSandboxBackend, "_ADOPT_POLL_INTERVAL_S", 0.01)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def _gateway_timeout_error() -> _FakeOpenSandboxException:
+        error = _FakeOpenSandboxException("Create sandbox failed: HTTP 504 | request_id=abc123")
+        error.status_code = 504
+        return error
+
+    @staticmethod
+    def _info(sandbox_id: str, state: str = _FakeSandboxState.RUNNING):
+        return SimpleNamespace(id=sandbox_id, status=SimpleNamespace(state=state))
+
+    def test_start_adopts_sandbox_after_gateway_timeout(self):
+        self.fake.create_exceptions = [self._gateway_timeout_error()]
+        # First poll sees nothing (pod still provisioning), second finds it.
+        self.fake.adoption_pages = [[], [self._info("orphan-1")]]
+        backend = OpenSandboxBackend()
+        backend.start()
+        self.assertEqual(self.fake.connect_calls, ["orphan-1"])
+        [manager] = self.fake.managers
+        self.assertTrue(manager.closed)
+        self.assertIn("open_instruct_create_id", manager.last_filter.metadata)
+        # The adopted sandbox must be fully usable.
+        result = backend.run_command("echo adopted")
+        self.assertEqual(result.exit_code, 0)
+        backend.close()
+
+    def test_adoption_filter_matches_the_create_id_sent_to_create(self):
+        self.fake.create_exceptions = [self._gateway_timeout_error()]
+        self.fake.adoption_pages = [[self._info("orphan-1")]]
+        backend = OpenSandboxBackend()
+        backend.start()
+        # create() raised, so grab the id from the filter and check its shape:
+        # a fresh uuid4 hex per start().
+        [manager] = self.fake.managers
+        create_id = manager.last_filter.metadata["open_instruct_create_id"]
+        self.assertEqual(len(create_id), 32)
+        int(create_id, 16)  # must be valid hex
+
+    def test_start_kills_duplicate_pods_when_adopting(self):
+        self.fake.create_exceptions = [self._gateway_timeout_error()]
+        self.fake.adoption_pages = [
+            [self._info("orphan-1"), self._info("orphan-2"), self._info("orphan-3", state=_FakeSandboxState.PENDING)]
+        ]
+        backend = OpenSandboxBackend()
+        backend.start()
+        self.assertEqual(self.fake.connect_calls, ["orphan-1"])
+        [manager] = self.fake.managers
+        self.assertEqual(sorted(manager.killed), ["orphan-2", "orphan-3"])
+
+    def test_start_reraises_when_no_sandbox_appears(self):
+        self.fake.create_exceptions = [self._gateway_timeout_error()]
+        backend = OpenSandboxBackend(ready_timeout=0)
+        with self.assertRaisesRegex(_FakeOpenSandboxException, "HTTP 504"):
+            backend.start()
+        self.assertEqual(self.fake.connect_calls, [])
+        [manager] = self.fake.managers
+        self.assertTrue(manager.closed)
+
+    def test_start_raises_non_timeout_errors_without_adoption(self):
+        self.fake.create_exceptions = [_FakeOpenSandboxException("HTTP 403 Forbidden")]
+        backend = OpenSandboxBackend()
+        with self.assertRaisesRegex(_FakeOpenSandboxException, "403"):
+            backend.start()
+        self.assertEqual(self.fake.managers, [])
+
+    def test_is_gateway_timeout_classification(self):
+        self.assertTrue(OpenSandboxBackend._is_gateway_timeout(self._gateway_timeout_error()))
+        self.assertTrue(
+            OpenSandboxBackend._is_gateway_timeout(RuntimeError("Create sandbox failed: HTTP 504 | request_id=x"))
+        )
+        self.assertFalse(OpenSandboxBackend._is_gateway_timeout(RuntimeError("HTTP 503 upstream unavailable")))
 
 
 if __name__ == "__main__":

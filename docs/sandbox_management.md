@@ -155,12 +155,24 @@ key issuance, and capacity planning are yours, and there is no vendor autoscaler
 behind the endpoint. Deployment of the OpenSandbox server itself is outside this repo.
 
 **Cold-start 504 gotcha** (observed 2026-07-23 against the AI2 deployment): if a create
-outlasts the ingress's ~30s upstream timeout (cold image pull or Autopilot node
-provisioning), the client gets HTTP 504 — **but the sandbox still comes up server-side**,
-leaking an orphan pod. The orphan carries the `open_instruct_app` metadata tag, so the
-janitor reclaims it and the lifetime cap bounds the cost, but the proper fix is raising
-the gateway timeout in the server deployment. Warm-path numbers from the same test:
-create ~5–7s, ~1.05s per exec — on par with Modal.
+outlasts the GCLB ingress's upstream timeout (default 30s; cold image pull or Autopilot
+node provisioning can take minutes), the client gets HTTP 504 — **but the sandbox still
+comes up server-side**, sometimes more than once per timed-out request. Two layers of
+defense exist:
+
+- **Server side (primary)**: raise the load balancer's backend timeout well above
+  worst-case pod startup (`timeoutSec` in a `BackendConfig` for GKE Ingress, or a
+  `GCPBackendPolicy` for the Gateway API). After this fix, a 101s cold create completed
+  normally on the AI2 deployment.
+- **Client side (insurance)**: `OpenSandboxBackend.start()` tags every create with a
+  unique `open_instruct_create_id` and, on a gateway-timeout error, polls the management
+  API for a sandbox carrying that tag, adopts it via `SandboxSync.connect`, and kills
+  any duplicates — so a 504 becomes a slower start instead of an error plus a leaked
+  pod. If nothing appears within `ready_timeout`, the original error is re-raised and
+  the janitor reclaims any late arrival by app tag.
+
+Warm-path numbers from live verification: create ~5–7s, ~1.05s per exec — on par with
+Modal.
 
 ## Do off-node sandboxes improve training efficiency?
 

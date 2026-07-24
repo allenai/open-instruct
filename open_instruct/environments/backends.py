@@ -28,16 +28,22 @@ except ImportError:
     modal = None
 
 try:
+    from opensandbox import SandboxManagerSync as OpenSandboxManagerSync
     from opensandbox import SandboxSync as OpenSandboxSync
     from opensandbox.config import ConnectionConfigSync as OpenSandboxConnectionConfig
     from opensandbox.exceptions import SandboxException as OpenSandboxException
+    from opensandbox.models import SandboxFilter as OpenSandboxFilter
+    from opensandbox.models import SandboxState as OpenSandboxState
     from opensandbox.models import WriteEntry as OpenSandboxWriteEntry
     from opensandbox.models.execd import RunCommandOpts as OpenSandboxRunCommandOpts
 except ImportError:
     # OpenSandbox is an optional dependency, only needed for OpenSandboxBackend.
+    OpenSandboxManagerSync = None
     OpenSandboxSync = None
     OpenSandboxConnectionConfig = None
     OpenSandboxException = None
+    OpenSandboxFilter = None
+    OpenSandboxState = None
     OpenSandboxRunCommandOpts = None
     OpenSandboxWriteEntry = None
 
@@ -1162,6 +1168,9 @@ class OpenSandboxBackend(SandboxBackend):
     # wrapper (exit 124) always fires first.
     _TIMEOUT_MARGIN_S = 60
     _REQUEST_TIMEOUT_MARGIN_S = 300
+    # Poll cadence while waiting to adopt a sandbox whose create request was
+    # cut by the ingress (see _adopt_after_gateway_timeout).
+    _ADOPT_POLL_INTERVAL_S = 5.0
 
     def __init__(
         self,
@@ -1258,16 +1267,93 @@ class OpenSandboxBackend(SandboxBackend):
             self._sandbox_lifetime,
         )
         start_time = time.perf_counter()
-        self._sandbox = OpenSandboxSync.create(
-            self._image,
-            timeout=timedelta(seconds=self._sandbox_lifetime),
-            ready_timeout=timedelta(seconds=self._ready_timeout),
-            resource={"cpu": str(self._cpu), "memory": f"{self._memory_mib}Mi"},
-            metadata={"open_instruct": "swerl_sandbox", "open_instruct_app": self._app_name},
-            connection_config=self._connection_config(),
-        )
+        # Unique per-create tag so a create whose HTTP response is cut by the
+        # ingress can still be found and adopted (see below).
+        create_id = uuid.uuid4().hex
+        try:
+            self._sandbox = OpenSandboxSync.create(
+                self._image,
+                timeout=timedelta(seconds=self._sandbox_lifetime),
+                ready_timeout=timedelta(seconds=self._ready_timeout),
+                resource={"cpu": str(self._cpu), "memory": f"{self._memory_mib}Mi"},
+                metadata={
+                    "open_instruct": "swerl_sandbox",
+                    "open_instruct_app": self._app_name,
+                    "open_instruct_create_id": create_id,
+                },
+                connection_config=self._connection_config(),
+            )
+        except OpenSandboxException as e:
+            # An ingress/LB with an upstream timeout shorter than a cold pod
+            # start (image pull, node provisioning) returns 504 while the
+            # server still brings the sandbox up. Adopt that sandbox instead
+            # of failing — otherwise every cold start both errors AND leaks
+            # a billed orphan pod.
+            if not self._is_gateway_timeout(e):
+                raise
+            logger.warning(
+                "OpenSandbox create was cut by a gateway timeout (image=%s, create_id=%s): %s. "
+                "The sandbox usually still comes up server-side; polling to adopt it.",
+                self._image,
+                create_id,
+                e,
+            )
+            self._sandbox = self._adopt_after_gateway_timeout(create_id, e)
         _OPENSANDBOX_LIVE_SANDBOXES.add(self._sandbox)
         logger.info("OpenSandbox sandbox started: %s (%.3fs)", self._sandbox.id, time.perf_counter() - start_time)
+
+    @staticmethod
+    def _is_gateway_timeout(error: Exception) -> bool:
+        if getattr(error, "status_code", None) == 504:
+            return True
+        return "HTTP 504" in str(error)
+
+    def _adopt_after_gateway_timeout(self, create_id: str, original_error: Exception):
+        """Find and connect to the sandbox a gateway-timeout create still spawned.
+
+        Polls the management API for sandboxes tagged with this create's
+        unique ``open_instruct_create_id`` until one is RUNNING (bounded by
+        ``ready_timeout``). A timed-out create has been observed to commit
+        more than once, so any duplicates carrying the same tag are killed.
+        Re-raises ``original_error`` if no sandbox appears in time.
+        """
+        adopted_id = None
+        deadline = time.monotonic() + self._ready_timeout
+        manager = OpenSandboxManagerSync.create(self._connection_config())
+        try:
+            while time.monotonic() < deadline:
+                page = manager.list_sandbox_infos(
+                    OpenSandboxFilter(metadata={"open_instruct_create_id": create_id}, page=1, page_size=10)
+                )
+                infos = page.sandbox_infos
+                running = [info for info in infos if info.status.state == OpenSandboxState.RUNNING]
+                if running:
+                    adopted_id = running[0].id
+                    for info in infos:
+                        if info.id != adopted_id:
+                            logger.warning(
+                                "Killing duplicate OpenSandbox sandbox %s from timed-out create (create_id=%s)",
+                                info.id,
+                                create_id,
+                            )
+                            with contextlib.suppress(Exception):
+                                manager.kill_sandbox(info.id)
+                    break
+                time.sleep(self._ADOPT_POLL_INTERVAL_S)
+        finally:
+            manager.close()
+        if adopted_id is None:
+            logger.error(
+                "OpenSandbox create timed out at the gateway and no sandbox appeared within %ss (create_id=%s). "
+                "If one shows up later it is an orphan; the janitor "
+                "(scripts/opensandbox/cleanup_opensandbox_sandboxes.sh) reclaims it by app tag.",
+                self._ready_timeout,
+                create_id,
+            )
+            raise original_error
+        sandbox = OpenSandboxSync.connect(adopted_id, connection_config=self._connection_config())
+        logger.info("Adopted OpenSandbox sandbox %s from gateway-timeout create (create_id=%s)", adopted_id, create_id)
+        return sandbox
 
     def close(self) -> None:
         if self._sandbox is None:
@@ -1297,12 +1383,12 @@ class OpenSandboxBackend(SandboxBackend):
         self._sandbox = None
 
     def _sandbox_is_alive(self) -> bool:
-        """Best-effort probe for the sandbox's RUNNING state. False on any error."""
+        """Best-effort probe for the sandbox's Running state. False on any error."""
         if self._sandbox is None:
             return False
         try:
             info = self._sandbox.get_info()
-            return info.status.state == "RUNNING"
+            return info.status.state == OpenSandboxState.RUNNING
         except Exception:
             return False
 
