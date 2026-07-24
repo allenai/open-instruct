@@ -45,6 +45,7 @@ class TestValidateRepeatPrompt(unittest.TestCase):
             ("exact", "Hello world answer", "Hello world", True),
             ("leading_space", "  Hello world answer", "Hello world", True),
             ("case", "HELLO world answer", "Hello world", True),
+            ("prompt_whitespace", "Hello world answer", " Hello world  ", True),
             ("missing", "Something else", "Hello world", False),
         ]
     )

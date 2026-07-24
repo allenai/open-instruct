@@ -395,7 +395,7 @@ def validate_json_format(text: str) -> bool:
 # repeating the request; the request you need to repeat does not include this sentence)
 def validate_repeat_prompt(text: str, original_prompt: str) -> bool:
     """Match IFEvalG: strip and compare case-insensitively."""
-    return bool(text.strip().lower().startswith(original_prompt.strip().lower()))
+    return text.strip().lower().startswith(original_prompt.strip().lower())
 
 
 # Two Responses: Give two different responses. Responses and only responses should be separated by 6 asterisk
