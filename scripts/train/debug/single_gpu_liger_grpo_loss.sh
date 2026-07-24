@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# Single-GPU GRPO smoke test for the tiled lm-head loss (`--use_liger_grpo_loss`).
+#
+# Mirrors single_gpu_on_beaker.sh, but runs under ZeRO-3 with the tiled loss
+# enabled. ZeRO-3 is the point: the tiled kernel flips `param.ds_grad_is_ready`
+# per tile so the lm-head gradient is reduced once per step rather than once per
+# tile, and that interaction only exists under stage 3. `beta` is non-zero so the
+# reference-KL branch of the kernel is exercised too.
+#
+# Keep single_gpu_on_beaker.sh on the default configuration — it is the canonical
+# single-GPU test — and use this script for the opt-in loss path.
+
 # Get the Beaker username to construct the image name
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -10,7 +21,7 @@ uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
-       --description "Single GPU on Beaker test script." \
+       --description "Single GPU tiled (liger) GRPO lm-head loss test script." \
        --pure_docker_mode \
        --no-host-networking \
        --workspace ai2/open-instruct-dev \
@@ -44,12 +55,14 @@ uv run python mason.py \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
     --total_episodes 200 \
-    --deepspeed_stage 2 \
+    --deepspeed_stage 3 \
+    --use_liger_grpo_loss \
+    --liger_grpo_loss_chunk_size 8 \
     --with_tracking \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
-    --beta 0.0 \
+    --beta 0.01 \
     --load_ref_policy true \
     --seed 3 \
     --local_eval_every 1 \
