@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import dataclasses
 import os
 import re
 import threading
@@ -38,6 +39,7 @@ from open_instruct import data_types, logger_utils, padding_free_collator, utils
 from open_instruct.data_loader_utils import (
     NeverGiveUpAccumulationState,
     compute_grouped_advantages,
+    compute_reinforce_ada_est_samples,
     get_never_give_up_chain_id,
     get_never_give_up_retry_suffix,
     merge_generation_results,
@@ -51,6 +53,7 @@ from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    PASS_COUNT_KEY,
     RAW_PROMPT_KEY,
     TOOLS_COLUMN_KEY,
     VERIFIER_SOURCE_KEY,
@@ -458,6 +461,13 @@ class StreamingDataLoaderConfig:
     accepted groups can be larger than `num_samples_per_prompt_rollout`, so accumulation increments by each group's
     actual accepted size."""
     filter_zero_std_samples: bool = True
+    reinforce_ada_est: bool = False
+    """Instead of sampling `num_samples_per_prompt_rollout` completions for every prompt, derive each
+    prompt's completions-per-rollout from its dataset `pass_count` column (correct samples out of 32
+    from a prior base-model rollout): pass_count >= 8 -> 4, >= 4 -> 8, >= 2 -> 16, else (0 or 1) -> 32.
+    The per-prompt count is a static property of the prompt (from `pass_count`), fixed for the whole
+    run; `pass_count` itself is never updated. Requires the dataset to have a `pass_count` column and
+    `batch_by="prompts"`; not supported together with `never_give_up`."""
     never_give_up: float = 0.0
     """Probability in [0.0, 1.0] that a zero-std prompt is requeued as a never-give-up retry."""
     never_give_up_accept_on: Literal["better", "different"] = "better"
@@ -582,6 +592,13 @@ class StreamingDataLoaderConfig:
                 "filter_zero_std_samples must be True when active_sampling is True. "
                 "Active sampling requires filtering to work correctly."
             )
+        if self.reinforce_ada_est and self.batch_by != "prompts":
+            raise ValueError(
+                f"`reinforce_ada_est` requires `batch_by='prompts'` (got {self.batch_by!r}); "
+                "`'completions'` batch sizing assumes a fixed samples-per-prompt count."
+            )
+        if self.reinforce_ada_est and self.never_give_up > 0:
+            raise ValueError("`reinforce_ada_est` is not supported together with `never_give_up`.")
         if not isinstance(self.never_give_up, float):
             raise ValueError(f"`never_give_up` must be a float, got {self.never_give_up!r}.")
         if not 0.0 <= self.never_give_up <= 1.0:
@@ -823,6 +840,7 @@ def add_prompt_to_generator(
     ground_truth_overrides: dict[int, Any] | None = None,
     prompt_id_suffix: str | None = None,
     continuations: list[data_types.ContinuationPrefix] | None = None,
+    reinforce_ada_est: bool = False,
 ) -> None:
     index = int(example["index"])
 
@@ -830,6 +848,11 @@ def add_prompt_to_generator(
     env_config = _merge_env_config(base_env_config, sample_env_config)
 
     ground_truth = ground_truth_overrides.get(index) if ground_truth_overrides else None
+
+    if reinforce_ada_est and not is_eval:
+        generation_config = dataclasses.replace(
+            generation_config, n=compute_reinforce_ada_est_samples(example[PASS_COUNT_KEY])
+        )
 
     param_prompt_Q.put(
         data_types.PromptRequest(
@@ -890,17 +913,22 @@ def process_group(
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     max_possible_score: float,
+    reinforce_ada_est: bool = False,
 ) -> Group:
     assert result.index is not None
     assert result.reward_scores is not None
     assert result.token_statistics is not None
-    assert len(result.responses) == generation_config.n, (
+
+    example = dataset[result.index]
+    expected_n = (
+        compute_reinforce_ada_est_samples(example[PASS_COUNT_KEY]) if reinforce_ada_est else generation_config.n
+    )
+    assert len(result.responses) == expected_n, (
         f"Mismatch: individual prompt result has {len(result.responses)} responses "
-        f"but expected {generation_config.n} samples per prompt. "
+        f"but expected {expected_n} samples per prompt. "
         f"Index: {result.index}, Prompt ID: {result.prompt_id}"
     )
 
-    example = dataset[result.index]
     query = example[INPUT_IDS_PROMPT_KEY]
     ground_truth = example[GROUND_TRUTHS_KEY]
     dataset_name = example[VERIFIER_SOURCE_KEY]
@@ -1119,6 +1147,7 @@ def maybe_replenish_prompt(
     param_prompt_Q: ray_queue.Queue | None,
     base_env_config: EnvConfig,
     ground_truth_overrides: dict[int, Any] | None = None,
+    reinforce_ada_est: bool = False,
 ) -> None:
     if not replenish_prompts:
         return
@@ -1145,6 +1174,7 @@ def maybe_replenish_prompt(
         ground_truth_overrides=ground_truth_overrides,
         prompt_id_suffix=prompt_id_suffix,
         continuations=continuations,
+        reinforce_ada_est=reinforce_ada_est,
     )
 
 
@@ -1369,6 +1399,7 @@ def accumulate_inference_batches(
     maintain_pending_ngu_age: int = 2,
     maintain_pending_ngu_completions: bool = True,
     ngu_seq_multiplier: int = 1,
+    reinforce_ada_est: bool = False,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1461,6 +1492,7 @@ def accumulate_inference_batches(
             tokenizer=tokenizer,
             dataset=dataset,
             max_possible_score=max_possible_score,
+            reinforce_ada_est=reinforce_ada_est,
         )
 
         no_resampled_prompt = maybe_dont_resample_prompt(group, no_resampling_pass_rate, iter_dataloader)
@@ -1511,6 +1543,7 @@ def accumulate_inference_batches(
             param_prompt_Q,
             base_env_config,
             ground_truth_overrides,
+            reinforce_ada_est=reinforce_ada_est,
         )
 
         group = group_filter_result.group
@@ -1769,6 +1802,7 @@ class DataPreparationActor:
                 is_eval=False,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
+                reinforce_ada_est=self.config.reinforce_ada_est,
             )
 
         while self.training_step < self.num_training_steps:
@@ -1810,6 +1844,7 @@ class DataPreparationActor:
                 maintain_pending_ngu_age=self.config.maintain_pending_ngu_age,
                 maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
                 ngu_seq_multiplier=self.config.ngu_seq_multiplier,
+                reinforce_ada_est=self.config.reinforce_ada_est,
             )
             logger.info(
                 f"[DataPreparationActor] Step {self.training_step}: accumulate_inference_batches returned, result type: {type(result).__name__}"

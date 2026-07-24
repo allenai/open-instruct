@@ -65,6 +65,26 @@ def get_never_give_up_chain_id(prompt_id: str) -> str:
     raise ValueError(f"Unexpected prompt_id format for never_give_up retry tracking: {prompt_id}")
 
 
+REINFORCE_ADA_EST_PASS_COUNT_DENOMINATOR = 32
+"""The `pass_count` column is out of this many prior base-model samples."""
+
+
+def compute_reinforce_ada_est_samples(pass_count: int) -> int:
+    """Map a prompt's `pass_count` (correct samples out of
+    `REINFORCE_ADA_EST_PASS_COUNT_DENOMINATOR`) to a fixed completions-per-prompt bucket for
+    `reinforce_ada_est`. Prompts the base model already solves often need less exploration;
+    prompts it rarely solves need more, so the bucket count grows as pass_count shrinks:
+    >=8 -> 4, >=4 -> 8, >=2 -> 16, else (0 or 1) -> 32.
+    """
+    if pass_count >= 8:
+        return 4
+    if pass_count >= 4:
+        return 8
+    if pass_count >= 2:
+        return 16
+    return 32
+
+
 def pop_pending_never_give_up_state(
     never_give_up_state: NeverGiveUpAccumulationState,
     chain_id: str,

@@ -372,3 +372,39 @@ months ago on `grpo_fast.py`'s (now-removed) `--eval_only` support and used
 current codebase — see the launch log for the two parse-time fixes needed
 (`--eval_only` now lives only in `open_instruct/grpo.py`/OC=true;
 `--eval_temperature` was removed, use `--temperature` instead).
+
+---
+
+## [ACTIVE] `reinforce_ada_est`: adaptive completions-per-prompt from pre-computed pass_count
+
+**Question:** instead of a fixed `num_samples_per_prompt_rollout` for every
+prompt, can we spend the sampling budget where it matters by sampling more
+completions for prompts the base model rarely solves and fewer for prompts
+it solves often? Uses the pre-computed `pass_count` column (correct-out-of-32
+from a prior base-model rollout) already present in
+`mnoukhov/deepscaler-10k-qwen3-4b-base-32samples-quartiles`: pass_count >= 8
+-> 4 samples, >= 4 -> 8, >= 2 -> 16, else (0 or 1) -> 32. The per-prompt count
+is a static property of the prompt (from `pass_count`, which is itself never
+updated during training) — no retry/requeue machinery like NGU.
+
+**Implementation:** new `--reinforce_ada_est` bool on `StreamingDataLoaderConfig`
+(`open_instruct/data_loader.py`). vLLM/`PromptRequest` already carry `n` per
+request and GRPO's grouped-advantage code already groups by a per-prompt
+`sample_count` list, so the only real gap was request construction:
+`add_prompt_to_generator` now looks up `pass_count` on the dataset row and
+overrides that request's `generation_config.n` via `dataclasses.replace`
+(bucketing logic in `compute_reinforce_ada_est_samples`,
+`open_instruct/data_loader_utils.py`); `process_group`'s response-count
+assert checks against the bucketed count instead of the global config `n`
+when the flag is set. Requires `batch_by="prompts"` (accumulation just waits
+for `num_unique_prompts_rollout` finished groups regardless of each group's
+size) and is mutually exclusive with `never_give_up` (untested combination,
+rejected at config validation). Batch-size/pool/episode-count estimates
+elsewhere in the pipeline still use the nominal `num_samples_per_prompt_rollout`
+as an approximate average for sizing purposes only (same pre-existing
+approximation NGU's variable group sizes already rely on) — not exact
+accounting, but not needed for correctness either.
+
+**Runs:** [reinforce_ada_est implementation + launch](experiment.md#2026-07-24-reinforce_ada_est-implementation--3-seed-launch-grpopy-oc) — 2-GPU smoke test then 3 seeds on `open_instruct/grpo.py` (OC=true only, per explicit request — not tested on `grpo_fast.py`).
+
+**Findings:** TBD.

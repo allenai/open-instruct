@@ -1553,3 +1553,36 @@ wandb state `finished`). `best_step` set to 800, its own combined
 AIME+BRUMO `eval/pass_at_1` peak (0.2589).
 
 Re-executed the full notebook immediately after this edit — 0 error cells.
+
+## 2026-07-24: reinforce_ada_est implementation + 3-seed launch (grpo.py, OC)
+
+New feature `--reinforce_ada_est` (see
+[research.md](research.md#active-reinforce_ada_est-adaptive-completions-per-prompt-from-pre-computed-pass_count)):
+derives each prompt's completions-per-rollout from its `pass_count` column
+(correct-out-of-32) instead of a fixed `num_samples_per_prompt_rollout` for
+every prompt: pass_count >= 8 -> 4, >= 4 -> 8, >= 2 -> 16, else -> 32.
+
+Code changes:
+- `open_instruct/dataset_transformation.py`: `PASS_COUNT_KEY = "pass_count"` constant. No transform-pipeline change needed — `grpo_fast.setup_datasets` never sets `DatasetConfig.target_columns`, so raw dataset columns already survive tokenization untouched (same mechanism that already preserves `tools`/`env_config`).
+- `open_instruct/data_loader_utils.py`: `compute_reinforce_ada_est_samples(pass_count) -> int` bucketing helper.
+- `open_instruct/data_loader.py`: new `StreamingDataLoaderConfig.reinforce_ada_est: bool` field (validated: requires `batch_by="prompts"`, incompatible with `never_give_up`); `add_prompt_to_generator` overrides the per-request `generation_config.n` via `dataclasses.replace` when set (skipped for eval prompts); `process_group`'s response-count assert checks the bucketed count instead of the global `generation_config.n`. `accumulate_inference_batches`/`maybe_replenish_prompt` thread the flag through. No changes needed in `compute_grouped_advantages`/`expand_grouped_scores` (already group by a per-prompt `sample_count` list, not a fixed scalar) or in vLLM request handling (`vllm_utils.add_request` already loops `range(request.generation_config.n)` per request).
+- `open_instruct/grpo_fast.py`: `setup_datasets` raises a clear error if `reinforce_ada_est` is set but the train dataset has no `pass_count` column. (`open_instruct/grpo.py` calls this same `setup_datasets`, so the check covers both entry points; only `grpo.py`/OC=true is actually being launched here per explicit request.)
+- `open_instruct/test_data_loader.py`: bucket boundary tests, config validation tests, `add_prompt_to_generator`/`process_group` behavior tests (12 new tests, `TestReinforceAdaEst`). Full `test_data_loader.py` suite (31 tests) and `make style && make quality` both pass.
+- New debug script `scripts/train/debug/reinforce_ada_est_2gpu.sh` (mirrors the existing `ngu_quartiles_2gpu.sh` smoke test, but calls `open_instruct/grpo.py` instead of `grpo_fast.py`).
+
+Known approximation: batch-size/pool/queue-sizing and episode-count math elsewhere (`grpo.py`/`grpo_fast.py`/`data_loader.py`) still use the nominal `num_samples_per_prompt_rollout` CLI value as an average for sizing/logging purposes — not exact given the variable per-prompt `n`, but this is the same pre-existing approximation NGU's variable group sizes already rely on (see `expand_prompt_lengths_for_response_groups`/`calculate_utilization_metrics`, which already consume the actual per-group `prompt_sample_counts` where it matters for correctness — MFU/utilization metrics — leaving only coarse estimates like `num_training_steps`/pool sizing on the nominal value).
+
+### Launch
+
+Smoke test (2 GPU, `open_instruct/grpo.py`, `Qwen3-0.6B-Base`, 256 episodes):
+```
+./scripts/train/build_image_and_launch.sh scripts/train/debug/reinforce_ada_est_2gpu.sh
+```
+
+3-seed production launch (`open_instruct/grpo.py`/OC=true, otherwise identical to `scripts/train/qwen/qwen3_4b_deepscaler_math.sh` defaults):
+```
+OC=true EXP=reinforce_ada_est_seed<N> ./scripts/train/build_image_and_launch.sh scripts/train/qwen/qwen3_4b_deepscaler_math.sh --reinforce_ada_est True --seed <N>
+```
+for `<N>` in 1, 2, 3.
+
+Beaker links and outcome: TBD, appended once launched.

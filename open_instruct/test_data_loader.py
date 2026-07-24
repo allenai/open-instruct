@@ -12,6 +12,7 @@ from open_instruct import data_loader
 from open_instruct.data_loader_utils import (
     NeverGiveUpAccumulationState,
     compute_grouped_advantages,
+    compute_reinforce_ada_est_samples,
     get_never_give_up_chain_id,
     get_never_give_up_retry_suffix,
 )
@@ -19,10 +20,12 @@ from open_instruct.data_types import EnvConfig, GenerationResult, RequestInfo, T
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    PASS_COUNT_KEY,
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
+from open_instruct.vllm_utils import SamplingConfig
 
 
 def _make_dpo_dataset(num_samples: int, max_seq_length: int) -> Dataset:
@@ -475,6 +478,132 @@ class TestNguSeqMultiplier(unittest.TestCase):
             ngu_seq_multiplier=2, never_give_up=0.5, max_prompt_token_length=256, response_length=256, pack_length=768
         )
         self.assertEqual(config.total_response_length, 512)
+
+
+class TestReinforceAdaEst(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("zero", 0, 32),
+            ("one", 1, 32),
+            ("two", 2, 16),
+            ("three", 3, 16),
+            ("four", 4, 8),
+            ("seven", 7, 8),
+            ("eight", 8, 4),
+            ("max", 32, 4),
+        ]
+    )
+    def test_compute_reinforce_ada_est_samples_buckets(self, _name, pass_count, expected_n):
+        self.assertEqual(compute_reinforce_ada_est_samples(pass_count), expected_n)
+
+    def test_streaming_config_validates_reinforce_ada_est(self):
+        with self.assertRaises(ValueError):
+            data_loader.StreamingDataLoaderConfig(reinforce_ada_est=True, batch_by="completions")
+        with self.assertRaises(ValueError):
+            data_loader.StreamingDataLoaderConfig(reinforce_ada_est=True, never_give_up=0.5)
+        config = data_loader.StreamingDataLoaderConfig(reinforce_ada_est=True, batch_by="prompts")
+        self.assertTrue(config.reinforce_ada_est)
+
+    def test_add_prompt_to_generator_sets_n_from_pass_count(self):
+        example = {"index": 0, INPUT_IDS_PROMPT_KEY: [10], PASS_COUNT_KEY: 8}
+        generation_config = SamplingConfig(temperature=1.0, n=16)
+        param_prompt_Q = Queue()
+
+        data_loader.add_prompt_to_generator(
+            example,
+            epoch_number=0,
+            param_prompt_Q=param_prompt_Q,
+            generation_config=generation_config,
+            is_eval=False,
+            base_env_config=EnvConfig(),
+            reinforce_ada_est=True,
+        )
+
+        request = param_prompt_Q.get_nowait()
+        self.assertEqual(request.generation_config.n, 4)
+        # The shared base config passed in must not be mutated.
+        self.assertEqual(generation_config.n, 16)
+
+    def test_add_prompt_to_generator_ignores_pass_count_for_eval(self):
+        example = {"index": 0, INPUT_IDS_PROMPT_KEY: [10], PASS_COUNT_KEY: 8}
+        generation_config = SamplingConfig(temperature=1.0, n=16)
+        param_prompt_Q = Queue()
+
+        data_loader.add_prompt_to_generator(
+            example,
+            epoch_number=0,
+            param_prompt_Q=param_prompt_Q,
+            generation_config=generation_config,
+            is_eval=True,
+            base_env_config=EnvConfig(),
+            reinforce_ada_est=True,
+        )
+
+        request = param_prompt_Q.get_nowait()
+        self.assertEqual(request.generation_config.n, 16)
+
+    def test_process_group_uses_pass_count_as_expected_n(self):
+        class MockTokenizer:
+            eos_token_id = 0
+
+            def batch_decode(self, responses, skip_special_tokens=False):
+                return [str(response) for response in responses]
+
+        result = GenerationResult(
+            responses=[[1], [2], [3], [4]],
+            finish_reasons=["stop"] * 4,
+            masks=[[1]] * 4,
+            request_info=RequestInfo(
+                num_calls=[0] * 4,
+                timeouts=[0] * 4,
+                tool_errors=[""] * 4,
+                tool_outputs=[""] * 4,
+                tool_runtimes=[0.0] * 4,
+                tool_calleds=[False] * 4,
+                tool_call_stats=[[] for _ in range(4)],
+                rollout_states=[{} for _ in range(4)],
+            ),
+            index=0,
+            prompt_id="0_0",
+            token_statistics=TokenStatistics(num_prompt_tokens=1, num_response_tokens=4, generation_time=1.0),
+            logprobs=[[0.0]] * 4,
+            reward_scores=[0.0, 0.0, 0.0, 1.0],
+            reward_metrics={},
+            model_step=0,
+        )
+        # pass_count=8 buckets to 4 samples, but the shared generation_config.n is 16: without
+        # reinforce_ada_est this mismatch would (correctly) raise.
+        dataset = Dataset.from_dict(
+            {
+                INPUT_IDS_PROMPT_KEY: [[10]],
+                GROUND_TRUTHS_KEY: [[11]],
+                VERIFIER_SOURCE_KEY: ["unit"],
+                RAW_PROMPT_KEY: ["prompt"],
+                PASS_COUNT_KEY: [8],
+                "index": [0],
+            }
+        )
+        generation_config = SamplingConfig(temperature=1.0, n=16)
+
+        group = data_loader.process_group(
+            result=result,
+            generation_config=generation_config,
+            tokenizer=MockTokenizer(),
+            dataset=dataset,
+            max_possible_score=1.0,
+            reinforce_ada_est=True,
+        )
+        self.assertEqual(group.sample_count, 4)
+
+        with self.assertRaises(AssertionError):
+            data_loader.process_group(
+                result=result,
+                generation_config=generation_config,
+                tokenizer=MockTokenizer(),
+                dataset=dataset,
+                max_possible_score=1.0,
+                reinforce_ada_est=False,
+            )
 
 
 if __name__ == "__main__":

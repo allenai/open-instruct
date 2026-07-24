@@ -86,6 +86,7 @@ from open_instruct.data_types import ShutdownSentinel
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
     INPUT_IDS_PROMPT_KEY,
+    PASS_COUNT_KEY,
     TOOLS_COLUMN_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
@@ -1144,6 +1145,13 @@ def setup_datasets(
     )
 
     _validate_and_log_dataset_tools(train_dataset, configured_tool_call_names, "train_dataset")
+
+    if streaming_config.reinforce_ada_est and PASS_COUNT_KEY not in train_dataset.column_names:
+        raise ValueError(
+            f"`reinforce_ada_est` requires the train dataset to have a '{PASS_COUNT_KEY}' column "
+            "(correct samples out of 32 from a prior base-model rollout), but "
+            f"train_dataset.column_names={train_dataset.column_names!r} has no such column."
+        )
 
     if len(streaming_config.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(

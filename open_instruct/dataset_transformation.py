@@ -869,6 +869,9 @@ DEFAULT_SFT_MESSAGES_KEY = "messages"
 GROUND_TRUTHS_KEY = "ground_truth"
 VERIFIER_SOURCE_KEY = "dataset"
 RAW_PROMPT_KEY = "prompt"
+PASS_COUNT_KEY = "pass_count"
+"""Optional per-prompt column: number of correct samples out of some fixed budget (e.g. 32) from a
+prior base-model rollout. Used by `reinforce_ada_est` to pick completions-per-prompt."""
 
 
 @dataclass
