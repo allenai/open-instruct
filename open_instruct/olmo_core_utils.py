@@ -266,7 +266,7 @@ class CheckpointConfig:
 
 
 def build_checkpointer_callback(
-    checkpointing_steps: int, ephemeral_save_interval: int | None, save_async: bool = True
+    checkpointing_steps: int | None, ephemeral_save_interval: int | None, save_async: bool = True
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults."""
     return CheckpointerCallback(
