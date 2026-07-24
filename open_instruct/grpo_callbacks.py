@@ -166,6 +166,7 @@ class VLLMWeightSyncCallback(Callback):
             return
 
         torch.cuda.empty_cache()
+        is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
 
         if self.cpu_weight_state_provider is not None:
             weights = self.cpu_weight_state_provider()
@@ -200,11 +201,19 @@ class VLLMWeightSyncCallback(Callback):
                 model_step=self.trainer.global_step,
                 name_mapper=self.name_mapper,
             )
-        sync_time_stats, _ = grpo_utils.perform_weight_sync(
-            broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
-        )
-        for name, value in sync_time_stats.items():
-            self.trainer.record_metric(name, value, reduce_type=None)
+        if is_rank_0:
+            sync_time_stats, _ = grpo_utils.perform_weight_sync(
+                broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
+            )
+            for name, value in sync_time_stats.items():
+                self.trainer.record_metric(name, value, reduce_type=None)
+
+        # Weight gathering above may require every learner rank, but rank 0
+        # exclusively owns the vLLM control plane and transfer process group.
+        # Keep the remaining ranks out of overlapping sleep/wake RPCs, then
+        # rendezvous before any rank starts the next expert-parallel forward.
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier(group=self.trainer.dp_process_group)
 
 
 @dataclass

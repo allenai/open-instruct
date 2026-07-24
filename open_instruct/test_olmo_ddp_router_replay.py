@@ -7,7 +7,7 @@ import transformers
 from olmo_core.config import DType
 from olmo_core.nn.attention import AttentionBackendName
 
-from open_instruct import grpo_utils, olmo_core_utils, vllm_utils
+from open_instruct import grpo_callbacks, grpo_utils, olmo_core_utils, vllm_utils
 
 
 class _ReplayBlock(torch.nn.Module):
@@ -221,3 +221,31 @@ def test_cpu_staged_hf_state_nccl_sync(monkeypatch):
     for (name, tensor), expected in zip(sent, weights.values()):
         assert tensor.device.type == "cpu", name
         torch.testing.assert_close(tensor, expected)
+
+
+def test_vllm_weight_sync_nonzero_rank_only_gathers_and_rendezvous(monkeypatch):
+    gathered = []
+    broadcast = []
+    barriers = []
+    sync_calls = []
+    process_group = object()
+    callback = grpo_callbacks.VLLMWeightSyncCallback(
+        vllm_engines=[], actor_manager=object(), cpu_weight_state_provider=lambda: gathered.append(True) or {}
+    )
+    callback.trainer = SimpleNamespace(global_step=1, dp_process_group=process_group)
+
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 1)
+    monkeypatch.setattr(torch.distributed, "barrier", lambda *, group: barriers.append(group))
+    monkeypatch.setattr(
+        vllm_utils, "broadcast_cpu_staged_weights_to_vllm", lambda **kwargs: broadcast.append(kwargs) or []
+    )
+    monkeypatch.setattr(grpo_utils, "perform_weight_sync", lambda *args, **kwargs: sync_calls.append((args, kwargs)))
+
+    callback.post_step()
+
+    assert gathered == [True]
+    assert len(broadcast) == 1
+    assert sync_calls == []
+    assert barriers == [process_group]
