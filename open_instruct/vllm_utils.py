@@ -1566,12 +1566,12 @@ def broadcast_cpu_staged_weights_to_vllm(
         "names": list(weights),
         "dtype_names": [str(tensor.dtype).split(".")[-1] for tensor in weights.values()],
         "shapes": [list(tensor.shape) for tensor in weights.values()],
-        "packed": False,
+        "packed": True,
     }
     refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
     NCCLWeightTransferEngine.trainer_send_weights(
         iterator=iter(_iter_device_staged_weights(weights, device)),
-        trainer_args=NCCLTrainerSendWeightsArgs(group=model_update_group, packed=False),
+        trainer_args=NCCLTrainerSendWeightsArgs(group=model_update_group, packed=True),
     )
     return refs
 
