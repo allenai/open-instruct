@@ -46,6 +46,7 @@ class TestValidateSections(unittest.TestCase):
             ("bare_splitter_not_enough", "Intro\nSection\nHello\nSection\nWorld", 2, "Section", False),
             ("at_least_n", "Section 1\na\nSection 2\nb\nSection 3\nc", 2, "Section", True),
             ("too_few", "Section 1\nonly one", 2, "Section", False),
+            ("case_insensitive", "SECTION 1\na\nSECTION 2\nb", 2, "Section", True),
         ]
     )
     def test_validate_sections(self, _name, text, n, splitter, expected):

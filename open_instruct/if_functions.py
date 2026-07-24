@@ -381,7 +381,7 @@ def validate_sections(text: str, N: int, section_splitter: str) -> bool:
     bare splitter string alone.
     """
     pattern = r"\s?" + re.escape(section_splitter) + r"\s?\d+\s?"
-    sections = re.split(pattern, text)
+    sections = re.split(pattern, text, flags=re.IGNORECASE)
     return len(sections) - 1 >= N
 
 
