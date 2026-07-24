@@ -152,6 +152,7 @@ class VLLMWeightSyncCallback(Callback):
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
     weight_state_provider: Callable[[], dict[str, torch.Tensor]] | None = None
+    cpu_weight_state_provider: Callable[[], dict[str, torch.Tensor]] | None = None
     weight_stream_provider: (
         Callable[[], tuple[list[tuple[str, torch.dtype, tuple[int, ...]]], Iterable[tuple[str, torch.Tensor]]]] | None
     ) = None
@@ -166,7 +167,15 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        if self.weight_stream_provider is not None:
+        if self.cpu_weight_state_provider is not None:
+            weights = self.cpu_weight_state_provider()
+            broadcast_refs = vllm_utils.broadcast_cpu_staged_weights_to_vllm(
+                weights=weights,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=self.trainer.global_step,
+            )
+        elif self.weight_stream_provider is not None:
             metadata, weights = self.weight_stream_provider()
             broadcast_refs = vllm_utils.broadcast_streamed_weights_to_vllm(
                 metadata=metadata,

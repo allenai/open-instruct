@@ -18,12 +18,7 @@ from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn import ddp as olmo_ddp
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.moe.v2.checkpoint import gather_olmo_ddp_hf_state, load_olmo_ddp_hf_state
-from olmo_core.nn.moe.v2.weight_stream import (
-    HFWeightMetadata,
-    gather_olmo_ddp_hf_state_to_cpu,
-    get_olmo_ddp_hf_weight_metadata,
-    iter_olmo_ddp_hf_weights,
-)
+from olmo_core.nn.moe.v2.weight_stream import gather_olmo_ddp_hf_state_to_cpu
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup, OLMoDDPOptimizerConfig
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -342,12 +337,13 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             raise RuntimeError("OLMoDDP HF state requested before its HF config was loaded.")
         return gather_olmo_ddp_hf_state(self.train_module.model, self.hf_config)
 
-    def _stream_olmo_ddp_hf_state(self) -> tuple[list[HFWeightMetadata], Any]:
+    def _gather_olmo_ddp_hf_state_to_cpu(self) -> dict[str, torch.Tensor]:
         if self.hf_config is None:
-            raise RuntimeError("OLMoDDP HF stream requested before its HF config was loaded.")
-        metadata = get_olmo_ddp_hf_weight_metadata(self.train_module.model, self.hf_config)
-        weights = iter_olmo_ddp_hf_weights(self.train_module.model, self.hf_config)
-        return metadata, weights
+            raise RuntimeError("OLMoDDP CPU HF state requested before its HF config was loaded.")
+        logger.info(f"[Rank {self.rank}] Gathering OLMoDDP HF weights to CPU")
+        weights = gather_olmo_ddp_hf_state_to_cpu(self.train_module.model, self.hf_config)
+        logger.info(f"[Rank {self.rank}] Finished gathering {len(weights)} OLMoDDP HF weights to CPU")
+        return weights
 
     def run_initial_weight_sync(self) -> None:
         """Broadcast initial learner weights to vLLM engines before training starts.
@@ -360,10 +356,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.grpo_config.olmo_core_train_module == "ddp":
             assert self.hf_config is not None
             if self.hf_config.model_type == "olmo3moe":
-                metadata, weights = self._stream_olmo_ddp_hf_state()
-                refs = vllm_utils.broadcast_streamed_weights_to_vllm(
-                    metadata=metadata,
-                    weights=weights,
+                refs = vllm_utils.broadcast_cpu_staged_weights_to_vllm(
+                    weights=self._gather_olmo_ddp_hf_state_to_cpu(),
                     vllm_engines=self.vllm_engines,
                     model_update_group=self.model_update_group,
                     model_step=0,
@@ -463,8 +457,8 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 and self.hf_config.model_type != "olmo3moe"
                 else None
             ),
-            weight_stream_provider=(
-                self._stream_olmo_ddp_hf_state
+            cpu_weight_state_provider=(
+                self._gather_olmo_ddp_hf_state_to_cpu
                 if self.grpo_config.olmo_core_train_module == "ddp"
                 and self.hf_config is not None
                 and self.hf_config.model_type == "olmo3moe"
