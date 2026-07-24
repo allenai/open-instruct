@@ -4,7 +4,12 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock, patch
 
-from open_instruct.environments.backends import ExecutionResult, SandboxBackend
+from open_instruct.environments.backends import (
+    ExecutionResult,
+    SandboxBackend,
+    SandboxContainerLostError,
+    SandboxOOMError,
+)
 from open_instruct.environments.base import EnvCall, StepResult
 from open_instruct.environments.generic_sandbox import GenericSandboxEnv
 
@@ -172,6 +177,32 @@ class TestExecuteBash(unittest.TestCase):
 
         self.assertIn("'command' parameter is required", result.result)
         self.assertEqual(result.reward, -0.05)
+
+    def test_oom_killed_sandbox_ends_the_episode(self):
+        # Without done=True the rollout keeps stepping and every later command
+        # re-trips the same dead container, burning the step budget for nothing.
+        env = _make_env()
+        backend = env._backend
+        assert backend is not None
+        with patch.object(backend, "run_command", side_effect=SandboxOOMError("container abc123 was OOM-killed")):
+            result = _step(env, "execute_bash", {"command": "echo hello"})
+
+        self.assertTrue(result.done)
+        self.assertEqual(result.reward, -0.05)
+        self.assertIn("OOM-killed", result.result)
+        self.assertEqual(result.metadata["sandbox_terminated"], "SandboxOOMError")
+
+    def test_lost_container_ends_the_episode(self):
+        env = _make_env()
+        backend = env._backend
+        assert backend is not None
+        error = SandboxContainerLostError("container abc123 disappeared")
+        with patch.object(backend, "run_command", side_effect=error):
+            result = _step(env, "execute_bash", {"command": "echo hello"})
+
+        self.assertTrue(result.done)
+        self.assertEqual(result.reward, -0.05)
+        self.assertEqual(result.metadata["sandbox_terminated"], "SandboxContainerLostError")
 
 
 class TestStrReplaceEditor(unittest.TestCase):

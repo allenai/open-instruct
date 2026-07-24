@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import docker as docker_sdk
 
-from open_instruct.environments.backends import DockerBackend
+from open_instruct.environments.backends import DockerBackend, SandboxContainerLostError, SandboxOOMError
 
 
 class _FakeDockerContainer:
@@ -118,4 +118,70 @@ def test_run_command_does_not_retry_unknown_exec_api_error():
     else:
         raise AssertionError("Expected APIError to be raised")
 
+    assert container.exec_calls == 1
+
+
+def _conflict_error(message: str) -> docker_sdk.errors.APIError:
+    # APIError.status_code is read-only and derived from the response object.
+    return docker_sdk.errors.APIError(message, response=MagicMock(status_code=409))
+
+
+def test_run_command_raises_oom_error_when_container_was_oom_killed():
+    container = _FakeDockerContainer(exec_errors=[_conflict_error("container is not running")])
+    container.attrs = {"State": {"Status": "exited", "Running": False, "ExitCode": 137, "OOMKilled": True}}
+    backend = DockerBackend(image="test-image")
+    backend._container = container
+    backend._client = MagicMock()
+    backend._client.containers.get.return_value = container
+
+    with patch.object(backend, "start") as start:
+        try:
+            backend.run_command("echo ok")
+        except SandboxOOMError:
+            pass
+        else:
+            raise AssertionError("Expected SandboxOOMError to be raised")
+
+    # The container must not be recreated: a fresh one would silently discard the
+    # episode's filesystem state instead of ending the episode.
+    start.assert_not_called()
+    assert container.exec_calls == 1
+
+
+def test_run_command_raises_container_lost_on_409_without_oom():
+    container = _FakeDockerContainer(exec_errors=[_conflict_error("container is not running")])
+    container.attrs = {"State": {"Status": "exited", "Running": False, "ExitCode": 1, "OOMKilled": False}}
+    backend = DockerBackend(image="test-image")
+    backend._container = container
+    backend._client = MagicMock()
+    backend._client.containers.get.return_value = container
+
+    with patch.object(backend, "start") as start:
+        try:
+            backend.run_command("echo ok")
+        except SandboxContainerLostError:
+            pass
+        else:
+            raise AssertionError("Expected SandboxContainerLostError to be raised")
+
+    start.assert_not_called()
+    assert container.exec_calls == 1
+
+
+def test_run_command_raises_container_lost_when_container_not_found():
+    container = _FakeDockerContainer(exec_errors=[docker_sdk.errors.NotFound("no such container")])
+    backend = DockerBackend(image="test-image")
+    backend._container = container
+    backend._client = MagicMock()
+    backend._client.containers.get.side_effect = docker_sdk.errors.NotFound("no such container")
+
+    with patch.object(backend, "start") as start:
+        try:
+            backend.run_command("echo ok")
+        except SandboxContainerLostError:
+            pass
+        else:
+            raise AssertionError("Expected SandboxContainerLostError to be raised")
+
+    start.assert_not_called()
     assert container.exec_calls == 1

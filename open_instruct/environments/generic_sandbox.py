@@ -12,7 +12,7 @@ from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
 
-from .backends import SandboxBackend, create_backend
+from .backends import SandboxBackend, SandboxContainerLostError, SandboxOOMError, create_backend
 from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
 from .tools.utils import coerce_args
 
@@ -209,7 +209,22 @@ class GenericSandboxEnv(RLEnvironment):
         if not command:
             return StepResult(result="Error: 'command' parameter is required for execute_bash.", reward=self._penalty)
 
-        result = self._backend.run_command(f"bash /tmp/.sandbox_bash_wrapper.sh {shlex.quote(command)}")
+        # A dead container is terminal: its filesystem holds the episode state (the
+        # agent's edits, the wrapper script, the persisted cwd), so there is nothing
+        # left to continue. Ending the episode here sets ``done`` on the rollout;
+        # letting the error propagate would instead hit the generic handler in
+        # ``vllm_utils``, which scores 0 but keeps stepping — so the agent would
+        # re-trip the same failure on every remaining step.
+        try:
+            result = self._backend.run_command(f"bash /tmp/.sandbox_bash_wrapper.sh {shlex.quote(command)}")
+        except (SandboxOOMError, SandboxContainerLostError) as e:
+            logger.warning(f"Ending episode after unrecoverable sandbox failure: {e}")
+            return StepResult(
+                result=f"Error: the sandbox terminated and cannot continue ({e}).",
+                reward=self._penalty,
+                done=True,
+                metadata={"sandbox_terminated": type(e).__name__},
+            )
 
         stdout = _truncate_output(result.stdout) if result.stdout else ""
         stderr = _truncate_output(result.stderr) if result.stderr else ""

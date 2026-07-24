@@ -115,6 +115,18 @@ class SandboxOOMError(RuntimeError):
     """
 
 
+class SandboxContainerLostError(RuntimeError):
+    """Raised when the sandbox container died or vanished mid-episode.
+
+    Like :class:`SandboxOOMError`, this is terminal for the episode. The
+    container filesystem *is* the episode state — every file the agent edited,
+    plus the wrapper script and persisted cwd written during ``reset`` — so a
+    replacement container cannot continue the trajectory. Retrying the command
+    against a fresh container would silently run it against a pristine
+    filesystem and yield a trajectory that looks valid but is not.
+    """
+
+
 class SandboxBackend(ABC):
     """Abstract interface for code/command execution backends."""
 
@@ -258,32 +270,25 @@ class DockerBackend(SandboxBackend):
         )
         try:
             exit_code, output = self._exec_run(wrapped)
-        except docker_sdk.errors.NotFound:
+        except docker_sdk.errors.NotFound as e:
             self._log_container_state("exec_not_found", container_id)
-            logger.warning(
-                "Docker container disappeared before exec (container=%s, image=%s). "
-                "Restarting and retrying command once.",
-                container_id,
-                self._image,
-            )
-            exit_code, output = self._restart_and_retry_exec(wrapped, container_id)
+            raise SandboxContainerLostError(
+                f"Sandbox container {container_id} (image={self._image}) disappeared before exec. Aborting episode."
+            ) from e
         except docker_sdk.errors.APIError as e:
             # 409 Conflict is typically "container is not running" (OOM, crash,
-            # external stop). Raise SandboxOOMError when OOM-killed so the
-            # episode can terminate cleanly; otherwise restart + retry.
+            # external stop). Either way the container's filesystem — and with it
+            # the episode state — is gone, so both cases are terminal.
             self._log_container_state("exec_api_error", container_id)
             if getattr(e, "status_code", None) == 409:
                 if self._container_was_oom_killed(container_id):
                     raise SandboxOOMError(
                         f"Sandbox container {container_id} (image={self._image}) was OOM-killed. Aborting episode."
                     ) from e
-                logger.warning(
-                    "Docker exec 409 Conflict (container=%s, image=%s): %s. Restarting and retrying command once.",
-                    container_id,
-                    self._image,
-                    e,
-                )
-                exit_code, output = self._restart_and_retry_exec(wrapped, container_id)
+                raise SandboxContainerLostError(
+                    f"Sandbox container {container_id} (image={self._image}) is no longer running: {e}. "
+                    f"Aborting episode."
+                ) from e
             else:
                 if self._is_transient_exec_api_error(e):
                     logger.warning(
@@ -377,22 +382,6 @@ class DockerBackend(SandboxBackend):
             return bool(container.attrs.get("State", {}).get("OOMKilled"))
         except Exception:
             return False
-
-    def _restart_and_retry_exec(self, wrapped: str, old_container_id: str):
-        """Recreate the container and re-run a prepared bash command once.
-
-        Shared between the NotFound and 409-Conflict paths. Returns
-        ``(exit_code, output)`` from the retried ``exec_run``.
-        """
-        self.start()
-        if self._container is None:
-            raise RuntimeError("Failed to restart Docker container during exec retry.")
-        logger.info(
-            "Retrying command after container restart (old_container=%s, new_container=%s)",
-            old_container_id,
-            self._container.short_id,
-        )
-        return self._exec_run(wrapped)
 
     def _log_container_state(self, reason: str, container_id: str) -> None:
         """Best-effort container state diagnostics for flaky lifecycle issues."""
