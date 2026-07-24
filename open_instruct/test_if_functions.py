@@ -51,6 +51,7 @@ class TestVerifyBulletPoints(unittest.TestCase):
             ("bold_false_positive_old", "**Introduction**\n* one\n* two", 3, False),
             ("dash_bullets", "- a\n- b\n- c", 3, True),
             ("mixed", "* a\n- b", 2, True),
+            ("lone_star", "*", 1, True),
         ]
     )
     def test_verify_bullet_points(self, _name, text, n, expected):
