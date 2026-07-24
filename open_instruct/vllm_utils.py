@@ -635,6 +635,15 @@ class LLMRayActor:
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
         self._setup_gpu_visibility(noset_visible_devices, distributed_executor_backend)
         self._setup_and_start_async_engine(args, bundle_indices, kwargs)
+        hf_config = self.llm_engine.vllm_config.model_config.hf_config
+        self.use_layerwise_weight_reload = not (
+            self.return_routed_experts and getattr(hf_config, "model_type", None) == "olmo3moe"
+        )
+        logger.info(
+            "Configured vLLM layerwise weight reload: enabled=%s model_type=%s",
+            self.use_layerwise_weight_reload,
+            getattr(hf_config, "model_type", None),
+        )
         self._init_openai_client()
         self.inference_batch_size = self.get_kv_cache_info()
         self._init_executor()
@@ -848,15 +857,19 @@ class LLMRayActor:
                 len(update_info["update_info"]["names"]),
                 self.return_routed_experts,
             )
-        logger.info("Starting vLLM layerwise weight reload for model_step=%s", model_step)
-        self._run_async(self.llm_engine.start_weight_update())
+        if self.use_layerwise_weight_reload:
+            logger.info("Starting vLLM layerwise weight reload for model_step=%s", model_step)
+            self._run_async(self.llm_engine.start_weight_update())
+        else:
+            logger.info("Using direct vLLM weight reload for model_step=%s", model_step)
         logger.info("Receiving vLLM weight tensors for model_step=%s", model_step)
         try:
             self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
             logger.info("Received vLLM weight tensors for model_step=%s", model_step)
         finally:
-            logger.info("Finishing vLLM layerwise weight reload for model_step=%s", model_step)
-            self._run_async(self.llm_engine.finish_weight_update())
+            if self.use_layerwise_weight_reload:
+                logger.info("Finishing vLLM layerwise weight reload for model_step=%s", model_step)
+                self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
         if self.return_routed_experts:
