@@ -1396,3 +1396,132 @@ wandb state `finished`). `best_step` set to 800, its own combined
 AIME+BRUMO `eval/pass_at_1` peak (0.2589).
 
 Re-executed the full notebook immediately after this edit — 0 error cells.
+
+## 2026-07-23: K ablation holding N*(1-p) and N*K fixed — n16_k8 p=0.875, n32_k4 p=0.9375
+
+New idea: ablate `K` (`num_samples_per_prompt_rollout`) while holding
+`N*K = 128` fixed (as all configs in this sweep already do) *and* also
+holding `N*(1-p)` fixed at 2, where `p` is `--never_give_up`. The existing
+`n8_k16 p=0.75` line is the first point on this curve
+(`N*(1-p) = 8*0.25 = 2`); this adds the next two points:
+`n16_k8 p=0.875` (`16*0.125 = 2`) and `n32_k4 p=0.9375` (`32*0.0625 = 2`).
+`n32_k4` is a brand-new `N*K` config — never run before at any `p` or as a
+baseline. Per user decision, launched only the two NGU runs (no matching
+gradnorm1 baselines for `n16_k8`/`n32_k4` for now — `n16_k8` only has the
+older grad_norm=5.0 baseline, `n32_k4` has none at all).
+
+Both on `ai2/jupiter`, `ai2/open-instruct-dev` workspace, `urgent` priority
+(script default), same image (`michaeln/open-instruct-integration-test-ngu`
+@ `de6eb6fa6` — HEAD is `b1c2fde73` but the only diff since the image build
+is `experiment.md`/`research.md`, so no rebuild needed), launched directly
+via `bash`. Both `async_steps 2` (standard NGU mitigation), `max_grad_norm
+1.0`, seed 1.
+
+| Name | n | k | never_give_up | N*(1-p) | async_steps | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `2k_ngu0875_dapo_n16_k8_gradnorm1_async2_seed1` | 16 | 8 | 0.875 | 2 | 2 | 1 | [01KY6SYEJVRAC71QWBRSV3AAM6](https://beaker.org/ex/01KY6SYEJVRAC71QWBRSV3AAM6) |
+| `2k_ngu09375_dapo_n32_k4_gradnorm1_async2_seed1` | 32 | 4 | 0.9375 | 2 | 2 | 1 | [01KY6SYRR473W6C0CSWACHXAGA](https://beaker.org/ex/01KY6SYRR473W6C0CSWACHXAGA) |
+
+### Launch commands
+
+```bash
+OC=true EXP=2k_ngu0875_dapo_n16_k8_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 16 --num_samples_per_prompt_rollout 8 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up 0.875 --async_steps 2
+
+OC=true EXP=2k_ngu09375_dapo_n32_k4_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 32 --num_samples_per_prompt_rollout 4 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up 0.9375 --async_steps 2
+```
+
+## 2026-07-23: K ablation seeds 2 & 3 (n16_k8 p=0.875, n32_k4 p=0.9375)
+
+Two more seeds each for the two new K-ablation points above, same image/
+workspace/cluster/priority, no rebuild.
+
+| Name | n | k | never_give_up | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- |
+| `2k_ngu0875_dapo_n16_k8_gradnorm1_async2_seed2` | 16 | 8 | 0.875 | 2 | [01KY848DSJBK6WPEQVZY7VNCK5](https://beaker.org/ex/01KY848DSJBK6WPEQVZY7VNCK5) |
+| `2k_ngu0875_dapo_n16_k8_gradnorm1_async2_seed3` | 16 | 8 | 0.875 | 3 | [01KY848PSNWM9YH8AR5T2MZ8SR](https://beaker.org/ex/01KY848PSNWM9YH8AR5T2MZ8SR) |
+| `2k_ngu09375_dapo_n32_k4_gradnorm1_async2_seed2` | 32 | 4 | 0.9375 | 2 | [01KY84900QVSTAS9GEW2E3HNGC](https://beaker.org/ex/01KY84900QVSTAS9GEW2E3HNGC) |
+| `2k_ngu09375_dapo_n32_k4_gradnorm1_async2_seed3` | 32 | 4 | 0.9375 | 3 | [01KY849FHCTZGFHSCK22D6R1FD](https://beaker.org/ex/01KY849FHCTZGFHSCK22D6R1FD) |
+
+### Launch commands
+
+```bash
+OC=true EXP=2k_ngu0875_dapo_n16_k8_gradnorm1_async2_seed2 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 16 --num_samples_per_prompt_rollout 8 \
+  --max_grad_norm 1.0 --seed 2 --never_give_up 0.875 --async_steps 2
+
+OC=true EXP=2k_ngu0875_dapo_n16_k8_gradnorm1_async2_seed3 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 16 --num_samples_per_prompt_rollout 8 \
+  --max_grad_norm 1.0 --seed 3 --never_give_up 0.875 --async_steps 2
+
+OC=true EXP=2k_ngu09375_dapo_n32_k4_gradnorm1_async2_seed2 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 32 --num_samples_per_prompt_rollout 4 \
+  --max_grad_norm 1.0 --seed 2 --never_give_up 0.9375 --async_steps 2
+
+OC=true EXP=2k_ngu09375_dapo_n32_k4_gradnorm1_async2_seed3 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 32 --num_samples_per_prompt_rollout 4 \
+  --max_grad_norm 1.0 --seed 3 --never_give_up 0.9375 --async_steps 2
+```
+
+## 2026-07-24: Reinforce-Ada-Seq baseline — NGU=1.0, async_steps=1, no active_sampling (n8_k16, 3 seeds)
+
+New baseline variant: `--never_give_up 1.0` (always retry a zero-std/
+non-improving group instead of discarding it) combined with `--async_steps 1`
+(minimum allowed, tightest generation/training coupling) and
+`--active_sampling False` (script default is `--active_sampling` on).
+`active_sampling` had to be explicitly disabled — `StreamingDataLoaderConfig.__post_init__`
+(`open_instruct/data_loader.py:558-563`) asserts `async_steps > 1` whenever
+`active_sampling` is on, and this combination has crashed a job before (see
+the [`dapo_evalonly_n128` launch log](#2026-07-16-new-initial-model-difficulty-eval-n128-samplesprompt-replaces-w47m67sf)).
+`ArgumentParserPlus` (`HfArgumentParser`) takes the *last* occurrence of a
+repeated flag, so appending `--async_steps 1 --active_sampling False` after
+the wrapper script's own `--async_steps 4 --active_sampling` correctly
+overrides both — verified locally with a standalone `parse_args_into_dataclasses`
+call before launching.
+
+`n8_k16` (script defaults), `max_grad_norm=1.0`, `--total_episodes 256000`
+(2000 steps), same image/workspace/cluster as the rest of the NGU sweep, no
+rebuild needed (local diff since the image build is docs-only).
+
+| Name | never_give_up | async_steps | active_sampling | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- |
+| `2k_ngu1_dapo_n8_k16_gradnorm1_async1_noactive_seed1` | 1.0 | 1 | False | 1 | [01KYB4MHVH8A0QTE0ZE584MFM9](https://beaker.org/ex/01KYB4MHVH8A0QTE0ZE584MFM9) |
+| `2k_ngu1_dapo_n8_k16_gradnorm1_async1_noactive_seed2` | 1.0 | 1 | False | 2 | [01KYB4MNTKEQHF2CX0THGS748J](https://beaker.org/ex/01KYB4MNTKEQHF2CX0THGS748J) |
+| `2k_ngu1_dapo_n8_k16_gradnorm1_async1_noactive_seed3` | 1.0 | 1 | False | 3 | [01KYB4MT827BBBEDX9D4X6H29J](https://beaker.org/ex/01KYB4MT827BBBEDX9D4X6H29J) |
+
+### Launch commands
+
+```bash
+OC=true EXP=2k_ngu1_dapo_n8_k16_gradnorm1_async1_noactive_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --max_grad_norm 1.0 --seed 1 \
+  --never_give_up 1.0 --async_steps 1 --active_sampling False
+
+OC=true EXP=2k_ngu1_dapo_n8_k16_gradnorm1_async1_noactive_seed2 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --max_grad_norm 1.0 --seed 2 \
+  --never_give_up 1.0 --async_steps 1 --active_sampling False
+
+OC=true EXP=2k_ngu1_dapo_n8_k16_gradnorm1_async1_noactive_seed3 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev CLUSTER=ai2/jupiter \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --max_grad_norm 1.0 --seed 3 \
+  --never_give_up 1.0 --async_steps 1 --active_sampling False
+```
