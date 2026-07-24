@@ -46,6 +46,8 @@ class TestVerifyLetterFrequency(unittest.TestCase):
             ("case_insensitive", "Hello", "h", 1, True),
             ("mixed", "AaA", "a", 3, True),
             ("wrong_count", "hello", "l", 1, False),
+            ("zero_absent", "hello", "z", 0, True),
+            ("zero_present", "hello", "l", 0, False),
         ]
     )
     def test_verify_letter_frequency(self, _name, text, letter, n, expected):
