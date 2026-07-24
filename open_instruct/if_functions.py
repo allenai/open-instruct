@@ -289,15 +289,17 @@ def verify_postscript(text, postscript_marker):
     """
     # Align with IFEvalG PostscriptChecker: case-insensitive, marker starts a
     # trailing segment (end of a line).
+    if not isinstance(postscript_marker, str):
+        return False
     value = text.lower()
-    marker = postscript_marker.strip() if isinstance(postscript_marker, str) else postscript_marker
+    marker = postscript_marker.strip()
     if marker == "P.P.S":
         postscript_pattern = r"\s*p\.\s?p\.\s?s.*$"
     elif marker == "P.S.":
         postscript_pattern = r"\s*p\.\s?s\..*$"
     else:
         postscript_pattern = r"\s*" + re.escape(marker.lower()) + r".*$"
-    return bool(re.findall(postscript_pattern, value, flags=re.MULTILINE))
+    return bool(re.search(postscript_pattern, value, flags=re.MULTILINE))
 
 
 # Number Placeholder: The response must contain at least {N} placeholders represented by square brackets,
