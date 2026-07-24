@@ -335,7 +335,7 @@ def verify_bullet_points(text: str, N: int) -> bool:
     Returns:
         bool: True if the text contains exactly N bullet points, False otherwise.
     """
-    star_bullets = re.findall(r"^\s*\*[^\*].*$", text, flags=re.MULTILINE)
+    star_bullets = re.findall(r"^\s*\*(?!\*).*$", text, flags=re.MULTILINE)
     dash_bullets = re.findall(r"^\s*-.*$", text, flags=re.MULTILINE)
     return len(star_bullets) + len(dash_bullets) == N
 
