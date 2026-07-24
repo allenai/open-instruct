@@ -266,7 +266,7 @@ class CheckpointConfig:
 
 
 def build_checkpointer_callback(
-    checkpointing_steps: int,
+    checkpointing_steps: int | None,
     ephemeral_save_interval: int | None,
     save_async: bool = True,
     max_checkpoints: int | None = 3,
@@ -324,7 +324,7 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
 def build_base_callbacks(
     config_dict: dict,
     run_name: str | None,
-    checkpointing_steps: int,
+    checkpointing_steps: int | None,
     ephemeral_save_interval: int | None,
     with_tracking: bool = False,
     wandb_project: str | None = None,
