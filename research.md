@@ -93,6 +93,8 @@ n×k configs to test NGU on, alongside n=16,k=8).
 - [2026-07-17: NGU 0.75 seed3 (gz2ux8w0) also finished cleanly](experiment.md#2026-07-17-ngu-075-seed3-gz2ux8w0-also-finished-cleanly--same-false-alarm--stale-cache-pattern-as-seed2) — same benign-teardown-noise + stale-cache pattern as seed2, two-for-two now
 - [2026-07-17: NGU 0.5 seed3 (zg0thiuz) finished cleanly, best_step peak shifted](experiment.md#2026-07-17-ngu-05-seed3-zg0thiuz-finished-cleanly-best_step-peak-shifted) — finished 2000/2000; true peak moved from step 1000 to step 1700 (combined AIME+BRUMO 0.2542 vs 0.2490) now that the full run is in
 - [2026-07-17: NGU 0.75 seed3 swapped gz2ux8w0 -> cjr9kfxa (better on hard subset)](experiment.md#2026-07-17-ngu-075-seed3-swapped-gz2ux8w0---cjr9kfxa-better-on-hard-subset) — cjr9kfxa (KL beta=0.001 variant) beats gz2ux8w0, the worst-on-hard registered p=0.75 seed (0.0435 vs 0.0156); still early (1100/2000), best_step will need refreshing
+- [2026-07-23: K ablation, n16_k8 p=0.875 + n32_k4 p=0.9375](experiment.md#2026-07-23-k-ablation-holding-n1-p-and-nk-fixed-n16_k8-p0875-n32_k4-p09375) — new sub-question below (`K` ablation holding `N*(1-p)` and `N*K` fixed), just launched, no results yet
+- [2026-07-23: K ablation seeds 2 & 3](experiment.md#2026-07-23-k-ablation-seeds-2--3-n16_k8-p0875-n32_k4-p09375) — 2 more seeds each, both configs now at 3 seeds total
 
 **Findings:** p=0.5 was the leading candidate after the first sweep (drove
 the decision to replicate it over 4 seeds and bracket it with p=0.6/0.75).
@@ -128,6 +130,17 @@ resume could load an inconsistent state (whichever rank's `set_state` ran
 last). Fixed in `7c8919d2f` to save/restore from global rank 0 only; see
 [NGU relaunch with rank-0 state-saving fix](experiment.md#ngu-relaunch-with-rank-0-state-saving-fix--async_steps-2).
 Any NGU conclusions drawn from runs *before* this fix are suspect.
+
+**Sub-question ([[ngu-k-ablation]]): does NGU's edge hold as `K` shrinks?**
+All NGU results above are basically one point on a curve: `n8_k16, p=0.75`
+gives revisited-prompt fraction `N*(1-p) = 8*0.25 = 2`. Ablating `K` while
+holding both `N*K=128` (the usual completions/step budget) and `N*(1-p)=2`
+fixed asks whether the effect is robust to group size, or an artifact of
+`k=16`. Two new points launched 2026-07-23: `n16_k8, p=0.875`
+(`16*0.125=2`) and `n32_k4, p=0.9375` (`32*0.0625=2`) — see
+[K ablation runs](experiment.md#2026-07-23-k-ablation-holding-n1-p-and-nk-fixed-n16_k8-p0875-n32_k4-p09375).
+`n32_k4` is a brand-new `n×k` config with no baseline yet (only the NGU run
+was launched — see that experiment.md entry for why). No results yet.
 
 ---
 
@@ -374,6 +387,21 @@ current codebase — see the launch log for the two parse-time fixes needed
 `--eval_temperature` was removed, use `--temperature` instead).
 
 ---
+
+## [ACTIVE] Reinforce-Ada-Seq baseline: NGU=1.0 + async_steps=1 (no active_sampling) vs. the rest of the NGU sweep
+
+**Question:** how does the "always retry, minimal pipelining" extreme
+(`--never_give_up 1.0`, `--async_steps 1`, `--active_sampling` off) compare
+to the rest of the `p`-sweep above (`p` ∈ {0.5, 0.6, 0.75, 0.875, 0.9375},
+all with `active_sampling` on and `async_steps` 2–4)? `active_sampling`
+can't stay on at `async_steps=1` — `data_loader.py`'s config asserts
+`async_steps > 1` whenever `active_sampling` is set, so this variant
+necessarily drops active_sampling's within-batch resampling and relies
+purely on NGU's cross-step retry to keep hard prompts in the mix.
+
+**Runs:** [Reinforce-Ada-Seq baseline — NGU=1.0, async_steps=1, no active_sampling (n8_k16, 3 seeds)](experiment.md#2026-07-24-reinforce-ada-seq-baseline--ngu10-async_steps1-no-active_sampling-n8_k16-3-seeds)
+
+**Status (2026-07-24):** 3 seeds just launched, no results yet.
 
 ## [ACTIVE] `reinforce_ada_est`: adaptive completions-per-prompt from pre-computed pass_count
 
