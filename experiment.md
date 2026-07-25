@@ -1585,4 +1585,38 @@ OC=true EXP=reinforce_ada_est_seed<N> ./scripts/train/build_image_and_launch.sh 
 ```
 for `<N>` in 1, 2, 3.
 
-Beaker links and outcome: TBD, appended once launched.
+Beaker links and outcome:
+
+- Local smoke test debugging (ran directly on 2 local GPUs, not Beaker, since the
+  Beaker `--priority urgent` queue was congested/stuck): found and fixed a latent
+  bug in `reinforce_ada_est_2gpu.sh` (and its precedent `ngu_quartiles_2gpu.sh`,
+  left unfixed there as out of scope) — with a single learner GPU
+  (`num_learners_per_node 1`, world_size 1) and `single_gpu_mode` left at its
+  default `False`, `grpo_olmo_core_actor.py` skips building `dp_config`
+  (`not single_gpu_mode and world_size > 1`) and therefore never casts the model
+  to bf16, crashing FlashAttention with `RuntimeError: FlashAttention only
+  support fp16 and bf16 data type` on the dry-run batch. Fixed by adding
+  `--single_gpu_mode True` to `reinforce_ada_est_2gpu.sh` (commit `871ee88f7`).
+  Not a `reinforce_ada_est` bug — the production 3-seed launch uses
+  `fsdp_shard_degree 4`/`num_learners_per_node 4` (world_size 4), so `dp_config`
+  is built normally there regardless of this flag.
+- After the fix, local smoke test completed both training steps end-to-end
+  with `--reinforce_ada_est True` on `open_instruct/grpo.py`: prompt-level
+  `pass_count` correctly drove per-request `n` in `add_prompt_to_generator`,
+  `process_group` accepted the bucketed response counts with no assert
+  failures, `accumulate_inference_batches` correctly handled the variable
+  group sizes under `active_sampling`, and `[step=1/2,epoch=1]` /
+  `[step=2/2,epoch=1]` both logged followed by `Training complete`.
+- `uv run pytest open_instruct/test_grpo_fast.py -q`: 22 passed, 1 skipped, no
+  failures (confirms no regression in the shared `grpo_fast.py`/
+  `accumulate_inference_batches` coverage).
+- 3-seed production launch, all `open_instruct/grpo.py` (OC=true),
+  `--reinforce_ada_est True`, image built from commit `871ee88f7`:
+  1. seed 1: [Beaker](https://beaker.org/ex/01KYBC5WT2F0G2X4SGS0YKXDYD)
+  2. seed 2: [Beaker](https://beaker.org/ex/01KYBC73KRNTEWZ6JZNTJ39RAN)
+  3. seed 3: [Beaker](https://beaker.org/ex/01KYBC8AM8PT1V6X1SEA15PSE2)
+
+  All three jobs were kicked off successfully by mason.py (`ai2/jupiter`,
+  8 GPUs each, `--priority urgent`, `--preemptible`); training-progress outcome
+  still TBD, to be checked and recorded once the runs have made meaningful
+  progress.

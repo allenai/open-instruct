@@ -407,4 +407,15 @@ accounting, but not needed for correctness either.
 
 **Runs:** [reinforce_ada_est implementation + launch](experiment.md#2026-07-24-reinforce_ada_est-implementation--3-seed-launch-grpopy-oc) — 2-GPU smoke test then 3 seeds on `open_instruct/grpo.py` (OC=true only, per explicit request — not tested on `grpo_fast.py`).
 
-**Findings:** TBD.
+**Findings:** Implementation confirmed working end-to-end on `open_instruct/grpo.py`
+(OC=true): a local 2-GPU smoke test completed 2/2 training steps with
+`pass_count`-driven per-prompt `n` flowing correctly through
+`add_prompt_to_generator` -> `process_group` -> `accumulate_inference_batches`
+(including under `active_sampling`'s zero-variance filtering), no assert
+failures. Along the way, found and fixed an unrelated latent bug in the debug
+script: single-learner-GPU configs need `--single_gpu_mode True` or the model
+never gets cast to bf16 (FlashAttention dtype crash) — doesn't affect the
+production launch, which uses 4 learner GPUs. `test_grpo_fast.py` (22 passed,
+1 skipped) shows no regression. 3-seed production launch is now running on
+`ai2/jupiter` (links in experiment.md); training-outcome/convergence findings
+still TBD pending run progress.
