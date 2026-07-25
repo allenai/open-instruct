@@ -1943,3 +1943,70 @@ within its first couple minutes, no errors) as of this writing.
 `baseline_n8_k16` was watched furthest: `[step=2/500,epoch=1,eta=9h57m]`.
 Convergence/reward-curve findings still TBD, to be recorded once the runs
 have made meaningful progress.
+
+### `--eval_temperature` + 2 more seeds per config
+
+Added `--eval_temperature` (`grpo_utils.GRPOExperimentConfig`, mirrors the
+existing `--eval_top_p` pattern: `None` falls back to training temperature)
+so eval sampling temperature can be set independently of train temperature.
+`create_generation_configs` (`grpo_fast.py`) now applies it when building the
+eval `SamplingConfig`. Set `--eval_temperature 0.6` as the new default in
+`deepcoder_1_5b.sh` (commit `37327f2e4`).
+
+Launched 2 more seeds (2, 3) of each of the 6 sweep configs above — single
+seed was only for the initial sanity pass; per-arm variance needs ≥3 seeds
+to be meaningful, matching the DeepScaleR NGU sweep's seed convention.
+Per direct request, moved these off `ai2/olmo-instruct` to
+`WORKSPACE=ai2/oe-adapt-code`, `PRIORITY=high`.
+
+| Name | N | K | never_give_up | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- |
+| `deepcoder_1_5b_baseline_n8_k16_seed2` | 8 | 16 | — | 2 | [01KYD3T36SKVAC019XPKFV897A](https://beaker.org/ex/01KYD3T36SKVAC019XPKFV897A) |
+| `deepcoder_1_5b_baseline_n8_k16_seed3` | 8 | 16 | — | 3 | [01KYD3TKHDT08DGFWQQPS5FY5E](https://beaker.org/ex/01KYD3TKHDT08DGFWQQPS5FY5E) |
+| `deepcoder_1_5b_baseline_n4_k32_seed2` | 4 | 32 | — | 2 | [01KYD3V33KJVMB2H65HWHFT9MV](https://beaker.org/ex/01KYD3V33KJVMB2H65HWHFT9MV) |
+| `deepcoder_1_5b_baseline_n4_k32_seed3` | 4 | 32 | — | 3 | [01KYD3VKD1DM47487MCS3M1XT0](https://beaker.org/ex/01KYD3VKD1DM47487MCS3M1XT0) |
+| `deepcoder_1_5b_baseline_n2_k64_seed2` | 2 | 64 | — | 2 | [01KYD3W3NTGVDX21MCDF138GR2](https://beaker.org/ex/01KYD3W3NTGVDX21MCDF138GR2) |
+| `deepcoder_1_5b_baseline_n2_k64_seed3` | 2 | 64 | — | 3 | [01KYD3WMK4B0VPYR90VKFP4VN0](https://beaker.org/ex/01KYD3WMK4B0VPYR90VKFP4VN0) |
+| `deepcoder_1_5b_ngu05_n8_k16_seed2` | 8 | 16 | 0.5 | 2 | [01KYD3X5BY0BSGP2BCDTB7E24H](https://beaker.org/ex/01KYD3X5BY0BSGP2BCDTB7E24H) |
+| `deepcoder_1_5b_ngu05_n8_k16_seed3` | 8 | 16 | 0.5 | 3 | [01KYD3XPKMP6HT85G6DP6AJV3N](https://beaker.org/ex/01KYD3XPKMP6HT85G6DP6AJV3N) |
+| `deepcoder_1_5b_ngu075_n8_k16_seed2` | 8 | 16 | 0.75 | 2 | [01KYD3Y6R8J2JTQG9ESMJMT9VX](https://beaker.org/ex/01KYD3Y6R8J2JTQG9ESMJMT9VX) |
+| `deepcoder_1_5b_ngu075_n8_k16_seed3` | 8 | 16 | 0.75 | 3 | [01KYD3YRPS9WGBTGZCC4BYJTFW](https://beaker.org/ex/01KYD3YRPS9WGBTGZCC4BYJTFW) |
+| `deepcoder_1_5b_ngu0875_n8_k16_seed2` | 8 | 16 | 0.875 | 2 | [01KYD3Z9S97MKTV0FHTTXAVSPZ](https://beaker.org/ex/01KYD3Z9S97MKTV0FHTTXAVSPZ) |
+| `deepcoder_1_5b_ngu0875_n8_k16_seed3` | 8 | 16 | 0.875 | 3 | [01KYD3ZS9A83RDWS9JBSDS3QA0](https://beaker.org/ex/01KYD3ZS9A83RDWS9JBSDS3QA0) |
+
+All 12 jobs confirmed scheduled/started with no exit codes as of this
+writing (no crashes at launch time); step-level progress not yet checked.
+
+### Launch commands
+
+```bash
+export WORKSPACE=ai2/oe-adapt-code PRIORITY=high
+
+EXP=baseline_n8_k16_seed2 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh --seed 2
+EXP=baseline_n8_k16_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh --seed 3
+
+EXP=baseline_n4_k32_seed2 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 4 --num_samples_per_prompt_rollout 32 --seed 2
+EXP=baseline_n4_k32_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 4 --num_samples_per_prompt_rollout 32 --seed 3
+
+EXP=baseline_n2_k64_seed2 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 2 --num_samples_per_prompt_rollout 64 --seed 2
+EXP=baseline_n2_k64_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 2 --num_samples_per_prompt_rollout 64 --seed 3
+
+EXP=ngu05_n8_k16_seed2 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.5 --seed 2
+EXP=ngu05_n8_k16_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.5 --seed 3
+
+EXP=ngu075_n8_k16_seed2 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75 --seed 2
+EXP=ngu075_n8_k16_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75 --seed 3
+
+EXP=ngu0875_n8_k16_seed2 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.875 --seed 2
+EXP=ngu0875_n8_k16_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.875 --seed 3
+```

@@ -492,6 +492,15 @@ problem within a 500KB budget — this also happens to match DeepCoder's own
 published recipe of sampling "the 15 most challenging tests" per problem, so
 the fix is a correctness improvement, not just a workaround.
 
+**Status (2026-07-25, update):** Added `--eval_temperature` (mirrors
+`--eval_top_p`) to decouple eval sampling temperature from training
+temperature; set to 0.6 for this sweep. Launched 2 more seeds (2, 3) per
+config — all 6 arms now have 3 seeds each (18 runs total) — on
+`ai2/oe-adapt-code` at `high` priority (moved off `ai2/olmo-instruct`). See
+[the seed2/3 launch subsection](experiment.md#--eval_temperature--2-more-seeds-per-config).
+All 12 new jobs confirmed scheduled/started with no exit codes at launch
+time.
+
 **Next:** let the sweep run, then repeat the difficulty-stratified
 best-checkpoint comparison methodology from the DeepScaleR NGU work (see
 the K-ablation and NGU entries above) on code eval sets (LCB-v5 test,
