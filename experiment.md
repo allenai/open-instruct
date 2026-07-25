@@ -1807,8 +1807,32 @@ Relaunched all 3 seeds from the fixed commit (`ai2/oe-adapt-code` workspace,
 `grpo_fast.py` -- `01KYDA45NWE8WRJV07R5H33R6A` -- caught immediately and
 stopped before it made progress; not a real run.)
 
-All three confirmed `started` shortly after launch. Training-progress/
-convergence outcome still TBD.
+All three confirmed `started` shortly after launch. Training reached
+`training_step` 200+ on seeds 1/2 with no recurrence of the
+`attempt_count`/`pad_response_lengths_for_attempt_counts` crash, and seed 1's
+step-100 checkpoint + eval both completed cleanly (`eval scores: 1.46`),
+confirming the fix holds through the checkpoint/eval code path too.
+
+**seed 3 crashed at `training_step` ~200 (2026-07-25 19:49), unrelated
+infra failure.** `RuntimeError: Application timeout caused pair closure` in
+`torch.distributed.all_reduce` (`olmo_core/train/utils.py:320`, called from
+`StepTimingCallback`'s metrics reduction) -- a distributed collective-ops
+network timeout, not the `attempt_count` bug (no `pad_response_lengths_for_attempt_counts`
+signature in the traceback at all). Ran cleanly for ~53 minutes before
+failing, no `canceledFor`/`canceledCode` (unlike the earlier cordoned-node
+case), so likely a transient network blip between ranks during an
+all-reduce rather than a code or hardware fault. Relaunched with the
+identical command:
+
+```
+OC=true WORKSPACE=ai2/oe-adapt-code PRIORITY=high EXP=reinforce_ada_est_fixed_seed3 \
+  ./scripts/train/build_image_and_launch.sh scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --reinforce_ada_est True --seed 3
+```
+
+seed 3 (relaunch): [Beaker](https://beaker.org/ex/01KYDDJ1MWXAEV3RSABT6BYGC6)
+
+Training-progress/convergence outcome still TBD.
 
 ## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
 
