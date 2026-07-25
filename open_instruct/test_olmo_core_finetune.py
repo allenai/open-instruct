@@ -10,9 +10,12 @@ import torch
 from olmo_core.nn.attention import AttentionBackendName, AttentionType
 from olmo_core.nn.moe.v2.ep_config import ExpertParallelPath
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
-from olmo_core.nn.moe.v2.olmo3 import build_olmo3_moe_config_from_hf_config
+from olmo_core.nn.moe.v2.olmo3 import (
+    build_olmo3_moe_config_from_hf_config,
+    build_olmo3_moe_hf_config_from_native_config,
+)
 from parameterized import parameterized
-from transformers import AutoConfig
+from transformers import AutoConfig, AutoModelForCausalLM
 
 from open_instruct import dataset_transformation, olmo_core_finetune, olmo_core_utils
 
@@ -123,6 +126,39 @@ class SFTTerminalEosTest(unittest.TestCase):
 
 
 class Olmo3MoeModelConfigTest(unittest.TestCase):
+    def test_saves_prepared_hf_state_with_registered_local_model(self) -> None:
+        config = Olmo3MoeConfig(
+            vocab_size=64,
+            hidden_size=32,
+            attention_hidden_size=32,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            head_dim=8,
+            n_routed_experts=4,
+            num_experts_per_tok=2,
+            moe_intermediate_size=16,
+            shared_expert_intermediate_size=16,
+            max_position_embeddings=32,
+            use_head_qk_norm=True,
+            dense_layers_indices=[0],
+            dense_mlp_intermediate_size=24,
+            layer_types=["full_attention", "full_attention"],
+            use_peri_ln=True,
+        )
+        native_config = build_olmo3_moe_config_from_hf_config(config, attention_backend=AttentionBackendName.torch)
+        export_config = build_olmo3_moe_hf_config_from_native_config(
+            native_config, max_position_embeddings=32, pad_token_id=1, bos_token_id=None, eos_token_id=2
+        )
+        model = AutoModelForCausalLM.from_config(export_config)
+        tokenizer = mock.MagicMock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            olmo_core_utils.save_prepared_hf_state(model.state_dict(), tmp, export_config, tokenizer)
+
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "config.json")))
+            tokenizer.save_pretrained.assert_called_once_with(tmp)
+
     def test_setup_model_builds_olmo_ddp_with_requested_ep_settings(self) -> None:
         hf_config = Olmo3MoeConfig(
             vocab_size=64,

@@ -686,7 +686,7 @@ def save_prepared_hf_state(
 ) -> None:
     """Save an already HF-named full state without applying native conversion again."""
     with accelerate.init_empty_weights():
-        hf_model = transformers.AutoModelForCausalLM.from_config(hf_config, trust_remote_code=True)
+        hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
     hf_model.load_state_dict({key: value.contiguous() for key, value in hf_state.items()}, assign=True)
 
     os.makedirs(save_dir, exist_ok=True)
