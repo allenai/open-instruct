@@ -46,6 +46,7 @@ uv run python mason.py \
     --total_episodes 256 \
     --fsdp_shard_degree 1 \
     --fsdp_num_replicas 1 \
+    --single_gpu_mode True \
     --activation_memory_budget 0.5 \
     --beta 0.0 \
     --load_ref_policy False \
