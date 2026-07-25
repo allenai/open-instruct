@@ -13,7 +13,7 @@ BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
-WORKSPACE="${WORKSPACE:-ai2/oe-adapt-code}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 NODES="${NODES:-2}"
 
 # Datasets converted from agentica-org/DeepCoder-Preview-Dataset by
@@ -63,7 +63,7 @@ uv run mason.py \
     --pack_length 34816 \
     --model_name_or_path "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" \
     --non_stop_penalty False \
-    --total_episodes 128000 \
+    --total_episodes 64000 \
     ${BACKEND_ARGS} \
     --num_learners_per_node 8 \
     --vllm_num_engines 8 \
