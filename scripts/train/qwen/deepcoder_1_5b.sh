@@ -3,7 +3,7 @@
 EXP="${EXP:-}"
 
 TRAIN_SCRIPT="open_instruct/grpo.py"
-BACKEND_ARGS="--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
+BACKEND_ARGS="--fsdp_shard_degree 8 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
 
 EXP_NAME="${EXP_NAME:-deepcoder_1_5b_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
