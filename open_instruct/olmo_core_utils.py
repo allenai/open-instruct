@@ -3,6 +3,7 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -12,14 +13,20 @@ import torch
 import torch.distributed as dist
 import transformers
 from olmo_core import optim as olmo_optim
+from olmo_core.config import DType
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
+from olmo_core.nn.moe.v2.ep_config import ExpertParallelConfig, ExpertParallelPath
+from olmo_core.nn.moe.v2.olmo3 import (
+    build_olmo3_moe_config_from_hf_config,
+    build_olmo3_moe_hf_config_from_native_config,
+)
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
-from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.nn.transformer import OLMoDDPModelConfig, Transformer, TransformerConfig
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -74,10 +81,28 @@ class ModelConfig:
     """YaRN RoPE beta_slow parameter."""
     rope_scaling_old_context_len: int = 8192
     """YaRN RoPE old_context_len parameter."""
+    moe_expert_parallel_degree: int = 1
+    """Expert-parallel degree for OLMoDDP MoE models."""
+    moe_expert_parallel_path: str = ExpertParallelPath.sync_1d.value
+    """MoE communication path used by the model's routed experts."""
+    moe_expert_parallel_capacity_factor: float = 1.25
+    """Destination capacity factor for expert-parallel communication."""
+    moe_router_aux_loss_weight: float | None = None
+    """Optional router load-balancing loss weight for OLMoDDP MoE models."""
+    moe_router_z_loss_weight: float | None = None
+    """Optional router z-loss weight for OLMoDDP MoE models."""
+    moe_recompute_each_block: bool = True
+    """Recompute each OLMoDDP transformer block during backward."""
 
     def __post_init__(self):
         if self.attn_implementation is None:
             self.attn_implementation = model_utils.detect_attn_implementation()
+        if self.moe_expert_parallel_degree < 1:
+            raise ValueError("moe_expert_parallel_degree must be at least 1")
+        ep_path = ExpertParallelPath(self.moe_expert_parallel_path)
+        if self.moe_expert_parallel_degree == 1 and ep_path != ExpertParallelPath.sync_1d:
+            raise ValueError("Non-synchronized MoE expert paths require moe_expert_parallel_degree > 1")
+        ExpertParallelConfig(path=ep_path, capacity_factor=self.moe_expert_parallel_capacity_factor).validate()
 
 
 @dataclass
@@ -203,6 +228,10 @@ class DatasetConfig:
     """The hash of the dataset configuration."""
     hf_entity: str | None = None
     """The user or org name for dataset caching on the Hugging Face Hub."""
+    pretokenized_dataset_path: str | None = None
+    """Existing packed NumPy SFT directory, bypassing HF dataset tokenization and caching."""
+    ensure_terminal_eos_after_truncation: bool = False
+    """Replace a truncated record's final token with EOS so packing retains a document boundary."""
 
 
 @dataclass
@@ -237,6 +266,8 @@ class CheckpointConfig:
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
     """If the training should continue from a checkpoint folder."""
+    hf_export_dir: str | None = None
+    """Optional directory for a final Hugging Face export after training."""
 
 
 def build_checkpointer_callback(
@@ -329,12 +360,22 @@ def build_base_callbacks(
 def is_hf_checkpoint(path: str) -> bool:
     """Detect whether a model path is a HuggingFace checkpoint (vs olmo-core format).
 
-    Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
-    containing config.json, and paths with a '-hf' component. Returns False for
-    olmo-core distributed checkpoints.
+    Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local HF
+    directories, and paths with a '-hf' component. An OLMo-core distributed
+    checkpoint takes precedence even though its root also contains config.json.
     """
     if os.path.isdir(path):
-        return os.path.isfile(os.path.join(path, "config.json"))
+        if os.path.isfile(os.path.join(path, "model_and_optim", ".metadata")):
+            return False
+        config_path = os.path.join(path, "config.json")
+        if not os.path.isfile(config_path):
+            return False
+        try:
+            with open(config_path) as config_file:
+                config = json.load(config_file)
+        except (json.JSONDecodeError, OSError):
+            return True
+        return "model_type" in config or "architectures" in config
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True
@@ -392,27 +433,84 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     )
 
 
+def load_native_olmo3_moe_hf_config(checkpoint_path: str, tc: TokenizerConfig) -> transformers.PretrainedConfig | None:
+    """Derive the serving architecture embedded in a native OLMoDDP checkpoint."""
+    config_path = os.path.join(checkpoint_path, "config.json")
+    if not os.path.isfile(config_path):
+        return None
+    with open(config_path) as config_file:
+        checkpoint_config = json.load(config_file)
+    native_model_data = checkpoint_config.get("model")
+    if not isinstance(native_model_data, dict):
+        return None
+    class_name = native_model_data.get("_CLASS_", "")
+    if not class_name.endswith("OLMoDDPModelConfig"):
+        return None
+
+    native_model_config = OLMoDDPModelConfig.from_dict(native_model_data)
+    dataset_config = checkpoint_config.get("dataset", {})
+    max_position_embeddings = int(
+        dataset_config.get("max_target_sequence_length") or dataset_config.get("sequence_length") or 8192
+    )
+    return build_olmo3_moe_hf_config_from_native_config(
+        native_model_config,
+        max_position_embeddings=max_position_embeddings,
+        pad_token_id=tc.tokenizer.pad_token_id,
+        bos_token_id=tc.tokenizer.bos_token_id,
+        eos_token_id=tc.tokenizer.eos_token_id,
+    )
+
+
 def setup_model(
     model_config_args: ModelConfig, tc: TokenizerConfig | None = None, init_device: str = "cpu"
 ) -> tuple[Transformer, TransformerConfig]:
     model_name_or_path = model_config_args.model_name_or_path
+    hf_config: transformers.PretrainedConfig | None = None
+    hf_arch_config: transformers.PretrainedConfig | None = None
     if is_hf_checkpoint(model_name_or_path):
         logger.info(f"Detected HuggingFace checkpoint at {model_name_or_path}")
-        hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+        hf_config = transformers.AutoConfig.from_pretrained(
+            model_name_or_path, revision=model_config_args.model_revision, trust_remote_code=True
+        )
+        hf_arch_config = hf_config
         vocab_size = hf_config.vocab_size
     else:
         logger.info(f"Detected olmo-core checkpoint at {model_name_or_path}")
-        assert model_config_args.config_name is not None, (
-            "--config_name is required when model_name_or_path is an olmo-core checkpoint"
-        )
-        assert tc is not None, "tc (TokenizerConfig) is required for olmo-core checkpoints to derive vocab_size"
-        vocab_size = to_oc_tokenizer_config(tc).padded_vocab_size()
+        assert tc is not None, "tc (TokenizerConfig) is required for olmo-core checkpoints"
+        hf_arch_config = load_native_olmo3_moe_hf_config(model_name_or_path, tc)
+        if hf_arch_config is not None:
+            logger.info("Derived Olmo3MoE architecture from the native checkpoint config")
+            vocab_size = hf_arch_config.vocab_size
+        else:
+            assert model_config_args.config_name is not None, (
+                "--config_name is required when a native checkpoint has no supported embedded architecture"
+            )
+            vocab_size = to_oc_tokenizer_config(tc).padded_vocab_size()
     logger.info(f"Building OLMo-core model with vocab_size={vocab_size}")
-    model_config = get_transformer_config(
-        model_config_args.config_name or model_name_or_path,
-        vocab_size,
-        attn_backend=model_config_args.attn_implementation,
-    )
+    config_source = model_config_args.config_name or model_name_or_path
+    if hf_arch_config is None:
+        try:
+            hf_arch_config = transformers.AutoConfig.from_pretrained(
+                config_source, revision=model_config_args.model_revision, trust_remote_code=True
+            )
+        except (OSError, ValueError):
+            hf_arch_config = None
+
+    if hf_arch_config is not None and hf_arch_config.model_type == "olmo3moe":
+        model_config = build_olmo3_moe_config_from_hf_config(
+            hf_arch_config,
+            dtype=DType.bfloat16,
+            attention_backend=AttentionBackendName(model_config_args.attn_implementation),
+            ep_path=ExpertParallelPath(model_config_args.moe_expert_parallel_path),
+            ep_capacity_factor=model_config_args.moe_expert_parallel_capacity_factor,
+            router_aux_loss_weight=model_config_args.moe_router_aux_loss_weight,
+            router_z_loss_weight=model_config_args.moe_router_z_loss_weight,
+        )
+        model_config.recompute_each_block = model_config_args.moe_recompute_each_block
+    else:
+        model_config = get_transformer_config(
+            config_source, vocab_size, attn_backend=model_config_args.attn_implementation
+        )
     model_config.lm_head.loss_implementation = LMLossImplementation(model_config_args.loss_implementation)
     if model_config_args.rope_scaling_factor is not None:
         model_config = model_config.with_rope_scaling(
@@ -469,7 +567,7 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
     return tokenizer
 
 
-def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
+def to_oc_tokenizer_config(tc: TokenizerConfig, *, vocab_size: int | None = None) -> OLMoCoreTokenizerConfig:
     """Map open-instruct TokenizerConfig to olmo-core's TokenizerConfig for NumpyFSL loading.
 
     Prefers the curated `dolma2()` preset for the dolma2/OLMo-2 family (its
@@ -479,7 +577,10 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     identifier = tc.tokenizer_name_or_path or ""
     dolma2_markers = ("dolma2", "OLMo-2-1124", "OLMo-2-0325", "OLMo-2-0425")
     if any(marker in identifier for marker in dolma2_markers):
-        return OLMoCoreTokenizerConfig.dolma2()
+        config = OLMoCoreTokenizerConfig.dolma2()
+        if vocab_size is not None:
+            config.vocab_size = vocab_size
+        return config
     eos_id = tc.tokenizer.eos_token_id
     bos_id = tc.tokenizer.bos_token_id
     # olmo-core's doc-boundary scanner requires an EOS *immediately followed by* BOS
@@ -489,7 +590,7 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     if bos_id == eos_id:
         bos_id = None
     return OLMoCoreTokenizerConfig(
-        vocab_size=tc.tokenizer.vocab_size,
+        vocab_size=vocab_size or tc.tokenizer.vocab_size,
         eos_token_id=eos_id,
         pad_token_id=tc.tokenizer.pad_token_id,
         bos_token_id=bos_id,
@@ -549,6 +650,22 @@ def save_state_dict_as_hf(
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
     hf_model.load_state_dict(converted, assign=True)
+
+    os.makedirs(save_dir, exist_ok=True)
+    hf_model.save_pretrained(save_dir)
+    tokenizer.save_pretrained(save_dir)
+
+
+def save_prepared_hf_state(
+    hf_state: dict[str, torch.Tensor],
+    save_dir: str,
+    hf_config: transformers.PretrainedConfig,
+    tokenizer: transformers.PreTrainedTokenizerBase,
+) -> None:
+    """Save an already HF-named full state without applying native conversion again."""
+    with accelerate.init_empty_weights():
+        hf_model = transformers.AutoModelForCausalLM.from_config(hf_config, trust_remote_code=True)
+    hf_model.load_state_dict({key: value.contiguous() for key, value in hf_state.items()}, assign=True)
 
     os.makedirs(save_dir, exist_ok=True)
     hf_model.save_pretrained(save_dir)

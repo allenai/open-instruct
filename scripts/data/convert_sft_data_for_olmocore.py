@@ -126,6 +126,9 @@ class ConvertSFTDataArguments:
     """Resume from previously-written partial files in output_dir, if present."""
     resume: bool = field(default=False)
 
+    """Ensure truncated conversations end with EOS so packing retains a document boundary."""
+    ensure_terminal_eos_after_truncation: bool = field(default=False)
+
     """Shuffle seed for reproducible dataset ordering"""
     shuffle_seed: int = field(default=42)
 
@@ -140,7 +143,12 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
     transform_fn_args = []
     for fn_name in args.dataset_transform_fn:
         if fn_name == "sft_tulu_tokenize_and_truncate_v1":
-            transform_fn_args.append({"max_seq_length": args.max_seq_length})
+            transform_fn_args.append(
+                {
+                    "max_seq_length": args.max_seq_length,
+                    "ensure_terminal_eos_after_truncation": args.ensure_terminal_eos_after_truncation,
+                }
+            )
         else:
             transform_fn_args.append({})
 

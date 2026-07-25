@@ -41,6 +41,8 @@ from olmo_core import optim
 from olmo_core.config import DType
 from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import is_distributed
+from olmo_core.nn.moe.v2.weight_stream import gather_olmo_ddp_hf_state_to_cpu
+from olmo_core.nn.transformer import OLMoDDPModelConfig
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -123,20 +125,29 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
-    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
+    tokenize_transform_args = {"max_seq_length": args.training.max_seq_length}
+    if args.dataset.ensure_terminal_eos_after_truncation:
+        tokenize_transform_args["ensure_terminal_eos_after_truncation"] = True
+    transform_fn_args = [tokenize_transform_args, {}]
 
-    dcs = dataset_transformation.load_dataset_configs(
-        dataset_mixer_list=args.dataset.mixer_list,
-        dataset_mixer_list_splits=args.dataset.mixer_list_splits,
-        dataset_transform_fn=args.dataset.transform_fn,
-        transform_fn_args=transform_fn_args,
-        target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
-    )
-    cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
-    seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
-    numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
+    if args.dataset.pretokenized_dataset_path is not None:
+        numpy_dir = os.path.abspath(args.dataset.pretokenized_dataset_path)
+        cache_hash = "pretokenized"
+    else:
+        dcs = dataset_transformation.load_dataset_configs(
+            dataset_mixer_list=args.dataset.mixer_list,
+            dataset_mixer_list_splits=args.dataset.mixer_list_splits,
+            dataset_transform_fn=args.dataset.transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
+        )
+        cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
+        seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
+        numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
 
     if args.dataset.cache_dataset_only:
+        if args.dataset.pretokenized_dataset_path is not None:
+            raise ValueError("cache_dataset_only cannot be combined with pretokenized_dataset_path")
         pre_init_rank = int(os.environ.get("RANK", 0))
         if pre_init_rank == 0:
             if _numpy_dir_is_populated(numpy_dir):
@@ -179,18 +190,32 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model, model_config = olmo_core_utils.setup_model(args.model, tc, init_device="meta")
+    use_olmo_ddp = isinstance(model_config, OLMoDDPModelConfig)
 
     cp_config = olmo_core_utils.build_cp_config(args.training)
     cp_degree = args.training.cp_degree or 1
     gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 1
     dp_shard_degree = gpus_per_node // cp_degree
 
-    dp_config = train_module_lib.TransformerDataParallelConfig(
-        name=parallel.DataParallelType.hsdp if world_size > dp_shard_degree else parallel.DataParallelType.fsdp,
-        param_dtype=DType.bfloat16,
-        reduce_dtype=DType.float32,
-        shard_degree=dp_shard_degree,
-    )
+    if use_olmo_ddp:
+        if use_hf_ckpt:
+            raise NotImplementedError("Stage-one Olmo3MoE SFT requires a native OLMo-core checkpoint for weights.")
+        if cp_degree != 1:
+            raise NotImplementedError("Context parallelism is not supported by stage-one Olmo3MoE SFT")
+        if world_size % args.model.moe_expert_parallel_degree != 0:
+            raise ValueError(
+                f"World size {world_size} must be divisible by MoE EP degree {args.model.moe_expert_parallel_degree}"
+            )
+        dp_config = train_module_lib.TransformerDataParallelConfig(
+            name=parallel.DataParallelType.ddp, reduce_grads_in_fp32=True, accumulate_grads_in_fp32=True
+        )
+    else:
+        dp_config = train_module_lib.TransformerDataParallelConfig(
+            name=parallel.DataParallelType.hsdp if world_size > dp_shard_degree else parallel.DataParallelType.fsdp,
+            param_dtype=DType.bfloat16,
+            reduce_dtype=DType.float32,
+            shard_degree=dp_shard_degree,
+        )
 
     ac_config = olmo_core_utils.build_ac_config(
         args.training.activation_memory_budget,
@@ -203,7 +228,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     rank_microbatch_size = args.training.per_device_train_batch_size * args.training.max_seq_length
     dp_world_size = world_size // cp_degree
 
-    oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc)
+    oc_tokenizer_config = olmo_core_utils.to_oc_tokenizer_config(tc, vocab_size=model_config.vocab_size)
     np_dataset_config = oc_data.NumpyPackedFSLDatasetConfig(
         tokenizer=oc_tokenizer_config,
         work_dir=args.checkpoint.output_dir,
@@ -228,22 +253,52 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
     )
 
-    train_module_config = train_module_lib.TransformerTrainModuleConfig(
-        rank_microbatch_size=rank_microbatch_size,
-        max_sequence_length=args.training.max_seq_length,
-        z_loss_multiplier=None,
-        compile_model=args.training.compile_model,
-        optim=optim.SkipStepAdamWConfig(
-            lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
-        ),
-        dp_config=dp_config,
-        cp_config=cp_config,
-        ac_config=ac_config,
-        scheduler=scheduler,
-        max_grad_norm=args.training.max_grad_norm
-        if args.training.max_grad_norm and args.training.max_grad_norm > 0
-        else None,
+    max_grad_norm = (
+        args.training.max_grad_norm if args.training.max_grad_norm and args.training.max_grad_norm > 0 else None
     )
+    if use_olmo_ddp:
+        train_module_config = train_module_lib.OLMoDDPTrainModuleConfig(
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            z_loss_multiplier=None,
+            compile_model=args.training.compile_model,
+            optim=optim.OLMoDDPOptimizerConfig(
+                lr=args.training.learning_rate,
+                weight_decay=args.training.weight_decay,
+                betas=(0.9, 0.95),
+                compile=False,
+                dtype=DType.float32,
+                use_distributed=True,
+            ),
+            dp_config=dp_config,
+            cp_config=None,
+            ep_config=(
+                train_module_lib.TransformerExpertParallelConfig(degree=args.model.moe_expert_parallel_degree)
+                if args.model.moe_expert_parallel_degree > 1
+                else None
+            ),
+            ac_config=ac_config,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+        )
+    else:
+        train_module_config = train_module_lib.TransformerTrainModuleConfig(
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            z_loss_multiplier=None,
+            compile_model=args.training.compile_model,
+            optim=optim.SkipStepAdamWConfig(
+                lr=args.training.learning_rate,
+                weight_decay=args.training.weight_decay,
+                betas=(0.9, 0.95),
+                compile=False,
+            ),
+            dp_config=dp_config,
+            cp_config=cp_config,
+            ac_config=ac_config,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+        )
 
     train_module = train_module_config.build(model)
 
@@ -288,12 +343,15 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         with_tracking=args.logging.with_tracking,
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
+        save_async=not use_olmo_ddp,
         max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
 
-    load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
+    load_strategy = (
+        LoadStrategy.never if args.checkpoint.resume_from_checkpoint is not None else LoadStrategy.if_available
+    )
 
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
@@ -305,13 +363,38 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
     ).build(train_module, data_loader)
 
-    if not use_hf_ckpt:
+    if args.checkpoint.resume_from_checkpoint is not None:
+        logger.info(f"Resuming from explicit checkpoint {args.checkpoint.resume_from_checkpoint}...")
+        trainer.load_checkpoint(args.checkpoint.resume_from_checkpoint)
+    elif trainer.checkpoint_loaded:
+        logger.info(f"Resumed training state from {args.checkpoint.output_dir}")
+    elif not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
 
     logger.info("Starting training...")
     trainer.fit()
     logger.info("Training complete.")
+
+    if args.checkpoint.hf_export_dir is not None:
+        if not use_olmo_ddp:
+            raise NotImplementedError("hf_export_dir currently supports only OLMoDDP models")
+        assert isinstance(model_config, OLMoDDPModelConfig)
+        logger.info(f"Gathering final Olmo3MoE weights for HF export to {args.checkpoint.hf_export_dir}")
+        hf_config = olmo_core_utils.build_olmo3_moe_hf_config_from_native_config(
+            model_config,
+            max_position_embeddings=args.training.max_seq_length,
+            pad_token_id=tc.tokenizer.pad_token_id,
+            bos_token_id=tc.tokenizer.bos_token_id,
+            eos_token_id=tc.tokenizer.eos_token_id,
+        )
+        hf_state = gather_olmo_ddp_hf_state_to_cpu(train_module.model, hf_config, target_rank=0)
+        if global_rank == 0:
+            olmo_core_utils.save_prepared_hf_state(hf_state, args.checkpoint.hf_export_dir, hf_config, tc.tokenizer)
+            logger.info(f"Saved final Hugging Face checkpoint to {args.checkpoint.hf_export_dir}")
+        del hf_state
+        if is_distributed():
+            dist.barrier()
 
     teardown_training_environment()
 
