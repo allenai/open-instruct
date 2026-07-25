@@ -1805,6 +1805,8 @@ def check_oe_eval_internal():
 GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9, "memory_bandwidth": 2.0e12},  # 2.0 TB/s HBM2e (80GB variant)
     "b200": {"flops": 2250e12, "memory_size": 192e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
+    # B300 (Blackwell Ultra): same dense BF16 throughput as B200, more HBM3e.
+    "b300": {"flops": 2250e12, "memory_size": 288e9, "memory_bandwidth": 8e12},  # 8 TB/s HBM3e
     "h100": {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12},  # 3.35 TB/s HBM3
     "h200": {"flops": 989e12, "memory_size": 141e9, "memory_bandwidth": 4.8e12},  # 4.8 TB/s HBM3e
     "a6000": {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9},  # 768 GB/s GDDR6
@@ -1857,7 +1859,7 @@ class ModelDims:
         if self.device_name is None and torch.cuda.is_available():
             self.device_name = get_device_name(torch.cuda.get_device_name(0))
 
-        assert self.hidden_size % self.num_attn_heads == 0, "hidden_size must be divisible by num_attn_heads"
+        assert self.head_dim > 0, "head_dim must be positive"
         assert self.num_attn_heads % self.num_kv_heads == 0, (
             "num_attn_heads must be divisible by num_kv_heads (GQA/MQA)"
         )
@@ -1925,7 +1927,12 @@ class ModelDims:
                 num_sliding_window_layers = layer_types.count("sliding_attention")
             else:
                 num_sliding_window_layers = config.num_hidden_layers
-        head_dim = getattr(config, "head_dim", hidden_size // config.num_attention_heads)
+        head_dim = getattr(config, "head_dim", None)
+        if head_dim is None:
+            assert hidden_size % config.num_attention_heads == 0, (
+                "hidden_size must be divisible by num_attention_heads"
+            )
+            head_dim = hidden_size // config.num_attention_heads
 
         num_linear_attn_layers = layer_types.count("linear_attention") if layer_types is not None else 0
         linear_attn_kwargs = {}
