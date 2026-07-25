@@ -481,7 +481,12 @@ training setup (`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` on
 K∈{16,32,64} baseline + NGU p∈{0.5,0.75,0.875} sweep structure used on
 deepscaler.
 
-**Runs:** [DeepCoder-1.5B data pipeline + K/NGU sweep launch](experiment.md#2026-07-25-deepcoder-15b-data-pipeline--kngu-sweep-launch-grpopy-oc)
+**Runs:** [DeepCoder-1.5B data pipeline + K/NGU sweep launch](experiment.md#2026-07-25-deepcoder-15b-data-pipeline--kngu-sweep-launch-grpopy-oc), [eval-only initial-model baseline](experiment.md#2026-07-25-deepcoder-15b-eval-only-baseline-initial-model-grpopy-oc)
+
+**Initial-model baseline (2026-07-25):** `--eval_only` run of the untrained
+`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` on the held-out eval sets
+(`eval_temperature=0.6`) scores `1.13` — the pre-training reference point the
+K/NGU sweep runs below should be compared against.
 
 **Status (2026-07-25):** All 6 sweep jobs launched and confirmed training
 cleanly. Getting here required fixing three real infrastructure bugs

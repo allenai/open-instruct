@@ -2067,3 +2067,29 @@ EXP=ngu0875_n8_k16_seed2 ./scripts/train/build_image_and_launch.sh scripts/train
 EXP=ngu0875_n8_k16_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
   --never_give_up 0.875 --seed 3
 ```
+
+## 2026-07-25: DeepCoder-1.5B eval-only baseline (initial model, grpo.py, OC)
+
+Single `--eval_only` run of the untrained initial model
+(`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`) on `deepcoder_1_5b.sh`'s held-out
+eval sets (`mnoukhov/deepcoder_lcbv5_test`, `mnoukhov/deepcoder_codeforces_test`),
+to get a pre-training baseline score to compare the K/NGU sweep runs against.
+`--eval_temperature 0.6` is already the script's default (set in the commit
+logged above), so no override needed. `--eval_only` skips learner/FSDP setup
+entirely (`grpo.py` only builds vLLM engines in this mode), so `NUM_GPUS` was
+reduced to 4 (matching `--vllm_num_engines 4`) instead of the training
+default of 8; `--send_slack_alerts False` to keep it quiet for a one-off
+check (learner-only flags like `--fsdp_shard_degree`/`--num_learners_per_node`
+are baked into the script but unused/harmless in eval-only mode).
+
+```
+NUM_GPUS=4 EXP=eval_only_initial ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --eval_only \
+  --send_slack_alerts False
+```
+
+Beaker: [01KYDC2HZ0TV4TNHJ9RKWMGRMC](https://beaker.org/ex/01KYDC2HZ0TV4TNHJ9RKWMGRMC)
+(exitCode=0, ~10 min runtime). wandb: [q9gelapy](https://wandb.ai/ai2-llm/open_instruct_internal/runs/q9gelapy).
+
+**Result:** `eval scores: 1.13`, avg sequence length 13565 tokens, at
+`eval_step=1` (labels the initial/pre-training model).
