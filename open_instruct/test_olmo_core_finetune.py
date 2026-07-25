@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 
 import torch
-from olmo_core.nn.attention import AttentionBackendName
+from olmo_core.nn.attention import AttentionBackendName, AttentionType
 from olmo_core.nn.moe.v2.ep_config import ExpertParallelPath
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from olmo_core.nn.moe.v2.olmo3 import build_olmo3_moe_config_from_hf_config
@@ -165,7 +165,8 @@ class Olmo3MoeModelConfigTest(unittest.TestCase):
         self.assertEqual(0.015, routed_blocks[0].routed_experts_router.lb_loss_weight)
         self.assertEqual(0.0001, routed_blocks[0].routed_experts_router.z_loss_weight)
 
-    def test_setup_model_derives_architecture_from_native_checkpoint(self) -> None:
+    @parameterized.expand([(AttentionType.default,), (AttentionType.fused_v2,)])
+    def test_setup_model_derives_architecture_from_native_checkpoint(self, attention_type: AttentionType) -> None:
         hf_config = Olmo3MoeConfig(
             vocab_size=64,
             hidden_size=32,
@@ -186,7 +187,9 @@ class Olmo3MoeModelConfigTest(unittest.TestCase):
             sliding_window=16,
             use_peri_ln=True,
         )
-        native_config = build_olmo3_moe_config_from_hf_config(hf_config, attention_backend=AttentionBackendName.torch)
+        native_config = build_olmo3_moe_config_from_hf_config(
+            hf_config, attention_backend=AttentionBackendName.torch, attention_type=attention_type
+        )
         tc = mock.MagicMock()
         tc.tokenizer.pad_token_id = 1
         tc.tokenizer.bos_token_id = None
@@ -210,6 +213,7 @@ class Olmo3MoeModelConfigTest(unittest.TestCase):
         self.assertEqual("OLMoDDPModel", type(model).__name__)
         self.assertEqual(64, derived_config.vocab_size)
         self.assertEqual(16, derived_config.resolved_block_configs[0].sequence_mixer.head_dim)
+        self.assertEqual(attention_type, derived_config.resolved_block_configs[0].sequence_mixer.name)
         self.assertTrue(derived_config.resolved_block_configs[0].use_peri_norm)
         self.assertIsNone(derived_config.resolved_block_configs[0].routed_experts)
         self.assertEqual(4, derived_config.resolved_block_configs[1].routed_experts.num_experts)

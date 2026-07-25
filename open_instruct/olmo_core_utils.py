@@ -16,7 +16,7 @@ from olmo_core import optim as olmo_optim
 from olmo_core.config import DType
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
-from olmo_core.nn.attention import AttentionBackendName
+from olmo_core.nn.attention import AttentionBackendName, AttentionConfig, AttentionType
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
@@ -433,8 +433,8 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     )
 
 
-def load_native_olmo3_moe_hf_config(checkpoint_path: str, tc: TokenizerConfig) -> transformers.PretrainedConfig | None:
-    """Derive the serving architecture embedded in a native OLMoDDP checkpoint."""
+def load_native_olmo3_moe_model_config(checkpoint_path: str) -> OLMoDDPModelConfig | None:
+    """Load the model architecture embedded in a native OLMoDDP checkpoint."""
     config_path = os.path.join(checkpoint_path, "config.json")
     if not os.path.isfile(config_path):
         return None
@@ -446,8 +446,16 @@ def load_native_olmo3_moe_hf_config(checkpoint_path: str, tc: TokenizerConfig) -
     class_name = native_model_data.get("_CLASS_", "")
     if not class_name.endswith("OLMoDDPModelConfig"):
         return None
+    return OLMoDDPModelConfig.from_dict(native_model_data)
 
-    native_model_config = OLMoDDPModelConfig.from_dict(native_model_data)
+
+def load_native_olmo3_moe_hf_config(checkpoint_path: str, tc: TokenizerConfig) -> transformers.PretrainedConfig | None:
+    """Derive the serving architecture embedded in a native OLMoDDP checkpoint."""
+    native_model_config = load_native_olmo3_moe_model_config(checkpoint_path)
+    if native_model_config is None:
+        return None
+    with open(os.path.join(checkpoint_path, "config.json")) as config_file:
+        checkpoint_config = json.load(config_file)
     dataset_config = checkpoint_config.get("dataset", {})
     max_position_embeddings = int(
         dataset_config.get("max_target_sequence_length") or dataset_config.get("sequence_length") or 8192
@@ -467,6 +475,7 @@ def setup_model(
     model_name_or_path = model_config_args.model_name_or_path
     hf_config: transformers.PretrainedConfig | None = None
     hf_arch_config: transformers.PretrainedConfig | None = None
+    native_model_config: OLMoDDPModelConfig | None = None
     if is_hf_checkpoint(model_name_or_path):
         logger.info(f"Detected HuggingFace checkpoint at {model_name_or_path}")
         hf_config = transformers.AutoConfig.from_pretrained(
@@ -477,7 +486,10 @@ def setup_model(
     else:
         logger.info(f"Detected olmo-core checkpoint at {model_name_or_path}")
         assert tc is not None, "tc (TokenizerConfig) is required for olmo-core checkpoints"
-        hf_arch_config = load_native_olmo3_moe_hf_config(model_name_or_path, tc)
+        native_model_config = load_native_olmo3_moe_model_config(model_name_or_path)
+        hf_arch_config = (
+            load_native_olmo3_moe_hf_config(model_name_or_path, tc) if native_model_config is not None else None
+        )
         if hf_arch_config is not None:
             logger.info("Derived Olmo3MoE architecture from the native checkpoint config")
             vocab_size = hf_arch_config.vocab_size
@@ -497,10 +509,20 @@ def setup_model(
             hf_arch_config = None
 
     if hf_arch_config is not None and hf_arch_config.model_type == "olmo3moe":
+        attention_type = AttentionType.default
+        if native_model_config is not None:
+            source_attentions = [block.sequence_mixer for block in native_model_config.resolved_block_configs]
+            if not all(isinstance(attention, AttentionConfig) for attention in source_attentions):
+                raise NotImplementedError("Native Olmo3MoE checkpoints require attention sequence mixers.")
+            attention_types = {AttentionType(attention.name) for attention in source_attentions}
+            if len(attention_types) != 1:
+                raise NotImplementedError("Native Olmo3MoE checkpoints require a uniform attention layout.")
+            attention_type = attention_types.pop()
         model_config = build_olmo3_moe_config_from_hf_config(
             hf_arch_config,
             dtype=DType.bfloat16,
             attention_backend=AttentionBackendName(model_config_args.attn_implementation),
+            attention_type=attention_type,
             ep_path=ExpertParallelPath(model_config_args.moe_expert_parallel_path),
             ep_capacity_factor=model_config_args.moe_expert_parallel_capacity_factor,
             router_aux_loss_weight=model_config_args.moe_router_aux_loss_weight,
