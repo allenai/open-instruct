@@ -80,6 +80,12 @@ def _numpy_dir_is_populated(numpy_dir: str) -> bool:
     return token_chunks == labels_chunks == metadata_chunks
 
 
+def _load_initial_native_checkpoint(trainer: Any, checkpoint_path: str) -> None:
+    """Initialize model weights from a native checkpoint without restoring training state."""
+    logger.info(f"Loading OLMo-core model weights from {checkpoint_path}...")
+    trainer.load_checkpoint(checkpoint_path, load_trainer_state=False, load_optim_state=False)
+
+
 def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
@@ -369,8 +375,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     elif trainer.checkpoint_loaded:
         logger.info(f"Resumed training state from {args.checkpoint.output_dir}")
     elif not use_hf_ckpt:
-        logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
-        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
+        _load_initial_native_checkpoint(trainer, args.model.model_name_or_path)
 
     logger.info("Starting training...")
     trainer.fit()

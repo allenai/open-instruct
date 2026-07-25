@@ -55,6 +55,17 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
             self.assertFalse(olmo_core_finetune._numpy_dir_is_populated(tmp))
 
 
+class NativeCheckpointInitializationTest(unittest.TestCase):
+    def test_loads_only_model_weights(self) -> None:
+        trainer = mock.MagicMock()
+
+        olmo_core_finetune._load_initial_native_checkpoint(trainer, "/checkpoints/pretrained")
+
+        trainer.load_checkpoint.assert_called_once_with(
+            "/checkpoints/pretrained", load_trainer_state=False, load_optim_state=False
+        )
+
+
 class IsHfCheckpointTest(unittest.TestCase):
     def test_local_dir_with_config_json_is_hf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
