@@ -115,6 +115,40 @@ class DeepSeekR1DistillQwenConfigTest(unittest.TestCase):
     def test_qwen2_style_model_types_includes_qwen2(self) -> None:
         self.assertIn("qwen2", olmo_core_utils.QWEN2_STYLE_HF_MODEL_TYPES)
 
+    def test_reverse_hf_conversion_mapping_is_registered(self) -> None:
+        self.assertIn("qwen2", olmo_hf_convert.MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_TEMPLATE_MAPPINGS)
+        reverse_mapping = olmo_hf_convert.MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_TEMPLATE_MAPPINGS["qwen2"]
+        for proj in ("q", "k", "v"):
+            key = f"blocks.{olmo_hf_convert.LAYER}.attention.w_{proj}.bias"
+            self.assertIn(key, reverse_mapping)
+
+    def test_w_out_bias_frozen(self) -> None:
+        config = olmo_core_utils.get_transformer_config(self.MODEL_ID, vocab_size=151936, attn_backend="torch")
+        self.assertEqual(config.freeze_params, ["blocks.*.attention.w_out.bias"])
+        model = config.build(init_device="meta")
+        frozen = [n for n, p in model.named_parameters() if not p.requires_grad]
+        self.assertEqual(len(frozen), 28)
+        self.assertTrue(all(n.endswith("attention.w_out.bias") for n in frozen))
+
+    def test_drop_frozen_zero_bias_for_hf_export(self) -> None:
+        state_dict = {
+            "blocks.0.attention.w_out.bias": "x",
+            "blocks.0.attention.w_out.weight": "y",
+            "blocks.0.attention.w_q.bias": "z",
+        }
+
+        class FakeHfConfig:
+            model_type = "qwen2"
+
+        dropped = olmo_core_utils.drop_frozen_zero_bias_for_hf_export(state_dict, FakeHfConfig())
+        self.assertEqual(set(dropped.keys()), {"blocks.0.attention.w_out.weight", "blocks.0.attention.w_q.bias"})
+
+        class OtherHfConfig:
+            model_type = "qwen3"
+
+        unchanged = olmo_core_utils.drop_frozen_zero_bias_for_hf_export(state_dict, OtherHfConfig())
+        self.assertEqual(unchanged, state_dict)
+
 
 if __name__ == "__main__":
     unittest.main()

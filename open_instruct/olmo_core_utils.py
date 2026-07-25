@@ -16,6 +16,7 @@ from olmo_core.config import DType
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
+from olmo_core.nn.conversion.state_mapping import StateMappingTemplate, StateType
 from olmo_core.nn.feed_forward import FeedForwardConfig
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
@@ -356,13 +357,58 @@ olmo_hf_convert.MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_WEIGHT_MAPPINGS["qwen2"] = {
 olmo_hf_convert.MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_MODULE_MAPPINGS["qwen2"] = {
     f"model.layers.{olmo_hf_convert.LAYER}.post_attention_layernorm": f"blocks.{olmo_hf_convert.LAYER}.feed_forward_norm"
 }
+# Same gap in the reverse (olmo-core -> HF) direction, used when exporting checkpoints and syncing
+# weights to vLLM (verify_can_save_as_hf/save_state_dict_as_hf below). Mirrors the "llama" entry's
+# norm renaming, plus the reverse bias mapping.
+olmo_hf_convert.MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_TEMPLATE_MAPPINGS["qwen2"] = {
+    f"blocks.{olmo_hf_convert.LAYER}.attention_norm.weight": StateMappingTemplate(
+        f"blocks.{olmo_hf_convert.LAYER}.attention_norm.weight",
+        f"model.layers.{olmo_hf_convert.LAYER}.input_layernorm.weight",
+        state_type=StateType.weight,
+    ),
+    f"blocks.{olmo_hf_convert.LAYER}.feed_forward_norm.weight": StateMappingTemplate(
+        f"blocks.{olmo_hf_convert.LAYER}.feed_forward_norm.weight",
+        f"model.layers.{olmo_hf_convert.LAYER}.post_attention_layernorm.weight",
+        state_type=StateType.weight,
+    ),
+    f"blocks.{olmo_hf_convert.LAYER}.attention.w_q.bias": StateMappingTemplate(
+        f"blocks.{olmo_hf_convert.LAYER}.attention.w_q.bias",
+        f"model.layers.{olmo_hf_convert.LAYER}.self_attn.q_proj.bias",
+        state_type=StateType.weight,
+    ),
+    f"blocks.{olmo_hf_convert.LAYER}.attention.w_k.bias": StateMappingTemplate(
+        f"blocks.{olmo_hf_convert.LAYER}.attention.w_k.bias",
+        f"model.layers.{olmo_hf_convert.LAYER}.self_attn.k_proj.bias",
+        state_type=StateType.weight,
+    ),
+    f"blocks.{olmo_hf_convert.LAYER}.attention.w_v.bias": StateMappingTemplate(
+        f"blocks.{olmo_hf_convert.LAYER}.attention.w_v.bias",
+        f"model.layers.{olmo_hf_convert.LAYER}.self_attn.v_proj.bias",
+        state_type=StateType.weight,
+    ),
+}
 
 # Model_type "qwen2" HF checkpoints that only have QKV attention bias, no output-projection bias.
 # olmo-core's AttentionConfig.bias applies uniformly to all four projections (no per-projection
 # control), so building these with bias=True (to get the real QKV bias) also creates a w_out.bias
-# parameter with no counterpart in the source checkpoint. reload_hf_checkpoint_after_parallelization
-# zeros it after loading for exact fidelity, since nn.Linear's default init is small random, not zero.
+# parameter with no counterpart in the source checkpoint. The preset below freezes it via
+# TransformerConfig.freeze_params, reload_hf_checkpoint_after_parallelization zeros it after
+# loading (nn.Linear's default init is small random, not zero), and drop_frozen_zero_bias_for_hf_export
+# strips it before HF export (verify_can_save_as_hf/save_state_dict_as_hf) since HF has no slot for
+# it -- lossless given it's pinned at exactly zero for the model's entire lifetime.
 QWEN2_STYLE_HF_MODEL_TYPES = frozenset({"qwen2"})
+
+
+def drop_frozen_zero_bias_for_hf_export(state_dict: dict[str, Any], hf_config: Any) -> dict[str, Any]:
+    """Strip `*.attention.w_out.bias` entries for qwen2-style models before HF conversion.
+
+    These params exist only because olmo-core's AttentionConfig.bias is an all-or-nothing flag
+    (see QWEN2_STYLE_HF_MODEL_TYPES above); they're frozen at zero for the model's entire
+    lifetime, so dropping them before HF export (which has no slot for them) is exact, not lossy.
+    """
+    if getattr(hf_config, "model_type", None) not in QWEN2_STYLE_HF_MODEL_TYPES:
+        return state_dict
+    return {k: v for k, v in state_dict.items() if not k.endswith("attention.w_out.bias")}
 
 
 def _deepseek_r1_distill_qwen_1_5b(vocab_size: int, attn_backend: str) -> TransformerConfig:
@@ -388,6 +434,9 @@ def _deepseek_r1_distill_qwen_1_5b(vocab_size: int, attn_backend: str) -> Transf
         attn_backend=AttentionBackendName(attn_backend),
     )
     config.block.sequence_mixer.bias = True
+    # Real Qwen2 has no o_proj bias; freeze ours at zero so it's a true no-op for the model's
+    # entire lifetime (not just at init), matching real Qwen2's forward pass exactly.
+    config.freeze_params = ["blocks.*.attention.w_out.bias"]
     return config
 
 
@@ -568,6 +617,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
+    olmo_core_state = drop_frozen_zero_bias_for_hf_export(olmo_core_state, hf_config)
 
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
 
@@ -604,6 +654,7 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
+    state_dict = drop_frozen_zero_bias_for_hf_export(state_dict, hf_config)
     converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
