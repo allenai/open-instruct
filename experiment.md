@@ -1614,9 +1614,12 @@ Beaker links and outcome:
   `--reinforce_ada_est True`, image built from commit `871ee88f7`:
   1. seed 1: [Beaker](https://beaker.org/ex/01KYBC5WT2F0G2X4SGS0YKXDYD)
   2. seed 2: [Beaker](https://beaker.org/ex/01KYBC73KRNTEWZ6JZNTJ39RAN)
-  3. seed 3: [Beaker](https://beaker.org/ex/01KYBC8AM8PT1V6X1SEA15PSE2)
+  3. seed 3: [Beaker](https://beaker.org/ex/01KYBCBTWH74DZRZ7HWAQBN5K9) (first
+     attempt `01KYBC8AM8PT1V6X1SEA15PSE2` was auto-canceled ~1 min after
+     scheduling: node `01KQ0MFSCB5MJE2HZ3CVBAHTQJ` was cordoned for an
+     unrecoverable SXid GPU error, unrelated to this change; relaunched.)
 
   All three jobs were kicked off successfully by mason.py (`ai2/jupiter`,
-  8 GPUs each, `--priority urgent`, `--preemptible`); training-progress outcome
-  still TBD, to be checked and recorded once the runs have made meaningful
-  progress.
+  8 GPUs each, `--priority urgent`, `--preemptible`) and confirmed `scheduled`
+  (not stuck in `created`). Training-progress/convergence outcome still TBD,
+  to be checked and recorded once the runs have made meaningful progress.
