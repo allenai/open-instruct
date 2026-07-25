@@ -1753,6 +1753,63 @@ Beaker links and outcome:
   (not stuck in `created`). Training-progress/convergence outcome still TBD,
   to be checked and recorded once the runs have made meaningful progress.
 
+**Update 2026-07-25: all 3 seeds crashed within ~1-3 min (`exitCode=1`),
+fix + relaunch.** All three (`01KYBC5WT2F0G2X4SGS0YKXDYD`,
+`01KYBC73KRNTEWZ6JZNTJ39RAN`, `01KYBCBTWH74DZRZ7HWAQBN5K9`) finalized around
+2026-07-25 00:59-01:02 with:
+
+```
+ValueError: Group sample_count=32 exceeds attempt_count(1) * samples_per_prompt(16);
+attempt_count must cover every sample.
+```
+raised in `pad_response_lengths_for_attempt_counts` (`open_instruct/utils.py`),
+called from `StepTimingCallback.post_step` (`open_instruct/grpo_callbacks.py`)
+-> `utils.calculate_utilization_metrics`. Root cause: this helper's negative-
+`pad_count` guard assumed `sample_count` only ever grows via `never_give_up`'s
+multi-round merge (which increments `attempt_count` in lockstep), but
+`reinforce_ada_est` also changes a group's `sample_count` away from the
+baseline `samples_per_prompt` (bucketing a `pass_count`-0/1 prompt to 32
+samples when `--num_samples_per_prompt_rollout 16`) via the
+`never_give_up == 0` code path in `maybe_filter_group`
+(`open_instruct/data_loader.py`), which never touches `attempt_count` at all
+(stays at the dataclass default `1`). So `32 > 1*16` deterministically raises
+on the very first low-`pass_count` prompt in a batch -- this is a
+guaranteed-to-trigger bug for `reinforce_ada_est`, not an intermittent race.
+
+Fix (commit `f26cba8ab`): in `calculate_utilization_metrics`, correct
+`prompt_attempt_counts` up to `ceil(sample_count / samples_per_prompt)`
+before both `expand_prompt_lengths_for_response_groups` and
+`pad_response_lengths_for_attempt_counts` consume it, so their alignment
+invariant (prompt-length attribution shifting for every later group in the
+batch if left uncorrected) holds regardless of which feature changed
+`sample_count`. Also made `pad_response_lengths_for_attempt_counts` warn-and-
+skip padding instead of raise, as a defense-in-depth safety net (this
+function is explicitly documented as observability-only, not
+correctness-critical for training). Added
+`test_utilization_metrics_handles_under_counted_attempt_count` and updated
+`test_pad_response_lengths_for_attempt_counts_raises_on_impossible_attempt_count`
+(renamed to `..._skips_padding_...`, no longer expects a raise) in
+`open_instruct/test_utils.py`. `make style && make quality` and
+`uv run pytest open_instruct/test_utils.py -k "pad_response_lengths or utilization_metrics"`
+both pass (5/5); full `test_utils.py` has 6 pre-existing unrelated
+`CombineDatasetTest` failures confirmed present on `main` too (not caused by
+this change).
+
+Relaunched all 3 seeds from the fixed commit (`ai2/oe-adapt-code` workspace,
+`--priority high` per request), same config otherwise
+(`--reinforce_ada_est True`, `open_instruct/grpo.py`, OC=true):
+
+1. seed 1: [Beaker](https://beaker.org/ex/01KYDA56FVZYR0GKRAZCCE44AX)
+2. seed 2: [Beaker](https://beaker.org/ex/01KYDA5Q7QAYSQRMJP6RKPDZ3B)
+3. seed 3: [Beaker](https://beaker.org/ex/01KYDA66PXAZ6FN53GH9X4KR4T)
+
+(Note: first launch attempt accidentally omitted `OC=true` and ran on
+`grpo_fast.py` -- `01KYDA45NWE8WRJV07R5H33R6A` -- caught immediately and
+stopped before it made progress; not a real run.)
+
+All three confirmed `started` shortly after launch. Training-progress/
+convergence outcome still TBD.
+
 ## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
 
 Picked up a handoff from another session/machine that had written

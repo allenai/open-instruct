@@ -444,9 +444,30 @@ failures. Along the way, found and fixed an unrelated latent bug in the debug
 script: single-learner-GPU configs need `--single_gpu_mode True` or the model
 never gets cast to bf16 (FlashAttention dtype crash) — doesn't affect the
 production launch, which uses 4 learner GPUs. `test_grpo_fast.py` (22 passed,
-1 skipped) shows no regression. 3-seed production launch is now running on
-`ai2/jupiter` (links in experiment.md); training-outcome/convergence findings
-still TBD pending run progress.
+1 skipped) shows no regression.
+
+**Update:** all 3 production seeds crashed immediately (~1-3 min in) with a
+`ValueError` from `pad_response_lengths_for_attempt_counts`
+(`open_instruct/utils.py`) — a real, guaranteed-to-trigger bug (not
+intermittent): that function's negative-`pad_count` guard assumed
+`sample_count` only ever exceeds the baseline `samples_per_prompt` via
+`never_give_up`'s multi-round merge (which increments `attempt_count` in
+lockstep), but `reinforce_ada_est` also changes `sample_count` per-prompt
+(bucketing low-`pass_count` prompts up to 32 vs. the baseline
+`--num_samples_per_prompt_rollout 16`) while going through the
+`never_give_up == 0` code path, which never touches `attempt_count`. So any
+batch containing a `pass_count` 0/1 prompt deterministically raised. Fixed
+(commit `f26cba8ab`) by correcting `prompt_attempt_counts` up to
+`ceil(sample_count / samples_per_prompt)` at the point
+`calculate_utilization_metrics` consumes it (keeps
+`expand_prompt_lengths_for_response_groups`'s prompt-length attribution
+aligned with the padded response array), plus making the low-level padding
+function warn-and-skip instead of raise as a defense-in-depth safety net,
+since it's an observability-only metric. See
+[experiment.md](experiment.md#2026-07-24-reinforce_ada_est-implementation--3-seed-launch-grpopy-oc)
+for the full root-cause writeup. All 3 seeds relaunched from the fixed
+commit; training-outcome/convergence findings still TBD pending run
+progress.
 
 ---
 
