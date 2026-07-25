@@ -1883,10 +1883,33 @@ seed 1 (resumed from step300): [Beaker](https://beaker.org/ex/01KYDKNJ9TSPTRXYQ1
 -- not a real run.)
 
 Seed 3's two prior relaunches did *not* get this treatment (each restarted
-from step 0) since this was only noticed at seed 1's crash; if seed 3's
-current (3rd) attempt crashes again, resume it the same way from its
-checkpoint dir `.../deletable_checkpoint_states/michaeln/1785012503_30650`
-rather than relaunching plain.
+from step 0) since this was only noticed at seed 1's crash.
+
+**seed 3's 3rd attempt also crashed, identical signature, at
+`training_step` ~330-ish (2026-07-25 23:22-23:23)**: same
+`Application timeout caused pair closure` / gloo `unbound_buffer.cc`
+1800000ms timeout. This is the 4th occurrence of this exact signature in
+~4 hours -- 3 of the 4 have now hit seed 3 specifically (on 3 different
+nodes/IPs each time, ruling out one bad node), vs. 1 for seed 1 and 0 for
+seed 2. Resumed from the checkpoint dir noted above (had a `step300`
+checkpoint saved ~30 min before this crash):
+
+```
+OC=true WORKSPACE=ai2/oe-adapt-code PRIORITY=high EXP=reinforce_ada_est_fixed_seed3_resume \
+  ./scripts/train/build_image_and_launch.sh scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --reinforce_ada_est True --seed 3 \
+  --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1785012503_30650
+```
+
+seed 3 (resumed from step300, 4th attempt): [Beaker](https://beaker.org/ex/01KYDSHYB8ZKV2SFT31MNG6M3T)
+
+At this point (4 crashes, same exact signature, disproportionately on
+seed 3) this looks less like isolated bad luck and more like either a
+genuine `ai2/jupiter`-wide network instability window, or something about
+this specific job's placement/resource profile that keeps triggering
+30-min collective timeouts -- worth raising with infra/other users of the
+cluster if it keeps recurring, rather than continuing to blindly relaunch
+indefinitely.
 
 Training-progress/convergence outcome still TBD.
 
