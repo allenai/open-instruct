@@ -12,9 +12,11 @@ import torch
 import torch.distributed as dist
 import transformers
 from olmo_core import optim as olmo_optim
+from olmo_core.config import DType
 from olmo_core.data import TokenizerConfig as OLMoCoreTokenizerConfig
 from olmo_core.distributed.utils import get_rank, get_world_size, is_distributed
 from olmo_core.nn.attention import AttentionBackendName
+from olmo_core.nn.feed_forward import FeedForwardConfig
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
@@ -282,6 +284,13 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     logger.info("Reloading HuggingFace weights after parallelization...")
     sd = train_module.model.state_dict()
     load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    if is_hf_checkpoint(model_name_or_path):
+        hf_model_type = getattr(transformers.AutoConfig.from_pretrained(model_name_or_path), "model_type", None)
+        if hf_model_type in QWEN2_STYLE_HF_MODEL_TYPES:
+            with torch.no_grad():
+                for key, tensor in sd.items():
+                    if key.endswith("attention.w_out.bias"):
+                        tensor.zero_()
     train_module.model.load_state_dict(sd)
 
 
@@ -330,6 +339,63 @@ def is_hf_checkpoint(path: str) -> bool:
     return not os.path.isabs(path)
 
 
+# olmo-core's HF conversion has no "qwen2" entry (only "llama"/"qwen3"/etc., see
+# olmo_core.nn.hf.convert.MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_*_MAPPINGS), so Qwen2-architecture
+# checkpoints (e.g. DeepSeek-R1-Distill-Qwen-1.5B, model_type="qwen2") fail to convert: the generic
+# mapping sends both `input_layernorm` and `post_attention_layernorm` to the same `attention_norm`
+# key (dropping the pre-MLP norm entirely), and has no entry at all for qwen2's q/k/v attention
+# bias (Qwen2, unlike Qwen3, uses biased QKV projections). These dicts are explicitly documented as
+# configurable by olmo-core, so patch in a "qwen2" entry mirroring the existing "llama"/"qwen3" one
+# plus the bias mapping. Verified this produces bit-exact logits against the HF model.
+olmo_hf_convert.MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_WEIGHT_MAPPINGS["qwen2"] = {
+    f"model.layers.{olmo_hf_convert.LAYER}.post_attention_layernorm.weight": f"blocks.{olmo_hf_convert.LAYER}.feed_forward_norm.weight",
+    f"model.layers.{olmo_hf_convert.LAYER}.self_attn.q_proj.bias": f"blocks.{olmo_hf_convert.LAYER}.attention.w_q.bias",
+    f"model.layers.{olmo_hf_convert.LAYER}.self_attn.k_proj.bias": f"blocks.{olmo_hf_convert.LAYER}.attention.w_k.bias",
+    f"model.layers.{olmo_hf_convert.LAYER}.self_attn.v_proj.bias": f"blocks.{olmo_hf_convert.LAYER}.attention.w_v.bias",
+}
+olmo_hf_convert.MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_MODULE_MAPPINGS["qwen2"] = {
+    f"model.layers.{olmo_hf_convert.LAYER}.post_attention_layernorm": f"blocks.{olmo_hf_convert.LAYER}.feed_forward_norm"
+}
+
+# Model_type "qwen2" HF checkpoints that only have QKV attention bias, no output-projection bias.
+# olmo-core's AttentionConfig.bias applies uniformly to all four projections (no per-projection
+# control), so building these with bias=True (to get the real QKV bias) also creates a w_out.bias
+# parameter with no counterpart in the source checkpoint. reload_hf_checkpoint_after_parallelization
+# zeros it after loading for exact fidelity, since nn.Linear's default init is small random, not zero.
+QWEN2_STYLE_HF_MODEL_TYPES = frozenset({"qwen2"})
+
+
+def _deepseek_r1_distill_qwen_1_5b(vocab_size: int, attn_backend: str) -> TransformerConfig:
+    """DeepSeek-R1-Distill-Qwen-1.5B (Qwen2.5-1.5B architecture, HF model_type='qwen2').
+
+    Not one of olmo-core's built-in TransformerConfig presets (only Qwen3/OLMo families are
+    shipped), so this is defined directly from the HF checkpoint's config.json. Qwen2 has no
+    QK-norm (unlike Qwen3) but does use QKV attention bias, hence the post-hoc bias override
+    (see QWEN2_STYLE_HF_MODEL_TYPES above for the w_out.bias caveat).
+    """
+    config = TransformerConfig.llama_like(
+        d_model=1536,
+        vocab_size=vocab_size,
+        n_layers=28,
+        n_heads=12,
+        n_kv_heads=2,
+        head_dim=128,
+        rope_theta=10_000,
+        rope_full_precision=False,
+        layer_norm_eps=1e-6,
+        tie_word_embeddings=False,
+        feed_forward=FeedForwardConfig(hidden_size=8960, bias=False, dtype=DType.float32),
+        attn_backend=AttentionBackendName(attn_backend),
+    )
+    config.block.sequence_mixer.bias = True
+    return config
+
+
+CUSTOM_MODEL_CONFIG_BUILDERS: dict[str, Any] = {
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B": _deepseek_r1_distill_qwen_1_5b
+}
+
+
 OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "allenai/OLMo-2-0425-1B": "olmo2_1B_v2",
     "allenai/OLMo-2-1124-7B": "olmo2_7B",
@@ -364,6 +430,10 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     Raises:
         ValueError: If model/config not found.
     """
+    custom_builder = CUSTOM_MODEL_CONFIG_BUILDERS.get(model_name_or_config)
+    if custom_builder is not None:
+        return custom_builder(vocab_size, attn_backend)
+
     config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_config)
     if config_name is None:
         config_name = model_name_or_config
