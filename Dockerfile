@@ -1,6 +1,6 @@
 ARG CUDA_VERSION=12
-FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS cuda12
-FROM nvidia/cuda:13.0.3-devel-ubuntu22.04 AS cuda13
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 AS cuda12
+FROM nvidia/cuda:13.0.3-cudnn-devel-ubuntu22.04 AS cuda13
 FROM cuda${CUDA_VERSION}
 
 ARG CUDA_VERSION
@@ -11,6 +11,8 @@ ENV TZ="America/Los_Angeles" \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    cmake \
+    ninja-build \
     curl \
     wget \
     git \
@@ -78,6 +80,14 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
+
+# OLMo-core MoE permutation kernels depend on Transformer Engine. NVIDIA ships
+# the PyTorch binding as source, so install it after Torch with build isolation disabled.
+ARG TE_VERSION=2.9
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    uv pip install --python .venv/bin/python --no-build-isolation \
+        "transformer-engine[pytorch,core-cu${CUDA_VERSION}]==${TE_VERSION}" \
+    && .venv/bin/python -c "from transformer_engine.pytorch.permutation import moe_permute, moe_sort_chunks_by_index, moe_unpermute"
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
