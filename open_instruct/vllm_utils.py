@@ -330,6 +330,8 @@ def process_completed_request(request_id, outs, current_time, use_tools, request
 
     total_generation_tokens = sum(len(completion.token_ids) for out in outs for completion in out.outputs)
     metadata = request_metadata[request_id]
+    # Continuation prefixes are replayed tokens, not new generation work.
+    total_generation_tokens -= sum(len(prefix.tokens) for prefix in metadata.get("continuations") or [])
 
     response_ids = [list(out.token_ids) for out in final_output.outputs]
     finish_reasons = [out.finish_reason for out in final_output.outputs]
@@ -445,6 +447,7 @@ def _prefetch_worker(actor: "LLMRayActor") -> None:
 def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
     request_id = make_request_id(request)
     sampling_params = dataclasses.replace(request.generation_config, n=1)
+    continuations = request.continuations or []
 
     actor.request_metadata[request_id] = {
         "is_eval": request.is_eval,
@@ -458,11 +461,15 @@ def add_request(actor: "LLMRayActor", request: PromptRequest) -> None:
         "active_tools": request.active_tools,
         "env_config": request.env_config,
         "ground_truth": request.ground_truth,
+        "continuations": continuations,
     }
 
     for j in range(request.generation_config.n):
         seed = request.generation_config.seed + j if request.generation_config.seed is not None else None
         sub_sampling_params = dataclasses.replace(sampling_params, seed=seed)
+        if j < len(continuations):
+            # Resumed completions carry a larger total budget: prefix tokens + one more chunk.
+            sub_sampling_params = dataclasses.replace(sub_sampling_params, max_tokens=continuations[j].max_tokens)
         sub_request_id = f"{request_id}_{j}"
         actor.active_tasks[sub_request_id] = asyncio.run_coroutine_threadsafe(
             process_request(actor, sub_request_id, sub_sampling_params), actor.loop
@@ -956,6 +963,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     cumulative_logprob = 0.0
     rollout = RolloutState()
 
+    request_index = split_request_id(sub_request_id)["request_index"]
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
     original_prompt = request_metadata["prompt_token_ids"]
@@ -963,6 +971,17 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     env_config: EnvConfig = request_metadata.get("env_config", EnvConfig())
     current_prompt = list(original_prompt)
     max_model_len = actor.llm_engine.model_config.max_model_len
+
+    continuations = request_metadata.get("continuations") or []
+    if request_index < len(continuations):
+        # Never-give-up continuation: resume a length-truncated completion. The prefix becomes
+        # part of the vLLM prompt, but stays part of the *response* in the returned sample, so
+        # its tokens/masks/logprobs (from the attempt that generated it) are re-used as-is.
+        prefix = continuations[request_index]
+        response_tokens.extend(prefix.tokens)
+        response_logprobs.extend(prefix.logprobs)
+        response_masks.extend(prefix.masks)
+        current_prompt.extend(prefix.tokens)
 
     configured_tools = set(actor.pools.keys())
     allowed_tools = configured_tools & set(active_tools) if active_tools is not None else set(configured_tools)

@@ -42,6 +42,7 @@ from open_instruct.data_loader_utils import (
     get_never_give_up_retry_suffix,
     merge_generation_results,
     pop_pending_never_give_up_state,
+    select_generation_result,
     should_accept_never_give_up_batch,
     store_pending_never_give_up_state,
 )
@@ -461,6 +462,11 @@ class StreamingDataLoaderConfig:
     """Probability in [0.0, 1.0] that a zero-std prompt is requeued as a never-give-up retry."""
     never_give_up_accept_on: Literal["better", "different"] = "better"
     """When to accept a never-give-up retry against the chain's previous best reward."""
+    ngu_seq_multiplier: int = 1
+    """On a never-give-up retry, resume length-truncated completions instead of discarding them,
+    granting `response_length` more tokens per retry up to `response_length * ngu_seq_multiplier`
+    total. 1 (default) disables continuations; e.g. 2 with an 8k response_length lets unfinished
+    completions grow to 16k, like checking in halfway on a 16k budget."""
     maintain_pending_ngu_age: int = 4
     """Max age (in model steps) of pending never_give_up completions to keep when a chain is accepted.
     Set to -1 to keep all pending completions regardless of age."""
@@ -544,12 +550,23 @@ class StreamingDataLoaderConfig:
     # Computed at post_init
     max_possible_score: float = 1.0
 
+    @property
+    def total_response_length(self) -> int:
+        """Max response tokens a single completion can reach, including never-give-up continuations."""
+        return self.response_length * self.ngu_seq_multiplier
+
     def __post_init__(self):
         if self.eval_response_length is None:
             self.eval_response_length = self.response_length
 
-        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
-            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        if not isinstance(self.ngu_seq_multiplier, int) or self.ngu_seq_multiplier < 1:
+            raise ValueError(f"`ngu_seq_multiplier` must be an integer >= 1, got {self.ngu_seq_multiplier!r}.")
+        if self.ngu_seq_multiplier > 1 and self.never_give_up == 0:
+            raise ValueError("`ngu_seq_multiplier` > 1 requires `never_give_up` > 0 to ever trigger a continuation.")
+
+        assert self.pack_length >= self.max_prompt_token_length + self.total_response_length, (
+            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and "
+            "`response_length * ngu_seq_multiplier`!"
         )
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
@@ -732,6 +749,7 @@ class BatchStatistics:
     no_resampled_prompts: int
     total_prompts: int
     prompt_sample_counts: list[int] = field(default_factory=list)
+    prompt_attempt_counts: list[int] = field(default_factory=list)
     prompt_baseline_sample_counts: list[int] = field(default_factory=list)
     prompt_baseline_reward_sums: list[float] = field(default_factory=list)
     per_group_generation_times: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
@@ -804,6 +822,7 @@ def add_prompt_to_generator(
     base_env_config: EnvConfig,
     ground_truth_overrides: dict[int, Any] | None = None,
     prompt_id_suffix: str | None = None,
+    continuations: list[data_types.ContinuationPrefix] | None = None,
 ) -> None:
     index = int(example["index"])
 
@@ -822,6 +841,7 @@ def add_prompt_to_generator(
             active_tools=example.get(TOOLS_COLUMN_KEY),
             env_config=env_config,
             ground_truth=ground_truth,
+            continuations=continuations or [],
         )
     )
 
@@ -844,6 +864,12 @@ class Group:
     sample_count: int
     baseline_sample_count: int
     baseline_reward_sum: float
+    attempt_count: int = 1
+    """Number of `num_samples_per_prompt_rollout`-sized generation rounds behind this group.
+    1 outside NGU, or when NGU merges whole rounds. With `ngu_seq_multiplier` continuations, a
+    round's completions can split across the buffered and continued paths, so `sample_count` is
+    no longer always a multiple of the per-round sample count — `attempt_count` tracks the true
+    round count for utilization accounting instead."""
 
 
 @dataclass
@@ -854,6 +880,8 @@ class GroupFilterResult:
     never_give_up: bool
     prompt_id: str
     index: int
+    continuations: list[data_types.ContinuationPrefix] = field(default_factory=list)
+    """Length-truncated completions to resume on the never_give_up retry."""
 
 
 def process_group(
@@ -918,6 +946,35 @@ def maybe_dont_resample_prompt(
     return True
 
 
+def _build_ngu_continuations(
+    result: data_types.GenerationResult, response_length: int, ngu_seq_multiplier: int
+) -> tuple[list[int], list[data_types.ContinuationPrefix]]:
+    """Pick the length-truncated completions that can still grow and package them as continuations.
+
+    Returns (continued sample indices, continuation prefixes). A completion is continuable when it
+    stopped on the token budget ("length") and is still below `response_length * ngu_seq_multiplier`
+    total response tokens; each retry grants `response_length` more tokens up to that cap.
+    """
+    if ngu_seq_multiplier <= 1:
+        return [], []
+    response_cap = response_length * ngu_seq_multiplier
+    continue_indices = [
+        i
+        for i, finish_reason in enumerate(result.finish_reasons)
+        if finish_reason == "length" and len(result.responses[i]) < response_cap
+    ]
+    continuations = [
+        data_types.ContinuationPrefix(
+            tokens=list(result.responses[i]),
+            masks=list(result.masks[i]),
+            logprobs=list(result.logprobs[i]),
+            max_tokens=min(len(result.responses[i]) + response_length, response_cap),
+        )
+        for i in continue_indices
+    ]
+    return continue_indices, continuations
+
+
 def maybe_filter_group(
     group: Group,
     tokenizer: PreTrainedTokenizer,
@@ -930,6 +987,8 @@ def maybe_filter_group(
     never_give_up_state_lock: Any,
     maintain_pending_ngu_age: int,
     maintain_pending_ngu_completions: bool,
+    ngu_seq_multiplier: int = 1,
+    response_length: int = 0,
 ) -> GroupFilterResult:
     result = group.result
     assert result.prompt_id is not None
@@ -982,12 +1041,21 @@ def maybe_filter_group(
         never_give_up_prompt = not solved_prompt and np.random.random() < never_give_up
 
         filtered_results = []
+        continuations: list[data_types.ContinuationPrefix] = []
         if never_give_up_prompt:
-            if maintain_pending_ngu_completions:
-                pending_ngu.results.append(result)
-                pending_ngu.metrics.append(result.reward_metrics)
-            pending_ngu.response_count += current_sample_count
-            pending_ngu.reward_sum += current_reward_sum
+            continue_indices, continuations = _build_ngu_continuations(result, response_length, ngu_seq_multiplier)
+            # Continued completions come back stitched into the retry result, so buffer and count
+            # only the completions this attempt is done with.
+            buffered_result = result
+            if continue_indices:
+                keep_indices = sorted(set(range(len(result.responses))) - set(continue_indices))
+                buffered_result = select_generation_result(result, keep_indices) if keep_indices else None
+            if buffered_result is not None:
+                if maintain_pending_ngu_completions:
+                    pending_ngu.results.append(buffered_result)
+                    pending_ngu.metrics.append(buffered_result.reward_metrics)
+                pending_ngu.response_count += len(buffered_result.responses)
+                pending_ngu.reward_sum += float(sum(buffered_result.reward_scores or []))
             store_pending_never_give_up_state(
                 never_give_up_state,
                 chain_id,
@@ -996,7 +1064,11 @@ def maybe_filter_group(
                 current_attempt_count,
                 never_give_up_state_lock,
             )
-            logger.debug("[Data Preparation Thread] Buffered never_give_up prompt %s", prompt_id)
+            logger.debug(
+                "[Data Preparation Thread] Buffered never_give_up prompt %s (%d continuations)",
+                prompt_id,
+                len(continuations),
+            )
         else:
             filtered_results.extend(pending_ngu.results)
             filtered_results.append(result)
@@ -1008,6 +1080,7 @@ def maybe_filter_group(
             never_give_up=never_give_up_prompt,
             prompt_id=prompt_id,
             index=index,
+            continuations=continuations,
         )
 
     if pending_ngu.results:
@@ -1025,6 +1098,7 @@ def maybe_filter_group(
 
     group.baseline_sample_count = pending_ngu.response_count + current_sample_count
     group.baseline_reward_sum = pending_ngu.reward_sum + current_reward_sum
+    group.attempt_count = current_attempt_count
 
     return GroupFilterResult(
         group=group,
@@ -1055,9 +1129,11 @@ def maybe_replenish_prompt(
         prompt_id_suffix = get_never_give_up_retry_suffix(
             filter_result.prompt_id, iter_dataloader._epoch, filter_result.index
         )
+        continuations = filter_result.continuations
     else:
         replacement_example = next(iter_dataloader)
         prompt_id_suffix = None
+        continuations = None
 
     add_prompt_to_generator(
         replacement_example,
@@ -1068,6 +1144,7 @@ def maybe_replenish_prompt(
         base_env_config=base_env_config,
         ground_truth_overrides=ground_truth_overrides,
         prompt_id_suffix=prompt_id_suffix,
+        continuations=continuations,
     )
 
 
@@ -1100,6 +1177,7 @@ def make_batch_from_groups(
     all_percent_solved = []
     all_model_steps = []
     all_prompt_sample_counts = []
+    all_prompt_attempt_counts = []
     all_prompt_baseline_sample_counts = []
     all_prompt_baseline_reward_sums = []
 
@@ -1139,6 +1217,7 @@ def make_batch_from_groups(
         all_percent_solved.append(group.percent_solved)
         all_model_steps.extend([result.model_step] * len(result.responses))
         all_prompt_sample_counts.append(group.sample_count)
+        all_prompt_attempt_counts.append(group.attempt_count)
         all_prompt_baseline_sample_counts.append(group.baseline_sample_count)
         all_prompt_baseline_reward_sums.append(group.baseline_reward_sum)
 
@@ -1247,6 +1326,7 @@ def make_batch_from_groups(
         no_resampled_prompts=no_resampled_prompts,
         total_prompts=total_prompts,
         prompt_sample_counts=all_prompt_sample_counts,
+        prompt_attempt_counts=all_prompt_attempt_counts,
         prompt_baseline_sample_counts=all_prompt_baseline_sample_counts,
         prompt_baseline_reward_sums=all_prompt_baseline_reward_sums,
         per_group_generation_times=np.array(per_group_generation_times, dtype=float),
@@ -1288,6 +1368,7 @@ def accumulate_inference_batches(
     never_give_up_state_lock: Any = None,
     maintain_pending_ngu_age: int = 2,
     maintain_pending_ngu_completions: bool = True,
+    ngu_seq_multiplier: int = 1,
 ) -> (
     tuple[data_types.GenerationResult, Batch, dict, BatchStatistics]
     | tuple[data_types.ShutdownSentinel | None, None, None, None]
@@ -1402,6 +1483,8 @@ def accumulate_inference_batches(
             never_give_up_state_lock=never_give_up_state_lock,
             maintain_pending_ngu_age=maintain_pending_ngu_age,
             maintain_pending_ngu_completions=maintain_pending_ngu_completions,
+            ngu_seq_multiplier=ngu_seq_multiplier,
+            response_length=generation_config.max_tokens or 0,
         )
 
         filtered_dataset_key = dataset_metric_key(group.dataset)
@@ -1726,6 +1809,7 @@ class DataPreparationActor:
                 never_give_up_state_lock=self.never_give_up_state_lock,
                 maintain_pending_ngu_age=self.config.maintain_pending_ngu_age,
                 maintain_pending_ngu_completions=self.config.maintain_pending_ngu_completions,
+                ngu_seq_multiplier=self.config.ngu_seq_multiplier,
             )
             logger.info(
                 f"[DataPreparationActor] Step {self.training_step}: accumulate_inference_batches returned, result type: {type(result).__name__}"

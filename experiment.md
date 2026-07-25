@@ -544,6 +544,163 @@ were relaunched as full-node `NUM_GPUS=8` jobs to avoid packing.
 | `ngu0875_dapo_n8_k16` | 2 | 1700 | ux8zlyun | [01KX4EFPEA1F4WMAMQSKY982H3](https://beaker.org/ex/01KX4EFPEA1F4WMAMQSKY982H3) |
 | `ngu0875_dapo_n8_k16` | 3 | 1000 | 0f6tb0za | [01KX4EK2WFQPKYQBFWCECN5YM5](https://beaker.org/ex/01KX4EK2WFQPKYQBFWCECN5YM5) |
 
+## NGU sequence-continuation (`--ngu_seq_multiplier`): 8k×2 vs plain 16k
+
+New feature (commit `84b617078`): with `--ngu_seq_multiplier M > 1`, a
+never-give-up retry *resumes* completions that hit the `response_length` cap
+instead of discarding them — the partial response is re-fed as prompt tokens
+(its tokens/masks/logprobs kept as response state) and gets `response_length`
+more tokens per retry, up to `response_length * M` total. Finished-but-wrong
+completions still get fresh samples; continued completions are excluded from
+the NGU pending buffer/baseline until their stitched version returns. M=2 at
+8k ≈ a 16k budget with a halfway NGU check-in, which is exactly the
+comparison: does the check-in beat just generating 16k outright?
+
+Both arms: n=8, k=16, NGU p=0.75, `--max_grad_norm 1.0 --async_steps 2`,
+seed 1, `--pack_length 18432` (2048 prompt + 16384 max response), and
+`--eval_response_length 16384` so both arms get identical eval budgets.
+Note this makes eval budgets *larger* than the earlier 8k-eval NGU runs, so
+compare these two arms to each other, not directly to the old sweep numbers.
+
+### Smoke test (2 GPU, Qwen3-0.6B-Base, grpo_fast backend)
+
+Run locally (this session had 2 local L40S GPUs available) instead of on
+Beaker: `uv run python open_instruct/grpo_fast.py` with the same args as
+`scripts/train/debug/ngu_quartiles_2gpu.sh` (which now also takes the image
+from `BEAKER_IMAGE` and forwards extra args, for the Beaker path), plus
+`--ngu_seq_multiplier 2 --pack_length 3072`; `--never_give_up 1.0` + 1k
+response length force lots of truncation → continuations. Original Beaker
+smoke job `01KXZ13RCYYXXKXAGCVMGTM1JB` was cancelled before it started.
+
+| Name | Notes | Where |
+| --- | --- | --- |
+| `ngu_seq_multiplier_local_smoke` (mult2) | commit `84b617078`, `--ngu_seq_multiplier 2 --pack_length 3072` | local, 2x L40S |
+
+Passed on the 3rd fix iteration (first two were local-environment/pre-existing issues, not
+bugs in this feature; the third was a real bug this feature introduced — see below). Final run
+completed cleanly: `episode: 256/256`, model saved, `sequence_lengths_max: 2048.00` (exactly
+`response_length(1024) × ngu_seq_multiplier(2)`, confirming a continuation actually reached the
+multiplied cap), `stop_rate: 0.86`, no crash.
+
+1. `LookupError: setuptools-scm was unable to detect version` — Ray's `uv_runtime_env_hook`
+   auto-triggers when the driver is launched via `uv run`, shipping the working dir (`.git`
+   excluded per `grpo_fast.py`'s `ray.init` runtime_env) to each worker and rebuilding the
+   package there; setuptools-scm can't infer a version without `.git`. Fixed by launching with
+   `.venv/bin/python` directly instead of `uv run python`, which skips the hook. Pre-existing
+   local-execution-only issue, unrelated to this feature.
+2. `TypeError: Object of type <class 'torch.dtype'> is not serializable` in vLLM's EngineCore
+   output-socket encoder, during engine warmup before any generation. Worked around with
+   `VLLM_ALLOW_INSECURE_SERIALIZATION=1`. Pre-existing vLLM/environment issue, unrelated to this
+   feature.
+3. **Real bug, fixed in commit `62baca0c5`**: `ValueError: Expected each prompt sample count to be
+   a multiple of samples_per_prompt, got sample_count=12 and samples_per_prompt=8` in
+   `expand_prompt_lengths_for_response_groups` (called from `one_training_step`'s utilization/MFU
+   accounting). Root cause: NGU continuations let a merge round finalize *fewer* than
+   `num_samples_per_prompt_rollout` responses (the rest are deferred, resumed into a later round),
+   so a continuation-affected group's `sample_count` is no longer guaranteed to be a multiple of
+   `num_samples_per_prompt_rollout` — an invariant the utilization-metrics code silently relied on
+   (previously always true, since plain NGU always merges whole `k`-sized rounds). Fixed by adding
+   `Group.attempt_count`/`BatchStatistics.prompt_attempt_counts` (the true generation-round count,
+   independent of `sample_count`) for `prefill_flops`'s round-level accounting, and a new
+   `pad_response_lengths_for_attempt_counts` helper that zero-pads each group's response lengths to
+   round-align for `decode_flops`/`decode_memory_bytes`/`calculate_learner_utilization` (zero-padding
+   doesn't change any FLOPs/byte/token sum, so this is exact for everything except
+   `calculate_learner_utilization`'s training-mode accounting, which treats each pad slot as a small,
+   bounded phantom `prompt_length`-only sequence — an observability-only approximation, not a
+   training-correctness issue). All existing MFU/MBU tests (including the bit-exact
+   `test_mbu_reproduction` fixtures) still pass unchanged.
+
+**Follow-up bug found via the live Beaker run (commit `49a043644`):** `calculate_utilization_metrics`
+has *two* independent call sites — `grpo_fast.py`'s `one_training_step` (DeepSpeed backend) and
+`grpo_callbacks.py`'s `StepTimingCallback.post_step` (OLMo-core backend, used by `OC=true`/`grpo.py`,
+which is what the experiment arms below actually run). Commit `62baca0c5` only patched the former;
+the continuation arm (`01KXZWJMRC4VK0PBPYR281R72M`) crashed on the exact same `ValueError` at step
+18/2000 the moment a real continuation merge occurred. Fixed by threading
+`prompt_attempt_counts` through `StepTimingCallback` too. Verified against a fresh Beaker run
+(`01KY05JXM1NEJWD9T9FJHW96J7`) reaching step 32/2000 cleanly, well past the prior crash point.
+
+### Experiment arms
+
+Workspace note: arm 1 launched under `ai2/olmo-instruct` (per
+mid-session correction); arm 2 had already started under
+`ai2/open-instruct-dev` before that correction landed, so it was left running
+rather than restarted. Workspace is organizational only and doesn't affect
+comparability.
+
+| Name | response_length | ngu_seq_multiplier | never_give_up | Seed | Workspace | Beaker |
+| --- | --- | --- | --- | --- | --- | --- |
+| `2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1` | 8192 | 2 | 0.75 | 1 | ai2/olmo-instruct | ~~[01KXZWJMRC4VK0PBPYR281R72M](https://beaker.org/ex/01KXZWJMRC4VK0PBPYR281R72M)~~ (crashed step 18/2000, commit `84b617078`) → ~~[01KY02BGKXQPN68PAVA2XNK4NN](https://beaker.org/ex/01KY02BGKXQPN68PAVA2XNK4NN)~~ (crashed step 18/2000 again — `grpo_callbacks.py` call site fix missing, commit `105426b07`) → [01KY05JXM1NEJWD9T9FJHW96J7](https://beaker.org/ex/01KY05JXM1NEJWD9T9FJHW96J7) (commit `49a043644`, both call sites fixed; confirmed past step 32/2000, running) |
+| `2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1` | 16384 | 1 | 0.75 | 1 | ai2/open-instruct-dev | [01KXZ3J985XXE89MTGG2BQSTXF](https://beaker.org/ex/01KXZ3J985XXE89MTGG2BQSTXF) |
+| `2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k` | 16384 | 1 | 0 (no NGU) | 1 | ai2/olmo-instruct | ~~[01KY0BC34QVCHPPWXBE3GDCZF9](https://beaker.org/ex/01KY0BC34QVCHPPWXBE3GDCZF9)~~ (CUDA OOM step 290/2000, `torch.OutOfMemoryError` in `feed_forward.w1`, 76.03/79.19 GiB allocated) → ~~[01KY0R82P4PVPAADY1HBFPRWEW](https://beaker.org/ex/01KY0R82P4PVPAADY1HBFPRWEW)~~ (`--activation_memory_budget 0.25`; crashed in ~2min, unrelated `torch.distributed.DistNetworkError: EADDRINUSE` during vLLM engine startup on `jupiter-cs-aus-138` — transient port-collision infra flake, not a memory issue, different node than the OOM run) → [01KY0T45SY5EF75X6PWC617340](https://beaker.org/ex/01KY0T45SY5EF75X6PWC617340) (clean relaunch, same `--activation_memory_budget 0.25`; **fix confirmed** — passed step 290 cleanly (reached step 305+ with no OOM/errors over 2+ hours), running) |
+
+Third arm added to isolate whether NGU (in either form) helps at all relative
+to no-revisit at the same 16k sequence-length ceiling.
+
+**Arm 3 OOM root-cause note (2026-07-20):** crashed at step 290/2000 with
+76.03/79.19 GiB allocated — genuine memory pressure, not a bug.
+`--gradient_checkpointing` on this command line is a no-op on the OLMo-core
+(`OC=true`/`grpo.py`) path — it only wires into `grpo_fast.py`'s DeepSpeed
+backend (see `model_utils.py`'s `gradient_checkpointing` field, never read by
+`grpo_olmo_core_actor.py`/`olmo_core_train_modules.py`). The real
+activation-checkpointing knob for OLMo-core is `--activation_memory_budget`
+(needs `--compile_model` default `True`; see `build_ac_config` in
+`olmo_core_utils.py`), which was already 0.5 here but with `fsdp_shard_degree
+4` (no extra sharding headroom) and `--pack_length 18432` that left too
+little margin. Sibling arm 2 (NGU, same 16k ceiling) ran past step 500
+without issue, so this looks specific to the no-NGU arm — plausibly because
+without NGU retries more completions run close to the full pack length.
+Considered but ruled out: PR #1747's tiled GRPO loss (`--use_liger_grpo_loss`)
+only touches `grpo_fast.py`/`grpo_utils.py`, not the OLMo-core actor, so it
+doesn't apply here. Fix: relaunched with `--activation_memory_budget 0.25`
+(precedented elsewhere for long-context OC=true GRPO, e.g.
+`multi_node_grpo.sh` uses 0.25 with pack_length 20480, albeit with more
+learner-GPU sharding). Not resumed from the step200 checkpoint — relaunched
+fresh from step 0, consistent with how prior crash-relaunches in this file
+were handled. **Confirmed fixed:** relaunch `01KY0T45SY5EF75X6PWC617340` ran
+past step 290 cleanly (reached step 305+ over 2+ hours wall clock, no
+OOM/errors).
+
+**New observation while confirming the fix (2026-07-21):** step throughput on
+this relaunch dropped sharply around the same step range — ~1.9 steps/min
+(steps 217→293) down to ~0.16 steps/min (steps 301→305), ETA growing from
+~8h to ~12h. In-loop eval logs show `sequence_lengths` mean jumping
+1575→7005 tokens and `stop_rate` dropping 0.97→0.81 between the 23:47 and
+01:03 eval prints. This is the same signature as the `val/rho_weight`
+completion-length-drift collapse documented in the [rho_weight collapse
+entry](research.md#rho_weight-collapse-under-grad_norm10-n4_k32-watch-n2_k64-too-root-cause--partial-fix)
+— worth watching whether this arm stalls the way `n4_k32_gradnorm1` did.
+Not yet confirmed as the same collapse (no direct `val/rho_weight` line in
+stdout logs to check, only inferred from sequence-length/stop-rate proxies);
+flagging for follow-up, not treating as resolved.
+
+### Launch commands
+
+```bash
+# Arm 1: continuation (8k chunks, up to 16k via NGU retries)
+OC=true EXP=2k_ngu075_mult2x8k_dapo_n8_k16_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/olmo-instruct \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up 0.75 --async_steps 2 \
+  --ngu_seq_multiplier 2 --pack_length 18432 --eval_response_length 16384
+
+# Arm 2: plain 16k baseline (same NGU p, no continuation)
+OC=true EXP=2k_ngu075_seq16k_dapo_n8_k16_gradnorm1_async2_seed1 \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/open-instruct-dev \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --never_give_up 0.75 --async_steps 2 \
+  --response_length 16384 --pack_length 18432
+
+# Arm 3: no-NGU baseline, same 16k budget
+OC=true EXP=2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k \
+  BEAKER_IMAGE=michaeln/open-instruct-integration-test-ngu WORKSPACE=ai2/olmo-instruct \
+  bash scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --total_episodes 256000 --num_unique_prompts_rollout 8 --num_samples_per_prompt_rollout 16 \
+  --max_grad_norm 1.0 --seed 1 --async_steps 2 \
+  --response_length 16384 --pack_length 18432
+```
+
 ## Smoke test (2 GPU, before launching the sweep)
 
 Quick NGU + per-quartile-metrics check on a small model via

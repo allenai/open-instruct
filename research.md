@@ -144,6 +144,74 @@ was launched — see that experiment.md entry for why). No results yet.
 
 ---
 
+## [ACTIVE] NGU sequence continuation (`ngu_seq_multiplier`): resume unfinished completions instead of discarding them
+
+**Question:** NGU currently treats "unfinished" (hit the `response_length`
+cap) the same as "wrong" — truncated completions score 0 and get thrown away
+on a retry. New `--ngu_seq_multiplier M` resumes those completions on the NGU
+retry (partial response re-fed as prompt, tokens/masks/logprobs carried
+through), granting `response_length` more tokens per retry up to
+`response_length * M` total. M=2 at 8k is like a 16k budget with a halfway
+NGU check-in. Does that beat just training at 16k outright — same max
+sequence length, but cheaper rollouts on prompts that get solved (or dropped)
+early?
+
+**Implementation** (commit `84b617078`): `ContinuationPrefix` payloads ride
+the `PromptRequest`; the vLLM actor seeds resumed sub-requests with the
+prefix; `maybe_filter_group` continues only `finish_reason == "length"`
+completions below the cap, requeues fresh samples for finished-wrong ones,
+and keeps continued completions out of the NGU pending buffer/baseline so
+they aren't double-counted when the stitched version returns. vLLM
+`max_model_len`, trainer `max_sequence_length`, and the `pack_length` check
+all scale by the multiplier.
+
+**Runs:** [NGU sequence-continuation: 8k×2 vs plain 16k](experiment.md#ngu-sequence-continuation---ngu_seq_multiplier-8k2-vs-plain-16k)
+— both arms n=8, k=16, NGU p=0.75, gradnorm 1.0, async_steps 2, seed 1,
+16k eval budget. Watch the continuation arm's `val/stop_rate` and
+`batch/filtered_prompts_*`: the rho_weight-collapse risk (see below) is
+driven by truncation-heavy batches, and continuations should *reduce*
+effective truncation — but also produce very long merged completions.
+
+**Status (2026-07-20):** both arms launched and running past step 32/2000
+on Beaker (`2k_ngu075_mult2x8k...` at
+[01KY05JXM1NEJWD9T9FJHW96J7](https://beaker.org/ex/01KY05JXM1NEJWD9T9FJHW96J7),
+`2k_ngu075_seq16k...` at
+[01KXZ3J985XXE89MTGG2BQSTXF](https://beaker.org/ex/01KXZ3J985XXE89MTGG2BQSTXF)).
+Getting the continuation arm running required two follow-up fixes beyond the
+initial implementation — both are utilization-metrics (wandb MFU/MBU
+logging) bugs with no effect on training correctness, but both were crash
+bugs that killed the run: NGU continuations can make an accepted merge
+round finalize fewer than `num_samples_per_prompt_rollout` responses (the
+rest get deferred to a later round), breaking an implicit "sample_count is
+always a multiple of samples_per_prompt" assumption baked into the
+FLOPs/MFU accounting. Fixed once in `open_instruct/utils.py`
+(commit `62baca0c5`), then again in `grpo_callbacks.py` (commit
+`49a043644`) once the live Beaker run revealed the OLMo-core backend
+(`OC=true`, what these experiment arms actually use) has a *separate*
+`calculate_utilization_metrics` call site that the first fix missed. Full
+root-cause writeup in the experiment.md smoke-test section. Training
+results TBD — check Beaker/wandb before treating this as resolved.
+
+A third arm (`2k_baseline_dapo_n8_k16_gradnorm1_async2_seed1_16k`, no-NGU,
+same 16k ceiling) was added to isolate whether NGU helps at all vs. plain
+16k. It hit a genuine CUDA OOM at step 290/2000 (`--activation_memory_budget`
+0.5 too tight for `fsdp_shard_degree 4` at `pack_length 18432`) — fixed by
+lowering the budget to 0.25 (commit-free CLI override, no code change
+needed); confirmed fixed on relaunch
+[01KY0T45SY5EF75X6PWC617340](https://beaker.org/ex/01KY0T45SY5EF75X6PWC617340).
+Full root-cause writeup in the experiment.md "Arm 3 OOM root-cause note".
+Same relaunch then showed the exact stall signature this entry already
+flags as a risk (line above): step throughput collapsed ~1.9→0.16 steps/min
+right around step 290-305, with eval `sequence_lengths` mean jumping
+1575→7005 tokens and `stop_rate` dropping 0.97→0.81 — matching the
+[rho_weight collapse](#rho_weight-collapse-under-grad_norm10-n4_k32-watch-n2_k64-too-root-cause--partial-fix)
+pattern. Not yet confirmed as the same collapse (no direct `val/rho_weight`
+in stdout logs), so treat as a watch item, not a resolved finding.
+
+**Findings:** TBD (smoke test + both arms launching as of 2026-07-20).
+
+---
+
 ## [ACTIVE] max_grad_norm: 5.0 vs 1.0 — fixing the overfitting problem
 
 **Motivation:** at `max_grad_norm=5.0`, AIME eval performance degrades after

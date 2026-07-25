@@ -2555,14 +2555,21 @@ def calculate_utilization_metrics(
     training_time: float,
     num_training_gpus: int,
     prompt_sample_counts: list[int] | None = None,
+    prompt_attempt_counts: list[int] | None = None,
 ) -> dict:
-    prompt_lengths = expand_prompt_lengths_for_response_groups(
-        prompt_lengths, response_lengths, samples_per_prompt, prompt_sample_counts
+    expanded_prompt_lengths = expand_prompt_lengths_for_response_groups(
+        prompt_lengths, response_lengths, samples_per_prompt, prompt_sample_counts, prompt_attempt_counts
     )
+    decode_response_lengths = response_lengths
+    if prompt_attempt_counts is not None:
+        assert prompt_sample_counts is not None
+        decode_response_lengths = pad_response_lengths_for_attempt_counts(
+            response_lengths, prompt_sample_counts, prompt_attempt_counts, samples_per_prompt
+        )
 
     actor_metrics = model_dims.calculate_actor_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
+        prompt_lengths=expanded_prompt_lengths,
+        response_lengths=decode_response_lengths,
         total_generation_time=total_generation_time,
         samples_per_prompt=samples_per_prompt,
         num_engines=num_engines,
@@ -2570,8 +2577,8 @@ def calculate_utilization_metrics(
     )
 
     learner_metrics = model_dims.calculate_learner_utilization(
-        prompt_lengths=prompt_lengths,
-        response_lengths=response_lengths,
+        prompt_lengths=expanded_prompt_lengths,
+        response_lengths=decode_response_lengths,
         training_time=training_time,
         samples_per_prompt=samples_per_prompt,
         num_training_gpus=num_training_gpus,
@@ -2588,7 +2595,16 @@ def expand_prompt_lengths_for_response_groups(
     response_lengths: list[int],
     samples_per_prompt: int,
     prompt_sample_counts: list[int] | None = None,
+    prompt_attempt_counts: list[int] | None = None,
 ) -> list[int]:
+    """Repeat each prompt length once per generation "round" that contributed to its group.
+
+    Ordinarily a round always contributes exactly `samples_per_prompt` responses, so the round
+    count can be derived as `sample_count // samples_per_prompt`. NGU continuations break that:
+    a round can finalize fewer than `samples_per_prompt` responses (the rest get resumed into a
+    later round), so `prompt_attempt_counts` — the actual round count per group — must be passed
+    explicitly whenever it's available instead of derived from `prompt_sample_counts`.
+    """
     if prompt_sample_counts is None:
         assert len(response_lengths) == len(prompt_lengths) * samples_per_prompt, (
             f"Expected {len(prompt_lengths) * samples_per_prompt} response lengths, got {len(response_lengths)}"
@@ -2606,6 +2622,17 @@ def expand_prompt_lengths_for_response_groups(
             f"got {sum(prompt_sample_counts)} samples and {len(response_lengths)} response lengths."
         )
 
+    if prompt_attempt_counts is not None:
+        if len(prompt_attempt_counts) != len(prompt_lengths):
+            raise ValueError(
+                "Expected one prompt attempt count per prompt length, "
+                f"got {len(prompt_attempt_counts)} counts and {len(prompt_lengths)} prompt lengths."
+            )
+        expanded_prompt_lengths = []
+        for prompt_length, attempt_count in zip(prompt_lengths, prompt_attempt_counts, strict=True):
+            expanded_prompt_lengths.extend([prompt_length] * attempt_count)
+        return expanded_prompt_lengths
+
     expanded_prompt_lengths = []
     for prompt_length, sample_count in zip(prompt_lengths, prompt_sample_counts, strict=True):
         if sample_count % samples_per_prompt != 0:
@@ -2615,6 +2642,52 @@ def expand_prompt_lengths_for_response_groups(
             )
         expanded_prompt_lengths.extend([prompt_length] * (sample_count // samples_per_prompt))
     return expanded_prompt_lengths
+
+
+def pad_response_lengths_for_attempt_counts(
+    response_lengths: list[int],
+    prompt_sample_counts: list[int],
+    prompt_attempt_counts: list[int],
+    samples_per_prompt: int,
+) -> list[int]:
+    """Zero-pad each group's response lengths so every group occupies `attempt_count *
+    samples_per_prompt` slots, aligning with the round-level `prompt_attempt_counts` expansion
+    from `expand_prompt_lengths_for_response_groups`.
+
+    NGU continuations can make a round finalize fewer than `samples_per_prompt` responses (the
+    rest resume into a later round), so a group's true response count doesn't divide evenly across
+    its rounds. Padding with zero-length responses restores the fixed per-round shape that
+    `decode_flops`/`decode_memory_bytes`/`calculate_learner_utilization` assume, without changing
+    any FLOPs/byte/token totals — a zero-length response contributes nothing to those sums. The one
+    exception is `calculate_learner_utilization`, whose training-mode accounting treats each pad
+    slot as a phantom `prompt_length`-only sequence; this is a small, bounded overcount (at most
+    `samples_per_prompt - 1` phantom entries per continuation-affected group) in an
+    observability-only metric, not a correctness issue for training.
+    """
+    if len(prompt_sample_counts) != len(prompt_attempt_counts):
+        raise ValueError(
+            "Expected prompt_sample_counts and prompt_attempt_counts to have the same length, "
+            f"got {len(prompt_sample_counts)} and {len(prompt_attempt_counts)}."
+        )
+    if sum(prompt_sample_counts) != len(response_lengths):
+        raise ValueError(
+            "Expected prompt sample counts to match response lengths, "
+            f"got {sum(prompt_sample_counts)} samples and {len(response_lengths)} response lengths."
+        )
+
+    padded_response_lengths = []
+    offset = 0
+    for sample_count, attempt_count in zip(prompt_sample_counts, prompt_attempt_counts, strict=True):
+        pad_count = attempt_count * samples_per_prompt - sample_count
+        if pad_count < 0:
+            raise ValueError(
+                f"Group sample_count={sample_count} exceeds attempt_count({attempt_count}) * "
+                f"samples_per_prompt({samples_per_prompt}); attempt_count must cover every sample."
+            )
+        padded_response_lengths.extend(response_lengths[offset : offset + sample_count])
+        padded_response_lengths.extend([0] * pad_count)
+        offset += sample_count
+    return padded_response_lengths
 
 
 def check_calculation(

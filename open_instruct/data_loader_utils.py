@@ -15,7 +15,7 @@
 """Grouped advantage helpers for GRPO-style reward normalization."""
 
 import contextlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import numpy as np
@@ -155,6 +155,29 @@ def should_accept_never_give_up_batch(
     if never_give_up_accept_on == "better":
         return current_reward > pending_best_reward
     raise ValueError(f"Invalid never_give_up_accept_on: {never_give_up_accept_on!r}")
+
+
+def select_generation_result(result: data_types.GenerationResult, indices: list[int]) -> data_types.GenerationResult:
+    """Return a copy of `result` restricted to the samples at `indices`."""
+    request_info = result.request_info
+    return replace(
+        result,
+        responses=[result.responses[i] for i in indices],
+        finish_reasons=[result.finish_reasons[i] for i in indices],
+        masks=[result.masks[i] for i in indices],
+        logprobs=[result.logprobs[i] for i in indices] if result.logprobs else [],
+        reward_scores=[result.reward_scores[i] for i in indices] if result.reward_scores is not None else None,
+        request_info=data_types.RequestInfo(
+            num_calls=[request_info.num_calls[i] for i in indices],
+            timeouts=[request_info.timeouts[i] for i in indices],
+            tool_errors=[request_info.tool_errors[i] for i in indices],
+            tool_outputs=[request_info.tool_outputs[i] for i in indices],
+            tool_runtimes=[request_info.tool_runtimes[i] for i in indices],
+            tool_calleds=[request_info.tool_calleds[i] for i in indices],
+            tool_call_stats=[request_info.tool_call_stats[i] for i in indices],
+            rollout_states=[request_info.rollout_states[i] for i in indices],
+        ),
+    )
 
 
 def merge_generation_results(

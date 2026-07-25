@@ -629,6 +629,70 @@ class TestModelDims(unittest.TestCase):
         self.assertEqual(len(expanded_prompt_lengths), 40)
         self.assertEqual(set(metrics), {"actor_mfu", "actor_mbu", "learner_mfu"})
 
+    def test_expand_prompt_lengths_uses_attempt_counts_when_sample_counts_are_not_multiples(self):
+        # NGU continuations can finalize a round with fewer than samples_per_prompt responses (the
+        # rest resume into a later round), so sample_count (5) need not be a multiple of
+        # samples_per_prompt (2) even though the true round count (3) is well defined and known.
+        prompt_lengths = [256]
+        response_lengths = [128] * 5
+
+        expanded_prompt_lengths = utils.expand_prompt_lengths_for_response_groups(
+            prompt_lengths, response_lengths, samples_per_prompt=2, prompt_sample_counts=[5], prompt_attempt_counts=[3]
+        )
+
+        self.assertEqual(expanded_prompt_lengths, [256, 256, 256])
+
+    def test_expand_prompt_lengths_raises_without_attempt_counts_on_non_multiple(self):
+        with self.assertRaises(ValueError):
+            utils.expand_prompt_lengths_for_response_groups(
+                [256], [128] * 5, samples_per_prompt=2, prompt_sample_counts=[5]
+            )
+
+    def test_pad_response_lengths_for_attempt_counts_pads_and_preserves_sum(self):
+        # Group 0: 1 round, 2 responses (a standard, non-continuation group) -> no padding.
+        # Group 1: 2 rounds (attempt_count=2) but only 3 responses total (continuation deferred
+        # some) -> padded up to 2 * samples_per_prompt(2) = 4 slots.
+        response_lengths = [10, 20, 30, 40, 50]
+        padded = utils.pad_response_lengths_for_attempt_counts(
+            response_lengths, prompt_sample_counts=[2, 3], prompt_attempt_counts=[1, 2], samples_per_prompt=2
+        )
+
+        self.assertEqual(padded, [10, 20, 30, 40, 50, 0])
+        self.assertEqual(sum(padded), sum(response_lengths))
+
+    def test_pad_response_lengths_for_attempt_counts_raises_on_impossible_attempt_count(self):
+        with self.assertRaises(ValueError):
+            utils.pad_response_lengths_for_attempt_counts(
+                [10, 20, 30], prompt_sample_counts=[3], prompt_attempt_counts=[1], samples_per_prompt=2
+            )
+
+    def test_utilization_metrics_handles_uneven_ngu_continuation_groups(self):
+        # Reproduces the crash this fix addresses: a continuation-affected group's sample_count
+        # (12) is not a multiple of samples_per_prompt (8), unlike plain (non-continuation) NGU
+        # merges which always land on clean multiples.
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        prompt_lengths = [256, 256]
+        prompt_sample_counts = [8, 12]
+        prompt_attempt_counts = [1, 2]
+        response_lengths = [128] * 20
+
+        metrics = utils.calculate_utilization_metrics(
+            model_dims=model_dims,
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=8.0,
+            samples_per_prompt=8,
+            num_engines=1,
+            num_gpus_per_engine=1,
+            training_time=4.0,
+            num_training_gpus=1,
+            prompt_sample_counts=prompt_sample_counts,
+            prompt_attempt_counts=prompt_attempt_counts,
+        )
+
+        self.assertEqual(set(metrics), {"actor_mfu", "actor_mbu", "learner_mfu"})
+        self.assertGreater(metrics["actor_mfu"], 0)
+
     @parameterized.expand(
         [
             ("two_engines_four_gpus_each", "Qwen/Qwen2.5-7B", 16, 2, 256, 256, 8, 2, 4, 4, 8.0, 4.0),
