@@ -605,37 +605,12 @@ class PolicyTrainerRayProcess(RayProcess):
             data_BT = data_BT[:-leftover]
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
-        num_mini_batches = len(data_BT.query_responses) // accumulation_steps
-
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = grpo_utils.compute_logprobs(
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                 )
-
-        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
-        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
-        # from the generator (note that async mode means these are a bit diff!)
-        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(len(data_BT.query_responses))]
-        if num_mini_batches > 1:
-            with Timer("Old logprobs Calculation", noop=self.rank != 0):
-                local_old_logprobs_BT = None
-                if not self.args.use_vllm_logprobs:
-                    local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
-                    )
-
-                with torch.no_grad():
-                    for i in range(len(data_BT.query_responses)):
-                        if self.args.use_vllm_logprobs:
-                            old_logprobs_BT[i] = grpo_utils.mask_logprobs(
-                                data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
-                            )
-                        else:
-                            old_logprobs_BT[i] = local_old_logprobs_BT[i]
-
-                        torch.cuda.empty_cache()
 
         local_step = 0
         num_samples = len(data_BT.query_responses)
@@ -648,7 +623,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
-            for epoch_idx in range(self.args.num_epochs):
+            for _ in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
@@ -675,7 +650,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.streaming_config.temperature,
                         return_entropy=self.args.record_entropy,
                     )
-                    local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
                     self.local_metrics.update(
@@ -688,20 +662,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     new_logprobs_BT = local_logprobs_BT
 
-                    old_logprob_BT = grpo_utils.resolve_old_logprob(
-                        old_logprobs_BT,
-                        i,
-                        epoch_idx,
-                        num_mini_batches,
-                        self.args.use_vllm_logprobs,
-                        vllm_logprobs_BT,
-                        local_logprobs_BT,
-                    )
-
                     # Calculate the policy's loss
                     loss_output_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
-                        old_logprobs=old_logprob_BT,
                         vllm_logprobs=vllm_logprobs_BT,
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
@@ -1009,8 +972,8 @@ def setup_runtime_variables(
     tools_config: EnvsConfig,
 ) -> grpo_utils.GRPOExperimentConfig:
     """Set up runtime variables for the experiment."""
-    if tools_config.enabled and (args.use_vllm_logprobs or args.use_rho_correction):
-        assert streaming_config.mask_tool_use, "Must mask tool use when using vLLM logprobs or the ρ correction."
+    if tools_config.enabled and not streaming_config.mask_tool_use:
+        raise ValueError("Must mask tool use when training against vLLM logprobs.")
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"

@@ -9,6 +9,14 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 - `grpo.py` is the recommended GRPO implementation, built on OLMo-core's native training infrastructure (FSDP). It uses Ray for distributed training with vLLM inference.
 - `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing) with DeepSpeed.
 
+Both trainers use only the vLLM behavior-policy log probability \(\log \mu\)
+and differentiable training log probability \(\log \pi_\theta\). The policy
+term is
+\(-\operatorname{stopgrad}(\rho A)\log \pi_\theta\), where
+\(\rho=\exp(\log \pi_\theta-\log \mu)\). There is no separately cached
+old-policy log probability. Policy, divergence, response, and optional
+reference-KL masks are applied structurally, so excluded selected-token log
+probabilities receive zero direct gradient.
 
 ## `grpo.py` (OLMo-core)
 
@@ -53,6 +61,7 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | | `--loss_fn` | Loss function: `dapo`, `cispo`, or `dppo` | `dapo` |
 | | `--rho_divergence_algo` | Algorithm for the ρ token-drop mask: `icepop` (simple clipping), `vaco`, or `dppo` | `icepop` |
 | | `--rho_divergence_type` | Divergence measure for `vaco`/`dppo` masking: `tv` or `kl` | `tv` |
+| | `--use_rho_correction` | Clamp and filter the always-present behavior-policy ratio | `True` |
 | | `--load_ref_policy` | Load and use reference policy for KL | `True` |
 | **Rollout / Sampling** | `--num_unique_prompts_rollout` | Unique prompts per rollout | `16` |
 | | `--num_samples_per_prompt_rollout` | Samples per prompt in rollout | `4` |
@@ -360,8 +369,8 @@ During training, the following metrics are logged:
 * `time/training`: the time taken to do one training step
 * `val/sequence_lengths`: the length of the sequences in the generated responses
 * `val/num_stop_token_ids`: the number of stop tokens in the generated responses
-* `val/ratio`: the mean ratio of the new policy to the old policy, used to assess policy updates
-* `val/ratio_var`: the variance of the ratio of the new policy to the old policy, indicating the variability in policy updates
+* `val/ratio`: the mean ratio of the current training policy to the vLLM behavior policy, used to assess policy updates
+* `val/ratio_var`: the variance of the ratio of the current training policy to the vLLM behavior policy, indicating the variability in policy updates
 * `val/stop_token_rate`: the rate at which stop tokens appear in the responses, providing a measure of response termination
 * `val/format_scores`: the mean format scores, indicating the quality of response formatting (only logged if `add_r1_style_format_reward` is enabled)
 * `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,

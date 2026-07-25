@@ -434,7 +434,7 @@ class GRPOTrainModule(TransformerTrainModule):
         - Multi-epoch PPO-style training
         - DAPO/CISPO loss variants
         - KL penalty computation
-        - Importance sampling with clipping
+        - Direct behavior-policy importance weighting
         """
         self.model.train()
         data_BT = batch["batch"].to(self.device)
@@ -456,30 +456,6 @@ class GRPOTrainModule(TransformerTrainModule):
         num_samples = len(data_BT.query_responses)
         num_mini_batches = self.grpo_config.num_mini_batches
         accumulation_steps = max(math.ceil(num_samples / num_mini_batches), 1)
-
-        old_logprobs_BT: list[torch.Tensor | None] = [None for _ in range(num_samples)]
-        if num_mini_batches > 1:
-            with torch.no_grad():
-                local_old_logprobs_BT = None
-                if not self.grpo_config.use_vllm_logprobs:
-                    local_old_logprobs_BT = grpo_utils.compute_logprobs(
-                        self.model,
-                        data_BT,
-                        self.pad_token_id,
-                        self.temperature,
-                        use_grad=False,
-                        batch_size=3 * self.rank_microbatch_size,
-                        pass_olmo_core_doc_lens=True,
-                    )
-
-                for i in range(num_samples):
-                    if self.grpo_config.use_vllm_logprobs:
-                        old_logprobs_BT[i] = grpo_utils.mask_logprobs(
-                            data_BT.vllm_logprobs[i][:, 1:], data_BT.response_masks[i][:, 1:]
-                        )
-                    else:
-                        assert local_old_logprobs_BT is not None
-                        old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
         if self.grpo_config.loss_denominator == "token" or self.grpo_config.loss_denominator is None:
             accumulation_token_counts = grpo_utils.calculate_token_counts(
@@ -507,7 +483,7 @@ class GRPOTrainModule(TransformerTrainModule):
         local_step = 0
         rho_histograms: dict[str, list[torch.Tensor]] = {}
 
-        for epoch_idx in range(self.grpo_config.num_epochs):
+        for _ in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
@@ -521,8 +497,6 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
 
                 response_mask = data_BT.response_masks[sample_idx][:, 1:]
-                new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
-
                 vllm_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[sample_idx][:, 1:], response_mask)
 
                 step_debug_metrics = grpo_utils.compute_vllm_local_debug_metrics(
@@ -532,21 +506,10 @@ class GRPOTrainModule(TransformerTrainModule):
                     debug_metrics_sum[k] = debug_metrics_sum.get(k, 0.0) + v
                 debug_metrics_count += 1
 
-                old_logprob = grpo_utils.resolve_old_logprob(
-                    old_logprobs_BT,
-                    sample_idx,
-                    epoch_idx,
-                    num_mini_batches,
-                    self.grpo_config.use_vllm_logprobs,
-                    vllm_logprobs,
-                    new_logprobs,
-                )
-
                 advantages = data_BT.advantages[sample_idx]
 
                 loss_output = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
-                    old_logprobs=old_logprob,
                     vllm_logprobs=vllm_logprobs,
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
