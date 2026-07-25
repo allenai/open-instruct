@@ -447,3 +447,52 @@ production launch, which uses 4 learner GPUs. `test_grpo_fast.py` (22 passed,
 1 skipped) shows no regression. 3-seed production launch is now running on
 `ai2/jupiter` (links in experiment.md); training-outcome/convergence findings
 still TBD pending run progress.
+
+---
+
+## [ACTIVE] DeepCoder-1.5B: reproduce + K/NGU sweep on code RLVR
+
+**Question:** does the K-ablation / NGU sweep methodology developed on
+DeepScaleR (math) generalize to a code RLVR domain? Reproduces DeepCoder's
+training setup (`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` on
+`agentica-org/DeepCoder-Preview-Dataset`, converted to open-instruct's
+`code_stdio` RLVR format) as the base config, then runs the same single-seed
+K∈{16,32,64} baseline + NGU p∈{0.5,0.75,0.875} sweep structure used on
+deepscaler.
+
+**Runs:** [DeepCoder-1.5B data pipeline + K/NGU sweep launch](experiment.md#2026-07-25-deepcoder-15b-data-pipeline--kngu-sweep-launch-grpopy-oc)
+
+**Status (2026-07-25):** All 6 sweep jobs launched and confirmed training
+cleanly. Getting here required fixing three real infrastructure bugs
+surfaced by the sanity-check launch (all in shared `open_instruct` code, not
+DeepCoder-specific):
+
+1. `deepcoder_1_5b.sh`'s `fsdp_shard_degree` didn't match its
+   `num_learners_per_node` (copy-paste from a template with different
+   learner count) — `grpo_utils.py` requires the product to equal total
+   learner GPUs.
+2. **`open_instruct/grpo.py`'s OLMo-core backend had no support at all for
+   Qwen2-architecture checkpoints** (only OLMo-2/3 and Qwen3 families were
+   registered in `olmo_core_utils.OLMO_MODEL_CONFIG_MAP`), so
+   `DeepSeek-R1-Distill-Qwen-1.5B` (HF `model_type="qwen2"`) couldn't be
+   used with `grpo.py` at all before this session. Added a full Qwen2 preset
+   plus HF↔olmo-core conversion mappings in both directions (verified
+   bit-exact end-to-end). This is a reusable, general capability — any future
+   Qwen2/2.5-family checkpoint (not just this one) can now run on
+   `grpo.py`/OLMo-core.
+3. The separate vLLM weight-sync path (used for pushing trained weights to
+   the inference engines) had its own independent name-mapping table with
+   the same Qwen2 gap (missing bias entries), fixed similarly.
+
+**Data pipeline finding:** `create_deepcoder_data.py`'s initial conversion
+crashed on Arrow storage limits and would have also failed at the
+code-execution API's payload limit (a handful of LiveCodeBench-v5 stress
+tests run multi-MB each). Fixed by capping to the largest ~15 tests per
+problem within a 500KB budget — this also happens to match DeepCoder's own
+published recipe of sampling "the 15 most challenging tests" per problem, so
+the fix is a correctness improvement, not just a workaround.
+
+**Next:** let the sweep run, then repeat the difficulty-stratified
+best-checkpoint comparison methodology from the DeepScaleR NGU work (see
+the K-ablation and NGU entries above) on code eval sets (LCB-v5 test,
+Codeforces test) once these runs have made meaningful progress.

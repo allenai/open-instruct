@@ -1752,3 +1752,194 @@ Beaker links and outcome:
   8 GPUs each, `--priority urgent`, `--preemptible`) and confirmed `scheduled`
   (not stuck in `created`). Training-progress/convergence outcome still TBD,
   to be checked and recorded once the runs have made meaningful progress.
+
+## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
+
+Picked up a handoff from another session/machine that had written
+`scripts/data/create_deepcoder_data.py` (converts
+`agentica-org/DeepCoder-Preview-Dataset` into RLVR `code_stdio` format,
+pushing `mnoukhov/deepcoder_{lcbv5,lcbv5_test,primeintellect,taco,codeforces_test}`)
+and `scripts/train/qwen/deepcoder_1_5b.sh` (GRPO on
+`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`, `open_instruct/grpo.py`/OLMo-core
+only) but had never run either to completion. The handoff's branch state
+didn't match this machine (stale local `ngu`, diverged from `origin/ngu`
+where the work actually lived) — resolved via `git fetch` + merge (commit
+`093117162`), reconciling with unrelated `reinforce_ada_est` work done in
+parallel on this machine.
+
+### Data conversion, take 1: Arrow overflow
+
+First full run of `create_deepcoder_data.py` (directly on this machine —
+2TB RAM, not the 30GB box the handoff described) pushed all 5 datasets, but
+`lcbv5` crashed on write: `pyarrow.lib.ArrowInvalid: offset overflow while
+concatenating arrays`. Root cause: a handful of LiveCodeBench-v5
+stress-test problems ship up to 30 tests with individual test cases running
+several MB each (worst case: one problem's `ground_truth` was 160MB, lcbv5's
+322-row total was 4.79GB), overflowing PyArrow's 2GB string-offset limit
+during dataset caching.
+
+This isn't just a storage problem — `CodeStdioVerifier.async_call`
+(`open_instruct/ground_truth_utils.py`) bundles *every* test for one example
+into a single HTTP POST to the code-execution API, an AWS API Gateway
+endpoint (10MB hard request limit, Lambda sync-invoke caps ~6MB). Multi-MB
+tests would fail at grading time regardless of the Arrow issue.
+
+Fixed in `create_deepcoder_data.py` (`cap_tests`): drop any single test
+over 100KB, greedily keep the largest ("most challenging", matching
+DeepCoder's own recipe of sampling "the 15 most challenging tests" per
+problem — https://www.together.ai/blog/deepcoder) remaining tests within a
+500KB total budget per problem. Verified against the already-pushed
+(uncapped) data: only 3 of 21,707 problems drop to zero usable tests, median
+test count lands at 12–15 (matches the reference recipe), regenerated
+datasets top out at 726KB/example (~8x margin under the 6MB Lambda ceiling).
+Re-ran and re-pushed all 5 datasets; no Arrow errors. Final counts:
+
+| Dataset | Split | Count |
+| --- | --- | --- |
+| `mnoukhov/deepcoder_lcbv5` | train | 322 |
+| `mnoukhov/deepcoder_lcbv5_test` | eval | 175 |
+| `mnoukhov/deepcoder_primeintellect` | train | 14995 (3 dropped, zero tests under cap) |
+| `mnoukhov/deepcoder_taco` | train | 6387 |
+| `mnoukhov/deepcoder_codeforces_test` | eval | 408 |
+
+### Hyperparameter decisions (resolved against the real DeepCoder/DeepScaleR training scripts)
+
+The handoff flagged several hyperparameter choices as unconfirmed guesses.
+Verified against the actual public `agentica-project/rllm` training scripts
+(DeepScaleR-1.5B is the direct math-domain precursor to DeepCoder-1.5B, same
+base checkpoint/team) rather than guessing:
+
+- `--beta 0.001`: confirmed — real 1.5B script (`run_deepscaler_1.5b_24k.sh`)
+  sets `kl_loss_coef=0.001` with `use_kl_loss=True` (unlike the 14B DeepCoder
+  recipe, which disables KL loss entirely).
+- `--num_samples_per_prompt_rollout 16`: confirmed exact match — real 1.5B
+  script uses `rollout.n=16` (the handoff's "wandb showed n=8" was from the
+  14B recipe, not the 1.5B one it should've been compared against).
+- `--response_length 32768` / `--pack_length 34816`: deliberate override of
+  the real 1.5B run's `24576` — kept as user's explicit choice.
+- `--clip_higher 0.272`: kept the repo's DAPO default (matches
+  `qwen3_4b_dapo_math_32k.sh`) over switching to the 1.5B run's symmetric
+  ~0.2 (no `clip_ratio_high` override there) — DAPO's asymmetric clip-higher
+  is close to the real 14B recipe's `clip_ratio_high=0.28` and is generally
+  an improvement over symmetric clipping. User confirmed keep-as-is.
+  Full comparison table:
+
+  | Param | Script (ours) | Real 1.5B (DeepScaleR) | Real 14B (DeepCoder) |
+  | --- | --- | --- | --- |
+  | `beta`/`kl_coef` | 0.001 | 0.001 (active) | 0.0 (disabled) |
+  | samples/prompt (`n`) | 16 | 16 | 8 |
+  | response_length | 32768 | 24576 | 16k→32k (staged) |
+  | clip_ratio | 0.272 (asym) | ~0.2 (symmetric, no override) | 0.2/0.28 (asym) |
+
+- `--model_name_or_path deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`: confirmed
+  correct base checkpoint for both the DeepCoder-1.5B and DeepScaleR-1.5B
+  lineages.
+- `--total_episodes`: changed from the handoff's placeholder `128000` to
+  `64000` per direct request.
+- `WORKSPACE`: changed from `ai2/oe-adapt-code` to `ai2/olmo-instruct` per
+  direct request (used for both the sanity-check launch and the sweep below).
+
+### Sanity-check launch: three real bugs found and fixed
+
+Per-repo convention, sanity-checked `deepcoder_1_5b.sh` before trusting the
+untested 2-node topology (8 learners on node0 / 8 vLLM engines on node1,
+`fsdp_shard_degree 4`/`fsdp_num_replicas 1` — inherited unmodified from the
+`qwen3_4b_deepscaler_math.sh` template despite `num_learners_per_node` being
+bumped to 8). User then asked to switch to a single-node topology
+(`NODES=1`, 4 learners + 4 vLLM engines, mirroring the tested
+`qwen3_4b_dapo_math_oc.sh` single-node OC pattern) and `--async_steps 2`
+before the first real launch attempt. Five launch attempts were needed to
+get a genuinely clean training step, surfacing three separate real bugs:
+
+1. **`fsdp_shard_degree`/`num_learners_per_node` mismatch** (commit
+   `ec8c8bbc6`): `grpo_utils.py` requires
+   `fsdp_shard_degree * fsdp_num_replicas == total learner GPUs`; the
+   template's `--fsdp_shard_degree 4` didn't match the bumped
+   `--num_learners_per_node 8` (then `4` after the single-node switch).
+2. **`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` unsupported by
+   `open_instruct/grpo.py`'s OLMo-core backend** (commits `eca28b1d1`,
+   `aa442a161`): `olmo_core_utils.OLMO_MODEL_CONFIG_MAP` only ships
+   OLMo-2/3 and Qwen3 presets. The checkpoint is Qwen2.5-architecture
+   (HF `model_type="qwen2"`) — not just missing from the list but
+   architecturally incompatible with any existing preset (no QK-norm unlike
+   Qwen3, but does use QKV attention bias, which Qwen3 doesn't). Added a
+   `_deepseek_r1_distill_qwen_1_5b` preset built directly from the HF
+   `config.json`, plus:
+   - a `"qwen2"` entry in olmo-core's `MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_*`
+     mapping dicts (HF→olmo-core direction) — the generic fallback collapsed
+     `input_layernorm`/`post_attention_layernorm` onto the same key and had
+     no bias mapping at all;
+   - a mirrored `"qwen2"` entry in
+     `MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_TEMPLATE_MAPPINGS` (reverse
+     direction, used by `verify_can_save_as_hf`/`save_state_dict_as_hf`);
+   - `TransformerConfig.freeze_params` pinning the synthetic `w_out.bias`
+     (Qwen2 has no o_proj bias; olmo-core's `AttentionConfig.bias` applies
+     uniformly to all four projections) at exactly zero for the model's
+     entire lifetime, and `drop_frozen_zero_bias_for_hf_export` stripping it
+     before HF export.
+
+   Verified with a full HF→olmo-core→HF round trip: bit-exact logits/weights
+   across all 339 params, both via a standalone script and through the
+   actual production code path (`get_transformer_config` +
+   `load_hf_model` + `verify_can_save_as_hf`).
+3. **vLLM weight sync had no qwen2 bias mapping either** (commit
+   `ac3f757f6`): the direct NCCL weight-broadcast path
+   (`grpo_olmo_core_actor.run_initial_weight_sync` /
+   `VLLMWeightSyncCallback`) uses a *third*, separate hardcoded name-mapping
+   table (`grpo_callbacks._OLMO_CORE_TO_HF_LAYER_MAPPINGS`, independent of
+   `olmo_core.nn.hf.convert`) with no q/k/v bias entries — those params
+   passed through unmapped under their raw olmo-core name, crashing every
+   vLLM engine (`There is no module or parameter named 'blocks' in
+   Qwen2ForCausalLM`). Added the bias entries; `olmo_core_to_hf_name` now
+   returns `None` for the synthetic `w_out.bias` (no valid destination
+   either way) and callers (`_mapped_named_parameters`, new) drop it rather
+   than send an invalid name.
+
+All three fixes have offline (no-GPU-download) unit tests:
+`open_instruct/test_olmo_core_finetune.py::DeepSeekR1DistillQwenConfigTest`,
+`open_instruct/test_grpo_callbacks.py::OlmoCoreToHfNameTest`,
+`open_instruct/test_vllm_utils.py::TestMappedNamedParameters`. `make style
+&& make quality` clean throughout.
+
+### Sweep launch
+
+Per direct request: single seed each for K∈{16,32,64} baselines (holding
+`N*K=128`, mirroring the earlier deepscaler K-ablation convention) plus NGU
+`p`∈{0.5,0.75,0.875} at the K=16 baseline config, `WORKSPACE=ai2/olmo-instruct`,
+`NODES=1` (4 learners + 4 vLLM engines), all built from commit `ac3f757f6`.
+
+| Name | N | K | never_give_up | Beaker |
+| --- | --- | --- | --- | --- |
+| `deepcoder_1_5b_baseline_n8_k16` | 8 | 16 | — | [01KYC592P25ZQMZ8KKEYFNTX1R](https://beaker.org/ex/01KYC592P25ZQMZ8KKEYFNTX1R) |
+| `deepcoder_1_5b_baseline_n4_k32` | 4 | 32 | — | [01KYC5Y6MS8EX03SX9C58H7CV9](https://beaker.org/ex/01KYC5Y6MS8EX03SX9C58H7CV9) |
+| `deepcoder_1_5b_baseline_n2_k64` | 2 | 64 | — | [01KYC5YSHSVT5F2Q29C1W6AVGR](https://beaker.org/ex/01KYC5YSHSVT5F2Q29C1W6AVGR) |
+| `deepcoder_1_5b_ngu05_n8_k16` | 8 | 16 | 0.5 | [01KYC5ZAD2YFA5YKR43GTFC0Z5](https://beaker.org/ex/01KYC5ZAD2YFA5YKR43GTFC0Z5) |
+| `deepcoder_1_5b_ngu075_n8_k16` | 8 | 16 | 0.75 | [01KYC5ZW352ZPPDDKX74NDZP2Z](https://beaker.org/ex/01KYC5ZW352ZPPDDKX74NDZP2Z) |
+| `deepcoder_1_5b_ngu0875_n8_k16` | 8 | 16 | 0.875 | [01KYC60DGG12F3VX2YEHD9K5YT](https://beaker.org/ex/01KYC60DGG12F3VX2YEHD9K5YT) |
+
+### Launch commands
+
+```bash
+EXP=baseline_n8_k16 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh
+
+EXP=baseline_n4_k32 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 4 --num_samples_per_prompt_rollout 32
+
+EXP=baseline_n2_k64 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 2 --num_samples_per_prompt_rollout 64
+
+EXP=ngu05_n8_k16 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.5
+
+EXP=ngu075_n8_k16 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75
+
+EXP=ngu0875_n8_k16 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.875
+```
+
+All 6 jobs confirmed training cleanly (each reached a logged `[step=N/500]`
+within its first couple minutes, no errors) as of this writing.
+`baseline_n8_k16` was watched furthest: `[step=2/500,epoch=1,eta=9h57m]`.
+Convergence/reward-curve findings still TBD, to be recorded once the runs
+have made meaningful progress.
