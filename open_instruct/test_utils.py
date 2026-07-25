@@ -660,11 +660,15 @@ class TestModelDims(unittest.TestCase):
         self.assertEqual(padded, [10, 20, 30, 40, 50, 0])
         self.assertEqual(sum(padded), sum(response_lengths))
 
-    def test_pad_response_lengths_for_attempt_counts_raises_on_impossible_attempt_count(self):
-        with self.assertRaises(ValueError):
-            utils.pad_response_lengths_for_attempt_counts(
-                [10, 20, 30], prompt_sample_counts=[3], prompt_attempt_counts=[1], samples_per_prompt=2
-            )
+    def test_pad_response_lengths_for_attempt_counts_skips_padding_on_impossible_attempt_count(self):
+        # attempt_count under-counting sample_count (e.g. a never_give_up bookkeeping desync)
+        # shouldn't raise -- this is an observability-only metric, so we skip padding for the
+        # affected group and keep all of its samples rather than aborting the run.
+        padded = utils.pad_response_lengths_for_attempt_counts(
+            [10, 20, 30], prompt_sample_counts=[3], prompt_attempt_counts=[1], samples_per_prompt=2
+        )
+
+        self.assertEqual(padded, [10, 20, 30])
 
     def test_utilization_metrics_handles_uneven_ngu_continuation_groups(self):
         # Reproduces the crash this fix addresses: a continuation-affected group's sample_count
@@ -675,6 +679,34 @@ class TestModelDims(unittest.TestCase):
         prompt_sample_counts = [8, 12]
         prompt_attempt_counts = [1, 2]
         response_lengths = [128] * 20
+
+        metrics = utils.calculate_utilization_metrics(
+            model_dims=model_dims,
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=8.0,
+            samples_per_prompt=8,
+            num_engines=1,
+            num_gpus_per_engine=1,
+            training_time=4.0,
+            num_training_gpus=1,
+            prompt_sample_counts=prompt_sample_counts,
+            prompt_attempt_counts=prompt_attempt_counts,
+        )
+
+        self.assertEqual(set(metrics), {"actor_mfu", "actor_mbu", "learner_mfu"})
+        self.assertGreater(metrics["actor_mfu"], 0)
+
+    def test_utilization_metrics_handles_under_counted_attempt_count(self):
+        # Group 0's attempt_count(1) under-counts its true round count: sample_count=16 is 2
+        # rounds' worth at samples_per_prompt=8 (e.g. a never_give_up bookkeeping desync). This
+        # used to raise in pad_response_lengths_for_attempt_counts; it should now self-correct
+        # attempt_count to 2 so group 1's prompt_length attribution doesn't get shifted.
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        prompt_lengths = [256, 512]
+        prompt_sample_counts = [16, 8]
+        prompt_attempt_counts = [1, 1]
+        response_lengths = [128] * 24
 
         metrics = utils.calculate_utilization_metrics(
             model_dims=model_dims,

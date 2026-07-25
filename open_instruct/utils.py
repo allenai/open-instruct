@@ -2557,15 +2557,27 @@ def calculate_utilization_metrics(
     prompt_sample_counts: list[int] | None = None,
     prompt_attempt_counts: list[int] | None = None,
 ) -> dict:
-    expanded_prompt_lengths = expand_prompt_lengths_for_response_groups(
-        prompt_lengths, response_lengths, samples_per_prompt, prompt_sample_counts, prompt_attempt_counts
-    )
     decode_response_lengths = response_lengths
     if prompt_attempt_counts is not None:
         assert prompt_sample_counts is not None
+        # A group's recorded attempt_count can under-count its true round count (e.g. a
+        # never_give_up bookkeeping desync), which would otherwise misalign
+        # expand_prompt_lengths_for_response_groups (expands by attempt_count) against
+        # pad_response_lengths_for_attempt_counts (expects attempt_count * samples_per_prompt
+        # slots) for every group after the affected one. Correct attempt_count up to the minimum
+        # needed to cover its sample_count so both stay consistent; this only affects this
+        # observability metric, never the group's real attempt_count used elsewhere.
+        prompt_attempt_counts = [
+            max(attempt_count, -(-sample_count // samples_per_prompt))
+            for attempt_count, sample_count in zip(prompt_attempt_counts, prompt_sample_counts, strict=True)
+        ]
         decode_response_lengths = pad_response_lengths_for_attempt_counts(
             response_lengths, prompt_sample_counts, prompt_attempt_counts, samples_per_prompt
         )
+
+    expanded_prompt_lengths = expand_prompt_lengths_for_response_groups(
+        prompt_lengths, response_lengths, samples_per_prompt, prompt_sample_counts, prompt_attempt_counts
+    )
 
     actor_metrics = model_dims.calculate_actor_utilization(
         prompt_lengths=expanded_prompt_lengths,
@@ -2680,10 +2692,17 @@ def pad_response_lengths_for_attempt_counts(
     for sample_count, attempt_count in zip(prompt_sample_counts, prompt_attempt_counts, strict=True):
         pad_count = attempt_count * samples_per_prompt - sample_count
         if pad_count < 0:
-            raise ValueError(
+            # This is an observability-only metric (see docstring); a group whose recorded
+            # attempt_count under-counts its true round count (e.g. a never_give_up bookkeeping
+            # desync) shouldn't abort an otherwise-healthy training run. Skip padding for this
+            # group -- its samples are still included in full, just without the round-aligned
+            # zero-padding -- and surface the desync via a warning instead of raising.
+            logger.warning(
                 f"Group sample_count={sample_count} exceeds attempt_count({attempt_count}) * "
-                f"samples_per_prompt({samples_per_prompt}); attempt_count must cover every sample."
+                f"samples_per_prompt({samples_per_prompt}); skipping padding for this group. "
+                "This indicates attempt_count under-counted the group's true round count."
             )
+            pad_count = 0
         padded_response_lengths.extend(response_lengths[offset : offset + sample_count])
         padded_response_lengths.extend([0] * pad_count)
         offset += sample_count
