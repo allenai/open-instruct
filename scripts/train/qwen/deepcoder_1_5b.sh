@@ -3,7 +3,7 @@
 EXP="${EXP:-}"
 
 TRAIN_SCRIPT="open_instruct/grpo.py"
-BACKEND_ARGS="--fsdp_shard_degree 8 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
+BACKEND_ARGS="--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
 
 EXP_NAME="${EXP_NAME:-deepcoder_1_5b_${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
@@ -14,7 +14,7 @@ BEAKER_IMAGE="${BEAKER_IMAGE:-nathanl/open_instruct_auto}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
-NODES="${NODES:-2}"
+NODES="${NODES:-1}"
 
 # Datasets converted from agentica-org/DeepCoder-Preview-Dataset by
 # scripts/data/create_deepcoder_data.py. lcbv5_test and codeforces_test are
@@ -44,7 +44,7 @@ uv run mason.py \
     --exp_name "${EXP_NAME}" \
     --vllm_top_p 1.0 \
     --beta 0.001 \
-    --async_steps 4 \
+    --async_steps 2 \
     --active_sampling \
     --inflight_updates \
     --advantage_normalization_type centered \
@@ -65,8 +65,8 @@ uv run mason.py \
     --non_stop_penalty False \
     --total_episodes 64000 \
     ${BACKEND_ARGS} \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 8 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
