@@ -81,6 +81,11 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
 
+# The FA3 wheel puts its Python interface at site-packages/flash_attn_interface.py,
+# while Transformer Engine imports flash_attn_3.flash_attn_interface. Match the
+# package layout used by the canonical OLMo-core image before importing TE.
+RUN .venv/bin/python -c "from importlib.util import find_spec; from pathlib import Path; import shutil; import flash_attn_3; source = find_spec('flash_attn_interface'); assert source is not None and source.origin is not None; shutil.copyfile(source.origin, Path(next(iter(flash_attn_3.__path__))) / 'flash_attn_interface.py')"
+
 # OLMo-core MoE permutation kernels depend on Transformer Engine. NVIDIA ships
 # the PyTorch binding as source, so install it after Torch with build isolation disabled.
 ARG TE_VERSION=2.9
