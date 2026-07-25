@@ -1832,6 +1832,20 @@ OC=true WORKSPACE=ai2/oe-adapt-code PRIORITY=high EXP=reinforce_ada_est_fixed_se
 
 seed 3 (relaunch): [Beaker](https://beaker.org/ex/01KYDDJ1MWXAEV3RSABT6BYGC6)
 
+**seed 3's relaunch crashed again at `training_step=202` (2026-07-25 20:46),
+same failure signature**: `RuntimeError: [gloo/transport/tcp/pair.cc:547]
+Connection closed by peer` / `Application timeout caused pair closure`.
+Confirmed this is *not* the same bad node both times -- first crash was on
+`jupiter-cs-aus-120` (`10.93.1.29`), second on `jupiter-cs-aus-133`
+(`10.93.1.42`) -- and seeds 1/2 were already well past `training_step`
+200-280 with no issue at the time of both crashes, ruling out a systemic
+bug tied to the `reinforce_ada_est` fix or feature (would expect seeds 1/2
+to hit it too if so). Genuine, if unlucky (2/2), transient network
+flakiness on the `--preemptible` GPU pool. Relaunched a third time,
+identical command:
+
+seed 3 (2nd relaunch): [Beaker](https://beaker.org/ex/01KYDGJHG34KDJT80W88SH4HHM)
+
 Training-progress/convergence outcome still TBD.
 
 ## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
