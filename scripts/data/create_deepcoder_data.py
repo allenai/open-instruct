@@ -27,8 +27,43 @@ INSTRUCTION = (
     "and write the output to stdout. Enclose your complete solution in a single ```python code block."
 )
 
+# DeepCoder's own recipe samples "the 15 most challenging tests" per problem for reward
+# calculation (https://www.together.ai/blog/deepcoder). That cap alone isn't enough here, though:
+# a handful of LiveCodeBench-v5 stress-test problems ship individual tests running several MB each
+# (up to 160MB combined for one problem's 30 tests), and CodeStdioVerifier.async_call
+# (open_instruct/ground_truth_utils.py) sends every test for an example in a single HTTP POST to
+# the code-execution API -- an AWS API Gateway endpoint with a hard 10MB request limit (Lambda's
+# sync-invoke limit is 6MB). A handful of oversized tests would fail at request time regardless of
+# storage concerns, and unfiltered totals also overflow PyArrow's 2GB string-offset limit while
+# caching the dataset. Greedily keep the largest ("most challenging") tests within a total byte
+# budget with plenty of margin below the 6MB wall; problems with no test under the per-test cap end
+# up with zero usable tests and are dropped (can't be graded by this infra either way).
+MAX_TESTS_PER_PROBLEM = 15
+MAX_TEST_BYTES = 100_000  # drop any single test case bigger than this
+MAX_TOTAL_TEST_BYTES = 500_000  # total serialized size budget for the kept tests of one problem
 
-def to_example(problem: str, tests: list[dict]) -> dict:
+
+def _test_size(test: dict) -> int:
+    return len(test.get("input", "")) + len(test.get("output", ""))
+
+
+def cap_tests(tests: list[dict]) -> list[dict]:
+    candidates = sorted((t for t in tests if _test_size(t) <= MAX_TEST_BYTES), key=_test_size, reverse=True)
+    kept = []
+    total = 0
+    for test in candidates:
+        size = _test_size(test)
+        if len(kept) >= MAX_TESTS_PER_PROBLEM or total + size > MAX_TOTAL_TEST_BYTES:
+            break
+        kept.append(test)
+        total += size
+    return kept
+
+
+def to_example(problem: str, tests: list[dict]) -> dict | None:
+    tests = cap_tests(tests)
+    if not tests:
+        return None
     return {
         "messages": [{"role": "user", "content": problem.strip() + INSTRUCTION}],
         "ground_truth": json.dumps(tests),
@@ -44,11 +79,18 @@ def convert_lcbv5(split: str) -> Dataset:
         num_proc=open_instruct_utils.max_num_processes(),
     )
     examples = []
+    dropped_no_usable_tests = 0
     for sample in dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
         if any(test.get("testtype") != "stdin" for test in tests):
             continue
-        examples.append(to_example(sample["problem"], tests))
+        example = to_example(sample["problem"], tests)
+        if example is None:
+            dropped_no_usable_tests += 1
+            continue
+        examples.append(example)
+    if dropped_no_usable_tests:
+        print(f"  lcbv5[{split}]: dropped {dropped_no_usable_tests} problems with no test under the size cap")
     return Dataset.from_list(examples)
 
 
@@ -60,11 +102,18 @@ def convert_primeintellect() -> Dataset:
         num_proc=open_instruct_utils.max_num_processes(),
     )
     examples = []
+    dropped_no_usable_tests = 0
     for sample in dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
         if any(test.get("type") != "stdin_stdout" for test in tests):
             continue
-        examples.append(to_example(sample["problem"], tests))
+        example = to_example(sample["problem"], tests)
+        if example is None:
+            dropped_no_usable_tests += 1
+            continue
+        examples.append(example)
+    if dropped_no_usable_tests:
+        print(f"  primeintellect: dropped {dropped_no_usable_tests} problems with no test under the size cap")
     return Dataset.from_list(examples)
 
 
@@ -76,6 +125,7 @@ def convert_taco() -> Dataset:
         num_proc=open_instruct_utils.max_num_processes(),
     )
     examples = []
+    dropped_no_usable_tests = 0
     for sample in dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
         if not isinstance(tests, dict) or tests.get("fn_name"):
@@ -84,7 +134,13 @@ def convert_taco() -> Dataset:
         if not inputs or not outputs or len(inputs) != len(outputs):
             continue
         pairs = [{"input": i, "output": o} for i, o in zip(inputs, outputs)]
-        examples.append(to_example(sample["problem"], pairs))
+        example = to_example(sample["problem"], pairs)
+        if example is None:
+            dropped_no_usable_tests += 1
+            continue
+        examples.append(example)
+    if dropped_no_usable_tests:
+        print(f"  taco: dropped {dropped_no_usable_tests} problems with no test under the size cap")
     return Dataset.from_list(examples)
 
 
@@ -96,9 +152,16 @@ def convert_codeforces() -> Dataset:
         num_proc=open_instruct_utils.max_num_processes(),
     )
     examples = []
+    dropped_no_usable_tests = 0
     for sample in dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
-        examples.append(to_example(sample["problem"], tests))
+        example = to_example(sample["problem"], tests)
+        if example is None:
+            dropped_no_usable_tests += 1
+            continue
+        examples.append(example)
+    if dropped_no_usable_tests:
+        print(f"  codeforces: dropped {dropped_no_usable_tests} problems with no test under the size cap")
     return Dataset.from_list(examples)
 
 
