@@ -92,7 +92,9 @@ class GRPOExperimentConfig(
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
-    """How many train steps to save the model"""
+    """How often to save a HuggingFace-format model checkpoint (in steps), to `{output_dir}_checkpoints/step_N`.
+    Distinct from `checkpoint_state_freq`, which saves olmo-core's native, resumable training state
+    (model + optimizer + LR scheduler states)."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
     model_dtype: str = "bfloat16"
@@ -279,14 +281,6 @@ class GRPOExperimentConfig(
             )
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq <= 0:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
-        if self.save_freq != self.checkpoint_state_freq:
-            logger.warning(
-                "On the olmo-core training path, --save_freq is a no-op for periodic saves; "
-                "olmo-core checkpoints are full training state and saved every "
-                "--checkpoint_state_freq steps (got save_freq=%d, checkpoint_state_freq=%d).",
-                self.save_freq,
-                self.checkpoint_state_freq,
-            )
 
         if self.gs_checkpoint_state_dir is not None and not self.gs_checkpoint_state_dir.startswith("gs://"):
             raise ValueError(f"`gs_checkpoint_state_dir` must start with 'gs://', got: {self.gs_checkpoint_state_dir}")

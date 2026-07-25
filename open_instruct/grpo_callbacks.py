@@ -7,6 +7,7 @@ These callbacks handle:
 """
 
 import contextlib
+import os
 import re
 import time
 from collections.abc import Callable
@@ -18,6 +19,7 @@ import ray.exceptions
 import ray.util.queue as ray_queue
 import torch
 import torch.nn as nn
+import transformers
 from datasets import Dataset
 from olmo_core.distributed import utils as dist_utils
 from olmo_core.train.callbacks import Callback
@@ -26,7 +28,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import grpo_utils, logger_utils, utils, vllm_utils
+from open_instruct import grpo_utils, logger_utils, olmo_core_utils, utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -250,6 +252,44 @@ class RefPolicyUpdateCallback(Callback):
         finally:
             for m in fsdp2_submodules:
                 m.reshard()
+
+
+@dataclass
+class HFCheckpointCallback(Callback):
+    """Periodically saves a HuggingFace-format checkpoint during training.
+
+    Complements olmo-core's native `CheckpointerCallback` (full, resumable training
+    state: model + optimizer + LR scheduler). This instead saves fully materialized
+    HF-format weights, matching the format `PolicyTrainerOLMoCoreProcess.save_model`
+    writes at the end of training, so intermediate checkpoints can be evaluated or
+    served without waiting for the run to finish.
+    """
+
+    output_dir: str
+    model_name_or_path: str
+    tokenizer: transformers.PreTrainedTokenizer
+    save_freq: int
+
+    @property
+    def train_module(self) -> TransformerTrainModule:
+        return cast(TransformerTrainModule, self.trainer.train_module)
+
+    def post_step(self) -> None:
+        if self.trainer.global_step % self.save_freq != 0:
+            return
+
+        # state_dict()/full_tensor() are collective FSDP operations; every rank must call them.
+        state_dict = self.train_module.model.state_dict()
+        state_dict = {
+            k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()
+        }
+
+        if dist_utils.get_rank() != 0:
+            return
+
+        step_dir = os.path.join(self.output_dir, f"step_{self.trainer.global_step}")
+        olmo_core_utils.save_state_dict_as_hf(state_dict, step_dir, self.model_name_or_path, self.tokenizer)
+        logger.info(f"Saved HF checkpoint at step {self.trainer.global_step} to {step_dir}")
 
 
 @dataclass
