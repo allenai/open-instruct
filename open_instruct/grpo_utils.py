@@ -239,6 +239,8 @@ class GRPOExperimentConfig(
     """Number of completions per eval prompt for local pass@k metrics."""
     eval_top_p: float | None = None
     """Optional eval-only top_p override. If None, uses training top_p."""
+    eval_temperature: float | None = None
+    """Optional eval-only temperature override. If None, uses training temperature."""
     eval_only: bool = False
     """Run a single local evaluation round on `dataset_mixer_eval_list` and exit, without any training.
     Requires no learner GPUs; the model is served by vLLM directly from `model_name_or_path`."""
@@ -341,6 +343,8 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
+        if self.eval_temperature is not None and self.eval_temperature < 0.0:
+            raise ValueError(f"`eval_temperature` must be >= 0, got {self.eval_temperature}")
         if self.use_rho_correction:
             if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
                 raise ValueError(

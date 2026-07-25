@@ -1460,6 +1460,7 @@ def create_generation_configs(
         n=args.eval_pass_at_k,
         max_tokens=streaming_config.eval_response_length,
         top_p=args.eval_top_p or generation_config.top_p,
+        temperature=args.eval_temperature if args.eval_temperature is not None else generation_config.temperature,
     )
     return {"train": generation_config, "eval": eval_generation_config}
 

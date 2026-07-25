@@ -43,6 +43,7 @@ uv run mason.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --vllm_top_p 1.0 \
+    --eval_temperature 0.6 \
     --beta 0.001 \
     --async_steps 2 \
     --active_sampling \
