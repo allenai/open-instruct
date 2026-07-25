@@ -1846,6 +1846,48 @@ identical command:
 
 seed 3 (2nd relaunch): [Beaker](https://beaker.org/ex/01KYDGJHG34KDJT80W88SH4HHM)
 
+**seed 1 also crashed, same signature, at `training_step=322` (2026-07-25
+21:36)**: `RuntimeError: [gloo/transport/tcp/unbound_buffer.cc:78] Timed out
+waiting 1800000ms for recv operation to complete` -> `Application timeout
+caused pair closure`. This is the third occurrence of the identical Gloo
+collective-timeout signature in ~2.5 hours, now across 2 of the 3 seeds.
+Checked `DataPreparationActor.get_data` logs right up to the crash: step
+cadence was normal (no rank stuck at a high `wait_count`, steps advancing
+every ~10-30s through step 321) -- no evidence of an application-level
+stall or a `reinforce_ada_est`-specific hang, which continues to point at
+`ai2/jupiter` network flakiness rather than a code issue (seed 2 was
+already well past this step range throughout, unaffected).
+
+**Lesson learned, mid-course correction:** the first two seed-3 relaunches
+above used the plain launch command, which -- via `mason.py`'s
+`--auto_checkpoint_state_dir` -- assigns a *fresh* `--checkpoint_state_dir`
+each time, discarding the crashed run's saved checkpoints and restarting
+from step 0. Confirmed via `ls` that seed 1's original checkpoint dir
+(`.../deletable_checkpoint_states/michaeln/1785005775_707439`) had a
+`step300` checkpoint saved ~30 min before its crash. `mason.py` skips the
+auto-override if `--checkpoint_state_dir` is already explicitly set to a
+`/weka/`-prefixed path, so relaunched seed 1 with that flag pointed at the
+existing checkpoint dir to resume from `step300` instead of losing ~2 hours
+of progress:
+
+```
+OC=true WORKSPACE=ai2/oe-adapt-code PRIORITY=high EXP=reinforce_ada_est_fixed_seed1_resume \
+  ./scripts/train/build_image_and_launch.sh scripts/train/qwen/qwen3_4b_deepscaler_math.sh \
+  --reinforce_ada_est True --seed 1 \
+  --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1785005775_707439
+```
+
+seed 1 (resumed from step300): [Beaker](https://beaker.org/ex/01KYDKNJ9TSPTRXYQ1Q4S9K7X3)
+(a first relaunch attempt without the checkpoint override,
+`01KYDKK3JY1JNMQ452A3FV04JV`, was caught and stopped before making progress
+-- not a real run.)
+
+Seed 3's two prior relaunches did *not* get this treatment (each restarted
+from step 0) since this was only noticed at seed 1's crash; if seed 3's
+current (3rd) attempt crashes again, resume it the same way from its
+checkpoint dir `.../deletable_checkpoint_states/michaeln/1785012503_30650`
+rather than relaunching plain.
+
 Training-progress/convergence outcome still TBD.
 
 ## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
