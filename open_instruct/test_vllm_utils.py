@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
+import torch
 import vllm
 from parameterized import parameterized
 
@@ -31,6 +32,38 @@ class TestTruncateEnvOutputTokens(unittest.TestCase):
         )
         self.assertEqual(result, expected_tokens)
         self.assertEqual(excess, expected_excess)
+
+
+class TestMappedNamedParameters(unittest.TestCase):
+    """_mapped_named_parameters must drop any param name_mapper maps to None (see
+    grpo_callbacks.olmo_core_to_hf_name's qwen2 w_out.bias case), and keep metadata/tensors
+    aligned for callers like broadcast_weights_to_vllm that build parallel names/dtypes/shapes
+    lists from it."""
+
+    def setUp(self):
+        self.model = torch.nn.Module()
+        self.model.keep = torch.nn.Parameter(torch.zeros(2))
+        self.model.drop = torch.nn.Parameter(torch.zeros(3))
+
+    def test_none_mapper_returns_all_params_unchanged(self):
+        result = vllm_utils._mapped_named_parameters(self.model, None)
+        self.assertEqual({n for n, _ in result}, {"keep", "drop"})
+
+    def test_mapper_returning_none_drops_param(self):
+        mapper = lambda name: None if name == "drop" else f"mapped.{name}"  # noqa: E731
+        result = vllm_utils._mapped_named_parameters(self.model, mapper)
+        self.assertEqual([n for n, _ in result], ["mapped.keep"])
+
+    def test_prepare_and_collect_stay_aligned_after_filtering(self):
+        mapper = lambda name: None if name == "drop" else f"mapped.{name}"  # noqa: E731
+        params = vllm_utils._mapped_named_parameters(self.model, mapper)
+
+        names, dtype_names, shapes = vllm_utils._collect_weight_metadata(params)
+        prepared = vllm_utils._prepare_params_for_sync(params)
+
+        self.assertEqual(names, ["mapped.keep"])
+        self.assertEqual(shapes, [[2]])
+        self.assertEqual([n for n, _ in prepared], names)
 
 
 class TestVllmUtils3(unittest.TestCase):

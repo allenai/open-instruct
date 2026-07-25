@@ -36,6 +36,11 @@ _OLMO_CORE_TO_HF_LAYER_MAPPINGS = {
     "attention.w_k.weight": "self_attn.k_proj.weight",
     "attention.w_v.weight": "self_attn.v_proj.weight",
     "attention.w_out.weight": "self_attn.o_proj.weight",
+    # Qwen2/DeepSeek-R1-Distill-Qwen only (see olmo_core_utils.QWEN2_STYLE_HF_MODEL_TYPES):
+    # Qwen3/LLaMA presets keep AttentionConfig.bias=False, so these never appear for them.
+    "attention.w_q.bias": "self_attn.q_proj.bias",
+    "attention.w_k.bias": "self_attn.k_proj.bias",
+    "attention.w_v.bias": "self_attn.v_proj.bias",
     "attention.q_norm.weight": "self_attn.q_norm.weight",
     "attention.k_norm.weight": "self_attn.k_norm.weight",
     "feed_forward.w1.weight": "mlp.gate_proj.weight",
@@ -45,9 +50,23 @@ _OLMO_CORE_TO_HF_LAYER_MAPPINGS = {
     "feed_forward_norm.weight": "post_attention_layernorm.weight",
 }
 
+# Qwen2's o_proj has no bias; olmo-core's AttentionConfig.bias applies uniformly to all four
+# attention projections, so the qwen2 preset's w_out.bias is a synthetic, permanently-zero,
+# frozen param with no counterpart in vLLM's HF-format model (see
+# olmo_core_utils.QWEN2_STYLE_HF_MODEL_TYPES / drop_frozen_zero_bias_for_hf_export). vLLM's
+# weight loader errors on any name it doesn't recognize, so this must be dropped, not sent
+# under its raw olmo-core name.
+_OLMO_CORE_PARAMS_WITH_NO_HF_COUNTERPART = re.compile(r"blocks\.\d+\.attention\.w_out\.bias$")
 
-def olmo_core_to_hf_name(name: str) -> str:
-    """Convert OLMo-core parameter name to HuggingFace format for Qwen3/LLaMA models."""
+
+def olmo_core_to_hf_name(name: str) -> str | None:
+    """Convert OLMo-core parameter name to HuggingFace format for Qwen3/LLaMA/Qwen2 models.
+
+    Returns None for params with no destination in vLLM's model (see
+    _OLMO_CORE_PARAMS_WITH_NO_HF_COUNTERPART) -- callers must drop these rather than send them.
+    """
+    if _OLMO_CORE_PARAMS_WITH_NO_HF_COUNTERPART.match(name):
+        return None
     if name == "embeddings.weight":
         return "model.embed_tokens.weight"
     if name == "lm_head.norm.weight":
@@ -157,7 +176,7 @@ class VLLMWeightSyncCallback(Callback):
     actor_manager: ray.actor.ActorHandle
     model_update_group: Any | None = None
     sync_interval: int = 1
-    name_mapper: Callable[[str], str] | None = None
+    name_mapper: Callable[[str], str | None] | None = None
 
     @property
     def train_module(self) -> TransformerTrainModule:

@@ -1341,31 +1341,46 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
     return fsdp_modules
 
 
-def _prepare_params_for_sync(
-    params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
-) -> list[tuple[str, torch.Tensor]]:
-    """Map parameter names and clone into contiguous tensors for NCCL send.
+def _mapped_named_parameters(
+    model: torch.nn.Module, name_mapper: Callable[[str], str | None] | None
+) -> list[tuple[str, torch.nn.Parameter]]:
+    """model.named_parameters(), remapped to HF-style names via name_mapper.
+
+    Parameters name_mapper maps to None have no destination on the vLLM side (e.g. the
+    qwen2-style synthetic w_out.bias described in olmo_core_utils.QWEN2_STYLE_HF_MODEL_TYPES)
+    and are dropped rather than sent -- vLLM's weight loader errors on any name it doesn't
+    recognize, so an unmapped/raw olmo-core name is worse than not sending it at all.
+    """
+    if name_mapper is None:
+        return list(model.named_parameters())
+    mapped = ((name_mapper(name), param) for name, param in model.named_parameters())
+    return [(name, param) for name, param in mapped if name is not None]
+
+
+def _prepare_params_for_sync(params: list[tuple[str, torch.nn.Parameter]]) -> list[tuple[str, torch.Tensor]]:
+    """Clone params into contiguous tensors for NCCL send.
 
     DS3 gathered tensors may be non-contiguous or views into temporary buffers.
-    Cloning ensures we send independent, contiguous tensors over NCCL.
+    Cloning ensures we send independent, contiguous tensors over NCCL. Expects names already
+    mapped (see _mapped_named_parameters) -- callers must keep metadata and sent tensors aligned.
     """
-    return [(name_mapper(n) if name_mapper else n, p.data.contiguous().clone()) for n, p in params]
+    return [(n, p.data.contiguous().clone()) for n, p in params]
 
 
 def _collect_weight_metadata(
-    model: torch.nn.Module, name_mapper: Callable[[str], str] | None
+    params: list[tuple[str, torch.nn.Parameter]],
 ) -> tuple[list[str], list[str], list[list[int]]]:
     """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
 
     For DeepSpeed stage 3, uses ds_shape. For FSDP2 DTensors, .shape returns global shape.
     For FSDP1, param.shape returns full shape when parameters are registered (not flat).
+    Expects names already mapped (see _mapped_named_parameters).
     """
     names: list[str] = []
     dtype_names: list[str] = []
     shapes: list[list[int]] = []
-    for name, param in model.named_parameters():
-        mapped_name = name_mapper(name) if name_mapper else name
-        names.append(mapped_name)
+    for name, param in params:
+        names.append(name)
         dtype_names.append(str(param.dtype).split(".")[-1])
         shape = getattr(param, "ds_shape", param.shape)
         shapes.append(list(shape))
@@ -1375,13 +1390,13 @@ def _collect_weight_metadata(
 def _broadcast_weights_ipc(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
-    name_mapper: Callable[[str], str] | None,
+    name_mapper: Callable[[str], str | None] | None,
     gather_whole_model: bool,
     model_step: int,
 ) -> list[ray.ObjectRef]:
     """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
     is_rank_0 = torch.distributed.get_rank() == 0
-    params = list(model.named_parameters())
+    params = _mapped_named_parameters(model, name_mapper)
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
     if isinstance(model, FSDP):
@@ -1391,7 +1406,7 @@ def _broadcast_weights_ipc(
 
     with ctx:
         if is_rank_0:
-            mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
+            mapped_params = [(n, p.data) for n, p in params]
             for engine in vllm_engines:
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
@@ -1404,7 +1419,7 @@ def broadcast_weights_to_vllm(
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: Any | None,
     model_step: int,
-    name_mapper: Callable[[str], str] | None = None,
+    name_mapper: Callable[[str], str | None] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
     """Broadcast model weights to vLLM engines using the native weight transfer API.
@@ -1452,7 +1467,7 @@ def broadcast_weights_to_vllm(
         torch.cuda.synchronize()
         try:
             if is_rank_0:
-                mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
+                mapped_params = _prepare_params_for_sync(_mapped_named_parameters(model, name_mapper))
                 names = [n for n, _ in mapped_params]
                 dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
                 shapes = [list(t.shape) for _, t in mapped_params]
@@ -1469,7 +1484,8 @@ def broadcast_weights_to_vllm(
             model.reshard()
         return refs
 
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
+    mapped_named_params = _mapped_named_parameters(model, name_mapper)
+    names, dtype_names, shapes = _collect_weight_metadata(mapped_named_params)
 
     if is_rank_0:
         update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
@@ -1477,7 +1493,7 @@ def broadcast_weights_to_vllm(
     else:
         refs = []
 
-    params = list(model.named_parameters())
+    params = mapped_named_params
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
 
     if isinstance(model, FSDP):
@@ -1493,7 +1509,7 @@ def broadcast_weights_to_vllm(
     for ctx, batch_params in batches:
         with ctx:
             if is_rank_0:
-                mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
+                mapped_params = _prepare_params_for_sync(batch_params)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
 
     return refs
