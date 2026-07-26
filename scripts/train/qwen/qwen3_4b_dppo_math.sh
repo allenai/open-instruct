@@ -62,8 +62,8 @@ uv run open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --local_eval_every 25 \
-    --save_freq 100 \
-    --checkpoint_state_freq 100 \
+    --save_freq -1 \
+    --checkpoint_state_freq -1 \
     --gradient_checkpointing \
     --with_tracking \
     --send_slack_alerts \
@@ -82,5 +82,5 @@ uv run open_instruct/grpo_fast.py \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
-    --keep_last_n_checkpoints -1 \
+    --keep_last_n_checkpoints 1 \
     --push_to_hub False "$@"
