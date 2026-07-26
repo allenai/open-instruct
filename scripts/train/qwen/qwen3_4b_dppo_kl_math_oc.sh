@@ -1,0 +1,92 @@
+#!/bin/bash
+
+DPPO_DIVERGENCE_THRESHOLD="${DPPO_DIVERGENCE_THRESHOLD:-0.05}"
+
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dppo_kl}"
+RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+# Reuse RUN_NAME, or set CHECKPOINT_STATE_DIR directly, when relaunching to resume.
+CHECKPOINT_STATE_DIR="${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME}}"
+
+NUM_GPUS="${NUM_GPUS:-8}"
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+if [[ $# -gt 0 ]]; then
+    shift
+fi
+
+CLUSTER="${CLUSTER:-ai2/jupiter}"
+PRIORITY="${PRIORITY:-urgent}"
+WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
+
+uv run python mason.py \
+    --task_name ${EXP_NAME} \
+    --description "${RUN_NAME}" \
+    --cluster ${CLUSTER} \
+    --workspace ${WORKSPACE} \
+    --priority ${PRIORITY} \
+    --pure_docker_mode \
+    --no_auto_dataset_cache \
+    --image ${BEAKER_IMAGE} \
+    --preemptible \
+    --num_nodes 1 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --gpus $NUM_GPUS \
+    -- \
+uv run python open_instruct/grpo.py \
+    --run_name "${RUN_NAME}" \
+    --exp_name "${EXP_NAME}" \
+    --eval_pass_at_k 32 \
+    --eval_top_p 0.95 \
+    --vllm_top_p 1.0 \
+    --beta 0.0 \
+    --async_steps 4 \
+    --active_sampling \
+    --inflight_updates \
+    --advantage_normalization_type centered \
+    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 8 \
+    --num_mini_batches 1 \
+    --learning_rate 1e-6 \
+    --per_device_train_batch_size 1 \
+    --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
+    --dataset_mixer_list_splits "train" \
+    --dataset_mixer_eval_list allenai/aime_2025_openinstruct 1.0 allenai/brumo_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list_splits "train" \
+    --max_prompt_token_length 2048 \
+    --response_length 8192 \
+    --pack_length 10240 \
+    --model_name_or_path "Qwen/Qwen3-4B-Base" \
+    --non_stop_penalty False \
+    --temperature 1.0 \
+    --total_episodes 128000 \
+    --fsdp_shard_degree 4 \
+    --fsdp_num_replicas 1 \
+    --activation_memory_budget 0.5 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
+    --vllm_tensor_parallel_size 1 \
+    --lr_scheduler_type constant \
+    --apply_verifiable_reward true \
+    --seed 1 \
+    --local_eval_every 100 \
+    --save_freq 100 \
+    --checkpoint_state_freq 100 \
+    --with_tracking \
+    --send_slack_alerts \
+    --vllm_enable_prefix_caching \
+    --loss_fn dppo \
+    --policy_ratio_denominator rollout_policy \
+    --rollout_importance_correction none \
+    --rho_clamp_lower_bound 0.0 \
+    --rho_clamp_upper_bound 0.0 \
+    --rho_mask_metric kl \
+    --rho_mask_source current_policy \
+    --rho_mask_level token \
+    --rho_mask_direction increase_only \
+    --rho_mask_lower_bound 0.0 \
+    --rho_mask_upper_bound "${DPPO_DIVERGENCE_THRESHOLD}" \
+    --mask_truncated_completions False \
+    --chat_template qwen_instruct_user_boxed_math \
+    --load_ref_policy False \
+    --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
+    --keep_last_n_checkpoints 1 \
+    --push_to_hub False "$@"
