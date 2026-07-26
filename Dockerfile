@@ -73,11 +73,6 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
 
-# OLMo-core's MoE expert-parallel paths use Transformer Engine's token
-# permutation kernels. Keep this aligned with OLMo-core's canonical image.
-RUN uv pip install --python /stage/.venv/bin/python --no-build-isolation \
-    "transformer-engine[pytorch]==2.9"
-
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts

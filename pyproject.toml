@@ -73,7 +73,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "abc7cf1e6c1e0982ca5172ad7a7c0948b0d6fa64" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "79da8a0758eda42626f9ea69493108d918ad9bd5" }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.8.3%2Bcu128torch2.11-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
