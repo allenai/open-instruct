@@ -39,6 +39,7 @@ uv run mason.py \
     --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
     --gpus $NUM_GPUS \
     -- source configs/beaker_configs/ray_node_setup.sh \
+\&\& source configs/beaker_configs/code_api_setup.sh \
 \&\& uv run ${TRAIN_SCRIPT} \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
@@ -82,7 +83,7 @@ uv run mason.py \
     --clip_higher 0.272 \
     --max_grad_norm 1.0 \
     --mask_truncated_completions True \
-    --code_api_url https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program \
+    --code_api_url \$CODE_API_URL/test_program \
     --code_pass_rate_reward_threshold 0.0 \
     --load_ref_policy True \
     --keep_last_n_checkpoints 3 \
