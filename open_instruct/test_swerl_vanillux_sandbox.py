@@ -1,7 +1,10 @@
+import inspect
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
-from open_instruct.environments.backends import ExecutionResult
+from open_instruct.environments.backends import DockerBackend, ExecutionResult, SandboxBackend
 from open_instruct.environments.base import EnvCall, StepResult
 from open_instruct.environments.swerl_vanillux_sandbox import (
     INSTANCE_TEMPLATE,
@@ -16,12 +19,20 @@ from open_instruct.environments.tools.tools import TOOL_REGISTRY
 
 
 class _FakeBackend:
+    # Keep this signature in step with SandboxBackend.run_command. A fake that omits
+    # `timeout` silently accepts calls the real backend would reject with a TypeError.
     def __init__(self):
         self.commands: list[str] = []
+        self.timeouts: list[int | None] = []
+        self.archives: list[bytes] = []
 
-    def run_command(self, command: str) -> ExecutionResult:
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
         self.commands.append(command)
+        self.timeouts.append(timeout)
         return ExecutionResult(stdout="ok", stderr="", exit_code=0)
+
+    def put_archive(self, path: str, data: bytes) -> None:
+        self.archives.append(data)
 
     def write_file(self, path: str, content: str | bytes) -> None:
         self.commands.append(f"write_file {path}")
@@ -31,6 +42,22 @@ class _FakeBackend:
 
 
 class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
+    def test_backend_contract_supports_per_command_timeout(self):
+        # This env passes `timeout=` to run_command when running the verifier. The fakes
+        # in this file would happily accept it even if the real backends did not, so
+        # assert against the actual interface.
+        for backend in (SandboxBackend, DockerBackend):
+            params = inspect.signature(backend.run_command).parameters
+            self.assertIn("timeout", params, f"{backend.__name__}.run_command must accept `timeout`")
+
+    def test_backend_contract_supports_put_archive(self):
+        # _upload_directory uploads the test suite via put_archive. Same trap as above:
+        # the fakes define it, so only checking the real classes proves it exists.
+        for backend in (SandboxBackend, DockerBackend):
+            self.assertTrue(hasattr(backend, "put_archive"), f"{backend.__name__} must implement `put_archive`")
+        params = inspect.signature(DockerBackend.put_archive).parameters
+        self.assertEqual(list(params)[1:], ["path", "data"])
+
     def test_registered_as_tool_environment(self):
         self.assertIs(TOOL_REGISTRY["swerl_vanillux_sandbox"].tool_class, SWERLVanilluxSandboxEnv)
 
@@ -90,7 +117,7 @@ class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
         env = SWERLVanilluxSandboxEnv()
 
         class _SubmitBackend(_FakeBackend):
-            def run_command(self, command: str) -> ExecutionResult:
+            def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
                 self.commands.append(command)
                 if "wrapper" in command:
                     return ExecutionResult(stdout=SUBMIT_MARKER + "\n", stderr="", exit_code=0)
@@ -106,11 +133,65 @@ class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.result, "done")
         self.assertTrue(result.done)
 
+    def test_run_tests_uploads_runs_and_scores(self):
+        # The submit test above patches out _run_tests, so nothing else executes the
+        # method that actually uploads tests, runs test.sh and parses the reward —
+        # which is the success path of every episode. Exercise it for real here.
+        env = SWERLVanilluxSandboxEnv()
+
+        class _VerifierBackend(_FakeBackend):
+            def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
+                self.commands.append(command)
+                self.timeouts.append(timeout)
+                if "test -f /tests/test.sh" in command:
+                    return ExecutionResult(stdout="EXISTS\n", stderr="", exit_code=0)
+                if "reward.txt" in command:
+                    return ExecutionResult(stdout="0.75\n", stderr="", exit_code=0)
+                return ExecutionResult(stdout="", stderr="", exit_code=0)
+
+        backend = _VerifierBackend()
+        env._backend = backend
+        with tempfile.TemporaryDirectory() as tests_dir:
+            with open(os.path.join(tests_dir, "test.sh"), "w", encoding="utf-8") as f:
+                f.write("#!/bin/bash\nexit 0\n")
+            env._tests_dir = tests_dir
+            result = env._run_tests()
+
+        self.assertTrue(result.done)
+        self.assertEqual(result.reward, 0.75)
+        self.assertIn("bash /tests/test.sh", backend.commands)
+        # The test command must carry the per-command timeout override.
+        idx = backend.commands.index("bash /tests/test.sh")
+        self.assertEqual(backend.timeouts[idx], env._test_timeout)
+
+    def test_run_tests_reward_is_clamped_and_defaults_to_zero(self):
+        env = SWERLVanilluxSandboxEnv()
+
+        class _BadRewardBackend(_FakeBackend):
+            def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
+                self.commands.append(command)
+                self.timeouts.append(timeout)
+                if "test -f /tests/test.sh" in command:
+                    return ExecutionResult(stdout="EXISTS\n", stderr="", exit_code=0)
+                if "reward.txt" in command:
+                    return ExecutionResult(stdout="not-a-number\n", stderr="", exit_code=0)
+                return ExecutionResult(stdout="", stderr="", exit_code=0)
+
+        env._backend = _BadRewardBackend()
+        with tempfile.TemporaryDirectory() as tests_dir:
+            with open(os.path.join(tests_dir, "test.sh"), "w", encoding="utf-8") as f:
+                f.write("#!/bin/bash\nexit 0\n")
+            env._tests_dir = tests_dir
+            result = env._run_tests()
+
+        self.assertEqual(result.reward, 0.0)
+        self.assertTrue(result.done)
+
     async def test_bash_output_is_appended_with_exit_code(self):
         env = SWERLVanilluxSandboxEnv()
 
         class _EchoBackend(_FakeBackend):
-            def run_command(self, command: str) -> ExecutionResult:
+            def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
                 self.commands.append(command)
                 return ExecutionResult(stdout="hello", stderr="", exit_code=0)
 
@@ -125,7 +206,7 @@ class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
         env = SWERLVanilluxSandboxEnv(append_turns_remaining=True)
 
         class _EchoBackend(_FakeBackend):
-            def run_command(self, command: str) -> ExecutionResult:
+            def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
                 self.commands.append(command)
                 return ExecutionResult(stdout="hello", stderr="", exit_code=0)
 
@@ -140,7 +221,7 @@ class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
         env = SWERLVanilluxSandboxEnv(append_turns_remaining=True)
 
         class _EchoBackend(_FakeBackend):
-            def run_command(self, command: str) -> ExecutionResult:
+            def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
                 self.commands.append(command)
                 return ExecutionResult(stdout="hello", stderr="", exit_code=0)
 

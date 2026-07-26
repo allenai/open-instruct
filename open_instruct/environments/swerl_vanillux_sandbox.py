@@ -37,7 +37,7 @@ from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
 
-from .backends import SandboxBackend, SandboxOOMError, create_backend
+from .backends import DockerBackend, SandboxBackend, SandboxOOMError, create_backend
 from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
 from .tools.utils import coerce_args
 
@@ -72,7 +72,7 @@ pwd > {shlex.quote(_BASH_CWD_PATH)}
 exit $_exit_code
 """
 
-_BASH_TOOL = {
+_BASH_TOOL: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "bash",
@@ -313,7 +313,10 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
         if self._backend is not None:
             self._backend.close()
             record_phase("close")
-            self._backend._image = self._backend_kwargs.get("image", self._backend._image)
+            # Reusing a backend across tasks means re-pointing it at this task's image.
+            # Only the Docker backend has one; anything else is reused as-is.
+            if isinstance(self._backend, DockerBackend):
+                self._backend._image = self._backend_kwargs.get("image", self._backend._image)
             self._backend.start()
             record_phase("start")
         else:
