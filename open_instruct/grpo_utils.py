@@ -537,11 +537,7 @@ def compute_binary_divergence(
     if divergence_type == "tv":
         divergence = (mu - pi).abs()
     elif divergence_type == "kl":
-        mu_clip = mu.clamp(eps, 1.0 - eps)
-        pi_clip = pi.clamp(eps, 1.0 - eps)
-        divergence = mu_clip * (mu_clip.log() - pi_clip.log()) + (1.0 - mu_clip) * (
-            torch.log1p(-mu_clip) - torch.log1p(-pi_clip)
-        )
+        divergence = mu * (mu.log() - pi.log()) + (1.0 - mu) * (torch.log1p(-mu) - torch.log1p(-pi))
         divergence = divergence.clamp_min(0.0)
     else:
         raise ValueError(f"Unknown binary divergence type: {divergence_type}. Expected `tv` or `kl`.")
