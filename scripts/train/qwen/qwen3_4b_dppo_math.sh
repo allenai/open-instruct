@@ -63,7 +63,7 @@ uv run python open_instruct/grpo_fast.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --local_eval_every 25 \
+    --local_eval_every 100 \
     --save_freq -1 \
     --checkpoint_state_freq 100 \
     --gradient_checkpointing \
