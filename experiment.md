@@ -1911,6 +1911,16 @@ this specific job's placement/resource profile that keeps triggering
 cluster if it keeps recurring, rather than continuing to blindly relaunch
 indefinitely.
 
+**Separately, seed 1's resumed job (`01KYDKNJ9TSPTRXYQ1Q4S9K7X3`) was
+preempted** (2026-07-26 00:21) by an unrelated higher-priority `urgent` job
+elsewhere on the shared cluster (`canceledFor`: "preempted by job ... with
+'urgent' priority") -- not a crash, and unrelated to any of the above. The
+job spec has `autoResume: true`, so Beaker automatically scheduled and
+started a replacement job within the same experiment a few minutes later,
+no manual relaunch needed. Worth noting for future launches: our jobs run
+at `--priority high`, so they're preemptible by any `urgent`-priority job
+on `ai2/jupiter`, independent of the gloo-timeout pattern above.
+
 Training-progress/convergence outcome still TBD.
 
 ## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
