@@ -480,9 +480,10 @@ class RhoCorrection:
     ``valid_mask`` excludes padding and invalid loss metadata before filtering.
     ``metrics`` maps wandb keys to per-token tensors that get reduced by
     ``masked_mean(., response_mask)`` at logging time.
-    ``histogram_metrics`` maps wandb keys to flat 1D tensors of values
-    (response tokens only); these bypass the scalar reduction and are
-    concatenated across micro-batches and logged as wandb histograms.
+    ``histogram_metrics`` maps wandb keys to fixed-shape tensors whose excluded
+    entries are NaN. These bypass the scalar reduction; accumulation transfers
+    them to CPU before removing the excluded entries, avoiding dynamic-shape
+    boolean indexing on the accelerator.
     """
 
     weights: torch.Tensor
@@ -570,12 +571,14 @@ def compute_rho_correction(
     vllm_logprobs_f = vllm_logprobs.detach().to(torch.float32)
     advantages_f = advantages.detach().to(torch.float32)
     old_logprobs_f = old_logprobs.detach().to(torch.float32) if old_logprobs is not None else None
+    response_mask = response_mask.bool()
+    new_logprobs_are_valid = torch.isfinite(new_logprobs_f) & (new_logprobs_f <= 0)
+    invalid_new_logprobs = response_mask & ~new_logprobs_are_valid
     valid_mask = (
-        response_mask.bool()
-        & torch.isfinite(new_logprobs_f)
+        response_mask
+        & new_logprobs_are_valid
         & torch.isfinite(vllm_logprobs_f)
         & torch.isfinite(advantages_f)
-        & (new_logprobs_f <= 0)
         & (vllm_logprobs_f <= 0)
     )
     if old_logprobs_f is not None:
@@ -666,7 +669,14 @@ def compute_rho_correction(
 
     total_weight = policy_weight * correction_weight
     retained_overflow = final_mask & ~torch.isfinite(total_weight)
-    retained_overflow_count = int(retained_overflow.sum().item())
+    invalid_new_logprobs_count, retained_overflow_count = (
+        int(count) for count in torch.stack((invalid_new_logprobs.sum(), retained_overflow.sum())).tolist()
+    )
+    if invalid_new_logprobs_count:
+        raise FloatingPointError(
+            f"new_logprobs contains {invalid_new_logprobs_count} non-finite or positive value(s) "
+            "at response positions."
+        )
     if retained_overflow_count:
         raise FloatingPointError(
             f"A policy-gradient ratio overflowed for {retained_overflow_count} retained response token(s)."
@@ -674,7 +684,7 @@ def compute_rho_correction(
 
     weights = torch.where(final_mask, total_weight, torch.zeros_like(total_weight))
     finite_rho_mask = valid_mask & rho_is_finite
-    rho_hist = {"val/rho_hist": rho[finite_rho_mask]}
+    rho_hist = {"val/rho_hist": rho.masked_fill(~finite_rho_mask, torch.nan)}
     metric_weight = correction_weight if config.policy_ratio_denominator == "old_policy" else policy_weight
     metrics |= {
         "val/rho_drop_frac": (dropped_low | dropped_high).float(),
@@ -698,7 +708,8 @@ def compute_rho_correction(
 
 def accumulate_rho_histograms(acc: dict[str, list[torch.Tensor]], correction: RhoCorrection) -> None:
     for key, values in correction.histogram_metrics.items():
-        acc.setdefault(key, []).append(values.detach().cpu())
+        cpu_values = values.detach().cpu()
+        acc.setdefault(key, []).append(cpu_values[torch.isfinite(cpu_values)])
 
 
 def finalize_rho_histograms(acc: dict[str, list[torch.Tensor]]) -> dict[str, np.ndarray]:
@@ -775,13 +786,6 @@ def compute_grpo_loss(
         raise ValueError(f"old_logprobs shape {old_logprobs.shape} must match new_logprobs shape {expected_shape}.")
 
     response_mask = response_mask.bool()
-    invalid_new_logprobs = response_mask & (~torch.isfinite(new_logprobs.detach()) | (new_logprobs.detach() > 0))
-    invalid_count = int(invalid_new_logprobs.sum().item())
-    if invalid_count:
-        raise FloatingPointError(
-            f"new_logprobs contains {invalid_count} non-finite or positive value(s) at response positions."
-        )
-
     rho = compute_rho_correction(
         vllm_logprobs=vllm_logprobs,
         new_logprobs=new_logprobs,

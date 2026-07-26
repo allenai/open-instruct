@@ -351,7 +351,10 @@ class TestComputeGRPOLoss(unittest.TestCase):
         torch.testing.assert_close(output.rho.mask, torch.tensor([[False, True]]))
         torch.testing.assert_close(output.ratio, torch.tensor([[0.0, 1.0]]))
         torch.testing.assert_close(output.rho.metrics["val/rho_overflow_frac"], torch.tensor([[1.0, 0.0]]))
-        torch.testing.assert_close(output.rho.histogram_metrics["val/rho_hist"], torch.ones(1))
+        histograms: dict[str, list[torch.Tensor]] = {}
+        grpo_utils.accumulate_rho_histograms(histograms, output.rho)
+        rho_hist = grpo_utils.finalize_rho_histograms(histograms)["val/rho_hist"]
+        torch.testing.assert_close(torch.from_numpy(rho_hist), torch.ones(1))
         self.assertTrue(torch.isfinite(output.pg_loss).all())
         self.assertTrue(torch.isfinite(output.kl).all())
 
