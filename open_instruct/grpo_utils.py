@@ -191,6 +191,11 @@ class GRPOExperimentConfig(
     """How many training steps to take before updating the reference policy."""
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
+    mask_reference_kl_with_policy: bool = False
+    """Whether the final policy update mask also removes the reference-KL term.
+    False (default) preserves legacy behavior: policy-clipped or divergence-filtered
+    response tokens still receive reference-KL gradient when their logprobs are valid.
+    True couples the policy and reference-KL masks."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
     """Which mask/cap to apply to the common ``-ρ · advantage · log π_θ`` objective."""
     record_entropy: bool = False
@@ -774,8 +779,15 @@ def compute_grpo_loss(
 
     if ref_logprobs is not None:
         detached_ref_logprobs = ref_logprobs.detach()
-        kl_mask = rho.mask & torch.isfinite(detached_ref_logprobs) & (detached_ref_logprobs <= 0)
-        kl_new_logprobs = torch.where(kl_mask, safe_new_logprobs, torch.zeros_like(safe_new_logprobs))
+        kl_mask = response_mask & torch.isfinite(detached_ref_logprobs) & (detached_ref_logprobs <= 0)
+        if config.mask_reference_kl_with_policy:
+            kl_mask &= rho.mask
+        if config.kl_estimator == 3:
+            # Estimator 3 multiplies by π_θ/μ, so tokens whose direct ratio is
+            # invalid or overflowed cannot safely contribute even when KL is
+            # configured independently from the policy mask.
+            kl_mask &= finite_ratio_mask
+        kl_new_logprobs = torch.where(kl_mask, new_logprobs, torch.zeros_like(new_logprobs))
         safe_ref_logprobs = torch.where(kl_mask, detached_ref_logprobs, torch.zeros_like(detached_ref_logprobs))
         ref_logprobs_diff = (kl_new_logprobs.to(torch.float32) - safe_ref_logprobs.to(torch.float32)).clamp(
             -40.0, 40.0

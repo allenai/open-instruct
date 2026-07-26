@@ -140,6 +140,7 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "kl_estimator": 2,
         "loss_fn": grpo_utils.GRPOLossType.dapo,
         "load_ref_policy": False,
+        "mask_reference_kl_with_policy": False,
         "rho_mask_sequence_level": False,
         "rho_clamp_lower_bound": 0.0,
         "rho_clamp_upper_bound": 0.0,
@@ -402,7 +403,10 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ref_logprobs=torch.full_like(new_logprobs, -31.0),
             response_mask=torch.ones(1, 3, dtype=torch.bool),
             config=_make_grpo_config(
-                loss_fn=grpo_utils.GRPOLossType.dppo, use_rho_correction=True, rho_mask_upper_bound=2.0
+                loss_fn=grpo_utils.GRPOLossType.dppo,
+                use_rho_correction=True,
+                rho_mask_upper_bound=2.0,
+                mask_reference_kl_with_policy=True,
             ),
         )
 
@@ -411,6 +415,29 @@ class TestComputeGRPOLoss(unittest.TestCase):
         self.assertEqual(new_logprobs.grad[0, 1].item(), 0.0)
         self.assertEqual(output.pg_loss[0, 1].item(), 0.0)
         self.assertEqual(output.kl[0, 1].item(), 0.0)
+
+    def test_reference_kl_is_independent_from_policy_mask_by_default(self):
+        rho = torch.tensor([[1.0, 4.0]])
+        vllm_logprobs, new_values = _logprobs_for_rho(rho)
+        new_logprobs = new_values.requires_grad_(True)
+        output = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            vllm_logprobs=vllm_logprobs,
+            advantages=torch.ones_like(new_logprobs),
+            ref_logprobs=torch.full_like(new_logprobs, -31.0),
+            response_mask=torch.ones_like(new_logprobs, dtype=torch.bool),
+            config=_make_grpo_config(
+                loss_fn=grpo_utils.GRPOLossType.dppo, use_rho_correction=True, rho_mask_upper_bound=2.0, kl_estimator=0
+            ),
+        )
+
+        torch.testing.assert_close(output.rho.mask, torch.tensor([[True, False]]))
+        torch.testing.assert_close(output.kl_mask, torch.tensor([[True, True]]))
+        output.pg_loss.sum().backward(retain_graph=True)
+        self.assertEqual(new_logprobs.grad[0, 1].item(), 0.0)
+        new_logprobs.grad.zero_()
+        output.kl.sum().backward()
+        torch.testing.assert_close(new_logprobs.grad, torch.ones_like(new_logprobs))
 
     def test_masked_selected_token_has_zero_gradient_for_every_logit(self):
         logits = torch.tensor([[[2.0, 0.0, -1.0], [0.0, 2.0, -1.0]]], requires_grad=True)
@@ -425,7 +452,10 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ref_logprobs=torch.full_like(new_logprobs, -3.0),
             response_mask=torch.ones_like(new_logprobs, dtype=torch.bool),
             config=_make_grpo_config(
-                loss_fn=grpo_utils.GRPOLossType.dppo, use_rho_correction=True, rho_mask_upper_bound=2.0
+                loss_fn=grpo_utils.GRPOLossType.dppo,
+                use_rho_correction=True,
+                rho_mask_upper_bound=2.0,
+                mask_reference_kl_with_policy=True,
             ),
         )
 
@@ -483,7 +513,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=torch.ones(1, 3),
             ref_logprobs=torch.full((1, 3), -3.0),
             response_mask=torch.ones(1, 3, dtype=torch.bool),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo),
+            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo, mask_reference_kl_with_policy=True),
         )
 
         (output.pg_loss + output.kl).sum().backward()
@@ -503,6 +533,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             rho_mask_upper_bound=2.0,
             kl_estimator=0,
             beta=0.5,
+            mask_reference_kl_with_policy=True,
         )
         output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
@@ -544,6 +575,9 @@ class TestComputeGRPOLoss(unittest.TestCase):
     def test_removed_use_vllm_logprobs_config_field(self):
         field_names = {field.name for field in dataclasses.fields(grpo_utils.GRPOExperimentConfig)}
         self.assertNotIn("use_vllm_logprobs", field_names)
+
+    def test_reference_kl_policy_masking_is_disabled_by_default(self):
+        self.assertFalse(grpo_utils.GRPOExperimentConfig().mask_reference_kl_with_policy)
 
 
 class TestVLLMDebugMetrics(unittest.TestCase):
@@ -726,7 +760,7 @@ class TestDPPODivergenceMask(unittest.TestCase):
             advantages=torch.ones(1, 1),
             ref_logprobs=torch.tensor([[-2.0]]),
             response_mask=torch.ones(1, 1, dtype=torch.bool),
-            config=_make_dppo_config(),
+            config=_make_dppo_config(mask_reference_kl_with_policy=True),
         )
 
         self.assertFalse(output.rho.mask.item())
