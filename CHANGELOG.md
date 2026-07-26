@@ -23,4 +23,5 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Send Beaker debug/integration jobs to `ai2/jupiter`: `--cluster` is `nargs="+"` in `mason.py`, so repeating the flag overwrote instead of appending and five scripts silently ran on only their last-listed cluster (https://github.com/allenai/open-instruct/pull/1789).
 - Track the CUDA 12 image suffix in the merge-queue Beaker workflow and allow enough time for the larger image build and upload (https://github.com/allenai/open-instruct/pull/1783).
