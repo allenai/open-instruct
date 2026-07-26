@@ -16,6 +16,7 @@ from olmo_core.distributed import utils as dist_utils
 from olmo_core.nn import ddp as olmo_ddp
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
+from olmo_core.nn.moe.v2.checkpoint import load_olmo_ddp_hf_state
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OLMoDDPOptimizerConfig, OptimConfig
 from olmo_core.optim.scheduler import Scheduler
@@ -23,7 +24,7 @@ from olmo_core.train.common import ReduceType
 from olmo_core.train.train_module import OLMoDDPTrainModule, TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
 from torch.distributed.tensor import DTensor, Replicate, Shard
-from transformers import PreTrainedTokenizer
+from transformers import PretrainedConfig, PreTrainedTokenizer
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, olmo_core_utils, padding_free_collator
@@ -697,6 +698,8 @@ class GRPOOLMoDDPTrainModule(OLMoDDPTrainModule):
         tokenizer: PreTrainedTokenizer,
         streaming_config: data_loader_lib.StreamingDataLoaderConfig,
         attn_implementation: AttentionBackendName,
+        initial_hf_config: PretrainedConfig | None = None,
+        initial_hf_state: dict[str, torch.Tensor] | None = None,
         ref_policy: Transformer | None = None,
         dp_config: transformer_config.TransformerDataParallelConfig | None = None,
         ep_config: transformer_config.TransformerExpertParallelConfig | None = None,
@@ -709,6 +712,10 @@ class GRPOOLMoDDPTrainModule(OLMoDDPTrainModule):
         assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
             f"GRPOOLMoDDPTrainModule requires a flash attention backend for doc_lens; got {attn_implementation}."
         )
+        if (initial_hf_config is None) != (initial_hf_state is None):
+            raise ValueError("initial_hf_config and initial_hf_state must be provided together")
+        self._initial_hf_config = initial_hf_config
+        self._initial_hf_state = initial_hf_state
         super().__init__(
             model=model,
             optim=optim,
@@ -735,6 +742,32 @@ class GRPOOLMoDDPTrainModule(OLMoDDPTrainModule):
         self._num_total_tokens = 0
         self._grad_norms: list[float] = []
         self._last_num_step_tokens = 0
+
+    def init_model_part_weights(
+        self, model: olmo_ddp.OLMoDDPModel, *, model_part_idx: int, max_sequence_length: int, rank_microbatch_size: int
+    ) -> None:
+        if self._initial_hf_config is None or self._initial_hf_state is None:
+            return super().init_model_part_weights(
+                model,
+                model_part_idx=model_part_idx,
+                max_sequence_length=max_sequence_length,
+                rank_microbatch_size=rank_microbatch_size,
+            )
+        if model_part_idx != 0:
+            raise NotImplementedError("Loading initial HF weights into pipeline-parallel OLMoDDP is not supported")
+
+        logger.info("Materializing OLMoDDP parameters without random initialization before loading HF weights")
+        model.init_weights(
+            max_seq_len=max_sequence_length,
+            max_local_microbatch_size=rank_microbatch_size,
+            device=self.device,
+            world_mesh=self.world_mesh,
+            model_part_idx=model_part_idx,
+            initialize_parameters=False,
+        )
+        load_olmo_ddp_hf_state(model, self._initial_hf_config, self._initial_hf_state)
+        self._initial_hf_config = None
+        self._initial_hf_state = None
 
     def pre_train(self) -> None:
         pass
