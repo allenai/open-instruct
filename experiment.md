@@ -1937,6 +1937,19 @@ yet that something about this seed's specific job/placement is implicated,
 not pure bad luck -- flagged directly to the user rather than continuing
 to auto-relaunch indefinitely without visibility into cluster-side causes.
 
+**Update: seed 2 also crashed with the identical signature at
+`training_step=721` (2026-07-26 04:18), after running rock-solid for
+~700 steps.** This revises the "seed-3-specific" theory above: seed 2 had
+been the least-affected job by far right up until this point, so the
+crash isn't concentrated on one seed's placement -- it's better explained
+as a genuine `ai2/jupiter`-wide network flakiness with some baseline
+per-job-hour failure rate, and seed 3's higher crash *count* is mostly an
+artifact of it having accumulated more separate job-hours (via repeated
+restarts) than a real per-hour rate difference. 6th occurrence of the
+identical signature overall. Resumed from its `step700` checkpoint:
+
+seed 2 (resumed from step700): [Beaker](https://beaker.org/ex/01KYEAKKGA6N65GM69AQ0WBB62)
+
 Training-progress/convergence outcome still TBD.
 
 ## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
