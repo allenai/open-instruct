@@ -249,6 +249,44 @@ class TestComputeGRPOLoss(unittest.TestCase):
 
         torch.testing.assert_close(output.rho.rho, rho, rtol=1e-5, atol=0)
 
+    def test_icepop_drops_overflow_before_ratio_and_kl_autograd(self):
+        new_logprobs = torch.tensor([[-1.0, -2.0]], requires_grad=True)
+        output = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            vllm_logprobs=torch.tensor([[-101.0, -2.0]]),
+            advantages=torch.tensor([[-1.0, 1.0]]),
+            ref_logprobs=torch.tensor([[-2.0, -3.0]]),
+            response_mask=torch.ones(1, 2, dtype=torch.bool),
+            config=_make_grpo_config(
+                loss_fn=grpo_utils.GRPOLossType.dapo,
+                kl_estimator=3,
+                use_rho_correction=True,
+                rho_mask_upper_bound=10.0,
+            ),
+        )
+
+        torch.testing.assert_close(output.rho.mask, torch.tensor([[False, True]]))
+        torch.testing.assert_close(output.ratio, torch.tensor([[0.0, 1.0]]))
+        torch.testing.assert_close(output.rho.metrics["val/rho_overflow_frac"], torch.tensor([[1.0, 0.0]]))
+        torch.testing.assert_close(output.rho.histogram_metrics["val/rho_hist"], torch.ones(1))
+        self.assertTrue(torch.isfinite(output.pg_loss).all())
+        self.assertTrue(torch.isfinite(output.kl).all())
+
+        (output.pg_loss + output.kl).sum().backward()
+        self.assertEqual(new_logprobs.grad[0, 0].item(), 0.0)
+        self.assertNotEqual(new_logprobs.grad[0, 1].item(), 0.0)
+
+    def test_retained_overflow_still_fails(self):
+        with self.assertRaisesRegex(FloatingPointError, "retained response token"):
+            grpo_utils.compute_grpo_loss(
+                new_logprobs=torch.tensor([[-1.0]], requires_grad=True),
+                vllm_logprobs=torch.tensor([[-101.0]]),
+                advantages=torch.tensor([[-1.0]]),
+                ref_logprobs=None,
+                response_mask=torch.ones(1, 1, dtype=torch.bool),
+                config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dapo, use_rho_correction=False),
+            )
+
     def test_dapo_clipping_is_a_structural_directional_mask(self):
         rho = torch.tensor([[1.5, 0.5, 1.5, 0.5]])
         vllm_logprobs, new_values = _logprobs_for_rho(rho)
@@ -679,6 +717,26 @@ class TestDPPODivergenceMask(unittest.TestCase):
         correction = grpo_utils.compute_rho_correction(vllm_logprobs, new_logprobs, response_mask, advantages, config)
 
         torch.testing.assert_close(correction.weights, torch.tensor([[0.0, 5.0]]))
+
+    def test_dppo_drops_overflow_before_retained_token_check(self):
+        new_logprobs = torch.tensor([[-1.0]], requires_grad=True)
+        output = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            vllm_logprobs=torch.tensor([[-101.0]]),
+            advantages=torch.ones(1, 1),
+            ref_logprobs=torch.tensor([[-2.0]]),
+            response_mask=torch.ones(1, 1, dtype=torch.bool),
+            config=_make_dppo_config(),
+        )
+
+        self.assertFalse(output.rho.mask.item())
+        self.assertEqual(output.ratio.item(), 0.0)
+        self.assertEqual(output.rho.metrics["val/rho_overflow_frac"].item(), 1.0)
+        histograms: dict[str, list[torch.Tensor]] = {}
+        grpo_utils.accumulate_rho_histograms(histograms, output.rho)
+        self.assertEqual(grpo_utils.finalize_rho_histograms(histograms), {})
+        (output.pg_loss + output.kl).sum().backward()
+        self.assertEqual(new_logprobs.grad.item(), 0.0)
 
 
 class TestDPPOLoss(unittest.TestCase):

@@ -369,8 +369,9 @@ During training, the following metrics are logged:
 * `time/training`: the time taken to do one training step
 * `val/sequence_lengths`: the length of the sequences in the generated responses
 * `val/num_stop_token_ids`: the number of stop tokens in the generated responses
-* `val/ratio`: the mean ratio of the current training policy to the vLLM behavior policy, used to assess policy updates
+* `val/ratio`: the mean finite ratio of the current training policy to the vLLM behavior policy, used to assess policy updates
 * `val/ratio_var`: the variance of the ratio of the current training policy to the vLLM behavior policy, indicating the variability in policy updates
+* `val/rho_overflow_frac`: the fraction of valid response tokens whose raw fp32 behavior-policy ratio overflowed; structurally dropped overflows do not terminate training
 * `val/stop_token_rate`: the rate at which stop tokens appear in the responses, providing a measure of response termination
 * `val/format_scores`: the mean format scores, indicating the quality of response formatting (only logged if `add_r1_style_format_reward` is enabled)
 * `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,

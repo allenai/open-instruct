@@ -589,9 +589,7 @@ def compute_rho_correction(
     safe_vllm_logprobs = torch.where(valid_mask, vllm_logprobs_f, torch.zeros_like(vllm_logprobs_f))
     log_rho = safe_new_logprobs - safe_vllm_logprobs
     rho = torch.exp(log_rho)
-    if not torch.isfinite(rho[valid_mask]).all():
-        raise FloatingPointError("The behavior-policy ratio ρ overflowed for at least one valid response token.")
-    rho_hist = {"val/rho_hist": rho[valid_mask]}
+    rho_is_finite = torch.isfinite(rho)
 
     dropped_low = torch.zeros_like(valid_mask)
     dropped_high = torch.zeros_like(valid_mask)
@@ -651,11 +649,21 @@ def compute_rho_correction(
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
+    retained_overflow = final_mask & ~rho_is_finite
+    retained_overflow_count = int(retained_overflow.sum().item())
+    if retained_overflow_count:
+        raise FloatingPointError(
+            f"The behavior-policy ratio ρ overflowed for {retained_overflow_count} retained response token(s)."
+        )
+
     weights = torch.where(final_mask, effective_rho, torch.zeros_like(effective_rho))
+    finite_rho_mask = valid_mask & rho_is_finite
+    rho_hist = {"val/rho_hist": rho[finite_rho_mask]}
     metrics |= {
         "val/rho_drop_frac": (dropped_low | dropped_high).float(),
         "val/rho_drop_low_frac": dropped_low.float(),
         "val/rho_drop_high_frac": dropped_high.float(),
+        "val/rho_overflow_frac": (valid_mask & ~rho_is_finite).float(),
         "val/rho_weight": weights.float(),
         "val/rho_clipfrac": rho_was_clamped.float(),
     }
@@ -676,7 +684,12 @@ def accumulate_rho_histograms(acc: dict[str, list[torch.Tensor]], correction: Rh
 
 
 def finalize_rho_histograms(acc: dict[str, list[torch.Tensor]]) -> dict[str, np.ndarray]:
-    return {key: torch.cat(chunks).numpy() for key, chunks in acc.items()}
+    finalized: dict[str, np.ndarray] = {}
+    for key, chunks in acc.items():
+        values = torch.cat(chunks)
+        if values.numel() > 0:
+            finalized[key] = values.numpy()
+    return finalized
 
 
 @dataclass
@@ -684,9 +697,10 @@ class GRPOLossOutput:
     """Per-token loss terms plus the intermediates the training loops log.
 
     ``pg_loss``, ``clipfrac``, and ``kl`` are per-token [B, T] tensors; the total loss is
-    ``pg_loss + beta * kl`` reduced by ``masked_mean``. ``ratio`` is π_θ / μ,
-    ``rho`` carries the detached coefficient and final update mask, and
-    ``kl_mask`` is the exact structural mask applied to the reference-KL term.
+    ``pg_loss + beta * kl`` reduced by ``masked_mean``. ``ratio`` is π_θ / μ
+    where that ratio is representable and zero otherwise, ``rho`` carries the
+    detached coefficient and final update mask, and ``kl_mask`` is the exact
+    structural mask applied to the reference-KL term.
     """
 
     pg_loss: torch.Tensor
@@ -747,9 +761,16 @@ def compute_grpo_loss(
     )
 
     detached_vllm_logprobs = vllm_logprobs.detach()
-    safe_new_logprobs = torch.where(rho.valid_mask, new_logprobs, torch.zeros_like(new_logprobs))
-    safe_vllm_logprobs = torch.where(rho.valid_mask, detached_vllm_logprobs, torch.zeros_like(detached_vllm_logprobs))
-    ratio = torch.exp(safe_new_logprobs.to(torch.float32) - safe_vllm_logprobs.to(torch.float32))
+    finite_ratio_mask = rho.valid_mask & torch.isfinite(rho.rho)
+    safe_new_logprobs = torch.where(finite_ratio_mask, new_logprobs, torch.zeros_like(new_logprobs))
+    safe_vllm_logprobs = torch.where(
+        finite_ratio_mask, detached_vllm_logprobs, torch.zeros_like(detached_vllm_logprobs)
+    )
+    ratio = torch.where(
+        finite_ratio_mask,
+        torch.exp(safe_new_logprobs.to(torch.float32) - safe_vllm_logprobs.to(torch.float32)),
+        torch.zeros_like(safe_new_logprobs, dtype=torch.float32),
+    )
 
     if ref_logprobs is not None:
         detached_ref_logprobs = ref_logprobs.detach()
@@ -917,6 +938,7 @@ _SCALAR_LOSS_STAT_KEYS = [
     "val/rho_drop_frac",
     "val/rho_drop_low_frac",
     "val/rho_drop_high_frac",
+    "val/rho_overflow_frac",
 ]
 
 
@@ -955,7 +977,8 @@ def populate_sample_loss_stats(
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(loss_output.clipfrac, valid_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(loss_output.pg_loss, valid_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss
-        loss_stats_B["val/ratio"][sample_idx] = masked_mean(loss_output.ratio, valid_mask)
+        finite_ratio_mask = valid_mask & torch.isfinite(loss_output.rho.rho)
+        loss_stats_B["val/ratio"][sample_idx] = masked_mean(loss_output.ratio, finite_ratio_mask)
         if entropy is not None:
             entropy_mask = valid_mask & torch.isfinite(entropy)
             safe_entropy = torch.where(entropy_mask, entropy, torch.zeros_like(entropy))
