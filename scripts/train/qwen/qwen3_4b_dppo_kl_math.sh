@@ -1,8 +1,9 @@
 #!/bin/bash
 
 DPPO_DIVERGENCE_THRESHOLD="${DPPO_DIVERGENCE_THRESHOLD:-0.05}"
+DPPO_DIVERGENCE_THRESHOLD_TAG="${DPPO_DIVERGENCE_THRESHOLD//./p}"
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dppo_kl}"
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dppo_kl_delta${DPPO_DIVERGENCE_THRESHOLD_TAG}_deepspeed}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 # Reuse RUN_NAME, or set CHECKPOINT_STATE_DIR directly, when relaunching to resume.
 CHECKPOINT_STATE_DIR="${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME}}"

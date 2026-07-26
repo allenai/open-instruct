@@ -1,6 +1,9 @@
 #!/bin/bash
 
-EXP_NAME="${EXP_NAME:-qwen3_4b_base_dppo}"
+DPPO_DIVERGENCE_THRESHOLD="${DPPO_DIVERGENCE_THRESHOLD:-0.2}"
+DPPO_DIVERGENCE_THRESHOLD_TAG="${DPPO_DIVERGENCE_THRESHOLD//./p}"
+
+EXP_NAME="${EXP_NAME:-qwen3_4b_base_dppo_tv_delta${DPPO_DIVERGENCE_THRESHOLD_TAG}_deepspeed}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 # Reuse RUN_NAME, or set CHECKPOINT_STATE_DIR directly, when relaunching to resume.
 CHECKPOINT_STATE_DIR="${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME}}"
@@ -80,7 +83,7 @@ uv run python open_instruct/grpo_fast.py \
     --rho_mask_level token \
     --rho_mask_direction increase_only \
     --rho_mask_lower_bound 0.0 \
-    --rho_mask_upper_bound 0.2 \
+    --rho_mask_upper_bound "${DPPO_DIVERGENCE_THRESHOLD}" \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
