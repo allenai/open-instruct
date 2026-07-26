@@ -136,7 +136,7 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
     defaults = {
         "clip_lower": 0.2,
         "clip_higher": 0.2,
-        "beta": 0.05,
+        "beta": 0.0,
         "kl_estimator": 2,
         "loss_fn": grpo_utils.GRPOLossType.dapo,
         "load_ref_policy": False,
@@ -153,10 +153,23 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "rho_mask_direction": "symmetric",
     }
     defaults.update(kwargs)
-    config = MagicMock(spec=grpo_utils.GRPOExperimentConfig)
-    for key, value in defaults.items():
-        setattr(config, key, value)
-    return config
+    return grpo_utils.GRPOExperimentConfig(**defaults)
+
+
+def _make_dppo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
+    defaults = {
+        "loss_fn": grpo_utils.GRPOLossType.dppo,
+        "policy_ratio_denominator": "rollout_policy",
+        "rollout_importance_correction": "none",
+        "rho_mask_metric": "tv",
+        "rho_mask_source": "current_policy",
+        "rho_mask_level": "token",
+        "rho_mask_direction": "increase_only",
+        "rho_mask_upper_bound": 0.05,
+        "rho_mask_lower_bound": 0.0,
+    }
+    defaults.update(kwargs)
+    return _make_grpo_config(**defaults)
 
 
 def _logprobs_for_rho(rho: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -175,7 +188,9 @@ class TestComputeGRPOLoss(unittest.TestCase):
     )
     def test_output_shapes(self, _name, loss_type):
         batch_size, seq_len = 2, 4
-        config = _make_grpo_config(loss_fn=loss_type)
+        config = (
+            _make_dppo_config() if loss_type == grpo_utils.GRPOLossType.dppo else _make_grpo_config(loss_fn=loss_type)
+        )
         new_logprobs = -torch.rand(batch_size, seq_len)
         vllm_logprobs = -torch.rand(batch_size, seq_len)
         advantages = torch.randn(batch_size, seq_len)
@@ -279,7 +294,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=advantages,
             ref_logprobs=None,
             response_mask=torch.ones_like(new_logprobs, dtype=torch.bool),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo),
+            config=_make_dppo_config(),
         )
 
         torch.testing.assert_close(output.rho.rho, rho)
@@ -300,7 +315,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=torch.ones_like(new_logprobs),
             ref_logprobs=None,
             response_mask=torch.ones_like(new_logprobs, dtype=torch.bool),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo),
+            config=_make_dppo_config(),
         )
 
         torch.testing.assert_close(output.rho.weights, rho)
@@ -317,12 +332,12 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=torch.ones_like(rho),
             ref_logprobs=None,
             response_mask=torch.ones_like(rho, dtype=torch.bool),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo),
+            config=_make_dppo_config(),
         )
 
         torch.testing.assert_close(output.rho.rho, rho, rtol=1e-5, atol=0)
 
-    def test_icepop_drops_overflow_before_ratio_and_kl_autograd(self):
+    def test_ratio_mask_drops_overflow_before_ratio_and_kl_autograd(self):
         new_logprobs = torch.tensor([[-1.0, -2.0]], requires_grad=True)
         output = grpo_utils.compute_grpo_loss(
             new_logprobs=new_logprobs,
@@ -411,7 +426,8 @@ class TestComputeGRPOLoss(unittest.TestCase):
 
     def test_rho_mask_sequence_level(self):
         config = _make_grpo_config(
-            loss_fn=grpo_utils.GRPOLossType.dppo,
+            loss_fn=grpo_utils.GRPOLossType.cispo,
+            clip_higher=10.0,
             rho_mask_lower_bound=0.5,
             rho_mask_upper_bound=2.0,
             rho_mask_level="sequence",
@@ -496,7 +512,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ref_logprobs=torch.full_like(new_logprobs, -31.0),
             response_mask=torch.ones(1, 3, dtype=torch.bool),
             config=_make_grpo_config(
-                loss_fn=grpo_utils.GRPOLossType.dppo, rho_mask_upper_bound=2.0, mask_reference_kl_with_policy=True
+                loss_fn=grpo_utils.GRPOLossType.cispo, rho_mask_upper_bound=2.0, mask_reference_kl_with_policy=True
             ),
         )
 
@@ -516,7 +532,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=torch.ones_like(new_logprobs),
             ref_logprobs=torch.full_like(new_logprobs, -31.0),
             response_mask=torch.ones_like(new_logprobs, dtype=torch.bool),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo, rho_mask_upper_bound=2.0, kl_estimator=0),
+            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.cispo, rho_mask_upper_bound=2.0, kl_estimator=0),
         )
 
         torch.testing.assert_close(output.rho.mask, torch.tensor([[True, False]]))
@@ -540,7 +556,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             ref_logprobs=torch.full_like(new_logprobs, -3.0),
             response_mask=torch.ones_like(new_logprobs, dtype=torch.bool),
             config=_make_grpo_config(
-                loss_fn=grpo_utils.GRPOLossType.dppo, rho_mask_upper_bound=2.0, mask_reference_kl_with_policy=True
+                loss_fn=grpo_utils.GRPOLossType.cispo, rho_mask_upper_bound=2.0, mask_reference_kl_with_policy=True
             ),
         )
 
@@ -556,7 +572,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=torch.ones(1, 2),
             ref_logprobs=torch.full((1, 2), -3.0),
             response_mask=torch.tensor([[True, False]]),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo),
+            config=_make_dppo_config(),
         )
 
         (output.pg_loss + output.kl).sum().backward()
@@ -572,7 +588,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
                 advantages=torch.ones(1, 2),
                 ref_logprobs=None,
                 response_mask=torch.ones(1, 2, dtype=torch.bool),
-                config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo),
+                config=_make_dppo_config(),
             )
 
     def test_invalid_reference_logprob_only_removes_its_kl_gradient(self):
@@ -583,7 +599,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=torch.ones(1, 2),
             ref_logprobs=torch.tensor([[-3.0, float("nan")]]),
             response_mask=torch.ones(1, 2, dtype=torch.bool),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo, kl_estimator=0),
+            config=_make_dppo_config(kl_estimator=0),
         )
 
         output.kl.sum().backward()
@@ -598,7 +614,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
             advantages=torch.ones(1, 3),
             ref_logprobs=torch.full((1, 3), -3.0),
             response_mask=torch.ones(1, 3, dtype=torch.bool),
-            config=_make_grpo_config(loss_fn=grpo_utils.GRPOLossType.dppo, mask_reference_kl_with_policy=True),
+            config=_make_dppo_config(mask_reference_kl_with_policy=True),
         )
 
         (output.pg_loss + output.kl).sum().backward()
@@ -612,7 +628,7 @@ class TestComputeGRPOLoss(unittest.TestCase):
         vllm_logprobs, new_logprobs = _logprobs_for_rho(rho)
         response_mask = torch.ones_like(rho, dtype=torch.bool)
         config = _make_grpo_config(
-            loss_fn=grpo_utils.GRPOLossType.dppo,
+            loss_fn=grpo_utils.GRPOLossType.cispo,
             load_ref_policy=True,
             rho_mask_upper_bound=2.0,
             kl_estimator=0,
@@ -738,22 +754,6 @@ class TestComputeBinaryDivergence(unittest.TestCase):
                 response_mask=torch.ones(1, 1, dtype=torch.bool),
                 divergence_type="not_a_divergence",
             )
-
-
-def _make_dppo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
-    defaults = {
-        "loss_fn": grpo_utils.GRPOLossType.dppo,
-        "policy_ratio_denominator": "rollout_policy",
-        "rollout_importance_correction": "none",
-        "rho_mask_metric": "tv",
-        "rho_mask_source": "current_policy",
-        "rho_mask_level": "token",
-        "rho_mask_direction": "increase_only",
-        "rho_mask_upper_bound": 0.05,
-        "rho_mask_lower_bound": 0.0,
-    }
-    defaults.update(kwargs)
-    return _make_grpo_config(**defaults)
 
 
 class TestDPPODivergenceMask(unittest.TestCase):
