@@ -1038,8 +1038,6 @@ def setup_experiment_tracking(
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
     all_configs.update(**asdict(vllm_config))
-    for key in grpo_utils.POLICY_LOSS_TRACKING_EXCLUDED_KEYS:
-        all_configs.pop(key, None)
 
     wandb_url = None
     if args.with_tracking:

@@ -78,16 +78,6 @@ RhoMaskMetric = Literal["none", "ratio", "tv", "kl"]
 RhoMaskSource = Literal["old_policy", "current_policy"]
 RhoMaskLevel = Literal["token", "sequence"]
 RhoMaskDirection = Literal["symmetric", "increase_only"]
-POLICY_LOSS_TRACKING_EXCLUDED_KEYS = frozenset(
-    {
-        "policy_ratio_denominator",
-        "rollout_importance_correction",
-        "rho_mask_metric",
-        "rho_mask_source",
-        "rho_mask_level",
-        "rho_mask_direction",
-    }
-)
 
 
 @dataclass

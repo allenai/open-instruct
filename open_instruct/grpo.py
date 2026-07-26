@@ -298,8 +298,6 @@ def main(
     logger.info("======== Model update group setup successfully =========")
 
     json_config = dataclasses.asdict(args)
-    for key in grpo_utils.POLICY_LOSS_TRACKING_EXCLUDED_KEYS:
-        json_config.pop(key, None)
     if beaker_config is not None:
         json_config.update(dataclasses.asdict(beaker_config))
     utils.ray_get_with_progress(
