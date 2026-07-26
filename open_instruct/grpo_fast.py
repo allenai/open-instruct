@@ -612,8 +612,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
                 )
 
-        local_step = 0
         num_samples = len(data_BT.query_responses)
+        num_mini_batches = num_samples // accumulation_steps
+        old_logprobs_BT: list[torch.Tensor | None] | None = None
+        if self.args.policy_ratio_denominator == "old_policy":
+            old_logprobs_BT = [None] * num_samples
+            if num_mini_batches > 1:
+                with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                    old_logprobs_BT[:] = grpo_utils.compute_logprobs(
+                        self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                    )
+
+        local_step = 0
         # Pre-compute token counts per sample (for weighted averaging across SP ranks)
         # This only needs to be done once since response_masks don't change across epochs
         token_counts_per_sample = torch.stack([mask[:, 1:].sum().float() for mask in data_BT.response_masks])
@@ -623,7 +633,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
-            for _ in range(self.args.num_epochs):
+            for epoch_idx in range(self.args.num_epochs):
                 # Pre-compute total tokens for each accumulation group if using "token" normalization
                 # This ensures all minibatches in an accumulation group are normalized by the same total
                 if self.args.loss_denominator == "token":
@@ -661,11 +671,22 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
 
                     new_logprobs_BT = local_logprobs_BT
+                    old_logprobs = None
+                    if self.args.policy_ratio_denominator == "old_policy":
+                        assert old_logprobs_BT is not None
+                        old_logprobs = grpo_utils.resolve_old_logprobs(
+                            old_logprobs_BT,
+                            sample_idx=i,
+                            epoch_idx=epoch_idx,
+                            num_mini_batches=num_mini_batches,
+                            new_logprobs=new_logprobs_BT,
+                        )
 
                     # Calculate the policy's loss
                     loss_output_BT = grpo_utils.compute_grpo_loss(
                         new_logprobs=new_logprobs_BT,
                         vllm_logprobs=vllm_logprobs_BT,
+                        old_logprobs=old_logprobs,
                         advantages=data_BT.advantages[i][:, 1:],
                         ref_logprobs=ref_logprobs_BT[i] if self.args.load_ref_policy else None,
                         response_mask=response_mask_BT,
@@ -1017,6 +1038,8 @@ def setup_experiment_tracking(
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config), **asdict(streaming_config))
     all_configs.update(**asdict(vllm_config))
+    for key in grpo_utils.POLICY_LOSS_TRACKING_EXCLUDED_KEYS:
+        all_configs.pop(key, None)
 
     wandb_url = None
     if args.with_tracking:
@@ -2157,6 +2180,7 @@ def main(
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+    grpo_utils.log_policy_loss_configuration(args)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)

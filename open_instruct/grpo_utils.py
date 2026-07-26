@@ -72,36 +72,22 @@ class GRPOLossType(enum.StrEnum):
     dppo = "dppo"
 
 
-class RhoDivergenceType(enum.StrEnum):
-    """Which binary (Bernoulli) divergence measure the masking algorithm uses.
-
-    ``tv``: total variation |μ - π| (Eq. 13 of https://arxiv.org/abs/2602.04879);
-    ``kl``: KL of the Bernoulli collapse over {sampled token, all others} (Eq. 14).
-    Computed by :func:`compute_binary_divergence`. Ignored by the ``icepop``
-    algorithm, which masks on ρ itself.
-    """
-
-    tv = "tv"
-    kl = "kl"
-
-
-class RhoDivergenceAlgo(enum.StrEnum):
-    """Which algorithm drives the token-drop mask in :func:`compute_rho_correction`.
-
-    ``icepop`` (default): IcePop (https://arxiv.org/abs/2510.18855) — threshold
-    ρ = π_θ / μ itself (per token, or per sequence with
-    ``rho_mask_sequence_level``).
-    ``vaco``: VACO (https://arxiv.org/abs/2603.01365) — sequence-level mean of the
-    per-token binary divergence between the current policy π_θ and rollout policy μ, dropping
-    only tokens whose update would increase the divergence.
-    ``dppo``: DPPO (https://arxiv.org/abs/2602.04879) — per-token binary divergence
-    between the *current* policy π_θ and the rollout policy μ, dropping only tokens
-    whose update would push π_θ further from μ (Eq. 12).
-    """
-
-    icepop = "icepop"
-    vaco = "vaco"
-    dppo = "dppo"
+PolicyRatioDenominator = Literal["old_policy", "rollout_policy"]
+RolloutImportanceCorrection = Literal["none", "clipped"]
+RhoMaskMetric = Literal["none", "ratio", "tv", "kl"]
+RhoMaskSource = Literal["old_policy", "current_policy"]
+RhoMaskLevel = Literal["token", "sequence"]
+RhoMaskDirection = Literal["symmetric", "increase_only"]
+POLICY_LOSS_TRACKING_EXCLUDED_KEYS = frozenset(
+    {
+        "policy_ratio_denominator",
+        "rollout_importance_correction",
+        "rho_mask_metric",
+        "rho_mask_source",
+        "rho_mask_level",
+        "rho_mask_direction",
+    }
+)
 
 
 @dataclass
@@ -140,41 +126,31 @@ class GRPOExperimentConfig(
     """the lower clip range"""
     clip_higher: float = 0.272
     """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
-    use_rho_correction: bool = True
-    """Whether to clamp and filter the behavior-policy ratio ρ = π_θ / μ.
-    The detached ρ coefficient is always present in the policy-gradient estimator.
-    When this option is True, it is additionally clamped and the configured IcePop
-    or VACO filtering mask is applied."""
+    policy_ratio_denominator: PolicyRatioDenominator = "old_policy"
+    """Policy used in the denominator of the policy-gradient ratio.
+    ``old_policy`` preserves PPO-style updates and retains old logprobs;
+    ``rollout_policy`` uses vLLM logprobs directly and does not retain old logprobs."""
+    rollout_importance_correction: RolloutImportanceCorrection = "clipped"
+    """How to correct rollout samples to the old trainer policy.
+    ``clipped`` applies the configured clamp to π_old / μ; ``none`` uses unit weights.
+    Must be ``none`` when ``policy_ratio_denominator=rollout_policy`` because π_θ / μ
+    is already the policy ratio."""
     rho_clamp_lower_bound: float = 0.0
-    """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
+    """Lower bound for clamping π_old / μ when rollout importance correction is enabled (0 disables)."""
     rho_clamp_upper_bound: float = 2.0
-    """Upper bound for clamping ρ before reweighting the policy loss (0 disables)."""
+    """Upper bound for clamping π_old / μ when rollout importance correction is enabled (0 disables)."""
     rho_mask_lower_bound: float = 0.0
-    """Tokens whose masking statistic (see `rho_divergence_algo`) falls below this value are
-    dropped (0 disables). For `icepop`, the statistic is ρ itself; for `vaco` it is the
-    sequence-level divergence. Unused by `dppo`."""
+    """Drop tokens whose configured rho-mask statistic falls below this value (0 disables)."""
     rho_mask_upper_bound: float = 0.0
-    """Tokens whose masking statistic (see `rho_divergence_algo`) exceeds this value are
-    dropped (0 disables). For `icepop`, the statistic is ρ itself; for `vaco` it is the
-    sequence-level divergence; for `dppo` it is the trust-region threshold δ on the
-    per-token binary divergence."""
-    rho_mask_sequence_level: bool = False
-    """If True, apply the rho mask at the sequence level (DeepSeek-V3.2 style):
-    compute the mean log-ratio (1/|o_i|) Σ_t log(π_θ / μ) per response sequence,
-    exponentiate to get a per-sequence ρ, and broadcast the keep/drop decision to every
-    token in that sequence. If False (default), the mask is applied per token.
-    Only used with `rho_divergence_algo=icepop`."""
-    rho_divergence_algo: RhoDivergenceAlgo = RhoDivergenceAlgo.icepop
-    """Which masking algorithm the token-drop mask uses with `rho_mask_*_bound`:
-    `icepop` (default) masks on ρ itself (simple clipping); `vaco` applies sequence-level
-    divergence masking (https://arxiv.org/abs/2603.01365); `dppo` applies trust-region
-    masking (https://arxiv.org/abs/2602.04879) on the per-token binary divergence between
-    the current policy and the rollout policy. `vaco` and `dppo` are directional: tokens
-    whose update would *decrease* the divergence are never masked. The ρ clamp/reweighting
-    (truncated importance sampling) is unaffected by this choice."""
-    rho_divergence_type: RhoDivergenceType = RhoDivergenceType.tv
-    """Which binary (Bernoulli) divergence measure `rho_divergence_algo` thresholds:
-    `tv` or `kl` (Eqs. 13/14 of https://arxiv.org/abs/2602.04879). Ignored by `icepop`."""
+    """Drop tokens whose configured rho-mask statistic exceeds this value (0 disables)."""
+    rho_mask_metric: RhoMaskMetric = "ratio"
+    """Statistic used by the token-drop mask: none, probability ratio, binary TV, or binary KL."""
+    rho_mask_source: RhoMaskSource = "old_policy"
+    """Policy compared with the rollout policy when constructing the token-drop mask."""
+    rho_mask_level: RhoMaskLevel = "token"
+    """Whether the token-drop statistic is applied per token or averaged per response sequence."""
+    rho_mask_direction: RhoMaskDirection = "symmetric"
+    """Whether threshold violations always drop or only drop updates that increase divergence."""
     kl_estimator: Literal[0, 1, 2, 3] = 2
     """the KL estimator to use"""
     loss_denominator: str = "token"
@@ -364,59 +340,81 @@ class GRPOExperimentConfig(
             )
         if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
             raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
-        if self.use_rho_correction:
+        valid_options = {
+            "policy_ratio_denominator": ("old_policy", "rollout_policy"),
+            "rollout_importance_correction": ("none", "clipped"),
+            "rho_mask_metric": ("none", "ratio", "tv", "kl"),
+            "rho_mask_source": ("old_policy", "current_policy"),
+            "rho_mask_level": ("token", "sequence"),
+            "rho_mask_direction": ("symmetric", "increase_only"),
+        }
+        for name, options in valid_options.items():
+            value = getattr(self, name)
+            if value not in options:
+                raise ValueError(f"`{name}` must be one of {options}, got {value!r}.")
+        if self.policy_ratio_denominator == "rollout_policy" and self.rollout_importance_correction != "none":
+            raise ValueError(
+                "`rollout_importance_correction` must be `none` when "
+                "`policy_ratio_denominator=rollout_policy` because π_θ / μ is already the policy ratio."
+            )
+        if (
+            self.rho_mask_metric != "none"
+            and self.rho_mask_source == "old_policy"
+            and self.policy_ratio_denominator != "old_policy"
+        ):
+            raise ValueError(
+                "`rho_mask_source=old_policy` requires `policy_ratio_denominator=old_policy` so old logprobs exist."
+            )
+        if self.rollout_importance_correction == "clipped":
             if self.rho_clamp_lower_bound > 0.0 and self.rho_clamp_lower_bound >= 1.0:
                 raise ValueError(
                     f"rho_clamp_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_clamp_lower_bound}."
                 )
             if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
                 raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
-        if self.rho_divergence_algo == RhoDivergenceAlgo.icepop:
-            # The masking statistic is ρ itself, which is centered at 1.
-            if self.use_rho_correction:
-                if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
-                    raise ValueError(
-                        f"rho_mask_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_mask_lower_bound}."
-                    )
-                if self.rho_mask_upper_bound > 0.0 and self.rho_mask_upper_bound <= 1.0:
-                    raise ValueError(f"rho_mask_upper_bound must be > 1 when set, got {self.rho_mask_upper_bound}.")
+        if self.rho_mask_metric == "none":
+            if self.rho_mask_lower_bound != 0.0 or self.rho_mask_upper_bound != 0.0:
+                raise ValueError("rho mask bounds must both be 0 when `rho_mask_metric=none`.")
+        elif self.rho_mask_metric == "ratio":
+            if self.rho_mask_lower_bound > 0.0 and not (0.0 < self.rho_mask_lower_bound < 1.0):
+                raise ValueError(
+                    f"rho_mask_lower_bound must satisfy 0 < lb < 1 when set, got {self.rho_mask_lower_bound}."
+                )
+            if self.rho_mask_upper_bound > 0.0 and self.rho_mask_upper_bound <= 1.0:
+                raise ValueError(f"rho_mask_upper_bound must be > 1 when set, got {self.rho_mask_upper_bound}.")
         else:
-            # The masking statistic is a divergence, which is >= 0 and typically < 1.
-            if self.rho_mask_lower_bound < 0.0 or self.rho_mask_upper_bound < 0.0:
+            if self.rho_mask_lower_bound != 0.0:
                 raise ValueError(
-                    f"rho_mask bounds must be >= 0 with rho_divergence_algo={self.rho_divergence_algo}, got "
-                    f"lower={self.rho_mask_lower_bound}, upper={self.rho_mask_upper_bound}."
+                    f"`rho_mask_lower_bound` is not used with {self.rho_mask_metric} divergence masking; "
+                    f"set it to 0 (got {self.rho_mask_lower_bound})."
                 )
-            if (
-                self.rho_mask_lower_bound > 0.0
-                and self.rho_mask_upper_bound > 0.0
-                and self.rho_mask_lower_bound >= self.rho_mask_upper_bound
-            ):
+            if self.rho_mask_upper_bound < 0.0 or not math.isfinite(self.rho_mask_upper_bound):
                 raise ValueError(
-                    f"rho_mask_lower_bound ({self.rho_mask_lower_bound}) must be < rho_mask_upper_bound "
-                    f"({self.rho_mask_upper_bound}) when both are set."
+                    f"rho_mask_upper_bound must be finite and >= 0 for {self.rho_mask_metric}, "
+                    f"got {self.rho_mask_upper_bound}."
                 )
-        if self.rho_divergence_algo == RhoDivergenceAlgo.dppo:
+        if self.loss_fn == GRPOLossType.dppo:
+            required = {
+                "policy_ratio_denominator": (self.policy_ratio_denominator, "rollout_policy"),
+                "rollout_importance_correction": (self.rollout_importance_correction, "none"),
+                "rho_mask_source": (self.rho_mask_source, "current_policy"),
+                "rho_mask_level": (self.rho_mask_level, "token"),
+                "rho_mask_direction": (self.rho_mask_direction, "increase_only"),
+            }
+            invalid = [
+                f"{name}={actual!r} (expected {expected!r})"
+                for name, (actual, expected) in required.items()
+                if actual != expected
+            ]
+            if invalid:
+                raise ValueError("DPPO requires " + ", ".join(invalid) + ".")
+            if self.rho_mask_metric not in ("tv", "kl"):
+                raise ValueError(f"DPPO requires `rho_mask_metric` to be `tv` or `kl`, got {self.rho_mask_metric!r}.")
             if not math.isfinite(self.rho_mask_upper_bound) or self.rho_mask_upper_bound <= 0.0:
                 raise ValueError(
                     "DPPO divergence masking requires `rho_mask_upper_bound` (the trust-region "
                     f"threshold δ) to be finite and > 0, got {self.rho_mask_upper_bound}."
                 )
-            if self.rho_mask_lower_bound != 0.0:
-                raise ValueError(
-                    "`rho_mask_lower_bound` is not used with DPPO divergence masking; "
-                    f"set it to 0 (got {self.rho_mask_lower_bound})."
-                )
-            if self.rho_mask_sequence_level:
-                raise ValueError("DPPO divergence masking is per-token; set `rho_mask_sequence_level=False`.")
-        elif self.rho_divergence_algo == RhoDivergenceAlgo.vaco and not self.use_rho_correction:
-            raise ValueError(f"rho_divergence_algo={self.rho_divergence_algo} requires `use_rho_correction=True`.")
-        if self.loss_fn == GRPOLossType.dppo and self.rho_divergence_algo != RhoDivergenceAlgo.dppo:
-            raise ValueError(
-                "The DPPO loss has no ratio clipping; its trust region is enforced entirely by the "
-                "divergence mask. Set `rho_divergence_algo=dppo` (and `rho_mask_upper_bound` to the "
-                "threshold δ) when using `loss_fn=dppo`."
-            )
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -483,13 +481,13 @@ def _sequence_level_mean(values: torch.Tensor, response_mask: torch.Tensor) -> t
 
 @dataclass
 class RhoCorrection:
-    """Detached behavior-policy weights and the final per-token update mask.
+    """Detached policy-gradient weights and the final per-token update mask.
 
-    ``rho`` is the direct ratio ``π_θ / μ``. ``weights`` is the sole
-    coefficient used by the score-function loss after optional clamping,
-    capping, and masking. ``mask`` is shared by the policy and reference-KL
-    terms. ``valid_mask`` excludes padding and invalid rollout metadata before
-    algorithmic filtering.
+    ``ratio`` is the configured policy ratio (``π_θ / π_old`` or ``π_θ / μ``).
+    ``rho`` is ``π_old / μ`` when old logprobs are retained, otherwise it is
+    the direct ``π_θ / μ`` ratio. ``weights`` is the sole coefficient used by
+    the score-function loss after the configured correction, cap, and masks.
+    ``valid_mask`` excludes padding and invalid loss metadata before filtering.
     ``metrics`` maps wandb keys to per-token tensors that get reduced by
     ``masked_mean(., response_mask)`` at logging time.
     ``histogram_metrics`` maps wandb keys to flat 1D tensors of values
@@ -500,6 +498,7 @@ class RhoCorrection:
     weights: torch.Tensor
     mask: torch.Tensor
     valid_mask: torch.Tensor
+    ratio: torch.Tensor
     rho: torch.Tensor
     clipfrac: torch.Tensor
     metrics: dict[str, torch.Tensor]
@@ -510,7 +509,7 @@ def compute_binary_divergence(
     behavior_logprobs: torch.Tensor,
     policy_logprobs: torch.Tensor,
     response_mask: torch.Tensor,
-    divergence_type: RhoDivergenceType,
+    divergence_type: Literal["tv", "kl"],
 ) -> torch.Tensor:
     """Per-token binary (Bernoulli) divergence between behavior and policy.
 
@@ -545,9 +544,9 @@ def compute_binary_divergence(
     eps = torch.finfo(torch.float64).eps
     mu = torch.exp(behavior_logprobs_f).clamp(eps, 1.0 - eps)
     pi = torch.exp(policy_logprobs_f).clamp(eps, 1.0 - eps)
-    if divergence_type == RhoDivergenceType.tv:
+    if divergence_type == "tv":
         divergence = (mu - pi).abs()
-    elif divergence_type == RhoDivergenceType.kl:
+    elif divergence_type == "kl":
         mu_clip = mu.clamp(eps, 1.0 - eps)
         pi_clip = pi.clamp(eps, 1.0 - eps)
         divergence = mu_clip * (mu_clip.log() - pi_clip.log()) + (1.0 - mu_clip) * (
@@ -555,9 +554,7 @@ def compute_binary_divergence(
         )
         divergence = divergence.clamp_min(0.0)
     else:
-        raise ValueError(
-            f"Unknown binary divergence type: {divergence_type}. Expected one of {list(RhoDivergenceType)}."
-        )
+        raise ValueError(f"Unknown binary divergence type: {divergence_type}. Expected `tv` or `kl`.")
     return torch.where(response_mask.bool(), divergence, torch.zeros_like(divergence)).to(orig_dtype)
 
 
@@ -568,20 +565,25 @@ def compute_rho_correction(
     response_mask: torch.Tensor,
     advantages: torch.Tensor,
     config: GRPOExperimentConfig,
+    old_logprobs: torch.Tensor | None = None,
 ) -> RhoCorrection:
-    """Build the detached ``ρ = π_θ / μ`` coefficient and structural update mask."""
+    """Build the detached policy-gradient coefficient and structural update mask."""
     expected_shape = new_logprobs.shape
-    for name, tensor in (
-        ("vllm_logprobs", vllm_logprobs),
-        ("response_mask", response_mask),
-        ("advantages", advantages),
-    ):
+    tensors = [("vllm_logprobs", vllm_logprobs), ("response_mask", response_mask), ("advantages", advantages)]
+    if old_logprobs is not None:
+        tensors.append(("old_logprobs", old_logprobs))
+    for name, tensor in tensors:
         if tensor.shape != expected_shape:
             raise ValueError(f"{name} shape {tensor.shape} must match new_logprobs shape {expected_shape}.")
+    if config.policy_ratio_denominator == "old_policy" and old_logprobs is None:
+        raise ValueError("old_logprobs is required when `policy_ratio_denominator=old_policy`.")
+    if config.policy_ratio_denominator == "rollout_policy" and old_logprobs is not None:
+        raise ValueError("old_logprobs must be omitted when `policy_ratio_denominator=rollout_policy`.")
 
     new_logprobs_f = new_logprobs.detach().to(torch.float32)
     vllm_logprobs_f = vllm_logprobs.detach().to(torch.float32)
     advantages_f = advantages.detach().to(torch.float32)
+    old_logprobs_f = old_logprobs.detach().to(torch.float32) if old_logprobs is not None else None
     valid_mask = (
         response_mask.bool()
         & torch.isfinite(new_logprobs_f)
@@ -590,92 +592,117 @@ def compute_rho_correction(
         & (new_logprobs_f <= 0)
         & (vllm_logprobs_f <= 0)
     )
+    if old_logprobs_f is not None:
+        valid_mask &= torch.isfinite(old_logprobs_f) & (old_logprobs_f <= 0)
+
     safe_new_logprobs = torch.where(valid_mask, new_logprobs_f, torch.zeros_like(new_logprobs_f))
     safe_vllm_logprobs = torch.where(valid_mask, vllm_logprobs_f, torch.zeros_like(vllm_logprobs_f))
-    log_rho = safe_new_logprobs - safe_vllm_logprobs
+    safe_old_logprobs = (
+        torch.where(valid_mask, old_logprobs_f, torch.zeros_like(old_logprobs_f))
+        if old_logprobs_f is not None
+        else None
+    )
+
+    denominator_logprobs = safe_old_logprobs if config.policy_ratio_denominator == "old_policy" else safe_vllm_logprobs
+    assert denominator_logprobs is not None
+    policy_log_ratio = safe_new_logprobs - denominator_logprobs
+    policy_ratio = torch.exp(policy_log_ratio)
+    policy_ratio_is_finite = torch.isfinite(policy_ratio)
+
+    log_rho = safe_old_logprobs - safe_vllm_logprobs if safe_old_logprobs is not None else policy_log_ratio
     rho = torch.exp(log_rho)
     rho_is_finite = torch.isfinite(rho)
 
     dropped_low = torch.zeros_like(valid_mask)
     dropped_high = torch.zeros_like(valid_mask)
     metrics: dict[str, torch.Tensor] = {}
-    if config.rho_divergence_algo == RhoDivergenceAlgo.icepop:
-        if config.use_rho_correction:
-            masking_rho = (
-                torch.exp(_sequence_level_mean(log_rho, valid_mask)) if config.rho_mask_sequence_level else rho
-            )
-            dropped_low, dropped_high = _rho_drop_masks(
-                masking_rho, valid_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
-            )
-    elif config.rho_divergence_algo in (RhoDivergenceAlgo.vaco, RhoDivergenceAlgo.dppo):
+    mask_log_ratio = torch.zeros_like(policy_log_ratio)
+    if config.rho_mask_metric != "none":
+        mask_policy_logprobs = safe_old_logprobs if config.rho_mask_source == "old_policy" else safe_new_logprobs
+        assert mask_policy_logprobs is not None
+        mask_log_ratio = mask_policy_logprobs - safe_vllm_logprobs
+    if config.rho_mask_metric == "ratio":
+        mask_statistic = torch.exp(mask_log_ratio)
+        if config.rho_mask_level == "sequence":
+            mask_statistic = torch.exp(_sequence_level_mean(mask_log_ratio, valid_mask))
+        dropped_low, dropped_high = _rho_drop_masks(
+            mask_statistic, valid_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
+        )
+    elif config.rho_mask_metric in ("tv", "kl"):
         divergence = compute_binary_divergence(
             behavior_logprobs=safe_vllm_logprobs,
-            policy_logprobs=safe_new_logprobs,
+            policy_logprobs=mask_policy_logprobs,
             response_mask=valid_mask,
-            divergence_type=config.rho_divergence_type,
+            divergence_type=config.rho_mask_metric,
         )
-        if config.rho_divergence_algo == RhoDivergenceAlgo.vaco:
+        if config.rho_mask_level == "sequence":
             divergence = _sequence_level_mean(divergence, valid_mask)
-        divergence_low, divergence_high = _rho_drop_masks(
+        dropped_low, dropped_high = _rho_drop_masks(
             divergence, valid_mask, config.rho_mask_lower_bound, config.rho_mask_upper_bound
         )
-        moving_away = torch.sign(log_rho) * advantages_f > 0
-        dropped_low = divergence_low & moving_away
-        dropped_high = divergence_high & moving_away
         metrics["val/rho_divergence"] = divergence.float()
-    else:
-        raise ValueError(f"Invalid rho divergence algorithm: {config.rho_divergence_algo}")
+    elif config.rho_mask_metric != "none":
+        raise ValueError(f"Invalid rho mask metric: {config.rho_mask_metric}")
+
+    if config.rho_mask_metric != "none" and config.rho_mask_direction == "increase_only":
+        moving_away = torch.sign(mask_log_ratio) * advantages_f > 0
+        dropped_low &= moving_away
+        dropped_high &= moving_away
 
     correction_mask = valid_mask & ~dropped_low & ~dropped_high
-    effective_rho = rho
+    correction_weight = torch.ones_like(rho)
     rho_was_clamped = torch.zeros_like(valid_mask)
-    # DPPO's trust region is the directional divergence mask; retained tokens
-    # use the raw Eq. 11 importance ratio rather than an additional rho clamp.
-    if config.use_rho_correction and config.loss_fn != GRPOLossType.dppo:
+    if config.rollout_importance_correction == "clipped":
+        correction_weight = rho
         if config.rho_clamp_lower_bound > 0.0:
-            effective_rho = torch.clamp(effective_rho, min=config.rho_clamp_lower_bound)
+            correction_weight = torch.clamp(correction_weight, min=config.rho_clamp_lower_bound)
         if config.rho_clamp_upper_bound > 0.0:
-            effective_rho = torch.clamp(effective_rho, max=config.rho_clamp_upper_bound)
-        rho_was_clamped = (effective_rho != rho) & valid_mask
+            correction_weight = torch.clamp(correction_weight, max=config.rho_clamp_upper_bound)
+        rho_was_clamped = (correction_weight != rho) & valid_mask
 
     if config.loss_fn == GRPOLossType.dapo:
         algorithm_clipped = (
-            ((advantages_f > 0) & (rho > 1.0 + config.clip_higher))
-            | ((advantages_f < 0) & (rho < 1.0 - config.clip_lower))
+            ((advantages_f > 0) & (policy_ratio > 1.0 + config.clip_higher))
+            | ((advantages_f < 0) & (policy_ratio < 1.0 - config.clip_lower))
         ) & correction_mask
+        policy_weight = policy_ratio
         final_mask = correction_mask & ~algorithm_clipped
     elif config.loss_fn == GRPOLossType.cispo:
-        algorithm_clipped = (rho > 1.0 + config.clip_higher) & correction_mask
-        effective_rho = torch.clamp(effective_rho, max=1.0 + config.clip_higher)
+        algorithm_clipped = (policy_ratio > 1.0 + config.clip_higher) & correction_mask
+        policy_weight = torch.clamp(policy_ratio, max=1.0 + config.clip_higher)
         final_mask = correction_mask
     elif config.loss_fn == GRPOLossType.dppo:
         algorithm_clipped = torch.zeros_like(valid_mask)
+        policy_weight = policy_ratio
         final_mask = correction_mask
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
-    retained_overflow = final_mask & ~rho_is_finite
+    total_weight = policy_weight * correction_weight
+    retained_overflow = final_mask & ~torch.isfinite(total_weight)
     retained_overflow_count = int(retained_overflow.sum().item())
     if retained_overflow_count:
         raise FloatingPointError(
-            f"The behavior-policy ratio ρ overflowed for {retained_overflow_count} retained response token(s)."
+            f"A policy-gradient ratio overflowed for {retained_overflow_count} retained response token(s)."
         )
 
-    weights = torch.where(final_mask, effective_rho, torch.zeros_like(effective_rho))
+    weights = torch.where(final_mask, total_weight, torch.zeros_like(total_weight))
     finite_rho_mask = valid_mask & rho_is_finite
     rho_hist = {"val/rho_hist": rho[finite_rho_mask]}
+    metric_weight = correction_weight if config.policy_ratio_denominator == "old_policy" else policy_weight
     metrics |= {
         "val/rho_drop_frac": (dropped_low | dropped_high).float(),
         "val/rho_drop_low_frac": dropped_low.float(),
         "val/rho_drop_high_frac": dropped_high.float(),
-        "val/rho_overflow_frac": (valid_mask & ~rho_is_finite).float(),
-        "val/rho_weight": weights.float(),
+        "val/rho_overflow_frac": (valid_mask & (~rho_is_finite | ~policy_ratio_is_finite)).float(),
+        "val/rho_weight": torch.where(final_mask, metric_weight, torch.zeros_like(metric_weight)).float(),
         "val/rho_clipfrac": rho_was_clamped.float(),
     }
     return RhoCorrection(
         weights=weights,
         mask=final_mask,
         valid_mask=valid_mask,
+        ratio=policy_ratio,
         rho=rho,
         clipfrac=algorithm_clipped.float(),
         metrics=metrics,
@@ -697,15 +724,31 @@ def finalize_rho_histograms(acc: dict[str, list[torch.Tensor]]) -> dict[str, np.
     return finalized
 
 
+def resolve_old_logprobs(
+    cache: list[torch.Tensor | None],
+    sample_idx: int,
+    epoch_idx: int,
+    num_mini_batches: int,
+    new_logprobs: torch.Tensor,
+) -> torch.Tensor:
+    """Return the fixed PPO denominator for one sample."""
+    if num_mini_batches == 1 and epoch_idx == 0:
+        cache[sample_idx] = new_logprobs.detach()
+    old_logprobs = cache[sample_idx]
+    if old_logprobs is None:
+        raise RuntimeError(f"old logprobs were not initialized for sample {sample_idx}.")
+    return old_logprobs
+
+
 @dataclass
 class GRPOLossOutput:
     """Per-token loss terms plus the intermediates the training loops log.
 
     ``pg_loss``, ``clipfrac``, and ``kl`` are per-token [B, T] tensors; the total loss is
-    ``pg_loss + beta * kl`` reduced by ``masked_mean``. ``ratio`` is π_θ / μ
-    where that ratio is representable and zero otherwise, ``rho`` carries the
-    detached coefficient and final update mask, and ``kl_mask`` is the exact
-    structural mask applied to the reference-KL term.
+    ``pg_loss + beta * kl`` reduced by ``masked_mean``. ``ratio`` is the
+    configured policy ratio where representable and zero otherwise, ``rho``
+    carries the detached coefficient and final update mask, and ``kl_mask`` is
+    the exact structural mask applied to the reference-KL term.
     """
 
     pg_loss: torch.Tensor
@@ -723,8 +766,9 @@ def compute_grpo_loss(
     ref_logprobs: torch.Tensor | None,
     response_mask: torch.Tensor,
     config: GRPOExperimentConfig,
+    old_logprobs: torch.Tensor | None = None,
 ) -> GRPOLossOutput:
-    """Compute ``-M · stopgrad(ρ · advantage) · log π_θ`` plus optional reference KL.
+    """Compute ``-M · stopgrad(weight · advantage) · log π_θ`` plus optional reference KL.
 
     Every decision tensor is detached. ``torch.where`` removes excluded
     selected-token log probabilities from the autograd graph before either
@@ -741,6 +785,8 @@ def compute_grpo_loss(
             raise ValueError(f"{name} shape {tensor.shape} must match new_logprobs shape {expected_shape}.")
     if ref_logprobs is not None and ref_logprobs.shape != expected_shape:
         raise ValueError(f"ref_logprobs shape {ref_logprobs.shape} must match new_logprobs shape {expected_shape}.")
+    if old_logprobs is not None and old_logprobs.shape != expected_shape:
+        raise ValueError(f"old_logprobs shape {old_logprobs.shape} must match new_logprobs shape {expected_shape}.")
 
     response_mask = response_mask.bool()
     invalid_new_logprobs = response_mask & (~torch.isfinite(new_logprobs.detach()) | (new_logprobs.detach() > 0))
@@ -753,6 +799,7 @@ def compute_grpo_loss(
     rho = compute_rho_correction(
         vllm_logprobs=vllm_logprobs,
         new_logprobs=new_logprobs,
+        old_logprobs=old_logprobs,
         response_mask=response_mask,
         advantages=advantages,
         config=config,
@@ -765,17 +812,8 @@ def compute_grpo_loss(
         rho.mask, -rho.weights * safe_advantages * masked_new_logprobs, torch.zeros_like(masked_new_logprobs)
     )
 
-    detached_vllm_logprobs = vllm_logprobs.detach()
-    finite_ratio_mask = rho.valid_mask & torch.isfinite(rho.rho)
-    safe_new_logprobs = torch.where(finite_ratio_mask, new_logprobs, torch.zeros_like(new_logprobs))
-    safe_vllm_logprobs = torch.where(
-        finite_ratio_mask, detached_vllm_logprobs, torch.zeros_like(detached_vllm_logprobs)
-    )
-    ratio = torch.where(
-        finite_ratio_mask,
-        torch.exp(safe_new_logprobs.to(torch.float32) - safe_vllm_logprobs.to(torch.float32)),
-        torch.zeros_like(safe_new_logprobs, dtype=torch.float32),
-    )
+    finite_ratio_mask = rho.valid_mask & torch.isfinite(rho.ratio)
+    ratio = torch.where(finite_ratio_mask, rho.ratio, torch.zeros_like(rho.ratio))
 
     if ref_logprobs is not None:
         detached_ref_logprobs = ref_logprobs.detach()
@@ -799,6 +837,33 @@ def compute_grpo_loss(
         kl = torch.zeros_like(pg_loss)
 
     return GRPOLossOutput(pg_loss=pg_loss, clipfrac=rho.clipfrac, kl=kl, ratio=ratio, rho=rho, kl_mask=kl_mask)
+
+
+def log_policy_loss_configuration(config: GRPOExperimentConfig) -> None:
+    """Log the configured policy-loss equations once at process startup."""
+    denominator = "π_old" if config.policy_ratio_denominator == "old_policy" else "μ (rollout policy)"
+    correction = "1"
+    if config.rollout_importance_correction == "clipped":
+        lower = config.rho_clamp_lower_bound
+        upper = config.rho_clamp_upper_bound or "∞"
+        correction = f"clip(π_old / μ, {lower}, {upper})"
+    if config.rho_mask_metric == "none":
+        mask = "disabled"
+    else:
+        source = "π_old" if config.rho_mask_source == "old_policy" else "π_θ"
+        mask = (
+            f"{config.rho_mask_metric}({source}, μ), {config.rho_mask_level}, "
+            f"{config.rho_mask_direction}, bounds=({config.rho_mask_lower_bound}, "
+            f"{config.rho_mask_upper_bound})"
+        )
+    logger.info(
+        "Policy loss configuration:\n"
+        f"  objective: {config.loss_fn}\n"
+        f"  policy ratio: π_θ / {denominator}\n"
+        f"  rollout correction: {correction}\n"
+        f"  drop mask: {mask}\n"
+        f"  reference KL mask: {'policy mask' if config.mask_reference_kl_with_policy else 'valid tokens'}"
+    )
 
 
 def forward_for_logprobs(
@@ -989,7 +1054,7 @@ def populate_sample_loss_stats(
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(loss_output.clipfrac, valid_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(loss_output.pg_loss, valid_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss
-        finite_ratio_mask = valid_mask & torch.isfinite(loss_output.rho.rho)
+        finite_ratio_mask = valid_mask & torch.isfinite(loss_output.ratio)
         loss_stats_B["val/ratio"][sample_idx] = masked_mean(loss_output.ratio, finite_ratio_mask)
         if entropy is not None:
             entropy_mask = valid_mask & torch.isfinite(entropy)

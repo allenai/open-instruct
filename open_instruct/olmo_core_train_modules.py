@@ -434,7 +434,7 @@ class GRPOTrainModule(TransformerTrainModule):
         - Multi-epoch PPO-style training
         - DAPO/CISPO loss variants
         - KL penalty computation
-        - Direct behavior-policy importance weighting
+        - Configurable PPO or direct behavior-policy importance weighting
         """
         self.model.train()
         data_BT = batch["batch"].to(self.device)
@@ -456,6 +456,20 @@ class GRPOTrainModule(TransformerTrainModule):
         num_samples = len(data_BT.query_responses)
         num_mini_batches = self.grpo_config.num_mini_batches
         accumulation_steps = max(math.ceil(num_samples / num_mini_batches), 1)
+        old_logprobs_BT: list[torch.Tensor | None] | None = None
+        if self.grpo_config.policy_ratio_denominator == "old_policy":
+            old_logprobs_BT = [None] * num_samples
+            if num_mini_batches > 1:
+                with torch.no_grad():
+                    old_logprobs_BT[:] = grpo_utils.compute_logprobs(
+                        self.model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.temperature,
+                        use_grad=False,
+                        batch_size=3 * self.rank_microbatch_size,
+                        pass_olmo_core_doc_lens=True,
+                    )
 
         if self.grpo_config.loss_denominator == "token" or self.grpo_config.loss_denominator is None:
             accumulation_token_counts = grpo_utils.calculate_token_counts(
@@ -483,7 +497,7 @@ class GRPOTrainModule(TransformerTrainModule):
         local_step = 0
         rho_histograms: dict[str, list[torch.Tensor]] = {}
 
-        for _ in range(self.grpo_config.num_epochs):
+        for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
                 new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                     self.model,
@@ -507,10 +521,21 @@ class GRPOTrainModule(TransformerTrainModule):
                 debug_metrics_count += 1
 
                 advantages = data_BT.advantages[sample_idx]
+                old_logprobs = None
+                if self.grpo_config.policy_ratio_denominator == "old_policy":
+                    assert old_logprobs_BT is not None
+                    old_logprobs = grpo_utils.resolve_old_logprobs(
+                        old_logprobs_BT,
+                        sample_idx=sample_idx,
+                        epoch_idx=epoch_idx,
+                        num_mini_batches=num_mini_batches,
+                        new_logprobs=new_logprobs,
+                    )
 
                 loss_output = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     vllm_logprobs=vllm_logprobs,
+                    old_logprobs=old_logprobs,
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
                     response_mask=response_mask,

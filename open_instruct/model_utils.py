@@ -796,8 +796,8 @@ def estimate_kl(ref_logprobs_diff: torch.Tensor, ratio: torch.Tensor) -> torch.T
     Args:
         ref_logprobs_diff: Log probability difference (new_logprobs - ref_logprobs), clamped
             to [-40, 40] for numerical stability. Shape: [B, T] or similar.
-        ratio: Importance sampling ratio exp(new_logprobs - vllm_logprobs) between the
-            current training policy and rollout behavior policy. Shape: [B, T] or similar.
+        ratio: Configured importance sampling ratio, either exp(new_logprobs - old_logprobs)
+            or exp(new_logprobs - vllm_logprobs). Shape: [B, T] or similar.
 
     Returns:
         Tensor of shape [4, B, T] containing 4 KL estimators stacked along dim 0:
