@@ -232,6 +232,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 if self.grpo_config.olmo_core_ep_degree > 1
                 else None
             )
+            assert self.hf_config is not None and hf_state is not None
             self.train_module = GRPOOLMoDDPTrainModule(
                 model=self.model,
                 optim=optim_config,
@@ -250,9 +251,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 device=device,
                 streaming_config=self.streaming_config,
                 attn_implementation=self.attn_implementation,
+                initial_hf_config=self.hf_config,
+                initial_hf_state=hf_state,
             )
-            assert self.hf_config is not None and hf_state is not None
-            load_olmo_ddp_hf_state(self.train_module.model, self.hf_config, hf_state)
             del hf_state
         else:
             optim_config = AdamWConfig(lr=self.grpo_config.learning_rate, weight_decay=self.grpo_config.weight_decay)
