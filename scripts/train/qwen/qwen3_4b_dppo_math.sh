@@ -2,6 +2,8 @@
 
 EXP_NAME="${EXP_NAME:-qwen3_4b_base_dppo}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
+# Reuse RUN_NAME, or set CHECKPOINT_STATE_DIR directly, when relaunching to resume.
+CHECKPOINT_STATE_DIR="${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${RUN_NAME}}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
@@ -63,7 +65,7 @@ uv run open_instruct/grpo_fast.py \
     --seed 1 \
     --local_eval_every 25 \
     --save_freq -1 \
-    --checkpoint_state_freq -1 \
+    --checkpoint_state_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --send_slack_alerts \
@@ -82,5 +84,6 @@ uv run open_instruct/grpo_fast.py \
     --mask_truncated_completions False \
     --chat_template qwen_instruct_user_boxed_math \
     --load_ref_policy False \
+    --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
     --keep_last_n_checkpoints 1 \
     --push_to_hub False "$@"
