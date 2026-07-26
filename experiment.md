@@ -1921,6 +1921,22 @@ no manual relaunch needed. Worth noting for future launches: our jobs run
 at `--priority high`, so they're preemptible by any `urgent`-priority job
 on `ai2/jupiter`, independent of the gloo-timeout pattern above.
 
+**seed 3's 4th attempt (resumed) crashed again, identical signature, at
+`training_step` ~430ish (2026-07-26 01:15-01:16)**: 5th occurrence of the
+exact same `Application timeout caused pair closure` / gloo
+`unbound_buffer.cc` 1800000ms timeout in under 6 hours, now 4 of 5 on
+seed 3 specifically (vs. 1 for seed 1, 0 for seed 2, which has meanwhile
+progressed past `training_step` 500+ without any issue). Resumed again
+from the `step400` checkpoint in the same dir:
+
+seed 3 (resumed from step400, 5th attempt): [Beaker](https://beaker.org/ex/01KYE04NF9502KDCY2NK5HQJAD)
+
+This concentration on one seed's jobs specifically (not a cluster-wide
+effect that would hit all 3 roughly evenly) is now the strongest signal
+yet that something about this seed's specific job/placement is implicated,
+not pure bad luck -- flagged directly to the user rather than continuing
+to auto-relaunch indefinitely without visibility into cluster-side causes.
+
 Training-progress/convergence outcome still TBD.
 
 ## 2026-07-25: DeepCoder-1.5B data pipeline + K/NGU sweep launch (grpo.py, OC)
