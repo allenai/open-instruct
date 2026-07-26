@@ -9,14 +9,95 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 - `grpo.py` is the recommended GRPO implementation, built on OLMo-core's native training infrastructure (FSDP). It uses Ray for distributed training with vLLM inference.
 - `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing) with DeepSpeed.
 
-Both trainers use only the vLLM behavior-policy log probability \(\log \mu\)
-and differentiable training log probability \(\log \pi_\theta\). The policy
-term is
-\(-\operatorname{stopgrad}(\rho A)\log \pi_\theta\), where
-\(\rho=\exp(\log \pi_\theta-\log \mu)\). There is no separately cached
-old-policy log probability. Policy, divergence, response, and optional
-reference-KL masks are applied structurally, so excluded selected-token log
-probabilities receive zero direct gradient.
+Both trainers use one policy-loss implementation. Let \(d\) be the configured
+policy-ratio denominator and \(c\) the configured rollout correction. The
+per-token score-function loss is
+
+\[
+-M_t\,\operatorname{stopgrad}\left(c_t r_t A_t\right)
+\log \pi_\theta(a_t\mid s_t),\qquad
+r_t=\frac{\pi_\theta}{d}.
+\]
+
+`policy_ratio_denominator=old_policy` sets \(d=\pi_{\text{old}}\) and retains
+old-policy log probabilities for the duration of the PPO update.
+`policy_ratio_denominator=rollout_policy` sets \(d=\mu\), using the vLLM
+rollout log probabilities directly and skipping old-logprob computation and
+storage. `rollout_importance_correction=clipped` sets
+\(c=\operatorname{clip}(\pi_{\text{old}}/\mu)\);
+`rollout_importance_correction=none` sets \(c=1\). A direct rollout-policy
+ratio cannot also use the correction because that would count the rollout
+denominator twice.
+
+DAPO applies its directional lower/upper clip as a structural mask, CISPO caps
+the detached ratio coefficient, and DPPO keeps the raw
+\(\pi_\theta/\mu\) ratio. DPPO therefore requires the direct rollout-policy
+denominator and no additional correction. Its retained ratio is intentionally
+unbounded; monitor `val/rho_hist`, `val/rho_overflow_frac`, and gradient norms
+when rollout probabilities can be extremely small.
+
+The token-drop mask is configured by independent properties rather than a
+named algorithm switch:
+
+- `rho_mask_metric`: `none`, `ratio`, `tv`, or `kl`;
+- `rho_mask_source`: compare `old_policy` or `current_policy` with \(\mu\);
+- `rho_mask_level`: apply the statistic per `token` or per `sequence`; and
+- `rho_mask_direction`: drop every threshold violation (`symmetric`) or only
+  updates that move farther from \(\mu\) (`increase_only`).
+
+For reference, the default IcePop behavior is `ratio + old_policy + token +
+symmetric`; VACO is `tv|kl + old_policy + sequence + increase_only`; and DPPO
+requires `tv|kl + current_policy + token + increase_only`. These are
+compositions of the properties above, not separate configuration values.
+
+All response, validity, clipping, and divergence masks are structural:
+excluded selected-token log probabilities are removed from the autograd graph
+and receive exactly zero policy gradient. Non-finite ratios fail only when the
+token remains in the policy update; a token that the configured mask drops
+cannot terminate a distributed run solely because its ratio overflowed.
+
+### Migration guidance
+
+The defaults preserve the previous DAPO/CISPO PPO behavior:
+\(r=\pi_\theta/\pi_{\text{old}}\), with a clipped
+\(\pi_{\text{old}}/\mu\) rollout correction and the existing per-token ratio
+mask. Existing configurations do not silently switch their clip baseline to
+\(\mu\).
+
+To replace `use_rho_correction=False` without changing its old meaning, use
+`policy_ratio_denominator=old_policy`,
+`rollout_importance_correction=none`, and `rho_mask_metric=none`. This remains
+plain PPO weighting by \(\pi_\theta/\pi_{\text{old}}\); it does not expose an
+unclamped \(\pi_\theta/\mu\) coefficient.
+
+To opt into the direct DPPO path, set:
+
+```bash
+--loss_fn dppo \
+--policy_ratio_denominator rollout_policy \
+--rollout_importance_correction none \
+--rho_mask_metric tv \
+--rho_mask_source current_policy \
+--rho_mask_level token \
+--rho_mask_direction increase_only \
+--rho_mask_upper_bound 0.1
+```
+
+Reference-KL masking is independently configurable for runs with `beta > 0`.
+By default, `mask_reference_kl_with_policy=False` preserves the legacy
+behavior: a token excluded from the policy loss can still receive
+reference-KL gradient when its training and reference log probabilities are
+valid. Set `mask_reference_kl_with_policy=True` to apply the final policy mask
+to the KL term as well. KL estimator 3
+always excludes tokens without a finite configured policy ratio because that
+estimator multiplies by the ratio directly.
+
+Binary-divergence thresholds use different units from the removed
+`rho_mask_tv_divergence` implementation. VACO now thresholds the
+probability-space binary TV or KL divergence, rather than the ratio-space
+sequence mean of \(\lvert\rho-1\rvert\). Previous thresholds such as `2.0`
+are not directly transferable; select a new threshold in the divergence's
+scale and validate it from `val/rho_divergence` and `val/rho_drop_frac`.
 
 ## `grpo.py` (OLMo-core)
 
@@ -57,12 +138,20 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | | `--seed` | Random seed | `1` |
 | **GRPO Algorithm** | `--beta` | KL coefficient for RLHF objective | `0.05` |
 | | `--clip_lower` | Lower clip range | `0.2` |
-| | `--clip_higher` | Higher clip range (see DAPO) | `0.2` |
+| | `--clip_higher` | Higher clip range (see DAPO) | `0.272` |
 | | `--loss_fn` | Loss function: `dapo`, `cispo`, or `dppo` | `dapo` |
-| | `--rho_divergence_algo` | Algorithm for the ρ token-drop mask: `icepop` (simple clipping), `vaco`, or `dppo` | `icepop` |
-| | `--rho_divergence_type` | Divergence measure for `vaco`/`dppo` masking: `tv` or `kl` | `tv` |
-| | `--use_rho_correction` | Clamp and filter the always-present behavior-policy ratio | `True` |
+| | `--policy_ratio_denominator` | Policy-ratio denominator: `old_policy` (PPO) or `rollout_policy` (direct) | `old_policy` |
+| | `--rollout_importance_correction` | Rollout-to-old-policy correction: `clipped` or `none` | `clipped` |
+| | `--rho_mask_metric` | Drop-mask statistic: `none`, `ratio`, `tv`, or `kl` | `ratio` |
+| | `--rho_mask_source` | Policy compared with the rollout policy for masking | `old_policy` |
+| | `--rho_mask_level` | Apply the mask statistic per `token` or `sequence` | `token` |
+| | `--rho_mask_direction` | Drop all violations (`symmetric`) or only divergence-increasing updates (`increase_only`) | `symmetric` |
+| | `--rho_clamp_lower_bound` | Lower bound for the clipped old-policy-to-rollout correction; `0` disables | `0.0` |
+| | `--rho_clamp_upper_bound` | Upper bound for the clipped old-policy-to-rollout correction; `0` disables | `2.0` |
+| | `--rho_mask_lower_bound` | Lower threshold for the configured drop-mask statistic; `0` disables | `0.0` |
+| | `--rho_mask_upper_bound` | Upper threshold for the configured drop-mask statistic; `0` disables | `0.0` |
 | | `--load_ref_policy` | Load and use reference policy for KL | `True` |
+| | `--mask_reference_kl_with_policy` | Also remove reference-KL gradients from policy-masked tokens | `False` |
 | **Rollout / Sampling** | `--num_unique_prompts_rollout` | Unique prompts per rollout | `16` |
 | | `--num_samples_per_prompt_rollout` | Samples per prompt in rollout | `4` |
 | | `--temperature` | Sampling temperature | `0.7` |
@@ -363,15 +452,18 @@ During training, the following metrics are logged:
 * `objective/verifiable_correct_rate`: the rate at which responses are verifiably correct, providing a measure of response accuracy
 * `loss/policy_avg`: the average policy loss, indicating the mean loss incurred during policy updates
 * `policy/approxkl_avg`: the average approximate KL divergence, used to monitor policy stability
-* `policy/clipfrac_avg`: the average fraction of updates where the policy was clipped, indicating how often clipping occurs
+* `policy/clipfrac_avg`: the fraction of valid tokens excluded by DAPO's directional behavior-policy clip or capped by CISPO; this is separate from rho clamping and divergence filtering
 * `policy/entropy_avg`: the average entropy of the policy, providing a measure of policy randomness
 * `time/from_scratch`: the time taken to train the model from scratch
 * `time/training`: the time taken to do one training step
 * `val/sequence_lengths`: the length of the sequences in the generated responses
 * `val/num_stop_token_ids`: the number of stop tokens in the generated responses
-* `val/ratio`: the mean finite ratio of the current training policy to the vLLM behavior policy, used to assess policy updates
-* `val/ratio_var`: the variance of the ratio of the current training policy to the vLLM behavior policy, indicating the variability in policy updates
-* `val/rho_overflow_frac`: the fraction of valid response tokens whose raw fp32 behavior-policy ratio overflowed; structurally dropped overflows do not terminate training
+* `val/ratio`: the mean finite configured policy ratio, either \(\pi_\theta/\pi_{\text{old}}\) or \(\pi_\theta/\mu\)
+* `val/ratio_var`: the variance of the configured policy ratio
+* `val/rho_clipfrac`: the fraction of valid tokens whose rollout-to-old-policy correction was truncated by `rho_clamp_lower_bound` or `rho_clamp_upper_bound`
+* `val/rho_drop_frac`: the fraction of valid tokens removed by the configured property-based drop mask; this does not include DAPO/CISPO clipping
+* `val/rho_divergence`: the binary TV or KL statistic used by the configured mask
+* `val/rho_overflow_frac`: the fraction of valid response tokens whose raw fp32 policy or correction ratio overflowed; masked or safely capped overflows do not terminate training
 * `val/stop_token_rate`: the rate at which stop tokens appear in the responses, providing a measure of response termination
 * `val/format_scores`: the mean format scores, indicating the quality of response formatting (only logged if `add_r1_style_format_reward` is enabled)
 * `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,
