@@ -83,11 +83,18 @@ torchaudio = [
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
 ]
 
-# vLLM wheels on PyPI are built against CUDA 12.8 on x86_64. The +cu130 builds
-# are only published on the version-specific vLLM wheel index.
+# vLLM 0.25.1 defaults to CUDA 13 on PyPI. Its CUDA 12 wheel is built against
+# CUDA 12.9 (which retains the CUDA 12 shared-library ABI), so both CUDA groups
+# must use explicit version-specific vLLM indexes.
 vllm = [
+  { index = "vllm-cu129", group = "cuda12" },
   { index = "vllm-cu130", group = "cuda13" },
 ]
+
+[[tool.uv.index]]
+name = "vllm-cu129"
+url = "https://wheels.vllm.ai/0.25.1/cu129"
+explicit = true
 
 [[tool.uv.index]]
 name = "vllm-cu130"
