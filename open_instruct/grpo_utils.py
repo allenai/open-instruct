@@ -811,9 +811,9 @@ def compute_grpo_loss(
         if config.mask_reference_kl_with_policy:
             kl_mask &= rho.mask
         if config.kl_estimator == 3:
-            # Estimator 3 multiplies by π_θ/μ, so tokens whose direct ratio is
-            # invalid or overflowed cannot safely contribute even when KL is
-            # configured independently from the policy mask.
+            # Estimator 3 multiplies by the configured policy ratio π_θ/d, so
+            # tokens whose ratio is invalid or overflowed cannot safely
+            # contribute even when KL is independent from the policy mask.
             kl_mask &= finite_ratio_mask
         kl_new_logprobs = torch.where(kl_mask, new_logprobs, torch.zeros_like(new_logprobs))
         safe_ref_logprobs = torch.where(kl_mask, detached_ref_logprobs, torch.zeros_like(detached_ref_logprobs))
