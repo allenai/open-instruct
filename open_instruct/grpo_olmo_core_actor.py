@@ -39,6 +39,7 @@ from open_instruct.grpo_callbacks import (
     RefPolicyUpdateCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
+    fingerprint_weight_shipment,
     olmo_core_to_hf_name,
     summarize_weight_shipment,
 )
@@ -101,6 +102,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.prompt_Q = None
         self.evaluation_inference_results_Q = None
         self.max_possible_score = 1.0
+        self.initial_weight_fingerprints: dict[str, str] = {}
 
     def setup_model(self) -> int:
         """Initialize the OLMo-core model and training infrastructure.
@@ -361,6 +363,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 weights = self._gather_olmo_ddp_hf_state_to_cpu()
                 if self.streaming_config.debug_grpo_diagnostics and self.rank == 0:
                     total_numel, total_bytes, probes = summarize_weight_shipment(weights)
+                    self.initial_weight_fingerprints = fingerprint_weight_shipment(weights)
                     logger.warning(
                         "[GRPODebug][initial-weight-sync] model_step=0 tensors=%s numel=%s bytes=%s probes=%s",
                         len(weights),
@@ -477,6 +480,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 else None
             ),
             log_weight_diagnostics=self.streaming_config.debug_grpo_diagnostics,
+            previous_weight_fingerprints=self.initial_weight_fingerprints,
         )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
