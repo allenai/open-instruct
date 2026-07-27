@@ -64,6 +64,12 @@ The defaults preserve the previous DAPO/CISPO PPO behavior:
 mask. Existing configurations do not silently switch their clip baseline to
 \(\mu\).
 
+Sequence-level masking is an exception: `rho_mask_level=sequence` now uses the
+broadcast sequence statistic only for the keep/drop decision, while retained
+tokens keep their per-token clipped \(\pi_{\text{old}}/\mu\) correction
+weights. Previously the broadcast sequence-mean ratio was also used as the
+clamp base and correction weight.
+
 To replace `use_rho_correction=False` without changing its old meaning, use
 `policy_ratio_denominator=old_policy`,
 `rollout_importance_correction=none`, and `rho_mask_metric=none`. This remains
