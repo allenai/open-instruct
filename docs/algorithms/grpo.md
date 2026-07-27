@@ -82,6 +82,13 @@ To replace `use_rho_correction=False` without changing its old meaning, use
 plain PPO weighting by \(\pi_\theta/\pi_{\text{old}}\); it does not expose an
 unclamped \(\pi_\theta/\mu\) coefficient.
 
+In `grpo_fast.py`, enabling tools now always requires `mask_tool_use=True`.
+This also applies to pure-PPO configurations with
+`policy_ratio_denominator=old_policy`, `rollout_importance_correction=none`,
+and `rho_mask_metric=none`, which do not consume vLLM log probabilities in the
+policy loss. The previous gate required tool masking only when vLLM log
+probabilities or the \(\rho\) correction were enabled.
+
 To opt into the direct DPPO path, set:
 
 ```bash
