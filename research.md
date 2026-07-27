@@ -527,7 +527,26 @@ config — all 6 arms now have 3 seeds each (18 runs total) — on
 All 12 new jobs confirmed scheduled/started with no exit codes at launch
 time.
 
-**Next:** let the sweep run, then repeat the difficulty-stratified
-best-checkpoint comparison methodology from the DeepScaleR NGU work (see
-the K-ablation and NGU entries above) on code eval sets (LCB-v5 test,
-Codeforces test) once these runs have made meaningful progress.
+**Status (2026-07-26): two infra root causes found and fixed after the
+seed2/3 sweep crashed twice.** See
+[the crash-investigation subsection](experiment.md#sweep-wide-crash-investigation-two-separate-root-causes-found-and-fixed)
+for full detail. (1) The shared AWS code-execution API endpoint choked once
+sweep concurrency hit 18 jobs (`500 Internal Server Error`), stalling ranks
+into a Gloo collective timeout — fixed by switching to per-job local code
+servers (`code_api_setup.sh`, commit `1ae99daa6`). (2) Even after that fix,
+every relaunched job died again from the identical `Application timeout
+caused pair closure` signature: olmo-core's async-bookkeeping process group
+is created via a bare `torch.distributed.new_group()` with no timeout
+argument, which silently falls back to torch's hardcoded 30-minute default
+*regardless* of `--backend_timeout` (this also explains the identical
+crash signature seen in the unrelated `reinforce_ada_est`/DeepScaleR sweep).
+Fixed by raising torch's `default_pg_timeout` global right after process
+group init (commit `020a93ee0`), so the bookkeeping subgroup inherits
+`--backend_timeout` too. All 13 affected jobs (12 seed2/3 + `ngu075` seed1)
+resumed from checkpoint with both fixes; outcome TBD.
+
+**Next:** let the sweep run past the ~3-8h window that killed the previous
+two attempts, then repeat the difficulty-stratified best-checkpoint
+comparison methodology from the DeepScaleR NGU work (see the K-ablation and
+NGU entries above) on code eval sets (LCB-v5 test, Codeforces test) once
+these runs have made meaningful progress.

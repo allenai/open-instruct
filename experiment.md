@@ -2235,3 +2235,96 @@ Beaker: [01KYDC2HZ0TV4TNHJ9RKWMGRMC](https://beaker.org/ex/01KYDC2HZ0TV4TNHJ9RKW
 
 **Result:** `eval scores: 1.13`, avg sequence length 13565 tokens, at
 `eval_step=1` (labels the initial/pre-training model).
+
+### Sweep-wide crash investigation: two separate root causes found and fixed
+
+All 12 seed2/3 jobs above died (exit 1, one also preempted) within hours of
+launch, and the same signature also killed one of the original 6 seed-1 jobs
+(`ngu075_n8_k16`, at 77.6%) and nearly a second (`ngu0875_n8_k16`, still
+running at time of writing). Two genuinely separate infra bugs were involved.
+
+**Root cause 1 (fixed, commit `1ae99daa6`): shared AWS code-execution API
+overloaded by sweep concurrency.** `deepcoder_1_5b.sh` hardcoded
+`--code_api_url` to a shared AWS API Gateway/Lambda endpoint
+(`p9f1719l7f.execute-api.us-west-2.amazonaws.com`) also used by other
+sweeps/users. Once concurrency hit 18 jobs (6 original + 12 new seeds), the
+endpoint started returning `500 Internal Server Error` on code-verification
+calls (`ground_truth_utils.py:980`), stalling a rank long enough to trip a
+30-minute Gloo collective timeout (`RuntimeError: Application timeout caused
+pair closure`) and kill training. Every one of the 11 non-preempted crashes
+showed this exact `500 Server Error` immediately preceding the timeout.
+Fixed by switching `deepcoder_1_5b.sh` to the per-job local code-server
+pattern already used by other code-RL scripts (`grpo_fast_7b_code.sh`, the
+`olmo3` RL scripts): source `configs/beaker_configs/code_api_setup.sh`
+(spins up a local uvicorn/nginx code server per job) instead of hitting the
+shared endpoint, and point `--code_api_url` at `$CODE_API_URL/test_program`.
+
+All 12 seed2/3 jobs plus `ngu075_n8_k16` seed1 were relaunched resumed from
+their last saved checkpoint (`--checkpoint_state_dir`, `mason.py` skips its
+`--auto_checkpoint_state_dir` override when the flag is already set to a
+`/weka/`-prefixed path) with this fix, on `ai2/oe-adapt-code`/`high`. Two of
+the 13 didn't get scheduled on `ai2/jupiter` (queue pressure); canceled and
+relaunched with `CLUSTER="ai2/jupiter ai2/ceres"` (`mason.py --cluster`
+accepts multiple values via `nargs="+"`), both scheduled immediately after.
+
+| Job | Beaker |
+| --- | --- |
+| `baseline_n8_k16_seed2_resume` | [01KYEKH7VYMH71H5HEB4W46K80](https://beaker.org/ex/01KYEKH7VYMH71H5HEB4W46K80) |
+| `baseline_n8_k16_seed3_resume` | [01KYEKHQV8VRV7BCPECG6FYXPK](https://beaker.org/ex/01KYEKHQV8VRV7BCPECG6FYXPK) |
+| `baseline_n4_k32_seed2_resume` | [01KYEKJ6HQS6KAKV1X54QH60TC](https://beaker.org/ex/01KYEKJ6HQS6KAKV1X54QH60TC) |
+| `baseline_n4_k32_seed3_resume` | [01KYEKJNFD0R4BS3BTH44J1BXF](https://beaker.org/ex/01KYEKJNFD0R4BS3BTH44J1BXF) |
+| `baseline_n2_k64_seed2_resume` | [01KYEKK4FTZ466FTY72A1TWM0A](https://beaker.org/ex/01KYEKK4FTZ466FTY72A1TWM0A) |
+| `baseline_n2_k64_seed3_resume` | [01KYEKKM0QABE5KNVNK5D7VZGE](https://beaker.org/ex/01KYEKKM0QABE5KNVNK5D7VZGE) |
+| `ngu05_n8_k16_seed2_resume` | [01KYEKM2F1TB6ZHNPKEZWN4MWX](https://beaker.org/ex/01KYEKM2F1TB6ZHNPKEZWN4MWX) |
+| `ngu05_n8_k16_seed3_resume` | [01KYEKMHTQD05NHRS3D6PAXGEC](https://beaker.org/ex/01KYEKMHTQD05NHRS3D6PAXGEC) |
+| `ngu075_n8_k16_seed2_resume` | [01KYEKN27EQR12C2PPSCCBWDJY](https://beaker.org/ex/01KYEKN27EQR12C2PPSCCBWDJY) |
+| `ngu075_n8_k16_seed3_resume` | [01KYEKNJ0JFY4TRWFC63PKHJYE](https://beaker.org/ex/01KYEKNJ0JFY4TRWFC63PKHJYE) |
+| `ngu0875_n8_k16_seed2_resume` | [01KYEKP2MS835XQG5KT53K86GP](https://beaker.org/ex/01KYEKP2MS835XQG5KT53K86GP) |
+| `ngu0875_n8_k16_seed3_resume2` (jupiter+ceres) | [01KYEM59SPZZBS4VXX1P4PD6N7](https://beaker.org/ex/01KYEM59SPZZBS4VXX1P4PD6N7) |
+| `ngu075_n8_k16_seed1_resume2` (jupiter+ceres) | [01KYEM5RX7SAMQ7E30BER2AGGX](https://beaker.org/ex/01KYEM5RX7SAMQ7E30BER2AGGX) |
+
+**Root cause 2 (fixed, commit `020a93ee0`): olmo-core's bookkeeping process
+group silently ignores `--backend_timeout`.** All 13 resumed jobs above died
+again anyway, spread over an 8-hour window (07:27-15:16), same
+`Application timeout caused pair closure` signature but now with zero `500
+Server Error` lines anywhere (confirming root cause 1's fix held). Traced
+the crashing collective (`olmo_core/train/utils.py:320`, called from
+`Trainer._reduce_and_pass_on_metrics`) to a *separate* CPU/gloo process group
+olmo-core creates for async metric bookkeeping via bare
+`torch.distributed.new_group()` (`trainer.py:375`) — no `timeout` argument.
+Per `torch/distributed/distributed_c10d.py`'s `_get_default_timeout`, a
+`new_group()` call with no explicit timeout resolves to the hardcoded
+module-level `default_pg_timeout` constant (`0:30:00`) for any non-NCCL
+backend, completely independent of whatever timeout was passed to the
+original `init_process_group`/`prepare_training_environment` call. So
+`--backend_timeout` (already 120 min by default) was only ever protecting
+the main world process group — the bookkeeping subgroup where these crashes
+actually originate was always on torch's hardcoded 30-minute default,
+regardless of what we configured. Confirmed by grep: no code anywhere in
+open_instruct or olmo-core passes a timeout to this specific `new_group()`
+call.
+
+Fixed in `grpo_olmo_core_actor.py`'s `setup()`: right after
+`train.prepare_training_environment(...)`, overwrite
+`torch.distributed.distributed_c10d.default_pg_timeout` to
+`timedelta(minutes=self.grpo_config.backend_timeout)`. Any subgroup created
+afterward without an explicit timeout (including olmo-core's bookkeeping
+group) now inherits the same generous timeout as the main group, via the
+existing `--backend_timeout` flag rather than adding a new one. Verified the
+attribute is reachable and mutable post-import
+(`torch.distributed.distributed_c10d.default_pg_timeout`) in the project
+venv; `make style && make quality` clean. No offline-testable surface (Ray
+actor distributed setup, GPU-only) — verification is via the next relaunch's
+survival time.
+
+**Monitoring note:** built `watch_sweep.sh`, a poller that checks all active
+jobs' Beaker exit codes every 4 min and only emits on a state transition to
+non-zero. First version had a bug — it treated the *first* observation of
+any job's exit code as a transition, so a job that had already finished
+successfully (`ngu0875_n8_k16` seed1, exit 0) got misreported as a crash.
+Fixed to record a silent baseline on first poll and only alert on genuine
+transitions (and never on exit 0).
+
+**Next:** relaunch resumed from the 13 checkpoints again with commit
+`020a93ee0`'s fix, and watch survival time past the ~3-8h window that killed
+the previous two attempts.
