@@ -1044,7 +1044,7 @@ def populate_sample_loss_stats(
         loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(loss_output.clipfrac, valid_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(loss_output.pg_loss, valid_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss
-        finite_ratio_mask = valid_mask & torch.isfinite(loss_output.ratio)
+        finite_ratio_mask = valid_mask & torch.isfinite(loss_output.rho.ratio)
         loss_stats_B["val/ratio"][sample_idx] = masked_mean(loss_output.ratio, finite_ratio_mask)
         if entropy is not None:
             entropy_mask = valid_mask & torch.isfinite(entropy)

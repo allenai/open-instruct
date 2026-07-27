@@ -664,6 +664,28 @@ class TestComputeGRPOLoss(unittest.TestCase):
             stats["loss/kl_avg"][0], grpo_utils.masked_mean(output.kl, response_mask) * config.beta
         )
 
+    def test_ratio_metric_excludes_sanitized_overflow(self):
+        response_mask = torch.ones(1, 2, dtype=torch.bool)
+        config = _make_dppo_config()
+        new_logprobs = torch.tensor([[-1.0, -1.0]], requires_grad=True)
+        output = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            vllm_logprobs=torch.tensor([[-101.0, -1.0]]),
+            advantages=torch.ones(1, 2),
+            ref_logprobs=None,
+            response_mask=response_mask,
+            config=config,
+        )
+        stats = grpo_utils.create_loss_stats(1, torch.device("cpu"))
+
+        grpo_utils.populate_sample_loss_stats(
+            stats, 0, output, output.pg_loss.mean(), response_mask, new_logprobs, None, None, config
+        )
+
+        torch.testing.assert_close(output.ratio, torch.tensor([[0.0, 1.0]]))
+        self.assertTrue(torch.isinf(output.rho.ratio[0, 0]))
+        torch.testing.assert_close(stats["val/ratio"][0], torch.tensor(1.0))
+
     def test_shape_mismatch_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "vllm_logprobs shape"):
             grpo_utils.compute_grpo_loss(
