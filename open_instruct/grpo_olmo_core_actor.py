@@ -465,6 +465,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 and self.hf_config.model_type == "olmo3moe"
                 else None
             ),
+            log_weight_diagnostics=self.streaming_config.debug_grpo_diagnostics,
         )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
