@@ -1221,6 +1221,7 @@ def create_vllm_engines(
     eval_dataset=None,
     trust_remote_code: bool = False,
     vllm_attention_backend: str | None = None,
+    load_format: str = "auto",
 ) -> list[ray.actor.ActorHandle]:
     vllm_engines = []
     # Use "mp" (multiprocessing) for TP > 1 when running inside a Ray actor.
@@ -1308,6 +1309,7 @@ def create_vllm_engines(
                 eval_dataset=eval_dataset,
                 trust_remote_code=trust_remote_code,
                 attention_backend=vllm_attention_backend,
+                load_format=load_format,
                 language_model_only=True,
             )
         )
