@@ -1375,8 +1375,12 @@ class DataPreparationActor:
         self.router_replay = router_replay
         if self.config.debug_grpo_diagnostics:
             # Ray may install handlers before this module is imported, preventing
-            # setup_logger() from setting this logger's effective level.
+            # setup_logger() from setting effective levels for this actor.
             logger.setLevel("WARNING")
+            root_logger = logger_utils.setup_logger()
+            root_logger.setLevel("WARNING")
+            for handler in root_logger.handlers:
+                handler.setLevel("WARNING")
             logger.warning(
                 "[GRPODebug][config] data-preparation diagnostics enabled: prompts_per_step=%s "
                 "samples_per_prompt=%s filter_zero_std_samples=%s async_steps=%s",
