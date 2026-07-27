@@ -119,6 +119,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
         logger.info(f"[Rank {self.rank}] train.prepare_training_environment completed")
 
+        # olmo-core's Trainer creates a separate CPU/gloo process group for async metric
+        # bookkeeping via bare `dist.new_group()` (no explicit timeout), which falls back to
+        # torch's hardcoded 30-minute default regardless of the timeout passed above. Raise
+        # that default so transient network blips don't kill training via this subgroup.
+        torch.distributed.distributed_c10d.default_pg_timeout = timedelta(minutes=self.grpo_config.backend_timeout)
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         torch_dtype = grpo_utils.TORCH_DTYPES[self.grpo_config.model_dtype]
