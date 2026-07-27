@@ -1373,6 +1373,18 @@ class DataPreparationActor:
         self.model_name = model_name
         self.base_env_config = base_env_config
         self.router_replay = router_replay
+        if self.config.debug_grpo_diagnostics:
+            # Ray may install a warning-level root logger before this module is imported.
+            # Set this named logger explicitly so opt-in INFO diagnostics are not suppressed.
+            logger.setLevel("INFO")
+            logger.info(
+                "[GRPODebug][config] data-preparation diagnostics enabled: prompts_per_step=%s "
+                "samples_per_prompt=%s filter_zero_std_samples=%s async_steps=%s",
+                self.global_batch_size,
+                self.config.num_samples_per_prompt_rollout,
+                self.config.filter_zero_std_samples,
+                self.config.async_steps,
+            )
 
         self.iter_dataloader = HFDataLoader(
             dataset=dataset,
