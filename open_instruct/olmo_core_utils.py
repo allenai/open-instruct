@@ -270,6 +270,7 @@ def build_checkpointer_callback(
     ephemeral_save_interval: int | None,
     save_async: bool = True,
     max_checkpoints: int | None = 3,
+    pre_train_checkpoint: bool | None = None,
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults.
 
@@ -281,6 +282,7 @@ def build_checkpointer_callback(
         ephemeral_save_interval=ephemeral_save_interval,
         save_async=save_async,
         max_checkpoints=max_checkpoints if max_checkpoints is not None and max_checkpoints >= 0 else None,
+        pre_train_checkpoint=pre_train_checkpoint,
     )
 
 
@@ -331,6 +333,7 @@ def build_base_callbacks(
     wandb_entity: str | None = None,
     save_async: bool = True,
     max_checkpoints: int | None = 3,
+    pre_train_checkpoint: bool | None = None,
 ) -> dict[str, Any]:
     """Build the callbacks shared across SFT and DPO: beaker, gpu monitor, checkpointer, and optional wandb."""
     result: dict[str, Any] = {
