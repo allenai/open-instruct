@@ -20,6 +20,8 @@ dependencies = [
     "numpy>=2",
     "ai2-olmo-core",
     "nvitop>=1.4.2",
+    # vLLM 0.25.1 imports NamespaceTool, which was added in openai 2.25.0.
+    "openai>=2.25.0,<3",
     "packaging>=24.2",
     "peft>=0.13.2",
     "pyarrow>=20.0.0",

@@ -3292,6 +3292,7 @@ dependencies = [
     { name = "nltk", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "numpy", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "nvitop", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "openai", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "openenv-core", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "packaging", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "peft", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
@@ -3383,6 +3384,7 @@ requires-dist = [
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = ">=2" },
     { name = "nvitop", specifier = ">=1.4.2" },
+    { name = "openai", specifier = ">=2.25.0,<3" },
     { name = "openenv-core", specifier = ">=0.2.1" },
     { name = "packaging", specifier = ">=24.2" },
     { name = "peft", specifier = ">=0.13.2" },
@@ -3437,7 +3439,7 @@ dev = [
 
 [[package]]
 name = "openai"
-version = "2.15.0"
+version = "2.48.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
@@ -3449,9 +3451,9 @@ dependencies = [
     { name = "tqdm", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "typing-extensions", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/94/f4/4690ecb5d70023ce6bfcfeabfe717020f654bde59a775058ec6ac4692463/openai-2.15.0.tar.gz", hash = "sha256:42eb8cbb407d84770633f31bf727d4ffb4138711c670565a41663d9439174fba", size = 627383, upload-time = "2026-01-09T22:10:08.603Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/ae/d4d1835488c0350424009dac5095b9a3e173bee12fd2e421ee27e2142c42/openai-2.48.0.tar.gz", hash = "sha256:231b1e7661dda14574986c2f71451e9d584b7fe69e0ee6480e12ed090b48fc16", size = 1093427, upload-time = "2026-07-23T20:15:50.402Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/df/c306f7375d42bafb379934c2df4c2fa3964656c8c782bac75ee10c102818/openai-2.15.0-py3-none-any.whl", hash = "sha256:6ae23b932cd7230f7244e52954daa6602716d6b9bf235401a107af731baea6c3", size = 1067879, upload-time = "2026-01-09T22:10:06.446Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/2a/dcb891114e303c4379d4a498f10222e33eee540bcef4e1e493bd0af2b242/openai-2.48.0-py3-none-any.whl", hash = "sha256:c98df30aaaf93c51979f64d3e7c5b76464f8be0173368266229eb8fe6bd30f2c", size = 1648520, upload-time = "2026-07-23T20:15:48.052Z" },
 ]
 
 [[package]]

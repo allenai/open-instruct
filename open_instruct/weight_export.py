@@ -126,7 +126,6 @@ def resolve_weight_export_adapter(model: torch.nn.Module) -> WeightExportAdapter
             text_config = getattr(config, "text_config", None)
             if getattr(text_config, "model_type", None) == "qwen3_moe":
                 return Qwen3MoeWeightExportAdapter()
-            return PassthroughWeightExportAdapter()
         wrapped = getattr(current, "module", None)
         if not isinstance(wrapped, torch.nn.Module):
             break

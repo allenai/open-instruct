@@ -79,6 +79,11 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
 
+# Catch Python API incompatibilities in the vLLM server stack during image
+# construction instead of after a GPU job has launched.
+RUN .venv/bin/python -c \
+    "from openai.types.responses import NamespaceTool; from vllm.entrypoints.openai.api_server import build_app"
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts

@@ -113,6 +113,16 @@ def test_adapter_resolution_is_explicitly_model_type_based() -> None:
     assert isinstance(resolve_weight_export_adapter(dense_model), PassthroughWeightExportAdapter)
 
 
+def test_adapter_resolution_checks_wrapped_learner_config() -> None:
+    qwen_model = torch.nn.Linear(2, 2)
+    qwen_model.config = SimpleNamespace(model_type="qwen3_moe")
+    wrapper = torch.nn.Module()
+    wrapper.config = SimpleNamespace(model_type="training_wrapper")
+    wrapper.module = qwen_model
+
+    assert isinstance(resolve_weight_export_adapter(wrapper), Qwen3MoeWeightExportAdapter)
+
+
 def test_transformers_553_qwen3_moe_uses_expected_fused_parameter_layout() -> None:
     assert transformers.__version__ == "5.5.3"
     config = Qwen3MoeConfig(
