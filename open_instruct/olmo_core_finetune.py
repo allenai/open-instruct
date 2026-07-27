@@ -89,7 +89,7 @@ def _load_initial_native_checkpoint(trainer: Any, checkpoint_path: str) -> None:
 def _resume_checkpoint(trainer: Any, checkpoint_path: str, reset_optimizer_states: bool) -> None:
     """Resume model and trainer state, optionally discarding optimizer state."""
     logger.info(f"Resuming from explicit checkpoint {checkpoint_path}...")
-    trainer.load_checkpoint(checkpoint_path, reset_optimizer_states_on_load=reset_optimizer_states)
+    trainer.load_checkpoint(checkpoint_path, load_optim_state=not reset_optimizer_states)
 
 
 def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:

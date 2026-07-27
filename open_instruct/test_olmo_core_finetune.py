@@ -77,7 +77,7 @@ class CheckpointResumeTest(unittest.TestCase):
         olmo_core_finetune._resume_checkpoint(trainer, "/checkpoints/step100", reset_optimizer_states)
 
         trainer.load_checkpoint.assert_called_once_with(
-            "/checkpoints/step100", reset_optimizer_states_on_load=reset_optimizer_states
+            "/checkpoints/step100", load_optim_state=not reset_optimizer_states
         )
 
 
