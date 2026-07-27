@@ -195,15 +195,13 @@ class VLLMWeightSyncCallback(Callback):
         if self.cpu_weight_state_provider is not None:
             weights = self.cpu_weight_state_provider()
             if self.log_weight_diagnostics and is_rank_0:
-                # Ray may install a warning-level root logger before this module is imported.
-                logger.setLevel("INFO")
                 total_numel, total_bytes, probes = summarize_weight_shipment(weights)
                 probe_deltas = {
                     name: value - self._previous_weight_probes[name]
                     for name, value in probes.items()
                     if name in self._previous_weight_probes
                 }
-                logger.info(
+                logger.warning(
                     "[GRPODebug][weight-sync] model_step=%s tensors=%s numel=%s bytes=%s "
                     "probes=%s probe_deltas_from_previous_sync=%s changed_probes=%s",
                     self.trainer.global_step,

@@ -509,12 +509,10 @@ class GRPOTrainModule(TransformerTrainModule):
         if not dry_run and token_counts.sum().item() == 0:
             raise RuntimeError("GRPO training batch has zero response tokens after packing and collation")
         if self.streaming_config.debug_grpo_diagnostics and not dry_run:
-            # Ray may install a warning-level root logger before this module is imported.
-            logger.setLevel("INFO")
             masked_advantages = torch.cat(
                 [data_BT.advantages[i][:, 1:][data_BT.response_masks[i][:, 1:]] for i in range(num_samples)]
             )
-            logger.info(
+            logger.warning(
                 "[GRPODebug][loss-input] step=%s rank=%s microbatches=%s response_tokens=%s "
                 "advantage_min=%s advantage_max=%s advantage_mean=%s advantage_std=%s "
                 "nonzero_advantage_tokens=%s",
@@ -680,7 +678,7 @@ class GRPOTrainModule(TransformerTrainModule):
                 self.record_metric(k, v / debug_metrics_count, reduce_type=None)
             if self.streaming_config.debug_grpo_diagnostics:
                 gradient_norms = list(self._grad_norms)
-                logger.info(
+                logger.warning(
                     "[GRPODebug][loss-output] step=%s rank=%s local_response_tokens=%s "
                     "global_response_tokens=%s losses=%s grad_norms=%s scores_mean=%s "
                     "advantage_min=%s advantage_max=%s",
