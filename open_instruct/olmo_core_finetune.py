@@ -86,6 +86,12 @@ def _load_initial_native_checkpoint(trainer: Any, checkpoint_path: str) -> None:
     trainer.load_checkpoint(checkpoint_path, load_trainer_state=False, load_optim_state=False)
 
 
+def _resume_checkpoint(trainer: Any, checkpoint_path: str, reset_optimizer_states: bool) -> None:
+    """Resume model and trainer state, optionally discarding optimizer state."""
+    logger.info(f"Resuming from explicit checkpoint {checkpoint_path}...")
+    trainer.load_checkpoint(checkpoint_path, reset_optimizer_states_on_load=reset_optimizer_states)
+
+
 def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
@@ -370,8 +376,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     ).build(train_module, data_loader)
 
     if args.checkpoint.resume_from_checkpoint is not None:
-        logger.info(f"Resuming from explicit checkpoint {args.checkpoint.resume_from_checkpoint}...")
-        trainer.load_checkpoint(args.checkpoint.resume_from_checkpoint)
+        _resume_checkpoint(
+            trainer, args.checkpoint.resume_from_checkpoint, args.checkpoint.reset_optimizer_states_on_resume
+        )
     elif trainer.checkpoint_loaded:
         logger.info(f"Resumed training state from {args.checkpoint.output_dir}")
     elif not use_hf_ckpt:

@@ -266,6 +266,8 @@ class CheckpointConfig:
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
     """If the training should continue from a checkpoint folder."""
+    reset_optimizer_states_on_resume: bool = False
+    """Restore model and trainer state while starting with fresh optimizer state."""
     hf_export_dir: str | None = None
     """Optional directory for a final Hugging Face export after training."""
 

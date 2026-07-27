@@ -69,6 +69,18 @@ class NativeCheckpointInitializationTest(unittest.TestCase):
         )
 
 
+class CheckpointResumeTest(unittest.TestCase):
+    @parameterized.expand([(False,), (True,)])
+    def test_optionally_resets_optimizer_state(self, reset_optimizer_states: bool) -> None:
+        trainer = mock.MagicMock()
+
+        olmo_core_finetune._resume_checkpoint(trainer, "/checkpoints/step100", reset_optimizer_states)
+
+        trainer.load_checkpoint.assert_called_once_with(
+            "/checkpoints/step100", reset_optimizer_states_on_load=reset_optimizer_states
+        )
+
+
 class IsHfCheckpointTest(unittest.TestCase):
     def test_local_dir_with_config_json_is_hf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
