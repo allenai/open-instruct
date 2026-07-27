@@ -1,0 +1,37 @@
+ARG OPEN_INSTRUCT_BASE_IMAGE=open-instruct-base:latest
+FROM ${OPEN_INSTRUCT_BASE_IMAGE}
+
+# Keep the specialized OLMo MoE training stack out of the shared Open Instruct image.
+# Transformer Engine supplies the optimized MoE token permutation kernels. The
+# CUTLASS-enabled grouped_gemm revision matches the canonical OLMo-core image.
+ARG TRANSFORMER_ENGINE_VERSION=2.16.1
+ARG GROUPED_GEMM_SHA=f1429a3c44c98f7912aa4b00125144cdf4e7fdb2
+ENV UV_CACHE_DIR=/root/.cache/uv \
+    CUDNN_PATH=/stage/.venv/lib/python3.12/site-packages/nvidia/cudnn \
+    CUDNN_HOME=/stage/.venv/lib/python3.12/site-packages/nvidia/cudnn \
+    CPLUS_INCLUDE_PATH=/stage/.venv/lib/python3.12/site-packages/nvidia/cudnn/include \
+    LIBRARY_PATH=/stage/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib \
+    LD_LIBRARY_PATH=/stage/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cmake ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    TORCH_CUDA_ARCH_LIST="9.0 10.0" \
+    GROUPED_GEMM_CUTLASS=1 \
+    uv pip install \
+        --python /stage/.venv/bin/python \
+        --no-build-isolation \
+        "pybind11==2.13.6" \
+        "grouped_gemm @ git+https://github.com/tgale96/grouped_gemm.git@${GROUPED_GEMM_SHA}" \
+    && NVTE_FRAMEWORK=pytorch \
+        NVTE_CUDA_ARCHS="90;100" \
+        uv pip install \
+        --python /stage/.venv/bin/python \
+        --no-build-isolation \
+        "git+https://github.com/NVIDIA/TransformerEngine.git@v${TRANSFORMER_ENGINE_VERSION}"
+
+# Fail the image build if the exact APIs consumed by OLMo-core are unavailable.
+RUN /stage/.venv/bin/python -c \
+    "import grouped_gemm.ops; from transformer_engine.pytorch.permutation import moe_permute, moe_unpermute; assert callable(moe_permute) and callable(moe_unpermute)"
