@@ -566,8 +566,45 @@ running/scheduled. See
 [the full crash-investigation subsection](experiment.md#sweep-wide-crash-investigation-three-separate-root-causes-found-and-fixed)
 for the complete job table.
 
+**Status (2026-07-27): crashes haven't fully stopped, just gotten rarer/later.**
+Survival times after the three fixes have grown from ~3-4h to as much as
+~7-8h, but the same `Application timeout caused pair closure` signature
+still recurs sporadically (arms are now on resume5-resume9 depending on how
+many times each has hit it) — treating this as an operational cost to
+manage via `watch_sweep.sh` (auto-detect crash, resume from checkpoint,
+re-arm watcher) rather than a fourth root cause to chase, since no new
+signature has appeared. See the [ongoing crash/resume cycle
+subsection](experiment.md#ongoing-crashresume-cycle-ad-hoc-via-watch_sweepsh)
+for the latest instance.
+
 **Next:** let the sweep run past the ~4h+ window that's killed prior
 attempts, then repeat the difficulty-stratified best-checkpoint comparison
 methodology from the DeepScaleR NGU work (see the K-ablation and NGU entries
 above) on code eval sets (LCB-v5 test, Codeforces test) once these runs have
 made meaningful progress.
+
+**Status (2026-07-27): fixed eval metrics silently pooling lcbv5/codeforces, added
+HumanEvalPlus as a third eval set.** See [the full
+writeup](experiment.md#2026-07-27-separate-per-source-eval-metrics--humanevalplus-eval-set-code-rlvr).
+Root cause: `create_deepcoder_data.py` tagged every row (train *and* eval, across all
+four DeepCoder configs) with the same literal `"dataset": "code_stdio"` column, which
+doubles as both the reward-routing key and the per-dataset metric-grouping key — so
+`eval/objective/code_stdio_correct_rate` and the eval pass@k breakdown were pooling
+`lcbv5_test` + `codeforces_test` into one number instead of reporting them separately.
+Fixed by giving eval-only splits distinct tags (`code_stdio_lcbv5`,
+`code_stdio_codeforces`) and adding a prefix fallback in
+`resolve_reward_function` (mirroring the existing `math`/`gsm8k` one) so reward routing
+is unaffected. Also added `mnoukhov/humanevalplus_test` (new
+`scripts/data/create_humanevalplus_data.py`, converted from `evalplus/humanevalplus`,
+164 problems, graded by the base `code` verifier since it's function-signature style
+rather than stdin/stdout) as a third eval set, tagged `code_humanevalplus`. Verified
+against the real code-exec sandbox (162/164 canonical solutions pass; the 2 exceptions
+are a genuine upstream evalplus test-harness bug in `HumanEval/32` and a slow-but-correct
+`HumanEval/139`). **Known caveat, not fixed:** the default `code_max_execution_time=1.0s`
+is applied per test-list entry, and since each HumanEvalPlus problem bundles all "plus"
+tests into one entry, ~5% of problems (8/164) can time out as false negatives at that
+budget — raising the global timeout would fix it but also slow down every
+lcbv5/codeforces `code_stdio` verification during training (that budget scales the total
+per-problem timeout there), so left as a tradeoff for whoever tunes eval fidelity next.
+All datasets re-pushed and confirmed on the Hub; `deepcoder_1_5b.sh` now lists all three
+eval sets.

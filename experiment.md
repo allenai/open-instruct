@@ -2385,3 +2385,111 @@ Final set of 13 active jobs (all three fixes applied):
 **Next:** relaunch resumed from the 13 checkpoints again with commit
 `020a93ee0`'s fix, and watch survival time past the ~3-8h window that killed
 the previous two attempts.
+
+**Ongoing crash/resume cycle (ad-hoc, via `watch_sweep.sh`):** the sweep has
+continued hitting the same `Application timeout caused pair closure`
+signature sporadically since the three fixes landed — survival times have
+grown (several hours to ~7-8h) but crashes haven't stopped entirely, so each
+one gets resumed from its last checkpoint and the watcher's job list gets
+updated in place. Individual resume rounds between this point and
+2026-07-27 (arms now at resume5 through resume9 depending on how many times
+each has crashed) weren't all logged here individually. Latest instance:
+
+- `ngu0875_n8_k16_seed2_resume8` ([01KYHKF079FT7K3QDN1JEA02HP](https://beaker.org/ex/01KYHKF079FT7K3QDN1JEA02HP))
+  crashed 2026-07-27 18:36 at step 338/500 (67.6%), same signature, ~7h40m
+  survival (started 10:56). Relaunched as
+  `ngu0875_n8_k16_seed2_resume9` ([01KYJE89VVESNMDM1Y5Y43ABVY](https://beaker.org/ex/01KYJE89VVESNMDM1Y5Y43ABVY))
+  from the same `--checkpoint_state_dir`, `ai2/jupiter ai2/ceres`/`urgent`,
+  scheduled immediately.
+
+Current 10-job watch list (`watch_sweep.sh`, polls every 4 min): `baseline_n8_k16_seed2_resume3`,
+`baseline_n8_k16_seed3_resume3`, `baseline_n4_k32_seed2_resume3`,
+`baseline_n4_k32_seed3_resume4urgent`, `ngu05_n8_k16_seed2_resume5`,
+`ngu05_n8_k16_seed3_resume5`, `ngu075_n8_k16_seed2_resume7`,
+`ngu075_n8_k16_seed3_resume6`, `ngu0875_n8_k16_seed2_resume9`,
+`ngu0875_n8_k16_seed3_resume9`.
+
+## 2026-07-27: Separate per-source eval metrics + HumanEvalPlus eval set (code RLVR)
+
+### Problem
+
+`eval/objective/code_stdio_correct_rate` (and the eval pass@k breakdown) was pooling
+`lcbv5_test` and `codeforces_test` into one number instead of reporting them separately,
+even though `EVAL_DATASETS` in `deepcoder_1_5b.sh` lists them as two datasets.
+
+Root cause: `scripts/data/create_deepcoder_data.py`'s `to_example()` hardcoded
+`"dataset": "code_stdio"` for every row across all four DeepCoder configs (lcbv5,
+primeintellect, taco, codeforces) -- train and eval alike. That `"dataset"` column is
+`VERIFIER_SOURCE_KEY` (`dataset_transformation.py`), used for two things at once:
+reward-function routing (`resolve_reward_function` in `ground_truth_utils.py`) and the
+per-dataset metric grouping key (`dataset_metric_key` in `grpo_utils.py`/`data_loader.py`).
+Since both eval sets carried the identical literal `"code_stdio"`, every metric that groups
+by that field collapsed them into one bucket -- `grpo_utils.py`'s
+`if len(unique_dataset_keys) > 1:` breakout branch never fired.
+
+Math datasets don't have this problem only because different math eval sources (e.g.
+`gsm8k` vs `math`) already happen to carry different `VERIFIER_SOURCE_KEY` strings --
+there's no separation *mechanism* being exercised there beyond that.
+
+### Fix
+
+1. `ground_truth_utils.py::resolve_reward_function`: added a prefix fallback (mirroring
+   the existing `math`/`gsm8k` fallback) so any `"code_stdio*"`-prefixed name routes to the
+   `code_stdio` verifier, and any other `"code*"`-prefixed name (checked after `code_stdio`,
+   since `"code_stdio_lcbv5".startswith("code")` is also true) routes to the base `code`
+   verifier.
+2. `create_deepcoder_data.py`: `to_example()` now takes a `dataset_tag` param. Train splits
+   keep `"code_stdio"` (unchanged, so training reward curves stay pooled). The held-out eval
+   splits get distinct tags: `lcbv5_test` -> `"code_stdio_lcbv5"`, `codeforces_test` ->
+   `"code_stdio_codeforces"`.
+3. New `scripts/data/create_humanevalplus_data.py`: converts `evalplus/humanevalplus`
+   (164 problems) to open-instruct RLVR format. Function-signature style (not
+   stdin/stdout), so it's graded by the base `code` verifier (`POST /test_program`,
+   assert-style exec) rather than `code_stdio`. Each example's ground truth is a
+   single combined test string: `sample["test"] + f"\ncheck({sample['entry_point']})\n"`
+   (the full evalplus check harness, including the "plus" extra tests) -- binary pass/fail
+   per problem, matching standard HumanEval(+) pass@1 semantics. Tagged
+   `"dataset": "code_humanevalplus"`. Pushed as `mnoukhov/humanevalplus_test`.
+4. `deepcoder_1_5b.sh`: added `mnoukhov/humanevalplus_test 1.0` to `EVAL_DATASETS`.
+5. Added regression tests in `test_ground_truth_utils.py` for both new prefix routes,
+   including one that specifically checks `code_humanevalplus` resolves to `code` and not
+   `code_stdio` (ordering matters in the fallback chain).
+
+### Verification
+
+- Ran the new humanevalplus conversion against the real code-exec sandbox
+  (`get_successful_tests_fast`): a correct canonical solution scores 1, a wrong one scores 0.
+  Spot-checked 15 random canonical solutions (all pass) and then the full 164: 162/164 pass
+  at a generous timeout.
+- Two "failures" at generous timeout, investigated individually:
+  - `HumanEval/32` (`find_zero`): a genuine bug in evalplus's own "plus" test harness --
+    `assert _poly(*candidate(*inp), inp) <= 0.0001` tries to unpack a scalar float return
+    with `*`. Pre-existing upstream data issue, not something our conversion introduced.
+  - `HumanEval/139`: not a bug, just slow (~10.3s wall time for the combined
+    check-with-all-plus-tests call).
+- **Caveat for the launch config:** `code_max_execution_time` (default 1.0s) is applied
+  *per test-list entry* in `get_successful_tests_fast`, and since each HumanEvalPlus
+  problem is one entry bundling all "plus" inputs, compute-heavy problems can get killed
+  before finishing. At the default 1.0s budget, 8/164 canonical solutions (~5%) time out as
+  false negatives (vs. 2/164 genuine issues at a generous budget). This is a systematic
+  handful-of-percentage-points underestimate on the humanevalplus eval curve specifically.
+  Didn't change the global default because `code_max_execution_time` is shared with
+  `code_stdio`, where it scales the *total* per-problem timeout
+  (`max_execution_time * test_ct + 5.0`) -- raising it to fix humanevalplus would also
+  proportionally slow down every lcbv5/codeforces stdio verification during training.
+  Left as a known tradeoff for whoever tunes this next; not fixed in this pass.
+- Re-ran `create_deepcoder_data.py` and confirmed on the Hub: train sets (`deepcoder_lcbv5`,
+  `deepcoder_primeintellect`, `deepcoder_taco`) unchanged (`{"code_stdio"}`, no-op commits);
+  eval sets updated (`deepcoder_lcbv5_test` -> `{"code_stdio_lcbv5"}`,
+  `deepcoder_codeforces_test` -> `{"code_stdio_codeforces"}`); new
+  `humanevalplus_test` -> `{"code_humanevalplus"}`.
+- `uv run pytest open_instruct/test_ground_truth_utils.py`: 54 passed.
+- `make style && make quality`: clean.
+
+### Files changed
+
+- `open_instruct/ground_truth_utils.py` (prefix fallback)
+- `open_instruct/test_ground_truth_utils.py` (2 new regression tests)
+- `scripts/data/create_deepcoder_data.py` (per-source eval tags)
+- `scripts/data/create_humanevalplus_data.py` (new)
+- `scripts/train/qwen/deepcoder_1_5b.sh` (added humanevalplus_test to EVAL_DATASETS)

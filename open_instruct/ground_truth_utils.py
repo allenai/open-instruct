@@ -1268,11 +1268,17 @@ async def apply_verifiable_reward(
         if reward_func is not None:
             return reward_func
         # Fall back to a base verifier for dataset-specific source names (e.g. difficulty-quartile
-        # splits like "math_deepscaler_quartile0" all resolve to the "math" verifier).
+        # splits like "math_deepscaler_quartile0" all resolve to the "math" verifier, and eval-only
+        # sources like "code_stdio_lcbv5" resolve to the "code_stdio" verifier). Check "code_stdio"
+        # before "code" since the former is also a prefix match of the latter.
         if dataset_key.startswith("gsm8k"):
             return reward_fn_mapping.get("gsm8k")
         if dataset_key.startswith("math"):
             return reward_fn_mapping.get("math")
+        if dataset_key.startswith("code_stdio"):
+            return reward_fn_mapping.get("code_stdio")
+        if dataset_key.startswith("code"):
+            return reward_fn_mapping.get("code")
         return None
 
     for i, (tok_prediction, prediction, ground_truth, dataset, query, rollout_state) in enumerate(

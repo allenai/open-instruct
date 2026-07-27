@@ -18,9 +18,13 @@ NODES="${NODES:-1}"
 
 # Datasets converted from agentica-org/DeepCoder-Preview-Dataset by
 # scripts/data/create_deepcoder_data.py. lcbv5_test and codeforces_test are
-# reserved as held-out eval and never appear in the train mixer.
+# reserved as held-out eval and never appear in the train mixer. humanevalplus_test
+# is converted from evalplus/humanevalplus by scripts/data/create_humanevalplus_data.py
+# and is eval-only (function-signature style, graded by the "code" verifier, not "code_stdio").
+# Each eval source is tagged with a distinct dataset name so eval metrics
+# (eval/pass_at_1/<name>, etc.) report separately per source instead of pooling.
 TRAIN_DATASETS="mnoukhov/deepcoder_lcbv5 1.0 mnoukhov/deepcoder_primeintellect 1.0 mnoukhov/deepcoder_taco 1.0"
-EVAL_DATASETS="mnoukhov/deepcoder_lcbv5_test 1.0 mnoukhov/deepcoder_codeforces_test 1.0"
+EVAL_DATASETS="mnoukhov/deepcoder_lcbv5_test 1.0 mnoukhov/deepcoder_codeforces_test 1.0 mnoukhov/humanevalplus_test 1.0"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \

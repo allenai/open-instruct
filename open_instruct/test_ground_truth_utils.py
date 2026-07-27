@@ -17,8 +17,20 @@ from open_instruct.ground_truth_utils import (
     LMJudgeVerifier,
     LMJudgeVerifierConfig,
     PuzzleMatcherVerifier,
+    VerificationResult,
+    VerifierFunction,
     cleanup_all_llm_judge_clients,
 )
+
+
+class _StubVerifier(VerifierFunction):
+    """Minimal verifier stub for exercising resolve_reward_function without network calls."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+
+    def __call__(self, tokenized_prediction, prediction, label, query=None, rollout_state=None) -> VerificationResult:
+        return VerificationResult(score=1.0)
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -261,6 +273,44 @@ class TestApplyVerifiableRewardResolution(unittest.TestCase):
         )
         self.assertEqual(rewards, [0])
         self.assertEqual(per_func, [{}])
+
+    def test_code_stdio_prefixed_source_resolves_to_code_stdio_verifier(self):
+        # Eval-only sources like "code_stdio_lcbv5" / "code_stdio_codeforces" (created by
+        # scripts/data/create_deepcoder_data.py) should route to the "code_stdio" verifier so
+        # eval metrics can still report separately per source (see dataset_metric_key grouping in
+        # grpo_utils.py), without affecting reward computation.
+        stub_verifier = _StubVerifier("code_stdio")
+        reward_fn_mapping = {"code_stdio": stub_verifier}
+        rewards, per_func = asyncio.run(
+            ground_truth_utils.apply_verifiable_reward(
+                reward_fn_mapping=reward_fn_mapping,
+                responses=[[1]],
+                decoded_responses=["print('hi')"],
+                ground_truths=["[]"],
+                datasets=["code_stdio_lcbv5"],
+            )
+        )
+        self.assertEqual(rewards, [1.0])
+        self.assertEqual(per_func, [{"code_stdio": 1.0}])
+
+    def test_code_prefixed_source_resolves_to_code_verifier_not_code_stdio(self):
+        # "code_humanevalplus" (scripts/data/create_humanevalplus_data.py) must resolve to the
+        # base "code" verifier, not "code_stdio", even though "code_stdio" is also a prefix of
+        # "code". Order of the prefix checks in resolve_reward_function matters here.
+        stub_code = _StubVerifier("code")
+        stub_code_stdio = _StubVerifier("code_stdio")
+        reward_fn_mapping = {"code": stub_code, "code_stdio": stub_code_stdio}
+        rewards, per_func = asyncio.run(
+            ground_truth_utils.apply_verifiable_reward(
+                reward_fn_mapping=reward_fn_mapping,
+                responses=[[1]],
+                decoded_responses=["def f(): return 1"],
+                ground_truths=["[]"],
+                datasets=["code_humanevalplus"],
+            )
+        )
+        self.assertEqual(rewards, [1.0])
+        self.assertEqual(per_func, [{"code": 1.0}])
 
 
 class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):

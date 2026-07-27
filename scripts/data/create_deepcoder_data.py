@@ -12,6 +12,11 @@ via lcbv5's testtype, primeintellect's per-test type, and taco's fn_name) are
 dropped.
 
 Pushes one HF dataset per (source, split) to mnoukhov/deepcoder_<source>[_test].
+
+Held-out eval splits (lcbv5 test, codeforces) are tagged with source-specific "dataset" values
+("code_stdio_lcbv5", "code_stdio_codeforces") instead of the generic "code_stdio" used by train
+splits, so eval metrics report separately per source (see `resolve_reward_function` in
+ground_truth_utils.py, which routes any "code_stdio*"-prefixed name to the "code_stdio" verifier).
 """
 
 import json
@@ -60,18 +65,22 @@ def cap_tests(tests: list[dict]) -> list[dict]:
     return kept
 
 
-def to_example(problem: str, tests: list[dict]) -> dict | None:
+def to_example(problem: str, tests: list[dict], dataset_tag: str = "code_stdio") -> dict | None:
     tests = cap_tests(tests)
     if not tests:
         return None
     return {
         "messages": [{"role": "user", "content": problem.strip() + INSTRUCTION}],
         "ground_truth": json.dumps(tests),
-        "dataset": "code_stdio",
+        "dataset": dataset_tag,
     }
 
 
 def convert_lcbv5(split: str) -> Dataset:
+    # Eval-only split gets its own tag so wandb can report it separately from other eval sets;
+    # `resolve_reward_function` (ground_truth_utils.py) still routes any "code_stdio*" prefix to
+    # the "code_stdio" verifier, so reward computation is unaffected.
+    dataset_tag = "code_stdio_lcbv5" if split == "test" else "code_stdio"
     dataset = load_dataset(
         "agentica-org/DeepCoder-Preview-Dataset",
         "lcbv5",
@@ -84,7 +93,7 @@ def convert_lcbv5(split: str) -> Dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
         if any(test.get("testtype") != "stdin" for test in tests):
             continue
-        example = to_example(sample["problem"], tests)
+        example = to_example(sample["problem"], tests, dataset_tag=dataset_tag)
         if example is None:
             dropped_no_usable_tests += 1
             continue
@@ -155,7 +164,7 @@ def convert_codeforces() -> Dataset:
     dropped_no_usable_tests = 0
     for sample in dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
-        example = to_example(sample["problem"], tests)
+        example = to_example(sample["problem"], tests, dataset_tag="code_stdio_codeforces")
         if example is None:
             dropped_no_usable_tests += 1
             continue
