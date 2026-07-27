@@ -1374,10 +1374,9 @@ class DataPreparationActor:
         self.base_env_config = base_env_config
         self.router_replay = router_replay
         if self.config.debug_grpo_diagnostics:
-            # Ray may install a warning-level root logger before this module is imported.
-            # Set this named logger explicitly so opt-in INFO diagnostics are not suppressed.
-            logger.setLevel("INFO")
-            logger.info(
+            # Ray may install a warning-level root handler before this module is imported,
+            # so opt-in diagnostic records use WARNING throughout this path.
+            logger.warning(
                 "[GRPODebug][config] data-preparation diagnostics enabled: prompts_per_step=%s "
                 "samples_per_prompt=%s filter_zero_std_samples=%s async_steps=%s",
                 self.global_batch_size,
@@ -1535,7 +1534,7 @@ class DataPreparationActor:
 
             if self.config.debug_grpo_diagnostics:
                 group_stds = scores_per_prompt.std(axis=-1)
-                logger.info(
+                logger.warning(
                     "[GRPODebug][rewards] step=%s samples=%s groups=%s scores=%s group_stds=%s "
                     "zero_std_groups=%s advantages=%s nonzero_advantages=%s",
                     self.training_step,
@@ -1553,7 +1552,7 @@ class DataPreparationActor:
                         if batch.decoded_responses is not None
                         else ""
                     )
-                    logger.info(
+                    logger.warning(
                         "[GRPODebug][rollout] step=%s sample=%s prompt_index=%s model_step=%s "
                         "score=%s advantage=%s response_tokens=%s finish_reason=%s ground_truth=%r response=%r",
                         self.training_step,
@@ -1625,7 +1624,7 @@ class DataPreparationActor:
                     )
                     for worker in collated_data
                 ]
-                logger.info(
+                logger.warning(
                     "[GRPODebug][packing] step=%s packs=%s pack_shapes=%s response_tokens=%s "
                     "nonzero_advantage_tokens=%s worker_response_tokens=%s worker_nonzero_advantage_tokens=%s",
                     self.training_step,
