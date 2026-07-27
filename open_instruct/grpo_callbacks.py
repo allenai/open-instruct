@@ -135,6 +135,28 @@ class StepTimingCallback(Callback):
             self.trainer.record_metric(key, float(value), reduce_type=None)
 
 
+def summarize_weight_shipment(
+    weights: dict[str, torch.Tensor], max_probes: int = 6
+) -> tuple[int, int, dict[str, float]]:
+    """Return cheap metadata and deterministic samples for a staged weight state."""
+    total_numel = sum(tensor.numel() for tensor in weights.values())
+    total_bytes = sum(tensor.numel() * tensor.element_size() for tensor in weights.values())
+    names = sorted(name for name, tensor in weights.items() if tensor.numel() > 0)
+    if not names or max_probes <= 0:
+        return total_numel, total_bytes, {}
+
+    if max_probes == 1:
+        probe_names = names[:1]
+    elif len(names) <= max_probes:
+        probe_names = names
+    else:
+        probe_indices = {round(index * (len(names) - 1) / (max_probes - 1)) for index in range(max_probes)}
+        probe_names = [names[index] for index in sorted(probe_indices)]
+
+    probes = {name: float(weights[name].detach().reshape(-1)[:64].float().sum().item()) for name in probe_names}
+    return total_numel, total_bytes, probes
+
+
 @dataclass
 class VLLMWeightSyncCallback(Callback):
     """Callback to synchronize weights from training model to vLLM inference engines.
@@ -156,6 +178,8 @@ class VLLMWeightSyncCallback(Callback):
     weight_stream_provider: (
         Callable[[], tuple[list[tuple[str, torch.dtype, tuple[int, ...]]], Iterable[tuple[str, torch.Tensor]]]] | None
     ) = None
+    log_weight_diagnostics: bool = False
+    _previous_weight_probes: dict[str, float] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def train_module(self) -> TransformerTrainModule:
@@ -170,6 +194,26 @@ class VLLMWeightSyncCallback(Callback):
 
         if self.cpu_weight_state_provider is not None:
             weights = self.cpu_weight_state_provider()
+            if self.log_weight_diagnostics and is_rank_0:
+                total_numel, total_bytes, probes = summarize_weight_shipment(weights)
+                probe_deltas = {
+                    name: value - self._previous_weight_probes[name]
+                    for name, value in probes.items()
+                    if name in self._previous_weight_probes
+                }
+                logger.info(
+                    "[GRPODebug][weight-sync] model_step=%s tensors=%s numel=%s bytes=%s "
+                    "probes=%s probe_deltas_from_previous_sync=%s changed_probes=%s",
+                    self.trainer.global_step,
+                    len(weights),
+                    total_numel,
+                    total_bytes,
+                    probes,
+                    probe_deltas,
+                    sum(delta != 0.0 for delta in probe_deltas.values()),
+                )
+                self._previous_weight_probes = probes
+
             broadcast_refs = vllm_utils.broadcast_cpu_staged_weights_to_vllm(
                 weights=weights,
                 vllm_engines=self.vllm_engines,

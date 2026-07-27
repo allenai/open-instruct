@@ -506,6 +506,32 @@ class GRPOTrainModule(TransformerTrainModule):
         token_counts = torch.tensor(
             [data_BT.response_masks[i][:, 1:].sum().float() for i in range(num_samples)], device=self.device
         )
+        if not dry_run and token_counts.sum().item() == 0:
+            raise RuntimeError("GRPO training batch has zero response tokens after packing and collation")
+        if self.streaming_config.debug_grpo_diagnostics and not dry_run:
+            masked_advantages = torch.cat(
+                [data_BT.advantages[i][:, 1:][data_BT.response_masks[i][:, 1:]] for i in range(num_samples)]
+            )
+            logger.info(
+                "[GRPODebug][loss-input] step=%s rank=%s microbatches=%s response_tokens=%s "
+                "advantage_min=%s advantage_max=%s advantage_mean=%s advantage_std=%s "
+                "nonzero_advantage_tokens=%s",
+                self.trainer.global_step,
+                dist_utils.get_rank(),
+                num_samples,
+                int(token_counts.sum().item()),
+                masked_advantages.min().item(),
+                masked_advantages.max().item(),
+                masked_advantages.mean().item(),
+                masked_advantages.std(unbiased=False).item(),
+                int(torch.count_nonzero(masked_advantages).item()),
+            )
+            if torch.count_nonzero(masked_advantages).item() == 0:
+                logger.warning(
+                    "[GRPODebug][loss-input] step=%s rank=%s has no nonzero advantages; policy gradient is zero",
+                    self.trainer.global_step,
+                    dist_utils.get_rank(),
+                )
         loss_stats_B = grpo_utils.create_loss_stats(
             num_samples, self.device, record_entropy=self.grpo_config.record_entropy
         )
@@ -631,6 +657,8 @@ class GRPOTrainModule(TransformerTrainModule):
             dist.all_reduce(tensor, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
 
             global_tokens = tensor[0].item()
+            if global_tokens == 0:
+                raise RuntimeError("GRPO response-token count became zero after DP reduction")
             for i, k in enumerate(keys):
                 self.record_metric(k, (tensor[i + 1] / global_tokens).item(), reduce_type=None)
             if self.scheduler is not None and self.trainer.max_steps is not None:
@@ -648,6 +676,26 @@ class GRPOTrainModule(TransformerTrainModule):
             self._record_data_prep_metrics(data_prep_metrics)
             for k, v in debug_metrics_sum.items():
                 self.record_metric(k, v / debug_metrics_count, reduce_type=None)
+            if self.streaming_config.debug_grpo_diagnostics:
+                gradient_norms = list(self._grad_norms)
+                logger.info(
+                    "[GRPODebug][loss-output] step=%s rank=%s local_response_tokens=%s "
+                    "global_response_tokens=%s losses=%s grad_norms=%s scores_mean=%s "
+                    "advantage_min=%s advantage_max=%s",
+                    self.trainer.global_step,
+                    dist_utils.get_rank(),
+                    local_tokens,
+                    global_tokens,
+                    {
+                        key: value
+                        for key, value in local_metrics.items()
+                        if key in {"loss/policy_avg", "loss/total_avg", "val/ratio", "val/rho_clipfrac"}
+                    },
+                    gradient_norms,
+                    data_prep_metrics.get("scores"),
+                    data_prep_metrics.get("val/advantages_min"),
+                    data_prep_metrics.get("val/advantages_max"),
+                )
 
             if self._grad_norms:
                 self.record_metric("optim/grad_norm", sum(self._grad_norms) / len(self._grad_norms), reduce_type=None)

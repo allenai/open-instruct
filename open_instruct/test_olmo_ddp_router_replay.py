@@ -10,6 +10,20 @@ from olmo_core.nn.attention import AttentionBackendName
 from open_instruct import grpo_callbacks, grpo_utils, olmo_core_utils, vllm_utils
 
 
+def test_summarize_weight_shipment():
+    weights = {
+        "b.weight": torch.ones(2, dtype=torch.bfloat16),
+        "a.weight": torch.arange(4, dtype=torch.float32),
+        "empty": torch.empty(0),
+    }
+
+    total_numel, total_bytes, probes = grpo_callbacks.summarize_weight_shipment(weights, max_probes=2)
+
+    assert total_numel == 6
+    assert total_bytes == 20
+    assert probes == {"a.weight": 6.0, "b.weight": 2.0}
+
+
 class _ReplayBlock(torch.nn.Module):
     def __init__(self, *, routed: bool):
         super().__init__()

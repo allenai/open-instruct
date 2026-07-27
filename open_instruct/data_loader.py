@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import os
 import threading
 import time
@@ -33,7 +32,7 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-from open_instruct import data_types, padding_free_collator, utils
+from open_instruct import data_types, logger_utils, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
 from open_instruct.dataset_transformation import (
     ENV_CONFIG_KEY,
@@ -49,7 +48,7 @@ from open_instruct.rl_utils import PackedSequences, pack_sequences, save_rollout
 from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics
 
-logger = logging.getLogger(__name__)
+logger = logger_utils.setup_logger(__name__)
 
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 
@@ -423,6 +422,8 @@ class StreamingDataLoaderConfig:
     advantage_normalization_type: str = "centered"
     mask_truncated_completions: bool = False
     mask_tool_use: bool = True
+    debug_grpo_diagnostics: bool = False
+    """Log bounded rollout, packing, advantage, loss-input, and weight-sync diagnostics."""
 
     # Dataset
     dataset_mixer_list: list[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
@@ -1164,7 +1165,7 @@ def accumulate_inference_batches(
 
         if no_resampling_pass_rate is not None and group.percent_solved >= no_resampling_pass_rate:
             total_no_resampled += 1
-            logging.debug(
+            logger.debug(
                 f"[Data Preparation Thread] Prompt solved at {group.percent_solved}, "
                 f"will be excluded from resampling, total no resampled: {total_no_resampled}"
             )
@@ -1180,7 +1181,7 @@ def accumulate_inference_batches(
         )
 
     if len(groups) == 0:
-        logging.warning(
+        logger.warning(
             "[Data Preparation Thread] All prompts were filtered during accumulation. "
             f"Filtered: {total_filtered_prompts} (zero std: {filtered_prompt_zero}, "
             f"solved: {filtered_prompt_solved}, nonzero: {filtered_prompt_nonzero})"
@@ -1520,6 +1521,41 @@ class DataPreparationActor:
             else:
                 raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
 
+            if self.config.debug_grpo_diagnostics:
+                group_stds = scores_per_prompt.std(axis=-1)
+                logger.info(
+                    "[GRPODebug][rewards] step=%s samples=%s groups=%s scores=%s group_stds=%s "
+                    "zero_std_groups=%s advantages=%s nonzero_advantages=%s",
+                    self.training_step,
+                    len(scores),
+                    len(scores_per_prompt),
+                    scores.tolist(),
+                    group_stds.tolist(),
+                    int(np.count_nonzero(group_stds == 0)),
+                    advantages.tolist(),
+                    int(np.count_nonzero(advantages)),
+                )
+                for sample_idx in range(min(len(scores), 10)):
+                    response_preview = (
+                        batch.decoded_responses[sample_idx][:500].replace("\n", "\\n")
+                        if batch.decoded_responses is not None
+                        else ""
+                    )
+                    logger.info(
+                        "[GRPODebug][rollout] step=%s sample=%s prompt_index=%s model_step=%s "
+                        "score=%s advantage=%s response_tokens=%s finish_reason=%s ground_truth=%r response=%r",
+                        self.training_step,
+                        sample_idx,
+                        batch.indices[sample_idx] if batch.indices is not None else None,
+                        batch.model_steps[sample_idx],
+                        scores[sample_idx],
+                        advantages[sample_idx],
+                        len(result.responses[sample_idx]),
+                        result.finish_reasons[sample_idx],
+                        batch.ground_truths[sample_idx],
+                        response_preview,
+                    )
+
             if self.config.save_traces and self.config.rollouts_save_path:
                 save_rollouts_to_disk(
                     self.config.rollouts_save_path,
@@ -1560,6 +1596,34 @@ class DataPreparationActor:
             collated_data = prepare_collated_data_for_workers(
                 packed_sequences, self.dp_world_size, self.per_device_train_batch_size, self.tokenizer.pad_token_id
             )
+
+            if self.config.debug_grpo_diagnostics:
+                packed_response_tokens = [int(mask.sum().item()) for mask in packed_sequences.response_masks]
+                packed_nonzero_advantages = [
+                    int(torch.count_nonzero(advantage[mask]).item())
+                    for advantage, mask in zip(packed_sequences.advantages, packed_sequences.response_masks)
+                ]
+                worker_response_tokens = [
+                    sum(int(mask.sum().item()) for mask in worker.response_masks) for worker in collated_data
+                ]
+                worker_nonzero_advantages = [
+                    sum(
+                        int(torch.count_nonzero(advantage[mask]).item())
+                        for advantage, mask in zip(worker.advantages, worker.response_masks)
+                    )
+                    for worker in collated_data
+                ]
+                logger.info(
+                    "[GRPODebug][packing] step=%s packs=%s pack_shapes=%s response_tokens=%s "
+                    "nonzero_advantage_tokens=%s worker_response_tokens=%s worker_nonzero_advantage_tokens=%s",
+                    self.training_step,
+                    len(packed_sequences.query_responses),
+                    [tuple(sequence.shape) for sequence in packed_sequences.query_responses],
+                    packed_response_tokens,
+                    packed_nonzero_advantages,
+                    worker_response_tokens,
+                    worker_nonzero_advantages,
+                )
 
             real_num_responses = len(result.responses)
             expected_num_responses = self.config.num_samples_per_prompt_rollout * self.global_batch_size
