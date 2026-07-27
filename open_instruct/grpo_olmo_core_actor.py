@@ -40,6 +40,7 @@ from open_instruct.grpo_callbacks import (
     StepTimingCallback,
     VLLMWeightSyncCallback,
     olmo_core_to_hf_name,
+    summarize_weight_shipment,
 )
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOOLMoDDPTrainModule, GRPOTrainModule
@@ -357,8 +358,18 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         if self.grpo_config.olmo_core_train_module == "ddp":
             assert self.hf_config is not None
             if self.hf_config.model_type == "olmo3moe":
+                weights = self._gather_olmo_ddp_hf_state_to_cpu()
+                if self.streaming_config.debug_grpo_diagnostics and self.rank == 0:
+                    total_numel, total_bytes, probes = summarize_weight_shipment(weights)
+                    logger.warning(
+                        "[GRPODebug][initial-weight-sync] model_step=0 tensors=%s numel=%s bytes=%s probes=%s",
+                        len(weights),
+                        total_numel,
+                        total_bytes,
+                        probes,
+                    )
                 refs = vllm_utils.broadcast_cpu_staged_weights_to_vllm(
-                    weights=self._gather_olmo_ddp_hf_state_to_cpu(),
+                    weights=weights,
                     vllm_engines=self.vllm_engines,
                     model_update_group=self.model_update_group,
                     model_step=0,

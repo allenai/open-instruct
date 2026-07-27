@@ -49,7 +49,6 @@ from open_instruct.rubrics import RubricManager
 from open_instruct.utils import combine_reward_metrics
 
 logger = logger_utils.setup_logger(__name__)
-diagnostic_logger = logger_utils.setup_logger()
 
 DATA_PREP_ACTOR_NAME = "data_prep_singleton"
 
@@ -1377,7 +1376,7 @@ class DataPreparationActor:
         if self.config.debug_grpo_diagnostics:
             # Ray may install a warning-level root handler before this module is imported,
             # so opt-in diagnostic records use WARNING throughout this path.
-            diagnostic_logger.warning(
+            logger.warning(
                 "[GRPODebug][config] data-preparation diagnostics enabled: prompts_per_step=%s "
                 "samples_per_prompt=%s filter_zero_std_samples=%s async_steps=%s",
                 self.global_batch_size,
@@ -1535,7 +1534,7 @@ class DataPreparationActor:
 
             if self.config.debug_grpo_diagnostics:
                 group_stds = scores_per_prompt.std(axis=-1)
-                diagnostic_logger.warning(
+                logger.warning(
                     "[GRPODebug][rewards] step=%s samples=%s groups=%s scores=%s group_stds=%s "
                     "zero_std_groups=%s advantages=%s nonzero_advantages=%s",
                     self.training_step,
@@ -1553,7 +1552,7 @@ class DataPreparationActor:
                         if batch.decoded_responses is not None
                         else ""
                     )
-                    diagnostic_logger.warning(
+                    logger.warning(
                         "[GRPODebug][rollout] step=%s sample=%s prompt_index=%s model_step=%s "
                         "score=%s advantage=%s response_tokens=%s finish_reason=%s ground_truth=%r response=%r",
                         self.training_step,
@@ -1625,7 +1624,7 @@ class DataPreparationActor:
                     )
                     for worker in collated_data
                 ]
-                diagnostic_logger.warning(
+                logger.warning(
                     "[GRPODebug][packing] step=%s packs=%s pack_shapes=%s response_tokens=%s "
                     "nonzero_advantage_tokens=%s worker_response_tokens=%s worker_nonzero_advantage_tokens=%s",
                     self.training_step,
