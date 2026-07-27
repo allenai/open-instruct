@@ -3,12 +3,14 @@ import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
+import torch
 import vllm
 from parameterized import parameterized
 
 from open_instruct import vllm_utils
 from open_instruct.data_types import PromptRequest
 from open_instruct.utils import ModelDims
+from open_instruct.weight_export import PassthroughWeightExportAdapter
 
 
 class TestTruncateEnvOutputTokens(unittest.TestCase):
@@ -255,6 +257,134 @@ class TestModelDimsFromVllmConfig(unittest.TestCase):
             vllm_dims = vllm_utils.model_dims_from_vllm_config(mock_vllm_config)
 
         self.assertEqual(vllm_dims, expected_dims)
+
+
+class TestWeightSyncLifecycle(unittest.TestCase):
+    def setUp(self):
+        self.model = torch.nn.Linear(2, 2, bias=False)
+        self.model.config = mock.Mock(model_type="dense")
+        self.engines = [mock.sentinel.engine_0, mock.sentinel.engine_1]
+
+    def test_complete_ipc_sync_orders_lifecycle_and_model_step(self):
+        events = []
+
+        def call_engines(engines, method, *args):
+            self.assertEqual(engines, self.engines)
+            events.append((method, args))
+            return []
+
+        with (
+            mock.patch.object(vllm_utils, "_call_engine_method", side_effect=call_engines),
+            mock.patch.object(
+                vllm_utils, "_broadcast_weights_ipc", side_effect=lambda *args: events.append(("send", ()))
+            ),
+            mock.patch.object(vllm_utils.torch.distributed, "is_initialized", return_value=False),
+        ):
+            refs = vllm_utils.broadcast_weights_to_vllm(
+                self.model, self.engines, model_update_group=None, model_step=7
+            )
+
+        self.assertEqual(refs, [])
+        self.assertEqual(
+            events,
+            [
+                ("sleep", ()),
+                ("start_weight_update", ()),
+                ("send", ()),
+                ("finish_weight_update", ()),
+                ("set_model_step", (7,)),
+            ],
+        )
+
+    def test_transfer_failure_preserves_primary_error_and_does_not_stamp_step(self):
+        events = []
+        transfer_error = RuntimeError("primary transfer failure")
+
+        def call_engines(_engines, method, *_args):
+            events.append(method)
+            if method == "finish_weight_update":
+                raise RuntimeError("cleanup failure")
+            return []
+
+        with (
+            mock.patch.object(vllm_utils, "_call_engine_method", side_effect=call_engines),
+            mock.patch.object(vllm_utils, "_broadcast_weights_ipc", side_effect=transfer_error),
+            mock.patch.object(vllm_utils.torch.distributed, "is_initialized", return_value=False),
+            self.assertRaisesRegex(RuntimeError, "primary transfer failure") as raised,
+        ):
+            vllm_utils.broadcast_weights_to_vllm(self.model, self.engines, model_update_group=None, model_step=7)
+
+        self.assertIs(raised.exception, transfer_error)
+        self.assertEqual(events, ["sleep", "start_weight_update", "finish_weight_update"])
+        self.assertNotIn("set_model_step", events)
+
+    def test_ipc_sender_uses_packed_send_mode_and_all_engine_handles(self):
+        captured = {}
+
+        def send_weights(iterator, trainer_args):
+            captured["weights"] = list(iterator)
+            captured["args"] = trainer_args
+
+        with mock.patch.object(vllm_utils.IPCWeightTransferEngine, "trainer_send_weights", side_effect=send_weights):
+            vllm_utils._broadcast_weights_ipc(
+                self.model,
+                self.engines,
+                name_mapper=None,
+                gather_whole_model=True,
+                adapter=PassthroughWeightExportAdapter(),
+            )
+
+        self.assertEqual(captured["args"].send_mode, "ray")
+        self.assertEqual(captured["args"].llm_handle, self.engines)
+        self.assertTrue(captured["args"].packed)
+        self.assertEqual([name for name, _ in captured["weights"]], ["weight"])
+
+
+class TestWeightGatherPolicy(unittest.TestCase):
+    def test_zero3_gathers_exactly_one_parameter_at_a_time(self):
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
+        params = list(model.named_parameters())
+        for _, param in params:
+            param.ds_id = id(param)
+
+        gathered_batches = []
+
+        class Gather:
+            def __init__(self, parameters, enabled):
+                self.parameters = list(parameters)
+                self.enabled = enabled
+
+            def __enter__(self):
+                gathered_batches.append(self.parameters)
+
+            def __exit__(self, *_args):
+                return False
+
+        with mock.patch.object(vllm_utils.deepspeed.zero, "GatheredParameters", Gather):
+            exported = list(
+                vllm_utils._iter_zero3_exported_tensors(
+                    params, name_mapper=None, adapter=PassthroughWeightExportAdapter()
+                )
+            )
+
+        self.assertEqual(len(gathered_batches), len(params))
+        self.assertTrue(all(len(batch) == 1 for batch in gathered_batches))
+        self.assertEqual([name for name, _ in exported], [name for name, _ in params])
+
+
+class TestMambaSpecCompatibilityPatch(unittest.TestCase):
+    def test_patch_is_feature_gated_on_fixed_length_annotation(self):
+        original_annotation = vllm_utils.MambaSpec.__annotations__["dtypes"]
+        original_field_type = vllm_utils.MambaSpec.__dataclass_fields__["dtypes"].type
+        try:
+            vllm_utils.MambaSpec.__annotations__["dtypes"] = "tuple[torch.dtype]"
+            vllm_utils.MambaSpec.__dataclass_fields__["dtypes"].type = "tuple[torch.dtype]"
+            self.assertTrue(vllm_utils._patch_mamba_spec_dtypes_annotation())
+            self.assertEqual(vllm_utils.MambaSpec.__annotations__["dtypes"], tuple[torch.dtype, ...])
+            self.assertFalse(vllm_utils._patch_mamba_spec_dtypes_annotation())
+        finally:
+            vllm_utils.MambaSpec.__annotations__["dtypes"] = original_annotation
+            vllm_utils.MambaSpec.__dataclass_fields__["dtypes"].type = original_field_type
 
 
 if __name__ == "__main__":

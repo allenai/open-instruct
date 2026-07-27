@@ -1501,11 +1501,13 @@ def weight_sync_thread(
         # Clear the event for next iteration
         target_model_step = weight_sync_trigger.get_step_and_clear()
         try:
+            ray.get(actor_manager.set_should_stop.remote(True))
             broadcast_refs = [m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models]
             sync_time_stats, _ = grpo_utils.perform_weight_sync(
                 broadcast_refs, vllm_engines, actor_manager, progress=args.verbose, inflight_updates=inflight_updates
             )
         except Exception as e:
+            ray.get(actor_manager.set_should_stop.remote(False))
             logger.exception("[Weight Sync Thread] Weight Sync failed")
             raise RuntimeError from e
 

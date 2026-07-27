@@ -162,16 +162,21 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        broadcast_refs = vllm_utils.broadcast_weights_to_vllm(
-            model=self.train_module.model,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            model_step=self.trainer.global_step,
-            name_mapper=self.name_mapper,
-        )
-        sync_time_stats, _ = grpo_utils.perform_weight_sync(
-            broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
-        )
+        ray.get(self.actor_manager.set_should_stop.remote(True))
+        try:
+            broadcast_refs = vllm_utils.broadcast_weights_to_vllm(
+                model=self.train_module.model,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=self.trainer.global_step,
+                name_mapper=self.name_mapper,
+            )
+            sync_time_stats, _ = grpo_utils.perform_weight_sync(
+                broadcast_refs, self.vllm_engines, self.actor_manager, inflight_updates=True
+            )
+        except BaseException:
+            ray.get(self.actor_manager.set_should_stop.remote(False))
+            raise
         for name, value in sync_time_stats.items():
             self.trainer.record_metric(name, value, reduce_type=None)
 

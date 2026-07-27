@@ -112,8 +112,8 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
             gather_whole_model=True,
         )
 
-        self.assertGreater(len(refs), 0)
-        ray.get(refs)
+        self.assertEqual(refs, [])
+        ray.get([engine.wake_up.remote() for engine in engines])
 
         torch.distributed.destroy_process_group()
 

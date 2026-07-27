@@ -1,5 +1,4 @@
 import enum
-import itertools
 import math
 import os
 import time
@@ -750,24 +749,14 @@ def perform_weight_sync(
     progress: bool = False,
     inflight_updates: bool = False,
 ) -> tuple[dict[str, float], list]:
-    """Pause actors, broadcast weights, await/skip inner engine RPCs, wake engines, resume actors.
-
-    With `inflight_updates=False`, broadcast results are treated as
-    list-of-lists of inner engine-update ObjectRefs which get flattened and
-    awaited before waking. Pass `inflight_updates=True` to skip that inner
-    await — either because `broadcast_refs` are already engine RPC refs, or
-    because updates are intentionally left in flight.
-    """
+    """Pause actors, await complete weight syncs, wake engines, and resume actors."""
+    del inflight_updates  # Weight broadcasts now wait for update and finalization internally.
     start = time.perf_counter()
     ray.get(actor_manager.set_should_stop.remote(True))
     try:
         results, actor_sync_times = utils.ray_get_with_progress(
             broadcast_refs, desc="Broadcasting weights to vLLM engines", enable=progress
         )
-        if not inflight_updates:
-            utils.ray_get_with_progress(
-                itertools.chain.from_iterable(results), desc="Waiting for vLLM engine update RPCs", enable=progress
-            )
         utils.ray_get_with_progress(
             [e.wake_up.remote() for e in vllm_engines], desc="Waking up vLLM engines", enable=progress
         )

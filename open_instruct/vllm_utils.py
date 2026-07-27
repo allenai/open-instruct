@@ -24,9 +24,9 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from concurrent import futures
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 import aiohttp
 import backoff
@@ -66,29 +66,29 @@ from open_instruct.dataset_transformation import GROUND_TRUTHS_KEY, RAW_PROMPT_K
 from open_instruct.environments.base import EnvCall, RolloutState, StepResult
 from open_instruct.environments.tools.parsers import ToolParser, create_tool_parser
 from open_instruct.ground_truth_utils import RewardConfig
+from open_instruct.weight_export import (
+    ExportedWeightSpec,
+    WeightExportAdapter,
+    map_weight_name,
+    resolve_weight_export_adapter,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
-#
-# vLLM's MambaSpec.dtypes field is typed as tuple[torch.dtype] (fixed-length,
-# exactly 1 element). Hybrid models like Olmo-Hybrid-Instruct-DPO-7B have
-# Mamba layers with 2 state tensors of different dtypes, producing a 2-element
-# tuple. When the EngineCore subprocess serializes collective_rpc results back
-# to the client via msgspec, the fixed-length tuple type is enforced and the
-# deserialization fails:
-#   msgspec.ValidationError: Expected `array` of length 1, got 2 - at `$.dtypes`
-#
-# The client-side decoder (in serial_utils._convert_result) dynamically imports
-# MambaSpec and calls msgspec.convert(data, MambaSpec), which checks the live
-# type annotations. By widening dtypes to tuple[torch.dtype, ...] (variable-
-# length), msgspec accepts any number of dtypes during deserialization.
-#
-# Upstream fix: change dtypes annotation in vllm/v1/kv_cache_interface.py.
-# ---------------------------------------------------------------------------
-MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
-MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
+
+def _patch_mamba_spec_dtypes_annotation() -> bool:
+    """Widen vLLM's fixed-length annotation only while the upstream bug exists."""
+
+    fixed_length_annotation = tuple[torch.dtype]
+    live_annotation = MambaSpec.__annotations__.get("dtypes")
+    if live_annotation != fixed_length_annotation and live_annotation != "tuple[torch.dtype]":
+        return False
+    MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
+    MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
+    return True
+
+
+_patch_mamba_spec_dtypes_annotation()
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
@@ -128,6 +128,8 @@ class WeightUpdateInfo(TypedDict):
     dtype_names: list[str]
     shapes: list[list[int]]
     packed: bool
+    packed_buffer_size_bytes: NotRequired[int]
+    packed_num_buffers: NotRequired[int]
 
 
 class WeightUpdateRPCArgs(TypedDict):
@@ -704,8 +706,10 @@ class LLMRayActor:
             inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
             has_chat_template = getattr(inner_tokenizer, "chat_template", None) is not None
             args = _create_server_args(engine_client.vllm_config.model_config.model, has_chat_template)
-            app = build_app(args)
-            await init_app_state(engine_client, app.state, args)
+            supported_tasks = await engine_client.get_supported_tasks()
+            model_config = engine_client.model_config
+            app = build_app(args, supported_tasks, model_config)
+            await init_app_state(engine_client, app.state, args, supported_tasks)
 
             # There is a TOCTOU race: another process could claim the port between
             # find_free_port() and uvicorn binding. Unlikely in practice.
@@ -781,6 +785,12 @@ class LLMRayActor:
     def init_weight_transfer_engine(self, request: WeightTransferInitRequest) -> None:
         return self._run_async(self.llm_engine.init_weight_transfer_engine(request))
 
+    def start_weight_update(self) -> None:
+        return self._run_async(self.llm_engine.start_weight_update())
+
+    def finish_weight_update(self) -> None:
+        return self._run_async(self.llm_engine.finish_weight_update())
+
     def _run_async(self, coro: Awaitable[Any]) -> Any:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
@@ -791,15 +801,11 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(self, update_info: WeightUpdateRPCArgs, model_step: int | None = None) -> None:
-        # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
-        # `dict(update_info=...)` and no model_step; NCCL callers pass model_step explicitly.
+    def update_weights(self, update_info: WeightUpdateRPCArgs) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
         self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
-        if model_step is not None:
-            self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -1322,35 +1328,83 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
     return fsdp_modules
 
 
-def _prepare_params_for_sync(
-    params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
-) -> list[tuple[str, torch.Tensor]]:
-    """Map parameter names and clone into contiguous tensors for NCCL send.
+@dataclasses.dataclass(frozen=True)
+class WeightExportMetadata:
+    specs: tuple[ExportedWeightSpec, ...]
+    original_parameter_count: int
+    expanded_expert_tensor_count: int
 
-    DS3 gathered tensors may be non-contiguous or views into temporary buffers.
-    Cloning ensures we send independent, contiguous tensors over NCCL.
-    """
-    return [(name_mapper(n) if name_mapper else n, p.data.contiguous().clone()) for n, p in params]
+    @property
+    def names(self) -> list[str]:
+        return [spec.name for spec in self.specs]
+
+    @property
+    def dtype_names(self) -> list[str]:
+        return [str(spec.dtype).split(".")[-1] for spec in self.specs]
+
+    @property
+    def shapes(self) -> list[list[int]]:
+        return [list(spec.shape) for spec in self.specs]
 
 
 def _collect_weight_metadata(
-    model: torch.nn.Module, name_mapper: Callable[[str], str] | None
-) -> tuple[list[str], list[str], list[list[int]]]:
-    """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
+    model: torch.nn.Module, name_mapper: Callable[[str], str] | None, adapter: WeightExportAdapter
+) -> WeightExportMetadata:
+    """Expand global parameter metadata without gathering model weights."""
 
-    For DeepSpeed stage 3, uses ds_shape. For FSDP2 DTensors, .shape returns global shape.
-    For FSDP1, param.shape returns full shape when parameters are registered (not flat).
-    """
-    names: list[str] = []
-    dtype_names: list[str] = []
-    shapes: list[list[int]] = []
+    specs: list[ExportedWeightSpec] = []
+    original_parameter_count = 0
+    expanded_expert_tensor_count = 0
     for name, param in model.named_parameters():
-        mapped_name = name_mapper(name) if name_mapper else name
-        names.append(mapped_name)
-        dtype_names.append(str(param.dtype).split(".")[-1])
-        shape = getattr(param, "ds_shape", param.shape)
-        shapes.append(list(shape))
-    return names, dtype_names, shapes
+        original_parameter_count += 1
+        mapped_name = map_weight_name(name, name_mapper)
+        shape = tuple(getattr(param, "ds_shape", param.shape))
+        exported_specs = tuple(adapter.export_specs(mapped_name, shape, param.dtype))
+        specs.extend(exported_specs)
+        if len(exported_specs) != 1 or exported_specs[0].name != mapped_name:
+            expanded_expert_tensor_count += len(exported_specs)
+    return WeightExportMetadata(
+        specs=tuple(specs),
+        original_parameter_count=original_parameter_count,
+        expanded_expert_tensor_count=expanded_expert_tensor_count,
+    )
+
+
+def _iter_exported_tensors(
+    params: Iterator[tuple[str, torch.nn.Parameter]],
+    name_mapper: Callable[[str], str] | None,
+    adapter: WeightExportAdapter,
+) -> Iterator[tuple[str, torch.Tensor]]:
+    for name, param in params:
+        mapped_name = map_weight_name(name, name_mapper)
+        for exported_name, exported_tensor in adapter.export_tensors(mapped_name, param.detach()):
+            yield exported_name, exported_tensor.detach().contiguous()
+
+
+def _iter_zero3_exported_tensors(
+    params: list[tuple[str, torch.nn.Parameter]],
+    name_mapper: Callable[[str], str] | None,
+    adapter: WeightExportAdapter,
+) -> Iterator[tuple[str, torch.Tensor]]:
+    """Gather and fully consume one ZeRO-3 parameter before moving to the next."""
+
+    for name, param in params:
+        with deepspeed.zero.GatheredParameters([param], enabled=True):
+            yield from _iter_exported_tensors(iter([(name, param)]), name_mapper, adapter)
+
+
+def _consume_iterator(iterator: Iterator[tuple[str, torch.Tensor]]) -> None:
+    for _ in iterator:
+        pass
+
+
+def _call_engine_method(vllm_engines: list[ray.actor.ActorHandle], method: str, *args: Any) -> list[Any]:
+    return ray.get([getattr(engine, method).remote(*args) for engine in vllm_engines])
+
+
+def _distributed_barrier() -> None:
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
 
 
 def _broadcast_weights_ipc(
@@ -1358,26 +1412,81 @@ def _broadcast_weights_ipc(
     vllm_engines: list[ray.actor.ActorHandle],
     name_mapper: Callable[[str], str] | None,
     gather_whole_model: bool,
-    model_step: int,
-) -> list[ray.ObjectRef]:
-    """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
-    is_rank_0 = torch.distributed.get_rank() == 0
+    adapter: WeightExportAdapter,
+) -> None:
+    """Stream packed IPC weights; every distributed trainer rank participates."""
+
     params = list(model.named_parameters())
     deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
+    trainer_args = IPCTrainerSendWeightsArgs(send_mode="ray", llm_handle=vllm_engines, packed=True)
+
+    if isinstance(model, FSDPModule):
+        fsdp_submodules = _get_fsdp2_submodules(model)
+        if not fsdp_submodules:
+            raise ValueError("FSDP2 model has no FSDP submodules.")
+        for _, block in fsdp_submodules:
+            block.unshard()
+        model.unshard()
+        torch.cuda.synchronize()
+        try:
+            IPCWeightTransferEngine.trainer_send_weights(
+                iterator=_iter_exported_tensors(iter(model.named_parameters()), name_mapper, adapter),
+                trainer_args=trainer_args,
+            )
+        finally:
+            for _, block in fsdp_submodules:
+                block.reshard()
+            model.reshard()
+    elif isinstance(model, FSDP):
+        if not gather_whole_model:
+            raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
+        with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
+            IPCWeightTransferEngine.trainer_send_weights(
+                iterator=_iter_exported_tensors(iter(params), name_mapper, adapter), trainer_args=trainer_args
+            )
+    elif deepspeed_stage_3:
+        IPCWeightTransferEngine.trainer_send_weights(
+            iterator=_iter_zero3_exported_tensors(params, name_mapper, adapter), trainer_args=trainer_args
+        )
+    else:
+        IPCWeightTransferEngine.trainer_send_weights(
+            iterator=_iter_exported_tensors(iter(params), name_mapper, adapter), trainer_args=trainer_args
+        )
+
+
+def _send_nccl_weights(
+    model: torch.nn.Module,
+    trainer_args: NCCLTrainerSendWeightsArgs,
+    name_mapper: Callable[[str], str] | None,
+    adapter: WeightExportAdapter,
+    gather_whole_model: bool,
+    is_rank_0: bool,
+) -> None:
+    params = list(model.named_parameters())
+    deepspeed_stage_3 = any(hasattr(param, "ds_id") for _, param in params)
 
     if isinstance(model, FSDP):
-        ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
-    else:
-        ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+        if not gather_whole_model:
+            raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
+        with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
+            if is_rank_0:
+                NCCLWeightTransferEngine.trainer_send_weights(
+                    iterator=_iter_exported_tensors(iter(params), name_mapper, adapter), trainer_args=trainer_args
+                )
+        return
 
-    with ctx:
+    if deepspeed_stage_3:
+        iterator = _iter_zero3_exported_tensors(params, name_mapper, adapter)
         if is_rank_0:
-            mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
-            for engine in vllm_engines:
-                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
-                IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-            return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
-    return []
+            NCCLWeightTransferEngine.trainer_send_weights(iterator=iterator, trainer_args=trainer_args)
+        else:
+            _consume_iterator(iterator)
+        return
+
+    if is_rank_0:
+        NCCLWeightTransferEngine.trainer_send_weights(
+            iterator=_iter_exported_tensors(iter(params), name_mapper, adapter), trainer_args=trainer_args
+        )
 
 
 def broadcast_weights_to_vllm(
@@ -1396,85 +1505,102 @@ def broadcast_weights_to_vllm(
     When model_update_group is None, uses IPC backend (single GPU mode).
     Otherwise uses NCCL backend.
 
-    `model_step` is stamped onto each vLLM engine as part of the weight-update RPC,
-    so no separate `set_model_step` call is needed.
+    The function is synchronous: on success all receivers have consumed and finalized
+    every tensor and the model step has been stamped. The empty return list preserves
+    the historical caller contract without exposing unfinished inner Ray references.
     """
+    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+    adapter = resolve_weight_export_adapter(model)
+    metadata = _collect_weight_metadata(model, name_mapper, adapter)
+    backend = "ipc" if model_update_group is None else "nccl"
+    is_zero3 = any(hasattr(param, "ds_id") for param in model.parameters())
+    gather_policy = "per-parameter" if is_zero3 else "whole-model" if isinstance(model, (FSDPModule, FSDP)) else "none"
+
+    fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
+    if isinstance(model, FSDPModule) and not gather_whole_model:
+        raise ValueError(
+            "FSDP2 weight sync requires gather_whole_model=True. "
+            "Per-block iteration deadlocks on the CUDA stream because reshard/unshard "
+            "collectives interleave with the trainer->vLLM NCCL sends."
+        )
     if isinstance(model, FSDP) and not gather_whole_model:
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
 
-    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
     if is_rank_0:
-        ray.get([engine.sleep.remote() for engine in vllm_engines])
+        logger.info(
+            "Installing model step %s via %s weight transfer "
+            "(adapter=%s, packed=True, gather=%s, learner_parameters=%s, "
+            "exported_tensors=%s, expanded_expert_tensors=%s)",
+            model_step,
+            backend,
+            adapter.name,
+            gather_policy,
+            metadata.original_parameter_count,
+            len(metadata.specs),
+            metadata.expanded_expert_tensor_count,
+        )
 
-    if model_update_group is None and is_rank_0:
-        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
+    start_attempted = False
+    finish_attempted = False
+    try:
+        if is_rank_0:
+            _call_engine_method(vllm_engines, "sleep")
+            start_attempted = True
+            _call_engine_method(vllm_engines, "start_weight_update")
+        _distributed_barrier()
 
-    fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
-    use_packed = False
-    trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=use_packed)
-
-    if isinstance(model, FSDPModule):
-        if not fsdp_submodules:
-            raise ValueError("FSDP2 model has no FSDP submodules.")
-        if not gather_whole_model:
-            raise ValueError(
-                "FSDP2 weight sync requires gather_whole_model=True. "
-                "Per-block iteration deadlocks on the CUDA stream because reshard/unshard "
-                "collectives interleave with the trainer->vLLM NCCL sends."
+        if model_update_group is None:
+            _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, adapter)
+        else:
+            trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=True)
+            update_info = {
+                "names": metadata.names,
+                "dtype_names": metadata.dtype_names,
+                "shapes": metadata.shapes,
+                "packed": trainer_args.packed,
+                "packed_buffer_size_bytes": trainer_args.packed_buffer_size_bytes,
+                "packed_num_buffers": trainer_args.packed_num_buffers,
+            }
+            update_refs = (
+                [engine.update_weights.remote({"update_info": update_info}) for engine in vllm_engines]
+                if is_rank_0
+                else []
             )
-        for _, block in fsdp_submodules:
-            block.unshard()
-        # The root FSDPModule wraps params not inside any submodule (e.g. model.norm,
-        # lm_head). _get_fsdp2_submodules excludes the root, so unshard it explicitly
-        # or those root-level DTensor params will fail NCCL broadcast with an illegal
-        # memory access (their `.contiguous().clone()` produces a buffer with global
-        # stride backed by only the local shard).
-        model.unshard()
-        torch.cuda.synchronize()
-        try:
-            if is_rank_0:
-                mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
-                names = [n for n, _ in mapped_params]
-                dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
-                shapes = [list(t.shape) for _, t in mapped_params]
-                update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
-                refs = [
-                    engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines
-                ]
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+
+            if isinstance(model, FSDPModule):
+                if not fsdp_submodules:
+                    raise ValueError("FSDP2 model has no FSDP submodules.")
+                for _, block in fsdp_submodules:
+                    block.unshard()
+                model.unshard()
+                torch.cuda.synchronize()
+                try:
+                    if is_rank_0:
+                        NCCLWeightTransferEngine.trainer_send_weights(
+                            iterator=_iter_exported_tensors(iter(model.named_parameters()), name_mapper, adapter),
+                            trainer_args=trainer_args,
+                        )
+                finally:
+                    for _, block in fsdp_submodules:
+                        block.reshard()
+                    model.reshard()
             else:
-                refs = []
-        finally:
-            for _, block in fsdp_submodules:
-                block.reshard()
-            model.reshard()
-        return refs
-
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
-
-    if is_rank_0:
-        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
-        refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
-    else:
-        refs = []
-
-    params = list(model.named_parameters())
-    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
-
-    if isinstance(model, FSDP):
-        batches = [(FSDP.summon_full_params(model, writeback=False, rank0_only=False), params)]
-    elif gather_whole_model:
-        batches = [(deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3), params)]
-    else:
-        batches = [
-            (deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3), [(name, param)])
-            for name, param in params
-        ]
-
-    for ctx, batch_params in batches:
-        with ctx:
+                _send_nccl_weights(model, trainer_args, name_mapper, adapter, gather_whole_model, is_rank_0)
             if is_rank_0:
-                mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+                ray.get(update_refs)
 
-    return refs
+        _distributed_barrier()
+        if is_rank_0:
+            finish_attempted = True
+            _call_engine_method(vllm_engines, "finish_weight_update")
+            _call_engine_method(vllm_engines, "set_model_step", model_step)
+            logger.info("Successfully installed model step %s on all vLLM engines", model_step)
+    except BaseException:
+        if is_rank_0 and start_attempted and not finish_attempted:
+            try:
+                _call_engine_method(vllm_engines, "finish_weight_update")
+            except BaseException:
+                logger.exception("Failed to clean up vLLM weight-update state after transfer failure")
+        raise
+
+    return []
