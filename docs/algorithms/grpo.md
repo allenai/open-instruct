@@ -70,6 +70,12 @@ tokens keep their per-token clipped \(\pi_{\text{old}}/\mu\) correction
 weights. Previously the broadcast sequence-mean ratio was also used as the
 clamp base and correction weight.
 
+`loss/policy_avg` and `loss/total_avg` are not numerically comparable with
+earlier runs. The score-function form includes \(\log\pi_\theta\) in the
+reported policy-loss value, and structurally DAPO-clipped tokens now report
+zero instead of the clipped surrogate value; the policy gradients are
+unchanged.
+
 To replace `use_rho_correction=False` without changing its old meaning, use
 `policy_ratio_denominator=old_policy`,
 `rollout_importance_correction=none`, and `rho_mask_metric=none`. This remains
