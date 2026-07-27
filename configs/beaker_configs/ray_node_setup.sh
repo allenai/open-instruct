@@ -2,6 +2,11 @@
 export CURRENT_DATETIME=$(python -c "import datetime; import pytz; print(datetime.datetime.now(pytz.timezone('America/Los_Angeles')).strftime('%m%d%y_%H%M%S'))")
 export PYTHONPATH=$REPO_PATH
 export PATH="/root/.local/bin:$PATH"
+# Ray 2.53+ detects drivers started with `uv run` and tries to recreate that
+# environment for every worker. Our Docker image already contains a complete
+# /stage/.venv, while the runtime working-directory archive excludes that venv,
+# so the recreated workers cannot import Ray. Keep workers in the image's venv.
+export RAY_ENABLE_UV_RUN_RUNTIME_ENV=0
 # We need to set NCCL_CUMEM_ENABLE=0 for performance reasons; see:
 # https://github.com/vllm-project/vllm/issues/5723#issuecomment-2554389656
 export NCCL_CUMEM_ENABLE=0
