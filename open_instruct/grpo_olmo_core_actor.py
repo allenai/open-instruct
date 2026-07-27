@@ -511,6 +511,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             ),
             ephemeral_save_interval=None,
             save_async=self.grpo_config.olmo_core_train_module != "ddp",
+            pre_train_checkpoint=False,
         )
         trainer_callbacks["data_prep_state"] = grpo_callbacks_lib.DataPreparationActorCheckpointCallback()
 
