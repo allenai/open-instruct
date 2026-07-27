@@ -529,7 +529,7 @@ time.
 
 **Status (2026-07-26): two infra root causes found and fixed after the
 seed2/3 sweep crashed twice.** See
-[the crash-investigation subsection](experiment.md#sweep-wide-crash-investigation-two-separate-root-causes-found-and-fixed)
+[the crash-investigation subsection](experiment.md#sweep-wide-crash-investigation-three-separate-root-causes-found-and-fixed)
 for full detail. (1) The shared AWS code-execution API endpoint choked once
 sweep concurrency hit 18 jobs (`500 Internal Server Error`), stalling ranks
 into a Gloo collective timeout — fixed by switching to per-job local code
@@ -542,11 +542,32 @@ argument, which silently falls back to torch's hardcoded 30-minute default
 crash signature seen in the unrelated `reinforce_ada_est`/DeepScaleR sweep).
 Fixed by raising torch's `default_pg_timeout` global right after process
 group init (commit `020a93ee0`), so the bookkeeping subgroup inherits
-`--backend_timeout` too. All 13 affected jobs (12 seed2/3 + `ngu075` seed1)
-resumed from checkpoint with both fixes; outcome TBD.
+`--backend_timeout` too. All 13 affected jobs resumed from checkpoint with
+both fixes; 12 survived, one (`baseline_n4_k32_seed3`) got to 99.4%
+(step 497/500) before dying the same way — real progress (up from ~3h
+average survival), just not a full fix for a sustained partition.
 
-**Next:** let the sweep run past the ~3-8h window that killed the previous
-two attempts, then repeat the difficulty-stratified best-checkpoint
-comparison methodology from the DeepScaleR NGU work (see the K-ablation and
-NGU entries above) on code eval sets (LCB-v5 test, Codeforces test) once
-these runs have made meaningful progress.
+**(3) Separately, a silent reward-corruption bug found while investigating
+that near-miss**: `code_api_setup.sh`'s nginx load balancer hardcoded a 5s
+`proxy_read_timeout`, but `code_utils.py` deliberately allows verification
+requests up to `max_execution_time * test_ct + 5.0` seconds (tests run
+sequentially per problem) — ~20s for a 15-test problem at the default
+budget. Nginx was killing legitimate multi-test requests with a 504 long
+before they'd finish, and the client's broad exception handling silently
+turned that into `score=0.0` for otherwise-correct solutions — no crash, no
+visible error, just quietly wrong reward. Fixed by raising nginx's timeout
+to 300s (commit `d703db162`). This is a shared script also used by
+`grpo_fast_7b_code.sh` and the `olmo3` RL scripts, so the same silent
+truncation likely affected those runs too — worth a mention if anyone asks
+why code-RL reward curves have looked noisier than expected.
+
+Relaunched the one crashed job with all three fixes; all 13 now
+running/scheduled. See
+[the full crash-investigation subsection](experiment.md#sweep-wide-crash-investigation-three-separate-root-causes-found-and-fixed)
+for the complete job table.
+
+**Next:** let the sweep run past the ~4h+ window that's killed prior
+attempts, then repeat the difficulty-stratified best-checkpoint comparison
+methodology from the DeepScaleR NGU work (see the K-ablation and NGU entries
+above) on code eval sets (LCB-v5 test, Codeforces test) once these runs have
+made meaningful progress.

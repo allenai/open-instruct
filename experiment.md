@@ -2236,7 +2236,7 @@ Beaker: [01KYDC2HZ0TV4TNHJ9RKWMGRMC](https://beaker.org/ex/01KYDC2HZ0TV4TNHJ9RKW
 **Result:** `eval scores: 1.13`, avg sequence length 13565 tokens, at
 `eval_step=1` (labels the initial/pre-training model).
 
-### Sweep-wide crash investigation: two separate root causes found and fixed
+### Sweep-wide crash investigation: three separate root causes found and fixed
 
 All 12 seed2/3 jobs above died (exit 1, one also preempted) within hours of
 launch, and the same signature also killed one of the original 6 seed-1 jobs
@@ -2324,6 +2324,63 @@ any job's exit code as a transition, so a job that had already finished
 successfully (`ngu0875_n8_k16` seed1, exit 0) got misreported as a crash.
 Fixed to record a silent baseline on first poll and only alert on genuine
 transitions (and never on exit 0).
+
+**Relaunch attempt with the `--backend_timeout` fix (commit `020a93ee0`):**
+launched all 13 resumed from checkpoint on `ai2/jupiter ai2/ceres`/`high`;
+9 of 13 never got scheduled (queue pressure) and were canceled + relaunched
+on `ai2/olmo-instruct`/`urgent` instead — all 13 scheduled within seconds
+after that switch. One (`baseline_n4_k32_seed3`) got extremely close before
+dying again: `[99.4% complete (step 497/500)]`, same
+`Application timeout caused pair closure` signature, ~4h4m survival (up from
+the ~3h pre-fix average — consistent with the timeout fix buying real
+headroom, just not infinite).
+
+**Root cause 3 (fixed, commit `d703db162`): nginx proxy timeout silently
+truncating multi-test verification, corrupting reward signal (not just
+crashing jobs).** While investigating that near-miss crash, its log also
+showed `504 Server Error: Gateway Time-out for url:
+http://127.0.0.1:8070/test_program_stdio` right before the Gloo timeout.
+Traced to `code_utils.py`'s `get_successful_tests_stdio`: tests for one
+problem run *sequentially* in a single subprocess, and the function
+deliberately sizes its own internal timeout as
+`max_execution_time * test_ct + 5.0` — for a 15-test problem at the default
+`code_max_execution_time=1.0s`, that's ~20s, by design. But
+`code_api_setup.sh`'s nginx load balancer hardcoded `proxy_read_timeout 5s`
+(and `proxy_send_timeout 5s`) — nginx kills the connection and returns 504
+long before a legitimate multi-test request can finish, silently zeroing
+reward for otherwise-correct solutions (caught by
+`ground_truth_utils.py`'s broad `except Exception` → `score=0.0`, so it
+never surfaces as a visible error, just quietly worse training signal).
+This is a shared setup script also used by `grpo_fast_7b_code.sh` and the
+`olmo3` RL scripts, so the same silent truncation likely affected those too.
+Fixed by raising both to `300s`, matching the client's own `http_timeout`
+ceiling (`ground_truth_utils.py`) so nginx is never the binding constraint.
+
+Relaunched the one crashed job (`baseline_n4_k32_seed3`, resumed from its
+`step400` checkpoint) with all three fixes now in place: first attempt
+([01KYH6KZR9HNNQH5SB8N1WEQC8](https://beaker.org/ex/01KYH6KZR9HNNQH5SB8N1WEQC8))
+didn't get scheduled on `ai2/jupiter ai2/ceres`/`high`, canceled and
+relaunched on `ai2/olmo-instruct`/`urgent`
+([01KYH77B8MNFXWZGBPQ3ZWGNPJ](https://beaker.org/ex/01KYH77B8MNFXWZGBPQ3ZWGNPJ)),
+scheduled immediately.
+
+Final set of 13 active jobs (all three fixes applied):
+
+| Job | Beaker |
+| --- | --- |
+| `baseline_n8_k16_seed2_resume3` | [01KYGR4AJTG2BV7R81S3F7EDP3](https://beaker.org/ex/01KYGR4AJTG2BV7R81S3F7EDP3) |
+| `baseline_n8_k16_seed3_resume3` | [01KYGR4SFGZ79H7PFXJEM4E6RB](https://beaker.org/ex/01KYGR4SFGZ79H7PFXJEM4E6RB) |
+| `baseline_n4_k32_seed2_resume3` | [01KYGR58F9GC91PRAP4HPKEZ41](https://beaker.org/ex/01KYGR58F9GC91PRAP4HPKEZ41) |
+| `baseline_n4_k32_seed3_resume4urgent` | [01KYH77B8MNFXWZGBPQ3ZWGNPJ](https://beaker.org/ex/01KYH77B8MNFXWZGBPQ3ZWGNPJ) |
+| `baseline_n2_k64_seed2_resume3urgent` | [01KYGRT9R2842E4YYCNGHSX988](https://beaker.org/ex/01KYGRT9R2842E4YYCNGHSX988) |
+| `baseline_n2_k64_seed3_resume3urgent` | [01KYGRTS6HS07XT0H0Q9T9B3NK](https://beaker.org/ex/01KYGRTS6HS07XT0H0Q9T9B3NK) |
+| `ngu05_n8_k16_seed2_resume3urgent` | [01KYGRV9CX4FQ68FS31SEHWF31](https://beaker.org/ex/01KYGRV9CX4FQ68FS31SEHWF31) |
+| `ngu05_n8_k16_seed3_resume3urgent` | [01KYGRVRJ69EP7PRJT9GYSFMM6](https://beaker.org/ex/01KYGRVRJ69EP7PRJT9GYSFMM6) |
+| `ngu075_n8_k16_seed2_resume3urgent` | [01KYGRW6XBBKXVVZH2TJ1JR0HW](https://beaker.org/ex/01KYGRW6XBBKXVVZH2TJ1JR0HW) |
+| `ngu075_n8_k16_seed3_resume3urgent` | [01KYGRWNGKSZ0M452X2JG6YPSV](https://beaker.org/ex/01KYGRWNGKSZ0M452X2JG6YPSV) |
+| `ngu0875_n8_k16_seed2_resume3urgent` | [01KYGRX4FGET8RENTKQC0GFR1F](https://beaker.org/ex/01KYGRX4FGET8RENTKQC0GFR1F) |
+| `ngu0875_n8_k16_seed3_resume3urgent` | [01KYGRXKVYHM4HT5W6THM8XGGM](https://beaker.org/ex/01KYGRXKVYHM4HT5W6THM8XGGM) |
+| `ngu075_n8_k16_seed1_resume3urgent` | [01KYGRY3DTG585YQ00JQKFHHCP](https://beaker.org/ex/01KYGRY3DTG585YQ00JQKFHHCP) |
 
 **Next:** relaunch resumed from the 13 checkpoints again with commit
 `020a93ee0`'s fix, and watch survival time past the ~3-8h window that killed
