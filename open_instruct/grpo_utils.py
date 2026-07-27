@@ -407,6 +407,18 @@ class GRPOExperimentConfig(
                 )
 
 
+def policy_loss_uses_vllm_logprobs(config: GRPOExperimentConfig) -> bool:
+    """Whether vLLM logprobs affect the policy-gradient coefficient or mask."""
+    rho_mask_is_active = config.rho_mask_metric != "none" and (
+        config.rho_mask_lower_bound > 0.0 or config.rho_mask_upper_bound > 0.0
+    )
+    return (
+        config.policy_ratio_denominator == "rollout_policy"
+        or config.rollout_importance_correction == "clipped"
+        or rho_mask_is_active
+    )
+
+
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
     """Set non-response positions to INVALID_LOGPROB and replace NaNs."""
     vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)

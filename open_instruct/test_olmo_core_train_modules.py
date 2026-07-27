@@ -992,6 +992,44 @@ class TestDPPOConfigValidation(unittest.TestCase):
         self.assertNotIn("rho_divergence_algo", field_names)
         self.assertNotIn("rho_divergence_type", field_names)
 
+    def test_pure_ppo_does_not_use_vllm_logprobs_in_policy_loss(self):
+        config = grpo_utils.GRPOExperimentConfig(
+            policy_ratio_denominator="old_policy", rollout_importance_correction="none", rho_mask_metric="none"
+        )
+
+        self.assertFalse(grpo_utils.policy_loss_uses_vllm_logprobs(config))
+
+    def test_disabled_rho_mask_does_not_use_vllm_logprobs_in_policy_loss(self):
+        config = grpo_utils.GRPOExperimentConfig(
+            policy_ratio_denominator="old_policy",
+            rollout_importance_correction="none",
+            rho_mask_metric="ratio",
+            rho_mask_lower_bound=0.0,
+            rho_mask_upper_bound=0.0,
+        )
+
+        self.assertFalse(grpo_utils.policy_loss_uses_vllm_logprobs(config))
+
+    @parameterized.expand(
+        [
+            (
+                "rollout_policy_ratio",
+                {
+                    "policy_ratio_denominator": "rollout_policy",
+                    "rollout_importance_correction": "none",
+                    "rho_mask_metric": "none",
+                    "rho_mask_source": "current_policy",
+                },
+            ),
+            ("rollout_correction", {"rho_mask_metric": "none"}),
+            ("rho_mask", {"rollout_importance_correction": "none", "rho_mask_upper_bound": 2.0}),
+        ]
+    )
+    def test_vllm_dependent_policy_loss_is_detected(self, _name, config_overrides):
+        config = grpo_utils.GRPOExperimentConfig(**config_overrides)
+
+        self.assertTrue(grpo_utils.policy_loss_uses_vllm_logprobs(config))
+
 
 if __name__ == "__main__":
     unittest.main()

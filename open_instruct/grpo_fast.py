@@ -993,8 +993,8 @@ def setup_runtime_variables(
     tools_config: EnvsConfig,
 ) -> grpo_utils.GRPOExperimentConfig:
     """Set up runtime variables for the experiment."""
-    if tools_config.enabled and not streaming_config.mask_tool_use:
-        raise ValueError("Must mask tool use when training against vLLM logprobs.")
+    if tools_config.enabled and grpo_utils.policy_loss_uses_vllm_logprobs(args) and not streaming_config.mask_tool_use:
+        raise ValueError("Must mask tool use when the policy loss uses vLLM logprobs.")
     if args.eval_pass_at_k < 1:
         raise ValueError(f"eval_pass_at_k must be >= 1, got {args.eval_pass_at_k}.")
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
