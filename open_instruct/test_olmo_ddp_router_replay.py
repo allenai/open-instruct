@@ -24,6 +24,17 @@ def test_summarize_weight_shipment():
     assert probes == {"a.weight": 6.0, "b.weight": 2.0}
 
 
+def test_fingerprint_weight_shipment_detects_exact_changes():
+    weights = {"weight": torch.tensor([1.0, 2.0], dtype=torch.bfloat16)}
+
+    before = grpo_callbacks.fingerprint_weight_shipment(weights)
+    weights["weight"][1] = 3.0
+    after = grpo_callbacks.fingerprint_weight_shipment(weights)
+
+    assert before.keys() == after.keys()
+    assert before["weight"] != after["weight"]
+
+
 class _ReplayBlock(torch.nn.Module):
     def __init__(self, *, routed: bool):
         super().__init__()

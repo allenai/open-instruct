@@ -7,6 +7,7 @@ These callbacks handle:
 """
 
 import contextlib
+import hashlib
 import re
 import time
 from collections.abc import Callable, Iterable
@@ -157,6 +158,15 @@ def summarize_weight_shipment(
     return total_numel, total_bytes, probes
 
 
+def fingerprint_weight_shipment(weights: dict[str, torch.Tensor]) -> dict[str, str]:
+    """Hash every staged tensor so debug runs can detect exact shipped changes."""
+    fingerprints = {}
+    for name, tensor in weights.items():
+        raw_bytes = tensor.detach().contiguous().view(torch.uint8).numpy()
+        fingerprints[name] = hashlib.blake2b(raw_bytes, digest_size=8).hexdigest()
+    return fingerprints
+
+
 @dataclass
 class VLLMWeightSyncCallback(Callback):
     """Callback to synchronize weights from training model to vLLM inference engines.
@@ -179,6 +189,7 @@ class VLLMWeightSyncCallback(Callback):
         Callable[[], tuple[list[tuple[str, torch.dtype, tuple[int, ...]]], Iterable[tuple[str, torch.Tensor]]]] | None
     ) = None
     log_weight_diagnostics: bool = False
+    previous_weight_fingerprints: dict[str, str] = field(default_factory=dict, repr=False)
     _previous_weight_probes: dict[str, float] = field(default_factory=dict, init=False, repr=False)
 
     @property
@@ -196,6 +207,13 @@ class VLLMWeightSyncCallback(Callback):
             weights = self.cpu_weight_state_provider()
             if self.log_weight_diagnostics and is_rank_0:
                 total_numel, total_bytes, probes = summarize_weight_shipment(weights)
+                fingerprints = fingerprint_weight_shipment(weights)
+                changed_tensors = [
+                    name
+                    for name, fingerprint in fingerprints.items()
+                    if name in self.previous_weight_fingerprints
+                    and fingerprint != self.previous_weight_fingerprints[name]
+                ]
                 probe_deltas = {
                     name: value - self._previous_weight_probes[name]
                     for name, value in probes.items()
@@ -203,7 +221,8 @@ class VLLMWeightSyncCallback(Callback):
                 }
                 logger.warning(
                     "[GRPODebug][weight-sync] model_step=%s tensors=%s numel=%s bytes=%s "
-                    "probes=%s probe_deltas_from_previous_sync=%s changed_probes=%s",
+                    "probes=%s probe_deltas_from_previous_sync=%s changed_probes=%s "
+                    "fingerprint_baseline_tensors=%s changed_tensors=%s changed_tensor_examples=%s",
                     self.trainer.global_step,
                     len(weights),
                     total_numel,
@@ -211,8 +230,12 @@ class VLLMWeightSyncCallback(Callback):
                     probes,
                     probe_deltas,
                     sum(delta != 0.0 for delta in probe_deltas.values()),
+                    len(self.previous_weight_fingerprints),
+                    len(changed_tensors),
+                    changed_tensors[:10],
                 )
                 self._previous_weight_probes = probes
+                self.previous_weight_fingerprints = fingerprints
 
             broadcast_refs = vllm_utils.broadcast_cpu_staged_weights_to_vllm(
                 weights=weights,
