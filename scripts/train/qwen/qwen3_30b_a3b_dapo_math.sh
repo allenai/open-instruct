@@ -18,6 +18,8 @@ set -euo pipefail
 #
 # The default 128,000 episodes at 8 prompts x 16 samples runs 1,000
 # optimizer steps.
+# A single rolling DeepSpeed state is kept for resume; periodic consolidated
+# models are disabled, and the only consolidated model is saved at completion.
 #
 # Run with:
 #   ./scripts/train/build_image_and_launch.sh \
@@ -111,7 +113,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --eval_pass_at_k 32 \
     --eval_top_p 0.95 \
     --local_eval_every 100 \
-    --save_freq 100 \
+    --save_freq -1 \
     --checkpoint_state_freq 100 \
     --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
     --keep_last_n_checkpoints 1 \
