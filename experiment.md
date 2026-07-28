@@ -3017,3 +3017,43 @@ All 3 jobs kicked off cleanly (image build + Beaker submission succeeded); this 
 exercise of the new `async_steps=0` code path (no prior CPU/GPU test coverage of the sync-gate
 callback), so early-startup monitoring is needed to rule out a hang from a mistake in the new
 gating logic. Status/step-progress TBD.
+
+## 2026-07-28: DeepCoder-1.5B baseline hyperparameter sweep (lr, temperature, KL), lcbv5-only pass@4 eval
+
+**Motivation:** with the async_steps=0 attempt abandoned (see above) and the K/NGU sweep showing no
+reliable NGU effect, try three single-lever changes to the plain `baseline_n8_k16` config to see if
+any improve lcbv5 results: doubling the learning rate, lowering training temperature, and dropping
+the KL penalty entirely. The two runs that keep a KL term drop its coefficient 10x (`beta`
+0.001 → 0.0001) rather than leaving it at the original value, since the original `beta=0.001` was
+tuned assuming `lr=5e-7`/`temperature=1.0`; keeping the same weight on top of the OTHER change
+being tested would confound the comparison less cleanly than a smaller, still-nonzero KL term.
+
+**Eval changes (commit `36d8ae102`):** `deepcoder_1_5b.sh`'s `EVAL_DATASETS` now trains lcbv5-only
+(dropped `codeforces_test`/`humanevalplus_test` — the latter was already known to score 0.00 across
+every run in the K/NGU sweep, plausibly an output-format mismatch, see the 2026-07-27 eval-metrics
+entry above). Also added `--eval_pass_at_k 4` (was implicitly 1).
+
+| Name | Δ from baseline | learning_rate | temperature | beta | Beaker |
+| --- | --- | --- | --- | --- | --- |
+| `deepcoder_1_5b_baseline_lr1e6` | 2x learning rate | 1e-6 | 1.0 | 0.0001 | [01KYNC8ZK6PPVT0JMXGDXP6T7H](https://beaker.org/ex/01KYNC8ZK6PPVT0JMXGDXP6T7H) |
+| `deepcoder_1_5b_baseline_temp06` | lower train temperature | 5e-7 | 0.6 | 0.0001 | [01KYNCCBNAN8KKFCXMKJX71NQB](https://beaker.org/ex/01KYNCCBNAN8KKFCXMKJX71NQB) |
+| `deepcoder_1_5b_baseline_nokl` | no KL penalty | 5e-7 | 1.0 | 0 | [01KYNCF1EF2A1GGE820QRK7XAW](https://beaker.org/ex/01KYNCF1EF2A1GGE820QRK7XAW) |
+
+All other args match `baseline_n8_k16` (N=8, K=16, `never_give_up` unset, seed 1). Launched on
+script defaults (`ai2/jupiter`, urgent, `ai2/olmo-instruct`) — no workspace/cluster override
+requested this time.
+
+### Launch commands
+
+```bash
+EXP=baseline_lr1e6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --learning_rate 1e-6 --beta 0.0001
+
+EXP=baseline_temp06 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --temperature 0.6 --beta 0.0001
+
+EXP=baseline_nokl ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0
+```
+
+All 3 confirmed starting/running at launch time (no errors). Results TBD.

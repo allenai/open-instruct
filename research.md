@@ -680,7 +680,7 @@ Untested on GPU before this launch — first run is also the infra smoke test.
 
 **Runs:** [NGU 0.75 async_steps=0, 3 seeds](experiment.md#2026-07-28-ngu-075-async_steps0-fully-synchronous-sweep-3-seeds)
 
-**Status (2026-07-28, ABANDONED):** all 3 seeds launched, then deadlocked partway through step 1
+**Status (2026-07-28, ABANDONED — see below for what replaced it):** all 3 seeds launched, then deadlocked partway through step 1
 and were stopped (~15-20 min of urgent-priority 8-GPU time burned across 3 jobs, no useful
 result). The Python-level gate (`mark_trained`/`_last_trained_step`) worked correctly for the
 step0→step1 transition, but the run then hung inside the pre-existing weight-sync path
@@ -695,3 +695,21 @@ properly would mean debugging FSDP2/NCCL timing live on GPU, which is expensive 
 this was called off rather than continuing to iterate blind. **All code changes reverted**
 (`git revert c4eed42ef`, revert commit `fe89a88e4`) — `async_steps` stays `>=1`-only. Not
 revisiting unless there's a specific reason to need strictly on-policy (zero-staleness) rollouts.
+
+## [ACTIVE] DeepCoder-1.5B baseline: does lr, temperature, or dropping KL improve lcbv5?
+
+**Question:** rather than chasing the async_steps=0 infra issue further, try three single-lever
+hyperparameter changes off the plain `baseline_n8_k16` config (no NGU) to see if any beats it on
+lcbv5 pass@1: 2x learning rate (5e-7→1e-6), lower training temperature (1.0→0.6), or dropping the
+KL penalty entirely (beta 0.001→0). The two runs that keep a KL term use it at 10x lower weight
+(beta=0.0001) rather than the original 0.001, since 0.001 was tuned for the *unchanged* lr/temperature
+config.
+
+Also switched the default eval set to lcbv5-only (dropped `codeforces_test` and
+`humanevalplus_test` — the latter scored 0.00 across every run in the earlier K/NGU sweep) and
+pass@4 instead of pass@1, for a less noisy per-run signal.
+
+**Runs:** [Baseline lr/temperature/KL sweep, pass@4 lcbv5-only eval](experiment.md#2026-07-28-deepcoder-15b-baseline-hyperparameter-sweep-lr-temperature-kl-lcbv5-only-pass4-eval)
+
+**Status (2026-07-28):** all 3 runs launched (`ai2/jupiter`, urgent, `ai2/olmo-instruct`,
+script defaults); confirmed starting/running, no results yet.
