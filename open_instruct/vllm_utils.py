@@ -1401,7 +1401,10 @@ def _consume_iterator(iterator: Iterator[tuple[str, torch.Tensor]]) -> None:
 
 
 def _call_engine_method(vllm_engines: list[ray.actor.ActorHandle], method: str, *args: Any) -> list[Any]:
-    return ray.get([getattr(engine, method).remote(*args) for engine in vllm_engines])
+    logger.info("Calling %s on %s vLLM engines", method, len(vllm_engines))
+    results = ray.get([getattr(engine, method).remote(*args) for engine in vllm_engines])
+    logger.info("Completed %s on all vLLM engines", method)
+    return results
 
 
 def _distributed_barrier() -> None:
@@ -1511,15 +1514,13 @@ def broadcast_weights_to_vllm(
     every tensor and the model step has been stamped. The empty return list preserves
     the historical caller contract without exposing unfinished inner Ray references.
     """
-    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    is_rank_0 = rank == 0
+    logger.info("Learner rank %s preparing model step %s for live weight transfer", rank, model_step)
     adapter = resolve_weight_export_adapter(model)
     metadata = _collect_weight_metadata(model, name_mapper, adapter)
     backend = "ipc" if model_update_group is None else "nccl"
     is_zero3 = any(hasattr(param, "ds_id") for param in model.parameters())
-    # vLLM's packed NCCL producer pulls the iterator from rotating private CUDA
-    # streams. That is unsafe when the iterator itself runs ZeRO-3 gather
-    # collectives which every learner rank must enter in identical order.
-    packed = model_update_group is None or not is_zero3
     gather_policy = "per-parameter" if is_zero3 else "whole-model" if isinstance(model, (FSDPModule, FSDP)) else "none"
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
@@ -1535,12 +1536,11 @@ def broadcast_weights_to_vllm(
     if is_rank_0:
         logger.info(
             "Installing model step %s via %s weight transfer "
-            "(adapter=%s, packed=%s, gather=%s, learner_parameters=%s, "
+            "(adapter=%s, packed=True, gather=%s, learner_parameters=%s, "
             "exported_tensors=%s, expanded_expert_tensors=%s)",
             model_step,
             backend,
             adapter.name,
-            packed,
             gather_policy,
             metadata.original_parameter_count,
             len(metadata.specs),
@@ -1559,7 +1559,7 @@ def broadcast_weights_to_vllm(
         if model_update_group is None:
             _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, adapter)
         else:
-            trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=packed)
+            trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=True)
             update_info = {
                 "names": metadata.names,
                 "dtype_names": metadata.dtype_names,
