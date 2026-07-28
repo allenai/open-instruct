@@ -95,8 +95,8 @@ class GRPOExperimentConfig(
     """How many train steps to save the model"""
     save_final_model: bool = True
     """Whether to save the final model after training finishes."""
-    remove_checkpoint_state_after_training: bool = False
-    """Remove DeepSpeed resume state after the final model is saved successfully."""
+    clean_checkpoints_at_end: bool = False
+    """Whether to clean up training-state checkpoints after the final model is saved."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
     model_dtype: str = "bfloat16"
@@ -258,17 +258,6 @@ class GRPOExperimentConfig(
             )
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq <= 0:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
-        if self.remove_checkpoint_state_after_training:
-            if not self.save_final_model:
-                raise ValueError("`remove_checkpoint_state_after_training` requires `save_final_model=True`!")
-            if self.checkpoint_state_dir is None:
-                raise ValueError("`remove_checkpoint_state_after_training` requires `checkpoint_state_dir`!")
-            if self.gs_checkpoint_state_dir is not None or self.gs_bucket_path is not None:
-                raise ValueError("Removing completed checkpoint state is not supported with GCS checkpoint syncing!")
-            if os.path.abspath(self.checkpoint_state_dir) == os.path.abspath(self.output_dir):
-                raise ValueError(
-                    "`checkpoint_state_dir` must differ from `output_dir` when removing checkpoint state!"
-                )
         if self.save_freq != self.checkpoint_state_freq:
             logger.warning(
                 "On the olmo-core training path, --save_freq is a no-op for periodic saves; "

@@ -2065,8 +2065,8 @@ def run_training(
 
     if args.save_final_model:
         save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
-        if args.remove_checkpoint_state_after_training:
-            utils.remove_deepspeed_checkpoint_state(args.checkpoint_state_dir)
+        if args.clean_checkpoints_at_end and args.checkpoint_state_dir and os.path.isdir(args.checkpoint_state_dir):
+            clean_last_n_checkpoints_deepspeed(args.checkpoint_state_dir, keep_last_n_checkpoints=0)
     else:
         logger.info("Skipping final model save because save_final_model=False")
 

@@ -1075,40 +1075,13 @@ class TestCleanLastNCheckpoints(unittest.TestCase):
         utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=0)
         self.assertEqual(self._checkpoint_dirs(), [])
 
+    def test_remove_all_deepspeed(self):
+        with tempfile.TemporaryDirectory() as checkpoint_dir:
+            for step in (10, 20):
+                os.makedirs(os.path.join(checkpoint_dir, f"global_step{step}"))
+            pathlib.Path(checkpoint_dir, "latest").touch()
 
-class TestRemoveDeepSpeedCheckpointState(unittest.TestCase):
-    def setUp(self):
-        self.parent_dir = tempfile.mkdtemp()
-        self.checkpoint_dir = os.path.join(self.parent_dir, "resume")
-        os.makedirs(os.path.join(self.checkpoint_dir, "global_step100"))
-        os.makedirs(os.path.join(self.checkpoint_dir, "ds_universal_global_step100"))
-        os.makedirs(os.path.join(self.checkpoint_dir, "ref_policy"))
-        for filename in ("latest", "latest_universal", "zero_to_fp32.py"):
-            pathlib.Path(self.checkpoint_dir, filename).touch()
+            utils.clean_last_n_checkpoints_deepspeed(checkpoint_dir, keep_last_n_checkpoints=0)
 
-    def tearDown(self):
-        shutil.rmtree(self.parent_dir, ignore_errors=True)
-
-    def test_removes_only_checkpoint_state(self):
-        unrelated_sibling = pathlib.Path(self.parent_dir, "keep.txt")
-        unrelated_sibling.touch()
-
-        utils.remove_deepspeed_checkpoint_state(self.checkpoint_dir)
-
-        self.assertFalse(os.path.exists(self.checkpoint_dir))
-        self.assertTrue(unrelated_sibling.exists())
-
-    def test_refuses_unexpected_entries(self):
-        unexpected = pathlib.Path(self.checkpoint_dir, "keep.txt")
-        unexpected.touch()
-
-        with self.assertRaisesRegex(ValueError, "unexpected entries"):
-            utils.remove_deepspeed_checkpoint_state(self.checkpoint_dir)
-
-        self.assertTrue(unexpected.exists())
-        self.assertTrue(os.path.isdir(self.checkpoint_dir))
-
-    def test_missing_directory_is_a_noop(self):
-        shutil.rmtree(self.checkpoint_dir)
-
-        utils.remove_deepspeed_checkpoint_state(self.checkpoint_dir)
+            self.assertFalse(any(entry.startswith("global_step") for entry in os.listdir(checkpoint_dir)))
+            self.assertTrue(os.path.exists(os.path.join(checkpoint_dir, "latest")))

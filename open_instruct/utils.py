@@ -860,45 +860,6 @@ def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints:
     print("Remaining files:" + str(os.listdir(output_dir)))
 
 
-def remove_deepspeed_checkpoint_state(checkpoint_state_dir: str) -> None:
-    """Remove a completed run's DeepSpeed resume state.
-
-    The directory is removed only when every entry is a known DeepSpeed resume
-    artifact. Unexpected files cause an error so a misconfigured path cannot
-    silently delete unrelated data.
-    """
-    if not os.path.exists(checkpoint_state_dir):
-        return
-    if not os.path.isdir(checkpoint_state_dir):
-        raise ValueError(f"Checkpoint state path is not a directory: {checkpoint_state_dir}")
-
-    removable_files = {"latest", "latest_universal", "zero_to_fp32.py"}
-    removable_directories = {"ref_policy"}
-    entries = os.listdir(checkpoint_state_dir)
-    unexpected_entries = [
-        entry
-        for entry in entries
-        if entry not in removable_files
-        and entry not in removable_directories
-        and not (entry.startswith("global_step") and entry[len("global_step") :].isdigit())
-        and not (entry.startswith("ds_universal_global_step") and entry[len("ds_universal_global_step") :].isdigit())
-    ]
-    if unexpected_entries:
-        raise ValueError(
-            f"Refusing to remove checkpoint state from {checkpoint_state_dir}; "
-            f"unexpected entries: {sorted(unexpected_entries)}"
-        )
-
-    for entry in entries:
-        path = os.path.join(checkpoint_state_dir, entry)
-        if os.path.isdir(path) and not os.path.islink(path):
-            shutil.rmtree(path)
-        else:
-            os.remove(path)
-    os.rmdir(checkpoint_state_dir)
-    logger.info(f"Removed completed DeepSpeed checkpoint state directory {checkpoint_state_dir}")
-
-
 def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
     """
     Find the latest valid checkpoint directory and update the 'latest' file.
