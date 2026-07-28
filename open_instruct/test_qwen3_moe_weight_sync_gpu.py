@@ -74,7 +74,7 @@ class Qwen3MoeZero3Trainer:
             model=model,
             model_parameters=model.parameters(),
             config={
-                "train_batch_size": 1,
+                "train_batch_size": world_size,
                 "train_micro_batch_size_per_gpu": 1,
                 "gradient_accumulation_steps": 1,
                 "bf16": {"enabled": True},
