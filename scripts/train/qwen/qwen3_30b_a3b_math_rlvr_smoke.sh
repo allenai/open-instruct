@@ -5,6 +5,7 @@ EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-math-rlvr-smoke}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 BEAKER_USER="$(beaker account whoami --format json | jq -r '.[0].name')"
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/open-instruct-dev}"
 
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-30B-A3B}"
 DATASET="${DATASET:-ai2-adapt-dev/rlvr_gsm8k_zs}"
@@ -18,7 +19,7 @@ uv run python mason.py \
     --task_name "$EXP_NAME" \
     --description "$RUN_NAME" \
     --cluster ai2/holmes \
-    --workspace ai2/olmo-instruct \
+    --workspace "$BEAKER_WORKSPACE" \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
