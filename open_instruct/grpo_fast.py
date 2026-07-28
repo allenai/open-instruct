@@ -564,9 +564,6 @@ class PolicyTrainerRayProcess(RayProcess):
             self.model(input_ids=input_ids)
 
     def broadcast_to_vllm(self, model_step: int):
-        # Ensure CUDA device is set before broadcast operations.
-        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
-        torch.cuda.set_device(self.local_rank)
         return vllm_utils.broadcast_weights_to_vllm(
             model=self.model.module,
             vllm_engines=self.vllm_engines,
