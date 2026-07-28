@@ -1503,7 +1503,6 @@ def weight_sync_thread(
     vllm_engines,
     actor_manager: ActorManager,
     weight_sync_metrics_Q: Queue,
-    inflight_updates: bool = False,
 ):
     """Thread function that handles weight sync operations and actor manager coordination."""
     logger.info("[Weight Sync Thread] 🚀 Starting weight sync thread")
@@ -1516,13 +1515,12 @@ def weight_sync_thread(
         # Clear the event for next iteration
         target_model_step = weight_sync_trigger.get_step_and_clear()
         try:
-            ray.get(actor_manager.set_should_stop.remote(True))
-            broadcast_refs = [m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models]
-            sync_time_stats, _ = grpo_utils.perform_weight_sync(
-                broadcast_refs, vllm_engines, actor_manager, progress=args.verbose, inflight_updates=inflight_updates
-            )
+            with grpo_utils.pause_actor_manager(actor_manager):
+                broadcast_refs = [m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models]
+                sync_time_stats, _ = grpo_utils.perform_weight_sync(
+                    broadcast_refs, vllm_engines, progress=args.verbose
+                )
         except Exception as e:
-            ray.get(actor_manager.set_should_stop.remote(False))
             logger.exception("[Weight Sync Thread] Weight Sync failed")
             raise RuntimeError from e
 
@@ -1902,7 +1900,6 @@ def run_training(
             vllm_engines,
             actor_manager,
             weight_sync_metrics_Q,
-            streaming_config.inflight_updates,
         )
 
         logger.info(f"[Main Thread] Triggering initial native vLLM weight sync at step {initial_step}.")
@@ -2068,6 +2065,8 @@ def run_training(
 
     if args.save_final_model:
         save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+        if args.remove_checkpoint_state_after_training:
+            utils.remove_deepspeed_checkpoint_state(args.checkpoint_state_dir)
     else:
         logger.info("Skipping final model save because save_final_model=False")
 

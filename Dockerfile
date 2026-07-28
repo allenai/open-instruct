@@ -79,17 +79,17 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
 
-# Catch Python API incompatibilities in the vLLM server stack during image
-# construction instead of after a GPU job has launched.
-RUN .venv/bin/python -c \
-    "from openai.types.responses import NamespaceTool; from vllm.entrypoints.openai.api_server import build_app"
-
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
 COPY mason.py mason.py
 COPY open_instruct open_instruct
 COPY oe-eval-interna[l] oe-eval-internal/
+
+# Catch Python API incompatibilities in the training and vLLM server stacks
+# during image construction instead of after a GPU job has launched.
+RUN .venv/bin/python -c \
+    "from datasets import Dataset; from openai.types.responses import NamespaceTool; from open_instruct.environments.tools.parsers import VLLM_PARSERS; from open_instruct.utils import import_class_from_string; from vllm.entrypoints.openai.api_server import build_app; [import_class_from_string(config.import_path) for config in VLLM_PARSERS.values()]; Dataset.from_dict({'tokens': [[1, 2]]}).with_format('torch')[0]"
 
 ARG GIT_COMMIT="" \
     GIT_BRANCH=""

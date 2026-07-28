@@ -7,7 +7,7 @@ import torch
 import vllm
 from parameterized import parameterized
 
-from open_instruct import vllm_utils
+from open_instruct import grpo_utils, vllm_utils
 from open_instruct.data_types import PromptRequest
 from open_instruct.utils import ModelDims
 from open_instruct.weight_export import PassthroughWeightExportAdapter
@@ -412,6 +412,30 @@ class TestWeightGatherPolicy(unittest.TestCase):
         self.assertEqual(len(gathered_batches), len(params))
         self.assertTrue(all(len(batch) == 1 for batch in gathered_batches))
         self.assertEqual([name for name, _ in exported], [name for name, _ in params])
+
+
+class TestWeightSyncCoordination(unittest.TestCase):
+    def test_actor_manager_is_paused_and_resumed_once(self):
+        actor_manager = MagicMock()
+        actor_manager.set_should_stop.remote.side_effect = ["pause", "resume"]
+
+        with mock.patch.object(grpo_utils.ray, "get") as ray_get, grpo_utils.pause_actor_manager(actor_manager):
+            pass
+
+        self.assertEqual(actor_manager.set_should_stop.remote.call_args_list, [mock.call(True), mock.call(False)])
+        self.assertEqual(ray_get.call_args_list, [mock.call("pause"), mock.call("resume")])
+
+    def test_actor_manager_is_resumed_after_failure(self):
+        actor_manager = MagicMock()
+
+        with (
+            mock.patch.object(grpo_utils.ray, "get"),
+            self.assertRaisesRegex(RuntimeError, "sync failed"),
+            grpo_utils.pause_actor_manager(actor_manager),
+        ):
+            raise RuntimeError("sync failed")
+
+        self.assertEqual(actor_manager.set_should_stop.remote.call_args_list, [mock.call(True), mock.call(False)])
 
 
 class TestMambaSpecCompatibilityPatch(unittest.TestCase):

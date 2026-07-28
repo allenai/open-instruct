@@ -1,3 +1,4 @@
+import contextlib
 import enum
 import math
 import os
@@ -94,6 +95,8 @@ class GRPOExperimentConfig(
     """How many train steps to save the model"""
     save_final_model: bool = True
     """Whether to save the final model after training finishes."""
+    remove_checkpoint_state_after_training: bool = False
+    """Remove DeepSpeed resume state after the final model is saved successfully."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
     model_dtype: str = "bfloat16"
@@ -255,6 +258,17 @@ class GRPOExperimentConfig(
             )
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq <= 0:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
+        if self.remove_checkpoint_state_after_training:
+            if not self.save_final_model:
+                raise ValueError("`remove_checkpoint_state_after_training` requires `save_final_model=True`!")
+            if self.checkpoint_state_dir is None:
+                raise ValueError("`remove_checkpoint_state_after_training` requires `checkpoint_state_dir`!")
+            if self.gs_checkpoint_state_dir is not None or self.gs_bucket_path is not None:
+                raise ValueError("Removing completed checkpoint state is not supported with GCS checkpoint syncing!")
+            if os.path.abspath(self.checkpoint_state_dir) == os.path.abspath(self.output_dir):
+                raise ValueError(
+                    "`checkpoint_state_dir` must differ from `output_dir` when removing checkpoint state!"
+                )
         if self.save_freq != self.checkpoint_state_freq:
             logger.warning(
                 "On the olmo-core training path, --save_freq is a no-op for periodic saves; "
@@ -743,27 +757,27 @@ def compute_metrics_from_loss_stats(
     return metrics
 
 
-def perform_weight_sync(
-    broadcast_refs: list[ray.ObjectRef],
-    vllm_engines: list[ray.actor.ActorHandle],
-    actor_manager: ray.actor.ActorHandle,
-    *,
-    progress: bool = False,
-    inflight_updates: bool = False,
-) -> tuple[dict[str, float], list]:
-    """Pause actors, await complete weight syncs, wake engines, and resume actors."""
-    del inflight_updates  # Weight broadcasts now wait for update and finalization internally.
-    start = time.perf_counter()
+@contextlib.contextmanager
+def pause_actor_manager(actor_manager: ray.actor.ActorHandle):
+    """Pause generation while the caller performs a complete weight sync."""
     ray.get(actor_manager.set_should_stop.remote(True))
     try:
-        results, actor_sync_times = utils.ray_get_with_progress(
-            broadcast_refs, desc="Broadcasting weights to vLLM engines", enable=progress
-        )
-        utils.ray_get_with_progress(
-            [e.wake_up.remote() for e in vllm_engines], desc="Waking up vLLM engines", enable=progress
-        )
+        yield
     finally:
         ray.get(actor_manager.set_should_stop.remote(False))
+
+
+def perform_weight_sync(
+    broadcast_refs: list[ray.ObjectRef], vllm_engines: list[ray.actor.ActorHandle], *, progress: bool = False
+) -> tuple[dict[str, float], list]:
+    """Await complete weight syncs, wake engines, and collect timing metrics."""
+    start = time.perf_counter()
+    results, actor_sync_times = utils.ray_get_with_progress(
+        broadcast_refs, desc="Broadcasting weights to vLLM engines", enable=progress
+    )
+    utils.ray_get_with_progress(
+        [e.wake_up.remote() for e in vllm_engines], desc="Waking up vLLM engines", enable=progress
+    )
     sync_time_stats = {"time/weight_sync": time.perf_counter() - start}
     if actor_sync_times:
         sync_time_stats["time/weight_sync_mean"] = float(np.mean(actor_sync_times))

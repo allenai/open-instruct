@@ -118,6 +118,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
     --keep_last_n_checkpoints 1 \
     --save_final_model True \
+    --remove_checkpoint_state_after_training True \
     --try_auto_save_to_beaker False \
     --push_to_hub False \
     --seed 1 \

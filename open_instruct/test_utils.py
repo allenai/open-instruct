@@ -1074,3 +1074,41 @@ class TestCleanLastNCheckpoints(unittest.TestCase):
     def test_remove_all(self):
         utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=0)
         self.assertEqual(self._checkpoint_dirs(), [])
+
+
+class TestRemoveDeepSpeedCheckpointState(unittest.TestCase):
+    def setUp(self):
+        self.parent_dir = tempfile.mkdtemp()
+        self.checkpoint_dir = os.path.join(self.parent_dir, "resume")
+        os.makedirs(os.path.join(self.checkpoint_dir, "global_step100"))
+        os.makedirs(os.path.join(self.checkpoint_dir, "ds_universal_global_step100"))
+        os.makedirs(os.path.join(self.checkpoint_dir, "ref_policy"))
+        for filename in ("latest", "latest_universal", "zero_to_fp32.py"):
+            pathlib.Path(self.checkpoint_dir, filename).touch()
+
+    def tearDown(self):
+        shutil.rmtree(self.parent_dir, ignore_errors=True)
+
+    def test_removes_only_checkpoint_state(self):
+        unrelated_sibling = pathlib.Path(self.parent_dir, "keep.txt")
+        unrelated_sibling.touch()
+
+        utils.remove_deepspeed_checkpoint_state(self.checkpoint_dir)
+
+        self.assertFalse(os.path.exists(self.checkpoint_dir))
+        self.assertTrue(unrelated_sibling.exists())
+
+    def test_refuses_unexpected_entries(self):
+        unexpected = pathlib.Path(self.checkpoint_dir, "keep.txt")
+        unexpected.touch()
+
+        with self.assertRaisesRegex(ValueError, "unexpected entries"):
+            utils.remove_deepspeed_checkpoint_state(self.checkpoint_dir)
+
+        self.assertTrue(unexpected.exists())
+        self.assertTrue(os.path.isdir(self.checkpoint_dir))
+
+    def test_missing_directory_is_a_noop(self):
+        shutil.rmtree(self.checkpoint_dir)
+
+        utils.remove_deepspeed_checkpoint_state(self.checkpoint_dir)
