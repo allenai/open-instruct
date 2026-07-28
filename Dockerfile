@@ -70,7 +70,8 @@ WORKDIR /stage/
 ENV UV_CACHE_DIR=/root/.cache/uv \
     HF_XET_HIGH_PERFORMANCE=1 \
     UV_COMPILE_BYTECODE=0 \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+docker
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+docker \
+    OPEN_INSTRUCT_CUDA_VERSION=${CUDA_VERSION}
 
 # Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
@@ -89,7 +90,7 @@ COPY oe-eval-interna[l] oe-eval-internal/
 # Catch Python API incompatibilities in the training and vLLM server stacks
 # during image construction instead of after a GPU job has launched.
 RUN .venv/bin/python -c \
-    "from datasets import Dataset; from openai.types.responses import NamespaceTool; from open_instruct.environments.tools.parsers import VLLM_PARSERS; from open_instruct.utils import import_class_from_string; from vllm.entrypoints.openai.api_server import build_app; [import_class_from_string(config.import_path) for config in VLLM_PARSERS.values()]; Dataset.from_dict({'tokens': [[1, 2]]}).with_format('torch')[0]"
+    "import os; import torch; import torchaudio; import torchvision; from datasets import Dataset; from flash_attn import flash_attn_func; from openai.types.responses import NamespaceTool; from open_instruct.environments.tools.parsers import VLLM_PARSERS; from open_instruct.utils import import_class_from_string; from vllm.entrypoints.openai.api_server import build_app; expected_cuda = os.environ['OPEN_INSTRUCT_CUDA_VERSION']; assert torch.version.cuda and torch.version.cuda.split('.', 1)[0] == expected_cuda, (expected_cuda, torch.version.cuda); [import_class_from_string(config.import_path) for config in VLLM_PARSERS.values()]; Dataset.from_dict({'tokens': [[1, 2]]}).with_format('torch')[0]"
 
 ARG GIT_COMMIT="" \
     GIT_BRANCH=""

@@ -113,6 +113,7 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ github.head_ref || github.ref_name }}
+            CUDA_VERSION=12
           cache-from: type=registry,ref=ghcr.io/allenai/open-instruct:buildcache
           cache-to: type=inline
 
@@ -120,4 +121,4 @@ jobs:
         if: env.RUN_GPU_TESTS == 'true'
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
-        run: ./scripts/test/run_gpu_tests_on_beaker.sh "${{ github.sha }}"
+        run: ./scripts/test/run_gpu_tests_on_beaker.sh "${{ github.sha }}" 12

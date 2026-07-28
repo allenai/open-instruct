@@ -1,9 +1,15 @@
 """End-to-end GPU test for Transformers 5 Qwen3-MoE live weight synchronization.
 
-This pytest file is the sole isolated launch target for the test. Run it on
-Beaker with:
+This pytest file is the sole isolated launch target for the test.
+
+CUDA 12:
 
     GPU_COUNT=3 ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh \
+        open_instruct/test_qwen3_moe_weight_sync_gpu.py
+
+CUDA 13:
+
+    GPU_COUNT=3 ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/test/run_gpu_pytest.sh \
         open_instruct/test_qwen3_moe_weight_sync_gpu.py
 
 The tests use a tiny fused Qwen3-MoE learner under DeepSpeed ZeRO-3 and a vLLM

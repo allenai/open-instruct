@@ -54,7 +54,12 @@ if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"*
   echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
 else
   echo "Creating CUDA $cuda_version beaker image for commit $git_hash..."
-  CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
+  if [[ "$cuda_version" == "13" ]]; then
+    default_cache_repo="ghcr.io/allenai/open-instruct:buildcache-cuda13"
+  else
+    default_cache_repo="ghcr.io/allenai/open-instruct:buildcache"
+  fi
+  CACHE_REPO="${DOCKER_CACHE_REPO:-$default_cache_repo}"
 
   # Try to build with cache push first, fall back to cache-from only if push fails
   if docker buildx build --platform=linux/amd64 \

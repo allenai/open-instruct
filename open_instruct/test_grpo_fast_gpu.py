@@ -217,8 +217,10 @@ class TestGeneration(TestGrpoFastBase):
         """Test generation produces expected output and tool invocation behavior."""
         cuda_version = torch.version.cuda
         assert cuda_version is not None
-        if not use_tools and version.Version(cuda_version).major == 12:
-            test_data_filename = f"generation_{name}_cuda12_expected.json"
+        cuda_major_version = version.Version(cuda_version).major
+        if not use_tools:
+            self.assertIn(cuda_major_version, (12, 13), f"Unsupported CUDA version: {cuda_version}")
+            test_data_filename = f"generation_{name}_cuda{cuda_major_version}_expected.json"
         else:
             test_data_filename = f"generation_{name}_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
