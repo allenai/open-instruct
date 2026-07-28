@@ -31,6 +31,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --non_resumable \
+    --preemptible \
     --no_auto_dataset_cache \
     --gpus "$GPU_COUNT" \
     --env TOKENIZERS_PARALLELISM=false \

@@ -18,6 +18,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --non_resumable \
+    --preemptible \
     --no_auto_dataset_cache \
     --num_nodes 1 \
     --gpus 8 \
