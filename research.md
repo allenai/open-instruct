@@ -633,3 +633,25 @@ nginx `proxy_read_timeout` bug found during the crash investigation above,
 but a different underlying trigger (an isolated crash, not a shared
 timeout misconfiguration) — needs a re-run before drawing any conclusion
 about `p=0.875`.
+
+**Status (2026-07-28, full trajectory):** Extended the single-checkpoint comparison to every
+saved checkpoint (steps 100-500 as available) across all 12 (config, seed) lineages. See [the
+full trajectory writeup](experiment.md#2026-07-28-full-checkpoint-trajectory-eval--lcbv5-pass1-vs-step-all-3-seeds--4-configs)
+for the complete per-checkpoint table, best-step summary, and job roster (4 of the 12 original
+jobs had to be relaunched mid-run, and 2 more crashed partway through their checkpoint loop and
+needed a single-checkpoint backfill — same two infra failure modes as before: a GPU-memory crash
+between sequential checkpoints within one job, and the nginx-code-exec-API silent-death pattern
+that invalidated 3 more checkpoints this round). Headline finding: taking each lineage's best
+*valid* checkpoint anywhere in its trajectory (not just the final one), the single-checkpoint
+finding that baseline beats every NGU arm does **not** hold up — `ngu05_seed3` (0.21 lcbv5 pass@1
+at step 300) and `ngu0875_seed3` (0.19 at step 200) both match or beat baseline's best (0.19,
+seed 3 at step 400), reversing the earlier "NGU costs lcbv5 performance" read. This should be
+treated cautiously though: the NGU trajectories that look best are exactly the ones truncated
+early by infra failures, so "best of an incomplete run" isn't a fair comparison to "best of a
+complete run." Within the handful of lineages that ran cleanly to their full requested length,
+lcbv5 pass@1 bounces ±0.03-0.05 step-to-step with no clear monotonic trend or late-training
+separation between baseline and any NGU value — the trajectory view mostly confirms "NGU roughly
+comparable to baseline, within noise" rather than showing a value that clearly overtakes or falls
+behind over training. Next step is re-running the truncated/invalidated cells
+(`baseline_seed2` steps 300-500, `ngu05_seed3` steps 400-500, `ngu0875_seed2` steps 200-400)
+before treating either direction as conclusive.

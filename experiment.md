@@ -2607,3 +2607,154 @@ non-stdio verifier, are also flat zero, and the same verifier confirmed 162/164 
 solutions pass with only 2 real failures per the earlier humanevalplus-data verification pass, so
 the harness itself works). Worth spot-checking a couple of raw completions before treating this as
 fully conclusive, but there's no sign of a verifier-side bug specific to today's run.
+
+## 2026-07-28: Full checkpoint-trajectory eval — lcbv5 pass@1 vs step, all 3 seeds × 4 configs
+
+Follow-up to the single-checkpoint comparison above: instead of "just the last checkpoint,"
+`--eval_only`-looped over *every* saved checkpoint (steps 100/200/.../500 as available) for all
+12 (config, seed) lineages, one Beaker job per lineage, each internally sequencing through its
+checkpoints via `--eval_only_set_checkpoint <step>` and logging each checkpoint as a separate
+wandb run sharing a common `wandb_group_name = eval_<lineage>`. `--eval_only_set_checkpoint`
+confirmed correct in the canary job (`baseline_seed1`, `eval_step: 500` matched the requested
+checkpoint).
+
+### Job roster, launches, and mid-run corrections
+
+12 jobs were launched initially (`WORKSPACE=ai2/open-instruct-dev`, `PRIORITY=urgent`,
+`CLUSTER=ai2/jupiter`). Partway through, 4 of them (`baseline_seed2`, `ngu05_seed1`,
+`ngu075_seed1`, `ngu0875_seed2`) were stopped and relaunched on `ai2/oe-adapt-code` /
+`PRIORITY=high` / `CLUSTER="ai2/jupiter ai2/neptune"` with new job IDs (original IDs are dead,
+not queried). Additionally, two jobs (`baseline_seed3`, `ngu05_seed3`) crashed partway through
+their checkpoint loop on a transient
+`ValueError: Free memory on device cuda:0 (6.47/79.19 GiB) ... less than desired GPU memory
+utilization` (vLLM engine re-init OOM-checking against stale allocator state from the *previous*
+checkpoint's engine in the same process — see "GPU-memory crash pattern" note below) and had
+their missing final checkpoint backfilled by a follow-up single-checkpoint job. Final roster:
+
+| Lineage | Beaker job(s) | Checkpoints requested | Checkpoints obtained |
+|---|---|---|---|
+| baseline_seed1 | [01KYK9062B1AZFQJ2Y17SCQC13](https://beaker.org/ex/01KYK9062B1AZFQJ2Y17SCQC13) | 500 | 500 |
+| baseline_seed2 | [01KYKAD77YTNCDCW0NWADDN487](https://beaker.org/ex/01KYKAD77YTNCDCW0NWADDN487) (relaunch) | 100,200,300,400,500 | 100,200 only — job failed (GPU-memory crash) attempting step 300 |
+| baseline_seed3 | [01KYK98XFPE19AJRA6GTBHDX7P](https://beaker.org/ex/01KYK98XFPE19AJRA6GTBHDX7P) + step-400 backfill [01KYKAJM33VKF334JXTQCWQVZX](https://beaker.org/ex/01KYKAJM33VKF334JXTQCWQVZX) | 100,200,300,400 | all 4 (100/200/300 from first job, which failed attempting step 400; 400 from backfill job) |
+| ngu05_seed1 | [01KYKADS8ZY5A5P5P3F5BHYS2C](https://beaker.org/ex/01KYKADS8ZY5A5P5P3F5BHYS2C) (relaunch) | 500 | 500 |
+| ngu05_seed2 | [01KYK97Y6273EZB83X8DAN6X52](https://beaker.org/ex/01KYK97Y6273EZB83X8DAN6X52) | 100,200,300,400,500 | all 5 |
+| ngu05_seed3 | [01KYK99D2TK3ZV1A4WA69JC42D](https://beaker.org/ex/01KYK99D2TK3ZV1A4WA69JC42D) + step-400 backfill [01KYKAK52BXWQTRGS9QJKD1ADV](https://beaker.org/ex/01KYKAK52BXWQTRGS9QJKD1ADV) | 100,200,300,400,500 | 100/200/300 valid; 400 obtained but **invalid** (nginx code-exec API died mid-eval, see below); 500 never attempted |
+| ngu075_seed1 | [01KYKAEA22G6KWSPZ7CTBAHWFP](https://beaker.org/ex/01KYKAEA22G6KWSPZ7CTBAHWFP) (relaunch) | 400,500 | 400 valid; 500 obtained but **invalid** (same nginx failure) |
+| ngu075_seed2 | [01KYK9AW65ZW7ZY81SYN1KBP5G](https://beaker.org/ex/01KYK9AW65ZW7ZY81SYN1KBP5G) | 100,200,300 | all 3 |
+| ngu075_seed3 | [01KYK99WBBT67JRY1FWTGC1JV9](https://beaker.org/ex/01KYK99WBBT67JRY1FWTGC1JV9) | 100,200,300,400,500 | all 5 |
+| ngu0875_seed1 | [01KYK98CZN071T79BMK37GFX3S](https://beaker.org/ex/01KYK98CZN071T79BMK37GFX3S) | 500 | 500 |
+| ngu0875_seed2 | [01KYKAETTA7D1ZVNYR6MVXNHA0](https://beaker.org/ex/01KYKAETTA7D1ZVNYR6MVXNHA0) (relaunch) | 100,200,300,400 | 100 valid; 200 obtained but **invalid** (nginx failure); job then failed (GPU-memory crash) attempting step 300 — 300/400 never obtained |
+| ngu0875_seed3 | [01KYK9ABX1WGN2K4G2J82BE7T8](https://beaker.org/ex/01KYK9ABX1WGN2K4G2J82BE7T8) | 100,200,300,400 | all 4 |
+
+### Two distinct failure modes hit during this run (neither is a new root cause — both match
+### previously-documented signatures)
+
+1. **GPU-memory crash between sequential checkpoints in one job** (`baseline_seed2`,
+   `baseline_seed3` original job, `ngu05_seed3` original job, `ngu0875_seed2`): all four crashes
+   show the identical `vllm.../gpu_worker.py` traceback —
+   `ValueError: Free memory on device cuda:0 (X/Y GiB) on startup is less than desired GPU memory
+   utilization` — always on the checkpoint *after* the 2nd-3rd one loaded in that job's process
+   (step 300 of a 100/200/300/... sequence, or step 400 of a 100/200/300/400 sequence). Consistent
+   with each `--eval_only_set_checkpoint` pass re-initializing a vLLM engine without fully
+   releasing the previous checkpoint's GPU allocation first — an apparent memory-accumulation
+   issue in the multi-checkpoint eval loop, not investigated further here (no code changes made
+   per task scope) but worth flagging for whoever owns `deepcoder_1_5b_eval_checkpoints_inner.sh`.
+2. **Silent nginx/local-code-exec-API death → reward forced to 0.0** (`ngu05_seed3` step 400
+   backfill, `ngu075_seed1` step 500, `ngu0875_seed2` step 200): same signature as the
+   `ngu0875_n8_k16_seed1` invalidation from the section above —
+   `ConnectionResetError`/`Failed to establish a new connection: [Errno 111] Connection refused`
+   to `127.0.0.1:8070` starts partway through the job and never recovers, silently forcing every
+   verification in the affected eval to `score=0.0` while the job itself still exits 0. Confirmed
+   by grepping each affected log: e.g. `ngu075_seed1` shows 262 connection-error lines in the
+   window between its (valid) step-400 metrics block and its (invalid) step-500 block, vs. only
+   31 stray lines before step 400 (which came back with normal nonzero numbers). All three
+   affected checkpoints are marked **invalid** in the table below and excluded from the "best
+   step" analysis; two of them (`ngu05_seed3` step 400, `ngu0875_seed2` step 200) have no valid
+   re-run in this batch.
+
+### Full per-checkpoint results
+
+`scores` = pooled `eval/scores`; `lcbv5` = `eval/pass_at_1/code_stdio_lcbv5`; `hep` =
+`eval/pass_at_1/code_humanevalplus` (exactly 0.00 in every single checkpoint below, all 39
+data points — consistent with the output-format-mismatch explanation from the section above, not
+re-litigated here).
+
+| Config | Seed | Step | scores | lcbv5 pass@1 | hep pass@1 | Note |
+|---|---|---|---|---|---|---|
+| baseline | 1 | 500 | 1.27 | 0.18 | 0.00 | |
+| baseline | 2 | 100 | 1.25 | 0.17 | 0.00 | |
+| baseline | 2 | 200 | 1.30 | 0.17 | 0.00 | job failed before step 300 |
+| baseline | 3 | 100 | 1.25 | 0.18 | 0.00 | |
+| baseline | 3 | 200 | 1.28 | 0.16 | 0.00 | |
+| baseline | 3 | 300 | 1.34 | 0.16 | 0.00 | |
+| baseline | 3 | 400 | 1.43 | 0.19 | 0.00 | from step-400 backfill job |
+| ngu05 | 1 | 500 | 1.21 | 0.14 | 0.00 | |
+| ngu05 | 2 | 100 | 1.35 | 0.19 | 0.00 | |
+| ngu05 | 2 | 200 | 1.32 | 0.18 | 0.00 | |
+| ngu05 | 2 | 300 | 1.19 | 0.15 | 0.00 | |
+| ngu05 | 2 | 400 | 1.20 | 0.14 | 0.00 | |
+| ngu05 | 2 | 500 | 1.31 | 0.19 | 0.00 | |
+| ngu05 | 3 | 100 | 1.31 | 0.15 | 0.00 | |
+| ngu05 | 3 | 200 | 1.26 | 0.15 | 0.00 | |
+| ngu05 | 3 | 300 | 1.42 | 0.21 | 0.00 | |
+| ngu05 | 3 | 400 | **0.00** | **0.00** | 0.00 | **INVALID** — nginx code-exec API died mid-eval |
+| ngu075 | 1 | 400 | 1.27 | 0.18 | 0.00 | |
+| ngu075 | 1 | 500 | **0.00** | **0.00** | 0.00 | **INVALID** — nginx code-exec API died mid-eval |
+| ngu075 | 2 | 100 | 1.31 | 0.14 | 0.00 | |
+| ngu075 | 2 | 200 | 1.37 | 0.18 | 0.00 | |
+| ngu075 | 2 | 300 | 1.41 | 0.18 | 0.00 | |
+| ngu075 | 3 | 100 | 1.30 | 0.18 | 0.00 | |
+| ngu075 | 3 | 200 | 1.35 | 0.17 | 0.00 | |
+| ngu075 | 3 | 300 | 1.28 | 0.15 | 0.00 | |
+| ngu075 | 3 | 400 | 1.33 | 0.15 | 0.00 | |
+| ngu075 | 3 | 500 | 1.30 | 0.17 | 0.00 | |
+| ngu0875 | 1 | 500 | 1.33 | 0.16 | 0.00 | |
+| ngu0875 | 2 | 100 | 1.24 | 0.17 | 0.00 | |
+| ngu0875 | 2 | 200 | **0.00** | **0.00** | 0.00 | **INVALID** — nginx code-exec API died mid-eval; job then failed before step 300 |
+| ngu0875 | 3 | 100 | 1.32 | 0.17 | 0.00 | |
+| ngu0875 | 3 | 200 | 1.33 | 0.19 | 0.00 | |
+| ngu0875 | 3 | 300 | 1.23 | 0.16 | 0.00 | |
+| ngu0875 | 3 | 400 | 1.22 | 0.15 | 0.00 | |
+
+### Best step per run (valid checkpoints only)
+
+| Config | Seed | Best step (lcbv5) | Best lcbv5 pass@1 | Best step (scores) | Best scores | Valid/requested |
+|---|---|---|---|---|---|---|
+| baseline | 1 | 500 | 0.18 | 500 | 1.27 | 1/1 |
+| baseline | 2 | 100 | 0.17 | 200 | 1.30 | 2/5 |
+| baseline | 3 | 400 | **0.19** | 400 | 1.43 | 4/4 |
+| ngu05 | 1 | 500 | 0.14 | 500 | 1.21 | 1/1 |
+| ngu05 | 2 | 100 or 500 | 0.19 | 100 | 1.35 | 5/5 |
+| ngu05 | 3 | 300 | **0.21** | 300 | 1.42 | 3/4 (400 invalid, 500 not attempted) |
+| ngu075 | 1 | 400 | 0.18 | 400 | 1.27 | 1/2 (500 invalid) |
+| ngu075 | 2 | 200 or 300 | 0.18 | 300 | 1.41 | 3/3 |
+| ngu075 | 3 | 100 | 0.18 | 200 | 1.35 | 5/5 |
+| ngu0875 | 1 | 500 | 0.16 | 500 | 1.33 | 1/1 |
+| ngu0875 | 2 | 100 | 0.17 | 100 | 1.24 | 1/4 (200 invalid, 300/400 not obtained) |
+| ngu0875 | 3 | 200 | **0.19** | 200 | 1.33 | 4/4 |
+
+### Does the trajectory change NGU's ranking vs. baseline?
+
+Not decisively, but it does complicate the single-checkpoint story from the section above.
+Taking each lineage's best *valid* lcbv5 pass@1 regardless of step: baseline's ceiling in this
+batch is 0.19 (seed 3, reached at step 400 of only 4 completed steps — its most-trained
+checkpoint), matched by `ngu0875_seed3` (0.19 at step 200 — *half* as many steps) and beaten by
+`ngu05_seed3` (0.21 at step 300). So at the level of "best checkpoint anywhere in a (possibly
+truncated) trajectory," two of the three NGU values now have a seed that ties or beats every
+baseline seed, reversing the previous single-checkpoint finding that baseline swept all three
+NGU arms. However this is a fragile read: `ngu05_seed3` and `ngu0875_seed2`'s trajectories are
+exactly the ones truncated early by infra failures (GPU-memory crash and/or invalidated nginx
+checkpoints), so "best of an incomplete trajectory" is not directly comparable to "best of a
+complete trajectory" — it's entirely possible baseline's own peak would also move if its seed 2/3
+runs had reached step 500 uncorrupted. Within the trajectories that *did* run to completion
+(`baseline_seed1`, `ngu05_seed2`, `ngu075_seed2/3`, `ngu0875_seed1/3`), the picture is noisier
+than monotonic: every config's per-seed lcbv5 bounces around by ±0.03-0.05 step-to-step with no
+clean upward trend by step 500 (e.g. `ngu05_seed2` peaks at step 100 *and* step 500, dips in
+between; `ngu075_seed3` peaks at step 100 and never re-reaches it). No config shows a clear
+late-training pull-ahead or pull-away from baseline — the single-checkpoint snapshot and the
+full trajectory tell a broadly consistent "NGU roughly comparable to baseline, within run-to-run
+noise" story, just with the specific ranking at any one step being fairly noisy and highly
+sensitive to which checkpoints survived the infra failures above. Given how much of this batch
+was truncated or invalidated, the cleanest next step is re-running the incomplete/invalidated
+cells (`baseline_seed2` steps 300-500, `ngu05_seed3` steps 400-500, `ngu0875_seed2` steps
+200-400) rather than drawing a firm conclusion from what's here.
