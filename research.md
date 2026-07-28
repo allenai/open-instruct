@@ -608,3 +608,28 @@ lcbv5/codeforces `code_stdio` verification during training (that budget scales t
 per-problem timeout there), so left as a tradeoff for whoever tunes eval fidelity next.
 All datasets re-pushed and confirmed on the Hub; `deepcoder_1_5b.sh` now lists all three
 eval sets.
+
+**Status (2026-07-27, eval-only checkpoint comparison):** Ran the promised
+per-source (`lcbv5` vs `humanevalplus`) checkpoint comparison — 6
+`--eval_only` jobs (3 baseline seeds + NGU `p`∈{0.5,0.75,0.875} seed1), all
+completed. See [the full results
+table](experiment.md#2026-07-27-eval-only-checkpoint-comparison-results-3-baselines--3-ngu-n8_k16)
+for details. Two findings: (1) `baseline_n8_k16` beats both NGU arms on
+`lcbv5` pass@1 at every seed checked (0.18-0.21 vs. `ngu05`'s 0.15 and
+`ngu075`'s 0.17) and on aggregate `eval/scores` — opposite direction from
+the deepscaler NGU result, though this is a single-seed-per-NGU-arm
+comparison so only directional. (2) `humanevalplus` pass@1 is exactly 0.00
+for every one of the 5 valid runs — plausibly an output-format mismatch
+(all training data is `code_stdio`/stdin-stdout style, never
+function-signature style) rather than a verifier bug, since the same `code`
+verifier was independently confirmed working (162/164 canonical solutions
+pass) in the eval-set verification above. (3) `ngu0875_n8_k16_seed1`'s
+result is **invalid**: its per-job local nginx code-exec API silently died
+~2.5 min into the eval and never recovered, forcing every reward to 0.0 for
+the rest of the run (Beaker exit code was still 0 — nothing would have
+caught this without checking the actual eval numbers). This is the same
+"silent reward corruption on verifier-infra failure" failure mode as the
+nginx `proxy_read_timeout` bug found during the crash investigation above,
+but a different underlying trigger (an isolated crash, not a shared
+timeout misconfiguration) — needs a re-run before drawing any conclusion
+about `p=0.875`.

@@ -2493,3 +2493,117 @@ there's no separation *mechanism* being exercised there beyond that.
 - `scripts/data/create_deepcoder_data.py` (per-source eval tags)
 - `scripts/data/create_humanevalplus_data.py` (new)
 - `scripts/train/qwen/deepcoder_1_5b.sh` (added humanevalplus_test to EVAL_DATASETS)
+
+## 2026-07-27: Eval-only checkpoint comparison — 3 baselines + 3 NGU (n8_k16), lcbv5 + humanevalplus
+
+`--eval_only` runs (4 GPUs each, `WORKSPACE=ai2/open-instruct-dev`, `PRIORITY=urgent`,
+`CLUSTER` left at script default `ai2/jupiter`) against the actual saved HF-format
+checkpoints from 6 of the K/NGU sweep runs, restricted to
+`--dataset_mixer_eval_list mnoukhov/deepcoder_lcbv5_test 1.0 mnoukhov/humanevalplus_test 1.0`
+(per user request, to see these two report separately post-fix — see the section above).
+
+Checkpoint selection: "just the last one" per run, since only 3/6 runs have actually reached
+the full 500-step target so far (the other 3 are still mid-sweep, cycling through the ongoing
+crash/resume loop tracked by `watch_sweep.sh`). Checkpoints live under
+`/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/` (mason's
+`--auto_output_dir_path` default); found by walking `*_checkpoints/step_N` dirs across all
+resume-tagged reruns of each config and taking the max N, since `setup_runtime_variables`
+mints a fresh timestamped `run_name` (hence a fresh checkpoint dir) on every relaunch and step
+count only continues monotonically *across* those dirs via checkpoint-state resume.
+
+| Config | Seed | Checkpoint | Step | Beaker |
+|---|---|---|---|---|
+| baseline_n8_k16 | 1 | `..._baseline_n8_k16__1__1784967249` (final save; Beaker job succeeded) | 500 (complete) | [01KYJTJ9EKDR8TY4R3M25SDY4V](https://beaker.org/ex/01KYJTJ9EKDR8TY4R3M25SDY4V) |
+| baseline_n8_k16 | 2 | `..._baseline_n8_k16_seed2_resume3__2__1785154849_checkpoints/step_500` | 500 (complete) | [01KYJTK89GQH71M7ED63SP9MZ1](https://beaker.org/ex/01KYJTK89GQH71M7ED63SP9MZ1) |
+| baseline_n8_k16 | 3 | `..._baseline_n8_k16_seed3_resume3__3__1785158507_checkpoints/step_300` | 300 (mid-sweep, latest available) | [01KYJTM58ZPFTVDK6C9WF082CX](https://beaker.org/ex/01KYJTM58ZPFTVDK6C9WF082CX) |
+| ngu05_n8_k16 | 1 | `..._ngu05_n8_k16__1__1784967885` (final save; Beaker job succeeded) | 500 (complete) | [01KYJTMX0Z8KWXYYD531679954](https://beaker.org/ex/01KYJTMX0Z8KWXYYD531679954) |
+| ngu075_n8_k16 | 1 | `..._ngu075_n8_k16_seed1_resume3urgent__1__1785122081_checkpoints/step_500` | 500 (complete, after 2 crash-resumes) | [01KYJTNN43N39B4Q2QJ36EZ455](https://beaker.org/ex/01KYJTNN43N39B4Q2QJ36EZ455) |
+| ngu0875_n8_k16 | 1 | `..._ngu0875_n8_k16__1__1784968037` (final save; Beaker job succeeded) | 500 (complete) | [01KYJTPBM7E74H4AX04NGT7YQZ](https://beaker.org/ex/01KYJTPBM7E74H4AX04NGT7YQZ) |
+
+Note: "three baselines and three NGUs" was read as the 3 baseline seeds (1/2/3) + the 3 NGU
+p-values (0.5/0.75/0.875) at seed1 -- seed1 happens to be where all 4 arms (baseline + 3 NGU)
+already completed the full 500-step run, making it the natural "one representative per NGU
+value" choice. Seed2/seed3 for the NGU arms were *not* run here; only baseline got all 3 seeds
+evaluated. Flag if a different 6-way split was intended.
+
+### Launch commands
+
+```
+export WORKSPACE=ai2/open-instruct-dev PRIORITY=urgent NUM_GPUS=4
+
+EXP=eval_baseline_n8_k16_seed1 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --eval_only --model_name_or_path <checkpoint path> \
+  --dataset_mixer_eval_list mnoukhov/deepcoder_lcbv5_test 1.0 mnoukhov/humanevalplus_test 1.0 \
+  --send_slack_alerts False
+# ...repeated per checkpoint above (EXP=eval_baseline_n8_k16_seed2/seed3, eval_ngu05/075/0875_n8_k16_seed1)
+```
+
+All 6 confirmed `pending` (queued on jupiter) immediately after launch, no arg-parse errors.
+
+## 2026-07-27: Eval-only checkpoint comparison results — 3 baselines + 3 NGU (n8_k16)
+
+All 6 jobs from the section above ran to completion (`exitCode=0` for all). Jupiter queue time
+was long (~37 min pending before the first job started; last job finished ~64 min after launch),
+but each eval itself took only ~2-13 min once scheduled, consistent with the ~10 min/run estimate.
+Metrics pulled directly from each job's stdout rich-metrics table (`model_utils.print_rich_single_line_metrics`,
+logged once per job right after `📊 Evaluation responses received`) via `beaker experiment logs <id>`
+— wandb links included below for anyone who wants full curves/samples but weren't otherwise queried.
+
+| Config | Seed | Checkpoint step | eval/scores | lcbv5 pass@1 | humanevalplus pass@1 | Beaker | wandb | Status |
+|---|---|---|---|---|---|---|---|---|
+| baseline_n8_k16 | 1 | 500 (complete) | 1.44 | 0.21 | 0.00 | [01KYJTJ9EKDR8TY4R3M25SDY4V](https://beaker.org/ex/01KYJTJ9EKDR8TY4R3M25SDY4V) | [r07owo48](https://wandb.ai/ai2-llm/open_instruct_internal/runs/r07owo48) | succeeded |
+| baseline_n8_k16 | 2 | 500 (complete) | 1.50 | 0.19 | 0.00 | [01KYJTK89GQH71M7ED63SP9MZ1](https://beaker.org/ex/01KYJTK89GQH71M7ED63SP9MZ1) | [w1c4m3gq](https://wandb.ai/ai2-llm/open_instruct_internal/runs/w1c4m3gq) | succeeded |
+| baseline_n8_k16 | 3 | 300 (mid-sweep, partial) | 1.40 | 0.18 | 0.00 | [01KYJTM58ZPFTVDK6C9WF082CX](https://beaker.org/ex/01KYJTM58ZPFTVDK6C9WF082CX) | [syvzps7d](https://wandb.ai/ai2-llm/open_instruct_internal/runs/syvzps7d) | succeeded |
+| ngu05_n8_k16 | 1 | 500 (complete) | 1.25 | 0.15 | 0.00 | [01KYJTMX0Z8KWXYYD531679954](https://beaker.org/ex/01KYJTMX0Z8KWXYYD531679954) | [sdm5xbz5](https://wandb.ai/ai2-llm/open_instruct_internal/runs/sdm5xbz5) | succeeded |
+| ngu075_n8_k16 | 1 | 500 (complete) | 1.38 | 0.17 | 0.00 | [01KYJTNN43N39B4Q2QJ36EZ455](https://beaker.org/ex/01KYJTNN43N39B4Q2QJ36EZ455) | [jb9c2msw](https://wandb.ai/ai2-llm/open_instruct_internal/runs/jb9c2msw) | succeeded |
+| ngu0875_n8_k16 | 1 | 500 (complete) | **0.00 (invalid, see below)** | **0.00 (invalid)** | **0.00 (invalid)** | [01KYJTPBM7E74H4AX04NGT7YQZ](https://beaker.org/ex/01KYJTPBM7E74H4AX04NGT7YQZ) | [k9l3eie9](https://wandb.ai/ai2-llm/open_instruct_internal/runs/k9l3eie9) | succeeded (job), eval data corrupted |
+
+(`lcbv5`/`humanevalplus` columns are `eval/pass_at_1/code_stdio_lcbv5` and
+`eval/pass_at_1/code_humanevalplus` respectively — the per-source eval tags added earlier the
+same day. `pass_at_1_unbiased` matched `pass_at_1` exactly in every run, as expected at
+`eval_pass_at_k=1`.)
+
+### `ngu0875_n8_k16_seed1` result is invalid — local code-exec API died mid-eval
+
+Every metric for this one job is a flat `0.00e+00` (`eval/scores`, `objective/verifiable_reward`,
+`objective/code_reward`, `objective/code_stdio_reward`, `pass_at_1`, both per-dataset pass@1s —
+all zero), while `stop_rate=0.99` and `sequence_lengths` (mean 8131, matching the other 5 runs)
+show the model generated normal-looking completions. Root cause, from the job's stdout: the
+per-job local nginx code-execution load balancer (`code_api_setup.sh`, port 8070) started and
+passed its health check fine at launch (`23:24:14 ✓ CODE_API_URL is responding correctly`), but
+by `23:26:46` every `/test_program` and `/test_program_stdio` call started failing with
+`ConnectionResetError` then `Connection refused` (`Failed to establish a new connection: [Errno
+111]`), and **never recovered** for the rest of the run (115 consecutive connection-error log
+lines through to the final eval at `23:29:14`). None of the other 5 jobs show a single
+connection-error line in their logs, so this looks like an isolated silent nginx/local-code-server
+crash specific to this one job, not a systemic regression of the `code_api_setup.sh` fix from
+`1ae99daa6`. Every verification request during the outage window was scored `0.0` by
+`ground_truth_utils`' broad exception handling — the same "silent reward corruption on
+verifier-infra failure" failure mode already flagged in the sweep-wide crash investigation
+(see [that section](#sweep-wide-crash-investigation-three-separate-root-causes-found-and-fixed)),
+just triggered by a different underlying infra fault (nginx dying, not the 5s `proxy_read_timeout`
+or the shared-API `500`s). This job's Beaker exit code is 0 (no crash, ran to completion), so
+nothing here would have surfaced without checking the actual eval numbers.
+**`ngu0875_n8_k16` needs a re-run before drawing any conclusion about `p=0.875`.**
+
+### Summary across the 5 valid runs
+
+`baseline_n8_k16` has the best `lcbv5` pass@1 and best aggregate `eval/scores` at every seed
+checked (seed1: 0.21 / 1.44, seed2: 0.19 / 1.50, seed3 @ step 300: 0.18 / 1.40), beating both
+`ngu05_n8_k16` (0.15 / 1.25) and `ngu075_n8_k16` (0.17 / 1.38) at seed1 — i.e. in this
+single-seed-per-NGU-arm comparison, NGU regularization looks like it costs lcbv5 performance
+rather than helping, the opposite of the deepscaler finding. This is not a controlled comparison
+(only baseline has 3 seeds; NGU arms have 1 each, and baseline seed3 is a partial 300-step
+checkpoint) so treat as directional only pending more NGU seeds.
+
+`humanevalplus` pass@1 is **exactly 0.00 for all 5 valid runs**, not just low — every one of the
+164 humanevalplus problems failed verification in every run. Plausible explanation: all three
+training datasets (`deepcoder_lcbv5`, `deepcoder_primeintellect`, `deepcoder_taco`) are
+`code_stdio`-format (stdin/stdout competitive-programming style), so none of these checkpoints
+were ever trained to produce plain function-signature-style solutions matching HumanEvalPlus's
+assert-based harness — likely an output-format mismatch rather than a verifier bug (the
+`code_reward`/`code_correct_rate` objective metrics, which route through the separate `code`
+non-stdio verifier, are also flat zero, and the same verifier confirmed 162/164 canonical
+solutions pass with only 2 real failures per the earlier humanevalplus-data verification pass, so
+the harness itself works). Worth spot-checking a couple of raw completions before treating this as
+fully conclusive, but there's no sign of a verifier-side bug specific to today's run.
