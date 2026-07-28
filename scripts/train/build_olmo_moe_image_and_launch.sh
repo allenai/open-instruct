@@ -1,6 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
+cuda_version=13
+if [[ "${1:-}" == "--cuda-version" ]]; then
+  cuda_version="${2:?--cuda-version requires 12 or 13}"
+  shift 2
+elif [[ "${1:-}" == --cuda-version=* ]]; then
+  cuda_version="${1#*=}"
+  shift
+fi
+if [[ "$cuda_version" != "12" && "$cuda_version" != "13" ]]; then
+  echo "Error: --cuda-version must be 12 or 13."
+  exit 1
+fi
+if [[ $# -eq 0 ]]; then
+  echo "Usage: $0 [--cuda-version 12|13] SCRIPT [SCRIPT_ARGS...]"
+  exit 1
+fi
+
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "Error: This directory is not a Git repository."
   exit 1
@@ -15,8 +32,8 @@ fi
 git_hash=$(git rev-parse --short HEAD)
 git_branch=$(git rev-parse --abbrev-ref HEAD)
 sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-base_image_name=open-instruct-integration-test-${sanitized_branch}-olmo-moe-base
-image_name=open-instruct-integration-test-${sanitized_branch}-olmo-moe
+base_image_name=open-instruct-integration-test-${sanitized_branch}-olmo-moe-base-cuda${cuda_version}
+image_name=open-instruct-integration-test-${sanitized_branch}-olmo-moe-cuda${cuda_version}
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
 existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null | jq -r '.[0].description // ""' || echo "")
@@ -57,19 +74,32 @@ if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"*
   echo "Beaker OLMo MoE image already exists for commit $git_hash, skipping build and upload."
 else
   cache_repo="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
-  build_docker_image "$base_image_name" Dockerfile "$cache_repo"
+  if [[ "$cuda_version" == "13" ]]; then
+    torch_cuda_arch_list="9.0 10.0 10.3"
+    nvte_cuda_archs="90;100;103"
+  else
+    torch_cuda_arch_list="9.0 10.0"
+    nvte_cuda_archs="90;100"
+  fi
+  build_docker_image \
+    "$base_image_name" \
+    Dockerfile \
+    "$cache_repo" \
+    --build-arg "CUDA_VERSION=$cuda_version"
   build_docker_image \
     "$image_name" \
     Dockerfile.olmo-moe \
     "${cache_repo}-olmo-moe" \
-    --build-arg "OPEN_INSTRUCT_BASE_IMAGE=$base_image_name"
+    --build-arg "OPEN_INSTRUCT_BASE_IMAGE=$base_image_name" \
+    --build-arg "TORCH_CUDA_ARCH_LIST=$torch_cuda_arch_list" \
+    --build-arg "NVTE_CUDA_ARCHS=$nvte_cuda_archs"
 
   beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
   beaker image create \
     "$image_name" \
     --name "$image_name" \
     --workspace "ai2/$beaker_user" \
-    --description "Git commit: $git_hash; variant: olmo-moe"
+    --description "Git commit: $git_hash; variant: olmo-moe; CUDA: $cuda_version"
 fi
 
 if [[ "${OPEN_INSTRUCT_BUILD_ONLY:-0}" == "1" ]]; then
