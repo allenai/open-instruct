@@ -42,6 +42,10 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
         --no-build-isolation \
         "git+https://github.com/NVIDIA/TransformerEngine.git@v${TRANSFORMER_ENGINE_VERSION}"
 
+# TE imports the FA3 interface from its package namespace; the Open Instruct wheel installs it at top level.
+RUN ln -sf ../flash_attn_interface.py /stage/.venv/lib/python3.12/site-packages/flash_attn_3/flash_attn_interface.py \
+    && touch /stage/.venv/lib/python3.12/site-packages/flash_attn_3/__init__.py
+
 # Fail the image build if the exact APIs consumed by OLMo-core are unavailable.
 RUN /stage/.venv/bin/python -c \
     "import grouped_gemm.ops; from transformer_engine.pytorch.permutation import moe_permute, moe_unpermute; assert callable(moe_permute) and callable(moe_unpermute)"
