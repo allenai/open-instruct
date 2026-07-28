@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -218,6 +220,74 @@ class TestVllmUtils3(unittest.TestCase):
         self.assertEqual(result.request_info.tool_runtimes, [0.0, 0.0])
         self.assertEqual(result.request_info.tool_calleds, [False, False])
         self.assertEqual(result.request_info.rollout_states, [{}, {}])
+
+
+class TestProcessRequest(unittest.TestCase):
+    def setUp(self):
+        self.sub_request_id = "train_0_1_0"
+        self.base_request_id = "train_0_1"
+        self.sampling_params = vllm_utils.SamplingConfig(temperature=1.0, max_tokens=16)
+        self.actor = SimpleNamespace(
+            server_port=8000,
+            request_metadata={
+                self.base_request_id: {
+                    "prompt_token_ids": [1, 2, 3],
+                    "active_tools": None,
+                    "env_config": vllm_utils.EnvConfig(),
+                    "original_sampling_params": self.sampling_params,
+                }
+            },
+            llm_engine=SimpleNamespace(
+                model_config=SimpleNamespace(max_model_len=32), tokenizer=SimpleNamespace(eos_token_id=99)
+            ),
+            pools={},
+            max_steps=5,
+            per_turn_max_tokens=None,
+            model_name="test-model",
+            tool_parser=MagicMock(),
+            mask_tool_use=True,
+            active_tasks={self.sub_request_id: mock.sentinel.task},
+            completion_queue=mock.Mock(),
+        )
+        self.actor.tool_parser.get_tool_calls.return_value = []
+
+    def test_empty_completion_uses_eos_fallback(self):
+        output = SimpleNamespace(
+            token_ids=[], logprobs=SimpleNamespace(token_logprobs=[]), text="", finish_reason="stop"
+        )
+        self.actor.client = SimpleNamespace(
+            completions=SimpleNamespace(create=mock.AsyncMock(return_value=SimpleNamespace(choices=[output])))
+        )
+
+        with mock.patch.object(vllm_utils, "_check_health", new=mock.AsyncMock()):
+            asyncio.run(vllm_utils.process_request(self.actor, self.sub_request_id, self.sampling_params))
+
+        queued = self.actor.completion_queue.put.call_args.args[0]["request_output"].outputs[0]
+        self.assertEqual(queued.token_ids, [99])
+        self.assertEqual(queued.mask, [1])
+        self.assertEqual(len(queued.logprobs), 1)
+        self.assertTrue(torch.isnan(torch.tensor(queued.logprobs[0])))
+        self.assertNotIn(self.sub_request_id, self.actor.active_tasks)
+
+    @parameterized.expand(
+        [
+            ("missing", None, "without logprobs"),
+            ("mismatched", [-0.1], "2 tokens but 1 logprobs"),
+            ("missing_value", [-0.1, None], "missing token logprob"),
+        ]
+    )
+    def test_nonempty_completion_requires_one_logprob_per_token(self, _name, token_logprobs, expected_error):
+        logprobs = None if token_logprobs is None else SimpleNamespace(token_logprobs=token_logprobs)
+        output = SimpleNamespace(token_ids=[4, 5], logprobs=logprobs, text="answer", finish_reason="stop")
+        self.actor.client = SimpleNamespace(
+            completions=SimpleNamespace(create=mock.AsyncMock(return_value=SimpleNamespace(choices=[output])))
+        )
+
+        with (
+            mock.patch.object(vllm_utils, "_check_health", new=mock.AsyncMock()),
+            self.assertRaisesRegex(RuntimeError, expected_error),
+        ):
+            asyncio.run(vllm_utils.process_request(self.actor, self.sub_request_id, self.sampling_params))
 
 
 class TestModelDimsFromVllmConfig(unittest.TestCase):

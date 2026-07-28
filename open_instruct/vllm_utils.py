@@ -1033,8 +1033,24 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             response_tokens.extend(model_tokens)
             current_prompt.extend(model_tokens)
 
-            assert output.logprobs and output.logprobs.token_logprobs, "logprobs must be available"
-            for logprob in output.logprobs.token_logprobs:
+            token_logprobs = output.logprobs.token_logprobs if output.logprobs is not None else None
+            if not model_tokens and not token_logprobs:
+                token_logprobs = []
+            elif token_logprobs is None:
+                raise RuntimeError(
+                    f"vLLM completion for request {sub_request_id} returned {len(model_tokens)} tokens without logprobs"
+                )
+            elif len(token_logprobs) != len(model_tokens):
+                raise RuntimeError(
+                    f"vLLM completion for request {sub_request_id} returned {len(model_tokens)} tokens "
+                    f"but {len(token_logprobs)} logprobs"
+                )
+
+            for logprob in token_logprobs:
+                if logprob is None:
+                    raise RuntimeError(
+                        f"vLLM completion for request {sub_request_id} returned a missing token logprob"
+                    )
                 response_logprobs.append(logprob)
                 cumulative_logprob += logprob
             response_masks.extend([1] * len(model_tokens))
