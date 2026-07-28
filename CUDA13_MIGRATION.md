@@ -10,6 +10,11 @@ lock → missing B300 GPU spec → unregistered holmes cluster → missing oe-ev
 → **flash-attn-4 vs Ulysses sequence-parallel on Blackwell**. None were in the cu13
 math stack itself — that worked first try.
 
+**fa4 + Ulysses SP on B300 is now RESOLVED (2026-07-27)** via two dependency bumps —
+**deepspeed 0.18.4→0.19.3** (permits fa4 in Ulysses) and **flash-attn-4 b5→b23** (adds the
+head_dim=256 Blackwell kernel Qwen3.5 needs). Validated end-to-end on the 9B; see §8 + §10.
+The `--attn_implementation flash_2` workaround is no longer required (kept as a fallback).
+
 ---
 
 ## 0. Reproduce (cu13 holmes launch)
@@ -139,51 +144,80 @@ found by trial across three holmes launches:
 3. **fa2 → works.** SP-compatible **and** the `flash_attn 2.8.3+cu130` wheel has Blackwell
    kernels (verified locally: `flash_attn_func` runs on the B300). **This is the fix.**
 
-- **Fix:** `--attn_implementation flash_2` on B300 + SP. Config-only → reuse the image.
-- **Perf note:** on B300 you're capped at fa2 whenever SP is on (fa4 > fa3 > fa2 in speed).
-- **Path to fa4+SP (deepspeed bump — verified upstream):** we're on **deepspeed 0.18.4**,
-  whose `ulysses_sp.py` uses the hardcoded allowlist. Deepspeed **master already refactored**
-  this to a blocklist `unsupported_attn_implementation = ["eager","paged|eager"]` and otherwise
-  validates against `transformers.ALL_ATTENTION_FUNCTIONS` — and `flash_attention_4` IS in that
-  registry (transformers 5.4.0). So a newer deepspeed would **permit fa4 with Ulysses SP**.
-  Follow-up: bump deepspeed (re-lock + rebuild), drop the `--attn_implementation flash_2`
-  override (auto-detect → fa4), and verify fa4 runs correctly through Ulysses' all-to-all at
-  runtime (permitted ≠ validated). Confirm which released version has the refactor (0.18.4 lacks it).
-- **Candidate codebase fix (TODO):** make `detect_attn_implementation()` SP-aware — when
-  sequence parallelism is enabled, don't pick fa4 (and don't pick fa3 on Blackwell where it
-  has no kernel) → default to fa2, so SP runs on B300 work without the override.
-- **`main` is affected too (upstream candidate).** `origin/main` pins the same
-  `deepspeed>=0.18.3` (→0.18.4, old allowlist) and the same `flash-attn-4` wheel + fa4
-  auto-detect (all introduced by #1758). So SP training on B300 from `main` hits the identical
-  crash — this is not fork-specific. #1758's B300 GPU tests didn't exercise SP>1, so it went
-  unnoticed. The detect fix and/or deepspeed bump belong upstream.
+- **Interim fix (what the successful fa2 runs used):** `--attn_implementation flash_2` on B300 + SP.
+  Config-only → reuse the image. fa2's `flash_attn 2.8.3+cu130` wheel has Blackwell kernels for
+  every head dim we use (incl. Qwen3.5's hd256). **Now superseded by the fa4 path below**, but
+  remains a valid fallback.
+
+### fa4 + Ulysses SP on B300 — RESOLVED (2026-07-27), a TWO-part fix
+
+fa4 with SP on B300 was blocked by **two independent gaps**. Both are now fixed; bump both deps:
+
+1. **deepspeed allowlist → permit fa4 in Ulysses.** deepspeed **0.18.4**'s `ulysses_sp.py` used the
+   hardcoded allowlist that rejected fa4 (point 1 above). **deepspeed ≥0.19.0** (PR #7887, first in
+   v0.19.0 2026-05-06; we pin **0.19.3**) replaced it with a *blocklist*
+   `unsupported_attn_implementation = ["eager","paged|eager"]` and otherwise validates against
+   `transformers.ALL_ATTENTION_FUNCTIONS` (which registers `flash_attention_4`). ⇒ Ulysses now
+   **permits** fa4. Verified: the old `ValueError` is gone and fa4 reaches its actual kernel.
+2. **flash-attn-4 hd256 Blackwell kernel → the second, deeper gap.** Once *permitted*, fa4 on
+   **Qwen3.5-9B (head_dim=256)** still crashed *inside* the fa4 kernel at the learner's ZeRO-3 dummy
+   step: `AssertionError: (head_dim, head_dim_v)=(256, 256) is not supported on SM100/SM110`. fa4's
+   `flash_attn.cute` (which OWNS `flash_attn/cute/`, provided by the **flash-attn-4** package —
+   *not* the `flash-attn` 2.8.3 wheel) had **no head_dim>128 Blackwell kernel** in our pinned
+   **4.0.0b5**. Upstream added a dedicated **hd256 SM100 kernel** on 2026-04-23 (PR #2412,
+   `sm100_hd256_2cta_fmha_*`), shipped in later betas. **Bump the pin b5 → b23**
+   (`fa4-v4.0.0.beta23`). flash-attn-4 is pure-Python CuTeDSL that **JIT-compiles kernels at
+   runtime** → no cu130 wheel to find, no source build; a version bump is the whole fix. (Qwen3-0.6B
+   at hd128 was never affected.) Caveat: fa4 is still **beta**; hd256 fwd perf is being tuned upstream
+   (#2576), so benchmark vs fa2 before assuming it's faster.
+
+- **Validation (2026-07-27, see §10):** *(a)* local **standalone** fa4 hd256 fwd+bwd match SDPA to
+  rel ~3e-3 on the B300; *(b)* on holmes the 9B SP=2 smoke (deepspeed 0.19.3 + flash-attn-4 b23)
+  passed the **ZeRO-3 dummy step — a full fwd+bwd through fa4's hd256 kernel *inside* Ulysses'
+  all-to-all** — then weight-sync + into the training loop with **no crash**. So fa4+SP+hd256 is
+  proven end-to-end. (A nonzero reward-weighted step is still gated on rollout variance, §11 —
+  orthogonal to fa4.)
+- **Backend choice on B300+SP now:** with the two deps above, **fa4 (fastest) works for all head
+  dims** — `--attn_implementation flash_4` (or drop the override; auto-detect picks fa4). Keep
+  `flash_2` only as a fallback. **fa3 still has no Blackwell kernel — never use it on B300.**
+- **Candidate codebase fix (still nice-to-have):** make `detect_attn_implementation()` refuse fa3
+  on Blackwell (no kernel). fa4 auto-detect is now correct for SP given the deps.
+- **`main` is affected too (upstream candidate).** `origin/main` pins `deepspeed>=0.18.3` (old
+  allowlist) **and** flash-attn-4 b5 (no hd256 Blackwell kernel), both via #1758 — so SP+hd256
+  training on B300 from `main` hits *both* crashes in turn. #1758's B300 GPU tests didn't exercise
+  SP>1 or hd256. Both bumps (deepspeed ≥0.19.0, flash-attn-4 ≥b23) belong upstream.
 
 ## 9. Registry mirror (verify before every sandbox-RL launch)
 
 Sandbox images are pulled through a docker.io pull-through cache set by
 `--env MIRROR_URL`. A dead mirror hides as "working" (silent docker.io fallback).
 
-- **LIVE:** `jupiter-cs-aus-112.reviz.ai2.in:5000` (v2=200, pull-through OK; reachable
-  even from the holmes dev box).
-- **DEAD now:** `jupiter-cs-aus-137` (conn-fail) — the cu12 `qwen35_9b_dppo_repro.sh`
-  hardcodes `-137` and calls it "live"; that comment is **stale**, update to `-112`.
-  `-193` also dead (long known).
+- **LIVE (2026-07-27):** `jupiter-cs-aus-102.reviz.ai2.in:5000` (v2=200, `python:3.12-slim`
+  pull-through=200). All cu13 scripts now point here.
+- **DEAD:** `-112` (was live 2026-07-23, dead by 2026-07-27), `-137`, `-193`. **Mirrors move —
+  re-check every launch.** The cu12 `qwen35_9b_dppo_repro.sh` hardcodes `-137` and calls it
+  "live"; that comment is stale.
 - Check: `curl -m8 http://<host>/v2/` (want 200) and a `.../manifests/3.12-slim` pull-through.
 
-## 10. Validation status (2026-07-23)
+## 10. Validation status (2026-07-23; fa4 update 2026-07-27)
 
 | Run | Config | Result |
 |-----|--------|--------|
 | Local 2-GPU | SP=1, stage 2, `swerl_sandbox`, Qwen3-0.6B | **PASSED** — 2 steps, exit 0, wandb `lvb9a3to` |
 | holmes `01KY6KQZ` | 4-GPU vanillux+DPPO+SP=2, Qwen3-0.6B | crashed: missing `oe-eval-internal` (§7) |
-| holmes `01KY6MFA` | ” (image w/ oe-eval-internal) | crashed later: fa4 vs SP (§8) |
+| holmes `01KY6MFA` | ” (image w/ oe-eval-internal) | crashed later: fa4 vs SP allowlist (§8) |
 | holmes `01KY6N9F` | ” + `--attn_implementation flash_3` | crashed later: fa3 no B300 kernel (§8) |
 | holmes `01KY6VRG/VSP` | 4-GPU + `flash_2`, Qwen3-0.6B (4k) | **infra PASSED** exit 0; empty batch (§11) |
 | holmes 9B smokes | 4-GPU `flash_2`, tmax **9B `_cg`** (`step_360_cg`), 4k & 64k | **infra PASSED** exit 0; empty batch (§11) |
 | holmes `01KY6Z9F` | **full prod 4-node/32-B300**, `flash_2`, 64k, SP=4, DPPO, `hamishivi/Qwen3.5-9B`, 8×32 rollouts, `total_episodes 6400` | **PASSED — real gradient steps**: `scores 0.83`, `advantages ∈ [-0.94, 0.38]`, non-empty batches, `seq_len_max 65536` |
+| **fa4 local scratch** | standalone fa4 **hd256** fwd+bwd on B300, flash-attn-4 **b23** | **PASSED** — matches SDPA rel ~3e-3, no assert |
+| **holmes `01KYK2ZF`** | 4-GPU SP=2, 9B `step_360_cg`, `flash_4`, deepspeed 0.19.3 + flash-attn-4 **b5** | crashed: fa4 hd256 assert on SM100 (b5 lacks kernel, §8) |
+| **holmes `01KYK6G0` (AS-on) / `01KYK7WM` (noAS)** | ” + flash-attn-4 **b23** | **fa4+SP+hd256 PASSED** — ZeRO-3 dummy step (fwd+bwd through Ulysses) + weight-sync + training loop, exit 0, no crash; empty batch (§11) |
 
-Every failure along the way was a config/hardware-enablement gap — the CUDA-13 math stack
-(torch cu130, vLLM cu130 flashinfer/CUDA-graphs/KV, deepspeed) came up first try each time.
+Every failure along the way was a config / hardware-enablement / dependency-version gap — the
+CUDA-13 math stack (torch cu130, vLLM cu130 flashinfer/CUDA-graphs/KV, deepspeed) came up first
+try each time. The fa4-on-B300 path required **two** dependency bumps (deepspeed ≥0.19.0 to permit
+fa4 in Ulysses, flash-attn-4 ≥b23 for the hd256 Blackwell kernel); see §8.
 
 ## 11. Reward variance ≠ context length (why smokes had empty batches)
 

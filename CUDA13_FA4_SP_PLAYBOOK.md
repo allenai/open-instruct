@@ -1,11 +1,30 @@
 # Playbook: get flash-attn-4 working with Ulysses SP on B300 (deepspeed/transformers bump)
 
-**Goal.** On B300/holmes, sequence-parallel (`--sequence_parallel_size > 1`) training is
-currently forced onto **flash-attn-2** (`--attn_implementation flash_2`) because fa4 (the
-fastest, Blackwell-native backend, which the code auto-detects on B300) is blocked by the
+> ## ✅ RESOLVED — 2026-07-27
+> fa4 + Ulysses SP on B300 now works. It took **TWO** dependency bumps, not one:
+> 1. **deepspeed 0.18.4 → 0.19.3** (`deepspeed>=0.19.0`, PR #7887) — replaces the Ulysses attn
+>    *allowlist* with a blocklist ⇒ **permits** fa4. (This playbook's original hypothesis.)
+> 2. **flash-attn-4 4.0.0b5 → b23** (`fa4-v4.0.0.beta23`) — adds the **head_dim=256 Blackwell
+>    (SM100) cute kernel** (upstream PR #2412). Without it, once fa4 was *permitted* it still
+>    asserted inside the kernel on Qwen3.5-9B (hd256): *"(head_dim, head_dim_v)=(256,256) is not
+>    supported on SM100/SM110"*. This second gap was NOT anticipated below — the playbook assumed
+>    the deepspeed allowlist was the only blocker. flash-attn-4 is pure-Python CuTeDSL (JIT at
+>    runtime) so it's just a pin bump — no cu130 wheel, no source build.
+>
+> **Validated:** local standalone fa4 hd256 fwd+bwd match SDPA (rel ~3e-3); holmes 9B SP=2 smoke
+> passed the ZeRO-3 dummy step (fwd+bwd through fa4 hd256 *inside* Ulysses' all-to-all) + weight
+> sync + training loop, no crash (ex `01KYK6G0`/`01KYK7WM`). All 9B B300 smokes are now on `flash_4`.
+> Commits on `omni_agent_cuda13`: `8b4f8f7ac` (deepspeed), `00a4feccb` (flash-attn-4 b23). fa4 is
+> still upstream **beta** and hd256 fwd perf is being tuned (#2576) — benchmark vs fa2 before assuming
+> it's faster. The procedure below is kept as the executed record + template for future attn bumps.
+
+**Goal (original).** On B300/holmes, sequence-parallel (`--sequence_parallel_size > 1`) training was
+forced onto **flash-attn-2** (`--attn_implementation flash_2`) because fa4 (the fastest,
+Blackwell-native backend, which the code auto-detects on B300) was blocked by the
 **deepspeed 0.18.4** Ulysses allowlist, and fa3 has no Blackwell kernel. This playbook bumps
-deepspeed (and, if needed, transformers) so **fa4 works with Ulysses SP**, then rebuilds the
-cu13 image and re-runs the holmes smoke to validate — restoring the fastest attention on B300.
+deepspeed so **fa4 works with Ulysses SP**, then rebuilds the cu13 image and re-runs the holmes
+smoke to validate — restoring the fastest attention on B300. (See the RESOLVED note above: a second
+flash-attn-4 bump was also required.)
 
 Root-cause detail + the full attention saga live in **`CUDA13_MIGRATION.md` §8**. Read that
 first. This doc is the *how-to-execute* companion (env, edits, build, publish, smoke, monitor).
