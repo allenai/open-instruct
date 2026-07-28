@@ -1510,22 +1510,22 @@ def broadcast_weights_to_vllm(
     Must be called on ALL ranks when using DeepSpeed stage 3 or FSDP,
     since gathering is a collective operation. Only rank 0 sends weights.
 
-    When model_update_group is None, uses IPC backend (single GPU mode).
-    Otherwise uses NCCL backend.
+    Uses IPC only for a single trainer rank without an NCCL transfer handle.
+    In a distributed trainer, nonzero ranks do not own that handle but must still
+    follow the NCCL path so every rank participates in ZeRO/FSDP collectives.
 
     The function is synchronous: on success all receivers have consumed and finalized
     every tensor and the model step has been stamped. The empty return list preserves
     the historical caller contract without exposing unfinished inner Ray references.
     """
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
     is_rank_0 = rank == 0
-    print(f"[weight-sync-debug] learner rank {rank} entered transfer implementation", flush=True)
     logger.info("Learner rank %s preparing model step %s for live weight transfer", rank, model_step)
     adapter = resolve_weight_export_adapter(model)
-    print(f"[weight-sync-debug] learner rank {rank} resolved adapter {adapter.name}", flush=True)
     metadata = _collect_weight_metadata(model, name_mapper, adapter)
-    print(f"[weight-sync-debug] learner rank {rank} collected {len(metadata.specs)} tensor specs", flush=True)
-    backend = "ipc" if model_update_group is None else "nccl"
+    use_ipc = model_update_group is None and world_size == 1
+    backend = "ipc" if use_ipc else "nccl"
     is_zero3 = any(hasattr(param, "ds_id") for param in model.parameters())
     gather_policy = "per-parameter" if is_zero3 else "whole-model" if isinstance(model, (FSDPModule, FSDP)) else "none"
 
@@ -1557,18 +1557,13 @@ def broadcast_weights_to_vllm(
     finish_attempted = False
     try:
         if is_rank_0:
-            print("[weight-sync-debug] learner rank 0 calling vLLM sleep", flush=True)
             _call_engine_method(vllm_engines, "sleep")
-            print("[weight-sync-debug] learner rank 0 waking vLLM weights", flush=True)
             _call_engine_method(vllm_engines, "wake_up_weights")
             start_attempted = True
-            print("[weight-sync-debug] learner rank 0 starting vLLM weight update", flush=True)
             _call_engine_method(vllm_engines, "start_weight_update")
-        print(f"[weight-sync-debug] learner rank {rank} entering pre-transfer barrier", flush=True)
         _distributed_barrier()
-        print(f"[weight-sync-debug] learner rank {rank} exited pre-transfer barrier", flush=True)
 
-        if model_update_group is None:
+        if use_ipc:
             _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, adapter)
         else:
             trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=True)

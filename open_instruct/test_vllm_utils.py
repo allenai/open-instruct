@@ -319,6 +319,26 @@ class TestWeightSyncLifecycle(unittest.TestCase):
         self.assertEqual(events, ["sleep", "wake_up_weights", "start_weight_update", "finish_weight_update"])
         self.assertNotIn("set_model_step", events)
 
+    def test_distributed_nonzero_rank_without_transfer_handle_uses_nccl_path(self):
+        for param in self.model.parameters():
+            param.ds_id = id(param)
+
+        with (
+            mock.patch.object(vllm_utils.torch.distributed, "is_initialized", return_value=True),
+            mock.patch.object(vllm_utils.torch.distributed, "get_rank", return_value=1),
+            mock.patch.object(vllm_utils.torch.distributed, "get_world_size", return_value=8),
+            mock.patch.object(vllm_utils, "_distributed_barrier"),
+            mock.patch.object(vllm_utils, "_send_nccl_weights") as send_nccl_weights,
+            mock.patch.object(vllm_utils, "_broadcast_weights_ipc") as broadcast_weights_ipc,
+        ):
+            refs = vllm_utils.broadcast_weights_to_vllm(
+                self.model, self.engines, model_update_group=None, model_step=7, gather_whole_model=False
+            )
+
+        self.assertEqual(refs, [])
+        send_nccl_weights.assert_called_once()
+        broadcast_weights_ipc.assert_not_called()
+
     def test_ipc_sender_uses_packed_send_mode_and_all_engine_handles(self):
         captured = {}
 
