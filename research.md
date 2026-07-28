@@ -634,24 +634,30 @@ but a different underlying trigger (an isolated crash, not a shared
 timeout misconfiguration) — needs a re-run before drawing any conclusion
 about `p=0.875`.
 
-**Status (2026-07-28, full trajectory):** Extended the single-checkpoint comparison to every
-saved checkpoint (steps 100-500 as available) across all 12 (config, seed) lineages. See [the
-full trajectory writeup](experiment.md#2026-07-28-full-checkpoint-trajectory-eval--lcbv5-pass1-vs-step-all-3-seeds--4-configs)
-for the complete per-checkpoint table, best-step summary, and job roster (4 of the 12 original
-jobs had to be relaunched mid-run, and 2 more crashed partway through their checkpoint loop and
-needed a single-checkpoint backfill — same two infra failure modes as before: a GPU-memory crash
-between sequential checkpoints within one job, and the nginx-code-exec-API silent-death pattern
-that invalidated 3 more checkpoints this round). Headline finding: taking each lineage's best
-*valid* checkpoint anywhere in its trajectory (not just the final one), the single-checkpoint
-finding that baseline beats every NGU arm does **not** hold up — `ngu05_seed3` (0.21 lcbv5 pass@1
-at step 300) and `ngu0875_seed3` (0.19 at step 200) both match or beat baseline's best (0.19,
-seed 3 at step 400), reversing the earlier "NGU costs lcbv5 performance" read. This should be
-treated cautiously though: the NGU trajectories that look best are exactly the ones truncated
-early by infra failures, so "best of an incomplete run" isn't a fair comparison to "best of a
-complete run." Within the handful of lineages that ran cleanly to their full requested length,
-lcbv5 pass@1 bounces ±0.03-0.05 step-to-step with no clear monotonic trend or late-training
-separation between baseline and any NGU value — the trajectory view mostly confirms "NGU roughly
-comparable to baseline, within noise" rather than showing a value that clearly overtakes or falls
-behind over training. Next step is re-running the truncated/invalidated cells
-(`baseline_seed2` steps 300-500, `ngu05_seed3` steps 400-500, `ngu0875_seed2` steps 200-400)
-before treating either direction as conclusive.
+**Status (2026-07-28, full trajectory, RESOLVED):** Extended the single-checkpoint comparison to
+every saved checkpoint (steps 100-500 as available) across all 12 (config, seed) lineages, then
+backfilled every gap left open by mid-run crashes. See the
+[corrected, all-gaps-backfilled writeup](experiment.md#2026-07-28-full-checkpoint-trajectory-eval-corrected--all-gaps-backfilled)
+(supersedes the [earlier partial version](experiment.md#2026-07-28-full-checkpoint-trajectory-eval--lcbv5-pass1-vs-step-all-3-seeds--4-configs))
+for the complete per-checkpoint tables, the 12-row best-step-per-lineage summary, and full job
+roster. Two distinct infra failure modes recurred throughout: a GPU-memory crash between
+sequential checkpoints within one job, and a silent nginx-code-exec-API death that zeros every
+reward for a checkpoint while the job still exits 0 — the latter hit two of the *backfill* jobs
+too (`ngu05_seed3` step 400, `ngu0875_seed2` step 400), so those two lineages remain capped at
+step 300 despite a second attempt.
+
+**Final verdict:** with all three seeds now available for every NGU value (not just seed 1) and
+each lineage scored by its own best checkpoint across the trajectory, the four configs are
+statistically indistinguishable on lcbv5 pass@1 — per-config mean of best-lcbv5-per-seed is
+baseline 0.180, ngu05 0.180, ngu075 0.183, ngu0875 0.180, all within the ±0.03-0.05 seed-to-seed
+noise band. The earlier "baseline beats every NGU arm" finding (2026-07-27, single seed per NGU
+value) turns out to be a seed-selection artifact: seed 1 happened to be the *worst* of the three
+seeds for both `ngu05` (0.14 vs. 0.19/0.21) and `ngu0875` (0.16 vs. 0.19/0.19), which is exactly
+why comparing baseline's 3 seeds against NGU's unluckiest single seed made NGU look worse. Once
+seed2/seed3 are included, every NGU value has at least one seed that ties or beats baseline's best
+seed (0.19). **Conclusion: this sweep provides no reliable evidence that NGU (at p=0.5/0.75/0.875)
+either helps or hurts lcbv5 pass@1 relative to baseline on DeepCoder-1.5B** — a real but small
+effect can't be ruled out, but distinguishing it would need more than 3 seeds/arm given the
+observed variance. No further action planned on this specific question; treating it as closed
+pending a reason to revisit (e.g. a differently-tuned NGU schedule, or K/N changes that reduce
+per-seed variance).

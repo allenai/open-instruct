@@ -2610,6 +2610,15 @@ fully conclusive, but there's no sign of a verifier-side bug specific to today's
 
 ## 2026-07-28: Full checkpoint-trajectory eval — lcbv5 pass@1 vs step, all 3 seeds × 4 configs
 
+**Superseded — see the
+["corrected, all gaps backfilled"](#2026-07-28-full-checkpoint-trajectory-eval-corrected--all-gaps-backfilled)
+section below.** This section's job roster and "best step" table were written before the
+`baseline_seed2`, `ngu075_seed1`, and `ngu0875_seed2` backfill jobs below had been checked; two of
+those backfills turned out to hit the *same* nginx code-exec failure as the checkpoints they were
+meant to replace. Job IDs, raw per-checkpoint numbers, and the failure-mode analysis below are
+still accurate and are carried forward as-is; only the "what's still missing" bookkeeping and the
+final ranking conclusion are superseded.
+
 Follow-up to the single-checkpoint comparison above: instead of "just the last checkpoint,"
 `--eval_only`-looped over *every* saved checkpoint (steps 100/200/.../500 as available) for all
 12 (config, seed) lineages, one Beaker job per lineage, each internally sequencing through its
@@ -2758,3 +2767,157 @@ sensitive to which checkpoints survived the infra failures above. Given how much
 was truncated or invalidated, the cleanest next step is re-running the incomplete/invalidated
 cells (`baseline_seed2` steps 300-500, `ngu05_seed3` steps 400-500, `ngu0875_seed2` steps
 200-400) rather than drawing a firm conclusion from what's here.
+
+## 2026-07-28: Full checkpoint-trajectory eval, corrected — all gaps backfilled
+
+Backfill jobs for the three gaps left open by the section above have now finished:
+`baseline_seed2` steps 300/400/500 ([01KYKJ2VBNG510KD6X30F7J11K](https://beaker.org/ex/01KYKJ2VBNG510KD6X30F7J11K)),
+`ngu075_seed1` step 500 ([01KYKJ2VBABAMF5DQVD586X6VW](https://beaker.org/ex/01KYKJ2VBABAMF5DQVD586X6VW)),
+and `ngu075_seed1` step 400 ([01KYKAEA22G6KWSPZ7CTBAHWFP](https://beaker.org/ex/01KYKAEA22G6KWSPZ7CTBAHWFP),
+already valid, no reissue needed), plus `ngu0875_seed2` steps 200/300/400
+([01KYKJMDYJAN92K4ZTPTV7P61S](https://beaker.org/ex/01KYKJMDYJAN92K4ZTPTV7P61S)). All were grepped
+for `Connection refused` (the nginx-code-exec-death signature from the previous section) in the
+window before each checkpoint's metrics block, not just checked for a completed block — see the
+finding below on why a "completed" block isn't sufficient on its own.
+
+**New finding: two of the backfill checkpoints are themselves invalid, hitting the identical
+nginx code-exec failure a second time.** `ngu05_seed3` step 400's backfill
+([01KYKAK52BXWQTRGS9QJKD1ADV](https://beaker.org/ex/01KYKAK52BXWQTRGS9QJKD1ADV)) and
+`ngu0875_seed2` step 400's backfill (from `01KYKJMDYJAN92K4ZTPTV7P61S` above) both produced a
+structurally-complete metrics block (`eval_step: 400` present, `Done step 400` printed, job exit
+0) with **every** metric flat `0.00e+00` — `eval/scores`, `objective/code_stdio_reward`,
+`pass_at_1`, both per-dataset pass@1s — while `sequence_lengths` still looks normal (~8300-8450,
+in line with every valid run), confirming generation succeeded but verification silently died.
+Both logs show a sustained run of `Connection refused` errors to `127.0.0.1:8070`
+(99 lines for the `ngu05_seed3` backfill, 120 for the `ngu0875_seed2` backfill) starting well
+before that checkpoint's eval and never recovering, vs. 0 such lines in every genuinely-valid job
+in this batch. This means the task's original assumption — "a completed `eval_step: N` metrics
+block = trustworthy data" — is not sufficient on its own; a job can complete cleanly and still log
+a fully zeroed, garbage block. `ngu075_seed1` step 500's backfill and all three of
+`ngu0875_seed2` steps 200/300/400 job's non-400 checkpoints (200, 300) came back clean (0
+connection-refused lines each) and are trusted.
+
+Net effect on the two lineages that needed backfills for a *missing final checkpoint*:
+`ngu05_seed3` still has no valid step-400 or step-500 data (400 obtained twice now, invalid both
+times; 500 never attempted) — its trajectory tops out at step 300. `ngu0875_seed2` gained valid
+step 200 and step 300 data from the backfill but step 400 remains invalid — its trajectory tops
+out at step 300. Every other lineage is now fully populated for its requested checkpoint range.
+
+### Per-config trajectories (rows = seed × step)
+
+**baseline**
+
+| Seed | Step | eval/scores | lcbv5 pass@1 | hep pass@1 | Note |
+|---|---|---|---|---|---|
+| 1 | 500 | 1.27 | 0.18 | 0.00 |  |
+| 2 | 100 | 1.25 | 0.17 | 0.00 |  |
+| 2 | 200 | 1.30 | 0.17 | 0.00 |  |
+| 2 | 300 | 1.27 | 0.15 | 0.00 |  |
+| 2 | 400 | 1.34 | 0.17 | 0.00 |  |
+| 2 | 500 | 1.32 | 0.16 | 0.00 |  |
+| 3 | 100 | 1.25 | 0.18 | 0.00 |  |
+| 3 | 200 | 1.28 | 0.16 | 0.00 |  |
+| 3 | 300 | 1.34 | 0.16 | 0.00 |  |
+| 3 | 400 | 1.43 | 0.19 | 0.00 |  |
+
+**ngu05 (p=0.5)**
+
+| Seed | Step | eval/scores | lcbv5 pass@1 | hep pass@1 | Note |
+|---|---|---|---|---|---|
+| 1 | 500 | 1.21 | 0.14 | 0.00 |  |
+| 2 | 100 | 1.35 | 0.19 | 0.00 |  |
+| 2 | 200 | 1.32 | 0.18 | 0.00 |  |
+| 2 | 300 | 1.19 | 0.15 | 0.00 |  |
+| 2 | 400 | 1.20 | 0.14 | 0.00 |  |
+| 2 | 500 | 1.31 | 0.19 | 0.00 |  |
+| 3 | 100 | 1.31 | 0.15 | 0.00 |  |
+| 3 | 200 | 1.26 | 0.15 | 0.00 |  |
+| 3 | 300 | 1.42 | 0.21 | 0.00 |  |
+| 3 | 400 | **INVALID** | **INVALID** | **INVALID** | nginx code-exec death, backfill re-hit same failure; step 500 never attempted |
+
+**ngu075 (p=0.75)**
+
+| Seed | Step | eval/scores | lcbv5 pass@1 | hep pass@1 | Note |
+|---|---|---|---|---|---|
+| 1 | 400 | 1.27 | 0.18 | 0.00 |  |
+| 1 | 500 | 1.44 | 0.19 | 0.00 |  |
+| 2 | 100 | 1.31 | 0.14 | 0.00 |  |
+| 2 | 200 | 1.37 | 0.18 | 0.00 |  |
+| 2 | 300 | 1.41 | 0.18 | 0.00 |  |
+| 3 | 100 | 1.30 | 0.18 | 0.00 |  |
+| 3 | 200 | 1.35 | 0.17 | 0.00 |  |
+| 3 | 300 | 1.28 | 0.15 | 0.00 |  |
+| 3 | 400 | 1.33 | 0.15 | 0.00 |  |
+| 3 | 500 | 1.30 | 0.17 | 0.00 |  |
+
+**ngu0875 (p=0.875)**
+
+| Seed | Step | eval/scores | lcbv5 pass@1 | hep pass@1 | Note |
+|---|---|---|---|---|---|
+| 1 | 500 | 1.33 | 0.16 | 0.00 |  |
+| 2 | 100 | 1.24 | 0.17 | 0.00 |  |
+| 2 | 200 | 1.33 | 0.15 | 0.00 |  |
+| 2 | 300 | 1.46 | 0.19 | 0.00 |  |
+| 2 | 400 | **INVALID** | **INVALID** | **INVALID** | nginx code-exec death, backfill re-hit same failure |
+| 3 | 100 | 1.32 | 0.17 | 0.00 |  |
+| 3 | 200 | 1.33 | 0.19 | 0.00 |  |
+| 3 | 300 | 1.23 | 0.16 | 0.00 |  |
+| 3 | 400 | 1.22 | 0.15 | 0.00 |  |
+
+`hep` (`eval/pass_at_1/code_humanevalplus`) is exactly 0.00 in every one of the 37 valid
+checkpoints above — same output-format-mismatch explanation as the earlier sections, not
+re-litigated here.
+
+### Best step per lineage (12 rows)
+
+Max `pass_at_1/code_stdio_lcbv5` and max pooled `eval/scores` over all valid steps in each
+lineage's trajectory (independently — the step that maximizes lcbv5 isn't always the step that
+maximizes pooled scores, since pooled scores also includes the humanevalplus-zeroed and reward
+magnitude terms):
+
+| Config | Seed | Best step (lcbv5) | Best lcbv5 pass@1 | Best step (scores) | Best eval/scores |
+|---|---|---|---|---|---|
+| baseline | 1 | 500 | 0.18 | 500 | 1.27 |
+| baseline | 2 | 100 (tie: 100/200/400) | 0.17 | 400 | 1.34 |
+| baseline | 3 | 400 | **0.19** | 400 | 1.43 |
+| ngu05 | 1 | 500 | 0.14 | 500 | 1.21 |
+| ngu05 | 2 | 100 (tie: 100/500) | 0.19 | 100 | 1.35 |
+| ngu05 | 3 | 300 | **0.21** | 300 | 1.42 |
+| ngu075 | 1 | 500 | **0.19** | 500 | 1.44 |
+| ngu075 | 2 | 200 (tie: 200/300) | 0.18 | 300 | 1.41 |
+| ngu075 | 3 | 100 | 0.18 | 200 | 1.35 |
+| ngu0875 | 1 | 500 | 0.16 | 500 | 1.33 |
+| ngu0875 | 2 | 300 | **0.19** | 300 | 1.46 |
+| ngu0875 | 3 | 200 | **0.19** | 200 | 1.33 |
+
+Per-config mean of "best lcbv5 per seed": baseline 0.180, ngu05 0.180, ngu075 0.183, ngu0875
+0.180 — all four configs land in the same ~0.18 band once every arm gets the same 3-seed,
+best-of-trajectory treatment.
+
+### Does NGU's ranking vs. baseline change across the trajectory, and does it change now that
+### NGU has 3 seeds instead of 1?
+
+Yes to both, and the two effects compound. Taking only step 500 (or each lineage's single
+requested checkpoint, the original "just the last one" comparison from 2026-07-27) with only
+seed 1 of each NGU arm — the comparison actually run on 2026-07-27 — gave baseline=0.18,
+ngu05=0.14, ngu0875=0.16, both clearly below baseline, and ngu075=0.19, above it: 2 of 3 NGU
+values looked worse, 1 looked better. That 2-out-of-3 pattern is exactly what drove the earlier
+"NGU costs lcbv5 performance" read. With seed2/seed3 now in hand, seed 1 turns out to be
+`ngu05`'s *worst* seed (0.14 vs. 0.19 and 0.21 for its other two) and `ngu0875`'s worst seed too
+(0.16 vs. 0.19 and 0.19) — both by a comfortable margin. In other words, the original comparison
+wasn't measuring "does NGU help or hurt," it was measuring "what does one unlucky seed look
+like," and it happened to draw the low seed for 2 of the 3 NGU values. Once all three seeds are
+in and each lineage is scored by its own best checkpoint (not forced to step 500, since several
+lineages never reached it), every NGU value has at least one seed that ties or beats baseline's
+best seed (`ngu05_seed3` 0.21 and `ngu075_seed1` 0.19 both beat baseline's best of 0.19;
+`ngu0875_seed2`/`seed3` tie it at 0.19), and the four config-level means (0.180/0.180/0.183/0.180)
+are indistinguishable given per-seed spread of 0.14-0.21. **Verdict: there is no reliable
+evidence, at n=3 seeds/arm, that any NGU value (0.5/0.75/0.875) either helps or hurts lcbv5 pass@1
+relative to baseline — seed-to-seed variance (±0.03-0.05, and up to ±0.05 for the two low-seed1
+outliers) dominates any config-level effect, and the earlier single-seed "baseline wins" finding
+was a seed-selection artifact, not a real NGU effect.** This doesn't rule out a real but small
+effect that would need more seeds to detect, but it does mean the current data can't support
+choosing an NGU value on lcbv5 grounds. Two lineages (`ngu05_seed3`, `ngu0875_seed2`) are still
+capped at step 300 by the repeated nginx failure and would need a third backfill attempt to reach
+full trajectories, but neither is close to being an outlier at either end, so this gap is unlikely
+to change the verdict above.
