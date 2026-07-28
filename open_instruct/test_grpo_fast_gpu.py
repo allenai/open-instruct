@@ -57,7 +57,7 @@ from open_instruct import grpo_utils
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.grpo_fast import PolicyTrainerRayProcess, create_tool_pools
+from open_instruct.grpo_fast import PolicyTrainerRayProcess, _create_policy_optimizer, create_tool_pools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
@@ -74,6 +74,16 @@ TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
 
 
 class TestPolicyTrainerRayProcessSerialization(unittest.TestCase):
+    def test_optimizer_offload_uses_deepspeed_cpu_adam(self):
+        args = mock.Mock(deepspeed_offload_optimizer=True, learning_rate=1e-6)
+        optim_params = mock.sentinel.optim_params
+
+        with mock.patch("open_instruct.grpo_fast.DeepSpeedCPUAdam", return_value=mock.sentinel.optimizer) as cpu_adam:
+            optimizer = _create_policy_optimizer(args, optim_params)
+
+        self.assertIs(optimizer, mock.sentinel.optimizer)
+        cpu_adam.assert_called_once_with(optim_params, lr=1e-6)
+
     def test_actor_class_is_cloudpickle_serializable(self):
         actor_class = PolicyTrainerRayProcess.__ray_metadata__.modified_class
         cloudpickle.dumps(actor_class)

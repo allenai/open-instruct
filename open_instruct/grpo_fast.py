@@ -37,6 +37,7 @@ from datetime import timedelta
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 with contextlib.suppress(Exception):
     import deepspeed
+    from deepspeed.ops.adam import DeepSpeedCPUAdam
     from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPAttentionHF
     from deepspeed.utils import groups
 
@@ -129,6 +130,12 @@ from open_instruct.utils import (
 )
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def _create_policy_optimizer(args: grpo_utils.GRPOExperimentConfig, optim_params: Any) -> torch.optim.Optimizer:
+    if args.deepspeed_offload_optimizer:
+        return DeepSpeedCPUAdam(optim_params, lr=args.learning_rate)
+    return torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
 
 
 def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -385,7 +392,7 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        self.optimizer = _create_policy_optimizer(args, optim_params)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
