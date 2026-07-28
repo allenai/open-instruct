@@ -5,9 +5,9 @@ EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-smoke}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 
-MODEL_PATH="${MODEL_PATH:-/weka/oe-adapt-default/jacobm/olmoe3/post-training/checkpoints/qwen3-30b-a3b-base-olmo}"
-DATASET_PATH="${DATASET_PATH:-/weka/oe-adapt-default/jacobm/olmoe3/post-training/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker-terminal-eos-v2/10k}"
-OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/jacobm/olmoe3/post-training/checkpoints/${RUN_NAME}}"
+MODEL_PATH="${MODEL_PATH:?Set MODEL_PATH to an OLMo-core Qwen3-MoE checkpoint}"
+DATASET_PATH="${DATASET_PATH:?Set DATASET_PATH to a pretokenized OLMo-core SFT dataset}"
+OUTPUT_DIR="${OUTPUT_DIR:?Set OUTPUT_DIR for OLMo-core checkpoints}"
 
 uv run python mason.py \
     --task_name "$EXP_NAME" \

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BEAKER_IMAGE="${1:-jacobm/open-instruct-integration-test-jacobm-olmoe3-post-training}"
+BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
 DATASET_VARIANT="${DATASET_VARIANT:-100k}"
 
 case "$DATASET_VARIANT" in
@@ -25,8 +25,7 @@ esac
 
 TIMEOUT="${TIMEOUT:-$DEFAULT_TIMEOUT}"
 
-PROJECT_ROOT=/weka/oe-adapt-default/jacobm/olmoe3/post-training
-OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/datasets/Dolci-Think-SFT-32B/qwen3-30b-a3b-olmo_thinker-terminal-eos-v2/${DATASET_VARIANT}}"
+OUTPUT_DIR="${OUTPUT_DIR:?Set OUTPUT_DIR for the tokenized dataset}"
 
 uv run python mason.py \
     --task_name "qwen3-30b-a3b-dolci-think-tokenize-${DATASET_VARIANT}-terminal-eos-v2" \
@@ -42,8 +41,7 @@ uv run python mason.py \
     --preemptible \
     --no_auto_dataset_cache \
     --gpus 8 \
-    --env PYTHONPATH="${PROJECT_ROOT}/open-instruct" \
-    -- python "${PROJECT_ROOT}/open-instruct/scripts/data/convert_sft_data_for_olmocore.py" \
+    -- python scripts/data/convert_sft_data_for_olmocore.py \
         --dataset_mixer_list allenai/Dolci-Think-SFT-32B "$MIXER_AMOUNT" \
         --tokenizer_name_or_path Qwen/Qwen3-30B-A3B \
         --output_dir "$OUTPUT_DIR" \
