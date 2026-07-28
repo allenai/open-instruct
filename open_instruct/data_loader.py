@@ -624,8 +624,8 @@ class StreamingDataLoaderConfig:
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
             )
-        if self.async_steps < 1:
-            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
+        if self.async_steps < 0:
+            raise ValueError(f"`async_steps` must be >= 0, got {self.async_steps!r}.")
 
         assert (
             self.apply_verifiable_reward
@@ -1758,6 +1758,11 @@ class DataPreparationActor:
         self.metrics: dict[int, dict] = {}
         self.current_prepared_step = -1
         self._last_consumed_step = -1
+        # Only advanced (via `mark_trained`) when `async_steps == 0`: gates generation of the
+        # next step on the *previous* step's training (incl. weight sync) actually finishing,
+        # rather than merely having been pulled off the queue (see `_last_consumed_step`). This
+        # is what makes `async_steps == 0` truly synchronous instead of deadlocking.
+        self._last_trained_step = -1
         self.lock = threading.Lock()
         self.training_step = 0
         self.total_samples_written = 0
@@ -1791,7 +1796,9 @@ class DataPreparationActor:
             save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
             self.metadata_saved = True
 
-        num_initial_prompts = self.config.async_steps * self.global_batch_size
+        # Even with `async_steps == 0` (fully synchronous), the very first step has nothing to
+        # wait on, so at least one batch worth of prompts must be pushed to bootstrap generation.
+        num_initial_prompts = max(self.config.async_steps, 1) * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
         for _ in range(num_initial_prompts):
             add_prompt_to_generator(
@@ -1807,11 +1814,20 @@ class DataPreparationActor:
 
         while self.training_step < self.num_training_steps:
             generation_wait_start_time = time.perf_counter()
-            while self.training_step - self._last_consumed_step > self.config.async_steps:
-                logger.info(
-                    f"[DataPreparationActor] Step {self.training_step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
-                )
-                time.sleep(0.1)
+            if self.config.async_steps == 0:
+                # Fully synchronous: don't start generating step N until step N-1 has actually
+                # finished training (incl. weight sync), not merely been pulled off the queue.
+                while self.training_step - 1 > self._last_trained_step:
+                    logger.info(
+                        f"[DataPreparationActor] Step {self.training_step}: waiting for step {self.training_step - 1} to finish training (async_steps=0, fully synchronous)."
+                    )
+                    time.sleep(0.1)
+            else:
+                while self.training_step - self._last_consumed_step > self.config.async_steps:
+                    logger.info(
+                        f"[DataPreparationActor] Step {self.training_step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
+                    )
+                    time.sleep(0.1)
             generation_wait_time = time.perf_counter() - generation_wait_start_time
 
             logger.info(
@@ -2057,10 +2073,18 @@ class DataPreparationActor:
             if s in self.metrics:
                 del self.metrics[s]
 
+    def mark_trained(self, step: int) -> None:
+        """Called (rank 0 only) once a training step, incl. weight sync, has fully completed.
+
+        Only consulted when `async_steps == 0`; see `_last_trained_step`.
+        """
+        self._last_trained_step = max(self._last_trained_step, step)
+
     def get_state(self) -> dict:
         state = {
             "training_step": self.training_step,
             "last_consumed_step": self._last_consumed_step,
+            "last_trained_step": self._last_trained_step,
             "iter_dataloader_state": self.iter_dataloader.state_dict(),
         }
         with self.never_give_up_state_lock:
@@ -2076,8 +2100,10 @@ class DataPreparationActor:
                 self.never_give_up_state = copy.deepcopy(state["never_give_up_state"])
 
         self._last_consumed_step = state.get("last_consumed_step", state["training_step"] - 1)
+        self._last_trained_step = state.get("last_trained_step", self._last_consumed_step)
         self.training_step = self._last_consumed_step + 1
 
         logger.info(
-            f"[DataPreparationActor] Restored state: training_step={self.training_step}, last_consumed_step={self._last_consumed_step}"
+            f"[DataPreparationActor] Restored state: training_step={self.training_step}, "
+            f"last_consumed_step={self._last_consumed_step}, last_trained_step={self._last_trained_step}"
         )

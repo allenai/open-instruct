@@ -348,6 +348,9 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 ref_policy=self.ref_policy, alpha=self.grpo_config.alpha, update_interval=self.ref_policy_update_freq
             )
 
+        if self.streaming_config.async_steps == 0:
+            trainer_callbacks["sync_generation_gate"] = grpo_callbacks_lib.SyncGenerationGateCallback()
+
         if is_beaker_job() and self.json_config is not None:
             trainer_callbacks["beaker"] = BeakerCallbackV2(config=self.json_config)
 
