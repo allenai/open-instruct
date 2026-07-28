@@ -339,6 +339,39 @@ class TestWeightSyncLifecycle(unittest.TestCase):
         self.assertTrue(captured["args"].packed)
         self.assertEqual([name for name, _ in captured["weights"]], ["weight"])
 
+    def test_zero3_nccl_sender_disables_packing(self):
+        model = torch.nn.Linear(2, 2, bias=False)
+        model.config = mock.Mock(model_type="dense")
+        for parameter in model.parameters():
+            parameter.ds_id = id(parameter)
+
+        engine = mock.MagicMock()
+        engine.update_weights.remote.return_value = mock.sentinel.update_ref
+        captured = {}
+
+        def send_weights(_model, trainer_args, *_args):
+            captured["args"] = trainer_args
+
+        with (
+            mock.patch.object(vllm_utils, "_call_engine_method", return_value=[]),
+            mock.patch.object(vllm_utils, "_distributed_barrier"),
+            mock.patch.object(vllm_utils, "_send_nccl_weights", side_effect=send_weights),
+            mock.patch.object(vllm_utils.ray, "get", return_value=[]),
+            mock.patch.object(vllm_utils.torch.distributed, "is_initialized", return_value=False),
+        ):
+            refs = vllm_utils.broadcast_weights_to_vllm(
+                model,
+                [engine],
+                model_update_group=mock.sentinel.model_update_group,
+                model_step=7,
+                gather_whole_model=False,
+            )
+
+        self.assertEqual(refs, [])
+        self.assertFalse(captured["args"].packed)
+        update_request = engine.update_weights.remote.call_args.args[0]
+        self.assertFalse(update_request["update_info"]["packed"])
+
 
 class TestWeightGatherPolicy(unittest.TestCase):
     def test_zero3_gathers_exactly_one_parameter_at_a_time(self):

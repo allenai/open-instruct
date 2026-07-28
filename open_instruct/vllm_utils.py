@@ -1516,6 +1516,10 @@ def broadcast_weights_to_vllm(
     metadata = _collect_weight_metadata(model, name_mapper, adapter)
     backend = "ipc" if model_update_group is None else "nccl"
     is_zero3 = any(hasattr(param, "ds_id") for param in model.parameters())
+    # vLLM's packed NCCL producer pulls the iterator from rotating private CUDA
+    # streams. That is unsafe when the iterator itself runs ZeRO-3 gather
+    # collectives which every learner rank must enter in identical order.
+    packed = model_update_group is None or not is_zero3
     gather_policy = "per-parameter" if is_zero3 else "whole-model" if isinstance(model, (FSDPModule, FSDP)) else "none"
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
@@ -1531,11 +1535,12 @@ def broadcast_weights_to_vllm(
     if is_rank_0:
         logger.info(
             "Installing model step %s via %s weight transfer "
-            "(adapter=%s, packed=True, gather=%s, learner_parameters=%s, "
+            "(adapter=%s, packed=%s, gather=%s, learner_parameters=%s, "
             "exported_tensors=%s, expanded_expert_tensors=%s)",
             model_step,
             backend,
             adapter.name,
+            packed,
             gather_policy,
             metadata.original_parameter_count,
             len(metadata.specs),
@@ -1554,7 +1559,7 @@ def broadcast_weights_to_vllm(
         if model_update_group is None:
             _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, adapter)
         else:
-            trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=True)
+            trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=packed)
             update_info = {
                 "names": metadata.names,
                 "dtype_names": metadata.dtype_names,
