@@ -345,11 +345,14 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
         max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
+        save_async=not use_olmo_ddp,
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
 
-    load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
+    load_strategy = (
+        LoadStrategy.never if args.checkpoint.resume_from_checkpoint is not None else LoadStrategy.if_available
+    )
 
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
@@ -361,8 +364,13 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
     ).build(train_module, data_loader)
 
-    if not use_hf_ckpt:
-        logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
+    if args.checkpoint.resume_from_checkpoint is not None:
+        logger.info(f"Resuming from explicit checkpoint {args.checkpoint.resume_from_checkpoint}...")
+        trainer.load_checkpoint(args.checkpoint.resume_from_checkpoint)
+    elif trainer.checkpoint_loaded:
+        logger.info(f"Resumed training state from {args.checkpoint.output_dir}")
+    elif not use_hf_ckpt:
+        logger.info(f"Loading OLMo-core checkpoint from {args.model.model_name_or_path}...")
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
 
     logger.info("Starting training...")
