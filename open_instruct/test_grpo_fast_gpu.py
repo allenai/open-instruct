@@ -40,6 +40,7 @@ import pathlib
 import subprocess
 import time
 import unittest
+from unittest import mock
 
 import datasets
 import ray
@@ -76,6 +77,36 @@ class TestPolicyTrainerRayProcessSerialization(unittest.TestCase):
     def test_actor_class_is_cloudpickle_serializable(self):
         actor_class = PolicyTrainerRayProcess.__ray_metadata__.modified_class
         cloudpickle.dumps(actor_class)
+
+    def test_weight_sync_does_not_flush_cuda_cache_after_creating_nccl_group(self):
+        actor_class = PolicyTrainerRayProcess.__ray_metadata__.modified_class
+        trainer = mock.Mock()
+        trainer.local_rank = 0
+        trainer.model.module = mock.sentinel.model
+        trainer.vllm_engines = [mock.sentinel.engine]
+        trainer.model_update_group = mock.sentinel.model_update_group
+        trainer.args.gather_whole_model = False
+        trainer._model_name_or_path = "Qwen/Qwen3-30B-A3B-Base"
+
+        with (
+            mock.patch.object(torch.cuda, "empty_cache", side_effect=AssertionError("unsafe cache flush")),
+            mock.patch.object(torch.cuda, "set_device") as set_device,
+            mock.patch.object(
+                vllm_utils_module, "broadcast_weights_to_vllm", return_value=[mock.sentinel.broadcast_ref]
+            ) as broadcast_weights,
+        ):
+            result = actor_class.broadcast_to_vllm(trainer, model_step=3)
+
+        self.assertEqual(result, [mock.sentinel.broadcast_ref])
+        set_device.assert_called_once_with(0)
+        broadcast_weights.assert_called_once_with(
+            model=mock.sentinel.model,
+            vllm_engines=[mock.sentinel.engine],
+            model_update_group=mock.sentinel.model_update_group,
+            model_step=3,
+            gather_whole_model=False,
+            name_mapper=None,
+        )
 
 
 class TestGeneration(TestGrpoFastBase):
