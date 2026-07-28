@@ -46,6 +46,7 @@ import ray
 import torch
 from packaging import version
 from parameterized import parameterized
+from ray import cloudpickle
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
@@ -55,7 +56,7 @@ from open_instruct import grpo_utils
 from open_instruct.data_types import GenerationResult, PromptRequest
 from open_instruct.environments.tools.utils import ParsedEnvConfig
 from open_instruct.ground_truth_utils import RewardConfig
-from open_instruct.grpo_fast import create_tool_pools
+from open_instruct.grpo_fast import PolicyTrainerRayProcess, create_tool_pools
 from open_instruct.test_grpo_fast import TestGrpoFastBase
 from open_instruct.utils import maybe_update_beaker_description
 from open_instruct.vllm_utils import SamplingConfig, create_vllm_engines
@@ -69,6 +70,12 @@ logger.info(f"create_vllm_engines signature: {inspect.signature(create_vllm_engi
 maybe_update_beaker_description()
 
 TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
+
+
+class TestPolicyTrainerRayProcessSerialization(unittest.TestCase):
+    def test_actor_class_is_cloudpickle_serializable(self):
+        actor_class = PolicyTrainerRayProcess.__ray_metadata__.modified_class
+        cloudpickle.dumps(actor_class)
 
 
 class TestGeneration(TestGrpoFastBase):

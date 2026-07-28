@@ -164,6 +164,20 @@ LEARNER_ACTOR_NUM_CPUS = 4
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
+def _initialize_torch_distributed(timeout_minutes: int) -> None:
+    """Initialize the default process group without exposing torch.distributed to Ray's actor serializer."""
+    if not dist.is_initialized():
+        dist.init_process_group(backend="nccl", timeout=timedelta(minutes=timeout_minutes))
+
+
+def _get_process_group_ranks(process_group: dist.ProcessGroup) -> list[int]:
+    return dist.get_process_group_ranks(process_group)
+
+
+def _torch_distributed_barrier() -> None:
+    dist.barrier()
+
+
 def _build_vlm_name_mapper(model_name: str):
     """Sometimes we have different weight names btw vLLM and HF, so we build
     a mapping. E.g., Qwen3.5 has 'language_model.' prefixed in vLLM but not HF."""
@@ -324,8 +338,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # DeepSpeed 0.17.3 and up sets device_id in init_process_group which can cause hangs
         # when multiple process groups exist (e.g., for weight sync to vLLM).
         # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
-        if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
+        _initialize_torch_distributed(args.backend_timeout)
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(
@@ -490,7 +503,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # getting the dp_rank directly does not work right now with the mpus :/
         if self.mpu is not None:
             sp_group = groups._get_sequence_parallel_group()
-            sp_ranks = sorted(torch.distributed.get_process_group_ranks(sp_group))
+            sp_ranks = sorted(_get_process_group_ranks(sp_group))
             expected = list(range(dp_rank * args.sequence_parallel_size, (dp_rank + 1) * args.sequence_parallel_size))
             assert sp_ranks == expected, f"SP group {sp_ranks} != expected {expected}"
 
@@ -537,7 +550,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
 
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
-        torch.distributed.barrier()
+        _torch_distributed_barrier()
 
     def warmup_for_weight_sync(self):
         """Run a dummy forward so DeepSpeed Stage 3 materializes sharded params.
