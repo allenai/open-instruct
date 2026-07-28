@@ -1,11 +1,31 @@
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
+from olmo_core.nn.attention import AttentionBackendName
 
 import open_instruct.model_utils
 from open_instruct.model_utils import Batch, TensorCache
+
+
+class TestAttentionBackendDetection(unittest.TestCase):
+    def tearDown(self):
+        open_instruct.model_utils._gpu_compute_major.cache_clear()
+        open_instruct.model_utils.detect_attn_implementation.cache_clear()
+
+    def test_blackwell_uses_flash_attention_4(self):
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.cuda, "get_device_capability", return_value=(10, 0)),
+            mock.patch.object(
+                open_instruct.model_utils.transformers.utils, "is_flash_attn_4_available", return_value=True
+            ),
+        ):
+            result = open_instruct.model_utils.detect_attn_implementation()
+
+        self.assertEqual(result, AttentionBackendName.flash_4)
 
 
 class TestBatchSlicing(unittest.TestCase):

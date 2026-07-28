@@ -9,6 +9,9 @@ import torch
 from datasets import Dataset
 
 GPU_TEST_SCRIPT = pathlib.Path(__file__).parents[1] / "scripts" / "test" / "run_gpu_pytest.sh"
+QWEN3_MOE_PROFILE_SCRIPT = (
+    pathlib.Path(__file__).parents[1] / "scripts" / "train" / "qwen" / "qwen3_30b_a3b_dapo_math_profile.sh"
+)
 
 
 class TestDependencyCompatibility(unittest.TestCase):
@@ -76,6 +79,42 @@ class TestDependencyCompatibility(unittest.TestCase):
 
         self.assertIsNotNone(torch.version.cuda)
         self.assertEqual(torch.version.cuda.split(".", maxsplit=1)[0], expected_cuda)
+
+    def test_qwen3_moe_hardware_profiles(self):
+        profiles = {"12": "ai2/jupiter|4|2|true", "13": "ai2/holmes|8|1|false"}
+
+        for cuda_version, expected_profile in profiles.items():
+            with self.subTest(cuda_version=cuda_version):
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        'source "$1"; qwen3_30b_a3b_hardware_profile "$2"',
+                        "_",
+                        str(QWEN3_MOE_PROFILE_SCRIPT),
+                        cuda_version,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.stdout.strip(), expected_profile)
+
+    def test_qwen3_moe_cuda13_image_selects_cuda13_profile(self):
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; qwen3_30b_a3b_cuda_version_for_image "$2"',
+                "_",
+                str(QWEN3_MOE_PROFILE_SCRIPT),
+                "user/open-instruct-integration-test-branch-cuda13",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.strip(), "13")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ set -eo pipefail
 #
 # Topology:
 #   - node 1: 8 DeepSpeed ZeRO-3 learner ranks
-#   - node 2: 4 vLLM engines with tensor parallelism 2
+#   - node 2 on CUDA 12: 4 vLLM engines with tensor parallelism 2
+#   - node 2 on CUDA 13/B300: 8 vLLM engines with tensor parallelism 1
 #
 # Run with:
 #   ./scripts/train/build_image_and_launch.sh \
@@ -18,10 +19,39 @@ EXP_NAME="${EXP_NAME:-qwen3_30b_a3b_dapo_math_smoke}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 MODEL_NAME_OR_PATH="Qwen/Qwen3-30B-A3B-Base"
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "${SCRIPT_DIR}/../qwen/qwen3_30b_a3b_dapo_math_profile.sh"
+
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
-CLUSTER="${CLUSTER:-ai2/jupiter}"
+CUDA_VERSION=$(qwen3_30b_a3b_cuda_version_for_image "${BEAKER_IMAGE}")
+IFS="|" read -r DEFAULT_CLUSTER DEFAULT_VLLM_NUM_ENGINES DEFAULT_VLLM_TENSOR_PARALLEL_SIZE \
+    DEFAULT_DEEPSPEED_OFFLOAD_OPTIMIZER <<< "$(qwen3_30b_a3b_hardware_profile "${CUDA_VERSION}")"
+
+CLUSTER="${CLUSTER:-${DEFAULT_CLUSTER}}"
+VLLM_NUM_ENGINES="${VLLM_NUM_ENGINES:-${DEFAULT_VLLM_NUM_ENGINES}}"
+VLLM_TENSOR_PARALLEL_SIZE="${VLLM_TENSOR_PARALLEL_SIZE:-${DEFAULT_VLLM_TENSOR_PARALLEL_SIZE}}"
+DEEPSPEED_OFFLOAD_OPTIMIZER="${DEEPSPEED_OFFLOAD_OPTIMIZER:-${DEFAULT_DEEPSPEED_OFFLOAD_OPTIMIZER}}"
 PRIORITY="${PRIORITY:-urgent}"
+
+if [[ "${CUDA_VERSION}" == "13" && "${CLUSTER}" != "ai2/holmes" ]]; then
+    echo "CUDA 13 Qwen3-30B-A3B runs require CLUSTER=ai2/holmes; got ${CLUSTER}." >&2
+    exit 1
+fi
+if (( VLLM_NUM_ENGINES * VLLM_TENSOR_PARALLEL_SIZE != 8 )); then
+    echo "The vLLM topology must use exactly 8 inference GPUs; got " \
+        "${VLLM_NUM_ENGINES} engines x TP=${VLLM_TENSOR_PARALLEL_SIZE}." >&2
+    exit 1
+fi
+if [[ "${DEEPSPEED_OFFLOAD_OPTIMIZER}" != "true" && "${DEEPSPEED_OFFLOAD_OPTIMIZER}" != "false" ]]; then
+    echo "DEEPSPEED_OFFLOAD_OPTIMIZER must be true or false." >&2
+    exit 1
+fi
+
+DEEPSPEED_OFFLOAD_OPTIMIZER_ARG=""
+if [[ "${DEEPSPEED_OFFLOAD_OPTIMIZER}" == "true" ]]; then
+    DEEPSPEED_OFFLOAD_OPTIMIZER_ARG="--deepspeed_offload_optimizer"
+fi
 
 # Four prompts x four samples = sixteen episodes per optimizer step.
 # Forty-eight total episodes therefore runs exactly three optimizer steps,
@@ -81,11 +111,11 @@ source configs/beaker_configs/ray_node_setup.sh \
     --mask_truncated_completions False \
     --deepspeed_stage 3 \
     --deepspeed_zpg 8 \
-    --deepspeed_offload_optimizer \
+    ${DEEPSPEED_OFFLOAD_OPTIMIZER_ARG:+"${DEEPSPEED_OFFLOAD_OPTIMIZER_ARG}"} \
     --gather_whole_model False \
     --num_learners_per_node 8 \
-    --vllm_num_engines 4 \
-    --vllm_tensor_parallel_size 2 \
+    --vllm_num_engines "${VLLM_NUM_ENGINES}" \
+    --vllm_tensor_parallel_size "${VLLM_TENSOR_PARALLEL_SIZE}" \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --load_ref_policy False \

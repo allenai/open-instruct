@@ -102,4 +102,4 @@ uv sync
 # Run the provided script with the image name and all remaining arguments
 script="$1"
 shift
-bash "$script" "$beaker_user/$image_name" "$@"
+OPEN_INSTRUCT_CUDA_VERSION="$cuda_version" bash "$script" "$beaker_user/$image_name" "$@"
