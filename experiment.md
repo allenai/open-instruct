@@ -2921,3 +2921,99 @@ choosing an NGU value on lcbv5 grounds. Two lineages (`ngu05_seed3`, `ngu0875_se
 capped at step 300 by the repeated nginx failure and would need a third backfill attempt to reach
 full trajectories, but neither is close to being an outlier at either end, so this gap is unlikely
 to change the verdict above.
+
+## 2026-07-28: NGU 0.75 async_steps=0 (fully synchronous) sweep, 3 seeds
+
+**Motivation:** the DeepCoder-1.5B K/NGU sweep above (verdict: no reliable NGU effect on lcbv5
+at n=3 seeds/arm) has all `async_steps>=2` (script default) plus `active_sampling`, both of which
+introduce a few steps of generation/training overlap, meaning training rollouts can lag the
+current policy by up to `async_steps` steps. Request: an `async_steps=0` (fully synchronous —
+each step generates strictly with the just-trained policy, no overlap) arm at the best-studied
+NGU value (`p=0.75`) as a comparison point, urgent priority.
+
+**Blocking infra gap found + fixed:** `async_steps=0` was previously rejected outright
+(`StreamingDataLoaderConfig.__post_init__` raised `ValueError`), and simply removing that check
+would have deadlocked: the wait-gate in `DataPreparationActor._data_preparation_loop` compared the
+step about to be prepared against `_last_consumed_step`, which only advances when a batch is
+*pulled* off the queue (`get_data`), not when that step's training (forward/backward/optim +
+weight sync) actually finishes. For any `async_steps=0`, the gate's own formula requires
+`_last_consumed_step >= step_about_to_be_prepared`, which is circular — step N can't be consumed
+before it's prepared. Confirmed via `olmo_core.train.trainer.Trainer._fit_epoch` (plain
+`for batch in self._iter_batches(): ...; callback.post_step()` loop, no separate prefetch thread)
+that `get_data(N)` fires right as the trainer starts on step N, well before that step's weight
+sync — so `async_steps=1`'s existing gate already permits full generation/training overlap and
+can't be reused to express "0" by just special-casing the initial prefill.
+
+**Fix (commit `c4eed42ef`):** added a second counter, `_last_trained_step`, advanced only via a
+new `mark_trained` actor method, called from a new `SyncGenerationGateCallback`
+(`grpo_callbacks.py`, `priority=-2000` so it runs after `VLLMWeightSyncCallback`'s default
+priority — i.e. after vLLM already has the updated weights) registered in
+`grpo_olmo_core_actor.py` only when `streaming_config.async_steps == 0`. The wait-gate now
+branches: `async_steps == 0` waits on `_last_trained_step` (true completion signal) instead of
+`_last_consumed_step`. Also fixed the initial prefill (`num_initial_prompts`) to always push at
+least one batch (`max(async_steps, 1)`) regardless of `async_steps`, so the very first step has
+something to generate before anything has been consumed. `_last_trained_step` is persisted in
+`get_state`/`set_state` for checkpoint-resume (defaults to `_last_consumed_step` for old
+checkpoints missing the key).
+
+`active_sampling` asserts `async_steps > 1` (needs a lookahead buffer to filter/replenish), so
+it's fundamentally incompatible with `async_steps=0` and had to be disabled for this arm — a
+second, unavoidable difference from the existing `async_steps=2` NGU 0.75 arms, not just the
+async_steps change alone. `deepcoder_1_5b.sh` now exposes `ASYNC_STEPS` (default 2, matching prior
+behavior) and `ACTIVE_SAMPLING` (`true`/`false`, default `true`) env vars instead of hardcoding
+`--async_steps 2 --active_sampling`.
+
+Verified: `uv run pytest open_instruct/test_data_loader.py` (31 tests) still passes; `make style
+&& make quality` clean; manually confirmed `StreamingDataLoaderConfig(async_steps=0,
+active_sampling=False, ...)` now constructs successfully and `active_sampling=True` with
+`async_steps=0` still correctly raises.
+
+| Name | N | K | never_give_up | async_steps | active_sampling | Seed | Beaker |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `deepcoder_1_5b_ngu075_n8_k16_async0_seed1` | 8 | 16 | 0.75 | 0 | false | 1 | [01KYKW8TFP1XCWDBWDGFQYG1KQ](https://beaker.org/ex/01KYKW8TFP1XCWDBWDGFQYG1KQ) |
+| `deepcoder_1_5b_ngu075_n8_k16_async0_seed2` | 8 | 16 | 0.75 | 0 | false | 2 | [01KYKW9JJE5E33C6S088CNAMCQ](https://beaker.org/ex/01KYKW9JJE5E33C6S088CNAMCQ) |
+| `deepcoder_1_5b_ngu075_n8_k16_async0_seed3` | 8 | 16 | 0.75 | 0 | false | 3 | [01KYKWA79EQ9KSBJ4QTSKZTKKW](https://beaker.org/ex/01KYKWA79EQ9KSBJ4QTSKZTKKW) |
+
+### Launch commands
+
+```bash
+export WORKSPACE=ai2/open-instruct-dev PRIORITY=urgent ASYNC_STEPS=0 ACTIVE_SAMPLING=false
+
+EXP=ngu075_n8_k16_async0_seed1 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75 --seed 1
+EXP=ngu075_n8_k16_async0_seed2 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75 --seed 2
+EXP=ngu075_n8_k16_async0_seed3 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75 --seed 3
+```
+
+### ABANDONED: deadlocked at step 1, all jobs stopped, code reverted
+
+All 3 jobs deadlocked partway through step 1 (~15-20 min of urgent-priority 8-GPU time total) and
+were stopped (`beaker experiment stop` on all three). The new `mark_trained`/`_last_trained_step`
+gate worked correctly for the step0→step1 transition (confirmed via log: the wait message advanced
+from "waiting for step 0" to "waiting for step 1" right on schedule), but the run then hung inside
+the *existing* weight-sync path (`VLLMWeightSyncCallback.post_step` → `perform_weight_sync` →
+`broadcast_weights_to_vllm`), not in the new code. Evidence: the trainer process went completely
+silent mid-`post_step` (no more log lines at all, including the routine per-step metrics line that
+only fires after every `post_step` callback returns), and at the exact same moment vLLM logged
+`WARNING [layerwise.py:230] <Layer>: Failed to load weights` for literally every layer in the
+model — i.e. that weight broadcast delivered zero bytes, for the *second* consecutive sync only
+(the first, for step 0, succeeded).
+
+`broadcast_weights_to_vllm` (`vllm_utils.py`) already carries a comment noting that FSDP2
+unshard/reshard collectives interleaving with the trainer→vLLM NCCL send is a known deadlock-prone
+area (why `gather_whole_model=True` is forced). Working theory: fully synchronous training is the
+first code path that ever fires two weight syncs back-to-back with *zero* training-compute gap
+between them — every `async_steps>=1` run has at least a full step of compute time separating
+consecutive syncs, which was apparently masking a latent variant of that same class of bug.
+Confirming and fixing this would require live GPU debugging of FSDP2/NCCL timing, which is
+expensive and open-ended, so continuing to iterate blind (especially at urgent priority) wasn't
+worth it. **Reverted all code changes**: `git revert c4eed42ef` → commit `fe89a88e4`. `async_steps`
+is back to rejecting `< 1`; `deepcoder_1_5b.sh` no longer has `ASYNC_STEPS`/`ACTIVE_SAMPLING` env
+vars. See `research.md`'s NGU-async0 entry (marked `[ABANDONED]`) for the closing summary.
+
+All 3 jobs kicked off cleanly (image build + Beaker submission succeeded); this is the first real
+exercise of the new `async_steps=0` code path (no prior CPU/GPU test coverage of the sync-gate
+callback), so early-startup monitoring is needed to rule out a hang from a mistake in the new
+gating logic. Status/step-progress TBD.

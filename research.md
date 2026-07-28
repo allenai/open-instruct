@@ -661,3 +661,37 @@ effect can't be ruled out, but distinguishing it would need more than 3 seeds/ar
 observed variance. No further action planned on this specific question; treating it as closed
 pending a reason to revisit (e.g. a differently-tuned NGU schedule, or K/N changes that reduce
 per-seed variance).
+
+## [ABANDONED] DeepCoder-1.5B NGU 0.75: does fully synchronous training (`async_steps=0`) change the picture?
+
+**Question:** the K/NGU sweep above ran with `async_steps>=2` and `active_sampling`, both of which
+let training rollouts lag the current policy by a few steps. Does removing that overlap entirely
+(`async_steps=0`, strictly on-policy generation, `active_sampling` off since it requires
+`async_steps>1`) change NGU 0.75's lcbv5 result relative to the existing `async_steps=2` NGU 0.75
+arms?
+
+**Infra:** `async_steps=0` didn't work before this session — it was rejected outright, and would
+have deadlocked even without that guard (the wait-gate compared against a "pulled off the queue"
+counter, not a "training finished" one — see the experiment.md entry for the full mechanism).
+Added a real "training step fully finished" signal (`DataPreparationActor.mark_trained` +
+`SyncGenerationGateCallback`, commit `c4eed42ef`) so the data-prep actor's generation-ahead gate
+can correctly express zero lookahead instead of just aliasing to `async_steps=1`'s behavior.
+Untested on GPU before this launch — first run is also the infra smoke test.
+
+**Runs:** [NGU 0.75 async_steps=0, 3 seeds](experiment.md#2026-07-28-ngu-075-async_steps0-fully-synchronous-sweep-3-seeds)
+
+**Status (2026-07-28, ABANDONED):** all 3 seeds launched, then deadlocked partway through step 1
+and were stopped (~15-20 min of urgent-priority 8-GPU time burned across 3 jobs, no useful
+result). The Python-level gate (`mark_trained`/`_last_trained_step`) worked correctly for the
+step0→step1 transition, but the run then hung inside the pre-existing weight-sync path
+(`VLLMWeightSyncCallback`/`broadcast_weights_to_vllm`), correlated with vLLM logging "Failed to
+load weights" for every layer — i.e. that weight broadcast delivered nothing. `vllm_utils.py`
+already has a code comment flagging FSDP unshard/reshard-vs-NCCL-send interleaving as a known
+deadlock-prone area; the working theory is that fully synchronous training is the first code path
+to ever fire two weight syncs back-to-back with zero training-compute gap between them (every
+`async_steps>=1` run has at least a full step of compute time separating consecutive syncs, which
+was apparently masking this), and that triggers a new variant of the same class of bug. Fixing it
+properly would mean debugging FSDP2/NCCL timing live on GPU, which is expensive and open-ended, so
+this was called off rather than continuing to iterate blind. **All code changes reverted**
+(`git revert c4eed42ef`, revert commit `fe89a88e4`) — `async_steps` stays `>=1`-only. Not
+revisiting unless there's a specific reason to need strictly on-policy (zero-staleness) rollouts.
