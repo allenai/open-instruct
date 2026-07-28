@@ -39,7 +39,7 @@ dependencies = [
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     # flash-attn-3 is pinned per CUDA group (cu128 vs cu130) in [dependency-groups] below.
-    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
+    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta23/flash_attn_4-4.0.0b23-py3-none-any.whl ; platform_system != 'Darwin'", # b23 adds the SM100/SM110 head_dim=256 cute kernel (PR #2412) needed for Qwen3.5 (hd256) fa4 on B300; b5 capped hd<=128. See CUDA13_FA4_SP_PLAYBOOK.md.
     "liger-kernel==0.8.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",

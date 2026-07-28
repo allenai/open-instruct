@@ -226,18 +226,16 @@ wheels = [
 
 [[package]]
 name = "apache-tvm-ffi"
-version = "0.1.8.post2"
+version = "0.1.13rc2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e3/e9/a13952726228fa6282154ecf927092396bc759739e5e045019f6ab92f3ca/apache_tvm_ffi-0.1.8.post2.tar.gz", hash = "sha256:4513e38852894f290172ecfefcbc18d34e817fd29c16a0f1770e130c82b4067e", size = 2441111, upload-time = "2026-01-13T18:11:27.864Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/5f/78d7f4768f5075c491699d802030cbbcea23dfa54df6a48da11c26555fb5/apache_tvm_ffi-0.1.13rc2.tar.gz", hash = "sha256:11708588b04395d12bf3e4b92e66e400695074ef13e824d05aaf19a63a841f84", size = 2978832, upload-time = "2026-07-27T07:58:24.093Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/8b/a39d6c6eb1a87f6003e2717695cc6d44cc65ccd57dae5a0af944c0d25751/apache_tvm_ffi-0.1.8.post2-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:c13ec7fc8f255767998b301ace0cd1e7d17ba76b48ffeb97ca9eb22a3314e250", size = 1811882, upload-time = "2026-01-13T18:10:46.317Z" },
-    { url = "https://files.pythonhosted.org/packages/8e/3a/7b1c9edcaeaebb945038144896cf17eb828a40b6ace0371823e133132664/apache_tvm_ffi-0.1.8.post2-cp312-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:8c78b4caf17304a1f47881bccdb2f9ac24d98b3b7fbe761a6dd4fd0585934d96", size = 1967259, upload-time = "2026-01-13T18:10:47.851Z" },
-    { url = "https://files.pythonhosted.org/packages/6c/b6/463602f57dda2e1c69165c044c07061cd59404593f313a427a3ad9c02cf3/apache_tvm_ffi-0.1.8.post2-cp312-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4a48da3fa8f47130f3502134f01e97044388c5217e7b91be4b0acec4feab81a0", size = 2044821, upload-time = "2026-01-13T18:10:49.396Z" },
-    { url = "https://files.pythonhosted.org/packages/fe/e6/9cdc7f4814b2fbdfceba5dc640c3704d07d8db18e3d1aef5aa49bbf1ba7e/apache_tvm_ffi-0.1.8.post2-cp312-abi3-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:61cc98e489ebc03bc96d1a966dc863eb1c0a607383f6bf4a416ff0a96170ca85", size = 1910964, upload-time = "2026-01-13T18:10:51.345Z" },
-    { url = "https://files.pythonhosted.org/packages/7d/f5/a2e5487cdad575fe6cf34f8a23f8c49e08ce5808fa75dc19d98bcebc20ec/apache_tvm_ffi-0.1.8.post2-cp312-abi3-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:caa48509f0c7d9b896823b492a9ee42afac2548065c1ec7ef07f9a0dc30d2796", size = 2025814, upload-time = "2026-01-13T18:10:52.804Z" },
+    { url = "https://files.pythonhosted.org/packages/94/fe/c501203e418866a22e1ec5a15341dc3c6d1b7fbee36c7399188fa0c1d8fd/apache_tvm_ffi-0.1.13rc2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:ea4d24ebabb8af9edf362c950bc83504b3f20759ab58d0881b2e3ff4404bf3a8", size = 2677750, upload-time = "2026-07-27T07:57:55.201Z" },
+    { url = "https://files.pythonhosted.org/packages/15/69/97f0b2e960d01e5aa6fb9a63ef28015856b08cba8c07b3e744c7b0fbcf9c/apache_tvm_ffi-0.1.13rc2-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2bfc13147d319632e11ea8ae601bee52445b8d8ac98ff6946b27d4d1ad01ac9d", size = 2750384, upload-time = "2026-07-27T07:57:57.208Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/e9/f2fd670e09cf79b4b6d5e34d0be50b29357c08c10f9812d4886e3874dd52/apache_tvm_ffi-0.1.13rc2-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c76953897a2e8760d7ec2ceaa0911829673a4b838bd0400ac16e46c50ff9dfe1", size = 2945749, upload-time = "2026-07-27T07:57:59.174Z" },
 ]
 
 [[package]]
@@ -1319,8 +1317,8 @@ requires-dist = [
 
 [[package]]
 name = "flash-attn-4"
-version = "4.0.0b5"
-source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl" }
+version = "4.0.0b23"
+source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta23/flash_attn_4-4.0.0b23-py3-none-any.whl" }
 dependencies = [
     { name = "apache-tvm-ffi", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "einops", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
@@ -1333,22 +1331,24 @@ dependencies = [
     { name = "typing-extensions", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 wheels = [
-    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl", hash = "sha256:28d58341980b61224bacd0dcf2c1be3a30e6f73d911a76c5fb83f0c4bf61412b" },
+    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta23/flash_attn_4-4.0.0b23-py3-none-any.whl", hash = "sha256:570d5803dc1e2ea8bce6c85ab411c7341efdf0be18a1a720d172f39a52b3dcbd" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "apache-tvm-ffi", specifier = ">=0.1.5,<0.2" },
+    { name = "apache-tvm-ffi", specifier = ">=0.1.12,<0.2" },
     { name = "einops" },
-    { name = "nvidia-cutlass-dsl", specifier = ">=4.4.2" },
+    { name = "nvidia-cutlass-dsl", specifier = "==4.6.0.dev0" },
+    { name = "nvidia-cutlass-dsl", extras = ["cu13"], marker = "extra == 'cu13'", specifier = "==4.6.0.dev0" },
     { name = "pytest", marker = "extra == 'dev'" },
-    { name = "quack-kernels", specifier = ">=0.3.3" },
+    { name = "pytest-xdist", marker = "extra == 'dev'" },
+    { name = "quack-kernels", specifier = ">=0.5.3" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "torch" },
     { name = "torch-c-dlpack-ext" },
     { name = "typing-extensions" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["cu13", "dev"]
 
 [[package]]
 name = "flash-linear-attention"
@@ -2711,28 +2711,29 @@ wheels = [
 
 [[package]]
 name = "nvidia-cutlass-dsl"
-version = "4.4.2"
+version = "4.6.0.dev0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-cutlass-dsl-libs-base", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/03/678dab0383db1ddfc449da216220f40404189eb36eeed9d87a4fa4bdb0e6/nvidia_cutlass_dsl-4.4.2-py3-none-any.whl", hash = "sha256:7cfb9ef19062b055b9372c7a627004724e2755e4c8b16c3cc88807d64501a4ae", size = 10167, upload-time = "2026-03-16T02:18:59.043Z" },
+    { url = "https://files.pythonhosted.org/packages/95/80/9e563d5b9e670761c930505e68e3826711ce1d32db5a992db6fae4aa1961/nvidia_cutlass_dsl-4.6.0.dev0-py3-none-any.whl", hash = "sha256:98dfd40fabc6c0db610eeeaea403f0bb9e2aec0bc699ae0cdf475fa4a54710ca", size = 10234, upload-time = "2026-06-14T04:18:51.719Z" },
 ]
 
 [[package]]
 name = "nvidia-cutlass-dsl-libs-base"
-version = "4.4.2"
+version = "4.6.0.dev0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cuda-python", version = "12.9.4", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "cuda-python", version = "13.0.3", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "numpy", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "protobuf", version = "6.33.5", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "typing-extensions", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/7d/0df5e38d11e52cc72095a14d6448bc1c5d0d4b00b069a1189ca417fb225b/nvidia_cutlass_dsl_libs_base-4.4.2-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:2ec8812eeadcbb6fe20bda2e295ed9c00653f8253b78e33cf0ab65a47b829e73", size = 75473821, upload-time = "2026-03-16T02:27:08.371Z" },
-    { url = "https://files.pythonhosted.org/packages/56/98/e264964741d9cc9816625d9600d17a5249fd5cbd8c2d166fb0d0c34dfe5a/nvidia_cutlass_dsl_libs_base-4.4.2-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:22e37b58f7a6f2f43bba533c4df8a088012122e0b4e9a632eca23937adeafb39", size = 74355593, upload-time = "2026-03-16T02:25:11.762Z" },
+    { url = "https://files.pythonhosted.org/packages/59/07/5747add860c9747b56c2d11eb2831d6f6d831b27f715bdf33573258b0a6c/nvidia_cutlass_dsl_libs_base-4.6.0.dev0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:97683ee6231ec57c4f7bfd2ce53171d7fa3805cf8f307ddd238ed75707446cdb", size = 89046659, upload-time = "2026-06-14T04:27:34.296Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/f2/f23740acf232540576439e2fbb5a231f74739047dbd1db5896cbd2eb6498/nvidia_cutlass_dsl_libs_base-4.6.0.dev0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:a33d83905cfca7a2db2034a2f658941024755d75c1b500c93aacbe6164ec0300", size = 90623701, upload-time = "2026-06-14T04:30:55.438Z" },
 ]
 
 [[package]]
@@ -2954,7 +2955,7 @@ requires-dist = [
     { name = "dr-agent", marker = "extra == 'dr-tulu'" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "platform_machine != 'aarch64' and sys_platform != 'darwin'", specifier = ">=2.8.3" },
-    { name = "flash-attn-4", marker = "sys_platform != 'darwin'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl" },
+    { name = "flash-attn-4", marker = "sys_platform != 'darwin'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta23/flash_attn_4-4.0.0b23-py3-none-any.whl" },
     { name = "flash-linear-attention", specifier = ">=0.4.2" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
@@ -4023,19 +4024,20 @@ wheels = [
 
 [[package]]
 name = "quack-kernels"
-version = "0.3.4"
+version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apache-tvm-ffi", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "einops", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "nvidia-cutlass-dsl", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda12' and extra != 'group-13-open-instruct-cuda13') or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torch", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torch", version = "2.10.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "(platform_machine != 'x86_64' and sys_platform == 'linux') or (sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "torch-c-dlpack-ext", marker = "sys_platform == 'linux' or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/cf/faf4d6af611211016efe38efe9e5ddcf3f1a8dd91023124f566b501d7f20/quack_kernels-0.3.4.tar.gz", hash = "sha256:2cf1545065ea90acca40360dfcc40ea0cafd07056a8afa859b62a27aa070e78a", size = 177914, upload-time = "2026-03-18T18:46:46.625Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/d4/979d9afc6008adeba640b146fe4cb3aa61157581b2dad5649104af4079b5/quack_kernels-0.5.3.tar.gz", hash = "sha256:e295c3861ffebca44f6adafff9bf9bc55102a7178b3e1690b2c4cd8f7e0533ff", size = 370274, upload-time = "2026-06-26T03:51:23.488Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/0a/ccc1fc353e2aa68973159a13f87efacbb98cdbd950c3648da2d7d6f6bf0b/quack_kernels-0.3.4-py3-none-any.whl", hash = "sha256:aafab366098017b3a8af371d1eba5c2fa3be5282beef9a5de73b3d36f05d691b", size = 181472, upload-time = "2026-03-18T18:46:45.44Z" },
+    { url = "https://files.pythonhosted.org/packages/38/99/a697f7168dbd91d2e7e66df07187a0693cb3d350a58ba8a91271596adfa6/quack_kernels-0.5.3-py3-none-any.whl", hash = "sha256:d2590dbbdfedaf7e36682a0e1bc36a623897e137579664941578b16a2b127da4", size = 338690, upload-time = "2026-06-26T03:51:21.929Z" },
 ]
 
 [[package]]
