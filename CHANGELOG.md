@@ -23,4 +23,5 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Run the short Beaker debug jobs preemptible: a non-preemptible urgent request carries an 8-hour `minRuntime` guarantee, which left a 1-GPU 15-minute job queued for over a day (https://github.com/allenai/open-instruct/pull/1792).
 - Track the CUDA 12 image suffix in the merge-queue Beaker workflow and allow enough time for the larger image build and upload (https://github.com/allenai/open-instruct/pull/1783).
