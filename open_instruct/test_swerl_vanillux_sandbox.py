@@ -1,5 +1,6 @@
 import inspect
 import os
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -16,6 +17,8 @@ from open_instruct.environments.swerl_vanillux_sandbox import (
     truncate_observation,
 )
 from open_instruct.environments.tools.tools import TOOL_REGISTRY
+
+_MODULE = "open_instruct.environments.swerl_vanillux_sandbox"
 
 
 class _FakeBackend:
@@ -236,3 +239,57 @@ class TestSWERLVanilluxSandbox(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResolveTaskDataDir(unittest.TestCase):
+    """Extraction locking: a dead holder must not wedge everyone else."""
+
+    def _make_repo(self, tmp: str) -> str:
+        payload = os.path.join(tmp, "payload")
+        os.makedirs(payload, exist_ok=True)
+        with open(os.path.join(payload, "test.sh"), "w", encoding="utf-8") as f:
+            f.write("#!/bin/bash\nexit 0\n")
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(repo, exist_ok=True)
+        subprocess.run(["tar", "-czf", os.path.join(repo, "task-data.tar.gz"), "-C", payload, "."], check=True)
+        return repo
+
+    def test_extracts_tarball_and_marks_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_repo(tmp)
+            with patch(f"{_MODULE}.snapshot_download", return_value=repo):
+                out = SWERLVanilluxSandboxEnv.resolve_task_data_dir("fake/repo")
+            self.assertTrue(os.path.isfile(os.path.join(out, ".extraction_complete")))
+            self.assertTrue(os.path.isfile(os.path.join(out, "test.sh")))
+
+    def test_second_call_reuses_completed_extraction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_repo(tmp)
+            with patch(f"{_MODULE}.snapshot_download", return_value=repo):
+                first = SWERLVanilluxSandboxEnv.resolve_task_data_dir("fake/repo")
+                # A second call must not re-extract: tar would be invoked again.
+                with patch(f"{_MODULE}.subprocess.run") as run:
+                    second = SWERLVanilluxSandboxEnv.resolve_task_data_dir("fake/repo")
+                run.assert_not_called()
+            self.assertEqual(first, second)
+
+    def test_abandoned_lock_file_does_not_block(self):
+        # The old implementation used a lock *directory* removed in a finally block,
+        # so a killed holder left it behind and every other process span forever.
+        # An flock is released by the kernel on process death, so a leftover lock
+        # file must not prevent extraction.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_repo(tmp)
+            stale_lock = os.path.join(repo, "task-data.tar.gz.extracted.lock")
+            with open(stale_lock, "w", encoding="utf-8") as f:
+                f.write("")
+            with patch(f"{_MODULE}.snapshot_download", return_value=repo):
+                out = SWERLVanilluxSandboxEnv.resolve_task_data_dir("fake/repo")
+            self.assertTrue(os.path.isfile(os.path.join(out, ".extraction_complete")))
+
+    def test_returns_repo_dir_when_no_tarball(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = os.path.join(tmp, "repo")
+            os.makedirs(repo, exist_ok=True)
+            with patch(f"{_MODULE}.snapshot_download", return_value=repo):
+                self.assertEqual(SWERLVanilluxSandboxEnv.resolve_task_data_dir("fake/repo"), repo)

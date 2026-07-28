@@ -19,6 +19,7 @@ Key properties (matching the reference solver):
 
 import asyncio
 import contextlib
+import fcntl
 import io
 import os
 import random
@@ -54,6 +55,8 @@ TIMING_LOGS = os.getenv("SWERL_SANDBOX_TIMING_LOGS", "").strip().lower() not in 
 TIMING_LOG_THRESHOLD_S = float(os.getenv("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", "1.0"))
 
 VANILLUX_CALL_LIMIT = int(os.getenv("VANILLUX_CALL_LIMIT", "100"))
+# Upper bound on waiting for another process to finish extracting task data.
+_EXTRACT_WAIT_TIMEOUT_S = float(os.getenv("VANILLUX_EXTRACT_WAIT_TIMEOUT_S", "1800"))
 
 _BASH_WRAPPER_PATH = "/tmp/.swerl_vanillux_bash_wrapper.sh"
 _BASH_WRAPPER_PATH_QUOTED = shlex.quote(_BASH_WRAPPER_PATH)
@@ -177,34 +180,61 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
 
     @staticmethod
     def resolve_task_data_dir(task_data_hf_repo: str) -> str:
-        """Download and extract task data once per machine."""
+        """Download and extract task data once per machine.
+
+        Extraction is serialized with an ``flock`` rather than a lock directory:
+        the kernel releases an ``flock`` when the holding process dies, so a
+        preempted or OOM-killed actor cannot leave a lock behind that wedges
+        every other actor on the node. A wait deadline bounds the pathological
+        case where the holder is alive but stuck.
+        """
         repo_dir = snapshot_download(task_data_hf_repo, repo_type="dataset")
         tarball = os.path.join(repo_dir, "task-data.tar.gz")
-        if os.path.isfile(tarball):
-            extract_dir = tarball + ".extracted"
-            complete_file = os.path.join(extract_dir, ".extraction_complete")
-            lock_dir = extract_dir + ".lock"
-            while not os.path.isfile(complete_file):
-                try:
-                    os.mkdir(lock_dir)
-                except FileExistsError:
-                    time.sleep(1)
-                    continue
-                try:
-                    if os.path.isfile(complete_file):
-                        break
-                    logger.info(f"Extracting {tarball} to {extract_dir}...")
-                    if os.path.isdir(extract_dir):
-                        shutil.rmtree(extract_dir)
-                    os.makedirs(extract_dir, exist_ok=True)
-                    subprocess.run(["tar", "-xzf", tarball, "-C", extract_dir], check=True)
-                    with open(complete_file, "w", encoding="utf-8") as f:
-                        f.write("ok\n")
-                finally:
-                    with contextlib.suppress(FileNotFoundError):
-                        os.rmdir(lock_dir)
+        if not os.path.isfile(tarball):
+            return repo_dir
+
+        extract_dir = tarball + ".extracted"
+        complete_file = os.path.join(extract_dir, ".extraction_complete")
+        if os.path.isfile(complete_file):
             return extract_dir
-        return repo_dir
+
+        lock_path = extract_dir + ".lock"
+        deadline = time.monotonic() + _EXTRACT_WAIT_TIMEOUT_S
+        last_log = 0.0
+        with open(lock_path, "a+") as lock_file:  # noqa: SIM115 - held for the extraction below
+            while True:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    # Someone else is extracting. Re-check the marker so we exit as
+                    # soon as they finish rather than waiting for the lock itself.
+                    if os.path.isfile(complete_file):
+                        return extract_dir
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(
+                            f"Timed out after {_EXTRACT_WAIT_TIMEOUT_S}s waiting for another process to "
+                            f"extract {tarball} to {extract_dir}. Remove {lock_path} if no extraction is "
+                            f"actually running."
+                        ) from None
+                    if time.monotonic() - last_log > 60:
+                        logger.info(f"Waiting for another process to extract {tarball} ({remaining:.0f}s left)...")
+                        last_log = time.monotonic()
+                    time.sleep(1)
+            try:
+                if os.path.isfile(complete_file):
+                    return extract_dir
+                logger.info(f"Extracting {tarball} to {extract_dir}...")
+                if os.path.isdir(extract_dir):
+                    shutil.rmtree(extract_dir)
+                os.makedirs(extract_dir, exist_ok=True)
+                subprocess.run(["tar", "-xzf", tarball, "-C", extract_dir], check=True)
+                with open(complete_file, "w", encoding="utf-8") as f:
+                    f.write("ok\n")
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        return extract_dir
 
     async def setup(self) -> None:
         """Download task data from HuggingFace if configured."""
