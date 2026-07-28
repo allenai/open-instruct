@@ -293,32 +293,6 @@ class HFCheckpointCallback(Callback):
 
 
 @dataclass
-class SyncGenerationGateCallback(Callback):
-    """Notifies the DataPreparationActor once a training step has fully finished.
-
-    Only meaningful when `async_steps == 0` (fully synchronous training): the actor's
-    generation-ahead gate normally advances as soon as a batch is *pulled* off the queue
-    (`DataPreparationActor.get_data`), which happens before that step's forward/backward/optim
-    and weight sync run. With `async_steps == 0` that would let generation of step N+1 start
-    while step N is still training. `post_step` runs after weight sync
-    (`VLLMWeightSyncCallback`, default priority), so by the time this fires vLLM already has
-    the updated weights.
-    """
-
-    priority: ClassVar[int] = -2000
-
-    def post_step(self) -> None:
-        if dist_utils.get_rank() != 0:
-            return
-
-        try:
-            data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-            data_prep_actor.mark_trained.remote(self.trainer.global_step - 1)
-        except (ray.exceptions.RayError, ValueError) as e:
-            logger.warning(f"Failed to notify DataPreparationActor of trained step: {e}")
-
-
-@dataclass
 class DataPreparationActorCheckpointCallback(Callback):
     """Callback to save and restore DataPreparationActor state during checkpointing."""
 

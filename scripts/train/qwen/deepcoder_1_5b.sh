@@ -16,15 +16,6 @@ PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 NODES="${NODES:-1}"
 
-ASYNC_STEPS="${ASYNC_STEPS:-2}"
-# active_sampling requires async_steps > 1 (see StreamingDataLoaderConfig.__post_init__), so it
-# must be disabled for fully synchronous (async_steps=0) runs.
-ACTIVE_SAMPLING="${ACTIVE_SAMPLING:-true}"
-ACTIVE_SAMPLING_FLAG=""
-if [[ "${ACTIVE_SAMPLING}" == "true" ]]; then
-    ACTIVE_SAMPLING_FLAG="--active_sampling"
-fi
-
 # Datasets converted from agentica-org/DeepCoder-Preview-Dataset by
 # scripts/data/create_deepcoder_data.py. lcbv5_test and codeforces_test are
 # reserved as held-out eval and never appear in the train mixer. humanevalplus_test
@@ -59,8 +50,8 @@ uv run mason.py \
     --vllm_top_p 1.0 \
     --eval_temperature 0.6 \
     --beta 0.001 \
-    --async_steps ${ASYNC_STEPS} \
-    ${ACTIVE_SAMPLING_FLAG} \
+    --async_steps 2 \
+    --active_sampling \
     --inflight_updates \
     --advantage_normalization_type centered \
     --num_samples_per_prompt_rollout 16 \
