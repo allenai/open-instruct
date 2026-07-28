@@ -79,6 +79,14 @@ def _numpy_dir_is_populated(numpy_dir: str) -> bool:
     return token_chunks == labels_chunks == metadata_chunks
 
 
+def _olmo_core_model_checkpoint_path(path: str) -> str:
+    """Resolve a converted OLMo-core model root to its distributed-checkpoint directory."""
+    model_and_optim_path = os.path.join(path, "model_and_optim")
+    if os.path.isfile(os.path.join(model_and_optim_path, ".metadata")):
+        return model_and_optim_path
+    return path
+
+
 def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
@@ -370,8 +378,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     elif trainer.checkpoint_loaded:
         logger.info(f"Resumed training state from {args.checkpoint.output_dir}")
     elif not use_hf_ckpt:
-        logger.info(f"Loading OLMo-core checkpoint from {args.model.model_name_or_path}...")
-        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
+        checkpoint_path = _olmo_core_model_checkpoint_path(args.model.model_name_or_path)
+        logger.info(f"Loading OLMo-core model checkpoint from {checkpoint_path}...")
+        trainer.load_checkpoint(checkpoint_path, load_trainer_state=False, load_optim_state=False)
 
     logger.info("Starting training...")
     trainer.fit()

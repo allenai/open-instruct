@@ -85,5 +85,19 @@ class IsHfCheckpointTest(unittest.TestCase):
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
 
 
+class OLMoCoreModelCheckpointPathTest(unittest.TestCase):
+    def test_converted_model_root_resolves_to_model_and_optim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _touch(os.path.join(tmp, "model_and_optim", ".metadata"))
+            self.assertEqual(
+                os.path.join(tmp, "model_and_optim"), olmo_core_finetune._olmo_core_model_checkpoint_path(tmp)
+            )
+
+    def test_direct_distributed_checkpoint_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _touch(os.path.join(tmp, ".metadata"))
+            self.assertEqual(tmp, olmo_core_finetune._olmo_core_model_checkpoint_path(tmp))
+
+
 if __name__ == "__main__":
     unittest.main()
