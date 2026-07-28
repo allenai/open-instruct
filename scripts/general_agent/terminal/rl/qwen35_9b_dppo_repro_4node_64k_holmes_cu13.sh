@@ -41,7 +41,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --env SWERL_PODMAN_IMAGE_JANITOR_ENABLED=1 \
        --env SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S=60 \
        --env SWERL_PODMAN_IMAGE_JANITOR_UNTIL=10m \
-       --env MIRROR_URL=jupiter-cs-aus-102.reviz.ai2.in:5000 \
+       --env MIRROR_URL=jupiter-cs-aus-155.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=shashankg_DOCKER_PAT \
@@ -66,7 +66,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
-    --attn_implementation flash_2 \
+    --attn_implementation flash_4 \
     --num_epochs 1 \
     --num_learners_per_node 8 8 \
     --vllm_num_engines 16 \

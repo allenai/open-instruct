@@ -21,15 +21,15 @@
 #       shashankg/open-instruct-integration-test-omni_agent_cuda13-cuda13
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
-MODEL=/weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360_cg
+MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=$MODEL
 DATASET=allenai/tmax-15k-open-instruct
-EXP_NAME=swerl_holmes_smoke_9b_tmax_noAS_cuda13
+EXP_NAME=swerl_holmes_smoke_9b_hamishivi_32k_noAS_cuda13
 
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "CUDA-13/B300 4-GPU terminal RL smoke, 9B tmax step_360_cg (vanillux, DPPO, SP=2, fa4, NO active_sampling)" \
+       --description "CUDA-13/B300 4-GPU terminal RL smoke, 9B tmax step_360_cg (vanillux, DPPO, SP=2, fa4, noAS, 32k ctx, 4x16)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -66,18 +66,18 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --dataset_mixer_list $DATASET 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --per_turn_max_tokens 2048 \
-    --response_length 4096 \
-    --pack_length 8192 \
+    --per_turn_max_tokens 16384 \
+    --response_length 32768 \
+    --pack_length 34816 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_samples_per_prompt_rollout 16 \
     --async_steps 2 \
     --model_name_or_path $MODEL \
     --tokenizer_name_or_path $TOKENIZER \
     --temperature 1.0 \
     --learning_rate 1e-6 \
-    --total_episodes 32 \
+    --total_episodes 64 \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
@@ -88,6 +88,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.7 \
     --vllm_enable_prefix_caching \
+    --vllm_gdn_prefill_backend triton \
     --beta 0.0 \
     --use_vllm_logprobs true \
     --truncated_importance_sampling_ratio_cap 0.0 \
