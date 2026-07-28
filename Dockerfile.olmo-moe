@@ -26,6 +26,10 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv pip install \
         --python /stage/.venv/bin/python \
         --no-build-isolation \
+        "pip" \
+        "wheel" \
+        "packaging" \
+        "setuptools<70.0.0" \
         "pybind11==2.13.6" \
         "grouped_gemm @ git+https://github.com/tgale96/grouped_gemm.git@${GROUPED_GEMM_SHA}" \
     && NVTE_FRAMEWORK=pytorch \
@@ -34,7 +38,7 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
         uv pip install \
         --python /stage/.venv/bin/python \
         --no-build-isolation \
-        "git+https://github.com/NVIDIA/TransformerEngine.git@v${TRANSFORMER_ENGINE_VERSION}"
+        "transformer-engine[pytorch]==${TRANSFORMER_ENGINE_VERSION}"
 
 # Fail the image build if the exact APIs consumed by OLMo-core are unavailable.
 RUN /stage/.venv/bin/python -c \
