@@ -49,6 +49,7 @@ from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUB
 # isort: on
 import asyncio
 import dataclasses
+import faulthandler
 import logging
 import math
 import random
@@ -564,14 +565,19 @@ class PolicyTrainerRayProcess(RayProcess):
             self.model(input_ids=input_ids)
 
     def broadcast_to_vllm(self, model_step: int):
-        return vllm_utils.broadcast_weights_to_vllm(
-            model=self.model.module,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            model_step=model_step,
-            gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
-        )
+        print(f"[weight-sync-debug] learner rank {self.rank} entered broadcast actor method", flush=True)
+        faulthandler.dump_traceback_later(60)
+        try:
+            return vllm_utils.broadcast_weights_to_vllm(
+                model=self.model.module,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=model_step,
+                gather_whole_model=self.args.gather_whole_model,
+                name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
+            )
+        finally:
+            faulthandler.cancel_dump_traceback_later()
 
     def update_ref_policy(self):
         if not self.args.load_ref_policy:
@@ -1510,7 +1516,9 @@ def weight_sync_thread(
         target_model_step = weight_sync_trigger.get_step_and_clear()
         try:
             ray.get(actor_manager.set_should_stop.remote(True))
+            print(f"[weight-sync-debug] submitting learner broadcasts for model step {target_model_step}", flush=True)
             broadcast_refs = [m.broadcast_to_vllm.remote(target_model_step) for m in policy_group.models]
+            print(f"[weight-sync-debug] submitted {len(broadcast_refs)} learner broadcasts", flush=True)
             sync_time_stats, _ = grpo_utils.perform_weight_sync(
                 broadcast_refs, vllm_engines, actor_manager, progress=args.verbose, inflight_updates=inflight_updates
             )

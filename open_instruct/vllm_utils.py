@@ -1519,9 +1519,12 @@ def broadcast_weights_to_vllm(
     """
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     is_rank_0 = rank == 0
+    print(f"[weight-sync-debug] learner rank {rank} entered transfer implementation", flush=True)
     logger.info("Learner rank %s preparing model step %s for live weight transfer", rank, model_step)
     adapter = resolve_weight_export_adapter(model)
+    print(f"[weight-sync-debug] learner rank {rank} resolved adapter {adapter.name}", flush=True)
     metadata = _collect_weight_metadata(model, name_mapper, adapter)
+    print(f"[weight-sync-debug] learner rank {rank} collected {len(metadata.specs)} tensor specs", flush=True)
     backend = "ipc" if model_update_group is None else "nccl"
     is_zero3 = any(hasattr(param, "ds_id") for param in model.parameters())
     gather_policy = "per-parameter" if is_zero3 else "whole-model" if isinstance(model, (FSDPModule, FSDP)) else "none"
@@ -1554,11 +1557,16 @@ def broadcast_weights_to_vllm(
     finish_attempted = False
     try:
         if is_rank_0:
+            print("[weight-sync-debug] learner rank 0 calling vLLM sleep", flush=True)
             _call_engine_method(vllm_engines, "sleep")
+            print("[weight-sync-debug] learner rank 0 waking vLLM weights", flush=True)
             _call_engine_method(vllm_engines, "wake_up_weights")
             start_attempted = True
+            print("[weight-sync-debug] learner rank 0 starting vLLM weight update", flush=True)
             _call_engine_method(vllm_engines, "start_weight_update")
+        print(f"[weight-sync-debug] learner rank {rank} entering pre-transfer barrier", flush=True)
         _distributed_barrier()
+        print(f"[weight-sync-debug] learner rank {rank} exited pre-transfer barrier", flush=True)
 
         if model_update_group is None:
             _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, adapter)
