@@ -76,7 +76,7 @@ else
   cache_repo="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
   if [[ "$cuda_version" == "13" ]]; then
     torch_cuda_arch_list="9.0 10.0 10.3"
-    nvte_cuda_archs="90;100;103"
+    nvte_cuda_archs="90;100"
   else
     torch_cuda_arch_list="9.0 10.0"
     nvte_cuda_archs="90;100"

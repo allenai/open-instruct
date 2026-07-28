@@ -7,7 +7,8 @@ FROM ${OPEN_INSTRUCT_BASE_IMAGE}
 ARG TRANSFORMER_ENGINE_VERSION=2.9
 ARG GROUPED_GEMM_SHA=f1429a3c44c98f7912aa4b00125144cdf4e7fdb2
 ARG TORCH_CUDA_ARCH_LIST="9.0 10.0 10.3"
-ARG NVTE_CUDA_ARCHS="90;100;103"
+# TE 2.9 derives the B300-specific sm_103a target from sm_100 under CUDA >= 12.9.
+ARG NVTE_CUDA_ARCHS="90;100"
 ENV UV_CACHE_DIR=/root/.cache/uv \
     TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
     CUDNN_PATH=/stage/.venv/lib/python3.12/site-packages/nvidia/cudnn \
