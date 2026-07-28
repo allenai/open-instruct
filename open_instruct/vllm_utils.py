@@ -796,10 +796,13 @@ class LLMRayActor:
         return future.result()
 
     def sleep(self) -> None:
-        return self._run_async(self.llm_engine.sleep(level=0, mode="keep"))
+        return self._run_async(self.llm_engine.sleep(level=1))
+
+    def wake_up_weights(self) -> None:
+        return self._run_async(self.llm_engine.wake_up(tags=["weights"]))
 
     def wake_up(self) -> None:
-        return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
+        return self._run_async(self.llm_engine.wake_up(tags=["kv_cache", "scheduling"]))
 
     def update_weights(self, update_info: WeightUpdateRPCArgs) -> None:
         while not self.inflight_updates and len(self.active_tasks) > 0:
@@ -1552,6 +1555,7 @@ def broadcast_weights_to_vllm(
     try:
         if is_rank_0:
             _call_engine_method(vllm_engines, "sleep")
+            _call_engine_method(vllm_engines, "wake_up_weights")
             start_attempted = True
             _call_engine_method(vllm_engines, "start_weight_update")
         _distributed_barrier()

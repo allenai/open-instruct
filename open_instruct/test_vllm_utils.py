@@ -289,6 +289,7 @@ class TestWeightSyncLifecycle(unittest.TestCase):
             events,
             [
                 ("sleep", ()),
+                ("wake_up_weights", ()),
                 ("start_weight_update", ()),
                 ("send", ()),
                 ("finish_weight_update", ()),
@@ -315,7 +316,7 @@ class TestWeightSyncLifecycle(unittest.TestCase):
             vllm_utils.broadcast_weights_to_vllm(self.model, self.engines, model_update_group=None, model_step=7)
 
         self.assertIs(raised.exception, transfer_error)
-        self.assertEqual(events, ["sleep", "start_weight_update", "finish_weight_update"])
+        self.assertEqual(events, ["sleep", "wake_up_weights", "start_weight_update", "finish_weight_update"])
         self.assertNotIn("set_model_step", events)
 
     def test_ipc_sender_uses_packed_send_mode_and_all_engine_handles(self):
@@ -338,6 +339,27 @@ class TestWeightSyncLifecycle(unittest.TestCase):
         self.assertEqual(captured["args"].llm_handle, self.engines)
         self.assertTrue(captured["args"].packed)
         self.assertEqual([name for name, _ in captured["weights"]], ["weight"])
+
+    def test_engine_sleep_and_wake_tags_match_vllm_weight_update_lifecycle(self):
+        actor = object.__new__(vllm_utils.LLMRayActor)
+        actor.llm_engine = mock.Mock()
+        actor.llm_engine.sleep.return_value = mock.sentinel.sleep
+        actor.llm_engine.wake_up.side_effect = [mock.sentinel.weights, mock.sentinel.inference]
+        actor._run_async = mock.Mock()
+
+        actor.sleep()
+        actor.wake_up_weights()
+        actor.wake_up()
+
+        actor.llm_engine.sleep.assert_called_once_with(level=1)
+        self.assertEqual(
+            actor.llm_engine.wake_up.call_args_list,
+            [mock.call(tags=["weights"]), mock.call(tags=["kv_cache", "scheduling"])],
+        )
+        self.assertEqual(
+            actor._run_async.call_args_list,
+            [mock.call(mock.sentinel.sleep), mock.call(mock.sentinel.weights), mock.call(mock.sentinel.inference)],
+        )
 
 
 class TestWeightGatherPolicy(unittest.TestCase):
