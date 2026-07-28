@@ -47,11 +47,16 @@ SUPPORTED_OLMO_DDP_MODEL_TYPES = frozenset({"olmo3moe", "qwen3_moe"})
 
 
 def build_olmo_ddp_model_config_from_hf_config(
-    hf_config: transformers.PretrainedConfig, *, dtype: DType, attention_backend: AttentionBackendName
+    hf_config: transformers.PretrainedConfig,
+    *,
+    dtype: DType,
+    attention_backend: AttentionBackendName,
+    **model_overrides: Any,
 ) -> OLMoDDPModelConfig:
-    """Build the stage-one OLMoDDP model for a supported Hugging Face MoE config."""
+    """Build an OLMoDDP model for a supported Hugging Face MoE config."""
     model_type = getattr(hf_config, "model_type", None)
     common = {"dtype": dtype, "attention_backend": attention_backend, "router_aux_loss_weight": None}
+    common.update(model_overrides)
     if model_type == "olmo3moe":
         return build_olmo3_moe_config_from_hf_config(hf_config, **common)
     if model_type == "qwen3_moe":
@@ -553,15 +558,13 @@ def setup_model(
     if hf_arch_config is not None and hf_arch_config.model_type == "qwen3_moe":
         vocab_size = int(hf_arch_config.vocab_size)
         logger.info(f"Using Qwen architecture vocab_size={vocab_size} from {config_source}")
-        validate_qwen3_moe_checkpoint_config(hf_arch_config)
         ep = ExpertParallelConfig(
             path=ExpertParallelPath(model_config_args.moe_expert_parallel_path),
             capacity_factor=model_config_args.moe_expert_parallel_capacity_factor,
         )
         ep.validate()
-        model_config = build_qwen3_moe_config_from_hf_config(
-            hf_arch_config.to_dict(),
-            vocab_size=vocab_size,
+        model_config = build_olmo_ddp_model_config_from_hf_config(
+            hf_arch_config,
             dtype=DType.bfloat16,
             attention_backend=AttentionBackendName(model_config_args.attn_implementation),
             compile_friendly_recompute=model_config_args.moe_recompute_each_block,
