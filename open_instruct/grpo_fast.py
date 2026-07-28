@@ -2051,7 +2051,10 @@ def run_training(
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
 
-    save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+    if args.save_final_model:
+        save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
+    else:
+        logger.info("Skipping final model save because save_final_model=False")
 
 
 def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:

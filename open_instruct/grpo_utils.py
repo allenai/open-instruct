@@ -92,6 +92,8 @@ class GRPOExperimentConfig(
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
     save_freq: int = 200
     """How many train steps to save the model"""
+    save_final_model: bool = True
+    """Whether to save the final model after training finishes."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
     model_dtype: str = "bfloat16"
