@@ -53,6 +53,10 @@ class RLEnvironment(ABC):
     def get_response_role(self) -> str:
         return self.response_role
 
+    def get_tool_call_format_error_message(self) -> str | None:
+        """Optional message to continue a rollout after malformed/missing tool calls."""
+        return None
+
     async def setup(self) -> None:
         """Called once at start of training for resource initialization."""
         return

@@ -146,6 +146,14 @@ class SandboxBackend(ABC):
     def read_file(self, path: str, binary: bool = False) -> str | bytes:
         """Read a file from the sandbox filesystem."""
 
+    def put_archive(self, path: str, data: bytes) -> None:
+        """Extract an uncompressed tar archive into ``path`` in the sandbox.
+
+        Not abstract so backends that cannot accept archives keep working; they
+        fail loudly only if something actually tries to upload one.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support uploading tar archives.")
+
     @abstractmethod
     def close(self) -> None:
         """Cleanup sandbox resources."""
@@ -444,6 +452,12 @@ class DockerBackend(SandboxBackend):
             tar.addfile(info, io.BytesIO(content))
         tar_stream.seek(0)
         self._container.put_archive(os.path.dirname(path) or "/", tar_stream)
+
+    def put_archive(self, path: str, data: bytes) -> None:
+        if self._container is None:
+            raise RuntimeError("Container not started. Call start() first.")
+
+        self._container.put_archive(path, io.BytesIO(data))
 
     def read_file(self, path: str, binary: bool = False) -> str | bytes:
         if self._container is None:
