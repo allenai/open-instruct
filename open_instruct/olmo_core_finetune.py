@@ -197,15 +197,14 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     dp_shard_degree = gpus_per_node // cp_degree
 
     if use_olmo_ddp:
+        if args.training.cp_degree not in (None, 1):
+            raise ValueError("Context parallelism is not supported by Open Instruct OLMoDDP SFT yet.")
         if world_size % args.model.moe_expert_parallel_degree != 0:
             raise ValueError(
-                f"World size {world_size} must be divisible by MoE EP degree "
-                f"{args.model.moe_expert_parallel_degree}"
+                f"World size {world_size} must be divisible by MoE EP degree {args.model.moe_expert_parallel_degree}"
             )
         dp_config = train_module_lib.TransformerDataParallelConfig(
-            name=parallel.DataParallelType.ddp,
-            reduce_grads_in_fp32=True,
-            accumulate_grads_in_fp32=True,
+            name=parallel.DataParallelType.ddp, reduce_grads_in_fp32=True, accumulate_grads_in_fp32=True
         )
     else:
         dp_config = train_module_lib.TransformerDataParallelConfig(

@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 import torch
@@ -55,9 +56,17 @@ class TerminalEosTest(unittest.TestCase):
         }
 
     def _tokenize(self, **kwargs):
-        return dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
-            copy.deepcopy(self.row), self.tokenizer, max_seq_length=6, **kwargs
+        tokenized = (
+            torch.tensor([[10, 11, 20, 30, 30, 30]], dtype=torch.long),
+            torch.ones((1, 6), dtype=torch.long),
+            torch.tensor([[-100, -100, 20, 30, 30, 30]], dtype=torch.long),
         )
+        with mock.patch.object(
+            dataset_transformation, "_tokenize_tulu_sft_with_assistant_labels", return_value=tokenized
+        ):
+            return dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+                copy.deepcopy(self.row), self.tokenizer, max_seq_length=6, **kwargs
+            )
 
     def test_default_matches_explicit_false(self):
         default = self._tokenize()

@@ -23,9 +23,9 @@ from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
+from olmo_core.nn.moe.v2.ep_config import ExpertParallelConfig, ExpertParallelPath
 from olmo_core.nn.moe.v2.olmo3 import build_olmo3_moe_config_from_hf_config
 from olmo_core.nn.moe.v2.qwen import build_qwen3_moe_config_from_hf_config, validate_qwen3_moe_checkpoint_config
-from olmo_core.nn.moe.v2.ep_config import ExpertParallelConfig, ExpertParallelPath
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import OLMoDDPModelConfig, Transformer, TransformerConfig
 from olmo_core.train import callbacks as train_callbacks
@@ -58,7 +58,7 @@ def build_olmo_ddp_model_config_from_hf_config(
         validate_qwen3_moe_checkpoint_config(hf_config)
         return build_qwen3_moe_config_from_hf_config(hf_config.to_dict(), **common)
     raise ValueError(
-        f"OLMoDDP GRPO supports model_type in {sorted(SUPPORTED_OLMO_DDP_MODEL_TYPES)}, "
+        f"OLMoDDP training supports model_type in {sorted(SUPPORTED_OLMO_DDP_MODEL_TYPES)}, "
         f"but the checkpoint reports {model_type!r}."
     )
 
@@ -119,10 +119,7 @@ class ModelConfig:
         ep_path = ExpertParallelPath(self.moe_expert_parallel_path)
         if self.moe_expert_parallel_degree == 1 and ep_path != ExpertParallelPath.sync_1d:
             raise ValueError("Non-synchronized MoE expert paths require moe_expert_parallel_degree > 1")
-        ExpertParallelConfig(
-            path=ep_path,
-            capacity_factor=self.moe_expert_parallel_capacity_factor,
-        ).validate()
+        ExpertParallelConfig(path=ep_path, capacity_factor=self.moe_expert_parallel_capacity_factor).validate()
 
 
 @dataclass
@@ -532,9 +529,7 @@ def setup_model(
     if is_hf_checkpoint(model_name_or_path):
         logger.info(f"Detected HuggingFace checkpoint at {model_name_or_path}")
         hf_config = transformers.AutoConfig.from_pretrained(
-            model_name_or_path,
-            revision=model_config_args.model_revision,
-            trust_remote_code=True,
+            model_name_or_path, revision=model_config_args.model_revision, trust_remote_code=True
         )
         vocab_size = hf_config.vocab_size
     else:
@@ -550,9 +545,7 @@ def setup_model(
     if hf_arch_config is None:
         try:
             hf_arch_config = transformers.AutoConfig.from_pretrained(
-                config_source,
-                revision=model_config_args.model_revision,
-                trust_remote_code=False,
+                config_source, revision=model_config_args.model_revision, trust_remote_code=False
             )
         except (OSError, ValueError):
             hf_arch_config = None
@@ -560,6 +553,7 @@ def setup_model(
     if hf_arch_config is not None and hf_arch_config.model_type == "qwen3_moe":
         vocab_size = int(hf_arch_config.vocab_size)
         logger.info(f"Using Qwen architecture vocab_size={vocab_size} from {config_source}")
+        validate_qwen3_moe_checkpoint_config(hf_arch_config)
         ep = ExpertParallelConfig(
             path=ExpertParallelPath(model_config_args.moe_expert_parallel_path),
             capacity_factor=model_config_args.moe_expert_parallel_capacity_factor,
@@ -575,9 +569,7 @@ def setup_model(
         )
     else:
         model_config = get_transformer_config(
-            config_source,
-            vocab_size,
-            attn_backend=model_config_args.attn_implementation,
+            config_source, vocab_size, attn_backend=model_config_args.attn_implementation
         )
     model_config.lm_head.loss_implementation = LMLossImplementation(model_config_args.loss_implementation)
     if model_config_args.rope_scaling_factor is not None:
@@ -636,10 +628,7 @@ def setup_tokenizer_and_cache(model_config: ModelConfig, dataset_config: Dataset
 
 
 def to_oc_tokenizer_config(
-    tc: TokenizerConfig,
-    *,
-    vocab_size: int | None = None,
-    document_boundary_start_token: str | None = None,
+    tc: TokenizerConfig, *, vocab_size: int | None = None, document_boundary_start_token: str | None = None
 ) -> OLMoCoreTokenizerConfig:
     """Map open-instruct TokenizerConfig to olmo-core's TokenizerConfig for NumpyFSL loading.
 
