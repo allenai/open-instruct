@@ -11,8 +11,6 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 # and then set the search_api_endpoint accordingly.
 uv run python mason.py \
        --cluster ai2/jupiter \
-       --cluster ai2/augusta \
-       --cluster ai2/saturn \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU on Beaker with tool use test script." \
        --pure_docker_mode \
