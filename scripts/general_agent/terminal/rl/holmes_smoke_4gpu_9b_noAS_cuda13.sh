@@ -29,7 +29,7 @@ EXP_NAME=swerl_holmes_smoke_9b_tmax_noAS_cuda13
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "CUDA-13/B300 4-GPU terminal RL smoke, 9B tmax step_360_cg (vanillux, DPPO, SP=2, fa2, NO active_sampling)" \
+       --description "CUDA-13/B300 4-GPU terminal RL smoke, 9B tmax step_360_cg (vanillux, DPPO, SP=2, fa4, NO active_sampling)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -81,7 +81,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
-    --attn_implementation flash_2 \
+    --attn_implementation flash_4 \
     --num_epochs 1 \
     --num_learners_per_node 2 \
     --vllm_num_engines 2 \
