@@ -8,6 +8,8 @@
 # tile, and that interaction only exists under stage 3. `beta` is non-zero so the
 # reference-KL branch of the kernel is exercised too.
 #
+# Runs preemptible: this is a short verification job, and a non-preemptible urgent
+# request carries an 8-hour minRuntime guarantee that left it unscheduled for a day.
 # Keep single_gpu_on_beaker.sh on the default configuration — it is the canonical
 # single-GPU test — and use this script for the opt-in loss path.
 
@@ -25,6 +27,7 @@ uv run python mason.py \
        --no-host-networking \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
+       --preemptible \
        --num_nodes 1 \
        --max_retries 0 \
        --timeout 15m \
