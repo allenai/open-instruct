@@ -27,6 +27,8 @@ NUM_UNIQUE_PROMPTS=4
 NUM_SAMPLES_PER_PROMPT=4
 TOTAL_EPISODES=$((3 * NUM_UNIQUE_PROMPTS * NUM_SAMPLES_PER_PROMPT))
 
+# mason.py injects checkpoint_state_dir, which requires a positive frequency.
+# A frequency of 100 is beyond this three-step run, so no state is written.
 uv run python mason.py \
     --task_name "${EXP_NAME}" \
     --description "${RUN_NAME}" \
@@ -85,7 +87,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --load_ref_policy False \
     --local_eval_every -1 \
     --save_freq -1 \
-    --checkpoint_state_freq -1 \
+    --checkpoint_state_freq 100 \
     --save_final_model False \
     --try_auto_save_to_beaker False \
     --push_to_hub False \
