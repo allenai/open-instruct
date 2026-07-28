@@ -78,6 +78,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --mask_truncated_completions False \
     --deepspeed_stage 3 \
     --deepspeed_zpg 8 \
+    --deepspeed_offload_optimizer \
     --gather_whole_model False \
     --num_learners_per_node 8 \
     --vllm_num_engines 4 \
