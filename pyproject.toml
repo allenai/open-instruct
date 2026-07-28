@@ -11,7 +11,7 @@ dependencies = [
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
-    "deepspeed>=0.18.3",
+    "deepspeed>=0.19.0", # >=0.19.0 has the Ulysses SP attn blocklist (PR #7887) → permits flash_attention_4 on B300; 0.18.x allowlist rejected it. See CUDA13_FA4_SP_PLAYBOOK.md.
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2", # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
