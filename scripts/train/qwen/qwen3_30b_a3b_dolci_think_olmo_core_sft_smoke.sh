@@ -38,7 +38,7 @@ uv run python mason.py \
     --ensure_terminal_eos_after_truncation true \
     --document_boundary_start_token \$DOCUMENT_BOUNDARY_START_TOKEN \
     --output_dir "$OUTPUT_DIR" \
-    --attn_implementation torch \
+    --attn_implementation flash_4 \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 1 \
