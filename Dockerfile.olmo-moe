@@ -23,7 +23,7 @@ RUN apt-get update \
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
     GROUPED_GEMM_CUTLASS=1 \
-    uv pip install \
+    uv pip install --no-cache \
         --python /stage/.venv/bin/python \
         --no-build-isolation \
         "pip" \
@@ -35,10 +35,10 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     && NVTE_FRAMEWORK=pytorch \
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
         NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS}" \
-        uv pip install \
+        uv pip install --no-cache \
         --python /stage/.venv/bin/python \
         --no-build-isolation \
-        "transformer-engine[pytorch]==${TRANSFORMER_ENGINE_VERSION}"
+        "git+https://github.com/NVIDIA/TransformerEngine.git@v${TRANSFORMER_ENGINE_VERSION}"
 
 # Fail the image build if the exact APIs consumed by OLMo-core are unavailable.
 RUN /stage/.venv/bin/python -c \
