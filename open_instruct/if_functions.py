@@ -93,10 +93,12 @@ def verify_letter_frequency(text: str, letter: str, N: int) -> bool:
     """
     Verifies if a given letter appears exactly the specified number of times in the text.
 
+    Matching is case-insensitive (IFEvalG LetterFrequencyChecker).
+
     Args:
         text (str): The text to check
-        letter (str): The letter to count (case-sensitive)
-        target_count (int): The expected number of occurrences
+        letter (str): The letter to count
+        N (int): The expected number of occurrences
 
     Returns:
         bool: True if the constraint is met, False otherwise
@@ -104,15 +106,13 @@ def verify_letter_frequency(text: str, letter: str, N: int) -> bool:
     Example:
         >>> verify_letter_frequency("hello world", "l", 3)
         True
-        >>> verify_letter_frequency("hello world", "o", 2)
-        True
-        >>> verify_letter_frequency("hello world", "x", 0)
+        >>> verify_letter_frequency("Hello", "h", 1)
         True
     """
     if len(letter) != 1:
         raise ValueError("Letter parameter must be a single character")
 
-    actual_count = text.count(letter)
+    actual_count = text.lower().count(letter.lower())
     return actual_count == N
 
 
