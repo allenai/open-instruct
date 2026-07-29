@@ -254,6 +254,10 @@ def validate_paragraphs(text, N, first_word, i):
     Validates that a text contains the expected number of paragraphs and that the i-th paragraph starts with a specific
     word.
 
+    Aligns with IFEvalG ``ParagraphFirstWordCheck`` for case-insensitive first-word
+    checks (punctuation stripped). Empty paragraphs are filtered before both counting
+    and indexing so the i-th paragraph is the i-th non-empty paragraph.
+
     Args:
         text (str): The text to analyze
         N (int): The expected number of paragraphs
@@ -263,15 +267,27 @@ def validate_paragraphs(text, N, first_word, i):
     Returns:
         bool: True if the text meets the paragraph and first word requirements, False otherwise
     """
-    # Split the text into paragraphs
-    paragraphs = text.split("\n\n")
+    # Filter empties before counting/indexing so the i-th paragraph is the
+    # i-th non-empty paragraph (IFEvalG counts empties out of N but still
+    # indexes the unfiltered list; that shifts later indices incorrectly).
+    paragraphs = [p.strip() for p in re.split(r"\n\n", text) if p.strip()]
+    num_paragraphs = len(paragraphs)
 
-    # Check if the number of paragraphs is as expected
-    if len(paragraphs) != N:
+    if i <= 0 or i > num_paragraphs:
         return False
 
-    # Check if the i-th paragraph starts with the specified first word
-    return bool(paragraphs[i - 1].strip().startswith(first_word))
+    paragraph = paragraphs[i - 1]
+    expected = first_word.lower()
+    word = paragraph.split()[0].strip().lstrip("'").lstrip('"')
+    punctuation = {".", ",", "?", "!", "'", '"'}
+    actual = ""
+    for letter in word:
+        if letter in punctuation:
+            break
+        actual += letter.lower()
+
+    return num_paragraphs == N and actual == expected
+
 
 
 # Postscript: At the end of your response, please explicitly add a postscript starting with {postscript marker}
