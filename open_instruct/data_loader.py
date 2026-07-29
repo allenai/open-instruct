@@ -1583,10 +1583,20 @@ def accumulate_inference_batches(
     )
 
 
-def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch: Batch, enabled: bool) -> Batch:
-    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch."""
+def maybe_mask_truncated_completions(
+    result: data_types.GenerationResult, batch: Batch, batch_stats: BatchStatistics, enabled: bool
+) -> tuple[Batch, BatchStatistics]:
+    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch.
+
+    Also shrinks `batch_stats`' per-group fields (`prompt_sample_counts` and friends) to match the
+    post-filter group sizes. Those fields are built once in `make_batch_from_groups`, before this
+    filter removes individual completions from `batch`/`result`; left untouched, a group that loses
+    only some of its completions would desync `prompt_sample_counts` from `len(batch.scores)` and
+    crash `compute_grouped_advantages`, and a group that loses all of them would silently corrupt
+    the grouping (an unrelated group's samples would inherit its now-stale sample count).
+    """
     if not enabled:
-        return batch
+        return batch, batch_stats
     stop_idxes = [i for i, fr in enumerate(result.finish_reasons) if fr == "stop"]
     num_truncated = len(result.finish_reasons) - len(stop_idxes)
     if num_truncated > 0:
@@ -1598,7 +1608,39 @@ def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch:
     result.masks = [result.masks[i] for i in stop_idxes]
     result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
     result.logprobs = [result.logprobs[i] for i in stop_idxes]
-    return batch[stop_idxes]
+
+    if num_truncated == 0:
+        return batch[stop_idxes], batch_stats
+
+    # `all_prompt_sample_counts` in `make_batch_from_groups` is built in group order, with each
+    # group contributing a contiguous run of `group.sample_count` global indices — so the group
+    # boundaries below line up with the pre-filter `stop_idxes`/`result.finish_reasons` indexing.
+    group_boundaries = np.cumsum([0, *batch_stats.prompt_sample_counts])
+    new_prompt_sample_counts = [0] * len(batch_stats.prompt_sample_counts)
+    for i in stop_idxes:
+        group_idx = int(np.searchsorted(group_boundaries, i, side="right") - 1)
+        new_prompt_sample_counts[group_idx] += 1
+
+    keep_groups = [count > 0 for count in new_prompt_sample_counts]
+    if not all(keep_groups):
+        logger.warning(
+            f"[DataPreparationActor] Truncation filter removed every completion for "
+            f"{len(keep_groups) - sum(keep_groups)} prompt group(s); dropping them from this batch."
+        )
+
+    batch_stats = dataclasses.replace(
+        batch_stats,
+        prompt_sample_counts=[c for c, keep in zip(new_prompt_sample_counts, keep_groups) if keep],
+        prompt_attempt_counts=[c for c, keep in zip(batch_stats.prompt_attempt_counts, keep_groups) if keep],
+        prompt_baseline_sample_counts=[
+            c for c, keep in zip(batch_stats.prompt_baseline_sample_counts, keep_groups) if keep
+        ],
+        prompt_baseline_reward_sums=[
+            c for c, keep in zip(batch_stats.prompt_baseline_reward_sums, keep_groups) if keep
+        ],
+        prompt_lengths=[c for c, keep in zip(batch_stats.prompt_lengths, keep_groups) if keep],
+    )
+    return batch[stop_idxes], batch_stats
 
 
 def prepare_collated_data_for_workers(
@@ -1863,7 +1905,9 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
 
-            batch = maybe_mask_truncated_completions(result, batch, self.config.mask_truncated_completions)
+            batch, batch_stats = maybe_mask_truncated_completions(
+                result, batch, batch_stats, self.config.mask_truncated_completions
+            )
 
             if len(result.responses) == 0:
                 logger.warning(

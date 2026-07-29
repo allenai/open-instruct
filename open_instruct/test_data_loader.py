@@ -1,3 +1,4 @@
+import dataclasses
 import tempfile
 import unittest
 from queue import Queue
@@ -151,6 +152,109 @@ class TestGroupedAdvantages(unittest.TestCase):
 
         self.assertTrue(np.allclose(keep_all, regular))
         self.assertFalse(np.allclose(with_baseline, regular))
+
+
+class TestMaskTruncatedCompletions(unittest.TestCase):
+    def _make_result(self, finish_reasons: list[str]) -> GenerationResult:
+        n = len(finish_reasons)
+        return GenerationResult(
+            responses=[[i] for i in range(n)],
+            finish_reasons=finish_reasons,
+            masks=[[1] for _ in range(n)],
+            request_info=RequestInfo(
+                num_calls=[0] * n,
+                timeouts=[0] * n,
+                tool_errors=[""] * n,
+                tool_outputs=[""] * n,
+                tool_runtimes=[0.0] * n,
+                tool_calleds=[False] * n,
+            ),
+            index=None,
+            prompt_id="0",
+            logprobs=[[0.0] for _ in range(n)],
+        )
+
+    def _make_batch(self, n: int) -> data_loader.Batch:
+        return data_loader.Batch(
+            queries=[[0]] * n,
+            ground_truths=[[0]] * n,
+            datasets=["ds"] * n,
+            raw_queries=["q"] * n,
+            decoded_responses=["r"] * n,
+            indices=[0] * n,
+            scores=[1.0] * n,
+            model_steps=[0] * n,
+        )
+
+    def _make_batch_stats(self, prompt_sample_counts: list[int]) -> data_loader.BatchStatistics:
+        num_groups = len(prompt_sample_counts)
+        return data_loader.BatchStatistics(
+            prompt_lengths=[10] * num_groups,
+            response_lengths=[5] * sum(prompt_sample_counts),
+            filtered_prompts=0,
+            filtered_prompts_zero=0,
+            filtered_prompts_solved=0,
+            filtered_prompts_nonzero=0,
+            filtered_prompts_pct=0.0,
+            percent_solved_mean=0.0,
+            percent_solved_hist=np.array([]),
+            no_resampled_prompts=0,
+            total_prompts=num_groups,
+            prompt_sample_counts=prompt_sample_counts,
+            prompt_attempt_counts=[1] * num_groups,
+            prompt_baseline_sample_counts=list(prompt_sample_counts),
+            prompt_baseline_reward_sums=[float(c) for c in prompt_sample_counts],
+        )
+
+    def test_partial_group_truncation_keeps_counts_in_sync_with_scores(self):
+        # Two groups of 3 and 2; one sample from the first group is truncated.
+        finish_reasons = ["stop", "stop", "length", "stop", "stop"]
+        result = self._make_result(finish_reasons)
+        batch = self._make_batch(5)
+        batch_stats = self._make_batch_stats(prompt_sample_counts=[3, 2])
+
+        new_batch, new_batch_stats = data_loader.maybe_mask_truncated_completions(
+            result, batch, batch_stats, enabled=True
+        )
+
+        self.assertEqual(new_batch_stats.prompt_sample_counts, [2, 2])
+        self.assertEqual(sum(new_batch_stats.prompt_sample_counts), len(new_batch.scores))
+        self.assertEqual(new_batch_stats.prompt_baseline_sample_counts, [3, 2])
+
+        # Would previously raise "Mismatch between prompt_sample_counts and scores".
+        compute_grouped_advantages(np.array(new_batch.scores), new_batch_stats.prompt_sample_counts)
+
+    def test_fully_truncated_group_is_dropped_and_stays_aligned(self):
+        # First group (size 1) is fully truncated; second group (size 2) survives intact.
+        finish_reasons = ["length", "stop", "stop"]
+        result = self._make_result(finish_reasons)
+        batch = self._make_batch(3)
+        batch_stats = self._make_batch_stats(prompt_sample_counts=[1, 2])
+        batch_stats = dataclasses.replace(batch_stats, prompt_baseline_reward_sums=[9.0, 2.0])
+
+        new_batch, new_batch_stats = data_loader.maybe_mask_truncated_completions(
+            result, batch, batch_stats, enabled=True
+        )
+
+        self.assertEqual(new_batch_stats.prompt_sample_counts, [2])
+        self.assertEqual(sum(new_batch_stats.prompt_sample_counts), len(new_batch.scores))
+        # The surviving group's baseline reward sum (2.0), not the dropped group's (9.0).
+        self.assertEqual(new_batch_stats.prompt_baseline_reward_sums, [2.0])
+
+        compute_grouped_advantages(np.array(new_batch.scores), new_batch_stats.prompt_sample_counts)
+
+    def test_no_truncation_is_a_no_op(self):
+        finish_reasons = ["stop", "stop", "stop"]
+        result = self._make_result(finish_reasons)
+        batch = self._make_batch(3)
+        batch_stats = self._make_batch_stats(prompt_sample_counts=[3])
+
+        new_batch, new_batch_stats = data_loader.maybe_mask_truncated_completions(
+            result, batch, batch_stats, enabled=True
+        )
+
+        self.assertEqual(new_batch_stats.prompt_sample_counts, [3])
+        self.assertIs(new_batch_stats, batch_stats)
 
     def test_get_never_give_up_retry_suffix_increments_existing_suffix(self):
         self.assertEqual(get_never_give_up_retry_suffix("7_0", epoch_number=7, index=0), "_1")
