@@ -8,6 +8,7 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 import os
 from datetime import timedelta
 from functools import wraps
+from importlib import import_module
 from itertools import count
 from typing import Any
 
@@ -19,7 +20,6 @@ from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn import ddp as olmo_ddp
 from olmo_core.nn.hf.checkpoint import load_hf_model
-from olmo_core.nn.moe.v2 import ep_sync_1d
 from olmo_core.nn.moe.v2.checkpoint import gather_olmo_ddp_hf_state, load_olmo_ddp_hf_state
 from olmo_core.nn.moe.v2.weight_stream import gather_olmo_ddp_hf_state_to_cpu
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup, OLMoDDPOptimizerConfig
@@ -146,6 +146,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 )
 
         if not self._cuda_stage_sync_wrapped_ep_ops:
+            ep_sync_1d = import_module("olmo_core.nn.moe.v2.ep_sync_1d")
             op_counter = count()
 
             def wrap_ep_op(op_name: str, original):
