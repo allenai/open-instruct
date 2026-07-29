@@ -39,10 +39,13 @@ curl -sS -m8  -o /dev/null -w "v2 %{http_code}\n" "http://$host/v2/"            
 curl -sS -m20 -o /dev/null -w "task %{http_code}\n" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
   "http://$host/v2/hamishi740/swerl-tmax-v3/manifests/<some-tag>"                                              # want 200
 ```
-**Corrupt-mirror trap:** if resets mostly "succeed" but EVERY rollout scores 0 (empty batches, no
-gradient step) with logs `500 ... failed to convert ImageData to ImageInspect` / `404 ... failed to
-find image`, the mirror is bad → point `MIRROR_URL` at the current node and relaunch. Full detail:
-memory `reference_verify_image_mirror_before_launch`.
+**How a bad mirror actually shows up:** image pulls fail — `500 ... failed to convert ImageData to
+ImageInspect` / `404 ... failed to find image hamishi740/...` — so those tasks' sandbox **resets
+fail** (and with `SWERL_RESET_FAILURE_ZERO_REWARD=1` those specific rollouts get 0). That's a
+*fraction* of rollouts. **A bad mirror does NOT make every rollout score 0 / empty the batch** — if
+you see uniform-0 scores with resets otherwise succeeding, that's a CONFIG problem, not the mirror
+(in our case it was the missing `--vllm_gdn_prefill_backend triton` for Qwen3.5 GDN; also check
+rollout width vs the hard tasks). Full detail: memory `reference_verify_image_mirror_before_launch`.
 
 ## 1. GPU sizing (how grpo_fast splits GPUs)
 
