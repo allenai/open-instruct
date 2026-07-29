@@ -110,21 +110,26 @@ It prints `Kicked off Beaker job. https://beaker.org/ex/<EXP_ID>`. Default works
 `ai2/oe-agents`, priority `urgent`, `--preemptible`, `--max_retries 5`. Docker Hub creds:
 `DOCKERHUB_USERNAME=shashankg209` + `--secret DOCKER_PAT=shashankg_DOCKER_PAT`.
 
-**CUDA 12 (Hopper / ai2/jupiter) vs CUDA 13 (B300 / ai2/holmes).** The launcher takes an
-optional **leading** `--cuda-version 12|13` (default 12) — it picks the Dockerfile base
-(`12.8.1` vs `13.0.3-devel`), the `uv --group cuda${v}`, and the image name suffix `-cuda${v}`.
-For cu13 you must be on the `omni_agent_cuda13` worktree and `source env.cuda13.sh` FIRST
-(isolated uv/triton caches + no-ssh gitconfig):
+**CUDA 12 (Hopper) vs CUDA 13 (B300 / ai2/holmes).** The launcher takes an optional **leading**
+`--cuda-version 12|13` (default 12 today; cu13 is the direction as we move to B300) — it picks the
+Dockerfile base (`12.8.1` vs `13.0.3-devel`), the `uv --group cuda${v}`, and the image name suffix
+`-cuda${v}`. From any normal checkout, just pass the flag:
 ```bash
-source env.cuda13.sh   # cu13 only
 ./scripts/train/build_image_and_launch_dirty.sh --cuda-version 13 \
     scripts/general_agent/terminal/rl/holmes_smoke_4gpu_9b_cuda13.sh    # B300 / --cluster ai2/holmes
 ```
-On B300, the working attention is **fa4**: set `--attn_implementation flash_4` (needs deepspeed
-0.19.3 + flash-attn-4 b23 — both pinned per-CUDA-group on `omni_agent_cuda13`) and
-`--vllm_gdn_prefill_backend triton` (Qwen3.5 GatedDeltaNet). cu12/Hopper is unchanged (backend
-FA3). Full detail: memories `feedback_build_image_and_launch_dirty` + `project_cuda13_worktree_setup`,
-and `CUDA13_MIGRATION.md` / `CUDA13_FA4_SP_PLAYBOOK.md` at the worktree root.
+On B300 the working attention is **fa4**: set `--attn_implementation flash_4` (needs deepspeed
+0.19.3 + flash-attn-4 b23 — pinned per-CUDA-group) and `--vllm_gdn_prefill_backend triton`
+(Qwen3.5 GatedDeltaNet). cu12/Hopper is unchanged (backend FA3).
+
+> Dev-only aside (ignore unless replicating the original test setup): the separate
+> `open-instruct-cuda13` worktree + `source env.cuda13.sh` were **just cache isolation** — so a
+> cu12 and a cu13 session could run on the SAME box without their shared-weka uv/triton caches
+> clobbering each other (env.cuda13.sh also set a no-ssh gitconfig for the container). **Not
+> required to build/train cu13** — the `--cuda-version` flag is all you need.
+
+Full detail: memory `feedback_build_image_and_launch_dirty`, and `CUDA13_MIGRATION.md` /
+`CUDA13_FA4_SP_PLAYBOOK.md`.
 
 Reliability envs worth carrying (from tmax's proven 9B script): `PYTORCH_ALLOC_CONF=expandable_segments:True`,
 the podman image-janitor trio (`SWERL_PODMAN_IMAGE_JANITOR_ENABLED/INTERVAL_S=60/UNTIL=10m` —
