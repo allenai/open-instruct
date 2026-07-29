@@ -733,13 +733,29 @@ Also switched the default eval set to lcbv5-only (dropped `codeforces_test` and
 `humanevalplus_test` — the latter scored 0.00 across every run in the earlier K/NGU sweep) and
 pass@4 instead of pass@1, for a less noisy per-run signal.
 
-**Runs:** [Baseline lr/temperature/KL sweep, pass@4 lcbv5-only eval](experiment.md#2026-07-28-deepcoder-15b-baseline-hyperparameter-sweep-lr-temperature-kl-lcbv5-only-pass4-eval), [Relaunch with revised arms after async-checkpoint fix](experiment.md#2026-07-29-relaunch-of-the-lrtemperaturekl-sweep-on-deepcoder_1_5b_baseline_lr1e6)
+**Runs:** [Baseline lr/temperature/KL sweep, pass@4 lcbv5-only eval](experiment.md#2026-07-28-deepcoder-15b-baseline-hyperparameter-sweep-lr-temperature-kl-lcbv5-only-pass4-eval), [Relaunch with revised arms after async-checkpoint fix](experiment.md#2026-07-29-relaunch-of-the-lrtemperaturekl-sweep-on-deepcoder_1_5b_baseline_lr1e6), [nokl_temp0.6 step-1 crash: mask_truncated_completions desync, root-caused + fixed](experiment.md#2026-07-29-deepcoder_1_5b_nokl_temp06-dying-at-step-1-every-time-mask_truncated_completions-desync)
 
 **Status (2026-07-29):** the 2026-07-28 sweep's 3 runs all died at step 100 to the async-checkpoint
 metric race (see the experiment.md root-cause entry above), no results from that arm set. Fixed
 and relaunched today with a revised arm set that isolates the KL lever instead of reducing it in
 lockstep with the others: `beta=0.01` alone, `beta=0`+`temperature=0.6`, `beta=0`+`learning_rate=1e-6`.
-All 3 confirmed starting; no results yet.
+
+The `nokl_temp0.6` arm then died at step 1 on every attempt with a second, unrelated bug:
+`--mask_truncated_completions True` (on by default) drops individual truncated completions from
+the batch but left `batch_stats`' per-group/per-completion bookkeeping (`prompt_sample_counts`,
+`response_lengths`, etc.) at their pre-filter sizes, desyncing them from the actual post-filter
+data and crashing `compute_grouped_advantages`/`calculate_utilization_metrics`. `temperature=0.6`
+hit this far more often than the other two arms since lower temperature makes non-`stop`-terminated
+completions more likely. Fixed in `open_instruct/data_loader.py`
+(`maybe_mask_truncated_completions`, commits `f72fe997d` + `d736f7ab7` — the fix needed two passes,
+see the experiment.md entry for why) with new unit test coverage
+(`TestMaskTruncatedCompletions` in `test_data_loader.py`). This is a general `open_instruct` bug,
+not specific to this sweep or to DeepCoder — any run with `mask_truncated_completions=True` that
+hits a truncated completion was exposed to it.
+
+`kl0.01` and `nokl_lr1e-6` confirmed still running clean; `nokl_temp0.6` relaunched post-fix and
+confirmed training past step 6 (previously died at step 1 every time). No pass@4 results yet from
+any of the 3 arms.
 
 ## [ACTIVE] DeepCoder-1.5B on `grpo_fast.py` (DeepSpeed): does it match/beat the `grpo.py`/OLMo-core baseline?
 

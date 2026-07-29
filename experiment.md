@@ -3179,3 +3179,63 @@ OC=false EXP=baseline ./scripts/train/build_image_and_launch.sh scripts/train/qw
 ```
 
 Confirmed starting/running at launch time (no errors). Results TBD.
+
+## 2026-07-29: `deepcoder_1_5b_nokl_temp0.6` dying at step 1 every time — `mask_truncated_completions` desync
+
+`deepcoder_1_5b_nokl_temp0.6` ([01KYP4G6NZ231J04X3AC6RZG9W](https://beaker.org/ex/01KYP4G6NZ231J04X3AC6RZG9W))
+died at step 1 twice (05:19 and 16:14), both times with the identical error:
+
+```
+ValueError: Mismatch between prompt_sample_counts and scores: 128 grouped samples vs 127 scores.
+```
+
+**Root cause.** `maybe_mask_truncated_completions` (`data_loader.py`) drops any completion that
+didn't finish with a `stop` token when `--mask_truncated_completions True` is set (on by default
+in `deepcoder_1_5b.sh`) — but it only filtered `batch`/`result`, never the `batch_stats` fields
+built earlier in `make_batch_from_groups` (`prompt_sample_counts` and friends). Those still summed
+to the pre-filter total, so a single truncated completion anywhere in the batch desynced
+`prompt_sample_counts` (128) from `len(batch.scores)` (127) and crashed
+`compute_grouped_advantages`. `temperature=0.6` is more prone to non-terminating completions than
+the `temperature=1.0` baseline, which is presumably why this arm hit it deterministically at step 1
+while the `kl0.01`/`nokl_lr1e-6` siblings didn't (in 64000/128≈500 steps of headroom, luck alone
+doesn't rule out them hitting it later, but neither has yet as of this fix).
+
+**Fix, attempt 1 (commit `f72fe997d`):** recompute `prompt_sample_counts` (and the aligned
+`prompt_attempt_counts`/`prompt_baseline_sample_counts`/`prompt_baseline_reward_sums`/
+`prompt_lengths`) from the surviving sample indices, dropping any group that lost every completion
+to truncation. Added `TestMaskTruncatedCompletions` (`test_data_loader.py`) covering partial-group
+truncation, whole-group truncation, and the no-op case; `uv run pytest open_instruct/test_data_loader.py`
+passed (34/34) and `make style && make quality` was clean.
+
+Relaunched ([01KYQBTP9Y59PDGSMQXPV9MTA5](https://beaker.org/ex/01KYQBTP9Y59PDGSMQXPV9MTA5)) — got
+past step 1 this time, but died at step 2 with a **new**, closely related error:
+
+```
+ValueError: Expected prompt sample counts to match response lengths, got 125 samples and 128 response lengths.
+```
+
+**Fix, attempt 2 (commit `d736f7ab7`):** `batch_stats.response_lengths` is *also* built pre-filter
+in `make_batch_from_groups` (one entry per completion, same global ordering as `batch.scores`) and
+is consumed via the `batch/response_lengths` metric by `calculate_utilization_metrics`
+(`grpo_callbacks.py` → `utils.py`) — attempt 1 updated `prompt_sample_counts` but missed this
+sibling field, so the mismatch just moved. Filtered `response_lengths` by the same `stop_idxes` used
+for the rest of the per-completion fields. Extended the three new tests to assert
+`response_lengths` is filtered correctly and stays sum-aligned with `prompt_sample_counts`; full
+suite still 34/34, linter clean.
+
+Audited every other `sum(prompt_sample_counts) != len(...)` / `len(x) != len(prompt_sample_counts)`
+check in `utils.py`/`data_loader_utils.py` (`expand_prompt_lengths_for_response_groups`,
+`pad_response_lengths_for_attempt_counts`, `expand_grouped_scores`,
+`_apply_anchor_pos_advantage_rescaling`) — all their inputs are now covered by one of the two
+fixes above.
+
+Relaunched again ([01KYQCMY5KDQXEKY5F22XKZREX](https://beaker.org/ex/01KYQCMY5KDQXEKY5F22XKZREX))
+— confirmed training past step 6 (previously died at step 1 both times), no further errors as of
+this writing.
+
+### Launch command (same as original, rebuilt image only)
+
+```bash
+EXP_NAME=deepcoder_1_5b_nokl_temp0.6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.0 --temperature 0.6
+```
