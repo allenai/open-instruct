@@ -3297,3 +3297,24 @@ Built from commit `029ed4415`; confirmed in `starting` state on
 `ai2/jupiter` immediately after launch. The rendered Beaker command confirmed
 all three `_full` training datasets, `deepcoder_lcbv5_test_full`, and
 `--code_max_execution_time 6`.
+
+## 2026-07-29: DeepCoder-1.5B full-data NGU p=0.875 arm, 50-step eval/save cadence
+
+Prepared a matched comparison arm for the full-data baseline above. It keeps
+the same N=8/K=16, seed 1, optimizer, datasets, pass@4 eval, and 6-second code
+execution budget, adding only `--never_give_up 0.875`. Eval, model checkpoint,
+and resumable checkpoint-state frequencies are all reduced from 100 to 50
+steps to capture the trajectory at finer resolution.
+
+### Launch command
+
+```bash
+EXP_NAME=deepcoder_1_5b_ngu0875_full_train_full_eval \
+  ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.875 \
+  --local_eval_every 50 \
+  --save_freq 50 \
+  --checkpoint_state_freq 50
+```
+
+Beaker: pending launch.

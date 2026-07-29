@@ -775,7 +775,8 @@ additional lr/temperature/KL changes: the old baselines trained on stdin-only
 primeintellect/taco data and evaluated most lcbv5 problems on only the 15
 largest tests.
 
-**Runs:** [Full training + higher-fidelity full eval baseline](experiment.md#2026-07-29-deepcoder-15b-full-training--higher-fidelity-full-eval-baseline)
+**Runs:** [Full training + higher-fidelity full eval baseline](experiment.md#2026-07-29-deepcoder-15b-full-training--higher-fidelity-full-eval-baseline),
+[matched NGU p=0.875 arm](experiment.md#2026-07-29-deepcoder-15b-full-data-ngu-p0875-arm-50-step-evalsave-cadence)
 
 **Status (2026-07-29):** launched from `deepcoder_1_5b.sh` defaults:
 `mnoukhov/deepcoder_{lcbv5,primeintellect,taco}_full` for training,
@@ -785,6 +786,12 @@ the compressed per-problem payload fits 10 MB (238/279 problems; 90% of all
 tests) and uses the 15-largest-test fallback for the heavy tail. Beaker
 [01KYQSAK0JG3FG03XFM61CTMZ0](https://beaker.org/ex/01KYQSAK0JG3FG03XFM61CTMZ0)
 was starting on `ai2/jupiter` at launch verification. Results TBD.
+
+**NGU comparison arm (2026-07-29):** prepared a matched full-data seed-1 arm
+with `--never_give_up 0.875`; all other optimization and data settings match
+the new baseline. Eval, model checkpoints, and resumable checkpoint state are
+all scheduled every 50 steps instead of every 100 so its trajectory can be
+compared at finer resolution. Launch pending; results TBD.
 
 ## [ACTIVE] DeepCoder-1.5B on `grpo_fast.py` (DeepSpeed): does it match/beat the `grpo.py`/OLMo-core baseline?
 
