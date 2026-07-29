@@ -1290,6 +1290,14 @@ class OpenSandboxBackend(SandboxBackend):
             # of failing — otherwise every cold start both errors AND leaks
             # a billed orphan pod.
             if not self._is_gateway_timeout(e):
+                message = str(e).lower()
+                if self._protocol == "http" and ("connection reset" in message or "server disconnected" in message):
+                    logger.error(
+                        "OpenSandbox create failed with an immediate connection reset while using plain http "
+                        "(domain=%s). An HTTPS-only endpoint produces exactly this symptom — "
+                        "set SWERL_OPENSANDBOX_PROTOCOL=https.",
+                        self._domain,
+                    )
                 raise
             logger.warning(
                 "OpenSandbox create was cut by a gateway timeout (image=%s, create_id=%s): %s. "

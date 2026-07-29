@@ -13,7 +13,6 @@
 # docs/sandbox_management.md for the trade-offs vs Podman and Modal.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
-: "${SWERL_OPENSANDBOX_DOMAIN:?Set SWERL_OPENSANDBOX_DOMAIN to the OpenSandbox endpoint (e.g. sandbox.example.com)}"
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -32,8 +31,8 @@ uv run python mason.py \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
-       --env SWERL_OPENSANDBOX_DOMAIN="$SWERL_OPENSANDBOX_DOMAIN" \
-       --env SWERL_OPENSANDBOX_PROTOCOL="${SWERL_OPENSANDBOX_PROTOCOL:-http}" \
+       --env SWERL_OPENSANDBOX_DOMAIN="${SWERL_OPENSANDBOX_DOMAIN:-sandbox.oe-rl-sandbox.apps.allenai.org}" \
+       --env SWERL_OPENSANDBOX_PROTOCOL="${SWERL_OPENSANDBOX_PROTOCOL:-https}" \
        --env SWERL_OPENSANDBOX_LIFETIME_S=3600 \
        --env SWERL_OPENSANDBOX_APP_NAME=swerl-tmax-opensandbox-toy \
        --secret OPEN_SANDBOX_API_KEY=pradeepd_OPEN_SANDBOX_API_KEY \
@@ -76,7 +75,7 @@ uv run python mason.py \
     --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"backend": "opensandbox", "task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 128 \
+    --pool_size 16 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
