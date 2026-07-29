@@ -200,8 +200,8 @@ def validate_word_constraint(text: str, N: int, quantifier: str) -> bool:
     Raises:
         ValueError: If an invalid qualifier is provided
     """
-    # Remove extra whitespace and split into words
-    words = text.strip().split()
+    # Match IFEvalG NumberOfWords / count_words: tokenize on word characters.
+    words = re.findall(r"\w+", text)
     actual_count = len(words)
 
     # Define tolerance for "around" qualifier (±10% of target count)

@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+
+class TestValidateWordConstraint(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("punct_split_diff", "Hello, world! It's a test.", 6, "at least", True),
+            ("punct_old_split_would_be_5", "Hello, world! It's a test.", 5, "at most", False),
+            ("at_most", "one two three", 2, "at most", False),
+            ("around", "one two three", 3, "around", True),
+        ]
+    )
+    def test_validate_word_constraint(self, _name, text, n, quantifier, expected):
+        self.assertEqual(if_functions.validate_word_constraint(text, n, quantifier), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
