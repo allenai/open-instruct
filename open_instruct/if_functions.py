@@ -349,10 +349,13 @@ def verify_bullet_points(text: str, N: int) -> bool:
 
 # Title: Your answer must contain a title, wrapped in double angular brackets, such as <<poem of joy>>.
 def validate_title(text: str) -> bool:
-    pattern = r"<<(.*?)>>"
-    matches = re.findall(pattern, text)
+    """Require a non-empty <<title>> (IFEvalG TitleChecker).
 
-    return len(matches) > 0
+    Uses a non-greedy capture so adjacent empty ``<<>>`` pairs cannot glue
+    together into a false-positive non-empty match.
+    """
+    titles = re.findall(r"<<(.*?)>>", text)
+    return any(title.strip() for title in titles)
 
 
 # Choose: From Answer with one of the following options: {options}
