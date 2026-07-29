@@ -41,6 +41,12 @@ from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
+# Upper bound on tests per problem, used only to size CodeVerifier's HTTP timeout so it outlasts
+# the code API's own `max_execution_time * n_tests + 5` bound. Raise this if a dataset ships more
+# tests per problem than this, or slow solutions on those problems get scored 0 on a client timeout.
+# The largest test counts we ship are lcbv5's uncapped splits: 52 (eval) and 103 (train).
+MAX_TESTS_PER_PROBLEM_ESTIMATE = 120
+
 # remove excessive logging from liteLLM
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.ERROR)
@@ -947,8 +953,15 @@ class CodeVerifier(VerifierFunction):
             # Use connection pooling session
             session = self._get_session()
 
-            # Calculate timeout
-            http_timeout = max(30, min(300, self.verifier_config.code_max_execution_time * 10))
+            # The code API bounds its own work at `max_execution_time * n_tests + 5` seconds (see
+            # get_successful_tests_stdio / _functional in code_utils.py). The client has to outlast
+            # that bound: when the request is abandoned early the except branch below scores the
+            # sample 0.0, silently turning a slow-but-correct solution into a wrong answer. We
+            # can't know n_tests here without decoding the payload, so budget for the largest test
+            # count we ship (lcbv5 eval problems top out at 52 tests).
+            http_timeout = max(
+                30, min(1800, self.verifier_config.code_max_execution_time * MAX_TESTS_PER_PROBLEM_ESTIMATE + 30)
+            )
 
             # Make request in thread pool to keep it async
             def make_request():
