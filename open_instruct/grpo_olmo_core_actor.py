@@ -7,9 +7,6 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 
 import os
 from datetime import timedelta
-from functools import wraps
-from importlib import import_module
-from itertools import count
 from typing import Any
 
 import ray
@@ -36,7 +33,15 @@ from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngin
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_callbacks as grpo_callbacks_lib
-from open_instruct import grpo_utils, logger_utils, model_utils, olmo_core_utils, utils, vllm_utils
+from open_instruct import (
+    grpo_utils,
+    logger_utils,
+    model_utils,
+    olmo_core_cuda_diagnostics,
+    olmo_core_utils,
+    utils,
+    vllm_utils,
+)
 from open_instruct.grpo_callbacks import (
     EvalCallback,
     RefPolicyUpdateCallback,
@@ -146,48 +151,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 )
 
         if not self._cuda_stage_sync_wrapped_ep_ops:
-            ep_sync_1d = import_module("olmo_core.nn.moe.v2.ep_sync_1d")
-            op_counter = count()
-
-            def wrap_ep_op(op_name: str, original):
-                @wraps(original)
-                def wrapped(*args, **kwargs):
-                    op_index = next(op_counter)
-                    first_arg = args[0] if args else kwargs.get("inp", kwargs.get("x"))
-                    shape = tuple(first_arg.shape) if isinstance(first_arg, torch.Tensor) else None
-                    logger.warning(
-                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=enter shape=%s",
-                        self.rank,
-                        op_index,
-                        op_name,
-                        shape,
-                    )
-                    torch.cuda.synchronize()
-                    logger.warning(
-                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=enter-synchronized",
-                        self.rank,
-                        op_index,
-                        op_name,
-                    )
-                    result = original(*args, **kwargs)
-                    logger.warning(
-                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=exit", self.rank, op_index, op_name
-                    )
-                    torch.cuda.synchronize()
-                    logger.warning(
-                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=exit-synchronized",
-                        self.rank,
-                        op_index,
-                        op_name,
-                    )
-                    return result
-
-                return wrapped
-
-            ep_sync_1d.moe_permute_no_compile = wrap_ep_op("permute", ep_sync_1d.moe_permute_no_compile)
-            ep_sync_1d.moe_unpermute_no_compile = wrap_ep_op("unpermute", ep_sync_1d.moe_unpermute_no_compile)
-            ep_sync_1d.ops.all_to_all_async = wrap_ep_op("all_to_all_async", ep_sync_1d.ops.all_to_all_async)
-            ep_sync_1d.ops.all_to_all_wait = wrap_ep_op("all_to_all_wait", ep_sync_1d.ops.all_to_all_wait)
+            olmo_core_cuda_diagnostics.install_ep_operation_sync(self.rank)
             self._cuda_stage_sync_wrapped_ep_ops = True
 
         logger.warning(
