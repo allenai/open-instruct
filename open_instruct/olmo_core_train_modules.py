@@ -5,6 +5,7 @@ OLMo-core's native training infrastructure.
 """
 
 import math
+import os
 from typing import Any, Literal
 
 import numpy as np
@@ -542,6 +543,7 @@ class GRPOTrainModule(TransformerTrainModule):
         num_steps = 0
         local_step = 0
         rho_histograms: dict[str, list[torch.Tensor]] = {}
+        cuda_stage_sync = os.getenv("OLMO_CORE_CUDA_STAGE_SYNC", "").strip().lower() in {"1", "true", "yes", "on"}
 
         for epoch_idx in range(self.grpo_config.num_epochs):
             for sample_idx in range(num_samples):
@@ -558,6 +560,14 @@ class GRPOTrainModule(TransformerTrainModule):
                     microbatch_context(microbatch_index, window_size),
                     olmo_core_utils.replay_router_context(self.model, routed_experts),
                 ):
+                    if cuda_stage_sync:
+                        torch.cuda.synchronize()
+                        logger.warning(
+                            "[CUDAStageSync] rank=%s sample=%s boundary=before-forward dry_run=%s",
+                            dist_utils.get_rank(),
+                            sample_idx,
+                            dry_run,
+                        )
                     new_logprobs, entropy = grpo_utils.forward_for_logprobs(
                         self.model,
                         data_BT.query_responses[sample_idx],
@@ -568,6 +578,14 @@ class GRPOTrainModule(TransformerTrainModule):
                         return_entropy=self.grpo_config.record_entropy,
                         pass_olmo_core_doc_lens=True,
                     )
+                    if cuda_stage_sync:
+                        torch.cuda.synchronize()
+                        logger.warning(
+                            "[CUDAStageSync] rank=%s sample=%s boundary=after-forward dry_run=%s",
+                            dist_utils.get_rank(),
+                            sample_idx,
+                            dry_run,
+                        )
 
                     response_mask = data_BT.response_masks[sample_idx][:, 1:]
                     new_logprobs = grpo_utils.mask_logprobs(new_logprobs, response_mask)
@@ -616,6 +634,14 @@ class GRPOTrainModule(TransformerTrainModule):
 
                     loss = loss * dp_world_size
                     loss.backward()
+                    if cuda_stage_sync:
+                        torch.cuda.synchronize()
+                        logger.warning(
+                            "[CUDAStageSync] rank=%s sample=%s boundary=after-backward dry_run=%s",
+                            dist_utils.get_rank(),
+                            sample_idx,
+                            dry_run,
+                        )
 
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,

@@ -103,6 +103,47 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.evaluation_inference_results_Q = None
         self.max_possible_score = 1.0
         self.initial_weight_fingerprints: dict[str, str] = {}
+        self._cuda_stage_sync_hook_handles: list[torch.utils.hooks.RemovableHandle] = []
+
+    def _install_cuda_stage_sync_hooks(self) -> None:
+        if os.getenv("OLMO_CORE_CUDA_STAGE_SYNC", "").strip().lower() not in {"1", "true", "yes", "on"}:
+            return
+
+        def synchronize(module_name: str, boundary: str) -> None:
+            torch.cuda.synchronize()
+            logger.warning("[CUDAStageSync] rank=%s module=%s boundary=%s", self.rank, module_name, boundary)
+
+        def make_pre_hook(module_name: str):
+            def pre_hook(_module, _args) -> None:
+                synchronize(module_name, "enter")
+
+            return pre_hook
+
+        def make_post_hook(module_name: str):
+            def post_hook(_module, _args, _output) -> None:
+                synchronize(module_name, "exit")
+
+            return post_hook
+
+        selected_suffixes = (
+            ".attention",
+            ".routed_experts_router",
+            ".shared_experts_router",
+            ".routed_experts",
+            ".shared_experts",
+        )
+        for module_name, module in self.train_module.model.named_modules():
+            if module.__class__.__name__ == "OLMoDDPTransformerBlock" or module_name.endswith(selected_suffixes):
+                self._cuda_stage_sync_hook_handles.extend(
+                    (
+                        module.register_forward_pre_hook(make_pre_hook(module_name)),
+                        module.register_forward_hook(make_post_hook(module_name)),
+                    )
+                )
+
+        logger.warning(
+            "[CUDAStageSync] rank=%s installed %s hooks", self.rank, len(self._cuda_stage_sync_hook_handles)
+        )
 
     def setup_model(self) -> int:
         """Initialize the OLMo-core model and training infrastructure.
@@ -299,6 +340,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 )
                 self.train_module.model = self.train_module.model.to(dtype=torch_dtype)
 
+        self._install_cuda_stage_sync_hooks()
         logger.info(f"[Rank {self.rank}] OLMo-core model setup complete")
         return 1
 
