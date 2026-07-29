@@ -1,66 +1,58 @@
 ---
 name: track-terminal-evals
 description: >
-  Compile / update the terminal-bench (harbor) eval-results tracking CSV. Use when the user
-  wants to add eval experiments to the results file, refresh in-progress evals, pull train-time
-  metrics for native checkpoints, dig up existing evals from a workspace, or otherwise maintain
-  the growing eval spreadsheet. NOT for launching evals (run-terminal-eval) or analyzing a
-  training run (analyze-terminal-rl).
+  Maintain the single terminal-bench eval-results tracking sheet (TB2.1 + TBlite in one CSV).
+  Use when the user wants to add a model/checkpoint's eval results, refresh in-progress evals,
+  or otherwise update the tracking spreadsheet. NOT for launching evals (run-terminal-eval) or
+  analyzing a training run (analyze-terminal-rl).
 ---
 
 # Track terminal-bench eval results
 
-Maintains a single growing CSV of harbor eval results (pass@1/pass@5 + error disaggregation +
-optional train-time metrics + clickable Beaker/W&B links), upserted idempotently by `beaker_url`.
+ONE self-contained sheet + ONE tool. Each row = a model/checkpoint with BOTH benchmarks side by
+side; each row remembers its own eval-experiment URLs, so scores are (re)extracted directly from
+Beaker — no intermediate per-benchmark sheets.
 
-## Canonical locations
-- **Script:** `/weka/nora-default/shashankg/code/tmax/scripts/beaker/track_evals.py`
-- **Default CSV:** `/weka/nora-default/shashankg/code/tmax/scripts/beaker/dppo9b_4n64k_tb21_evals.csv`
-  (next to `eval_runs_2026-07-08.md`; pass `--csv` for a different file). Git-untracked.
-- **ALWAYS run with the open-instruct uv env** (has `wandb`), per `feedback_use_open_instruct_env_as_base`:
+## Canonical files (in `/weka/nora-default/shashankg/code/tmax/scripts/beaker/`)
+- **Sheet: `terminalbench_combined_evals.csv`** — one row per model/checkpoint. Columns:
+  `model_name, step, max_model_len,` `tb21_pass@1/pass@5/pass1_adj/err_rate/beaker_url,`
+  `tblite_pass@1/pass@5/pass1_adj/err_rate/beaker_url,` `train_grp_perf_w5, train_kl2, train_seq_len,
+  wandb_url, train_beaker_url, workspace`.
+- **Tool: `combined_evals.py`** (`refresh`, `add`). **Run with the open-instruct uv env**
+  (per [[feedback_use_open_instruct_env_as_base]]):
   ```bash
   cd /weka/nora-default/shashankg/code/open-instruct && \
-    uv run python /weka/nora-default/shashankg/code/tmax/scripts/beaker/track_evals.py <subcmd> ...
+    uv run python /weka/nora-default/shashankg/code/tmax/scripts/beaker/combined_evals.py <cmd>
   ```
+- **Row order (fixed, applied on every save):** raw Qwen (Qwen3 → Qwen3.5) · published Tmax SFT ·
+  local SFT (small → big; Qwen3 → Qwen3.5) · published Tmax RL · RL checkpoints by step.
 
-## Conventions (the judgment the script doesn't hardcode)
-- **Only track the user's own runs**: `--author shashankg` (default in `discover`).
-- **Default comparison config = TB2.1, k=5, 64k**: gate with `--require-tb21 --require-k 5 --require-maxlen 65536`
-  on `add` so mismatches are skipped. The eval **name suffix is unreliable** (new launches get named
-  `...terminal-bench-2-0` even when run on TB2.1 via `--dataset-path`) — the script keys off the actual
-  `DATASET_PATH`/`N_ATTEMPTS`/`MAX_MODEL_LEN` spec envs, so trust those, not the name.
-- **model_name**: for native RL checkpoints use a stable family name (e.g. `swerl-qwen35-9b-dppo-4n64k`)
-  + `--step N`; for released/base models the HF path (`allenai/tmax-9b`, `Qwen/Qwen3.5-9B`), no step.
-- **Error buckets**: `AgentTimeoutError` = the model's own 120s bash timeouts (model behavior). Everything
-  else (`RuntimeError` = vLLM/connection crashes, `Verifier/RewardFileNotFound/BadRequest/...`) = `infra_err`.
-  `pass1_infra_adj` = pass@1 recomputed excluding infra-failed trials (upper-ish estimate; assumes infra
-  failures are difficulty-random). Released-model runs whose log lacks the exception table (e.g. tmax-2b)
-  get blank buckets — flag, don't guess.
-- **Train metrics** apply ONLY to native checkpoints (not released models — skip those). Solve-signal is
-  noisy per-step; the `_w5` (±5-step smoothed) columns are the informative ones. Keep the set small
-  (grp_perf/scores @step + w5, kl2, seq_len).
-
-## Common tasks
+## The two commands
 ```bash
-# 1) Discover candidate evals in a workspace, then add the ones you want:
-... track_evals.py discover --workspace ai2/oe-agents --filter tb21
-... track_evals.py add --exp 01AAA 01BBB --model-name allenai/tmax-9b --require-tb21 --require-k 5 --require-maxlen 65536
+# fill scores for any row that has a beaker_url but no pass@1 yet (run after evals finish).
+# --force re-extracts every row (idempotent). Only touches eval scores; train_* are carried as-is.
+combined_evals.py refresh [--force]
 
-# 2) Refresh every row currently status=running (flips running->done, fills scores):
-... track_evals.py refresh
-
-# 3) Fill train-time metrics for native-checkpoint rows across a RESUME CHAIN of W&B runs
-#    (list earliest-first; earliest run wins on overlapping steps). Also sets wandb_url +
-#    train_beaker_url (resolved by scanning workspaces for the wandb id in the exp description):
-... track_evals.py train --wandb ut64ii7s gyw0z542 be3l7oy4
+# add (or update) one model/checkpoint row, then auto-refresh it:
+combined_evals.py add --model <NAME> [--step N] --max-len <32768|65536> --workspace ai2/oe-agents \
+    --tb21 <TB2.1_eval_exp_id> --tblite <TBlite_eval_exp_id> \
+    [--wandb <url> --train-exp <train_beaker_id> --grp-w5 X --kl2 X --seq-len X]   # train metrics: RL/SFT ckpts only
 ```
 
-## Notes / gotchas
-- Rows are keyed by `beaker_url` → re-running `add`/`refresh` updates in place, never duplicates,
-  and only overwrites with non-empty values (so `train_*` set by `train` survive a later `refresh`).
-- `n_trials` assumes 89 TB tasks × k; fine for TB2.1/TBlite-ish. If a dataset has a different task
-  count, correct `n_trials`/`error_rate` afterward.
-- The wandb resume-chain must be supplied by hand (`--wandb ...`) — each resume = a new W&B run;
-  find them from the training beaker experiment descriptions. For THIS run the chain is
-  `ut64ii7s`(steps 1-282) → `gyw0z542`(281-366) → `be3l7oy4`(361-440); later resumes append new runs.
-- After updating, the CSV is the source of truth; paste into Google Sheets (URL columns auto-linkify).
+## How scores are extracted (so you can trust/debug it)
+- Reads the scoring job's log for each URL: `pass@1`, `pass@5`, the exception-count table, and the
+  `X/Y trials` count. `AgentTimeoutError` = model failure; everything else (`RuntimeError` = vLLM/conn,
+  `Verifier*`, `RewardFileNotFound`, …) = infra. `err_rate = total/n_trials`;
+  `pass1_adj = pass@1·n_trials/(n_trials−infra)` (drops infra-failed trials; blank if no exception table).
+- **n_trials**: read from the log; TB2.1 = 89 tasks, TBlite = 100 tasks (× k, usually 5).
+- Edge case: a few early logs emit only a 2-line summary (no exception table) → tool falls back to the
+  `errors=N` progress line for the total and leaves the agent/infra split + `pass1_adj` blank.
+
+## Conventions / gotchas
+- Track only the user's own runs. Eval **names are unreliable** (a TB2.1 run can be named
+  `...terminal-bench-2-0`) — identity comes from the launch config, not the name.
+- Standard configs: released/base + RL = 64k; SFT = 32k; k=5. TBlite eval launches use
+  `--dataset openthoughts-tblite@2.0` (registry, 100 tasks); TB2.1 uses `--dataset-path .../terminal-bench-2-1`.
+- The sheet is git-tracked in tmax; the per-benchmark source sheets + old builders
+  (`track_evals.py`, `build_tblite_sheet.py`, `build_combined.py`) were retired — do not recreate them.
+- Launch commands for the eval + training jobs live in `eval_runs_2026-07-08.md` (same dir).
