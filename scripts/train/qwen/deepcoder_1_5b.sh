@@ -2,10 +2,19 @@
 
 EXP="${EXP:-}"
 
-TRAIN_SCRIPT="open_instruct/grpo.py"
-BACKEND_ARGS="--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
+# OC=true uses the OLMo-core GRPO (grpo.py) with FSDP; OC=false uses grpo_fast.py with DeepSpeed.
+OC="${OC:-true}"
+if [ "${OC}" = "true" ]; then
+    TRAIN_SCRIPT="open_instruct/grpo.py"
+    BACKEND_ARGS="--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
+    OC_TAG=""
+else
+    TRAIN_SCRIPT="open_instruct/grpo_fast.py"
+    BACKEND_ARGS="--deepspeed_stage 2"
+    OC_TAG="fast_"
+fi
 
-EXP_NAME="${EXP_NAME:-deepcoder_1_5b_${EXP}}"
+EXP_NAME="${EXP_NAME:-deepcoder_1_5b_${OC_TAG}${EXP}}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"

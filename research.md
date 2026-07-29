@@ -733,7 +733,10 @@ Also switched the default eval set to lcbv5-only (dropped `codeforces_test` and
 `humanevalplus_test` — the latter scored 0.00 across every run in the earlier K/NGU sweep) and
 pass@4 instead of pass@1, for a less noisy per-run signal.
 
-**Runs:** [Baseline lr/temperature/KL sweep, pass@4 lcbv5-only eval](experiment.md#2026-07-28-deepcoder-15b-baseline-hyperparameter-sweep-lr-temperature-kl-lcbv5-only-pass4-eval)
+**Runs:** [Baseline lr/temperature/KL sweep, pass@4 lcbv5-only eval](experiment.md#2026-07-28-deepcoder-15b-baseline-hyperparameter-sweep-lr-temperature-kl-lcbv5-only-pass4-eval), [Relaunch with revised arms after async-checkpoint fix](experiment.md#2026-07-29-relaunch-of-the-lrtemperaturekl-sweep-on-deepcoder_1_5b_baseline_lr1e6)
 
-**Status (2026-07-28):** all 3 runs launched (`ai2/jupiter`, urgent, `ai2/olmo-instruct`,
-script defaults); confirmed starting/running, no results yet.
+**Status (2026-07-29):** the 2026-07-28 sweep's 3 runs all died at step 100 to the async-checkpoint
+metric race (see the experiment.md root-cause entry above), no results from that arm set. Fixed
+and relaunched today with a revised arm set that isolates the KL lever instead of reducing it in
+lockstep with the others: `beta=0.01` alone, `beta=0`+`temperature=0.6`, `beta=0`+`learning_rate=1e-6`.
+All 3 confirmed starting; no results yet.

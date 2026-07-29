@@ -3121,3 +3121,37 @@ anything — they just silently score two rollouts as wrong. Real (and a mild co
 **Still open:** `olmo_core_utils.build_shared_callbacks` (SFT/DPO) also defaults to
 `save_async=True`. Those paths use `metrics_collect_interval=logging_steps` (>1), which makes the
 same race less likely to line up, but not impossible — untouched for now.
+
+## 2026-07-29: Relaunch of the lr/temperature/KL sweep on `deepcoder_1_5b_baseline_lr1e6`
+
+Now that the async-checkpoint deadlock above is fixed (commit `f32919bc7`), relaunched the
+`baseline_n8_k16` single-lever sweep from 2026-07-28 (all 3 of which died at step 100 to that
+bug). New arm set, chosen to separate the KL lever from the other two rather than reduce it in
+lockstep with them: raise `beta` 0.001→0.01 on its own, and combine `beta=0` with each of the
+other two levers (temperature 1.0→0.6, learning_rate 5e-7→1e-6) instead of testing each lever in
+isolation with a 10x-reduced (but still nonzero) KL term.
+
+| Name | learning_rate | temperature | beta | Beaker |
+| --- | --- | --- | --- | --- |
+| `deepcoder_1_5b_kl0.01` | 5e-7 | 1.0 | 0.01 | [01KYP4D91S30FGM5W1M1XQPEP9](https://beaker.org/ex/01KYP4D91S30FGM5W1M1XQPEP9) |
+| `deepcoder_1_5b_nokl_temp0.6` | 5e-7 | 0.6 | 0.0 | [01KYP4G6NZ231J04X3AC6RZG9W](https://beaker.org/ex/01KYP4G6NZ231J04X3AC6RZG9W) |
+| `deepcoder_1_5b_nokl_lr1e-6` | 1e-6 | 1.0 | 0.0 | [01KYP4GYKSF247M4XY7VM02088](https://beaker.org/ex/01KYP4GYKSF247M4XY7VM02088) |
+
+All other args match `baseline_n8_k16` (N=8, K=16, `never_give_up` unset, seed 1), same lcbv5-only
+pass@4 eval as the 2026-07-28 sweep. Launched on script defaults (`ai2/jupiter`, urgent,
+`ai2/olmo-instruct`) with `save_async=False` (today's fix), so these should survive past step 100.
+
+### Launch commands
+
+```bash
+EXP_NAME=deepcoder_1_5b_kl0.01 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.01
+
+EXP_NAME=deepcoder_1_5b_nokl_temp0.6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.0 --temperature 0.6
+
+EXP_NAME=deepcoder_1_5b_nokl_lr1e-6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.0 --learning_rate 1e-6
+```
+
+All 3 confirmed starting/running at launch time (no errors). Results TBD.
