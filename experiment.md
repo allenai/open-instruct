@@ -3121,3 +3121,146 @@ anything — they just silently score two rollouts as wrong. Real (and a mild co
 **Still open:** `olmo_core_utils.build_shared_callbacks` (SFT/DPO) also defaults to
 `save_async=True`. Those paths use `metrics_collect_interval=logging_steps` (>1), which makes the
 same race less likely to line up, but not impossible — untouched for now.
+
+## 2026-07-29: Relaunch of the lr/temperature/KL sweep on `deepcoder_1_5b_baseline_lr1e6`
+
+Now that the async-checkpoint deadlock above is fixed (commit `f32919bc7`), relaunched the
+`baseline_n8_k16` single-lever sweep from 2026-07-28 (all 3 of which died at step 100 to that
+bug). New arm set, chosen to separate the KL lever from the other two rather than reduce it in
+lockstep with them: raise `beta` 0.001→0.01 on its own, and combine `beta=0` with each of the
+other two levers (temperature 1.0→0.6, learning_rate 5e-7→1e-6) instead of testing each lever in
+isolation with a 10x-reduced (but still nonzero) KL term.
+
+| Name | learning_rate | temperature | beta | Beaker |
+| --- | --- | --- | --- | --- |
+| `deepcoder_1_5b_kl0.01` | 5e-7 | 1.0 | 0.01 | [01KYP4D91S30FGM5W1M1XQPEP9](https://beaker.org/ex/01KYP4D91S30FGM5W1M1XQPEP9) |
+| `deepcoder_1_5b_nokl_temp0.6` | 5e-7 | 0.6 | 0.0 | [01KYP4G6NZ231J04X3AC6RZG9W](https://beaker.org/ex/01KYP4G6NZ231J04X3AC6RZG9W) |
+| `deepcoder_1_5b_nokl_lr1e-6` | 1e-6 | 1.0 | 0.0 | [01KYP4GYKSF247M4XY7VM02088](https://beaker.org/ex/01KYP4GYKSF247M4XY7VM02088) |
+
+All other args match `baseline_n8_k16` (N=8, K=16, `never_give_up` unset, seed 1), same lcbv5-only
+pass@4 eval as the 2026-07-28 sweep. Launched on script defaults (`ai2/jupiter`, urgent,
+`ai2/olmo-instruct`) with `save_async=False` (today's fix), so these should survive past step 100.
+
+### Launch commands
+
+```bash
+EXP_NAME=deepcoder_1_5b_kl0.01 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.01
+
+EXP_NAME=deepcoder_1_5b_nokl_temp0.6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.0 --temperature 0.6
+
+EXP_NAME=deepcoder_1_5b_nokl_lr1e-6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.0 --learning_rate 1e-6
+```
+
+All 3 confirmed starting/running at launch time (no errors). Results TBD.
+
+## 2026-07-29: `deepcoder_1_5b.sh` OC=true/false backend toggle + first grpo_fast.py (DeepSpeed) baseline
+
+`deepcoder_1_5b.sh` was hardcoded to `open_instruct/grpo.py` (OLMo-core/FSDP) with no way to run
+it on the DeepSpeed backend, unlike `qwen3_4b_deepscaler_math.sh` which already has this switch.
+Added the same `OC=true/false` pattern (commit `a75fcbb0c`): `OC=true` (default, unchanged
+behavior) keeps `grpo.py` + `--fsdp_shard_degree 4 --fsdp_num_replicas 1
+--activation_memory_budget 0.5`; `OC=false` switches to `grpo_fast.py` + `--deepspeed_stage 2` and
+tags `EXP_NAME` with a `fast_` prefix so runs don't collide with existing `grpo.py` naming.
+
+Launched a single baseline (no lr/temp/KL deltas, N=8/K=16, seed 1 — same config as
+`baseline_n8_k16`) on the new `OC=false` path to get a `grpo_fast.py` reference point.
+
+| Name | Backend | Beaker |
+| --- | --- | --- |
+| `deepcoder_1_5b_fast_baseline` | grpo_fast.py (DeepSpeed stage 2) | [01KYQAR2MV0EB0RNHKPH0FH8ZF](https://beaker.org/ex/01KYQAR2MV0EB0RNHKPH0FH8ZF) |
+
+### Launch command
+
+```bash
+OC=false EXP=baseline ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh
+```
+
+Confirmed starting/running at launch time (no errors). Results TBD.
+
+## 2026-07-29: `deepcoder_1_5b_nokl_temp0.6` dying at step 1 every time — `mask_truncated_completions` desync
+
+`deepcoder_1_5b_nokl_temp0.6` ([01KYP4G6NZ231J04X3AC6RZG9W](https://beaker.org/ex/01KYP4G6NZ231J04X3AC6RZG9W))
+died at step 1 twice (05:19 and 16:14), both times with the identical error:
+
+```
+ValueError: Mismatch between prompt_sample_counts and scores: 128 grouped samples vs 127 scores.
+```
+
+**Root cause.** `maybe_mask_truncated_completions` (`data_loader.py`) drops any completion that
+didn't finish with a `stop` token when `--mask_truncated_completions True` is set (on by default
+in `deepcoder_1_5b.sh`) — but it only filtered `batch`/`result`, never the `batch_stats` fields
+built earlier in `make_batch_from_groups` (`prompt_sample_counts` and friends). Those still summed
+to the pre-filter total, so a single truncated completion anywhere in the batch desynced
+`prompt_sample_counts` (128) from `len(batch.scores)` (127) and crashed
+`compute_grouped_advantages`. `temperature=0.6` is more prone to non-terminating completions than
+the `temperature=1.0` baseline, which is presumably why this arm hit it deterministically at step 1
+while the `kl0.01`/`nokl_lr1e-6` siblings didn't (in 64000/128≈500 steps of headroom, luck alone
+doesn't rule out them hitting it later, but neither has yet as of this fix).
+
+**Fix, attempt 1 (commit `f72fe997d`):** recompute `prompt_sample_counts` (and the aligned
+`prompt_attempt_counts`/`prompt_baseline_sample_counts`/`prompt_baseline_reward_sums`/
+`prompt_lengths`) from the surviving sample indices, dropping any group that lost every completion
+to truncation. Added `TestMaskTruncatedCompletions` (`test_data_loader.py`) covering partial-group
+truncation, whole-group truncation, and the no-op case; `uv run pytest open_instruct/test_data_loader.py`
+passed (34/34) and `make style && make quality` was clean.
+
+Relaunched ([01KYQBTP9Y59PDGSMQXPV9MTA5](https://beaker.org/ex/01KYQBTP9Y59PDGSMQXPV9MTA5)) — got
+past step 1 this time, but died at step 2 with a **new**, closely related error:
+
+```
+ValueError: Expected prompt sample counts to match response lengths, got 125 samples and 128 response lengths.
+```
+
+**Fix, attempt 2 (commit `d736f7ab7`):** `batch_stats.response_lengths` is *also* built pre-filter
+in `make_batch_from_groups` (one entry per completion, same global ordering as `batch.scores`) and
+is consumed via the `batch/response_lengths` metric by `calculate_utilization_metrics`
+(`grpo_callbacks.py` → `utils.py`) — attempt 1 updated `prompt_sample_counts` but missed this
+sibling field, so the mismatch just moved. Filtered `response_lengths` by the same `stop_idxes` used
+for the rest of the per-completion fields. Extended the three new tests to assert
+`response_lengths` is filtered correctly and stays sum-aligned with `prompt_sample_counts`; full
+suite still 34/34, linter clean.
+
+Audited every other `sum(prompt_sample_counts) != len(...)` / `len(x) != len(prompt_sample_counts)`
+check in `utils.py`/`data_loader_utils.py` (`expand_prompt_lengths_for_response_groups`,
+`pad_response_lengths_for_attempt_counts`, `expand_grouped_scores`,
+`_apply_anchor_pos_advantage_rescaling`) — all their inputs are now covered by one of the two
+fixes above.
+
+Relaunched again ([01KYQCMY5KDQXEKY5F22XKZREX](https://beaker.org/ex/01KYQCMY5KDQXEKY5F22XKZREX))
+— confirmed training past step 6 (previously died at step 1 both times), no further errors as of
+this writing.
+
+### Launch command (same as original, rebuilt image only)
+
+```bash
+EXP_NAME=deepcoder_1_5b_nokl_temp0.6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
+  --beta 0.0 --temperature 0.6
+```
+
+## 2026-07-29: Stop masking truncated completions (`deepcoder_1_5b.sh`, commit `64dca3e85`)
+
+Decision: `--mask_truncated_completions True` (dropping non-`stop`-terminated completions from
+training) shouldn't be on for this run — a truncated response is still real signal for a code RLVR
+task, and masking is what exposed the `prompt_sample_counts`/`response_lengths` desync bug fixed
+above. Dropped the flag from `deepcoder_1_5b.sh`; `mask_truncated_completions` already defaults to
+`False` in `data_loader.py`, so this is a pure removal, not a value flip.
+
+Scope decision: leave the 4 already-launched jobs alone (`kl0.01`/`nokl_lr1e-6` finished cleanly at
+500/500 steps in ~11h each; `nokl_temp0.6`/`fast_baseline` are mid-run) rather than kill and
+relaunch them. Launched one new baseline (N=8/K=16, seed 1, no lr/temp/KL deltas, mask off) as a
+fresh reference point instead.
+
+| Name | Beaker |
+| --- | --- |
+| `deepcoder_1_5b_baseline_nomask` | [01KYQJ2YPFYDJ7HNKS797QH2KG](https://beaker.org/ex/01KYQJ2YPFYDJ7HNKS797QH2KG) |
+
+### Launch command
+
+```bash
+EXP_NAME=deepcoder_1_5b_baseline_nomask ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh
+```
+
+Confirmed starting/running at launch time (no errors). Results TBD.

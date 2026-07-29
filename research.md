@@ -733,7 +733,51 @@ Also switched the default eval set to lcbv5-only (dropped `codeforces_test` and
 `humanevalplus_test` — the latter scored 0.00 across every run in the earlier K/NGU sweep) and
 pass@4 instead of pass@1, for a less noisy per-run signal.
 
-**Runs:** [Baseline lr/temperature/KL sweep, pass@4 lcbv5-only eval](experiment.md#2026-07-28-deepcoder-15b-baseline-hyperparameter-sweep-lr-temperature-kl-lcbv5-only-pass4-eval)
+**Runs:** [Baseline lr/temperature/KL sweep, pass@4 lcbv5-only eval](experiment.md#2026-07-28-deepcoder-15b-baseline-hyperparameter-sweep-lr-temperature-kl-lcbv5-only-pass4-eval), [Relaunch with revised arms after async-checkpoint fix](experiment.md#2026-07-29-relaunch-of-the-lrtemperaturekl-sweep-on-deepcoder_1_5b_baseline_lr1e6), [nokl_temp0.6 step-1 crash: mask_truncated_completions desync, root-caused + fixed](experiment.md#2026-07-29-deepcoder_1_5b_nokl_temp06-dying-at-step-1-every-time-mask_truncated_completions-desync), [baseline_nomask: fresh run with masking off](experiment.md#2026-07-29-stop-masking-truncated-completions-deepcoder_1_5bsh-commit-64dca3e85)
 
-**Status (2026-07-28):** all 3 runs launched (`ai2/jupiter`, urgent, `ai2/olmo-instruct`,
-script defaults); confirmed starting/running, no results yet.
+**Status (2026-07-29):** the 2026-07-28 sweep's 3 runs all died at step 100 to the async-checkpoint
+metric race (see the experiment.md root-cause entry above), no results from that arm set. Fixed
+and relaunched today with a revised arm set that isolates the KL lever instead of reducing it in
+lockstep with the others: `beta=0.01` alone, `beta=0`+`temperature=0.6`, `beta=0`+`learning_rate=1e-6`.
+
+The `nokl_temp0.6` arm then died at step 1 on every attempt with a second, unrelated bug:
+`--mask_truncated_completions True` (on by default) drops individual truncated completions from
+the batch but left `batch_stats`' per-group/per-completion bookkeeping (`prompt_sample_counts`,
+`response_lengths`, etc.) at their pre-filter sizes, desyncing them from the actual post-filter
+data and crashing `compute_grouped_advantages`/`calculate_utilization_metrics`. `temperature=0.6`
+hit this far more often than the other two arms since lower temperature makes non-`stop`-terminated
+completions more likely. Fixed in `open_instruct/data_loader.py`
+(`maybe_mask_truncated_completions`, commits `f72fe997d` + `d736f7ab7` — the fix needed two passes,
+see the experiment.md entry for why) with new unit test coverage
+(`TestMaskTruncatedCompletions` in `test_data_loader.py`). This is a general `open_instruct` bug,
+not specific to this sweep or to DeepCoder — any run with `mask_truncated_completions=True` that
+hits a truncated completion was exposed to it.
+
+`kl0.01` and `nokl_lr1e-6` finished cleanly (500/500 steps, ~11h each) without ever hitting a
+truncated completion. `nokl_temp0.6` relaunched post-fix and confirmed training past step 6
+(previously died at step 1 every time). No pass@4 results written up yet from any of the 3 arms.
+
+**Design decision (2026-07-29):** dropped `--mask_truncated_completions True` from
+`deepcoder_1_5b.sh` entirely (commit `64dca3e85`) — a truncated response is still real training
+signal for a code RLVR task, no reason to discard it, and masking is exactly what exposed the bug
+above. `mask_truncated_completions` already defaults to `False` in `data_loader.py`, so this is a
+straight removal. Left the 4 already-launched jobs alone (2 finished, 2 mid-run) rather than kill
+and relaunch; instead launched a fresh baseline with masking off for comparison — see
+[baseline_nomask](experiment.md#2026-07-29-stop-masking-truncated-completions-deepcoder_1_5bsh-commit-64dca3e85).
+
+## [ACTIVE] DeepCoder-1.5B on `grpo_fast.py` (DeepSpeed): does it match/beat the `grpo.py`/OLMo-core baseline?
+
+**Question:** the DeepScaleR K/NGU work already found `grpo_fast.py` (DeepSpeed) a viable,
+less-unstable alternative to `grpo.py`/OLMo-core for sweeps (see the DAPO/NGU entries above). All
+DeepCoder-1.5B work so far has run on `grpo.py`/OC=true, which has needed three separate infra
+fixes this week alone (Qwen2 checkpoint support, the async-checkpoint metric race). Does a
+same-config `grpo_fast.py` baseline reproduce the `grpo.py` baseline's lcbv5 numbers, and is it
+more reliable operationally?
+
+**Infra:** `deepcoder_1_5b.sh` had no backend toggle at all (`grpo.py` was hardcoded) — added the
+same `OC=true/false` switch `qwen3_4b_deepscaler_math.sh` already uses.
+
+**Runs:** [OC toggle + first grpo_fast.py baseline](experiment.md#2026-07-29-deepcoder_1_5bsh-octruefalse-backend-toggle--first-grpo_fastpy-deepspeed-baseline)
+
+**Status (2026-07-29):** toggle added, one baseline (N=8/K=16, seed 1, no lr/temp/KL deltas)
+launched on `OC=false`. Confirmed starting; no results yet.
