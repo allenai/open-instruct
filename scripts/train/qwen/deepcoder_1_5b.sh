@@ -92,7 +92,6 @@ uv run mason.py \
     --vllm_enable_prefix_caching \
     --clip_higher 0.272 \
     --max_grad_norm 1.0 \
-    --mask_truncated_completions True \
     --code_api_url \$CODE_API_URL/test_program \
     --code_pass_rate_reward_threshold 0.0 \
     --load_ref_policy True \
