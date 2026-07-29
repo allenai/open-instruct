@@ -3292,4 +3292,8 @@ EXP_NAME=deepcoder_1_5b_baseline_full_train_full_eval \
   ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh
 ```
 
-Beaker: pending launch.
+Beaker: [01KYQSAK0JG3FG03XFM61CTMZ0](https://beaker.org/ex/01KYQSAK0JG3FG03XFM61CTMZ0).
+Built from commit `029ed4415`; confirmed in `starting` state on
+`ai2/jupiter` immediately after launch. The rendered Beaker command confirmed
+all three `_full` training datasets, `deepcoder_lcbv5_test_full`, and
+`--code_max_execution_time 6`.

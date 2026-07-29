@@ -777,12 +777,14 @@ largest tests.
 
 **Runs:** [Full training + higher-fidelity full eval baseline](experiment.md#2026-07-29-deepcoder-15b-full-training--higher-fidelity-full-eval-baseline)
 
-**Status (2026-07-29):** launch prepared from `deepcoder_1_5b.sh` defaults:
+**Status (2026-07-29):** launched from `deepcoder_1_5b.sh` defaults:
 `mnoukhov/deepcoder_{lcbv5,primeintellect,taco}_full` for training,
 `mnoukhov/deepcoder_lcbv5_test_full` for pass@4 eval, and
 `--code_max_execution_time 6`. The eval conversion retains all tests whenever
 the compressed per-problem payload fits 10 MB (238/279 problems; 90% of all
-tests) and uses the 15-largest-test fallback for the heavy tail. Results TBD.
+tests) and uses the 15-largest-test fallback for the heavy tail. Beaker
+[01KYQSAK0JG3FG03XFM61CTMZ0](https://beaker.org/ex/01KYQSAK0JG3FG03XFM61CTMZ0)
+was starting on `ai2/jupiter` at launch verification. Results TBD.
 
 ## [ACTIVE] DeepCoder-1.5B on `grpo_fast.py` (DeepSpeed): does it match/beat the `grpo.py`/OLMo-core baseline?
 
