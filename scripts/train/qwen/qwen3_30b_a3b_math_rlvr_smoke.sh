@@ -16,6 +16,7 @@ NUM_TRAINING_STEPS="${NUM_TRAINING_STEPS:-5}"
 NUM_NODES="${NUM_NODES:-1}"
 NUM_LEARNERS_PER_NODE="${NUM_LEARNERS_PER_NODE:-4}"
 OLMO_CORE_EP_DEGREE="${OLMO_CORE_EP_DEGREE:-4}"
+ROUTER_REPLAY="${ROUTER_REPLAY:-false}"
 TOTAL_EPISODES=$((NUM_UNIQUE_PROMPTS * NUM_SAMPLES_PER_PROMPT * NUM_TRAINING_STEPS))
 
 uv run python mason.py \
@@ -70,7 +71,7 @@ uv run python mason.py \
         --ground_truths_key ground_truth \
         --olmo_core_train_module ddp \
         --olmo_core_ep_degree "$OLMO_CORE_EP_DEGREE" \
-        --router_replay true \
+        --router_replay "$ROUTER_REPLAY" \
         --num_learners_per_node "$NUM_LEARNERS_PER_NODE" \
         --vllm_num_engines 1 \
         --vllm_tensor_parallel_size 1 \
