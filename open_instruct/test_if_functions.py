@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+class TestValidateRepeatPrompt(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("exact", "Hello world answer", "Hello world", True),
+            ("leading_space", "  Hello world answer", "Hello world", True),
+            ("case", "HELLO world answer", "Hello world", True),
+            ("prompt_whitespace", "Hello world answer", " Hello world  ", True),
+            ("missing", "Something else", "Hello world", False),
+        ]
+    )
+    def test_validate_repeat_prompt(self, _name, text, prompt, expected):
+        self.assertEqual(if_functions.validate_repeat_prompt(text, prompt), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
