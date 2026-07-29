@@ -13,6 +13,9 @@ OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/${BEAKER_USER}/qmoe-int/qwen3-3
 NUM_UNIQUE_PROMPTS="${NUM_UNIQUE_PROMPTS:-2}"
 NUM_SAMPLES_PER_PROMPT="${NUM_SAMPLES_PER_PROMPT:-4}"
 NUM_TRAINING_STEPS="${NUM_TRAINING_STEPS:-5}"
+NUM_NODES="${NUM_NODES:-1}"
+NUM_LEARNERS_PER_NODE="${NUM_LEARNERS_PER_NODE:-4}"
+OLMO_CORE_EP_DEGREE="${OLMO_CORE_EP_DEGREE:-4}"
 TOTAL_EPISODES=$((NUM_UNIQUE_PROMPTS * NUM_SAMPLES_PER_PROMPT * NUM_TRAINING_STEPS))
 
 uv run python mason.py \
@@ -26,7 +29,7 @@ uv run python mason.py \
     --non_resumable \
     --preemptible \
     --no_auto_dataset_cache \
-    --num_nodes 2 \
+    --num_nodes "$NUM_NODES" \
     --gpus 8 \
     --max_retries 0 \
     --timeout 6h \
@@ -66,9 +69,9 @@ uv run python mason.py \
         --apply_verifiable_reward true \
         --ground_truths_key ground_truth \
         --olmo_core_train_module ddp \
-        --olmo_core_ep_degree 8 \
+        --olmo_core_ep_degree "$OLMO_CORE_EP_DEGREE" \
         --router_replay true \
-        --num_learners_per_node 8 \
+        --num_learners_per_node "$NUM_LEARNERS_PER_NODE" \
         --vllm_num_engines 1 \
         --vllm_tensor_parallel_size 1 \
         --vllm_gpu_memory_utilization 0.5 \
