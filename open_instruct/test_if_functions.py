@@ -39,5 +39,19 @@ class TestValidateFrequencyCapitalWords(unittest.TestCase):
         self.assertEqual(if_functions.validate_frequency_capital_words(text, n, quantifier), expected)
 
 
+
+class TestVerifySentenceConstraint(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("two_sentences", "One. Two.", 2, "at least", True),
+            ("trailing_space", "One. Two. ", 2, "at most", True),
+            ("trailing_was_three", "One. Two. ", 3, "at least", False),
+            ("empty", "", 1, "at least", False),
+        ]
+    )
+    def test_verify_sentence_constraint(self, _name, text, n, quantifier, expected):
+        self.assertEqual(if_functions.verify_sentence_constraint(text, n, quantifier), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
