@@ -3264,3 +3264,32 @@ EXP_NAME=deepcoder_1_5b_baseline_nomask ./scripts/train/build_image_and_launch.s
 ```
 
 Confirmed starting/running at launch time (no errors). Results TBD.
+
+## 2026-07-29: DeepCoder-1.5B full training + higher-fidelity full eval baseline
+
+Prepared a fresh plain baseline (N=8, K=16, seed 1, `beta=0.001`, training
+temperature 1.0, eval temperature 0.6/pass@4, no NGU, truncated-completion
+masking off) after the data/eval fidelity changes in commits `823dc3124` and
+`9ba44477e` were merged.
+
+Differences from the earlier baseline:
+
+- train on `mnoukhov/deepcoder_lcbv5_full`,
+  `mnoukhov/deepcoder_primeintellect_full`, and
+  `mnoukhov/deepcoder_taco_full`, retaining function-signature problems from
+  every source;
+- evaluate all 279 stdin + functional lcbv5 problems from
+  `mnoukhov/deepcoder_lcbv5_test_full`;
+- keep every eval test when its compressed per-problem payload fits 10 MB
+  (238/279 problems, covering 90% of all tests), falling back to the 15
+  largest tests for the heavy tail;
+- use `--code_max_execution_time 6` instead of the old 1-second default.
+
+### Launch command
+
+```bash
+EXP_NAME=deepcoder_1_5b_baseline_full_train_full_eval \
+  ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh
+```
+
+Beaker: pending launch.

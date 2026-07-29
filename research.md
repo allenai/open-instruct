@@ -765,6 +765,25 @@ straight removal. Left the 4 already-launched jobs alone (2 finished, 2 mid-run)
 and relaunch; instead launched a fresh baseline with masking off for comparison — see
 [baseline_nomask](experiment.md#2026-07-29-stop-masking-truncated-completions-deepcoder_1_5bsh-commit-64dca3e85).
 
+## [ACTIVE] DeepCoder-1.5B full-data baseline: do functional training problems and higher-fidelity eval change the baseline?
+
+**Question:** rerun the plain N=8/K=16, seed-1 baseline after adding the
+function-signature problems back into all three training sources and the full
+279-problem lcbv5 eval set, with the corrected 6-second per-test execution
+budget. This establishes a new reference point before interpreting any
+additional lr/temperature/KL changes: the old baselines trained on stdin-only
+primeintellect/taco data and evaluated most lcbv5 problems on only the 15
+largest tests.
+
+**Runs:** [Full training + higher-fidelity full eval baseline](experiment.md#2026-07-29-deepcoder-15b-full-training--higher-fidelity-full-eval-baseline)
+
+**Status (2026-07-29):** launch prepared from `deepcoder_1_5b.sh` defaults:
+`mnoukhov/deepcoder_{lcbv5,primeintellect,taco}_full` for training,
+`mnoukhov/deepcoder_lcbv5_test_full` for pass@4 eval, and
+`--code_max_execution_time 6`. The eval conversion retains all tests whenever
+the compressed per-problem payload fits 10 MB (238/279 problems; 90% of all
+tests) and uses the 15-largest-test fallback for the heavy tail. Results TBD.
+
 ## [ACTIVE] DeepCoder-1.5B on `grpo_fast.py` (DeepSpeed): does it match/beat the `grpo.py`/OLMo-core baseline?
 
 **Question:** the DeepScaleR K/NGU work already found `grpo_fast.py` (DeepSpeed) a viable,
