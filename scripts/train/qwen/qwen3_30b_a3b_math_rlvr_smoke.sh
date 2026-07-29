@@ -88,5 +88,4 @@ uv run python mason.py \
         --try_auto_save_to_beaker false \
         --push_to_hub false \
         --save_traces \
-        --with_tracking \
         --verbose
