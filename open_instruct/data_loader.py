@@ -1184,10 +1184,20 @@ def accumulate_inference_batches(
     )
 
 
-def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch: Batch, enabled: bool) -> Batch:
-    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch."""
+def maybe_mask_truncated_completions(
+    result: data_types.GenerationResult, batch: Batch, advantages: np.ndarray, enabled: bool
+) -> tuple[Batch, np.ndarray]:
+    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place), batch, and advantages.
+
+    `advantages` must already be computed (grouped by the original, pre-filter
+    `num_samples_per_prompt_rollout`-sized chunks) before calling this. Dropping some completions
+    from a group here, then trying to recompute group means/stds from the post-filter scores via
+    `scores.reshape(-1, num_samples_per_prompt_rollout)`, would either crash (filtering broke the
+    fixed-size divisibility) or silently mis-group samples (it happened to stay divisible, but
+    group boundaries no longer line up with actual prompts).
+    """
     if not enabled:
-        return batch
+        return batch, advantages
     stop_idxes = [i for i, fr in enumerate(result.finish_reasons) if fr == "stop"]
     num_truncated = len(result.finish_reasons) - len(stop_idxes)
     if num_truncated > 0:
@@ -1199,7 +1209,7 @@ def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch:
     result.masks = [result.masks[i] for i in stop_idxes]
     result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
     result.logprobs = [result.logprobs[i] for i in stop_idxes]
-    return batch[stop_idxes]
+    return batch[stop_idxes], advantages[stop_idxes]
 
 
 def prepare_collated_data_for_workers(
@@ -1450,7 +1460,26 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
 
-            batch = maybe_mask_truncated_completions(result, batch, self.config.mask_truncated_completions)
+            # Group means/stds must be computed from the pre-filter batch, while every group still
+            # has exactly `num_samples_per_prompt_rollout` samples — `maybe_mask_truncated_completions`
+            # below can drop individual completions and break that fixed-size invariant.
+            pre_filter_scores = np.array(batch.scores)
+            scores_per_prompt = pre_filter_scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
+            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+            std_grouped_rewards = scores_per_prompt.std(axis=-1)
+            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
+
+            if self.config.advantage_normalization_type == "standard":
+                pre_filter_advantages = (pre_filter_scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+            elif self.config.advantage_normalization_type == "centered":
+                pre_filter_advantages = pre_filter_scores - mean_grouped_rewards
+            else:
+                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
+
+            batch, advantages = maybe_mask_truncated_completions(
+                result, batch, pre_filter_advantages, self.config.mask_truncated_completions
+            )
 
             if len(result.responses) == 0:
                 logger.warning(
@@ -1470,18 +1499,6 @@ class DataPreparationActor:
                 self.ground_truth_overrides.update(new_overrides)
 
             scores = np.array(batch.scores)
-            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-
-            if self.config.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.config.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
 
             if self.config.save_traces and self.config.rollouts_save_path:
                 save_rollouts_to_disk(
