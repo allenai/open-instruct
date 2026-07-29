@@ -192,12 +192,16 @@ class TestCreateVllmEngines(unittest.TestCase):
                 actor_manager=MagicMock(),
                 vllm_moe_backend="triton",
                 vllm_max_num_batched_tokens=384,
+                enable_return_routed_experts=True,
             )
 
         self.assertEqual(engines, [engine])
         engine_kwargs = actor_options.remote.call_args.kwargs
         self.assertEqual(engine_kwargs["moe_backend"], "triton")
         self.assertEqual(engine_kwargs["max_num_batched_tokens"], 384)
+        self.assertEqual(
+            engine_kwargs["worker_extension_cls"], "open_instruct.vllm_worker_extension.RouterReplayWorkerExtension"
+        )
 
 
 class TestVllmUtils3(unittest.TestCase):

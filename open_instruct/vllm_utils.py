@@ -756,6 +756,15 @@ class LLMRayActor:
 
             engine_client = vllm.AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
+            if self.return_routed_experts:
+                route_status = await engine_client.collective_rpc("get_router_replay_status")
+                logger.info("Native vLLM router replay status: %s", route_status)
+                for worker_status in route_status:
+                    if not worker_status["config_enabled"] or not worker_status["capturer_initialized"]:
+                        raise RuntimeError(f"vLLM routed-expert capturer did not initialize: {worker_status}")
+                    if worker_status["bound_layers"] == 0:
+                        raise RuntimeError(f"vLLM bound no native MoE routers for route capture: {worker_status}")
+
             tokenizer = engine_client.tokenizer
             inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
             has_chat_template = getattr(inner_tokenizer, "chat_template", None) is not None
@@ -1437,6 +1446,11 @@ def create_vllm_engines(
                 attention_backend=vllm_attention_backend,
                 language_model_only=True,
                 enable_return_routed_experts=enable_return_routed_experts,
+                worker_extension_cls=(
+                    "open_instruct.vllm_worker_extension.RouterReplayWorkerExtension"
+                    if enable_return_routed_experts
+                    else ""
+                ),
             )
         )
 
