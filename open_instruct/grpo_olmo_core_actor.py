@@ -7,6 +7,8 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 
 import os
 from datetime import timedelta
+from functools import wraps
+from itertools import count
 from typing import Any
 
 import ray
@@ -17,6 +19,7 @@ from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn import ddp as olmo_ddp
 from olmo_core.nn.hf.checkpoint import load_hf_model
+from olmo_core.nn.moe.v2 import ep_sync_1d
 from olmo_core.nn.moe.v2.checkpoint import gather_olmo_ddp_hf_state, load_olmo_ddp_hf_state
 from olmo_core.nn.moe.v2.weight_stream import gather_olmo_ddp_hf_state_to_cpu
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup, OLMoDDPOptimizerConfig
@@ -104,6 +107,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         self.max_possible_score = 1.0
         self.initial_weight_fingerprints: dict[str, str] = {}
         self._cuda_stage_sync_hook_handles: list[torch.utils.hooks.RemovableHandle] = []
+        self._cuda_stage_sync_wrapped_ep_ops = False
 
     def _install_cuda_stage_sync_hooks(self) -> None:
         if os.getenv("OLMO_CORE_CUDA_STAGE_SYNC", "").strip().lower() not in {"1", "true", "yes", "on"}:
@@ -141,8 +145,54 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                     )
                 )
 
+        if not self._cuda_stage_sync_wrapped_ep_ops:
+            op_counter = count()
+
+            def wrap_ep_op(op_name: str, original):
+                @wraps(original)
+                def wrapped(*args, **kwargs):
+                    op_index = next(op_counter)
+                    first_arg = args[0] if args else kwargs.get("inp", kwargs.get("x"))
+                    shape = tuple(first_arg.shape) if isinstance(first_arg, torch.Tensor) else None
+                    logger.warning(
+                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=enter shape=%s",
+                        self.rank,
+                        op_index,
+                        op_name,
+                        shape,
+                    )
+                    torch.cuda.synchronize()
+                    logger.warning(
+                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=enter-synchronized",
+                        self.rank,
+                        op_index,
+                        op_name,
+                    )
+                    result = original(*args, **kwargs)
+                    logger.warning(
+                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=exit", self.rank, op_index, op_name
+                    )
+                    torch.cuda.synchronize()
+                    logger.warning(
+                        "[CUDAEPSync] rank=%s op_index=%s op=%s boundary=exit-synchronized",
+                        self.rank,
+                        op_index,
+                        op_name,
+                    )
+                    return result
+
+                return wrapped
+
+            ep_sync_1d.moe_permute_no_compile = wrap_ep_op("permute", ep_sync_1d.moe_permute_no_compile)
+            ep_sync_1d.moe_unpermute_no_compile = wrap_ep_op("unpermute", ep_sync_1d.moe_unpermute_no_compile)
+            ep_sync_1d.ops.all_to_all_async = wrap_ep_op("all_to_all_async", ep_sync_1d.ops.all_to_all_async)
+            ep_sync_1d.ops.all_to_all_wait = wrap_ep_op("all_to_all_wait", ep_sync_1d.ops.all_to_all_wait)
+            self._cuda_stage_sync_wrapped_ep_ops = True
+
         logger.warning(
-            "[CUDAStageSync] rank=%s installed %s hooks", self.rank, len(self._cuda_stage_sync_hook_handles)
+            "[CUDAStageSync] rank=%s installed %s hooks and EP operation wrappers",
+            self.rank,
+            len(self._cuda_stage_sync_hook_handles),
         )
 
     def setup_model(self) -> int:
