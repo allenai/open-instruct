@@ -51,6 +51,8 @@ from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArg
 from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
+from vllm.entrypoints.openai.completion import serving as completion_serving
+from vllm.entrypoints.openai.completion.protocol import CompletionResponseChoice
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 from vllm.v1.core import kv_cache_utils
 from vllm.v1.kv_cache_interface import MambaSpec
@@ -98,6 +100,53 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+def encode_routed_experts(routed_experts: np.ndarray) -> str:
+    """Encode routed experts using vLLM’s base64 NumPy transport format."""
+    buffer = io.BytesIO()
+    np.save(buffer, routed_experts, allow_pickle=False)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _attach_routed_experts_to_completion_response(response, final_res_batch, request) -> None:
+    if not getattr(request, "return_routed_experts", False):
+        return
+
+    choice_index = 0
+    for final_res in final_res_batch:
+        for output in final_res.outputs:
+            routed_experts = output.routed_experts
+            if routed_experts is not None:
+                response.choices[choice_index].routed_experts = encode_routed_experts(routed_experts)
+            choice_index += 1
+
+    if choice_index != len(response.choices):
+        raise RuntimeError(
+            "vLLM completion output count changed while attaching routed experts: "
+            f"found {choice_index} outputs and {len(response.choices)} response choices"
+        )
+
+
+def patch_vllm_completion_route_serialization(serving_cls=None) -> bool:
+    """Bridge routes into vLLM versions that omit them from OpenAI responses."""
+    if "routed_experts" in CompletionResponseChoice.model_fields:
+        return False
+
+    serving_cls = serving_cls or completion_serving.OpenAIServingCompletion
+    original = serving_cls.request_output_to_completion_response
+    if getattr(original, "_open_instruct_serializes_routed_experts", False):
+        return False
+
+    def request_output_to_completion_response(self, final_res_batch, request, *args, **kwargs):
+        response = original(self, final_res_batch, request, *args, **kwargs)
+        _attach_routed_experts_to_completion_response(response, final_res_batch, request)
+        return response
+
+    request_output_to_completion_response._open_instruct_serializes_routed_experts = True
+    serving_cls.request_output_to_completion_response = request_output_to_completion_response
+    logger.info("Installed vLLM OpenAI routed-expert response compatibility bridge")
+    return True
 
 
 def decode_routed_experts(routed_experts: str | list | None) -> list | None:
@@ -764,6 +813,7 @@ class LLMRayActor:
                         raise RuntimeError(f"vLLM routed-expert capturer did not initialize: {worker_status}")
                     if worker_status["bound_layers"] == 0:
                         raise RuntimeError(f"vLLM bound no native MoE routers for route capture: {worker_status}")
+                patch_vllm_completion_route_serialization()
 
             tokenizer = engine_client.tokenizer
             inner_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)

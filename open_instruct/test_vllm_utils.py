@@ -2,6 +2,7 @@ import base64
 import io
 import logging
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -75,6 +76,55 @@ class TestDecodeRoutedExperts(unittest.TestCase):
         )
 
         self.assertEqual(response.choices[0].routed_experts, "abc")
+
+
+class TestVllmRouteSerializationBridge(unittest.TestCase):
+    def test_attaches_encoded_routes_requested_by_client(self):
+        routes = np.arange(24, dtype=np.int32).reshape(3, 4, 2)
+        response = SimpleNamespace(choices=[vllm_utils.CompletionResponseChoice(index=0, text="")])
+        final_res_batch = [SimpleNamespace(outputs=[SimpleNamespace(routed_experts=routes)])]
+        request = SimpleNamespace(return_routed_experts=True)
+
+        vllm_utils._attach_routed_experts_to_completion_response(response, final_res_batch, request)
+
+        self.assertEqual(vllm_utils.decode_routed_experts(response.choices[0].routed_experts), routes.tolist())
+
+    def test_does_not_attach_routes_without_request_flag(self):
+        response = SimpleNamespace(choices=[vllm_utils.CompletionResponseChoice(index=0, text="")])
+        final_res_batch = [
+            SimpleNamespace(outputs=[SimpleNamespace(routed_experts=np.zeros((1, 1, 1), dtype=np.int32))])
+        ]
+
+        vllm_utils._attach_routed_experts_to_completion_response(
+            response, final_res_batch, SimpleNamespace(return_routed_experts=False)
+        )
+
+        self.assertIsNone(response.choices[0].routed_experts)
+
+    def test_patches_legacy_vllm_serializer_once(self):
+        routes = np.arange(8, dtype=np.int32).reshape(1, 4, 2)
+        response = SimpleNamespace(choices=[vllm_utils.CompletionResponseChoice(index=0, text="")])
+        final_res_batch = [SimpleNamespace(outputs=[SimpleNamespace(routed_experts=routes)])]
+
+        class LegacyServing:
+            def request_output_to_completion_response(self, final_res_batch, request, *args, **kwargs):
+                return response
+
+        with mock.patch.object(vllm_utils.CompletionResponseChoice, "model_fields", {}):
+            self.assertTrue(vllm_utils.patch_vllm_completion_route_serialization(LegacyServing))
+            self.assertFalse(vllm_utils.patch_vllm_completion_route_serialization(LegacyServing))
+
+        actual = LegacyServing().request_output_to_completion_response(
+            final_res_batch, SimpleNamespace(return_routed_experts=True)
+        )
+        self.assertEqual(vllm_utils.decode_routed_experts(actual.choices[0].routed_experts), routes.tolist())
+
+    def test_skips_bridge_when_vllm_has_native_response_field(self):
+        class NativeServing:
+            pass
+
+        with mock.patch.object(vllm_utils.CompletionResponseChoice, "model_fields", {"routed_experts": object()}):
+            self.assertFalse(vllm_utils.patch_vllm_completion_route_serialization(NativeServing))
 
 
 class TestCompletionExtraBody(unittest.TestCase):
