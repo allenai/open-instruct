@@ -5,18 +5,22 @@ The source dataset has four configs: codeforces, lcbv5, primeintellect, taco.
 - lcbv5 ships "train" and "test" -> lcbv5 test is reserved as held-out eval.
 - primeintellect and taco only ship "train" -> used entirely for training.
 
-Each config mixes stdin/stdout-style problems with function-signature ("functional") problems.
-lcbv5 keeps both: stdin problems are graded by the code_stdio verifier and functional ones by the
+Each config mixes stdin/stdout-style problems with function-signature ("functional") problems, all
+now kept: stdin problems are graded by the code_stdio verifier and functional ones by the
 code_functional verifier, which calls the solution's function directly (see
-`get_successful_tests_functional` in open_instruct/code_utils/code_utils.py). This keeps the lcbv5
-test split at the full 279 problems that DeepCoder/LiveCodeBench report on. primeintellect and taco
-encode their functional problems differently (pre-parsed argument lists rather than LiveCodeBench's
-JSON-per-line) and are still filtered to stdin-only.
+`get_successful_tests_functional` in open_instruct/code_utils/code_utils.py). lcbv5's functional
+tests already encode one JSON argument per line and a bare JSON-encoded return value, matching
+LiveCodeBench's own format, and ship a `starter_code` field so the prompt can hand the model the
+exact signature (as LiveCodeBench does). primeintellect and taco instead ship pre-parsed argument
+lists and wrap the expected return in a single-element list (not always consistently, so
+`grade_call_based` accepts the value either wrapped or bare -- see testing_util.py); they also
+don't ship starter code, so the prompt instead names the function and its arity.
 
-Pushes one HF dataset per (source, split) to mnoukhov/deepcoder_<source>[_test]. The lcbv5 splits
-are pushed under a "_full" suffix: the earlier stdin-only lcbv5 repos (mnoukhov/deepcoder_lcbv5,
-mnoukhov/deepcoder_lcbv5_test) are left untouched so runs launched against them stay reproducible
-and comparable.
+Pushes one HF dataset per (source, split) to mnoukhov/deepcoder_<source>[_test]. The lcbv5,
+primeintellect and taco splits with functional problems added back in are pushed under a "_full"
+suffix: the earlier stdin-only repos (mnoukhov/deepcoder_lcbv5, mnoukhov/deepcoder_lcbv5_test,
+mnoukhov/deepcoder_primeintellect, mnoukhov/deepcoder_taco) are left untouched so runs launched
+against them stay reproducible and comparable.
 
 Held-out eval splits (lcbv5 test, codeforces) are tagged with source-specific "dataset" values
 ("code_stdio_lcbv5", "code_functional_lcbv5", "code_stdio_codeforces") instead of the generic
@@ -44,6 +48,16 @@ FUNCTIONAL_INSTRUCTION = (
     "\n\nWrite Python code to solve this problem. You will use the following starter code to write "
     "the solution, and enclose your complete solution in a single ```python code block."
     "\n\n```python\n{starter_code}\n```"
+)
+
+# primeintellect/taco functional problems don't ship starter code, so name the function and its
+# arity directly instead (they're overwhelmingly bare functions, not `class Solution` methods --
+# verified against the primeintellect sources).
+FUNCTIONAL_INSTRUCTION_NAMED = (
+    "\n\nWrite Python code to solve this problem. Define a top-level function named `{fn_name}` "
+    "that takes the input arguments described above and returns the answer directly -- do not read "
+    "from stdin or write to stdout. It will be called as `{fn_name}({arg_placeholders})`. Enclose "
+    "your complete solution in a single ```python code block."
 )
 
 # DeepCoder's own recipe samples "the 15 most challenging tests" per problem for reward
@@ -85,6 +99,7 @@ def to_example(
     dataset_tag: str = "code_stdio",
     fn_name: str | None = None,
     starter_code: str = "",
+    num_args: int | None = None,
 ) -> dict | None:
     tests = cap_tests(tests)
     if not tests:
@@ -95,12 +110,25 @@ def to_example(
         # `get_successful_tests_functional` reads fn_name off the tests, so stamp it on each one to
         # keep the whole problem inside the single `ground_truth` field.
         tests = [{**test, "fn_name": fn_name} for test in tests]
-        instruction = FUNCTIONAL_INSTRUCTION.format(starter_code=starter_code.strip())
+        if starter_code:
+            instruction = FUNCTIONAL_INSTRUCTION.format(starter_code=starter_code.strip())
+        else:
+            arg_placeholders = ", ".join(f"arg{i}" for i in range(num_args)) if num_args else ""
+            instruction = FUNCTIONAL_INSTRUCTION_NAMED.format(fn_name=fn_name, arg_placeholders=arg_placeholders)
     return {
         "messages": [{"role": "user", "content": problem.strip() + instruction}],
         "ground_truth": json.dumps(tests),
         "dataset": dataset_tag,
     }
+
+
+def to_functional_test(args: list, output: object) -> dict:
+    """Re-encode a primeintellect/taco call-based test into the same string encoding lcbv5's
+    functional tests use (see `grade_call_based` in testing_util.py): one JSON-encoded argument per
+    line, and the JSON-encoded expected return value. The return value is left wrapped if the source
+    wrapped it (not all of them consistently do) -- `grade_call_based` accepts it either way.
+    """
+    return {"input": "\n".join(json.dumps(arg) for arg in args), "output": json.dumps(output)}
 
 
 def convert_lcbv5(split: str) -> Dataset:
@@ -166,17 +194,41 @@ def convert_primeintellect() -> Dataset:
     )
     examples = []
     dropped_no_usable_tests = 0
+    dropped_no_fn_name = 0
+    dropped_mixed_type = 0
     for sample in dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
-        if any(test.get("type") != "stdin_stdout" for test in tests):
+        types = {test.get("type") for test in tests}
+        if types == {"stdin_stdout"}:
+            example = to_example(sample["problem"], tests)
+        elif types == {"function_call"}:
+            fn_name = next((test.get("fn_name") for test in tests if test.get("fn_name")), None)
+            if not fn_name:
+                dropped_no_fn_name += 1
+                continue
+            functional_tests = [to_functional_test(test["input"], test["output"]) for test in tests]
+            example = to_example(
+                sample["problem"],
+                functional_tests,
+                dataset_tag="code_functional",
+                fn_name=fn_name,
+                num_args=len(tests[0]["input"]),
+            )
+        else:
+            # A single example carries one `dataset` tag and therefore one verifier. None exist in
+            # primeintellect today.
+            dropped_mixed_type += 1
             continue
-        example = to_example(sample["problem"], tests)
         if example is None:
             dropped_no_usable_tests += 1
             continue
         examples.append(example)
     if dropped_no_usable_tests:
         print(f"  primeintellect: dropped {dropped_no_usable_tests} problems with no test under the size cap")
+    if dropped_no_fn_name:
+        print(f"  primeintellect: dropped {dropped_no_fn_name} functional problems with no fn_name")
+    if dropped_mixed_type:
+        print(f"  primeintellect: dropped {dropped_mixed_type} problems mixing stdin and functional tests")
     return Dataset.from_list(examples)
 
 
@@ -191,13 +243,24 @@ def convert_taco() -> Dataset:
     dropped_no_usable_tests = 0
     for sample in dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
-        if not isinstance(tests, dict) or tests.get("fn_name"):
+        if not isinstance(tests, dict):
             continue
         inputs, outputs = tests.get("inputs"), tests.get("outputs")
         if not inputs or not outputs or len(inputs) != len(outputs):
             continue
-        pairs = [{"input": i, "output": o} for i, o in zip(inputs, outputs)]
-        example = to_example(sample["problem"], pairs)
+        fn_name = tests.get("fn_name")
+        if fn_name:
+            functional_tests = [to_functional_test(i, o) for i, o in zip(inputs, outputs)]
+            example = to_example(
+                sample["problem"],
+                functional_tests,
+                dataset_tag="code_functional",
+                fn_name=fn_name,
+                num_args=len(inputs[0]),
+            )
+        else:
+            pairs = [{"input": i, "output": o} for i, o in zip(inputs, outputs)]
+            example = to_example(sample["problem"], pairs)
         if example is None:
             dropped_no_usable_tests += 1
             continue
@@ -238,12 +301,12 @@ if __name__ == "__main__":
     lcbv5_test.push_to_hub(f"{HUB_PREFIX}_lcbv5_test_full")
 
     primeintellect_train = convert_primeintellect()
-    print(f"primeintellect train (stdin-only): {len(primeintellect_train)}")
-    primeintellect_train.push_to_hub(f"{HUB_PREFIX}_primeintellect")
+    print(f"primeintellect train (stdin + functional): {len(primeintellect_train)}")
+    primeintellect_train.push_to_hub(f"{HUB_PREFIX}_primeintellect_full")
 
     taco_train = convert_taco()
-    print(f"taco train (stdin-only): {len(taco_train)}")
-    taco_train.push_to_hub(f"{HUB_PREFIX}_taco")
+    print(f"taco train (stdin + functional): {len(taco_train)}")
+    taco_train.push_to_hub(f"{HUB_PREFIX}_taco_full")
 
     codeforces_test = convert_codeforces()
     print(f"codeforces test (eval): {len(codeforces_test)}")

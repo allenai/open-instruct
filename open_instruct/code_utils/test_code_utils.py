@@ -186,6 +186,55 @@ class GetSuccessfulTestsFunctionalTests(BaseCodeTestCase):
         self.assertEqual(result, [1, 1, 0])
 
 
+class GetSuccessfulTestsFunctionalWrappedOutputTests(BaseCodeTestCase):
+    """primeintellect/taco wrap the expected return value in a single-element list (not always
+    consistently within the same problem), unlike LiveCodeBench's bare encoding. `grade_call_based`
+    must accept the value either way -- see the APPS-style unwrap fallback in testing_util.py.
+    """
+
+    IS_ANAGRAM_PROGRAM = (
+        "def is_anagram(test, original):\n    return sorted(original.lower()) == sorted(test.lower())\n"
+    )
+
+    def test_wrapped_output_passes(self):
+        tests = [{"input": '"foefet"\n"toffee"', "output": "[true]", "fn_name": "is_anagram"}]
+        result, _ = code_utils.get_successful_tests_functional(
+            program=self.IS_ANAGRAM_PROGRAM, tests=tests, max_execution_time=2.0
+        )
+        self.assertEqual(result, [1])
+
+    def test_bare_output_still_passes(self):
+        """Not every source wraps consistently, so a bare expected value must still work."""
+        program = "def reverse_words(s):\n    return ' '.join(reversed(s.split()))\n"
+        tests = [{"input": '"the sky is blue"', "output": '"blue is sky the"', "fn_name": "reverse_words"}]
+        result, _ = code_utils.get_successful_tests_functional(program=program, tests=tests, max_execution_time=2.0)
+        self.assertEqual(result, [1])
+
+    def test_wrapped_wrong_answer_fails(self):
+        tests = [{"input": '"foefet"\n"toffee2"', "output": "[true]", "fn_name": "is_anagram"}]
+        result, _ = code_utils.get_successful_tests_functional(
+            program=self.IS_ANAGRAM_PROGRAM, tests=tests, max_execution_time=2.0
+        )
+        self.assertEqual(result, [0])
+
+    def test_genuine_single_element_list_answer_passes(self):
+        """A prediction that itself returns the (unwrapped) list still matches directly."""
+        program = "def duplicate(x):\n    return [x]\n"
+        tests = [{"input": "5", "output": "[5]", "fn_name": "duplicate"}]
+        result, _ = code_utils.get_successful_tests_functional(program=program, tests=tests, max_execution_time=2.0)
+        self.assertEqual(result, [1])
+
+    def test_fallback_is_lenient_for_a_genuine_single_element_list_answer(self):
+        """Known tradeoff: since we can't tell "wrapped scalar" from "genuine 1-element list answer"
+        apart at grading time, a solution returning the bare scalar is accepted even when the real
+        answer is the list itself. This mirrors APPS's own grading behavior.
+        """
+        program = "def duplicate(x):\n    return x\n"
+        tests = [{"input": "5", "output": "[5]", "fn_name": "duplicate"}]
+        result, _ = code_utils.get_successful_tests_functional(program=program, tests=tests, max_execution_time=2.0)
+        self.assertEqual(result, [1])
+
+
 class ReliabilityGuardNetworkTests(BaseCodeTestCase):
     """Tests to verify network operations behavior under reliability_guard."""
 

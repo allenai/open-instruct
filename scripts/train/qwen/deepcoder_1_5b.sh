@@ -28,11 +28,11 @@ NODES="${NODES:-1}"
 # Datasets converted from agentica-org/DeepCoder-Preview-Dataset by
 # scripts/data/create_deepcoder_data.py. lcbv5_test is reserved as held-out eval and never
 # appears in the train mixer.
-# The "_full" lcbv5 splits keep the function-signature ("functional") problems that the earlier
+# The "_full" splits keep the function-signature ("functional") problems that the earlier
 # stdin-only repos dropped, so the eval set is the same 279 problems DeepCoder reports LiveCodeBench
-# on (175 stdin + 104 functional) rather than a 175-problem subset. primeintellect and taco are
-# still stdin-only, their functional problems use a different encoding (see create_deepcoder_data.py).
-TRAIN_DATASETS="mnoukhov/deepcoder_lcbv5_full 1.0 mnoukhov/deepcoder_primeintellect 1.0 mnoukhov/deepcoder_taco 1.0"
+# on (175 stdin + 104 functional) rather than a 175-problem subset, and the train mixer includes
+# primeintellect/taco's functional problems too (see create_deepcoder_data.py).
+TRAIN_DATASETS="mnoukhov/deepcoder_lcbv5_full 1.0 mnoukhov/deepcoder_primeintellect_full 1.0 mnoukhov/deepcoder_taco_full 1.0"
 EVAL_DATASETS="mnoukhov/deepcoder_lcbv5_test_full 1.0"
 
 uv run mason.py \

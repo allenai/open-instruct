@@ -4,6 +4,7 @@ https://github.com/LiveCodeBench/LiveCodeBench/blob/main/lcb_runner/evaluation/t
 """
 
 import ast
+import contextlib
 import faulthandler
 import json
 
@@ -224,6 +225,11 @@ def grade_call_based(code: str, all_inputs: list, all_outputs: list, fn_name: st
     script. Each element of `all_inputs` holds one JSON-encoded argument per line, and the matching
     element of `all_outputs` is the JSON-encoded expected return value.
 
+    Some sources (e.g. primeintellect, taco) wrap the expected return value in a single-element
+    list rather than encoding it bare, and don't do so consistently within one problem. Rather than
+    guess at data-prep time, mirror APPS's own grading fallback: accept either the value as encoded
+    or, if it's a single-element list, its unwrapped element.
+
     Mirrors `grade_stdio`'s contract: returns per-test results (True for pass, a negative error code
     otherwise) alongside per-test runtimes, and keeps going after a failing test instead of
     returning early, so callers get a result for every test.
@@ -286,6 +292,10 @@ def grade_call_based(code: str, all_inputs: list, all_outputs: list, fn_name: st
         except Exception:
             # Comparison itself can raise for exotic return types (e.g. numpy arrays).
             test_case_passed = False
+
+        if not test_case_passed and isinstance(gt_out, list) and len(gt_out) == 1:
+            with contextlib.suppress(Exception):
+                test_case_passed = bool(prediction == gt_out[0])
 
         if test_case_passed:
             all_results.append(True)

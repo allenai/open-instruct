@@ -39,7 +39,7 @@ for entry in $CHECKPOINTS; do
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
         --temperature 1.0 \
-        --dataset_mixer_list mnoukhov/deepcoder_lcbv5_full 1.0 mnoukhov/deepcoder_primeintellect 1.0 mnoukhov/deepcoder_taco 1.0 \
+        --dataset_mixer_list mnoukhov/deepcoder_lcbv5_full 1.0 mnoukhov/deepcoder_primeintellect_full 1.0 mnoukhov/deepcoder_taco_full 1.0 \
         --dataset_mixer_list_splits "train" \
         --dataset_mixer_eval_list $EVAL_DATASETS \
         --dataset_mixer_eval_list_splits "train" \
