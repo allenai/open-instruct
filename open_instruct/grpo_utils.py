@@ -97,6 +97,10 @@ class GRPOExperimentConfig(
     (model + optimizer + LR scheduler states)."""
     backend_timeout: int = 120
     """Timeout for inference/training backends in minutes. Default is 2 hours (120 min)."""
+    checkpoint_timeout: int = 30
+    """Timeout in minutes for the checkpointer's dedicated process group. Scoped to checkpoint
+    saves/loads only, so a stalled save surfaces well before `backend_timeout` without shortening
+    the collective timeout for training itself."""
     model_dtype: str = "bfloat16"
     """Model dtype for training. Supported values: 'bfloat16', 'float32'."""
 

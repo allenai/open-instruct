@@ -577,6 +577,30 @@ signature has appeared. See the [ongoing crash/resume cycle
 subsection](experiment.md#ongoing-crashresume-cycle-ad-hoc-via-watch_sweepsh)
 for the latest instance.
 
+**Status (2026-07-29): `Application timeout caused pair closure` root-caused
+and fixed — it was a fourth root cause after all.** See [the full
+writeup](experiment.md#2026-07-29-root-cause-of-the-recurring-application-timeout-caused-pair-closure-crashes--async-checkpoint-save-metric-race).
+olmo-core records `checkpoint/save_async_duration_s` (`ReduceType.max`) from
+inside the *async* checkpoint-save future's done-callback — a background
+thread that buckets the metric under whatever `global_step` that rank is on
+when its shard write finishes. Ranks finish at different times (rank 0 also
+finalizes the checkpoint), so with `metrics_collect_interval=1` they bucket
+it into different steps and that step's `reduce_metrics` all-reduce gets
+mismatched tensor sizes; gloo doesn't validate shapes, so every rank blocks
+until the process-group timeout. `Trainer._metrics_consistent` is computed
+once at step 1 and cached, so the metric — which doesn't exist until the
+first checkpoint — is never caught by the consistency check. **This means
+the 2026-07-26 fix (2) above (commit `020a93ee0`, raising the bookkeeping
+subgroup's timeout from 30 min to `--backend_timeout`) never fixed anything:
+it only changed how long each job idled before the same deadlock killed it,
+which is exactly the "rarer/later" pattern logged on 2026-07-27.** Fixed by
+(a) `save_async=False` for the GRPO checkpointer, so the duration metric is
+recorded synchronously at the same step on every rank, and (b) giving the
+checkpointer its own process group with a dedicated `--checkpoint_timeout`
+(default 30 min), so a genuinely stalled save fails in 30 min rather than
+burning a full 2h `backend_timeout` — scoped to checkpoint saves/loads only,
+leaving training collectives on `backend_timeout`.
+
 **Next:** let the sweep run past the ~4h+ window that's killed prior
 attempts, then repeat the difficulty-stratified best-checkpoint comparison
 methodology from the DeepScaleR NGU work (see the K-ablation and NGU entries

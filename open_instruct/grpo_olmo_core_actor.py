@@ -386,8 +386,19 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             )
 
         if self.grpo_config.checkpoint_state_freq > 0:
+            # save_async=False: the async path records `checkpoint/save_async_duration_s`
+            # (ReduceType.max) from the save future's done-callback, i.e. on a background thread at
+            # whatever `global_step` that rank happens to be on when its shard write finishes. Ranks
+            # finish at different times (rank 0 also finalizes the checkpoint), so with
+            # metrics_collect_interval=1 they bucket that metric into different steps, and the
+            # step's `reduce_metrics` all-reduce gets mismatched tensor sizes across ranks. gloo
+            # doesn't validate shapes, so every rank blocks until the process-group timeout.
+            # Synchronous saves record `checkpoint/save_duration_s` on the main thread at the same
+            # step on every rank.
             trainer_callbacks["checkpointer"] = olmo_core_utils.build_checkpointer_callback(
-                checkpointing_steps=self.grpo_config.checkpoint_state_freq, ephemeral_save_interval=None
+                checkpointing_steps=self.grpo_config.checkpoint_state_freq,
+                ephemeral_save_interval=None,
+                save_async=False,
             )
         if self.grpo_config.save_freq > 0:
             trainer_callbacks["hf_checkpoint"] = grpo_callbacks_lib.HFCheckpointCallback(
@@ -401,6 +412,15 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         save_folder = self.grpo_config.checkpoint_state_dir or self.grpo_config.output_dir
 
         assert self.grpo_config.num_training_steps is not None
+        # Give the checkpointer its own process group with a tighter timeout than the training
+        # collectives: a save that stalls (e.g. a Weka hiccup) then fails in `checkpoint_timeout`
+        # minutes instead of burning a full `backend_timeout`. olmo-core does the same thing for
+        # async saves; the sync `Checkpointer.save()` path honors this group too.
+        checkpointer_pg = (
+            torch.distributed.new_group(timeout=timedelta(minutes=self.grpo_config.checkpoint_timeout))
+            if torch.distributed.is_initialized()
+            else None
+        )
         self.trainer = train.TrainerConfig(
             save_folder=save_folder,
             load_strategy=LoadStrategy.if_available,
@@ -408,7 +428,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             metrics_collect_interval=1,
             callbacks=trainer_callbacks,
             checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
-        ).build(self.train_module, self.dataloader)
+        ).build(self.train_module, self.dataloader, checkpointer_pg=checkpointer_pg)
 
         logger.info(f"[Rank {self.rank}] Starting trainer.fit() with callbacks: {list(trainer_callbacks.keys())}")
         self.trainer.fit()

@@ -3057,3 +3057,67 @@ EXP=baseline_nokl ./scripts/train/build_image_and_launch.sh scripts/train/qwen/d
 ```
 
 All 3 confirmed starting/running at launch time (no errors). Results TBD.
+
+## 2026-07-29: Root cause of the recurring `Application timeout caused pair closure` crashes — async checkpoint save metric race
+
+All three jobs from the 2026-07-28 baseline sweep above died with the same signature, at the
+same point, in the same way:
+
+| Run | Step-100 checkpoint saved | Hang starts | Crash (7200 s later) |
+| --- | --- | --- | --- |
+| `deepcoder_1_5b_baseline_nokl` ([01KYNCF1EF2A1GGE820QRK7XAW](https://beaker.org/ex/01KYNCF1EF2A1GGE820QRK7XAW)) | 00:32:44 | 00:32:46 | 02:32:46 |
+| `deepcoder_1_5b_baseline_lr1e6` ([01KYNC8ZK6PPVT0JMXGDXP6T7H](https://beaker.org/ex/01KYNC8ZK6PPVT0JMXGDXP6T7H)) | 00:31:50 | 00:31:50 | 02:31:50 |
+| `deepcoder_1_5b_baseline_temp06` ([01KYNCCBNAN8KKFCXMKJX71NQB](https://beaker.org/ex/01KYNCCBNAN8KKFCXMKJX71NQB)) | — (failed + canceled) | — | — |
+
+The hang begins *at the instant the async checkpoint-save future completes*, and the crash is
+exactly `backend_timeout` (7200 s) later.
+
+**Root cause.** `reduce_metrics` hangs in the **max** all-reduce
+(`olmo_core/train/utils.py:320`), meaning ranks passed different-sized tensors — gloo doesn't
+validate shapes, it just blocks every rank until the process-group timeout. The extra metric is
+`checkpoint/save_async_duration_s` (`ReduceType.max`), which olmo-core records from inside the
+async save future's *done-callback* (`olmo_core/train/trainer.py:1027`) — a background thread,
+bucketing the metric under whatever `trainer.global_step` that rank happens to be on when its
+shard write finishes. Ranks finish at different times (rank 0 additionally finalizes the
+checkpoint), so with `metrics_collect_interval=1` (`grpo_olmo_core_actor.py`) they land in
+different step buckets.
+
+Two things make it a guaranteed kill at the first checkpoint step:
+
+- `metrics_collect_interval=1` means each flush covers a single step, so there's no batching to
+  absorb the skew.
+- `Trainer._metrics_consistent` is computed **once**, at step 1 (`trainer.py:1406`), and cached
+  `True`. `checkpoint/save_async_duration_s` doesn't exist yet at step 1, so the consistency
+  check never sees it and `reduce_metrics` takes the fast path that assumes identical metric
+  sets across ranks.
+
+`save_freq`/`checkpoint_state_freq` are both 100, so every run dies at step 100 — and then burns
+another 2 h on the gloo timeout before the error surfaces. Training itself is unaffected while
+this is happening: the DataPreparationActor kept serving all 4 ranks up to step 186 with no
+trainer metrics logged since step 100.
+
+**This supersedes the 2026-07-26 "fix" (commit `020a93ee0`).** Raising the bookkeeping subgroup's
+timeout from torch's 30-minute default to `--backend_timeout` (120 min) didn't fix the deadlock,
+it just changed how long each job survived before the same deadlock killed it — which is exactly
+the "crashes haven't stopped, just gotten rarer/later" pattern logged on 2026-07-27.
+
+**Fix.**
+
+1. `save_async=False` for the GRPO checkpointer (`grpo_olmo_core_actor.py`). Synchronous saves
+   record `checkpoint/save_duration_s` on the main thread, at the same step on every rank. Cost is
+   ~19 s of blocked training per 100 steps (vs ~90 s/step), i.e. noise.
+2. Gave the checkpointer its own process group with a dedicated `--checkpoint_timeout`
+   (default 30 min) via `TrainerConfig.build(checkpointer_pg=...)`, so a genuinely stalled save
+   fails in 30 min instead of burning a full `backend_timeout`. This is scoped to checkpoint
+   saves/loads only — the training collectives keep the 120 min `backend_timeout`. (olmo-core
+   already does exactly this for async saves, with a hardcoded 30 min.)
+
+**Not the cause: the code server.** Two `Error verifying code sample: HTTPConnectionPool
+(host='127.0.0.1', port=8070): Read timed out` warnings appeared in 4.3 h. `ground_truth_utils.py`
+catches those and returns `VerificationResult(score=0.0)`, so they neither drop results nor block
+anything — they just silently score two rollouts as wrong. Real (and a mild continuation of the
+2026-07-26 silent-reward-corruption theme) but unrelated to the crash.
+
+**Still open:** `olmo_core_utils.build_shared_callbacks` (SFT/DPO) also defaults to
+`save_async=True`. Those paths use `metrics_collect_interval=logging_steps` (>1), which makes the
+same race less likely to line up, but not impossible — untouched for now.
