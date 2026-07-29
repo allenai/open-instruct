@@ -11,7 +11,8 @@ dependencies = [
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=4.0.0",
     "debugpy>=1.8.13",
-    "deepspeed>=0.19.0", # >=0.19.0 has the Ulysses SP attn blocklist (PR #7887) → permits flash_attention_4 on B300; 0.18.x allowlist rejected it. See CUDA13_FA4_SP_PLAYBOOK.md.
+    # deepspeed is pinned PER CUDA GROUP in [dependency-groups] below: cuda12 stays on the
+    # pre-Ulysses-blocklist 0.18 line (proven prod), cuda13 uses >=0.19.0 (permits fa4 on B300).
     "hf-transfer>=0.1.8",
     "litellm>=1.72.0,<1.75.2", # avoid needing backoff https://github.com/BerriAI/litellm/issues/13827
     "matplotlib>=3.9.3",
@@ -38,8 +39,9 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    # flash-attn-3 is pinned per CUDA group (cu128 vs cu130) in [dependency-groups] below.
-    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta23/flash_attn_4-4.0.0b23-py3-none-any.whl ; platform_system != 'Darwin'", # b23 adds the SM100/SM110 head_dim=256 cute kernel (PR #2412) needed for Qwen3.5 (hd256) fa4 on B300; b5 capped hd<=128. See CUDA13_FA4_SP_PLAYBOOK.md.
+    # flash-attn-3 AND flash-attn-4 are pinned per CUDA group (cu128 vs cu130 / b5 vs b23) in
+    # [dependency-groups] below. (fa4 b23 has the SM100 head_dim=256 kernel B300 needs; b5 does not.
+    # fa4 is only auto-selected on Blackwell major>=10, so it's unused on cu12/Hopper regardless.)
     "liger-kernel==0.8.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
@@ -161,6 +163,10 @@ cuda12 = [
     "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
     # The flat FA3 index can publish a newer aarch64-only build than the latest x86_64 build.
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    # cuda12 (Hopper): pin to EXACTLY omni_agent's source-of-truth versions — deepspeed 0.18.4
+    # (pre-Ulysses-blocklist) + flash-attn-4 b5 (unused on Hopper; real backend is FA3). Zero drift.
+    "deepspeed==0.18.4",
+    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
 ]
 cuda13 = [
     "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
@@ -169,6 +175,9 @@ cuda13 = [
     "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    # cuda13 (B300): deepspeed >=0.19.0 permits fa4 in Ulysses SP; flash-attn-4 b23 has the SM100 head_dim=256 kernel. See CUDA13_FA4_SP_PLAYBOOK.md.
+    "deepspeed>=0.19.0",
+    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta23/flash_attn_4-4.0.0b23-py3-none-any.whl ; platform_system != 'Darwin'",
 ]
 dev = [
     "beaker-py>=2.7.1",
