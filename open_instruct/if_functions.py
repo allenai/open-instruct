@@ -384,8 +384,14 @@ def validate_sections(text: str, N: int, section_splitter: str) -> bool:
 
 # JSON Format : Entire output should be wrapped in JSON format.
 def validate_json_format(text: str) -> bool:
+    """Accept bare JSON or markdown-fenced JSON (IFEvalG JsonFormat)."""
+    value = text.strip()
+    # Strip optional ``` / ```json fences case-insensitively.
+    value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s*```$", "", value)
+    value = value.strip()
     try:
-        json.loads(text)
+        json.loads(value)
     except ValueError:
         return False
     return True
