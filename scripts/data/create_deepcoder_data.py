@@ -30,6 +30,7 @@ import json
 from datasets import Dataset, load_dataset
 
 import open_instruct.utils as open_instruct_utils
+from open_instruct.code_utils.code_utils import encode_tests
 
 HUB_PREFIX = "mnoukhov/deepcoder"
 
@@ -46,20 +47,31 @@ FUNCTIONAL_INSTRUCTION = (
     "\n\n```python\n{starter_code}\n```"
 )
 
-# DeepCoder's own recipe samples "the 15 most challenging tests" per problem for reward
-# calculation (https://www.together.ai/blog/deepcoder). That cap alone isn't enough here, though:
-# a handful of LiveCodeBench-v5 stress-test problems ship individual tests running several MB each
-# (up to 160MB combined for one problem's 30 tests), and CodeStdioVerifier.async_call
-# (open_instruct/ground_truth_utils.py) sends every test for an example in a single HTTP POST to
-# the code-execution API -- an AWS API Gateway endpoint with a hard 10MB request limit (Lambda's
-# sync-invoke limit is 6MB). A handful of oversized tests would fail at request time regardless of
-# storage concerns, and unfiltered totals also overflow PyArrow's 2GB string-offset limit while
-# caching the dataset. Greedily keep the largest ("most challenging") tests within a total byte
-# budget with plenty of margin below the 6MB wall; problems with no test under the per-test cap end
-# up with zero usable tests and are dropped (can't be graded by this infra either way).
+# Which tests a problem is graded on, and how they are serialized into `ground_truth`.
+#
+# rllm (DeepCoder's trainer) does NOT use one policy here, it uses two, chosen by data_source
+# (rllm/rewards/code_reward.py at aba20b1429, the commit behind their 1.5B 32K run):
+#   - taco / apps / code_contests / primeintellect -> check_correctness(max_tests=15), keeping the
+#     15 longest-input tests. This is the "15 most challenging tests" from
+#     https://www.together.ai/blog/deepcoder.
+#   - livecodebench / codeforces -> lcb_check_correctness_v2, which caps nothing and runs EVERY test.
+# So the published LiveCodeBench numbers are all-tests numbers, and a 15-test cap on the lcbv5 eval
+# set makes our score incomparable (a solution only has to pass the 15 largest tests, not all ~42).
+#
+# Keeping every test is not unconditionally affordable: CodeVerifier.async_call
+# (open_instruct/ground_truth_utils.py) posts a problem's whole test set to the code API on every
+# rollout, and the lcbv5 test split holds 3.7GB of tests, one problem alone accounting for 189MB.
+# So keep all tests whenever the compressed payload fits FULL_TEST_BUDGET and fall back to the
+# 15-test cap only for the heavy tail. At 10MB that is 238/279 eval problems (90% of all tests)
+# graded exactly as LiveCodeBench does, for a 249MB dataset and a 10MB worst-case request.
+#
+# Test sets kept in full are stored with `encode_tests` (zlib+base64) rather than plain JSON;
+# `decode_tests` on the API side accepts either. Plain JSON at this size would also overflow
+# PyArrow's 2GB string-offset limit while caching the dataset.
 MAX_TESTS_PER_PROBLEM = 15
 MAX_TEST_BYTES = 100_000  # drop any single test case bigger than this
 MAX_TOTAL_TEST_BYTES = 500_000  # total serialized size budget for the kept tests of one problem
+FULL_TEST_BUDGET = 10_000_000  # keep every test when its compressed payload fits in this
 
 
 def _test_size(test: dict) -> int:
@@ -79,16 +91,27 @@ def cap_tests(tests: list[dict]) -> list[dict]:
     return kept
 
 
+def select_tests(tests: list[dict], full_test_budget: int) -> tuple[list[dict], str]:
+    """Pick the tests to grade on and serialize them for the `ground_truth` field.
+
+    Returns (tests, serialized). With `full_test_budget=0` this is the old capped behaviour.
+    """
+    if full_test_budget:
+        encoded = encode_tests(tests)
+        if len(encoded) <= full_test_budget:
+            return tests, encoded
+    capped = cap_tests(tests)
+    return capped, json.dumps(capped)
+
+
 def to_example(
     problem: str,
     tests: list[dict],
     dataset_tag: str = "code_stdio",
     fn_name: str | None = None,
     starter_code: str = "",
+    full_test_budget: int = 0,
 ) -> dict | None:
-    tests = cap_tests(tests)
-    if not tests:
-        return None
     if fn_name is None:
         instruction = INSTRUCTION
     else:
@@ -96,9 +119,12 @@ def to_example(
         # keep the whole problem inside the single `ground_truth` field.
         tests = [{**test, "fn_name": fn_name} for test in tests]
         instruction = FUNCTIONAL_INSTRUCTION.format(starter_code=starter_code.strip())
+    kept, ground_truth = select_tests(tests, full_test_budget)
+    if not kept:
+        return None
     return {
         "messages": [{"role": "user", "content": problem.strip() + instruction}],
-        "ground_truth": json.dumps(tests),
+        "ground_truth": ground_truth,
         "dataset": dataset_tag,
     }
 
@@ -108,6 +134,10 @@ def convert_lcbv5(split: str) -> Dataset:
     # `resolve_reward_function` (ground_truth_utils.py) still routes any "code_stdio*" /
     # "code_functional*" prefix to the matching verifier, so reward computation is unaffected.
     tag_suffix = "_lcbv5" if split == "test" else ""
+    # Uncapped tests are reserved for the eval split, where fidelity to LiveCodeBench's number is
+    # the whole point. The train split stays capped: uncapped it reaches 103 tests on one problem,
+    # and at 6s/test a looping rollout would occupy a grading worker for 10 minutes.
+    full_test_budget = FULL_TEST_BUDGET if split == "test" else 0
     dataset = load_dataset(
         "agentica-org/DeepCoder-Preview-Dataset",
         "lcbv5",
@@ -122,7 +152,9 @@ def convert_lcbv5(split: str) -> Dataset:
         tests = json.loads(sample["tests"]) if isinstance(sample["tests"], str) else sample["tests"]
         testtypes = {test.get("testtype") for test in tests}
         if testtypes == {"stdin"}:
-            example = to_example(sample["problem"], tests, dataset_tag=f"code_stdio{tag_suffix}")
+            example = to_example(
+                sample["problem"], tests, dataset_tag=f"code_stdio{tag_suffix}", full_test_budget=full_test_budget
+            )
         elif testtypes == {"functional"}:
             metadata = sample["metadata"]
             if isinstance(metadata, str):
@@ -138,6 +170,7 @@ def convert_lcbv5(split: str) -> Dataset:
                 dataset_tag=f"code_functional{tag_suffix}",
                 fn_name=fn_name,
                 starter_code=sample["starter_code"],
+                full_test_budget=full_test_budget,
             )
         else:
             # A single example carries one `dataset` tag and therefore one verifier, so a problem

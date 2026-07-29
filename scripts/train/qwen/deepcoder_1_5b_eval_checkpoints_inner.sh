@@ -67,6 +67,7 @@ for entry in $CHECKPOINTS; do
         --max_grad_norm 1.0 \
         --mask_truncated_completions True \
         --code_api_url "$CODE_API_URL/test_program" \
+        --code_max_execution_time 6 \
         --code_pass_rate_reward_threshold 0.0 \
         --load_ref_policy True \
         --keep_last_n_checkpoints 3 \

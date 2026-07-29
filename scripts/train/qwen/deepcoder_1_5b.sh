@@ -97,6 +97,7 @@ uv run mason.py \
     --clip_higher 0.272 \
     --max_grad_norm 1.0 \
     --code_api_url \$CODE_API_URL/test_program \
+    --code_max_execution_time ${CODE_MAX_EXECUTION_TIME:-6} \
     --code_pass_rate_reward_threshold 0.0 \
     --load_ref_policy True \
     --keep_last_n_checkpoints 3 \
