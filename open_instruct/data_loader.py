@@ -1588,12 +1588,14 @@ def maybe_mask_truncated_completions(
 ) -> tuple[Batch, BatchStatistics]:
     """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch.
 
-    Also shrinks `batch_stats`' per-group fields (`prompt_sample_counts` and friends) to match the
-    post-filter group sizes. Those fields are built once in `make_batch_from_groups`, before this
-    filter removes individual completions from `batch`/`result`; left untouched, a group that loses
-    only some of its completions would desync `prompt_sample_counts` from `len(batch.scores)` and
-    crash `compute_grouped_advantages`, and a group that loses all of them would silently corrupt
-    the grouping (an unrelated group's samples would inherit its now-stale sample count).
+    Also shrinks `batch_stats`' per-group fields (`prompt_sample_counts` and friends) and its
+    per-completion `response_lengths` to match the post-filter sizes. Those fields are built once
+    in `make_batch_from_groups`, before this filter removes individual completions from
+    `batch`/`result`; left untouched, a group that loses only some of its completions desyncs
+    `prompt_sample_counts` from `len(batch.scores)` and crashes `compute_grouped_advantages`, a
+    stale `response_lengths` desyncs from `prompt_sample_counts` and crashes
+    `calculate_utilization_metrics`, and a group that loses all of its completions would silently
+    corrupt the grouping (an unrelated group's samples would inherit its now-stale sample count).
     """
     if not enabled:
         return batch, batch_stats
@@ -1639,6 +1641,7 @@ def maybe_mask_truncated_completions(
             c for c, keep in zip(batch_stats.prompt_baseline_reward_sums, keep_groups) if keep
         ],
         prompt_lengths=[c for c, keep in zip(batch_stats.prompt_lengths, keep_groups) if keep],
+        response_lengths=[batch_stats.response_lengths[i] for i in stop_idxes],
     )
     return batch[stop_idxes], batch_stats
 

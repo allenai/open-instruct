@@ -190,7 +190,7 @@ class TestMaskTruncatedCompletions(unittest.TestCase):
         num_groups = len(prompt_sample_counts)
         return data_loader.BatchStatistics(
             prompt_lengths=[10] * num_groups,
-            response_lengths=[5] * sum(prompt_sample_counts),
+            response_lengths=list(range(sum(prompt_sample_counts))),
             filtered_prompts=0,
             filtered_prompts_zero=0,
             filtered_prompts_solved=0,
@@ -220,6 +220,9 @@ class TestMaskTruncatedCompletions(unittest.TestCase):
         self.assertEqual(new_batch_stats.prompt_sample_counts, [2, 2])
         self.assertEqual(sum(new_batch_stats.prompt_sample_counts), len(new_batch.scores))
         self.assertEqual(new_batch_stats.prompt_baseline_sample_counts, [3, 2])
+        # Index 2 (the "length"-truncated sample) is dropped; the rest survive in order.
+        self.assertEqual(new_batch_stats.response_lengths, [0, 1, 3, 4])
+        self.assertEqual(sum(new_batch_stats.prompt_sample_counts), len(new_batch_stats.response_lengths))
 
         # Would previously raise "Mismatch between prompt_sample_counts and scores".
         compute_grouped_advantages(np.array(new_batch.scores), new_batch_stats.prompt_sample_counts)
@@ -240,6 +243,9 @@ class TestMaskTruncatedCompletions(unittest.TestCase):
         self.assertEqual(sum(new_batch_stats.prompt_sample_counts), len(new_batch.scores))
         # The surviving group's baseline reward sum (2.0), not the dropped group's (9.0).
         self.assertEqual(new_batch_stats.prompt_baseline_reward_sums, [2.0])
+        # Index 0 (the fully-truncated group) is dropped.
+        self.assertEqual(new_batch_stats.response_lengths, [1, 2])
+        self.assertEqual(sum(new_batch_stats.prompt_sample_counts), len(new_batch_stats.response_lengths))
 
         compute_grouped_advantages(np.array(new_batch.scores), new_batch_stats.prompt_sample_counts)
 
