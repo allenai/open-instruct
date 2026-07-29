@@ -11,10 +11,17 @@ eval_logger = logger_utils.setup_logger("math_utils")
 
 # from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/utils.py#L187
 def last_boxed_only_string(string: str) -> str | None:
+    """Return the last \\boxed{...} or \\boxed ...$ span in `string`.
+
+    The space form (``\\boxed answer$``) is used only when the *last* ``\\boxed``
+    occurrence is that form. An earlier ``\\boxed `` mention must not override a
+    later ``\\boxed{...}`` answer.
+    """
     idx = string.rfind("\\boxed")
-    if "\\boxed " in string:
-        return "\\boxed " + string.split("\\boxed ")[-1].split("$")[0]
-    if idx < 0:
+    if idx >= 0:
+        if string.startswith("\\boxed ", idx):
+            return "\\boxed " + string[idx + len("\\boxed ") :].split("$")[0]
+    else:
         idx = string.rfind("\\fbox")
         if idx < 0:
             return None
