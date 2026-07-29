@@ -77,6 +77,22 @@ class TestDecodeRoutedExperts(unittest.TestCase):
         self.assertEqual(response.choices[0].routed_experts, "abc")
 
 
+class TestCompletionExtraBody(unittest.TestCase):
+    def test_requests_routes_when_capture_is_enabled(self):
+        extra_body = vllm_utils.get_completion_extra_body(
+            base_request_id="train_0_0", min_tokens=1, return_routed_experts=True
+        )
+
+        self.assertIs(extra_body["return_routed_experts"], True)
+
+    def test_omits_routes_when_capture_is_disabled(self):
+        extra_body = vllm_utils.get_completion_extra_body(
+            base_request_id="train_0_0", min_tokens=1, return_routed_experts=False
+        )
+
+        self.assertNotIn("return_routed_experts", extra_body)
+
+
 class TestVllmWeightUpdate(unittest.TestCase):
     def _actor(self, split_reload_lifecycle: bool = True):
         actor = object.__new__(vllm_utils.LLMRayActor)

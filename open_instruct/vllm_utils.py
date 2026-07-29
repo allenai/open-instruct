@@ -125,6 +125,22 @@ def decode_routed_experts(routed_experts: str | list | None) -> list | None:
     return routes.tolist()
 
 
+def get_completion_extra_body(
+    *, base_request_id: str, min_tokens: int, return_routed_experts: bool
+) -> dict[str, bool | int | str]:
+    """Build the vLLM-specific fields for a completion request."""
+    extra_body: dict[str, bool | int | str] = {
+        "return_token_ids": True,
+        "cache_salt": base_request_id,
+        "include_stop_str_in_output": True,
+        "skip_special_tokens": False,
+        "min_tokens": min_tokens,
+    }
+    if return_routed_experts:
+        extra_body["return_routed_experts"] = True
+    return extra_body
+
+
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
     model_config = vllm_config.model_config
     hidden_size = model_config.get_hidden_size()
@@ -1096,6 +1112,11 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
+            extra_body = get_completion_extra_body(
+                base_request_id=base_request_id,
+                min_tokens=min_tokens,
+                return_routed_experts=actor.return_routed_experts,
+            )
             if actor.return_routed_experts:
                 logger.info(
                     "Requesting routed experts for request_id=%s model_step=%s rollout_step=%s",
@@ -1104,16 +1125,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     rollout.step_count,
                 )
             api_response = await actor.client.completions.create(
-                model=actor.model_name,
-                prompt=current_prompt,
-                extra_body={
-                    "return_token_ids": True,
-                    "cache_salt": base_request_id,
-                    "include_stop_str_in_output": True,
-                    "skip_special_tokens": False,
-                    "min_tokens": min_tokens,
-                },
-                **params_dict,
+                model=actor.model_name, prompt=current_prompt, extra_body=extra_body, **params_dict
             )
 
             output = api_response.choices[0]
