@@ -27,7 +27,12 @@ def main():
     )
     parser.add_argument("--cluster", type=str, default="ai2/jupiter", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
-    parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
+    parser.add_argument(
+        "--preemptible",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use preemptible instances",
+    )
     parser.add_argument("--num_gpus", type=int, default=8, help="Number of GPUs to use")
     parser.add_argument("--num_nodes", type=int, default=1, help="Number of nodes to use")
     parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
