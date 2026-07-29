@@ -20,9 +20,10 @@ ROUTER_REPLAY="${ROUTER_REPLAY:-false}"
 CUDA_LAUNCH_BLOCKING="${CUDA_LAUNCH_BLOCKING:-0}"
 OLMO_USE_TORCH_GROUPED_MM="${OLMO_USE_TORCH_GROUPED_MM:-true}"
 OLMO_CORE_CUDA_STAGE_SYNC="${OLMO_CORE_CUDA_STAGE_SYNC:-0}"
-TORCH_NCCL_AVOID_RECORD_STREAMS="${TORCH_NCCL_AVOID_RECORD_STREAMS:-1}"
+TORCH_NCCL_AVOID_RECORD_STREAMS="${TORCH_NCCL_AVOID_RECORD_STREAMS:-0}"
 RAY_DEDUP_LOGS="${RAY_DEDUP_LOGS:-1}"
 VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-INFO}"
+VLLM_MOE_BACKEND="${VLLM_MOE_BACKEND:-triton}"
 TOTAL_EPISODES=$((NUM_UNIQUE_PROMPTS * NUM_SAMPLES_PER_PROMPT * NUM_TRAINING_STEPS))
 
 uv run python mason.py \
@@ -87,6 +88,7 @@ uv run python mason.py \
         --num_learners_per_node "$NUM_LEARNERS_PER_NODE" \
         --vllm_num_engines 1 \
         --vllm_tensor_parallel_size 1 \
+        --vllm_moe_backend "$VLLM_MOE_BACKEND" \
         --vllm_gpu_memory_utilization 0.5 \
         --vllm_enforce_eager \
         --vllm_sync_backend nccl \

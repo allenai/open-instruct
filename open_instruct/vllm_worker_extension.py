@@ -15,6 +15,17 @@ class RouterReplayWorkerExtension:
         fused_moe_layers = [module for module in context.values() if isinstance(module, FusedMoE)]
         capturable_layers = [module for module in fused_moe_layers if isinstance(module.router, BaseRouter)]
         bound_layers = [module for module in capturable_layers if module.router.capture_fn is not None]
+        monolithic_layers = [
+            module
+            for module in fused_moe_layers
+            if bool(getattr(getattr(module, "_quant_method", None), "is_monolithic", False))
+        ]
+        monolithic_experts = []
+        for module in monolithic_layers:
+            quant_method = module._quant_method
+            moe_kernel = getattr(quant_method, "moe_kernel", None)
+            implementation = getattr(moe_kernel, "impl", None)
+            monolithic_experts.append(getattr(implementation, "fused_experts", None))
         capturer = RoutedExpertsCapturer.get_instance()
         device_buffer = None if capturer is None else capturer._device_buffer
 
@@ -28,6 +39,18 @@ class RouterReplayWorkerExtension:
             "fused_moe_layers": len(fused_moe_layers),
             "capturable_layers": len(capturable_layers),
             "bound_layers": len(bound_layers),
+            "monolithic_layers": len(monolithic_layers),
+            "monolithic_expert_classes": sorted(
+                {type(experts).__name__ for experts in monolithic_experts if experts is not None}
+            ),
+            "monolithic_capture_supported": [
+                bool(
+                    experts is not None
+                    and hasattr(experts, "supports_routing_replay_capture")
+                    and experts.supports_routing_replay_capture()
+                )
+                for experts in monolithic_experts
+            ],
             "layer_ids": [module.layer_id for module in bound_layers],
             "router_classes": sorted({type(module.router).__name__ for module in fused_moe_layers}),
         }
