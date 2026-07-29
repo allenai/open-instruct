@@ -411,15 +411,15 @@ def validate_two_responses(text: str) -> bool:
 
 # All Uppercase: Your entire response should be in English, capital letters only.
 def validate_uppercase(text: str) -> bool:
-    # Check if the response is the same as the uppercase version of the response
-    return text == text.upper()
+    # Match IFEvalG CapitalLettersEnglishChecker: require actual uppercase letters.
+    return text.isupper()
 
 
 # All Lowercase: Your entire response should be in English, and in all lowercase letters. No capital letters are
 # allowed.
 def validate_lowercase(text: str) -> bool:
-    # Check if the response is the same as the lowercase version of the response
-    return text == text.lower()
+    # Match IFEvalG LowercaseLettersEnglishChecker: require actual lowercase letters.
+    return text.islower()
 
 
 # Frequency of All-capital Words: In your response, words with all capital letters should appear at least / around /
