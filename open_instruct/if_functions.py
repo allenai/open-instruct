@@ -62,28 +62,26 @@ def validate_forbidden_words(text, forbidden_words):
     """
     Validates that the text does not contain any of the specified forbidden words.
 
+    Matching is case-insensitive and whole-token (so ``bad`` does not match
+    ``badge``). Uses ``(?<!\\w)...(?!\\w)`` instead of ``\\b`` so tokens that
+    start/end with non-word characters (e.g. ``$5``) still match.
+
     Args:
         text (str): The text to check for forbidden words
         forbidden_words (list[str]): A list of forbidden words
 
     Returns:
-        tuple[bool, list[str]]: A tuple containing:
-            - Boolean indicating if any forbidden words are present
-            - List of forbidden words found in the text
+        bool: True if no forbidden words are present, False otherwise
 
     Example:
         text = "This is a message that should not contain any bad words"
         forbidden_words = ["bad", "evil", "harmful"]
         result = validate_forbidden_words(text, forbidden_words)
     """
-    # Convert text to lowercase for case-insensitive matching
-    text_lower = text.lower()
-
-    # Check each forbidden word
-    found_words = [word for word in forbidden_words if word.lower() in text_lower]
-
-    # Return results
-    return len(found_words) == 0
+    return all(
+        not re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text, flags=re.IGNORECASE)
+        for word in forbidden_words
+    )
 
 
 # Letter Frequency : In your response, the letter {letter} should appear {N} times.
