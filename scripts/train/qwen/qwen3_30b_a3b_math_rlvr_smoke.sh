@@ -82,8 +82,8 @@ uv run python mason.py \
         --beta 0.0 \
         --load_ref_policy false \
         --local_eval_every -1 \
-        --save_freq -1 \
-        --checkpoint_state_freq -1 \
+        --save_freq 1000 \
+        --checkpoint_state_freq 1000 \
         --output_dir "$OUTPUT_DIR" \
         --try_auto_save_to_beaker false \
         --push_to_hub false \
