@@ -3155,3 +3155,27 @@ EXP_NAME=deepcoder_1_5b_nokl_lr1e-6 ./scripts/train/build_image_and_launch.sh sc
 ```
 
 All 3 confirmed starting/running at launch time (no errors). Results TBD.
+
+## 2026-07-29: `deepcoder_1_5b.sh` OC=true/false backend toggle + first grpo_fast.py (DeepSpeed) baseline
+
+`deepcoder_1_5b.sh` was hardcoded to `open_instruct/grpo.py` (OLMo-core/FSDP) with no way to run
+it on the DeepSpeed backend, unlike `qwen3_4b_deepscaler_math.sh` which already has this switch.
+Added the same `OC=true/false` pattern (commit `a75fcbb0c`): `OC=true` (default, unchanged
+behavior) keeps `grpo.py` + `--fsdp_shard_degree 4 --fsdp_num_replicas 1
+--activation_memory_budget 0.5`; `OC=false` switches to `grpo_fast.py` + `--deepspeed_stage 2` and
+tags `EXP_NAME` with a `fast_` prefix so runs don't collide with existing `grpo.py` naming.
+
+Launched a single baseline (no lr/temp/KL deltas, N=8/K=16, seed 1 — same config as
+`baseline_n8_k16`) on the new `OC=false` path to get a `grpo_fast.py` reference point.
+
+| Name | Backend | Beaker |
+| --- | --- | --- |
+| `deepcoder_1_5b_fast_baseline` | grpo_fast.py (DeepSpeed stage 2) | [01KYQAR2MV0EB0RNHKPH0FH8ZF](https://beaker.org/ex/01KYQAR2MV0EB0RNHKPH0FH8ZF) |
+
+### Launch command
+
+```bash
+OC=false EXP=baseline ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh
+```
+
+Confirmed starting/running at launch time (no errors). Results TBD.

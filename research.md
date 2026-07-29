@@ -740,3 +740,20 @@ metric race (see the experiment.md root-cause entry above), no results from that
 and relaunched today with a revised arm set that isolates the KL lever instead of reducing it in
 lockstep with the others: `beta=0.01` alone, `beta=0`+`temperature=0.6`, `beta=0`+`learning_rate=1e-6`.
 All 3 confirmed starting; no results yet.
+
+## [ACTIVE] DeepCoder-1.5B on `grpo_fast.py` (DeepSpeed): does it match/beat the `grpo.py`/OLMo-core baseline?
+
+**Question:** the DeepScaleR K/NGU work already found `grpo_fast.py` (DeepSpeed) a viable,
+less-unstable alternative to `grpo.py`/OLMo-core for sweeps (see the DAPO/NGU entries above). All
+DeepCoder-1.5B work so far has run on `grpo.py`/OC=true, which has needed three separate infra
+fixes this week alone (Qwen2 checkpoint support, the async-checkpoint metric race). Does a
+same-config `grpo_fast.py` baseline reproduce the `grpo.py` baseline's lcbv5 numbers, and is it
+more reliable operationally?
+
+**Infra:** `deepcoder_1_5b.sh` had no backend toggle at all (`grpo.py` was hardcoded) — added the
+same `OC=true/false` switch `qwen3_4b_deepscaler_math.sh` already uses.
+
+**Runs:** [OC toggle + first grpo_fast.py baseline](experiment.md#2026-07-29-deepcoder_1_5bsh-octruefalse-backend-toggle--first-grpo_fastpy-deepspeed-baseline)
+
+**Status (2026-07-29):** toggle added, one baseline (N=8/K=16, seed 1, no lr/temp/KL deltas)
+launched on `OC=false`. Confirmed starting; no results yet.
