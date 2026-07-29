@@ -438,8 +438,10 @@ def validate_frequency_capital_words(text: str, N: int, quantifier: str) -> bool
 
 # End Checker: Finish your response with this exact phrase {end phrase}. No other words should follow this phrase.
 def validate_end(text: str, end_phrase: str) -> bool:
-    # Check if the response ends with the end phrase
-    return bool(text.endswith(end_phrase))
+    """Match IFEvalG EndChecker: strip, drop wrapping quotes, case-insensitive."""
+    text = text.strip().strip('"').lower()
+    end_phrase = end_phrase.strip().lower()
+    return text.endswith(end_phrase)
 
 
 # Quotation: Wrap your entire response with double quotation marks.
