@@ -773,6 +773,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     local_total_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     local_pred_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
+    accum_pred_tokens = torch.tensor(0.0, device=accelerator.device)
     start_time = time.perf_counter()
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
@@ -822,6 +823,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     outputs = model(**batch, use_cache=False)
 
                 loss = outputs.loss
+                if args.sequence_parallel_size == 1 and args.gradient_accumulation_steps > 1:
+                    pred_tokens_f = pred_tokens_in_batch.float()
+                    loss = loss * pred_tokens_f
+                    accum_pred_tokens += pred_tokens_f
                 del outputs
 
                 if args.sequence_parallel_size > 1:
@@ -843,6 +848,16 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
+                if (
+                    accelerator.sync_gradients
+                    and args.sequence_parallel_size == 1
+                    and args.gradient_accumulation_steps > 1
+                ):
+                    grad_scale = args.gradient_accumulation_steps / torch.clamp(accum_pred_tokens, min=1.0)
+                    for param in model.parameters():
+                        if param.grad is not None:
+                            param.grad.mul_(grad_scale)
+                    accum_pred_tokens.zero_()
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
