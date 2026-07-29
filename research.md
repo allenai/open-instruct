@@ -791,7 +791,9 @@ was starting on `ai2/jupiter` at launch verification. Results TBD.
 with `--never_give_up 0.875`; all other optimization and data settings match
 the new baseline. Eval, model checkpoints, and resumable checkpoint state are
 all scheduled every 50 steps instead of every 100 so its trajectory can be
-compared at finer resolution. Launch pending; results TBD.
+compared at finer resolution. Beaker
+[01KYQWXPTC937K2P3T1R3TK3C2](https://beaker.org/ex/01KYQWXPTC937K2P3T1R3TK3C2)
+was starting on `ai2/jupiter` at launch verification. Results TBD.
 
 ## [ACTIVE] DeepCoder-1.5B on `grpo_fast.py` (DeepSpeed): does it match/beat the `grpo.py`/OLMo-core baseline?
 

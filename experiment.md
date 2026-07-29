@@ -3317,4 +3317,9 @@ EXP_NAME=deepcoder_1_5b_ngu0875_full_train_full_eval \
   --checkpoint_state_freq 50
 ```
 
-Beaker: pending launch.
+Beaker: [01KYQWXPTC937K2P3T1R3TK3C2](https://beaker.org/ex/01KYQWXPTC937K2P3T1R3TK3C2).
+Built from commit `38aea039f`; confirmed in `starting` state on
+`ai2/jupiter` immediately after launch. The rendered command confirmed the
+three `_full` training datasets, full lcbv5 eval, 6-second code timeout,
+`--never_give_up 0.875`, and the final override values
+`--local_eval_every 50 --save_freq 50 --checkpoint_state_freq 50`.
