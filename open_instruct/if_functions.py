@@ -375,11 +375,14 @@ def validate_highlighted_sections(text: str, N: int) -> bool:
 
 
 def validate_sections(text: str, N: int, section_splitter: str) -> bool:
-    sections = text.split(section_splitter)
-    # The first section might not start with the splitter, so we adjust for this
-    if sections[0] == "":
-        sections.pop(0)
-    return len(sections) == N
+    """Require at least N numbered sections (IFEvalG SectionChecker).
+
+    Headers look like ``Section 1`` / ``SECTION 2``: splitter + number, not the
+    bare splitter string alone.
+    """
+    pattern = r"\s?" + re.escape(section_splitter) + r"\s?\d+\s?"
+    sections = re.split(pattern, text, flags=re.IGNORECASE)
+    return len(sections) - 1 >= N
 
 
 # JSON Format : Entire output should be wrapped in JSON format.
