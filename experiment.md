@@ -3239,3 +3239,28 @@ this writing.
 EXP_NAME=deepcoder_1_5b_nokl_temp0.6 ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh \
   --beta 0.0 --temperature 0.6
 ```
+
+## 2026-07-29: Stop masking truncated completions (`deepcoder_1_5b.sh`, commit `64dca3e85`)
+
+Decision: `--mask_truncated_completions True` (dropping non-`stop`-terminated completions from
+training) shouldn't be on for this run — a truncated response is still real signal for a code RLVR
+task, and masking is what exposed the `prompt_sample_counts`/`response_lengths` desync bug fixed
+above. Dropped the flag from `deepcoder_1_5b.sh`; `mask_truncated_completions` already defaults to
+`False` in `data_loader.py`, so this is a pure removal, not a value flip.
+
+Scope decision: leave the 4 already-launched jobs alone (`kl0.01`/`nokl_lr1e-6` finished cleanly at
+500/500 steps in ~11h each; `nokl_temp0.6`/`fast_baseline` are mid-run) rather than kill and
+relaunch them. Launched one new baseline (N=8/K=16, seed 1, no lr/temp/KL deltas, mask off) as a
+fresh reference point instead.
+
+| Name | Beaker |
+| --- | --- |
+| `deepcoder_1_5b_baseline_nomask` | [01KYQJ2YPFYDJ7HNKS797QH2KG](https://beaker.org/ex/01KYQJ2YPFYDJ7HNKS797QH2KG) |
+
+### Launch command
+
+```bash
+EXP_NAME=deepcoder_1_5b_baseline_nomask ./scripts/train/build_image_and_launch.sh scripts/train/qwen/deepcoder_1_5b.sh
+```
+
+Confirmed starting/running at launch time (no errors). Results TBD.
