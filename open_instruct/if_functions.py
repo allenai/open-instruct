@@ -400,13 +400,16 @@ def validate_repeat_prompt(text: str, original_prompt: str) -> bool:
 # Two Responses: Give two different responses. Responses and only responses should be separated by 6 asterisk
 # symbols: ******.
 def validate_two_responses(text: str) -> bool:
-    if text.count("******") == 1:
-        response_list = text.split("******")
-        first_response = response_list[0].strip()
-        second_response = response_list[1].strip()
-        if first_response != second_response:
-            return True
-    return False
+    """Require two non-empty different sides (IFEvalG TwoResponsesChecker)."""
+    valid_responses = []
+    responses = text.split("******")
+    for index, response in enumerate(responses):
+        if not response.strip():
+            if index != 0 and index != len(responses) - 1:
+                return False
+        else:
+            valid_responses.append(response)
+    return len(valid_responses) == 2 and valid_responses[0].strip() != valid_responses[1].strip()
 
 
 # All Uppercase: Your entire response should be in English, capital letters only.
