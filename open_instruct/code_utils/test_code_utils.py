@@ -72,6 +72,120 @@ class GetSuccessfulTestsFastTests(BaseCodeTestCase):
         self.assertEqual(result, expected)
 
 
+class GetSuccessfulTestsFunctionalTests(BaseCodeTestCase):
+    """Tests for the LiveCodeBench call-based ("functional") format."""
+
+    # LiveCodeBench encodes one JSON argument per line and the expected return value as JSON.
+    TWO_SUM_TESTS = [
+        {"input": "[2,7,11,15]\n9", "output": "[0,1]", "fn_name": "twoSum"},
+        {"input": "[3,2,4]\n6", "output": "[1,2]", "fn_name": "twoSum"},
+        {"input": "[3,3]\n6", "output": "[0,1]", "fn_name": "twoSum"},
+    ]
+
+    SOLUTION_CLASS = (
+        "class Solution:\n"
+        "    def twoSum(self, nums: List[int], target: int) -> List[int]:\n"
+        "        seen = {}\n"
+        "        for i, n in enumerate(nums):\n"
+        "            if target - n in seen:\n"
+        "                return [seen[target - n], i]\n"
+        "            seen[n] = i\n"
+    )
+
+    def test_correct_solution_passes(self):
+        result, _ = code_utils.get_successful_tests_functional(
+            program=self.SOLUTION_CLASS, tests=self.TWO_SUM_TESTS, max_execution_time=2.0
+        )
+        self.assertEqual(result, [1, 1, 1])
+
+    def test_bare_function_passes(self):
+        """The solution may define a plain function instead of a `class Solution` method."""
+        program = (
+            "def twoSum(nums, target):\n"
+            "    seen = {}\n"
+            "    for i, n in enumerate(nums):\n"
+            "        if target - n in seen:\n"
+            "            return [seen[target - n], i]\n"
+            "        seen[n] = i\n"
+        )
+        result, _ = code_utils.get_successful_tests_functional(
+            program=program, tests=self.TWO_SUM_TESTS, max_execution_time=2.0
+        )
+        self.assertEqual(result, [1, 1, 1])
+
+    def test_wrong_answer_fails(self):
+        program = "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 0]\n"
+        result, _ = code_utils.get_successful_tests_functional(
+            program=program, tests=self.TWO_SUM_TESTS, max_execution_time=2.0
+        )
+        self.assertEqual(result, [0, 0, 0])
+
+    def test_tuple_return_is_not_penalized(self):
+        """Ground truth sequences are never tuples, so a tuple return still counts as correct."""
+        program = (
+            "class Solution:\n"
+            "    def twoSum(self, nums, target):\n"
+            "        seen = {}\n"
+            "        for i, n in enumerate(nums):\n"
+            "            if target - n in seen:\n"
+            "                return (seen[target - n], i)\n"
+            "            seen[n] = i\n"
+        )
+        result, _ = code_utils.get_successful_tests_functional(
+            program=program, tests=self.TWO_SUM_TESTS, max_execution_time=2.0
+        )
+        self.assertEqual(result, [1, 1, 1])
+
+    def test_timeout_fails(self):
+        program = "class Solution:\n    def twoSum(self, nums, target):\n        import time\n        time.sleep(10)\n"
+        result, _ = code_utils.get_successful_tests_functional(
+            program=program, tests=self.TWO_SUM_TESTS, max_execution_time=1.0
+        )
+        self.assertEqual(result, [0, 0, 0])
+
+    def test_uncompilable_program_fails(self):
+        result, _ = code_utils.get_successful_tests_functional(
+            program="def f(:", tests=self.TWO_SUM_TESTS, max_execution_time=2.0
+        )
+        self.assertEqual(result, [0, 0, 0])
+
+    def test_missing_function_fails(self):
+        """The solution compiles but never defines the function the problem asks for."""
+        program = "class Solution:\n    def somethingElse(self, nums, target):\n        return [0, 1]\n"
+        result, _ = code_utils.get_successful_tests_functional(
+            program=program, tests=self.TWO_SUM_TESTS, max_execution_time=2.0
+        )
+        self.assertEqual(result, [0, 0, 0])
+
+    def test_missing_fn_name_fails(self):
+        tests = [{"input": "[3,3]\n6", "output": "[0,1]"}]
+        result, _ = code_utils.get_successful_tests_functional(program=self.SOLUTION_CLASS, tests=tests)
+        self.assertEqual(result, [0])
+
+    def test_no_tests(self):
+        result, runtimes = code_utils.get_successful_tests_functional(program=self.SOLUTION_CLASS, tests=[])
+        self.assertEqual(result, [])
+        self.assertEqual(runtimes, [])
+
+    def test_partial_pass_rate(self):
+        """A solution correct on some tests only: the pass rate must be per-test, not all-or-nothing."""
+        program = (
+            "class Solution:\n"
+            "    def twoSum(self, nums, target):\n"
+            "        if nums == [3, 3]:\n"
+            "            return [9, 9]\n"
+            "        seen = {}\n"
+            "        for i, n in enumerate(nums):\n"
+            "            if target - n in seen:\n"
+            "                return [seen[target - n], i]\n"
+            "            seen[n] = i\n"
+        )
+        result, _ = code_utils.get_successful_tests_functional(
+            program=program, tests=self.TWO_SUM_TESTS, max_execution_time=2.0
+        )
+        self.assertEqual(result, [1, 1, 0])
+
+
 class ReliabilityGuardNetworkTests(BaseCodeTestCase):
     """Tests to verify network operations behavior under reliability_guard."""
 

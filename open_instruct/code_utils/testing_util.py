@@ -5,6 +5,7 @@ https://github.com/LiveCodeBench/LiveCodeBench/blob/main/lcb_runner/evaluation/t
 
 import ast
 import faulthandler
+import json
 
 # to run the solution files we're using a timing based approach
 import signal
@@ -215,6 +216,95 @@ def get_stripped_lines(val: str):
     val = val.strip()
 
     return [val_line.strip() for val_line in val.split("\n")]
+
+
+def grade_call_based(code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int):
+    """Grade a call-based ("functional") problem: the solution defines a function or a
+    `class Solution` method named `fn_name`, which is invoked directly instead of being run as a
+    script. Each element of `all_inputs` holds one JSON-encoded argument per line, and the matching
+    element of `all_outputs` is the JSON-encoded expected return value.
+
+    Mirrors `grade_stdio`'s contract: returns per-test results (True for pass, a negative error code
+    otherwise) alongside per-test runtimes, and keeps going after a failing test instead of
+    returning early, so callers get a result for every test.
+    """
+    signal.signal(signal.SIGALRM, timeout_handler)
+    # Call-based solutions are imported rather than executed, so they need the same ambient imports
+    # the model may have assumed (e.g. `List` in the starter code's type hints).
+    code = import_string + "\n\n" + code
+    compiled_sol = compile_code(code, timeout)
+    if compiled_sol is None:
+        return ([-1] * len(all_outputs), [-1.0] * len(all_outputs))
+
+    method = get_function(compiled_sol, fn_name)
+    if method is None:
+        return ([-1] * len(all_outputs), [-1.0] * len(all_outputs))
+
+    try:
+        parsed_inputs = [[json.loads(line) for line in inputs.split("\n")] for inputs in all_inputs]
+        parsed_outputs = [json.loads(output) for output in all_outputs]
+    except (json.JSONDecodeError, AttributeError):
+        # Malformed ground truth, not the model's fault, but there is nothing to grade against.
+        return ([-1] * len(all_outputs), [-1.0] * len(all_outputs))
+
+    all_results = []
+    all_runtimes = []
+    first_failure_info = None
+    for gt_inp, gt_out in zip(parsed_inputs, parsed_outputs):
+        signal.alarm(timeout)
+        faulthandler.enable()
+
+        try:
+            start = time.time()
+            prediction = method(*gt_inp)
+            end_time = time.time()
+            signal.alarm(0)
+            all_runtimes.append(end_time - start)
+        except Exception as e:
+            signal.alarm(0)
+            all_runtimes.append(-1.0)
+            if "timeoutexception" in repr(e).lower():
+                all_results.append(-3)
+                if not first_failure_info:
+                    first_failure_info = {"error_code": -3, "error_message": "Time Limit Exceeded"}
+            else:
+                all_results.append(-4)
+                if not first_failure_info:
+                    first_failure_info = {"error_code": -4, "error_message": f"Runtime Error: {e}"}
+            continue
+        finally:
+            signal.alarm(0)
+            faulthandler.disable()
+
+        # don't penalize the model for returning tuples instead of lists, the ground truth
+        # sequences are never tuples
+        if isinstance(prediction, tuple):
+            prediction = list(prediction)
+
+        try:
+            test_case_passed = bool(prediction == gt_out)
+        except Exception:
+            # Comparison itself can raise for exotic return types (e.g. numpy arrays).
+            test_case_passed = False
+
+        if test_case_passed:
+            all_results.append(True)
+            continue
+
+        all_results.append(-2)
+        if not first_failure_info:
+            first_failure_info = {
+                "error_code": -2,
+                "error_message": "Wrong Answer",
+                "output": truncatefn(prediction),
+                "expected": truncatefn(gt_out),
+                "inputs": truncatefn(gt_inp),
+            }
+
+    if first_failure_info:
+        print(f"first_failure_info: {first_failure_info}")
+
+    return all_results, all_runtimes
 
 
 def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):

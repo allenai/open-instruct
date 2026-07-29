@@ -13,7 +13,7 @@ from typing import Any
 
 from open_instruct import logger_utils
 
-from .testing_util import grade_stdio
+from .testing_util import grade_call_based, grade_stdio
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # DANGEROUS_MODULES = ["os", "sys", "shutil", "subprocess", "socket", "urllib", "requests", "pathlib", "glob", "cgi", "cgitb", "xml", "pickle", "eval", "exec"]
@@ -261,6 +261,97 @@ def get_successful_tests_stdio(
     p.close()
 
     return [stdio_test_results[i] for i in range(test_ct)], [stdio_runtimes[i] for i in range(test_ct)]
+
+
+# -------------------------------------------------------------
+# Functional (call-based) format - mostly copied from livecodebench
+# -------------------------------------------------------------
+
+
+def get_fn_name(tests: list[Any]) -> str | None:
+    """The name of the function/method a call-based problem expects the solution to define.
+
+    It is a property of the problem rather than of an individual test, but it is stored on every
+    test so that the whole problem travels in the `ground_truth` field alone.
+    """
+    return next((test["fn_name"] for test in tests if isinstance(test, dict) and test.get("fn_name")), None)
+
+
+def run_tests_functional_helper(
+    program: str, tests: list[Any], fn_name: str, max_execution_time: float, results_array, runtimes_array
+):
+    """Helper to run call-based tests in a separate process."""
+    reliability_guard()
+    try:
+        all_inputs = [test["input"] for test in tests]
+        all_outputs = [test["output"] for test in tests]
+        timeout = math.ceil(max_execution_time)
+        results, runtimes = grade_call_based(program, all_inputs, all_outputs, fn_name, timeout)
+
+        if results is not None:
+            processed_results = [1 if r is True else 0 for r in results]
+            for i, res in enumerate(processed_results):
+                if i < len(results_array):
+                    results_array[i] = res
+                    runtimes_array[i] = runtimes[i]
+    except Exception:
+        # On any failure, results in the shared array will remain as they were initialized (0), indicating failure.
+        pass
+    finally:
+        partial_undo_reliability_guard()
+
+
+def get_successful_tests_functional(
+    program: str, tests: list[Any], max_execution_time: float = 1.0
+) -> tuple[list[int], list[float]]:
+    """Same as above but for the call-based (function-signature) format used by LiveCodeBench.
+
+    Parameter:
+        program: a string representation of the python program you want to run
+        tests: a list of dicts with "input" (one JSON-encoded argument per line), "output"
+            (the JSON-encoded expected return value) and "fn_name" (the function to call)
+        max_execution_time: the number of second each individual test can run before
+            it is considered failed and terminated
+    Return:
+        a tuple of (results, runtimes). results is a list of 0/1 indicating
+        passed or not, runtimes is a list of execution times for each test.
+    """
+    test_ct = len(tests)
+    if test_ct == 0:
+        return [], []
+
+    fn_name = get_fn_name(tests)
+    if fn_name is None:
+        logger.error("No fn_name found on any test, cannot grade a call-based problem without it")
+        return [0] * test_ct, [-1.0] * test_ct
+
+    if not should_execute(program=program, tests=tests):
+        logger.info("Not executing program %s", program)
+        return [0] * test_ct, [-1.0] * test_ct
+
+    functional_test_results = multiprocessing.Array("i", test_ct)
+    functional_runtimes = multiprocessing.Array("d", test_ct)
+
+    for i in range(test_ct):
+        functional_test_results[i] = 0  # Initialize results to 0 (failure)
+        functional_runtimes[i] = -1.0
+
+    # Total timeout needs to account for all tests running sequentially.
+    total_timeout = max_execution_time * test_ct + 5.0
+
+    p = multiprocessing.Process(
+        target=run_tests_functional_helper,
+        args=(program, tests, fn_name, max_execution_time, functional_test_results, functional_runtimes),
+    )
+    p.start()
+    p.join(timeout=total_timeout)
+
+    if p.is_alive():
+        p.kill()
+        p.join()
+    p.close()
+
+    return [functional_test_results[i] for i in range(test_ct)], [functional_runtimes[i] for i in range(test_ct)]
 
 
 # -------------------------------------------------------------

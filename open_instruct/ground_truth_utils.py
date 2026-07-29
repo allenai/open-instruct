@@ -1201,13 +1201,18 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
         instance = subclass(verifier_config)
         verifiers[instance.name.lower()] = instance
 
-        # add the code_stdio verifier
+        # add the code_stdio and code_functional verifiers, which share CodeVerifier's logic but
+        # hit a different endpoint of the code API
         if subclass == CodeVerifier:
-            stdio_config = copy.deepcopy(verifier_config)
-            stdio_config.code_api_url = stdio_config.code_api_url.replace("/test_program", "/test_program_stdio")
-            instance = CodeVerifier(stdio_config)
-            instance.name = "code_stdio"
-            verifiers["code_stdio"] = instance
+            for verifier_name, endpoint in (
+                ("code_stdio", "/test_program_stdio"),
+                ("code_functional", "/test_program_functional"),
+            ):
+                variant_config = copy.deepcopy(verifier_config)
+                variant_config.code_api_url = variant_config.code_api_url.replace("/test_program", endpoint)
+                instance = CodeVerifier(variant_config)
+                instance.name = verifier_name
+                verifiers[verifier_name] = instance
 
     for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
@@ -1269,14 +1274,16 @@ async def apply_verifiable_reward(
             return reward_func
         # Fall back to a base verifier for dataset-specific source names (e.g. difficulty-quartile
         # splits like "math_deepscaler_quartile0" all resolve to the "math" verifier, and eval-only
-        # sources like "code_stdio_lcbv5" resolve to the "code_stdio" verifier). Check "code_stdio"
-        # before "code" since the former is also a prefix match of the latter.
+        # sources like "code_stdio_lcbv5" resolve to the "code_stdio" verifier). Check the
+        # "code_stdio"/"code_functional" prefixes before "code" since both also prefix-match it.
         if dataset_key.startswith("gsm8k"):
             return reward_fn_mapping.get("gsm8k")
         if dataset_key.startswith("math"):
             return reward_fn_mapping.get("math")
         if dataset_key.startswith("code_stdio"):
             return reward_fn_mapping.get("code_stdio")
+        if dataset_key.startswith("code_functional"):
+            return reward_fn_mapping.get("code_functional")
         if dataset_key.startswith("code"):
             return reward_fn_mapping.get("code")
         return None

@@ -29,7 +29,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from open_instruct import logger_utils
-from open_instruct.code_utils.code_utils import decode_tests, get_successful_tests_fast, get_successful_tests_stdio
+from open_instruct.code_utils.code_utils import (
+    decode_tests,
+    get_successful_tests_fast,
+    get_successful_tests_functional,
+    get_successful_tests_stdio,
+)
 
 app = FastAPI()
 
@@ -53,6 +58,20 @@ async def test_program(request: TestRequest) -> dict[str, list[int] | list[float
         # logger.info("Executing tests for program: %s", request.program)
         decoded_tests = decode_tests(request.tests)
         results, runtimes = get_successful_tests_fast(
+            program=request.program, tests=decoded_tests, max_execution_time=request.max_execution_time
+        )
+        return {"results": results, "runtimes": runtimes}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/test_program_functional")
+async def test_program_functional(request: TestRequest) -> dict[str, list[int] | list[float]]:
+    # run tests with the call-based (function-signature) format
+    try:
+        decoded_tests = decode_tests(request.tests)
+        results, runtimes = get_successful_tests_functional(
             program=request.program, tests=decoded_tests, max_execution_time=request.max_execution_time
         )
         return {"results": results, "runtimes": runtimes}

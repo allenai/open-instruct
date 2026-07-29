@@ -159,6 +159,35 @@ class TestAPI(unittest.TestCase):
                 for result in data["results"]:
                     self.assertIn(result, [0, 1], f"Invalid result value: {result}")
 
+    def test_test_program_functional(self):
+        """POST call-based (function-signature) tests and verify the pass/fail vector."""
+        with APITestServer() as server:
+            payload = {
+                "program": (
+                    "class Solution:\n"
+                    "    def twoSum(self, nums: List[int], target: int) -> List[int]:\n"
+                    "        seen = {}\n"
+                    "        for i, n in enumerate(nums):\n"
+                    "            if target - n in seen:\n"
+                    "                return [seen[target - n], i]\n"
+                    "            seen[n] = i\n"
+                ),
+                "tests": [
+                    {"input": "[2,7,11,15]\n9", "output": "[0,1]", "fn_name": "twoSum"},
+                    {"input": "[3,2,4]\n6", "output": "[1,2]", "fn_name": "twoSum"},
+                    {"input": "[3,2,4]\n6", "output": "[0,1]", "fn_name": "twoSum"},  # Should fail.
+                ],
+                "max_execution_time": 2.0,
+            }
+
+            response = requests.post(f"{server.base_url}/test_program_functional", json=payload, timeout=30)
+
+            self.assertEqual(response.status_code, 200)
+
+            data = response.json()
+            self.assertIn("results", data, "Response JSON missing 'results' field")
+            self.assertEqual(data["results"], [1, 1, 0], "Returned pass/fail vector does not match expectation")
+
 
 class TestAPITestServer(unittest.TestCase):
     def test_health_check_with_context_manager(self):
