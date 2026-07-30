@@ -135,6 +135,13 @@ How it's wired:
   `SWERL_OPENSANDBOX_DOMAIN` / `SWERL_OPENSANDBOX_PROTOCOL` / `OPEN_SANDBOX_API_KEY`
   (Beaker secret), with `SWERL_OPENSANDBOX_CPU`, `SWERL_OPENSANDBOX_LIFETIME_S`,
   `SWERL_OPENSANDBOX_READY_TIMEOUT_S`, and `SWERL_OPENSANDBOX_APP_NAME` tuning knobs.
+- **Creates are throttled per node** (`SWERL_OPENSANDBOX_START_CONCURRENCY`, default 64)
+  with the same file-slot semaphore `DockerBackend` uses: a large pool (hundreds of env
+  actors) otherwise stampedes the control plane at t=0 with concurrent creates that force
+  mass Autopilot node provisioning — observed to collapse a pool-768 run into 504s and
+  failed adoptions while a throttled ramp is absorbed fine. Running sandboxes hold no
+  slot, so steady-state concurrency still reaches the full pool size. `ready_timeout`
+  defaults to 600s so creates and 504-adoptions survive node-provisioning waves.
 - **Command output is an SSE stream** whose HTTP read timeout is the connection's
   `request_timeout`; the backend sets it above the per-command timeout so long-quiet
   commands don't sever the stream. Exec output is text-only, so binary file reads go

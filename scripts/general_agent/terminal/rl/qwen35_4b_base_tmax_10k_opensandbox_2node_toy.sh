@@ -34,6 +34,7 @@ uv run python mason.py \
        --env SWERL_OPENSANDBOX_DOMAIN="${SWERL_OPENSANDBOX_DOMAIN:-sandbox.oe-rl-sandbox.apps.allenai.org}" \
        --env SWERL_OPENSANDBOX_PROTOCOL="${SWERL_OPENSANDBOX_PROTOCOL:-https}" \
        --env SWERL_OPENSANDBOX_LIFETIME_S=3600 \
+       --env SWERL_OPENSANDBOX_START_CONCURRENCY="${SWERL_OPENSANDBOX_START_CONCURRENCY:-64}" \
        --env SWERL_OPENSANDBOX_APP_NAME=swerl-tmax-opensandbox-toy \
        --secret OPEN_SANDBOX_API_KEY=pradeepd_OPEN_SANDBOX_API_KEY \
        --secret WANDB_API_KEY=pradeepd_WANDB_API_KEY \
@@ -75,7 +76,7 @@ uv run python mason.py \
     --save_trainer_logprobs false \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"backend": "opensandbox", "task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 16 \
+    --pool_size 768 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \

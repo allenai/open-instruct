@@ -1171,6 +1171,11 @@ class OpenSandboxBackend(SandboxBackend):
     # Poll cadence while waiting to adopt a sandbox whose create request was
     # cut by the ingress (see _adopt_after_gateway_timeout).
     _ADOPT_POLL_INTERVAL_S = 5.0
+    # Per-node cap on concurrent creates. A large pool (hundreds of env
+    # actors) otherwise stampedes the control plane and forces mass node
+    # provisioning at t=0; the cap makes the pool ramp instead. Running
+    # sandboxes hold no slot — only starts are throttled.
+    _START_SEMAPHORE = _FileSlotSemaphore("opensandbox-start", _env_int("SWERL_OPENSANDBOX_START_CONCURRENCY", 64))
 
     def __init__(
         self,
@@ -1209,9 +1214,12 @@ class OpenSandboxBackend(SandboxBackend):
                 ``SWERL_OPENSANDBOX_LIFETIME_S`` (3600). Must exceed the
                 longest expected rollout.
             ready_timeout: Seconds to wait for the sandbox pod to become
-                ready. Defaults to ``SWERL_OPENSANDBOX_READY_TIMEOUT_S``
-                (180) — GKE Autopilot may need to provision a node, which
-                takes minutes, not the SDK's default 30s.
+                ready (also bounds the post-504 adoption poll). Defaults to
+                ``SWERL_OPENSANDBOX_READY_TIMEOUT_S`` (600) — when a large
+                pool scales out, GKE Autopilot provisions nodes in waves and
+                pods can sit Pending for several minutes; the SDK's default
+                30s (and our previous 180s) abandoned pods that were about
+                to come up.
         """
         if OpenSandboxSync is None:
             raise RuntimeError(
@@ -1234,7 +1242,7 @@ class OpenSandboxBackend(SandboxBackend):
             sandbox_lifetime if sandbox_lifetime is not None else _env_int("SWERL_OPENSANDBOX_LIFETIME_S", 3600)
         )
         self._ready_timeout = (
-            ready_timeout if ready_timeout is not None else _env_int("SWERL_OPENSANDBOX_READY_TIMEOUT_S", 180)
+            ready_timeout if ready_timeout is not None else _env_int("SWERL_OPENSANDBOX_READY_TIMEOUT_S", 600)
         )
         self._sandbox = None
 
@@ -1270,45 +1278,55 @@ class OpenSandboxBackend(SandboxBackend):
         # Unique per-create tag so a create whose HTTP response is cut by the
         # ingress can still be found and adopted (see below).
         create_id = uuid.uuid4().hex
-        try:
-            self._sandbox = OpenSandboxSync.create(
-                self._image,
-                timeout=timedelta(seconds=self._sandbox_lifetime),
-                ready_timeout=timedelta(seconds=self._ready_timeout),
-                resource={"cpu": str(self._cpu), "memory": f"{self._memory_mib}Mi"},
-                metadata={
-                    "open_instruct": "swerl_sandbox",
-                    "open_instruct_app": self._app_name,
-                    "open_instruct_create_id": create_id,
-                },
-                connection_config=self._connection_config(),
-            )
-        except OpenSandboxException as e:
-            # An ingress/LB with an upstream timeout shorter than a cold pod
-            # start (image pull, node provisioning) returns 504 while the
-            # server still brings the sandbox up. Adopt that sandbox instead
-            # of failing — otherwise every cold start both errors AND leaks
-            # a billed orphan pod.
-            if not self._is_gateway_timeout(e):
-                message = str(e).lower()
-                if self._protocol == "http" and ("connection reset" in message or "server disconnected" in message):
-                    logger.error(
-                        "OpenSandbox create failed with an immediate connection reset while using plain http "
-                        "(domain=%s). An HTTPS-only endpoint produces exactly this symptom — "
-                        "set SWERL_OPENSANDBOX_PROTOCOL=https.",
-                        self._domain,
-                    )
-                raise
-            logger.warning(
-                "OpenSandbox create was cut by a gateway timeout (image=%s, create_id=%s): %s. "
-                "The sandbox usually still comes up server-side; polling to adopt it.",
-                self._image,
-                create_id,
-                e,
-            )
-            self._sandbox = self._adopt_after_gateway_timeout(create_id, e)
+        # The semaphore stays held through adoption: the pod is still being
+        # provisioned then, which is exactly the load being throttled.
+        with self._START_SEMAPHORE.acquire() as semaphore_wait_s:
+            try:
+                self._sandbox = OpenSandboxSync.create(
+                    self._image,
+                    timeout=timedelta(seconds=self._sandbox_lifetime),
+                    ready_timeout=timedelta(seconds=self._ready_timeout),
+                    resource={"cpu": str(self._cpu), "memory": f"{self._memory_mib}Mi"},
+                    metadata={
+                        "open_instruct": "swerl_sandbox",
+                        "open_instruct_app": self._app_name,
+                        "open_instruct_create_id": create_id,
+                    },
+                    connection_config=self._connection_config(),
+                )
+            except OpenSandboxException as e:
+                # An ingress/LB with an upstream timeout shorter than a cold pod
+                # start (image pull, node provisioning) returns 504 while the
+                # server still brings the sandbox up. Adopt that sandbox instead
+                # of failing — otherwise every cold start both errors AND leaks
+                # a billed orphan pod.
+                if not self._is_gateway_timeout(e):
+                    message = str(e).lower()
+                    if self._protocol == "http" and (
+                        "connection reset" in message or "server disconnected" in message
+                    ):
+                        logger.error(
+                            "OpenSandbox create failed with an immediate connection reset while using plain http "
+                            "(domain=%s). An HTTPS-only endpoint produces exactly this symptom — "
+                            "set SWERL_OPENSANDBOX_PROTOCOL=https.",
+                            self._domain,
+                        )
+                    raise
+                logger.warning(
+                    "OpenSandbox create was cut by a gateway timeout (image=%s, create_id=%s): %s. "
+                    "The sandbox usually still comes up server-side; polling to adopt it.",
+                    self._image,
+                    create_id,
+                    e,
+                )
+                self._sandbox = self._adopt_after_gateway_timeout(create_id, e)
         _OPENSANDBOX_LIVE_SANDBOXES.add(self._sandbox)
-        logger.info("OpenSandbox sandbox started: %s (%.3fs)", self._sandbox.id, time.perf_counter() - start_time)
+        logger.info(
+            "OpenSandbox sandbox started: %s (%.3fs, semaphore_wait=%.3fs)",
+            self._sandbox.id,
+            time.perf_counter() - start_time,
+            semaphore_wait_s,
+        )
 
     @staticmethod
     def _is_gateway_timeout(error: Exception) -> bool:

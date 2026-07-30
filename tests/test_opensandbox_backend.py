@@ -8,6 +8,7 @@ honors the abstract SandboxBackend contract.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import itertools
 import os
@@ -272,6 +273,26 @@ class TestStartAndClose(OpenSandboxBackendTestCase):
         config = sandbox.create_kwargs["connection_config"]
         self.assertEqual(config.kwargs["domain"], "sandbox.test:8080")
         self.assertEqual(config.kwargs["request_timeout"], timedelta(seconds=600 + 300))
+        backend.close()
+
+    def test_start_defaults_ready_timeout_for_autopilot_scaleout(self):
+        backend = self._started_backend()
+        [sandbox] = self.fake.sandboxes
+        self.assertEqual(sandbox.create_kwargs["ready_timeout"], timedelta(seconds=600))
+        backend.close()
+
+    def test_start_acquires_create_semaphore(self):
+        acquisitions = []
+
+        class _RecordingSemaphore:
+            @contextlib.contextmanager
+            def acquire(self):
+                acquisitions.append("acquired")
+                yield 0.0
+
+        with patch.object(OpenSandboxBackend, "_START_SEMAPHORE", _RecordingSemaphore()):
+            backend = self._started_backend()
+        self.assertEqual(acquisitions, ["acquired"])
         backend.close()
 
     def test_start_uses_env_defaults(self):
