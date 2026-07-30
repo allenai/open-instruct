@@ -3406,10 +3406,10 @@ Launch two new full-data seed-1 standards with OLMo-core GRPO, CUDA 13,
 
 | Name | never_give_up | Beaker |
 | --- | ---: | --- |
-| `deepcoder_1_5b_baseline_n8_k16_async4_threshold099_nokl_standard_cuda13` | — | pending |
-| `deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_standard_cuda13` | 0.75 | pending |
+| `deepcoder_1_5b_baseline_n8_k16_async4_threshold099_nokl_standard_cuda13` | — | [01KYTHSD5GTZSDVKBJ2K9024VY](https://beaker.org/ex/01KYTHSD5GTZSDVKBJ2K9024VY) |
+| `deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_standard_cuda13` | 0.75 | [01KYTHXPGNT3HW04PPD6GE8BG0](https://beaker.org/ex/01KYTHXPGNT3HW04PPD6GE8BG0) |
 
-### Planned launch commands
+### Launch commands
 
 ```bash
 CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
@@ -3422,5 +3422,14 @@ CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
   --never_give_up 0.75
 ```
 
-Image/source commit, Beaker experiment IDs, and launch verification to be
-filled in after submission.
+Both runs use CUDA 13 image
+`michaeln/open-instruct-integration-test-ngu-cuda13`
+(`01KYTHMMGR19G1PV8VZ1QFG3NW`), built and committed from source commit
+`2f49cd434`.
+
+Immediately after submission, both jobs were scheduled on `ai2/holmes` with
+8 GPUs, urgent priority, and workspace `ai2/olmo-instruct`. Their rendered
+commands confirmed `open_instruct/grpo.py`, `N=8,K=16`, `--async_steps 4`,
+`--code_pass_rate_reward_threshold 0.99`, `--beta 0.0`, and
+`--load_ref_policy False`; the NGU arm additionally confirmed
+`--never_give_up 0.75`. Results TBD.

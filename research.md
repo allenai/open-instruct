@@ -842,5 +842,8 @@ full-data seed-1 standards at `N=8,K=16`: a plain baseline and an NGU
 
 **Runs:** [Async-4/high-pass-rate/no-KL standard baseline launches](experiment.md#2026-07-30-deepcoder-15b-async-4high-pass-rateno-kl-standard-baselines)
 
-**Status (2026-07-30):** defaults updated; launch preparation active. Results
-TBD.
+**Status (2026-07-30):** defaults updated and both standards launched from
+commit `2f49cd434` using its CUDA 13 image. Beaker:
+[plain baseline](https://beaker.org/ex/01KYTHSD5GTZSDVKBJ2K9024VY) and
+[NGU 0.75](https://beaker.org/ex/01KYTHXPGNT3HW04PPD6GE8BG0). Both were
+immediately scheduled on `ai2/holmes`; results TBD.
