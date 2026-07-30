@@ -37,6 +37,7 @@ STARTING_RE = re.compile(r"Starting OpenSandbox sandbox \(.*?cpu=([\d.]+), memor
 STARTED_RE = re.compile(r"OpenSandbox sandbox started: ([0-9a-f-]+) \(([\d.]+)s\)")
 ADOPTED_RE = re.compile(r"Adopted OpenSandbox sandbox ([0-9a-f-]+)")
 CLOSING_RE = re.compile(r"Closing OpenSandbox sandbox: ([0-9a-f-]+)")
+JANITOR_RE = re.compile(r"^killed ([0-9a-f-]+)")
 REPEATED_RE = re.compile(r"\[repeated (\d+)x across cluster\]")
 
 
@@ -94,6 +95,13 @@ def parse_log(path: str) -> dict:
             if closing and timestamp is not None:
                 closes[closing.group(1)] = timestamp
                 hidden_closed += multiplier - 1
+                continue
+
+            # End-of-job janitor output ("killed <id>", no timestamp): treat
+            # as a close at the last seen timestamp.
+            janitor = JANITOR_RE.match(line.strip())
+            if janitor and janitor.group(1) not in closes and last_timestamp is not None:
+                closes[janitor.group(1)] = last_timestamp
 
     return {
         "starts": starts,
@@ -131,38 +139,50 @@ def main() -> int:
         return 1
 
     paired_seconds: list[float] = []
-    unclosed_seconds: list[float] = []
+    unpaired_tails: list[float] = []
     for sandbox_id, started_at in starts.items():
         closed_at = closes.get(sandbox_id)
         if closed_at is not None:
             paired_seconds.append(max(0.0, (closed_at - started_at).total_seconds()))
         else:
-            # No Closing line: price up to end of log, bounded by the cap.
             tail = (events["last_timestamp"] - started_at).total_seconds() if events["last_timestamp"] else 0.0
-            unclosed_seconds.append(min(max(0.0, tail), lifetime_cap))
+            unpaired_tails.append(min(max(0.0, tail), lifetime_cap))
 
-    mean_life = statistics.mean(paired_seconds) if paired_seconds else statistics.mean(unclosed_seconds or [0.0])
-    hidden_count = max(events["hidden_started"], events["hidden_closed"])
-    hidden_seconds = hidden_count * mean_life
+    mean_life = statistics.mean(paired_seconds) if paired_seconds else statistics.mean(unpaired_tails or [0.0])
 
-    observed_hours = sum(paired_seconds) / 3600
-    unclosed_hours = sum(unclosed_seconds) / 3600
-    hidden_hours = hidden_seconds / 3600
-    total_hours = observed_hours + unclosed_hours + hidden_hours
+    # Ray log dedup hides both "started" and "Closing" lines, so an unpaired
+    # id usually means the close was deduped, not that the sandbox leaked.
+    # Reconcile globally: total starts vs total closes (both including hidden
+    # multipliers) bounds how many sandboxes truly never closed. Those are
+    # priced at their observed end-of-log tail (capped); every other sandbox
+    # beyond the exactly-paired ones is priced at the mean paired lifetime.
+    total_starts = len(starts) + events["hidden_started"]
+    total_closes = len(closes) + events["hidden_closed"]
+    truly_unclosed = max(0, total_starts - total_closes)
+    assumed_closed = max(0, total_starts - len(paired_seconds) - truly_unclosed)
+    unclosed_tail = statistics.mean(unpaired_tails) if unpaired_tails else float(lifetime_cap)
+
+    paired_hours = sum(paired_seconds) / 3600
+    assumed_hours = assumed_closed * mean_life / 3600
+    unclosed_hours = truly_unclosed * min(unclosed_tail, lifetime_cap) / 3600
+    total_hours = paired_hours + assumed_hours + unclosed_hours
 
     print(f"Profile: {cpu} vCPU + {memory_gib:.1f} GiB per sandbox -> ${hourly_rate:.4f}/sandbox-hour")
-    print(f"Observed sandboxes (started+closed): {len(paired_seconds)}")
+    print(f"Total sandboxes: ~{total_starts} started, ~{total_closes} closed (incl. Ray-dedup-hidden + janitor)")
+    print(f"  exactly paired: {len(paired_seconds)}", end="")
     if paired_seconds:
         print(
-            f"  lifetime mean={mean_life:.0f}s median={statistics.median(paired_seconds):.0f}s "
-            f"max={max(paired_seconds):.0f}s"
+            f" (lifetime mean={mean_life:.0f}s median={statistics.median(paired_seconds):.0f}s "
+            f"max={max(paired_seconds):.0f}s)"
         )
-    print(f"Unclosed sandboxes (no Closing line, capped at {lifetime_cap}s): {len(unclosed_seconds)}")
-    if hidden_count:
-        print(f"Events hidden by Ray log dedup: ~{hidden_count} (priced at mean lifetime; ")
-        print("  relaunch with --env RAY_DEDUP_LOGS=0 for exact accounting)")
+    else:
+        print()
+    print(f"  closed but unpaired (dedup-hidden lines): ~{assumed_closed}, priced at mean lifetime")
+    print(f"  truly unclosed (leaks): ~{truly_unclosed}, priced at end-of-log tail capped at {lifetime_cap}s")
+    if events["hidden_started"] or events["hidden_closed"]:
+        print("  (launch with --env RAY_DEDUP_LOGS=0 for exact per-sandbox accounting)")
     print()
-    print(f"Sandbox-hours: observed={observed_hours:.2f} unclosed={unclosed_hours:.2f} hidden~={hidden_hours:.2f}")
+    print(f"Sandbox-hours: paired={paired_hours:.2f} assumed~={assumed_hours:.2f} leaked~={unclosed_hours:.2f}")
     print(f"ESTIMATED COST: ${total_hours * hourly_rate:.2f} ({total_hours:.2f} sandbox-hours)")
     print()
     print("Not included: LB data processing, orphans invisible to the client, cluster management fee.")
