@@ -19,8 +19,9 @@ set -euo pipefail
 #
 # The default 128,000 episodes at 8 prompts x 16 samples runs 1,000
 # optimizer steps.
-# Periodic model and training-state checkpoints are disabled. The only model
-# checkpoint is the existing final save at completion.
+# Periodic consolidated model checkpoints are disabled. Training state is saved
+# every 100 steps for resume, retaining only the latest state checkpoint. The
+# consolidated model is saved at completion.
 #
 # Run with:
 #   ./scripts/train/build_image_and_launch.sh \
@@ -96,8 +97,6 @@ uv run python mason.py \
     --priority "${PRIORITY}" \
     --pure_docker_mode \
     --no_auto_dataset_cache \
-    --non_resumable \
-    --auto_checkpoint_state_dir "" \
     --image "${BEAKER_IMAGE}" \
     --preemptible \
     --num_nodes 2 \
@@ -153,7 +152,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --eval_top_p 0.95 \
     --local_eval_every 100 \
     --save_freq -1 \
-    --checkpoint_state_freq -1 \
+    --checkpoint_state_freq 100 \
+    --keep_last_n_checkpoints 1 \
     --try_auto_save_to_beaker False \
     --push_to_hub False \
     --seed 1 \

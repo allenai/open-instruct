@@ -68,8 +68,6 @@ uv run python mason.py \
     --priority "${PRIORITY}" \
     --pure_docker_mode \
     --no_auto_dataset_cache \
-    --non_resumable \
-    --auto_checkpoint_state_dir "" \
     --image "${BEAKER_IMAGE}" \
     --preemptible \
     --num_nodes 2 \
@@ -121,7 +119,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --load_ref_policy False \
     --local_eval_every -1 \
     --save_freq -1 \
-    --checkpoint_state_freq -1 \
+    --checkpoint_state_freq 100 \
+    --keep_last_n_checkpoints 1 \
     --try_auto_save_to_beaker False \
     --push_to_hub False \
     --seed 1 \
