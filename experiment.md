@@ -3332,10 +3332,10 @@ comparison on `ai2/holmes`, workspace `ai2/olmo-instruct`, urgent priority:
 
 | Name | N | K | never_give_up | Beaker |
 | --- | ---: | ---: | ---: | --- |
-| `deepcoder_1_5b_baseline_n4_k32_full_train_full_eval_cuda13` | 4 | 32 | — | pending |
-| `deepcoder_1_5b_baseline_n2_k64_full_train_full_eval_cuda13` | 2 | 64 | — | pending |
-| `deepcoder_1_5b_ngu05_n8_k16_full_train_full_eval_cuda13` | 8 | 16 | 0.5 | pending |
-| `deepcoder_1_5b_ngu075_n8_k16_full_train_full_eval_cuda13` | 8 | 16 | 0.75 | pending |
+| `deepcoder_1_5b_baseline_n4_k32_full_train_full_eval_cuda13` | 4 | 32 | — | [01KYRX78X0VSVP337ME5AKZG5W](https://beaker.org/ex/01KYRX78X0VSVP337ME5AKZG5W) |
+| `deepcoder_1_5b_baseline_n2_k64_full_train_full_eval_cuda13` | 2 | 64 | — | [01KYRX8QAHWFJV2ZEJ5TE4NG8M](https://beaker.org/ex/01KYRX8QAHWFJV2ZEJ5TE4NG8M) |
+| `deepcoder_1_5b_ngu05_n8_k16_full_train_full_eval_cuda13` | 8 | 16 | 0.5 | [01KYRXA43VB6SW2RZG89XNZ4JS](https://beaker.org/ex/01KYRXA43VB6SW2RZG89XNZ4JS) |
+| `deepcoder_1_5b_ngu075_n8_k16_full_train_full_eval_cuda13` | 8 | 16 | 0.75 | [01KYRXBFTXR1EHJBPB073JRZ5D](https://beaker.org/ex/01KYRXBFTXR1EHJBPB073JRZ5D) |
 
 All other settings remain at `deepcoder_1_5b.sh` defaults: seed 1,
 `beta=0.001`, training temperature 1.0, eval temperature 0.6/pass@4,
@@ -3343,7 +3343,7 @@ the script's 100-step eval/save/checkpoint cadence, the three `_full`
 training datasets, `deepcoder_lcbv5_test_full`, and the 6-second code
 execution budget.
 
-### Planned launch commands
+### Launch commands
 
 ```bash
 ./scripts/train/build_image_and_launch.sh --cuda-version 12 /bin/true
@@ -3369,5 +3369,23 @@ CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
   --never_give_up 0.75
 ```
 
-Image names, source commit, Beaker experiment IDs, and launch verification to
-be filled in after submission.
+Both images were built from commit `a7e66076e`:
+
+- CUDA 12:
+  `michaeln/open-instruct-integration-test-ngu-cuda12`,
+  Beaker image `01KYRSPSN6VR5HEEEP56RGNGAM`, committed at
+  `2026-07-30T06:30:26Z`.
+- CUDA 13:
+  `michaeln/open-instruct-integration-test-ngu-cuda13`,
+  Beaker image `01KYRVZMX0JDDAE6FFH8Y77ECX`, committed at
+  `2026-07-30T07:00:09Z`.
+
+The CUDA 12 build-only invocation returned exit 126 after the image was fully
+pushed because the helper executes its target with `bash` and `/bin/true` is
+a binary; no CUDA 12 experiment was intended or launched.
+
+Immediately after submission, all four jobs were scheduled on `ai2/holmes`
+with 8 GPUs, urgent priority, workspace `ai2/olmo-instruct`, and CUDA 13 image
+`01KYRVZMX0JDDAE6FFH8Y77ECX`. The rendered commands confirmed
+`open_instruct/grpo.py` (OLMo-core), the full train/eval datasets, and the
+final K/N or NGU override for each arm. Results TBD.

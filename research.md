@@ -822,4 +822,10 @@ OLMo-core GRPO, seed 1, CUDA 13, urgent priority, and `ai2/holmes`.
 
 **Runs:** [CUDA 12/13 image builds and CUDA 13 full-data K/NGU launch batch](experiment.md#2026-07-30-cuda-1213-images--deepcoder-15b-full-data-kngu-extensions)
 
-**Status (2026-07-30):** launch preparation active; results TBD.
+**Status (2026-07-30):** CUDA 12 and CUDA 13 images built from commit
+`a7e66076e`; all four CUDA 13 arms launched and immediately scheduled on
+`ai2/holmes`. Beaker:
+[K=32/N=4](https://beaker.org/ex/01KYRX78X0VSVP337ME5AKZG5W),
+[K=64/N=2](https://beaker.org/ex/01KYRX8QAHWFJV2ZEJ5TE4NG8M),
+[NGU 0.5](https://beaker.org/ex/01KYRXA43VB6SW2RZG89XNZ4JS), and
+[NGU 0.75](https://beaker.org/ex/01KYRXBFTXR1EHJBPB073JRZ5D). Results TBD.
