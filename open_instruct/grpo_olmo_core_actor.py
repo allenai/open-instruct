@@ -399,6 +399,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
                 checkpointing_steps=self.grpo_config.checkpoint_state_freq,
                 ephemeral_save_interval=None,
                 save_async=False,
+                max_checkpoints=self.grpo_config.keep_last_n_checkpoints,
             )
         if self.grpo_config.save_freq > 0:
             trainer_callbacks["hf_checkpoint"] = grpo_callbacks_lib.HFCheckpointCallback(
