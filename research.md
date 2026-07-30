@@ -811,3 +811,15 @@ same `OC=true/false` switch `qwen3_4b_deepscaler_math.sh` already uses.
 
 **Status (2026-07-29):** toggle added, one baseline (N=8/K=16, seed 1, no lr/temp/KL deltas)
 launched on `OC=false`. Confirmed starting; no results yet.
+
+## [ACTIVE] DeepCoder-1.5B full-data K/NGU extensions on CUDA 13
+
+**Question:** on the full functional-problem training data and 279-problem
+lcbv5 eval, do larger rollout groups (`K=32,N=4` or `K=64,N=2`) or NGU
+(`p=0.5` or `p=0.75`, both at `K=16,N=8`) improve on the plain
+`K=16,N=8` baseline and matched NGU `p=0.875` arm? All four additions use
+OLMo-core GRPO, seed 1, CUDA 13, urgent priority, and `ai2/holmes`.
+
+**Runs:** [CUDA 12/13 image builds and CUDA 13 full-data K/NGU launch batch](experiment.md#2026-07-30-cuda-1213-images--deepcoder-15b-full-data-kngu-extensions)
+
+**Status (2026-07-30):** launch preparation active; results TBD.

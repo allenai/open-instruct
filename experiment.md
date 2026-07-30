@@ -3323,3 +3323,51 @@ Built from commit `38aea039f`; confirmed in `starting` state on
 three `_full` training datasets, full lcbv5 eval, 6-second code timeout,
 `--never_give_up 0.875`, and the final override values
 `--local_eval_every 50 --save_freq 50 --checkpoint_state_freq 50`.
+
+## 2026-07-30: CUDA 12/13 images + DeepCoder-1.5B full-data K/NGU extensions
+
+Build both CUDA 12 and CUDA 13 images from the same committed source, then use
+the CUDA 13 image for four additions to the full-data OLMo-core GRPO
+comparison on `ai2/holmes`, workspace `ai2/olmo-instruct`, urgent priority:
+
+| Name | N | K | never_give_up | Beaker |
+| --- | ---: | ---: | ---: | --- |
+| `deepcoder_1_5b_baseline_n4_k32_full_train_full_eval_cuda13` | 4 | 32 | — | pending |
+| `deepcoder_1_5b_baseline_n2_k64_full_train_full_eval_cuda13` | 2 | 64 | — | pending |
+| `deepcoder_1_5b_ngu05_n8_k16_full_train_full_eval_cuda13` | 8 | 16 | 0.5 | pending |
+| `deepcoder_1_5b_ngu075_n8_k16_full_train_full_eval_cuda13` | 8 | 16 | 0.75 | pending |
+
+All other settings remain at `deepcoder_1_5b.sh` defaults: seed 1,
+`beta=0.001`, training temperature 1.0, eval temperature 0.6/pass@4,
+the script's 100-step eval/save/checkpoint cadence, the three `_full`
+training datasets, `deepcoder_lcbv5_test_full`, and the 6-second code
+execution budget.
+
+### Planned launch commands
+
+```bash
+./scripts/train/build_image_and_launch.sh --cuda-version 12 /bin/true
+
+CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
+  EXP_NAME=deepcoder_1_5b_baseline_n4_k32_full_train_full_eval_cuda13 \
+  ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 4 --num_samples_per_prompt_rollout 32
+
+CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
+  EXP_NAME=deepcoder_1_5b_baseline_n2_k64_full_train_full_eval_cuda13 \
+  ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/train/qwen/deepcoder_1_5b.sh \
+  --num_unique_prompts_rollout 2 --num_samples_per_prompt_rollout 64
+
+CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
+  EXP_NAME=deepcoder_1_5b_ngu05_n8_k16_full_train_full_eval_cuda13 \
+  ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.5
+
+CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
+  EXP_NAME=deepcoder_1_5b_ngu075_n8_k16_full_train_full_eval_cuda13 \
+  ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75
+```
+
+Image names, source commit, Beaker experiment IDs, and launch verification to
+be filled in after submission.
