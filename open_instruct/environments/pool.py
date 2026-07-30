@@ -100,17 +100,54 @@ class EnvironmentPool:
         self._available: asyncio.Queue[ray.actor.ActorHandle] = asyncio.Queue()
         for actor in self._actors:
             self._available.put_nowait(actor)
+
+        # Utilization tracking, polled via stats() once per training step.
+        self._waiting = 0
+        self._in_use_peak = 0
+        self._acquire_wait_sum_s = 0.0
+        self._acquire_count = 0
         logger.info(f"Pool ready: {pool_size} {actor_class.__name__} actors")
 
+    def _in_use(self) -> int:
+        return len(self._actors) - self._available.qsize()
+
     async def _acquire_actor(self) -> ray.actor.ActorHandle:
+        self._waiting += 1
+        wait_start = time.monotonic()
         try:
-            return await asyncio.wait_for(self._available.get(), timeout=self._acquire_timeout)
+            actor = await asyncio.wait_for(self._available.get(), timeout=self._acquire_timeout)
         except asyncio.TimeoutError as e:
             raise TimeoutError(
                 f"Pool acquire timed out after {self._acquire_timeout}s. "
                 f"Pool has {len(self._actors)} actors, {self._available.qsize()} available. "
                 f"An actor may have crashed without being released."
             ) from e
+        finally:
+            self._waiting -= 1
+        self._acquire_wait_sum_s += time.monotonic() - wait_start
+        self._acquire_count += 1
+        self._in_use_peak = max(self._in_use_peak, self._in_use())
+        return actor
+
+    def stats(self) -> dict[str, float]:
+        """Utilization snapshot; peak/wait counters reset on each call.
+
+        ``in_use`` at ``size`` together with nonzero ``waiting`` or a large
+        ``acquire_wait_s_mean`` means the pool size is the rollout bottleneck.
+        """
+        wait_mean = self._acquire_wait_sum_s / self._acquire_count if self._acquire_count else 0.0
+        snapshot = {
+            "size": len(self._actors),
+            "in_use": self._in_use(),
+            "in_use_peak": max(self._in_use_peak, self._in_use()),
+            "waiting": self._waiting,
+            "acquires": self._acquire_count,
+            "acquire_wait_s_mean": wait_mean,
+        }
+        self._in_use_peak = self._in_use()
+        self._acquire_wait_sum_s = 0.0
+        self._acquire_count = 0
+        return snapshot
 
     @ray.method(concurrency_group="acquire")
     async def acquire(self) -> ray.actor.ActorHandle:

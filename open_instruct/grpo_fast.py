@@ -2800,6 +2800,7 @@ def run_training(
     model_dims: utils.ModelDims,
     checkpoint_state=None,
     base_env_config: EnvConfig | None = None,
+    tool_pools: dict[str, ray.actor.ActorHandle] | None = None,
 ):
     if base_env_config is None:
         base_env_config = EnvConfig()
@@ -2959,6 +2960,12 @@ def run_training(
             logger.info("[Main Thread] didn't get train generation metrics")
 
         data_thread_metrics["time/health_check"] = health_check_time
+
+        # Env pool utilization: in_use pinned at size with waiters means the
+        # pool size caps rollout concurrency (see EnvironmentPool.stats).
+        for pool_name, pool in (tool_pools or {}).items():
+            for stat_name, value in ray.get(pool.stats.remote()).items():
+                data_thread_metrics[f"pool/{pool_name}/{stat_name}"] = value
 
         num_step_tokens, episode = one_training_step(
             args,
@@ -3375,6 +3382,7 @@ def main(
             model_dims,
             checkpoint_state,
             base_env_config,
+            tool_pools=pools,
         )
 
         if args.push_to_hub and (not dist.is_initialized() or dist.get_rank() == 0):
