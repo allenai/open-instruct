@@ -19,8 +19,8 @@ set -euo pipefail
 #
 # The default 128,000 episodes at 8 prompts x 16 samples runs 1,000
 # optimizer steps.
-# A single rolling DeepSpeed state is kept for resume; periodic consolidated
-# models are disabled, and the only consolidated model is saved at completion.
+# Periodic model and training-state checkpoints are disabled. The only model
+# checkpoint is the existing final save at completion.
 #
 # Run with:
 #   ./scripts/train/build_image_and_launch.sh \
@@ -54,7 +54,6 @@ DEEPSPEED_OFFLOAD_OPTIMIZER="${DEEPSPEED_OFFLOAD_OPTIMIZER:-${DEFAULT_DEEPSPEED_
 WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 PRIORITY="${PRIORITY:-high}"
 MAX_RETRIES="${MAX_RETRIES:-5}"
-CHECKPOINT_STATE_DIR="${CHECKPOINT_STATE_DIR:-/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${BEAKER_USER}/${RUN_NAME}}"
 
 if [[ "${CUDA_VERSION}" == "13" && "${CLUSTER}" != "ai2/holmes" ]]; then
     echo "CUDA 13 Qwen3-30B-A3B runs require CLUSTER=ai2/holmes; got ${CLUSTER}." >&2
@@ -97,6 +96,8 @@ uv run python mason.py \
     --priority "${PRIORITY}" \
     --pure_docker_mode \
     --no_auto_dataset_cache \
+    --non_resumable \
+    --auto_checkpoint_state_dir "" \
     --image "${BEAKER_IMAGE}" \
     --preemptible \
     --num_nodes 2 \
@@ -152,10 +153,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --eval_top_p 0.95 \
     --local_eval_every 100 \
     --save_freq -1 \
-    --checkpoint_state_freq 100 \
-    --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
-    --keep_last_n_checkpoints 1 \
-    --clean_checkpoints_at_end True \
+    --checkpoint_state_freq -1 \
     --try_auto_save_to_beaker False \
     --push_to_hub False \
     --seed 1 \

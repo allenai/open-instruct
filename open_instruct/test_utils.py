@@ -1074,14 +1074,3 @@ class TestCleanLastNCheckpoints(unittest.TestCase):
     def test_remove_all(self):
         utils.clean_last_n_checkpoints(self.tmp_dir, keep_last_n_checkpoints=0)
         self.assertEqual(self._checkpoint_dirs(), [])
-
-    def test_remove_all_deepspeed(self):
-        with tempfile.TemporaryDirectory() as checkpoint_dir:
-            for step in (10, 20):
-                os.makedirs(os.path.join(checkpoint_dir, f"global_step{step}"))
-            pathlib.Path(checkpoint_dir, "latest").touch()
-
-            utils.clean_last_n_checkpoints_deepspeed(checkpoint_dir, keep_last_n_checkpoints=0)
-
-            self.assertFalse(any(entry.startswith("global_step") for entry in os.listdir(checkpoint_dir)))
-            self.assertTrue(os.path.exists(os.path.join(checkpoint_dir, "latest")))

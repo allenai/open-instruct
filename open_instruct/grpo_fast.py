@@ -2064,8 +2064,6 @@ def run_training(
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
 
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
-    if args.clean_checkpoints_at_end and args.checkpoint_state_dir and os.path.isdir(args.checkpoint_state_dir):
-        clean_last_n_checkpoints_deepspeed(args.checkpoint_state_dir, keep_last_n_checkpoints=0)
 
 
 def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
