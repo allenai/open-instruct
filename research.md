@@ -829,3 +829,18 @@ OLMo-core GRPO, seed 1, CUDA 13, urgent priority, and `ai2/holmes`.
 [K=64/N=2](https://beaker.org/ex/01KYRX8QAHWFJV2ZEJ5TE4NG8M),
 [NGU 0.5](https://beaker.org/ex/01KYRXA43VB6SW2RZG89XNZ4JS), and
 [NGU 0.75](https://beaker.org/ex/01KYRXBFTXR1EHJBPB073JRZ5D). Results TBD.
+
+## [ACTIVE] DeepCoder-1.5B async-4/high-pass-rate/no-KL standard baselines
+
+**Decision:** promote `async_steps=4` and
+`code_pass_rate_reward_threshold=0.99` to the
+`scripts/train/qwen/deepcoder_1_5b.sh` defaults, disable KL with `beta=0`,
+and avoid loading the now-unused reference policy. Establish two new
+full-data seed-1 standards at `N=8,K=16`: a plain baseline and an NGU
+`p=0.75` baseline. Both use OLMo-core GRPO, CUDA 13, urgent priority, and
+`ai2/holmes`.
+
+**Runs:** [Async-4/high-pass-rate/no-KL standard baseline launches](experiment.md#2026-07-30-deepcoder-15b-async-4high-pass-rateno-kl-standard-baselines)
+
+**Status (2026-07-30):** defaults updated; launch preparation active. Results
+TBD.

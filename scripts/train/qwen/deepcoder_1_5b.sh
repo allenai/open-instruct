@@ -59,8 +59,8 @@ uv run mason.py \
     --vllm_top_p 1.0 \
     --eval_temperature 0.6 \
     --eval_pass_at_k 4 \
-    --beta 0.001 \
-    --async_steps 2 \
+    --beta 0.0 \
+    --async_steps 4 \
     --active_sampling \
     --inflight_updates \
     --advantage_normalization_type centered \
@@ -98,7 +98,7 @@ uv run mason.py \
     --max_grad_norm 1.0 \
     --code_api_url \$CODE_API_URL/test_program \
     --code_max_execution_time ${CODE_MAX_EXECUTION_TIME:-6} \
-    --code_pass_rate_reward_threshold 0.0 \
-    --load_ref_policy True \
+    --code_pass_rate_reward_threshold 0.99 \
+    --load_ref_policy False \
     --keep_last_n_checkpoints 3 \
     --push_to_hub False "$@"

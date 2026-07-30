@@ -3389,3 +3389,38 @@ with 8 GPUs, urgent priority, workspace `ai2/olmo-instruct`, and CUDA 13 image
 `01KYRVZMX0JDDAE6FFH8Y77ECX`. The rendered commands confirmed
 `open_instruct/grpo.py` (OLMo-core), the full train/eval datasets, and the
 final K/N or NGU override for each arm. Results TBD.
+
+## 2026-07-30: DeepCoder-1.5B async-4/high-pass-rate/no-KL standard baselines
+
+Promote these settings from launch-time experiments to
+`deepcoder_1_5b.sh` defaults:
+
+- `--async_steps 4` (previously 2);
+- `--code_pass_rate_reward_threshold 0.99` (previously 0.0).
+- `--beta 0.0` and `--load_ref_policy False` (previously 0.001 and
+  `True`), disabling KL and avoiding the unused reference-policy load.
+
+Launch two new full-data seed-1 standards with OLMo-core GRPO, CUDA 13,
+`N=8,K=16`, urgent priority, workspace `ai2/olmo-instruct`, and
+`ai2/holmes`:
+
+| Name | never_give_up | Beaker |
+| --- | ---: | --- |
+| `deepcoder_1_5b_baseline_n8_k16_async4_threshold099_nokl_standard_cuda13` | — | pending |
+| `deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_standard_cuda13` | 0.75 | pending |
+
+### Planned launch commands
+
+```bash
+CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
+  EXP_NAME=deepcoder_1_5b_baseline_n8_k16_async4_threshold099_nokl_standard_cuda13 \
+  ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/train/qwen/deepcoder_1_5b.sh
+
+CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
+  EXP_NAME=deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_standard_cuda13 \
+  ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75
+```
+
+Image/source commit, Beaker experiment IDs, and launch verification to be
+filled in after submission.
