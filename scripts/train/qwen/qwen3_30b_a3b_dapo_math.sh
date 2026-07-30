@@ -155,7 +155,6 @@ source configs/beaker_configs/ray_node_setup.sh \
     --checkpoint_state_freq 100 \
     --checkpoint_state_dir "${CHECKPOINT_STATE_DIR}" \
     --keep_last_n_checkpoints 1 \
-    --save_final_model True \
     --clean_checkpoints_at_end True \
     --try_auto_save_to_beaker False \
     --push_to_hub False \

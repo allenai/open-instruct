@@ -122,7 +122,6 @@ source configs/beaker_configs/ray_node_setup.sh \
     --local_eval_every -1 \
     --save_freq -1 \
     --checkpoint_state_freq 100 \
-    --save_final_model False \
     --try_auto_save_to_beaker False \
     --push_to_hub False \
     --seed 1 \
