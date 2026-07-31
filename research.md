@@ -850,4 +850,139 @@ commit `2f49cd434` using its CUDA 13 image. Beaker:
 immediately scheduled on `ai2/holmes`. A matched NGU 0.75 arm accumulating
 by completions instead of prompts was launched and scheduled:
 [Beaker 01KYV9J4734RAMKEARK1YN5DTH](https://beaker.org/ex/01KYV9J4734RAMKEARK1YN5DTH).
-Results TBD.
+
+**Superseded (2026-07-31):** all three runs were cancelled at steps 258 / 119 / 4 and relaunched on
+the `_lcb` datasets, because they trained on the paraphrased prompt rather than DeepCoder's — see
+[the prompt entry](#resolved-deepcoder-15b-repro-gap-part-2-our-prompt-was-a-paraphrase-not-deepcoders)
+and [the relaunch](#active-deepcoder-15b-on-deepcoders-own-prompt-does-matching-the-prompt-close-the-repro-gap).
+No results were written up from them.
+## [RESOLVED] DeepCoder-1.5B repro gap: our code reward was dense, DeepCoder's is sparse
+
+**Question:** we have not reproduced the reference DeepCoder-1.5B run
+([wandb mluo/deepcoder/s3lpnxwa](https://wandb.ai/mluo/deepcoder/runs/s3lpnxwa)).
+DeepCoder's outcome reward is binary — 1 iff the generated code passes every sampled
+test, 0 otherwise (including malformed output). Does `deepcoder_1_5b.sh` match it?
+
+**Finding (2026-07-30):** it did not. `deepcoder_1_5b.sh` passed
+`--code_pass_rate_reward_threshold 0.0`, and `CodeVerifier.async_call`
+(`open_instruct/ground_truth_utils.py`) computes
+
+```python
+score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
+```
+
+so a threshold of `0.0` never fires and the reward is the *dense* fraction of tests
+passed, in [0,1]. Every DeepCoder-1.5B run logged above therefore trained on partial
+credit, not DeepCoder's sparse ORM.
+
+Two knock-on effects, both of which move training dynamics away from the reference run
+more than the reward shape alone suggests:
+
+1. **`--active_sampling` was filtering almost nothing.** The zero-variance drop is an
+   exact test, `np.std(reward_scores) == 0` (`open_instruct/data_loader.py`). Under a
+   binary reward a group is dropped whenever all 16 samples are all-pass or all-fail —
+   that is DAPO-style dynamic sampling, and it removes a large share of prompts early in
+   training. Under dense pass rates 16 samples essentially never share an identical pass
+   rate, so nearly every group survived and we trained on gradient-poor groups DeepCoder
+   discards.
+2. **Partial credit shifts the `centered` advantage baseline.** A response that passes a
+   few easy tests on every sample gets a positive baseline instead of 0, rewarding
+   "compiles and passes the easy tests" rather than "solves the problem."
+
+**Not implicated:** the pass@k eval metric was already binary —
+`correct_per_prompt = scores_per_prompt >= max_possible_score - 1e-8` in
+`compute_pass_at_k_metrics` (`open_instruct/grpo_utils.py`) with
+`max_possible_score = 1.0` — so `eval/pass_at_{1,4}` numbers from earlier runs remain
+comparable; only the dense `eval/scores` mean changes meaning. The 15-largest-test cap on
+the train splits (`scripts/data/create_deepcoder_data.py`) already matches DeepCoder's
+"15 most challenging tests."
+
+**Config decision (2026-07-30):** set `--code_pass_rate_reward_threshold 0.99` in
+`deepcoder_1_5b.sh` and `deepcoder_1_5b_eval_checkpoints_inner.sh`, matching the value the
+Olmo 3 RL scripts already use. `0.99` rather than `1.0` is the conservative choice: the
+code API returns 0/1 per test so an all-pass `sum/len` is exactly `1.0` today, but `0.99`
+stays correct if a verifier ever returns fractional per-test scores.
+
+**Still divergent from DeepCoder:** we dropped `--mask_truncated_completions` entirely
+(see the design decision above, commit `64dca3e85`), whereas DeepCoder uses DAPO-style
+overlong filtering that excludes truncated sequences from the loss. Smaller expected
+effect than the reward shape; revisit if the sparse reward alone does not close the gap.
+
+**Runs:** none yet — no run has been launched with the sparse reward.
+
+## [RESOLVED] DeepCoder-1.5B repro gap, part 2: our prompt was a paraphrase, not DeepCoder's
+
+**Question:** alongside the reward-shape mismatch above, does `create_deepcoder_data.py` build the
+same prompt as DeepCoder's
+[`examples/deepcoder/prepare_deepcoder_data.py`](https://github.com/agentica-project/rllm/blob/main/examples/deepcoder/prepare_deepcoder_data.py)?
+
+**Finding (2026-07-31):** no. rllm delegates the entire prompt to
+`fetch_live_code_bench_system_prompt` (`rllm/data/utils.py`), a verbatim port of LiveCodeBench's
+generation prompt. Ours was a hand-written paraphrase. Differences, roughly by expected impact:
+
+1. **Missing "(do not directly test on the sample inputs)".** Our `code_stdio` verifier compares
+   stdout exactly, so a model that appends `print(solve(sample))` self-checks fails a test it
+   solved. DeepCoder's prompt suppresses exactly that; ours said nothing about it.
+2. **No role preamble.** DeepCoder opens with "You are an expert Python programmer…"; we had none,
+   and `system_prompt_override_file` is `None`, so there was no system message anywhere.
+3. **No `### Format:` / `### Answer: (use the provided format with backticks)` scaffolding** — the
+   structural markers R1-Distill saw during its own LiveCodeBench evaluation.
+4. **No fill-in template.** DeepCoder emits an empty ```` ```python\n# YOUR CODE HERE\n``` ````
+   block; we described a code block in prose instead. A template to complete is a much stronger
+   format constraint than a description of one.
+5. We stripped the problem text; rllm does not, and the source problems are inconsistent about a
+   trailing newline, so some DeepCoder prompts genuinely run the problem into "### Format:".
+
+**Change (2026-07-31):** ported `fetch_live_code_bench_system_prompt` into
+`create_deepcoder_data.py` and routed every example through it, including the non-stripping
+behaviour in (5). Verified byte-identical to rllm's output across stdin, `class Solution` starter
+code, and bare-function starter code, checking against the constants read straight from the fetched
+`rllm/system_prompts.py` rather than retyped.
+
+**One deliberate deviation:** primeintellect/taco functional problems ship no `starter_code`, a
+case rllm never hits (its DeepCoder prep is lcbv5-only, where every functional problem has it). We
+now synthesize a stub — `def {fn_name}(arg0, ...):` — and send it through LiveCodeBench's
+starter-code branch, rather than keeping the bespoke `FUNCTIONAL_INSTRUCTION_NAMED` prose, so no
+problem sees a prompt shape DeepCoder never trained on.
+
+**Also noted:** the linked rllm script prepares *only* lcbv5, while our mixer trains on
+lcbv5 + primeintellect + taco. DeepCoder's reported 1.5B run used the full mixture (their blog), so
+the prompt function is the thing to match here, not the file's dataset scope.
+
+**Not yet done:** the `_lcb` datasets are not built or pushed. Doing so invalidates comparability
+with every run above, all of which used `_full`. `deepcoder_1_5b.sh` still points at `_full`.
+
+**Runs:** none yet.
+
+## [ACTIVE] DeepCoder-1.5B on DeepCoder's own prompt: does matching the prompt close the repro gap?
+
+**Question:** with the sparse reward fixed and the LiveCodeBench prompt ported (the two
+`[RESOLVED]` entries above), rerun the three live arms on `_lcb` data to see whether prompt +
+reward fidelity moves lcbv5 pass@4 toward DeepCoder's reported 1.5B numbers.
+
+**Data (2026-07-31):** rebuilt all five splits from `create_deepcoder_data.py` under the ported
+prompt and pushed them as `mnoukhov/deepcoder_{lcbv5,lcbv5_test,primeintellect,taco,codeforces_test}_lcb`.
+New repos rather than an overwrite of `_full`, so the three in-flight `_full` runs keep reading
+what they started on. `deepcoder_1_5b.sh` and `deepcoder_1_5b_eval_checkpoints_inner.sh` now point
+at `_lcb`.
+
+**Eval change (2026-07-31):** `--eval_temperature` 0.6 -> 1.0 in both scripts, matching the
+training temperature. Note this diverges from the temperature 0.6 that DeepSeek recommends for
+R1-Distill and that LiveCodeBench evaluations conventionally use, so pass@4 numbers from here are
+not comparable to any eval in the entries above, DeepCoder's published numbers included.
+
+**Arms:** the same three configurations that were running on `_full`, rebased onto `_lcb`. `beta=0`,
+`async_steps=4`, `load_ref_policy=False` and `code_pass_rate_reward_threshold=0.99` are all
+`deepcoder_1_5b.sh` defaults as of `2f49cd434`, so no arm passes them explicitly. N=8/K=16, seed 1:
+
+1. `baseline` -- `never_give_up 0`, `batch_by prompts`
+2. `ngu075_standard` -- `never_give_up 0.75`, `batch_by prompts`
+3. `ngu075_batchby_completions` -- `never_give_up 0.75`, `batch_by completions`
+
+**Superseded runs (on `_full`, old prompt, eval temp 0.6):**
+[01KYTHSD5GTZSDVKBJ2K9024VY](https://beaker.org/ex/01KYTHSD5GTZSDVKBJ2K9024VY) (baseline, step 258),
+[01KYTHXPGNT3HW04PPD6GE8BG0](https://beaker.org/ex/01KYTHXPGNT3HW04PPD6GE8BG0) (ngu075, step 119),
+[01KYV9J4734RAMKEARK1YN5DTH](https://beaker.org/ex/01KYV9J4734RAMKEARK1YN5DTH) (ngu075 batch_by
+completions, step 4).
+
+**Status (2026-07-31):** datasets built and pushed; scripts updated. Relaunch pending.

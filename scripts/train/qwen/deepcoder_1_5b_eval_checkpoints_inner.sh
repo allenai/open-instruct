@@ -12,7 +12,7 @@ set -e
 BACKEND_ARGS="--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5"
 # Defaults mirror scripts/train/qwen/deepcoder_1_5b.sh so checkpoint evals are comparable to the
 # in-training eval curve: the full 279-problem lcbv5 test set at pass@4.
-EVAL_DATASETS="${EVAL_DATASETS:-mnoukhov/deepcoder_lcbv5_test_full 1.0}"
+EVAL_DATASETS="${EVAL_DATASETS:-mnoukhov/deepcoder_lcbv5_test_lcb 1.0}"
 EVAL_PASS_AT_K="${EVAL_PASS_AT_K:-4}"
 
 for entry in $CHECKPOINTS; do
@@ -26,7 +26,7 @@ for entry in $CHECKPOINTS; do
         --exp_name "${EXP_NAME}" \
         --wandb_group_name "${WANDB_GROUP_NAME}" \
         --vllm_top_p 1.0 \
-        --eval_temperature 0.6 \
+        --eval_temperature 1.0 \
         --eval_pass_at_k ${EVAL_PASS_AT_K} \
         --beta 0.001 \
         --async_steps 2 \
@@ -39,7 +39,7 @@ for entry in $CHECKPOINTS; do
         --learning_rate 5e-7 \
         --per_device_train_batch_size 1 \
         --temperature 1.0 \
-        --dataset_mixer_list mnoukhov/deepcoder_lcbv5_full 1.0 mnoukhov/deepcoder_primeintellect_full 1.0 mnoukhov/deepcoder_taco_full 1.0 \
+        --dataset_mixer_list mnoukhov/deepcoder_lcbv5_lcb 1.0 mnoukhov/deepcoder_primeintellect_lcb 1.0 mnoukhov/deepcoder_taco_lcb 1.0 \
         --dataset_mixer_list_splits "train" \
         --dataset_mixer_eval_list $EVAL_DATASETS \
         --dataset_mixer_eval_list_splits "train" \
@@ -68,7 +68,7 @@ for entry in $CHECKPOINTS; do
         --mask_truncated_completions True \
         --code_api_url "$CODE_API_URL/test_program" \
         --code_max_execution_time 6 \
-        --code_pass_rate_reward_threshold 0.0 \
+        --code_pass_rate_reward_threshold 0.99 \
         --load_ref_policy True \
         --keep_last_n_checkpoints 3 \
         --push_to_hub False \

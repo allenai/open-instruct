@@ -28,12 +28,15 @@ NODES="${NODES:-1}"
 # Datasets converted from agentica-org/DeepCoder-Preview-Dataset by
 # scripts/data/create_deepcoder_data.py. lcbv5_test is reserved as held-out eval and never
 # appears in the train mixer.
-# The "_full" splits keep the function-signature ("functional") problems that the earlier
+# The "_lcb" splits are the "_full" splits restated in DeepCoder's own prompt -- a verbatim port of
+# rllm's `fetch_live_code_bench_system_prompt`, which is LiveCodeBench's generation prompt (see
+# create_deepcoder_data.py). "_full" carried a hand-written paraphrase that dropped, among other
+# things, LiveCodeBench's "do not directly test on the sample inputs" clause; results on "_full" and
+# "_lcb" are not comparable. Both keep the function-signature ("functional") problems the earlier
 # stdin-only repos dropped, so the eval set is the same 279 problems DeepCoder reports LiveCodeBench
-# on (175 stdin + 104 functional) rather than a 175-problem subset, and the train mixer includes
-# primeintellect/taco's functional problems too (see create_deepcoder_data.py).
-TRAIN_DATASETS="mnoukhov/deepcoder_lcbv5_full 1.0 mnoukhov/deepcoder_primeintellect_full 1.0 mnoukhov/deepcoder_taco_full 1.0"
-EVAL_DATASETS="mnoukhov/deepcoder_lcbv5_test_full 1.0"
+# on (175 stdin + 104 functional) rather than a 175-problem subset.
+TRAIN_DATASETS="mnoukhov/deepcoder_lcbv5_lcb 1.0 mnoukhov/deepcoder_primeintellect_lcb 1.0 mnoukhov/deepcoder_taco_lcb 1.0"
+EVAL_DATASETS="mnoukhov/deepcoder_lcbv5_test_lcb 1.0"
 
 uv run mason.py \
     --task_name ${EXP_NAME} \
@@ -57,7 +60,7 @@ uv run mason.py \
     --run_name "${RUN_NAME}" \
     --exp_name "${EXP_NAME}" \
     --vllm_top_p 1.0 \
-    --eval_temperature 0.6 \
+    --eval_temperature 1.0 \
     --eval_pass_at_k 4 \
     --beta 0.0 \
     --async_steps 4 \

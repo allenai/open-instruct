@@ -14,13 +14,18 @@ LiveCodeBench's own format, and ship a `starter_code` field so the prompt can ha
 exact signature (as LiveCodeBench does). primeintellect and taco instead ship pre-parsed argument
 lists and wrap the expected return in a single-element list (not always consistently, so
 `grade_call_based` accepts the value either wrapped or bare -- see testing_util.py); they also
-don't ship starter code, so the prompt instead names the function and its arity.
+don't ship starter code, so a signature stub is synthesized for them.
 
-Pushes one HF dataset per (source, split) to mnoukhov/deepcoder_<source>[_test]. The lcbv5,
-primeintellect and taco splits with functional problems added back in are pushed under a "_full"
-suffix: the earlier stdin-only repos (mnoukhov/deepcoder_lcbv5, mnoukhov/deepcoder_lcbv5_test,
-mnoukhov/deepcoder_primeintellect, mnoukhov/deepcoder_taco) are left untouched so runs launched
-against them stay reproducible and comparable.
+The prompt is DeepCoder's, not ours: `fetch_live_code_bench_system_prompt` below is a verbatim port
+of the function rllm's examples/deepcoder/prepare_deepcoder_data.py uses, which is in turn
+LiveCodeBench's own generation prompt. Reproducing it exactly matters because the reference 1.5B
+run we compare against was trained on it -- in particular its "do not directly test on the sample
+inputs" clause, which suppresses the self-check prints that otherwise fail exact-stdout grading.
+
+Pushes one HF dataset per (source, split) to mnoukhov/deepcoder_<source>[_test]<HUB_SUFFIX>. Each
+prompt change gets a new suffix rather than overwriting, so runs launched against earlier repos
+stay reproducible and comparable: the stdin-only repos have no suffix, "_full" added the functional
+problems back in under a hand-written prompt, and "_lcb" is "_full" restated in DeepCoder's prompt.
 
 Held-out eval splits (lcbv5 test, codeforces) are tagged with source-specific "dataset" values
 ("code_stdio_lcbv5", "code_functional_lcbv5", "code_stdio_codeforces") instead of the generic
@@ -38,28 +43,51 @@ from open_instruct.code_utils.code_utils import encode_tests
 
 HUB_PREFIX = "mnoukhov/deepcoder"
 
-INSTRUCTION = (
-    "\n\nWrite Python code to solve this problem. Your program should read the input from stdin "
-    "and write the output to stdout. Enclose your complete solution in a single ```python code block."
+# Suffix for the repos this script pushes to. The prompt is part of the dataset, so changing it
+# means a new set of repos rather than an overwrite: runs launched against the previous suffix stay
+# reproducible and comparable. "_lcb" == the LiveCodeBench/DeepCoder prompt below; the earlier
+# "_full" repos carry the hand-written paraphrase this replaced.
+HUB_SUFFIX = "_lcb"
+
+# Verbatim from rllm (DeepCoder's trainer), which is itself a port of LiveCodeBench's generation
+# prompt -- rllm/system_prompts.py and `fetch_live_code_bench_system_prompt` in rllm/data/utils.py,
+# used by examples/deepcoder/prepare_deepcoder_data.py. Reproduced exactly, whitespace included, so
+# our rollouts see the same prompt DeepCoder's reported 1.5B run saw.
+# https://github.com/LiveCodeBench/LiveCodeBench/blob/main/lcb_runner/prompts/code_generation.py
+LCB_SYSTEM_MESSAGE_GENERIC = (
+    "You are an expert Python programmer. You will be given a question (problem specification) and "
+    "will generate a correct Python program that matches the specification and passes all tests."
 )
 
-# Functional problems are graded by calling the solution directly, so the model has to match the
-# expected signature. LiveCodeBench's own prompt hands the model the starter code for this reason.
-FUNCTIONAL_INSTRUCTION = (
-    "\n\nWrite Python code to solve this problem. You will use the following starter code to write "
-    "the solution, and enclose your complete solution in a single ```python code block."
-    "\n\n```python\n{starter_code}\n```"
+LCB_FORMATTING_MESSAGE_WITH_STARTER_CODE = (
+    "You will use the following starter code to write the solution to the problem and enclose your "
+    "code within delimiters."
 )
 
-# primeintellect/taco functional problems don't ship starter code, so name the function and its
-# arity directly instead (they're overwhelmingly bare functions, not `class Solution` methods --
-# verified against the primeintellect sources).
-FUNCTIONAL_INSTRUCTION_NAMED = (
-    "\n\nWrite Python code to solve this problem. Define a top-level function named `{fn_name}` "
-    "that takes the input arguments described above and returns the answer directly -- do not read "
-    "from stdin or write to stdout. It will be called as `{fn_name}({arg_placeholders})`. Enclose "
-    "your complete solution in a single ```python code block."
+LCB_FORMATTING_WITHOUT_STARTER_CODE = (
+    "Read the inputs from stdin solve the problem and write the answer to stdout (do not directly "
+    "test on the sample inputs). Enclose your code within delimiters as follows. Ensure that when "
+    "the python program runs, it reads the inputs, runs the algorithm and writes output to STDOUT."
 )
+
+
+def fetch_live_code_bench_system_prompt(prompt: str, starter_code: str | None = None) -> str:
+    """Port of rllm's `fetch_live_code_bench_system_prompt`, kept line-for-line identical.
+
+    Note `prompt` is deliberately *not* stripped: rllm concatenates the problem straight onto
+    "### Format:", and DeepCoder-Preview-Dataset problems are inconsistent about a trailing newline,
+    so some prompts run the two together. That is what DeepCoder trains on, so we keep it.
+    """
+    prompt = LCB_SYSTEM_MESSAGE_GENERIC + "\n\n" + prompt
+    if starter_code:
+        prompt += f"### Format: {LCB_FORMATTING_MESSAGE_WITH_STARTER_CODE}\n"
+        prompt += f"```python\n{starter_code}\n```\n\n"
+    else:
+        prompt += f"### Format: {LCB_FORMATTING_WITHOUT_STARTER_CODE}\n"
+        prompt += "```python\n# YOUR CODE HERE\n```\n\n"
+    prompt += "### Answer: (use the provided format with backticks)\n\n"
+    return prompt
+
 
 # Which tests a problem is graded on, and how they are serialized into `ground_truth`.
 #
@@ -127,22 +155,24 @@ def to_example(
     num_args: int | None = None,
     full_test_budget: int = 0,
 ) -> dict | None:
-    if fn_name is None:
-        instruction = INSTRUCTION
-    else:
+    if fn_name is not None:
         # `get_successful_tests_functional` reads fn_name off the tests, so stamp it on each one to
         # keep the whole problem inside the single `ground_truth` field.
         tests = [{**test, "fn_name": fn_name} for test in tests]
-        if starter_code:
-            instruction = FUNCTIONAL_INSTRUCTION.format(starter_code=starter_code.strip())
-        else:
+        if not starter_code:
+            # primeintellect/taco functional problems ship no starter code, a case rllm never hits
+            # (its DeepCoder prep is lcbv5-only, where every functional problem has it). Synthesize
+            # the signature into a stub so these still go through LiveCodeBench's starter-code
+            # branch rather than needing a prompt shape DeepCoder never trained on. They're
+            # overwhelmingly bare functions, not `class Solution` methods -- verified against the
+            # primeintellect sources.
             arg_placeholders = ", ".join(f"arg{i}" for i in range(num_args)) if num_args else ""
-            instruction = FUNCTIONAL_INSTRUCTION_NAMED.format(fn_name=fn_name, arg_placeholders=arg_placeholders)
+            starter_code = f"def {fn_name}({arg_placeholders}):\n    "
     kept, ground_truth = select_tests(tests, full_test_budget)
     if not kept:
         return None
     return {
-        "messages": [{"role": "user", "content": problem.strip() + instruction}],
+        "messages": [{"role": "user", "content": fetch_live_code_bench_system_prompt(problem, starter_code or None)}],
         "ground_truth": ground_truth,
         "dataset": dataset_tag,
     }
@@ -327,20 +357,20 @@ def convert_codeforces() -> Dataset:
 if __name__ == "__main__":
     lcbv5_train = convert_lcbv5("train")
     print(f"lcbv5 train (stdin + functional): {len(lcbv5_train)}")
-    lcbv5_train.push_to_hub(f"{HUB_PREFIX}_lcbv5_full")
+    lcbv5_train.push_to_hub(f"{HUB_PREFIX}_lcbv5{HUB_SUFFIX}")
 
     lcbv5_test = convert_lcbv5("test")
     print(f"lcbv5 test (stdin + functional, eval): {len(lcbv5_test)}")
-    lcbv5_test.push_to_hub(f"{HUB_PREFIX}_lcbv5_test_full")
+    lcbv5_test.push_to_hub(f"{HUB_PREFIX}_lcbv5_test{HUB_SUFFIX}")
 
     primeintellect_train = convert_primeintellect()
     print(f"primeintellect train (stdin + functional): {len(primeintellect_train)}")
-    primeintellect_train.push_to_hub(f"{HUB_PREFIX}_primeintellect_full")
+    primeintellect_train.push_to_hub(f"{HUB_PREFIX}_primeintellect{HUB_SUFFIX}")
 
     taco_train = convert_taco()
     print(f"taco train (stdin + functional): {len(taco_train)}")
-    taco_train.push_to_hub(f"{HUB_PREFIX}_taco_full")
+    taco_train.push_to_hub(f"{HUB_PREFIX}_taco{HUB_SUFFIX}")
 
     codeforces_test = convert_codeforces()
     print(f"codeforces test (eval): {len(codeforces_test)}")
-    codeforces_test.push_to_hub(f"{HUB_PREFIX}_codeforces_test")
+    codeforces_test.push_to_hub(f"{HUB_PREFIX}_codeforces_test{HUB_SUFFIX}")
