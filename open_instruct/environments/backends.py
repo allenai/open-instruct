@@ -33,6 +33,8 @@ try:
     from opensandbox.config import ConnectionConfigSync as OpenSandboxConnectionConfig
     from opensandbox.exceptions import SandboxException as OpenSandboxException
     from opensandbox.models import SandboxFilter as OpenSandboxFilter
+    from opensandbox.models import SandboxImageAuth as OpenSandboxImageAuth
+    from opensandbox.models import SandboxImageSpec as OpenSandboxImageSpec
     from opensandbox.models import SandboxState as OpenSandboxState
     from opensandbox.models import WriteEntry as OpenSandboxWriteEntry
     from opensandbox.models.execd import RunCommandOpts as OpenSandboxRunCommandOpts
@@ -43,6 +45,8 @@ except ImportError:
     OpenSandboxConnectionConfig = None
     OpenSandboxException = None
     OpenSandboxFilter = None
+    OpenSandboxImageAuth = None
+    OpenSandboxImageSpec = None
     OpenSandboxState = None
     OpenSandboxRunCommandOpts = None
     OpenSandboxWriteEntry = None
@@ -1189,6 +1193,8 @@ class OpenSandboxBackend(SandboxBackend):
         app_name: str | None = None,
         sandbox_lifetime: int | None = None,
         ready_timeout: int | None = None,
+        registry_username: str | None = None,
+        registry_password: str | None = None,
     ):
         """
         Args:
@@ -1220,6 +1226,14 @@ class OpenSandboxBackend(SandboxBackend):
                 pods can sit Pending for several minutes; the SDK's default
                 30s (and our previous 180s) abandoned pods that were about
                 to come up.
+            registry_username: Registry username for authenticated image
+                pulls on the sandbox cluster. Defaults to
+                ``DOCKERHUB_USERNAME`` (the same convention as the Podman
+                setup's docker login). Anonymous Docker Hub pulls are
+                rate-limited per NAT IP, which mass pod scale-out trips.
+            registry_password: Registry password/PAT; defaults to
+                ``DOCKER_PAT``. Auth is attached only when both username and
+                password are present.
         """
         if OpenSandboxSync is None:
             raise RuntimeError(
@@ -1244,7 +1258,18 @@ class OpenSandboxBackend(SandboxBackend):
         self._ready_timeout = (
             ready_timeout if ready_timeout is not None else _env_int("SWERL_OPENSANDBOX_READY_TIMEOUT_S", 600)
         )
+        self._registry_username = registry_username or os.getenv("DOCKERHUB_USERNAME")
+        self._registry_password = registry_password or os.getenv("DOCKER_PAT")
         self._sandbox = None
+
+    def _image_spec(self):
+        """Image reference for create: authenticated spec when creds are set."""
+        if self._registry_username and self._registry_password:
+            return OpenSandboxImageSpec(
+                image=self._image,
+                auth=OpenSandboxImageAuth(username=self._registry_username, password=self._registry_password),
+            )
+        return self._image
 
     def _ensure_started(self) -> None:
         if self._sandbox is None:
@@ -1283,7 +1308,7 @@ class OpenSandboxBackend(SandboxBackend):
         with self._START_SEMAPHORE.acquire() as semaphore_wait_s:
             try:
                 self._sandbox = OpenSandboxSync.create(
-                    self._image,
+                    self._image_spec(),
                     timeout=timedelta(seconds=self._sandbox_lifetime),
                     ready_timeout=timedelta(seconds=self._ready_timeout),
                     resource={"cpu": str(self._cpu), "memory": f"{self._memory_mib}Mi"},

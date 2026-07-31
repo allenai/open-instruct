@@ -37,6 +37,8 @@ uv run python mason.py \
        --env SWERL_OPENSANDBOX_LIFETIME_S=3600 \
        --env SWERL_OPENSANDBOX_START_CONCURRENCY="${SWERL_OPENSANDBOX_START_CONCURRENCY:-64}" \
        --env SWERL_OPENSANDBOX_APP_NAME=swerl-tmax-opensandbox-toy \
+       --env DOCKERHUB_USERNAME=pdasigi \
+       --secret DOCKER_PAT=pradeepd_DOCKER_PAT \
        --secret OPEN_SANDBOX_API_KEY=pradeepd_OPEN_SANDBOX_API_KEY \
        --secret WANDB_API_KEY=pradeepd_WANDB_API_KEY \
        --gpus 8 \

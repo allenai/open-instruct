@@ -51,6 +51,18 @@ class _FakeWriteEntry:
         self.mode = mode
 
 
+class _FakeImageAuth:
+    def __init__(self, username: str, password: str):
+        self.username = username
+        self.password = password
+
+
+class _FakeImageSpec:
+    def __init__(self, image: str, auth=None):
+        self.image = image
+        self.auth = auth
+
+
 class _FakeSandboxState:
     PENDING = "Pending"
     RUNNING = "Running"
@@ -210,11 +222,17 @@ class OpenSandboxBackendTestCase(unittest.TestCase):
             ("OpenSandboxManagerSync", _FakeManagerFactory(self.fake)),
             ("OpenSandboxFilter", _FakeSandboxFilter),
             ("OpenSandboxState", _FakeSandboxState),
+            ("OpenSandboxImageAuth", _FakeImageAuth),
+            ("OpenSandboxImageSpec", _FakeImageSpec),
         ]:
             patcher = patch.object(backends, name, replacement)
             patcher.start()
             self.addCleanup(patcher.stop)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("SWERL_OPENSANDBOX_")}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("SWERL_OPENSANDBOX_") and k not in ("DOCKERHUB_USERNAME", "DOCKER_PAT")
+        }
         env["SWERL_OPENSANDBOX_DOMAIN"] = "sandbox.test:8080"
         env_patcher = patch.dict(os.environ, env, clear=True)
         env_patcher.start()
@@ -273,6 +291,30 @@ class TestStartAndClose(OpenSandboxBackendTestCase):
         config = sandbox.create_kwargs["connection_config"]
         self.assertEqual(config.kwargs["domain"], "sandbox.test:8080")
         self.assertEqual(config.kwargs["request_timeout"], timedelta(seconds=600 + 300))
+        backend.close()
+
+    def test_start_passes_plain_image_without_registry_creds(self):
+        backend = self._started_backend(image="ubuntu:22.04")
+        [sandbox] = self.fake.sandboxes
+        self.assertEqual(sandbox.create_kwargs["image"], "ubuntu:22.04")
+        backend.close()
+
+    def test_start_attaches_registry_auth_from_env(self):
+        with patch.dict(os.environ, {"DOCKERHUB_USERNAME": "pdasigi", "DOCKER_PAT": "dckr_pat_secret"}):
+            backend = self._started_backend(image="hamishi740/swerl-tmax-v3:abc123")
+        [sandbox] = self.fake.sandboxes
+        spec = sandbox.create_kwargs["image"]
+        self.assertIsInstance(spec, _FakeImageSpec)
+        self.assertEqual(spec.image, "hamishi740/swerl-tmax-v3:abc123")
+        self.assertEqual(spec.auth.username, "pdasigi")
+        self.assertEqual(spec.auth.password, "dckr_pat_secret")
+        backend.close()
+
+    def test_start_skips_auth_when_only_username_present(self):
+        with patch.dict(os.environ, {"DOCKERHUB_USERNAME": "pdasigi"}):
+            backend = self._started_backend(image="ubuntu:22.04")
+        [sandbox] = self.fake.sandboxes
+        self.assertEqual(sandbox.create_kwargs["image"], "ubuntu:22.04")
         backend.close()
 
     def test_start_defaults_ready_timeout_for_autopilot_scaleout(self):
