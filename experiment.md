@@ -3433,3 +3433,29 @@ commands confirmed `open_instruct/grpo.py`, `N=8,K=16`, `--async_steps 4`,
 `--code_pass_rate_reward_threshold 0.99`, `--beta 0.0`, and
 `--load_ref_policy False`; the NGU arm additionally confirmed
 `--never_give_up 0.75`. Results TBD.
+
+## 2026-07-31: DeepCoder-1.5B NGU 0.75 `batch_by=completions` arm
+
+Prepare a matched follow-up to the new NGU 0.75 standard above, changing
+only the streaming accumulation unit from the default
+`--batch_by prompts` to `--batch_by completions`. Keep OLMo-core GRPO,
+CUDA 13, seed 1, `N=8,K=16`, async 4, pass-rate reward threshold 0.99,
+no KL/reference policy, the full train/eval datasets, urgent priority,
+workspace `ai2/olmo-instruct`, and `ai2/holmes`.
+
+| Name | never_give_up | batch_by | Beaker |
+| --- | ---: | --- | --- |
+| `deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_batchby_completions_cuda13` | 0.75 | completions | pending |
+
+### Planned launch command
+
+```bash
+CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
+  EXP_NAME=deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_batchby_completions_cuda13 \
+  ./scripts/train/build_image_and_launch.sh --cuda-version 13 scripts/train/qwen/deepcoder_1_5b.sh \
+  --never_give_up 0.75 \
+  --batch_by completions
+```
+
+Image/source commit, Beaker experiment ID, and launch verification to be
+filled in after submission.

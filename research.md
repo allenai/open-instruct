@@ -840,10 +840,12 @@ full-data seed-1 standards at `N=8,K=16`: a plain baseline and an NGU
 `p=0.75` baseline. Both use OLMo-core GRPO, CUDA 13, urgent priority, and
 `ai2/holmes`.
 
-**Runs:** [Async-4/high-pass-rate/no-KL standard baseline launches](experiment.md#2026-07-30-deepcoder-15b-async-4high-pass-rateno-kl-standard-baselines)
+**Runs:** [Async-4/high-pass-rate/no-KL standard baseline launches](experiment.md#2026-07-30-deepcoder-15b-async-4high-pass-rateno-kl-standard-baselines),
+[matched NGU 0.75 `batch_by=completions` arm](experiment.md#2026-07-31-deepcoder-15b-ngu-075-batch_bycompletions-arm)
 
 **Status (2026-07-30):** defaults updated and both standards launched from
 commit `2f49cd434` using its CUDA 13 image. Beaker:
 [plain baseline](https://beaker.org/ex/01KYTHSD5GTZSDVKBJ2K9024VY) and
 [NGU 0.75](https://beaker.org/ex/01KYTHXPGNT3HW04PPD6GE8BG0). Both were
-immediately scheduled on `ai2/holmes`; results TBD.
+immediately scheduled on `ai2/holmes`. A matched NGU 0.75 arm accumulating
+by completions instead of prompts is in launch preparation; results TBD.
