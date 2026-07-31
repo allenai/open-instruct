@@ -848,4 +848,6 @@ commit `2f49cd434` using its CUDA 13 image. Beaker:
 [plain baseline](https://beaker.org/ex/01KYTHSD5GTZSDVKBJ2K9024VY) and
 [NGU 0.75](https://beaker.org/ex/01KYTHXPGNT3HW04PPD6GE8BG0). Both were
 immediately scheduled on `ai2/holmes`. A matched NGU 0.75 arm accumulating
-by completions instead of prompts is in launch preparation; results TBD.
+by completions instead of prompts was launched and scheduled:
+[Beaker 01KYV9J4734RAMKEARK1YN5DTH](https://beaker.org/ex/01KYV9J4734RAMKEARK1YN5DTH).
+Results TBD.

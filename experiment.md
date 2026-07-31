@@ -3445,9 +3445,9 @@ workspace `ai2/olmo-instruct`, and `ai2/holmes`.
 
 | Name | never_give_up | batch_by | Beaker |
 | --- | ---: | --- | --- |
-| `deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_batchby_completions_cuda13` | 0.75 | completions | pending |
+| `deepcoder_1_5b_ngu075_n8_k16_async4_threshold099_nokl_batchby_completions_cuda13` | 0.75 | completions | [01KYV9J4734RAMKEARK1YN5DTH](https://beaker.org/ex/01KYV9J4734RAMKEARK1YN5DTH) |
 
-### Planned launch command
+### Launch command
 
 ```bash
 CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
@@ -3457,5 +3457,12 @@ CLUSTER=ai2/holmes PRIORITY=urgent WORKSPACE=ai2/olmo-instruct \
   --batch_by completions
 ```
 
-Image/source commit, Beaker experiment ID, and launch verification to be
-filled in after submission.
+The run uses CUDA 13 image
+`michaeln/open-instruct-integration-test-ngu-cuda13`
+(`01KYV9H5B25A9VGB5DPWJRJG06`), built and committed from source commit
+`c603f0b8b`.
+
+Immediately after submission, the job was scheduled on `ai2/holmes` with
+8 GPUs, urgent priority, and workspace `ai2/olmo-instruct`. Its rendered
+command confirmed the full new-standard configuration and final
+`--never_give_up 0.75 --batch_by completions` overrides. Results TBD.
