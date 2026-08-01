@@ -8,6 +8,7 @@ BEAKER_USER="$(beaker account whoami --format json | jq -r '.[0].name')"
 BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/open-instruct-dev}"
 
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-30B-A3B}"
+TOKENIZER_NAME_OR_PATH="${TOKENIZER_NAME_OR_PATH:-Qwen/Qwen3-30B-A3B}"
 DATASET="${DATASET:-ai2-adapt-dev/rlvr_gsm8k_zs}"
 OUTPUT_DIR="${OUTPUT_DIR:-/weka/oe-adapt-default/${BEAKER_USER}/qmoe-int/qwen3-30b-a3b-math-rlvr}"
 NUM_UNIQUE_PROMPTS="${NUM_UNIQUE_PROMPTS:-1}"
@@ -59,6 +60,7 @@ uv run python mason.py \
         --exp_name "$EXP_NAME" \
         --run_name "$RUN_NAME" \
         --model_name_or_path "$MODEL_NAME_OR_PATH" \
+        --tokenizer_name_or_path "$TOKENIZER_NAME_OR_PATH" \
         --attn_implementation flash_4 \
         --compile_model false \
         --dataset_mixer_list "$DATASET" 64 \
