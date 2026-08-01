@@ -36,11 +36,13 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+import transformers
 from olmo_core import data as oc_data
 from olmo_core import optim
 from olmo_core.config import DType
 from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import is_distributed
+from olmo_core.nn.moe.v2.weight_stream import gather_olmo_ddp_hf_state_to_cpu
 from olmo_core.nn.transformer import OLMoDDPModelConfig
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
@@ -79,12 +81,16 @@ def _numpy_dir_is_populated(numpy_dir: str) -> bool:
     return token_chunks == labels_chunks == metadata_chunks
 
 
-def _olmo_core_model_checkpoint_path(path: str) -> str:
-    """Resolve a converted OLMo-core model root to its distributed-checkpoint directory."""
-    model_and_optim_path = os.path.join(path, "model_and_optim")
-    if os.path.isfile(os.path.join(model_and_optim_path, ".metadata")):
-        return model_and_optim_path
-    return path
+def _load_initial_native_checkpoint(trainer: Any, checkpoint_path: str) -> None:
+    """Initialize model weights from a native checkpoint without restoring training state."""
+    logger.info(f"Loading OLMo-core model weights from {checkpoint_path}...")
+    trainer.load_checkpoint(checkpoint_path, load_trainer_state=False, load_optim_state=False)
+
+
+def _resume_checkpoint(trainer: Any, checkpoint_path: str, reset_optimizer_states: bool) -> None:
+    """Resume model and trainer state, optionally discarding optimizer state."""
+    logger.info(f"Resuming from explicit checkpoint {checkpoint_path}...")
+    trainer.load_checkpoint(checkpoint_path, load_optim_state=not reset_optimizer_states)
 
 
 def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
@@ -280,7 +286,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
                 use_distributed=True,
             ),
             dp_config=dp_config,
-            cp_config=cp_config,
+            cp_config=None,
             ep_config=(
                 train_module_lib.TransformerExpertParallelConfig(degree=args.model.moe_expert_parallel_degree)
                 if args.model.moe_expert_parallel_degree > 1
@@ -352,8 +358,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         with_tracking=args.logging.with_tracking,
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
-        max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
         save_async=not use_olmo_ddp,
+        max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
@@ -373,18 +379,38 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     ).build(train_module, data_loader)
 
     if args.checkpoint.resume_from_checkpoint is not None:
-        logger.info(f"Resuming from explicit checkpoint {args.checkpoint.resume_from_checkpoint}...")
-        trainer.load_checkpoint(args.checkpoint.resume_from_checkpoint)
+        _resume_checkpoint(
+            trainer, args.checkpoint.resume_from_checkpoint, args.checkpoint.reset_optimizer_states_on_resume
+        )
     elif trainer.checkpoint_loaded:
         logger.info(f"Resumed training state from {args.checkpoint.output_dir}")
     elif not use_hf_ckpt:
-        checkpoint_path = _olmo_core_model_checkpoint_path(args.model.model_name_or_path)
-        logger.info(f"Loading OLMo-core model checkpoint from {checkpoint_path}...")
-        trainer.load_checkpoint(checkpoint_path, load_trainer_state=False, load_optim_state=False)
+        _load_initial_native_checkpoint(trainer, args.model.model_name_or_path)
 
     logger.info("Starting training...")
     trainer.fit()
     logger.info("Training complete.")
+
+    if args.checkpoint.hf_export_dir is not None:
+        if not use_olmo_ddp:
+            raise NotImplementedError("hf_export_dir currently supports only OLMoDDP models")
+        assert isinstance(model_config, OLMoDDPModelConfig)
+        logger.info(f"Gathering final OLMoDDP weights for HF export to {args.checkpoint.hf_export_dir}")
+        if use_hf_ckpt:
+            hf_config = transformers.AutoConfig.from_pretrained(
+                args.model.model_name_or_path, revision=args.model.model_revision, trust_remote_code=True
+            )
+        else:
+            hf_config = olmo_core_utils.load_native_olmo3_moe_hf_config(args.model.model_name_or_path, tc)
+            if hf_config is None:
+                raise NotImplementedError("Native HF export currently supports only Olmo3MoE checkpoints")
+        hf_state = gather_olmo_ddp_hf_state_to_cpu(train_module.model, hf_config, target_rank=0)
+        if global_rank == 0:
+            olmo_core_utils.save_prepared_hf_state(hf_state, args.checkpoint.hf_export_dir, hf_config, tc.tokenizer)
+            logger.info(f"Saved final Hugging Face checkpoint to {args.checkpoint.hf_export_dir}")
+        del hf_state
+        if is_distributed():
+            dist.barrier()
 
     teardown_training_environment()
 
