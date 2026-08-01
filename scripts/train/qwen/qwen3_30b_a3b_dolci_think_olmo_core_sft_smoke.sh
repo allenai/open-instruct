@@ -4,6 +4,7 @@ set -euo pipefail
 EXP_NAME="${EXP_NAME:-qwen3-30b-a3b-dolci-think-olmo-core-sft-smoke}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}-$(date +%Y%m%d-%H%M%S)}"
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/open-instruct-dev}"
 
 MODEL_PATH="${MODEL_PATH:?Set MODEL_PATH to an OLMo-core Qwen3-MoE checkpoint}"
 DATASET_PATH="${DATASET_PATH:?Set DATASET_PATH to a pretokenized OLMo-core SFT dataset}"
@@ -13,7 +14,7 @@ uv run python mason.py \
     --task_name "$EXP_NAME" \
     --description "$RUN_NAME" \
     --cluster ai2/holmes \
-    --workspace ai2/olmo-instruct \
+    --workspace "$BEAKER_WORKSPACE" \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
