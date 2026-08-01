@@ -48,7 +48,14 @@ from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, te
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
 
-from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct import (
+    dataset_transformation,
+    logger_utils,
+    numpy_dataset_conversion,
+    olmo_core_train_modules,
+    olmo_core_utils,
+    utils,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -315,7 +322,34 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             max_grad_norm=max_grad_norm,
         )
 
-    train_module = train_module_config.build(model)
+    if use_hf_ckpt and use_olmo_ddp:
+        hf_config = transformers.AutoConfig.from_pretrained(
+            args.model.model_name_or_path, revision=args.model.model_revision, trust_remote_code=True
+        )
+        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+            args.model.model_name_or_path, revision=args.model.model_revision, trust_remote_code=True
+        )
+        hf_state = {name: value.detach().cpu() for name, value in hf_model.state_dict().items()}
+        del hf_model
+        train_module = olmo_core_train_modules.HFInitializingOLMoDDPTrainModule(
+            model=model,
+            optim=train_module_config.optim,
+            rank_microbatch_size=train_module_config.rank_microbatch_size,
+            max_sequence_length=train_module_config.max_sequence_length,
+            compile_model=train_module_config.compile_model,
+            dp_config=train_module_config.dp_config,
+            ep_config=train_module_config.ep_config,
+            ac_config=train_module_config.ac_config,
+            z_loss_multiplier=train_module_config.z_loss_multiplier,
+            scheduler=train_module_config.scheduler,
+            max_grad_norm=train_module_config.max_grad_norm,
+            device=device,
+            initial_hf_config=hf_config,
+            initial_hf_state=hf_state,
+        )
+        del hf_state
+    else:
+        train_module = train_module_config.build(model)
 
     data_loader_seed = (
         args.tracking.data_loader_seed if args.tracking.data_loader_seed is not None else args.tracking.seed
@@ -336,11 +370,6 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         dp_process_group=train_module.dp_process_group,
     )
     data_loader.reshuffle(epoch=1)
-
-    if use_hf_ckpt:
-        olmo_core_utils.reload_hf_checkpoint_after_parallelization(
-            train_module, args.model.model_name_or_path, args.checkpoint.output_dir
-        )
 
     if args.training.max_train_steps is not None:
         max_duration = Duration.steps(args.training.max_train_steps)

@@ -13,8 +13,8 @@ class FakeOLMoDDPModel:
         self.init_kwargs = kwargs
 
 
-def test_grpo_olmo_ddp_loads_hf_state_during_model_initialization(monkeypatch):
-    train_module = object.__new__(olmo_core_train_modules.GRPOOLMoDDPTrainModule)
+def test_hf_initializing_olmo_ddp_loads_state_during_model_initialization(monkeypatch):
+    train_module = object.__new__(olmo_core_train_modules.HFInitializingOLMoDDPTrainModule)
     hf_config = object()
     hf_state = {"weight": torch.ones(1)}
     train_module._initial_hf_config = hf_config

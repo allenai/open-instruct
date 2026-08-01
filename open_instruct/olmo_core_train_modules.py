@@ -758,6 +758,39 @@ class GRPOTrainModule(TransformerTrainModule):
             )
 
 
+class HFInitializingOLMoDDPTrainModule(OLMoDDPTrainModule):
+    """OLMoDDP train module that initializes an EP-sharded model from HF weights."""
+
+    def __init__(
+        self, *args, initial_hf_config: PretrainedConfig, initial_hf_state: dict[str, torch.Tensor], **kwargs
+    ) -> None:
+        self._initial_hf_config = initial_hf_config
+        self._initial_hf_state = initial_hf_state
+        super().__init__(*args, **kwargs)
+
+    def init_model_part_weights(
+        self, model: olmo_ddp.OLMoDDPModel, *, model_part_idx: int, max_sequence_length: int, rank_microbatch_size: int
+    ) -> None:
+        if model_part_idx != 0:
+            raise NotImplementedError("Loading initial HF weights into pipeline-parallel OLMoDDP is not supported")
+
+        logger.info("Materializing OLMoDDP parameters without random initialization before loading HF weights")
+        model.init_weights(
+            max_seq_len=max_sequence_length,
+            max_local_microbatch_size=rank_microbatch_size,
+            device=self.device,
+            world_mesh=self.world_mesh,
+            model_part_idx=model_part_idx,
+            initialize_parameters=False,
+        )
+        hf_config = self._initial_hf_config
+        hf_state = self._initial_hf_state
+        assert hf_config is not None and hf_state is not None
+        load_olmo_ddp_hf_state(model, hf_config, hf_state)
+        self._initial_hf_config = None
+        self._initial_hf_state = None
+
+
 class GRPOOLMoDDPTrainModule(OLMoDDPTrainModule):
     """Thin OLMoDDP runtime adapter for the shared GRPO training algorithm."""
 
