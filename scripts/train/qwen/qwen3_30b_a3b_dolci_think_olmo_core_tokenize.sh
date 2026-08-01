@@ -2,6 +2,8 @@
 set -euo pipefail
 
 BEAKER_IMAGE="${1:?Pass the Open Instruct Beaker image as the first argument}"
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/open-instruct-dev}"
+GPUS="${GPUS:-0}"
 DATASET_VARIANT="${DATASET_VARIANT:-100k}"
 
 case "$DATASET_VARIANT" in
@@ -31,7 +33,7 @@ uv run python mason.py \
     --task_name "qwen3-30b-a3b-dolci-think-tokenize-${DATASET_VARIANT}-terminal-eos-v2" \
     --description "Qwen3 30B A3B Dolci-Think tokenization (${DATASET_VARIANT}, terminal EOS v2)" \
     --cluster ai2/jupiter \
-    --workspace ai2/olmo-instruct \
+    --workspace "$BEAKER_WORKSPACE" \
     --priority urgent \
     --max_retries 3 \
     --timeout "$TIMEOUT" \
@@ -40,7 +42,7 @@ uv run python mason.py \
     --no-host-networking \
     --preemptible \
     --no_auto_dataset_cache \
-    --gpus 8 \
+    --gpus "$GPUS" \
     -- python scripts/data/convert_sft_data_for_olmocore.py \
         --dataset_mixer_list allenai/Dolci-Think-SFT-32B "$MIXER_AMOUNT" \
         --tokenizer_name_or_path Qwen/Qwen3-30B-A3B \
