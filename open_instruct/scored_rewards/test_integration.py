@@ -8,11 +8,18 @@ returned ``reward_fn`` with exactly the arguments
 the failure mode that matters on a rebase - upstream changing the reward
 signature or the ``RewardConfig`` fields underneath us.
 
-It needs open-instruct's own dependencies (numpy, transformers, torch, ...) but
-still no GPU, no ray cluster, no vLLM and no network. Where those are missing
-the whole module skips, so a laptop run of the other file stays green.
+It needs open-instruct's own dependencies but still no GPU, no ray cluster, no
+vLLM and no network. Where those are missing the whole module skips, so a laptop
+run of the other file stays green.
 
     python -m unittest open_instruct.scored_rewards.test_integration -v
+
+Inside the project environment this just works. To run it standalone - which is
+enough to check the seam after a rebase, and does not need vLLM - the import
+chain bottoms out at:
+
+    pip install numpy requests tiktoken transformers absl-py sympy \
+                nltk immutabledict langdetect beaker ray torch wandb datasets
 """
 
 from __future__ import annotations
