@@ -97,7 +97,7 @@ from open_instruct.environments.pool import EnvironmentPool
 from open_instruct.environments.tools.parsers import create_tool_parser
 from open_instruct.environments.tools.tools import TOOL_REGISTRY, GenericMCPToolConfig
 from open_instruct.environments.tools.utils import EnvsConfig, ParsedEnvConfig
-from open_instruct.ground_truth_utils import RewardConfig, build_all_verifiers, cleanup_all_llm_judge_clients
+from open_instruct.ground_truth_utils import RewardConfig, cleanup_all_llm_judge_clients
 from open_instruct.model_utils import (
     ModelConfig,
     disable_dropout_in_model,
@@ -107,6 +107,8 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
+from open_instruct.scored_rewards.registry import load_plugins as load_reward_plugins
+from open_instruct.scored_rewards.reward_config import make_reward_config
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -2199,6 +2201,10 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
 ):
+    # Before anything else: plugins register scorers AND environments as an
+    # import side effect, and initialize_tools_and_envs below reads the registry.
+    load_reward_plugins(streaming_config.reward_plugins)
+
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
@@ -2271,18 +2277,9 @@ def main(
     # We don't care if we ever hit the max, so we let the queue be unbounded.
     evaluation_inference_results_Q = ray_queue.Queue()
 
-    reward_config = RewardConfig(
-        apply_r1_style_format_reward=streaming_config.apply_r1_style_format_reward,
-        r1_style_format_reward=streaming_config.r1_style_format_reward,
-        apply_verifiable_reward=streaming_config.apply_verifiable_reward,
-        verification_reward=streaming_config.verification_reward,
-        non_stop_penalty=streaming_config.non_stop_penalty,
-        non_stop_penalty_value=streaming_config.non_stop_penalty_value,
-        only_reward_good_outputs=tools_config.only_reward_good_outputs,
-        additive_format_reward=streaming_config.additive_format_reward,
-        verifier_functions=build_all_verifiers(args, streaming_config),
-        reward_aggregator=streaming_config.reward_aggregator,
-    )
+    # Returns exactly the RewardConfig above unless --group_scorer or
+    # --score_verifiers is set. See open_instruct/scored_rewards/.
+    reward_config = make_reward_config(args, streaming_config, tools_config)
 
     # AFTER potentially adding tool stop sequences, create generation configs
     generation_configs = create_generation_configs(args, streaming_config, vllm_config)

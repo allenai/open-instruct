@@ -487,6 +487,24 @@ class StreamingDataLoaderConfig:
     cache_evolving_rubric_data_dir: str | None = None
     """Directory to cache evolving rubric generation data for debugging/analysis. If set, rubric data will be saved."""
 
+    # Score-based rewards (open_instruct/scored_rewards). All optional: leaving
+    # them unset reproduces upstream behaviour exactly.
+    reward_plugins: str | None = None
+    """Comma-separated modules or .py paths to import before anything is built.
+    Importing them is the whole registration protocol - scorers, environments and
+    VerifierFunction subclasses all register as an import side effect."""
+    group_scorer: str | None = None
+    """A registered GroupScorer, as `name` or `name:key=value,key=value`. It sees
+    all G completions of a prompt at once, which is what a relative reward needs."""
+    group_reward_mode: str = "replace"
+    """`replace` ignores the verifier score, `add` sums the two."""
+    group_reward_scale: float = 1.0
+    group_scorer_strict: bool = False
+    """Raise on a scorer error instead of falling back to the verifier score."""
+    score_verifiers: str | None = None
+    """Registered per-sample Scorers to expose as ordinary verifiers, routed by
+    the dataset's `dataset` column."""
+
     # Rollout saving
     save_traces: bool = False
     rollouts_save_path: str = "/weka/oe-adapt-default/allennlp/deletable_rollouts/"
