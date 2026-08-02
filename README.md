@@ -108,6 +108,25 @@ We train with `open_instruct/grpo_fast.py`. Launch via `scripts/train/build_imag
 ./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh
 ```
 
+### Score-based rewards (fork addition)
+
+> Not upstream. Everything in this section is added by this fork and lives in
+> new directories; see [PATCHES.md](./PATCHES.md) for the 28 lines of upstream
+> code it touches.
+
+RLVR assumes a rule can decide whether a completion is correct. For tasks that
+are judged rather than verified, or whose environment is another model,
+[`open_instruct/scored_rewards/`](./open_instruct/scored_rewards/README.md) adds
+continuous and multi-dimensional rewards, a plugin registry so a reward can live
+in its own repo, and a model-as-environment. It is entirely opt-in: with none of
+its flags set `grpo_fast.py` behaves exactly as it does upstream.
+
+```bash
+python open_instruct/grpo_fast.py --reward_plugins my_rewards.py --group_scorer brevity ...
+```
+
+[`projects/`](./projects/README.md) holds individual experiments built on it and
+is imported by nothing in `open_instruct/`.
 
 ## Contamination checks
 

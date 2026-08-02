@@ -5,14 +5,20 @@ Everything added by this fork lives in two new directories:
 - `open_instruct/scored_rewards/` — the generic score-based reward layer
 - `projects/` — one project's specifics, imported by nothing in `open_instruct/`
 
-Upstream files are touched in **two places, 28 lines**, kept deliberately small
-so rebasing onto `allenai/open-instruct` stays a non-event. With none of the new
-flags set, behaviour is byte-identical to upstream.
+Upstream files are touched in **three places**, kept deliberately small so
+rebasing onto `allenai/open-instruct` stays a non-event. With none of the new
+flags set, behaviour is unchanged — and that claim is enforced by a test, not
+just asserted (`test_integration.py::test_no_flags_returns_the_plain_upstream_config`).
 
 ```
-open_instruct/data_loader.py | 18 ++++++++++++++++++
-open_instruct/grpo_fast.py   | 23 ++++++++++-------------
+README.md                    | 20 +++++++++++++++++++   docs only
+open_instruct/data_loader.py | 18 ++++++++++++++++++    six new flags
+open_instruct/grpo_fast.py   | 23 ++++++++++-------------  two call sites
 ```
+
+Every added file is under `open_instruct/scored_rewards/` or `projects/`, both
+new directories, so `git diff --stat` against upstream separates the fork's code
+from upstream's without reading any of it.
 
 ---
 
@@ -28,6 +34,15 @@ derives the CLI from these dataclasses — new fields become new flags with no
 parser changes.
 
 **Conflict risk on rebase: nil.** Added fields, changed none.
+
+## 0. `README.md` — one section
+
+A "Score-based rewards (fork addition)" section under the RLVR heading, marked
+as not-upstream and pointing at `PATCHES.md`. Documentation only. It is here so
+that someone who clones the fork and reads the front page discovers the addition
+instead of finding two unexplained directories.
+
+**Conflict risk on rebase: low**, and a README conflict is never subtle.
 
 ## 2. `open_instruct/grpo_fast.py` — one call swapped, one call added
 
@@ -82,8 +97,16 @@ produces zero-mean-within-group scores, so upstream's default
 ```bash
 git remote add upstream https://github.com/allenai/open-instruct.git
 git fetch upstream && git rebase upstream/main
-python -m unittest open_instruct.scored_rewards.test_scored_rewards projects.tutor.test_tutor
+python -m unittest \
+    open_instruct.scored_rewards.test_scored_rewards \
+    open_instruct.scored_rewards.test_integration \
+    projects.tutor.test_tutor
 ```
 
-The tests need no GPU, no ray, no vLLM and no network, so this is a fast check
-that the seams still hold.
+No GPU, no ray, no vLLM, no network. The middle one is the one that matters
+after a rebase: it builds a real `RewardConfig`, calls `.build()`, and invokes
+the result with the exact argument list `vllm_utils.compute_rewards` passes, so
+a changed reward signature or a new `RewardConfig` field fails there rather than
+twenty minutes into a GPU run. It needs open-instruct's own dependencies
+installed and skips cleanly when they are not, which is why the other two files
+avoid them entirely.

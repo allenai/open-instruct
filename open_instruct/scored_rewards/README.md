@@ -122,6 +122,13 @@ gradient" case — and `scored/<name>/zero_advantage` reports how often it happe
 Watch it from step 0. When it approaches 1.0 the reward has stopped resolving
 differences and no amount of further training will help.
 
+The other metric to put on the dashboard is `scored/<name>/failed`. A scorer
+that raises is logged and falls back to the verifier score rather than killing
+the run, which is the right default for a judge behind a flaky endpoint but also
+a silent way to train on the wrong reward for an hour. It is emitted as `0.0` on
+every successful step precisely so it charts as a rate. `--group_scorer_strict`
+turns the fallback off.
+
 ---
 
 ## Guards: constraining a score you do not trust
@@ -261,8 +268,17 @@ open HTTP client or a CUDA tensor does not survive that trip.
 ## Testing
 
 ```bash
-python -m unittest open_instruct.scored_rewards.test_scored_rewards -v
+# 45 tests, no torch / vLLM / ray / openenv / network. Runs on a laptop.
+python -m unittest open_instruct.scored_rewards.test_scored_rewards
+
+# 10 more against the real upstream seam. Needs open-instruct's own deps
+# (numpy, transformers, torch) but still no GPU; skips cleanly without them.
+python -m unittest open_instruct.scored_rewards.test_integration
 ```
 
-45 tests, no torch, no vLLM, no ray, no openenv. That is deliberate: a reward
-should be checkable on a laptop before it costs a GPU hour.
+The split is deliberate. The first file checks this package's own logic and must
+stay runnable before anything costs a GPU hour. The second builds a genuine
+`ground_truth_utils.RewardConfig`, calls `.build()`, and invokes the returned
+function with exactly the arguments `vllm_utils.compute_rewards` passes — which
+is what catches upstream changing the signature underneath a rebase, and what
+pins the claim that unset flags leave behaviour untouched.
