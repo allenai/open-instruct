@@ -181,14 +181,21 @@ WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
-def _build_vlm_name_mapper(model_name: str):
+def _build_vlm_name_mapper(model_name: str, model_type: str | None = None):
     """Sometimes we have different weight names btw vLLM and HF, so we build
     a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF.
-    Match the "qwen35"/"qwen3_5" spellings too — local checkpoint dirs (e.g.
-    warm-start paths like .../swerl_qwen35_9b_..._cg) drop the dot, and missing the
-    mapper makes the trainer->vLLM weight sync fail with 'no module named model'."""
+    The authoritative signal is the loaded model's ``config.model_type``
+    ("qwen3_5"/"qwen3_5_text"/"qwen3_6"...) — path spellings alone miss
+    checkpoints whose names carry no qwen marker (e.g. allenai/tmax-4b), and
+    missing the mapper makes the trainer->vLLM weight sync fail with
+    'no module or parameter named model'. The path heuristics (including the
+    dot-less "qwen35" spelling of warm-start dirs like .../swerl_qwen35_9b_..._cg)
+    are kept as a fallback for callers without a config."""
     name = model_name.lower()
-    if any(v in name for v in ("qwen3.5", "qwen3.6", "qwen35", "qwen36", "qwen3_5", "qwen3_6")):
+    mtype = (model_type or "").lower()
+    if mtype.startswith(("qwen3_5", "qwen3_6")) or any(
+        v in name for v in ("qwen3.5", "qwen3.6", "qwen35", "qwen36", "qwen3_5", "qwen3_6")
+    ):
         return lambda weight_name: f"language_model.{weight_name}"
     return None
 
@@ -746,7 +753,9 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
+            name_mapper=_build_vlm_name_mapper(
+                self._model_name_or_path, getattr(self.model.module.config, "model_type", None)
+            ),
         )
 
     def update_ref_policy(self):
