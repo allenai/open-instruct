@@ -57,6 +57,7 @@ import logging
 import math
 import random
 import shutil
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -82,7 +83,6 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
@@ -180,11 +180,19 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
-# Attention-interface key for the OPD teacher's plain (non-Ulysses) attention.
-# Ulysses SP registration overwrites every key that exists at registration
-# time, so a key registered afterwards keeps pointing at the original
-# implementation and lets a mixed-geometry teacher bypass the SP wrapper.
-OPD_TEACHER_ATTN_KEY = "opd_teacher_core_attention"
+
+
+def _hf_attention_functions():
+    """The CURRENT ``ALL_ATTENTION_FUNCTIONS`` registry, resolved at call time.
+
+    Inside the ray actor the ``transformers.modeling_utils.ALL_ATTENTION_FUNCTIONS``
+    attribute gets replaced after import (import-order dependent), so an
+    import-time ``from … import`` binding can point at a stale instance that the
+    modeling code no longer consults — writes to it are silently invisible.
+    DeepSpeed's Ulysses registration works only because it imports the attribute
+    late, inside the registering function. Always go through ``sys.modules``.
+    """
+    return sys.modules["transformers.modeling_utils"].ALL_ATTENTION_FUNCTIONS
 
 
 def _attention_geometry(config) -> tuple:
@@ -349,9 +357,10 @@ class PolicyTrainerRayProcess(RayProcess):
         # attention for its full-sequence forwards.
         self._original_attention_functions: dict | None = None
         if args.sequence_parallel_size > 1:
+            attention_functions = _hf_attention_functions()
             self._original_attention_functions = {
-                key: ALL_ATTENTION_FUNCTIONS[key]
-                for key in ALL_ATTENTION_FUNCTIONS.keys()  # noqa: SIM118 — AttentionInterface, not a dict
+                key: attention_functions[key]
+                for key in attention_functions.keys()  # noqa: SIM118 — AttentionInterface, not a dict
             }
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
@@ -531,26 +540,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if self._teacher_full_sequence_scoring:
                 logger.info(
                     "OPD teacher attention geometry differs from the policy; "
-                    "using full-sequence (unsplit) teacher scoring under SP."
+                    "using full-sequence (unsplit) teacher scoring under SP "
+                    "with Ulysses attention disabled around the teacher forward."
                 )
-                # Route the teacher's attention through a dedicated key holding
-                # the original (pre-Ulysses) implementation, so its forwards
-                # never enter the policy-sized SP wrapper.
-                core_attn = model_utils.olmo_core_attn_to_hf(model_config.attn_implementation)
-                original_attn = (self._original_attention_functions or {}).get(core_attn)
-                if original_attn is not None:
-                    ALL_ATTENTION_FUNCTIONS[OPD_TEACHER_ATTN_KEY] = original_attn
-                    teacher_config = teacher_module.config
-                    teacher_config._attn_implementation = OPD_TEACHER_ATTN_KEY
-                    teacher_text_config = getattr(teacher_config, "text_config", None)
-                    if teacher_text_config is not None:
-                        teacher_text_config._attn_implementation = OPD_TEACHER_ATTN_KEY
-                    logger.info(f"OPD teacher attention routed to '{OPD_TEACHER_ATTN_KEY}' ({core_attn}).")
-                else:
-                    logger.warning(
-                        f"Could not resolve the original '{core_attn}' attention function for the OPD teacher; "
-                        "falling back to the context-manager swap only."
-                    )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
         self.value_model = None
         if args.use_value_model:
@@ -982,14 +974,15 @@ class PolicyTrainerRayProcess(RayProcess):
         if self._original_attention_functions is None:
             yield
             return
-        wrapped = {key: ALL_ATTENTION_FUNCTIONS[key] for key in self._original_attention_functions}
+        attention_functions = _hf_attention_functions()
+        wrapped = {key: attention_functions[key] for key in self._original_attention_functions}
         for key, fn in self._original_attention_functions.items():
-            ALL_ATTENTION_FUNCTIONS[key] = fn
+            attention_functions[key] = fn
         try:
             yield
         finally:
             for key, fn in wrapped.items():
-                ALL_ATTENTION_FUNCTIONS[key] = fn
+                attention_functions[key] = fn
 
     def _compute_teacher_logprobs_full_sequence(
         self, full_data_BT: data_types.CollatedBatchData, data_BT: data_types.CollatedBatchData, shards: int
