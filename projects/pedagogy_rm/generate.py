@@ -52,6 +52,10 @@ eliminate options for them."""
 # Appended to the teacher's system prompt, one per dialogue. See the module
 # docstring: these exist to put spread into dimensions that would otherwise be
 # constant, not to find the single best tutor prompt.
+# Two short sentences fit comfortably; a cap this low also stops a lecture
+# outright when the few-shot voice fails to.
+STUDENT_MAX_TOKENS = 60
+
 STYLES: dict[str, str] = {
     "plain": "Reply in at most three sentences.",
     "brief": "Reply with a single short sentence. No preamble, no summary.",
@@ -59,14 +63,24 @@ STYLES: dict[str, str] = {
     "explain": "Explain the underlying idea thoroughly before asking anything.",
 }
 
+# Instructions alone did not work: told to be brief and unsure, the 1.5B still
+# produced 50-word textbook paragraphs that defined terms back at the tutor. A
+# student who never says anything specific enough to be wrong about leaves the
+# ``targeted`` dimension nothing to point at, so the voice is now demonstrated
+# rather than described.
 STUDENT_SYSTEM = """You are a school student working on a test question. You do \
 not know the answer and you are not confident.
 
-Reply in ONE OR TWO SHORT SENTENCES, in a student's plain voice. Say what you \
-half-remember, what you are stuck on, or what you would try next. Guess wrong \
-sometimes. Never lecture, never define terms, never list what you know, and \
-never sound like a textbook or a teacher. Do not thank the tutor. Do not give a \
-final answer unless asked."""
+Write like these examples - short, unsure, specific, and often wrong:
+
+  "Is it B? I feel like it's the one about pressure but I can't tell why."
+  "I keep wanting to add them but that gives a number way too big."
+  "I don't really get what 'per capita' is doing here."
+  "We did something like this with the graph, but this one has no graph."
+
+Rules: ONE OR TWO SHORT SENTENCES. Never define a term. Never explain a concept \
+back. Never list what you know. Do not thank the tutor or praise them. Do not \
+write like a textbook. Do not give a final answer unless the tutor asks."""
 
 
 def student_opener(item: dict) -> str:
@@ -142,7 +156,7 @@ async def dialogue(
     for the student's model and get a 404 on every dialogue.
     """
     question = item["question"]
-    text, _ = await say(student_client, student_model, student_view(item, []), 0.9, 100)
+    text, _ = await say(student_client, student_model, student_view(item, []), 0.9, STUDENT_MAX_TOKENS)
     transcript: list[dict] = [{"role": "student", "text": text}]
 
     for _ in range(turns):
@@ -152,7 +166,7 @@ async def dialogue(
             teacher_client, teacher_model, teacher_view(question, transcript, style), temperature, 400
         )
         transcript.append({"role": "tutor", "text": text, "truncated": truncated})
-        text, _ = await say(student_client, student_model, student_view(item, transcript), 0.9, 100)
+        text, _ = await say(student_client, student_model, student_view(item, transcript), 0.9, STUDENT_MAX_TOKENS)
         transcript.append({"role": "student", "text": text})
 
     return {
