@@ -33,13 +33,35 @@ Four previous runs of this idea reduced leaking every time and **never improved
 teaching.** `teacher_acc` — the held-out anchor — has not moved across two
 reward configurations, two corpora, and a corrected leak rule.
 
-The leading explanation is not the reward. It is that a 0.5B student cannot use
-hints: expert human tutoring shifts its answers by about +0.07, so no reward
-computed from that student's accuracy can carry more signal than that. **The
-next experiment belongs on the student, not the reward.**
+An earlier draft of this file blamed the student's capacity — expert tutoring
+shifts the 0.5B's answers by only about +0.07, so no reward computed from its
+accuracy can carry more signal than that. That ceiling is real, but it was not
+the whole story, and `why_flat.md` later measured the rest of it:
 
-This port exists to make the next experiment cheap, not because the reward was
-the problem. If you are picking this up: change the student first.
+| correlation with the student solving | r |
+| --- | --- |
+| rated tutoring **quality** | **−0.012** |
+| rated **leakage** | **+0.291** |
+
+The best-rated turns had the *lowest* solve rates. So the outcome does not
+contain the target: it has one channel, information transfer, and the only way a
+tutor can move it is to give the answer away. Penalising leakage does not add a
+second channel — it removes the one that existed, which is exactly the observed
+history of leak rate falling while `teacher_acc` sits still.
+
+That reframes the next experiment. It is not "the student, not the reward" — it
+is that **the outcome measure has to admit a pedagogy channel before any reward
+built on it can find one.** A bigger student alone does not do that, and it
+costs headroom: the corpus is screened to items a 0.5B fails, and a large model
+solves those unaided, leaving no gradient at all.
+
+**Run `transfer_probe.py` before another training job.** It asks whether tutoring
+about problem A moves the student on a *different* problem B that needs the same
+knowledge unit — a channel leakage cannot reach, since A's answer is worthless on
+B. It re-scores dialogues that already exist, so it needs no tutor generation and
+no training, and it answers usefully either way: flat means the environment has
+one channel and the honest move is to change the outcome or write up the negative
+result, while positive means there is a pedagogy signal `teacher_acc` cannot see.
 
 ---
 
@@ -53,6 +75,8 @@ the problem. If you are picking this up: change the student first.
 | `plugin.py` | registers the `tutor` group scorer and the `tutor_student` environment |
 | `build_dataset.py` | screened problems → RLVR rows |
 | `run_anchor.py` | the held-out measurement, outside the reward |
+| `units.py` | knowledge-unit decomposition, annotated once offline — the only thing that says two items test the same skill |
+| `transfer_probe.py` | does tutoring on A move the student on a different item B sharing A's unit? Inference only |
 | `scripts/` | serve the two frozen models, smoke, train |
 
 ---

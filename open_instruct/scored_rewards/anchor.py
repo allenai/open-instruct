@@ -60,6 +60,8 @@ from collections.abc import Awaitable, Callable, Sequence
 OutcomeFn = Callable[[dict, str], Awaitable[float]]
 #: ``(item) -> the policy's output for it``.
 PolicyFn = Callable[[Sequence[dict]], Awaitable[list[str]]]
+#: ``(items, outputs) -> one foreign output per item``, for the swapped condition.
+SwapFn = Callable[[Sequence[dict], Sequence[str]], Sequence[str]]
 
 
 @dataclasses.dataclass
@@ -112,6 +114,13 @@ class Anchor:
     breaking the rule less often. Report both: an outcome that improves only
     because a penalised behaviour stopped is not the same result as an outcome
     that improves on the samples that never triggered it.
+
+    ``swap`` overrides how the foreign output is chosen. The default rotates by
+    one, which is right when the items are interchangeable. It is wrong whenever
+    the items have structure the rotation can land on by accident - if items
+    carry a topic, rotating may hand an item a foreign output about the SAME
+    topic, and the specificity term then understates itself by however often
+    that happens. Pass a swap that knows the structure.
     """
 
     def __init__(
@@ -121,12 +130,14 @@ class Anchor:
         outcome: OutcomeFn,
         extra_metrics: dict[str, Callable[[dict, str], float]] | None = None,
         concurrency: int = 16,
+        swap: SwapFn | None = None,
     ):
         self.items = list(items)
         self.policy = policy
         self.outcome = outcome
         self.extra_metrics = extra_metrics or {}
         self.concurrency = concurrency
+        self.swap = swap
 
     async def run(self) -> AnchorResult:
         if not self.items:
@@ -135,9 +146,14 @@ class Anchor:
         outputs = await self.policy(self.items)
         if len(outputs) != len(self.items):
             raise ValueError(f"policy returned {len(outputs)} outputs for {len(self.items)} items")
-        # rotate by one: every item is scored against exactly one foreign output,
-        # and every output is used exactly once in each condition
-        swapped = outputs[1:] + outputs[:1]
+        if self.swap is None:
+            # rotate by one: every item is scored against exactly one foreign
+            # output, and every output is used exactly once in each condition
+            swapped = outputs[1:] + outputs[:1]
+        else:
+            swapped = list(self.swap(self.items, outputs))
+            if len(swapped) != len(outputs):
+                raise ValueError(f"swap returned {len(swapped)} outputs for {len(outputs)} items")
 
         limiter = asyncio.Semaphore(self.concurrency)
 
