@@ -4,6 +4,9 @@
 #SBATCH --gres=gpu:h100:1
 #SBATCH --time=2:00:00
 #SBATCH --mem=128G
+#SBATCH --cpus-per-task=16
+#SBATCH --requeue
+#SBATCH --open-mode=append
 #SBATCH -o logs/transfer_probe_%j.out
 #SBATCH -e logs/transfer_probe_%j.err
 
@@ -34,12 +37,33 @@
 #      Wrong unit tags are silent and everything downstream inherits them.
 
 set -euo pipefail
-mkdir -p logs
 
-REPO=${REPO:-$HOME/open-instruct}
-DATA=${DATA:-$HOME/grpo_tutor}
+SCRATCH=${SCRATCH:-$HOME/orcd/scratch}
+REPO=${REPO:-$SCRATCH/open-instruct}
+DATA=${DATA:-$SCRATCH/grpo_tutor}
+VENV=${VENV:-$SCRATCH/venv_v4}
+# Pinned. run_v4.md: "student (answers) Qwen2.5-0.5B-Instruct, frozen - pinned so
+# teacher_acc stays comparable with v0-v3". Changing it changes what every
+# historical number means.
 STUDENT=${STUDENT:-Qwen/Qwen2.5-0.5B-Instruct}
 PORT=${PORT:-8001}
+
+# Everything cache-shaped goes to scratch. HOME is a quota that other projects
+# keep full, and a job that overruns it dies during vLLM engine init with
+# "Disk quota exceeded", which reads like a vLLM bug and is not one. Same set of
+# variables as grpo_tutor/scripts/env.sh, which exists because of that failure.
+export HF_HOME=$SCRATCH/hf-cache
+export HF_HUB_CACHE=$SCRATCH/hf-cache/hub
+export XDG_CACHE_HOME=$SCRATCH/xdg-cache
+export XDG_CONFIG_HOME=$SCRATCH/xdg-config
+export VLLM_CACHE_ROOT=$SCRATCH/vllm-cache
+export TRITON_CACHE_DIR=$SCRATCH/triton-cache
+export TORCHINDUCTOR_CACHE_DIR=$SCRATCH/inductor-cache
+# The student is already in the cache; compute nodes should not reach out.
+export HF_HUB_OFFLINE=1
+
+source "$VENV/bin/activate"
+mkdir -p logs runs
 # 0.82 keeps pairs like "simple interest" vs "simple and compound interest" and
 # "rounding to tens" vs "rounding to hundreds", while excluding mere neighbours.
 # Below ~0.75 the pairs stop being the same lesson; see build_pairs_by_similarity.
@@ -65,7 +89,7 @@ until curl -sf "http://localhost:$PORT/v1/models" >/dev/null; do
 done
 echo "student up on :$PORT"
 
-python -m projects.tutor.transfer_probe \
+python -u -m projects.tutor.transfer_probe \
     --items data/items_all.jsonl \
     --units data/units_all.jsonl \
     --embeddings data/units_all.npz \
