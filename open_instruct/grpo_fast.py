@@ -180,6 +180,11 @@ def _build_data_prep_actor_resume_state(checkpoint_state: dict[str, Any] | None)
 CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+# Attention-interface key for the OPD teacher's plain (non-Ulysses) attention.
+# Ulysses SP registration overwrites every key that exists at registration
+# time, so a key registered afterwards keeps pointing at the original
+# implementation and lets a mixed-geometry teacher bypass the SP wrapper.
+OPD_TEACHER_ATTN_KEY = "opd_teacher_core_attention"
 
 
 def _attention_geometry(config) -> tuple:
@@ -528,6 +533,24 @@ class PolicyTrainerRayProcess(RayProcess):
                     "OPD teacher attention geometry differs from the policy; "
                     "using full-sequence (unsplit) teacher scoring under SP."
                 )
+                # Route the teacher's attention through a dedicated key holding
+                # the original (pre-Ulysses) implementation, so its forwards
+                # never enter the policy-sized SP wrapper.
+                core_attn = model_utils.olmo_core_attn_to_hf(model_config.attn_implementation)
+                original_attn = (self._original_attention_functions or {}).get(core_attn)
+                if original_attn is not None:
+                    ALL_ATTENTION_FUNCTIONS[OPD_TEACHER_ATTN_KEY] = original_attn
+                    teacher_config = teacher_module.config
+                    teacher_config._attn_implementation = OPD_TEACHER_ATTN_KEY
+                    teacher_text_config = getattr(teacher_config, "text_config", None)
+                    if teacher_text_config is not None:
+                        teacher_text_config._attn_implementation = OPD_TEACHER_ATTN_KEY
+                    logger.info(f"OPD teacher attention routed to '{OPD_TEACHER_ATTN_KEY}' ({core_attn}).")
+                else:
+                    logger.warning(
+                        f"Could not resolve the original '{core_attn}' attention function for the OPD teacher; "
+                        "falling back to the context-manager swap only."
+                    )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
         self.value_model = None
         if args.use_value_model:
