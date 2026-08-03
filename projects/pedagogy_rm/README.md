@@ -70,13 +70,37 @@ run a fixed number of turns and stop.
 
 1. `generate.py` — traces. No labels, no probe, no training.
 2. `build_label_set.py` — sample turns into slices with deliberate overlap.
-3. **Label, then measure per-dimension agreement.** Drop any dimension whose
-   raters cannot agree; keep the rest. This is a decision point, not a formality.
-4. `extract_hidden.py` — OLMo hidden states for each labelled turn.
-5. `probe.py` — MLP per surviving dimension, reported against the agreement
-   ceiling rather than against zero.
+3. `agreement.py` — **the decision gate.** Weighted kappa per dimension. Drop
+   anything below 0.4: a probe trained on a dimension raters disagree about
+   learns rater noise, and no model size fixes it.
+4. `extract_hidden.py` — OLMo states over the tutor turn's tokens, several
+   layers, two poolings, rebuilding the rollout's exact chat context.
+5. `probe.py` — ridge and MLP per surviving dimension, scored against the
+   agreement ceiling rather than against zero.
 
-Nothing after step 3 is worth writing until step 3 has a number.
+Step 3 decides whether steps 4 and 5 are worth running at all.
+
+### Reading step 5
+
+`agreement.py` prints, per dimension, the highest correlation any predictor
+could reach against labels that noisy. A probe at 0.55 against a ceiling of 0.60
+has effectively solved it and the labels are now the constraint; the same 0.55
+against a ceiling of 0.95 means the representation is not carrying the property.
+Scored against zero those look the same, and the previous project's 0.581 was
+read exactly that way.
+
+If ridge matches the MLP, ship ridge — it is cheaper in the loop, which is the
+point of the project.
+
+## State
+
+Models are downloaded to scratch (`OLMo-2-1124-7B-Instruct` 14G,
+`Qwen2.5-1.5B-Instruct` 2.9G). The pipeline is written and tested on synthetic
+inputs end to end: the agreement gate correctly drops a dimension built to be
+noisy, and the probe recovers a signal planted in one layer (r = 0.65 against a
+0.61 ceiling) while returning ~0 for five dimensions that carry none.
+
+Nothing real has been generated yet. That is the next command.
 
 ## The caveat you are buying
 
