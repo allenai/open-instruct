@@ -5,6 +5,10 @@
 # exercising the production loss path (DPPO + liger tiled loss + vLLM logprobs
 # + ZeRO-3) with pure-OPD advantages. ~16 training steps then exits.
 # Beaker twin of scripts/train/debug/grpo_fast_opd.sh.
+#
+# --vllm_sync_backend gloo: the native (NCCL layerwise) weight sync on this
+# branch expects Qwen3.5 CG weight names and hangs on Qwen3-dense models
+# ("Failed to load weights" warnings at init). Unrelated to OPD.
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -64,6 +68,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --seed 3 \
     --local_eval_every -1 \
+    --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.85 \
     --vllm_enforce_eager \
     --gradient_checkpointing \
