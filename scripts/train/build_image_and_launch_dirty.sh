@@ -2,6 +2,31 @@
 # This script lets us launch experiments with a dirty repo.
 set -euo pipefail
 
+# Optional leading --cuda-version 12|13 (default 12) selects the CUDA base image
+# + uv dependency group and suffixes the Beaker image name (-cuda12 / -cuda13).
+cuda_version=12
+if [[ "${1:-}" == "--cuda-version" ]]; then
+  if [[ $# -lt 2 ]]; then
+    echo "Error: --cuda-version requires 12 or 13."
+    exit 1
+  fi
+  cuda_version="${2:-}"
+  shift 2
+elif [[ "${1:-}" == --cuda-version=* ]]; then
+  cuda_version="${1#*=}"
+  shift
+fi
+
+if [[ "$cuda_version" != "12" && "$cuda_version" != "13" ]]; then
+  echo "Error: --cuda-version must be 12 or 13."
+  exit 1
+fi
+
+if [[ $# -eq 0 ]]; then
+  echo "Usage: $0 [--cuda-version 12|13] SCRIPT [SCRIPT_ARGS...]"
+  exit 1
+fi
+
 # 1) Verify we're inside a Git repo
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "Error: This directory is not a Git repository."
@@ -13,7 +38,7 @@ git_branch=$(git rev-parse --abbrev-ref HEAD)
 # Sanitize the branch name to remove invalid characters for Beaker names
 # Beaker names can only contain letters, numbers, -_. and may not start with -
 sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-image_name=open-instruct-integration-test-${sanitized_branch}
+image_name=open-instruct-integration-test-${sanitized_branch}-cuda${cuda_version}
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
@@ -26,11 +51,12 @@ else
   docker build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
+    --build-arg CUDA_VERSION="$cuda_version" \
     . -t "$image_name"
 
   beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
 
-  beaker image create "$image_name" -n "$image_name" -w "ai2/oe-agents" --description "Git commit: $git_hash"
+  beaker image create "$image_name" -n "$image_name" -w "ai2/oe-agents" --description "Git commit: $git_hash; CUDA: $cuda_version"
 fi
 
 # Ensure uv is installed and sync dependencies before running the script
@@ -40,9 +66,11 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-# Install Python dependencies
-echo "Installing dependencies with uv..."
-uv sync
+# Install Python dependencies. Pin the CUDA group so this local sync works on a
+# CUDA-13 box too (a bare `uv sync` defaults to the cuda12 group and would try to
+# build cu128 causal-conv1d against nvcc 13). Behaviour-identical on a cuda12 box.
+echo "Installing dependencies with uv (cuda${cuda_version} group)..."
+uv sync --no-default-groups --group dev --group "cuda${cuda_version}"
 
 # Run the provided script with the image name and all remaining arguments
 script="$1"
