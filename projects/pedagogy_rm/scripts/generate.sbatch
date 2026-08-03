@@ -24,7 +24,12 @@ echo "started $(date -Is) on $(hostname), job ${SLURM_JOB_ID:-none}"
 SCRATCH=${SCRATCH:-$HOME/orcd/scratch}
 REPO=${REPO:-$SCRATCH/open-instruct}
 DATA=${DATA:-$SCRATCH/grpo_tutor}
-VENV=${VENV:-$SCRATCH/venv_v4}
+# venv_test (vLLM 0.11.2), NOT venv_v4 (0.25.1). 0.25.1 cannot serve anything on
+# this cluster: its kernel warmup imports MiniMax-M3 and Triton fails to parse
+# the kernel source at import time, so the engine never starts. Three jobs died
+# that way before this comment existed. venv_test is what every working
+# grpo_tutor run used.
+VENV=${VENV:-$HOME/venv_test}
 TEACHER=${TEACHER:-allenai/OLMo-2-1124-7B-Instruct}
 STUDENT=${STUDENT:-Qwen/Qwen2.5-1.5B-Instruct}
 ITEMS=${ITEMS:-$DATA/data/state_tests/train_items.jsonl}
