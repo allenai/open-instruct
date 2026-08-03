@@ -1,4 +1,13 @@
 #!/bin/bash
+#
+# The dataset must be large enough to form at least one global batch, or
+# num_training_steps floors to 0 and the LR scheduler raises ZeroDivisionError.
+#
+#   global_batch_size_seqs = per_device(1) * grad_accum(4) * dp_world(16) = 64
+#   1000 examples -> ~257 packed instances -> 257 // 64 * 2 epochs = 8 steps
+#
+# Keep this comfortably above the global batch size: dp_world scales with node
+# count, so a value tuned to the current 2-node layout breaks on wider runs.
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
@@ -33,7 +42,7 @@ uv run python mason.py \
     --num_epochs 2 \
     --ephemeral_save_interval 100 \
     --logging_steps 1 \
-    --mixer_list allenai/tulu-3-sft-personas-algebra 100 \
+    --mixer_list allenai/tulu-3-sft-personas-algebra 1000 \
     --seed 123 \
     --compile_model true \
     --with_tracking \
