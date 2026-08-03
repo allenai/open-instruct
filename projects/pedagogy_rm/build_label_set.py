@@ -50,6 +50,12 @@ def units(trace: dict, max_per_dialogue: int, rng: random.Random) -> list[dict]:
         # instruction is the part that got cut.
         if entry.get("truncated"):
             continue
+        # And a turn whose CONTEXT was corrupted is just as unusable. When a
+        # tutor turn is truncated the student continues its sentence rather than
+        # replying, so the student turn after it is not a student turn at all -
+        # and it is exactly what a rater reads to judge ``targeted``.
+        if any(t.get("truncated") for t in transcript[:i] if t.get("role") == "tutor"):
+            continue
         found.append(
             {
                 "id": unit_id(trace, i),

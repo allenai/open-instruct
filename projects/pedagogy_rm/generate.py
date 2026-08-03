@@ -57,6 +57,9 @@ eliminate options for them."""
 # sentence instead of replying to it, tripling mid-sentence tutor turns to 9%.
 # Brevity is enforced afterwards by ``first_sentences``, which cannot cut a word
 # in half.
+# 'explain' is told to be thorough and hit a 400-token cap a quarter of the
+# time; 700 leaves it room, and trimming makes overrunning cheap anyway.
+TEACHER_MAX_TOKENS = 700
 STUDENT_MAX_TOKENS = 140
 STUDENT_SENTENCES = 2
 
@@ -140,6 +143,18 @@ def first_sentences(text: str, n: int) -> str:
     return trimmed or text.strip().rsplit(" ", 1)[0]
 
 
+def whole_sentences(text: str) -> str:
+    """All of ``text`` up to its last complete sentence.
+
+    Applied to the TEACHER for the same reason the student is trimmed, learned
+    the same way: a turn ending mid-sentence gets continued by whoever speaks
+    next rather than answered, so one truncated tutor turn corrupts the student
+    turn after it - which is the context a rater sees for the NEXT tutor turn.
+    Truncation does not stay where it happens.
+    """
+    return first_sentences(text, 10_000)
+
+
 def teacher_view(question: str, transcript: list[dict], style: str) -> list[dict]:
     """The teacher's messages, strictly alternating user/assistant.
 
@@ -186,12 +201,15 @@ async def dialogue(
     transcript: list[dict] = [{"role": "student", "text": first_sentences(text, STUDENT_SENTENCES)}]
 
     for _ in range(turns):
-        # 400 tokens is well above what any style should need, so a turn that
-        # still hits it is a runaway rather than a good turn spoiled by the cap.
         text, truncated = await say(
-            teacher_client, teacher_model, teacher_view(question, transcript, style), temperature, 400
+            teacher_client, teacher_model, teacher_view(question, transcript, style), temperature, TEACHER_MAX_TOKENS
         )
-        transcript.append({"role": "tutor", "text": text, "truncated": truncated})
+        # Trimmed so the dialogue stays coherent, but still FLAGGED so
+        # build_label_set can drop it: the sentence is now whole, and the
+        # argument it was in the middle of making is still cut off.
+        transcript.append(
+            {"role": "tutor", "text": whole_sentences(text) if truncated else text, "truncated": truncated}
+        )
         text, _ = await say(student_client, student_model, student_view(item, transcript), 0.9, STUDENT_MAX_TOKENS)
         transcript.append({"role": "student", "text": first_sentences(text, STUDENT_SENTENCES)})
 
