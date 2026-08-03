@@ -57,10 +57,19 @@ mkdir -p logs runs
 cleanup() { kill "${TEACHER_PID:-}" "${STUDENT_PID:-}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-vllm serve "$TEACHER" --port 8000 --gpu-memory-utilization 0.60 \
+# --gpu-memory-utilization is a fraction of TOTAL device memory, not of what is
+# still free, and vLLM counts memory the other server already took against it.
+# So the SECOND server needs a budget covering the first's share as well: 0.45
+# then 0.85 leaves the student ~32GB of an 80GB card, not 0.85 of it. Setting
+# the intuitive 0.60/0.25 fails with "No available memory for the cache blocks",
+# which reads like the student is too big and is nothing of the sort.
+vllm serve "$TEACHER" --port 8000 --gpu-memory-utilization 0.45 \
     --max-model-len 4096 --disable-log-stats &
 TEACHER_PID=$!
-vllm serve "$STUDENT" --port 8001 --gpu-memory-utilization 0.25 \
+# Wait for the teacher to finish profiling before the student starts measuring,
+# or both size their caches against a GPU that is about to change underneath them.
+sleep 90
+vllm serve "$STUDENT" --port 8001 --gpu-memory-utilization 0.85 \
     --max-model-len 4096 --disable-log-stats &
 STUDENT_PID=$!
 
