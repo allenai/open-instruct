@@ -22,6 +22,12 @@
 # transfer_probe.sbatch for why that matters on this cluster.
 set -euo pipefail
 
+# First line of output, before anything that can block. Job 19584078 sat in
+# RUNNING for six minutes on node2435 without Slurm creating the log at all,
+# which is indistinguishable from a script that started and hung on a stalled
+# mount unless something prints this early.
+echo "started $(date -Is) on $(hostname), job ${SLURM_JOB_ID:-none}"
+
 SCRATCH=${SCRATCH:-$HOME/orcd/scratch}
 REPO=${REPO:-$SCRATCH/open-instruct}
 DATA=${DATA:-$SCRATCH/grpo_tutor}
