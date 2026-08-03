@@ -52,9 +52,13 @@ eliminate options for them."""
 # Appended to the teacher's system prompt, one per dialogue. See the module
 # docstring: these exist to put spread into dimensions that would otherwise be
 # constant, not to find the single best tutor prompt.
-# Two short sentences fit comfortably; a cap this low also stops a lecture
-# outright when the few-shot voice fails to.
-STUDENT_MAX_TOKENS = 60
+# Generous on purpose. Capping the student at 60 tokens to force brevity backfired
+# badly: it left student turns ending mid-sentence, and OLMo then CONTINUED the
+# sentence instead of replying to it, tripling mid-sentence tutor turns to 9%.
+# Brevity is enforced afterwards by ``first_sentences``, which cannot cut a word
+# in half.
+STUDENT_MAX_TOKENS = 140
+STUDENT_SENTENCES = 2
 
 STYLES: dict[str, str] = {
     "plain": "Reply in at most three sentences.",
@@ -114,6 +118,28 @@ async def say(client, model: str, messages: list[dict], temperature: float, max_
     return (choice.message.content or "").strip(), choice.finish_reason == "length"
 
 
+def first_sentences(text: str, n: int) -> str:
+    """The first ``n`` complete sentences, never a partial one.
+
+    This is what keeps the student short, because asking a 1.5B for one or two
+    sentences and showing it examples both failed - it wrote textbook paragraphs
+    either way. Trimming afterwards always works and, unlike a token cap, cannot
+    leave a dangling clause for the teacher to finish.
+    """
+    out: list[str] = []
+    start = 0
+    for i, char in enumerate(text):
+        if char in ".!?" and (i + 1 == len(text) or text[i + 1].isspace()):
+            out.append(text[start : i + 1].strip())
+            start = i + 1
+            if len(out) >= n:
+                break
+    trimmed = " ".join(out).strip()
+    # No terminator at all means one long run-on, possibly cut at the cap. Keep
+    # it whole rather than returning nothing, but drop a half-finished last word.
+    return trimmed or text.strip().rsplit(" ", 1)[0]
+
+
 def teacher_view(question: str, transcript: list[dict], style: str) -> list[dict]:
     """The teacher's messages, strictly alternating user/assistant.
 
@@ -157,7 +183,7 @@ async def dialogue(
     """
     question = item["question"]
     text, _ = await say(student_client, student_model, student_view(item, []), 0.9, STUDENT_MAX_TOKENS)
-    transcript: list[dict] = [{"role": "student", "text": text}]
+    transcript: list[dict] = [{"role": "student", "text": first_sentences(text, STUDENT_SENTENCES)}]
 
     for _ in range(turns):
         # 400 tokens is well above what any style should need, so a turn that
@@ -167,7 +193,7 @@ async def dialogue(
         )
         transcript.append({"role": "tutor", "text": text, "truncated": truncated})
         text, _ = await say(student_client, student_model, student_view(item, transcript), 0.9, STUDENT_MAX_TOKENS)
-        transcript.append({"role": "student", "text": text})
+        transcript.append({"role": "student", "text": first_sentences(text, STUDENT_SENTENCES)})
 
     return {
         "style": style,
