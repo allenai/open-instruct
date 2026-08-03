@@ -53,6 +53,7 @@ import asyncio
 import collections
 import json
 import random
+import statistics
 from collections.abc import Sequence
 
 from open_instruct.scored_rewards.anchor import Anchor, AnchorResult
@@ -75,6 +76,27 @@ class TransferStudent(ChoiceStudent):
         "{hint}\n\n"
         "Now answer this question.\nQuestion: {question}\nAnswer:"
     )
+
+
+class StubStudent:
+    """A fake answerer, for checking the plumbing without a GPU.
+
+    Not a measurement and cannot be mistaken for one - it answers by looking for
+    the gold string in the text, which is the leakage channel and nothing else.
+    Its only job is to make the full run() path executable on a laptop, so that a
+    crash in the leak split or the output writing is found here rather than forty
+    minutes into a cluster job.
+    """
+
+    def __init__(self, seed: int = 0):
+        self.rng = random.Random(seed)
+
+    async def choose(self, question: str, choices: Sequence[str], hint: str = "") -> int:
+        lowered = hint.lower()
+        for i, choice in enumerate(choices):
+            if str(choice).strip().lower() in lowered:
+                return i
+        return random.Random(f"{question}{len(hint)}{self.rng.random()}").randrange(len(choices))
 
 
 def build_pairs(
@@ -212,7 +234,6 @@ async def run(args) -> None:
 
     rng = random.Random(args.seed)
     chosen = {p["source_key"]: pick_dialogue(dialogues[p["source_key"]], rng) for p in pairs}
-    leaked = {k: bool(v.get("leaked")) for k, v in chosen.items()}
     targets = len({p["target_key"] for p in pairs})
     print(
         f"{len(pairs)} pairs over {len({p['unit'] for p in pairs})} units, {targets} distinct targets\n"
@@ -228,7 +249,11 @@ async def run(args) -> None:
     if args.dry_run:
         return
 
-    student = TransferStudent(args.student_model, args.student_url, args.api_key)
+    if args.stub_student:
+        print("\n*** STUB STUDENT - plumbing check only, these numbers mean nothing ***")
+        student = StubStudent(args.seed)
+    else:
+        student = TransferStudent(args.student_model, args.student_url, args.api_key)
 
     async def policy(ps: Sequence[dict]) -> list[str]:
         return [str(chosen[p["source_key"]].get("completion") or "") for p in ps]
@@ -247,7 +272,7 @@ async def run(args) -> None:
     verdict(result, targets)
 
     if args.report:
-        await split_by_leak(pairs, chosen, leaked, student, units, args)
+        await leak_contrast(pairs, dialogues, student, args)
 
     if args.out:
         with open(args.out, "w") as handle:
@@ -255,39 +280,62 @@ async def run(args) -> None:
         print(f"\nwrote {args.out}")
 
 
-async def split_by_leak(pairs, chosen, leaked, student, units, args) -> None:
-    """The contamination check. Read this before the headline.
+async def leak_contrast(pairs, dialogues, student, args) -> None:
+    """The contamination check, paired.
 
-    A dialogue that leaked A's answer should carry NOTHING to B. If it carries as
-    much as a clean dialogue, the two items share more than a knowledge unit and
-    the pairing is not measuring transfer.
+    A dialogue that gave A's answer away should carry NOTHING to B, because A's
+    answer is not B's. If leaked sources move B as much as clean ones, the pair
+    shares more than a knowledge unit - overlapping answers, or units drawn so
+    broadly that the items are near-duplicates - and the headline is measuring
+    that rather than teaching.
+
+    Restricted to source items that have BOTH a clean and a leaked dialogue, so
+    the two arms differ in leakage and in nothing else. Splitting the headline's
+    own sources instead gives two unrelated groups, and on this corpus leaves the
+    leaked arm at n=16, far too small to read - which is worse than useless for a
+    check whose whole purpose is to invalidate a result.
     """
-    groups = {
-        "clean source": [p for p in pairs if not leaked[p["source_key"]]],
-        "leaked source": [p for p in pairs if leaked[p["source_key"]]],
-    }
-    print("\n=== by whether the source dialogue leaked ===")
-    for name, subset in groups.items():
-        if len(subset) < 20:
-            print(f"  {name:<15} n={len(subset)} - too few to read")
-            continue
+    subset = []
+    for pair in pairs:
+        entries = dialogues[pair["source_key"]]
+        clean = [e for e in entries if not e.get("leaked")]
+        leaked = [e for e in entries if e.get("leaked")]
+        if clean and leaked:
+            subset.append((pair, clean[0], leaked[0]))
 
-        async def policy(ps: Sequence[dict]) -> list[str]:
-            return [str(chosen[p["source_key"]].get("completion") or "") for p in ps]
+    print("\n=== contamination check: same pair, clean vs leaked source dialogue ===")
+    if len(subset) < 20:
+        print(f"  only {len(subset)} source items have both kinds; cannot read this")
+        return
 
-        async def outcome(pair: dict, text: str) -> float:
-            item = pair["target"]
+    limiter = asyncio.Semaphore(args.concurrency)
+
+    async def measure(pair: dict, text: str) -> float:
+        item = pair["target"]
+        async with limiter:
             picked = await student.choose(item["question"], item["choices"], hint=text)
-            return float(picked == item["gold_idx"])
+        return float(picked == item["gold_idx"])
 
-        sub = await Anchor(
-            items=subset,
-            policy=policy,
-            outcome=outcome,
-            concurrency=args.concurrency,
-            swap=make_swap(units, args.seed),
-        ).run()
-        print(f"  {name:<15} {sub}")
+    base, with_clean, with_leaked = await asyncio.gather(
+        asyncio.gather(*(measure(p, "") for p, _, _ in subset)),
+        asyncio.gather(*(measure(p, str(c.get("completion") or "")) for p, c, _ in subset)),
+        asyncio.gather(*(measure(p, str(lk.get("completion") or "")) for p, _, lk in subset)),
+    )
+    n = len(subset)
+    se = (0.25 / n) ** 0.5
+    b, c, lk = statistics.fmean(base), statistics.fmean(with_clean), statistics.fmean(with_leaked)
+    print(f"  n={n}  (1 SE = {se:.3f})")
+    print(f"  baseline           {b:.3f}")
+    print(f"  clean source       {c:.3f}   gain {c - b:+.3f}")
+    print(f"  leaked source      {lk:.3f}   gain {lk - b:+.3f}")
+    if lk - b >= (c - b) - 2 * se and lk - b > 2 * se:
+        print(
+            "\n  -> CONTAMINATED. Leaking about A should be worthless on B, and it\n"
+            "     is not. The pairs share more than a knowledge unit; treat the\n"
+            "     headline as unproven until the pairing is tightened."
+        )
+    else:
+        print("\n  -> clean. Leaking about A does not carry to B, which is what the pairing assumed.")
 
 
 def verdict(result: AnchorResult, distinct_targets: int | None = None) -> None:
@@ -335,6 +383,7 @@ def main() -> None:
     parser.add_argument("--show-pairs", type=int, default=5, help="print this many pairs to eyeball the unit tags")
     parser.add_argument("--report", action="store_true", help="also split by whether the source dialogue leaked")
     parser.add_argument("--dry-run", action="store_true", help="build pairs and stop; no model needed")
+    parser.add_argument("--stub-student", action="store_true", help="run the full path with a fake answerer")
     parser.add_argument("--out", default=None)
     asyncio.run(run(parser.parse_args()))
 

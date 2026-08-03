@@ -195,6 +195,45 @@ class TestAnchorSwapHook(unittest.TestCase):
             self.run_anchor(swap=lambda items, outputs: ["only one"])
 
 
+class TestLeakContrast(unittest.TestCase):
+    """The check that can invalidate the headline must itself be well powered."""
+
+    def subset(self, dialogues):
+        pairs = [{"source_key": k, "target": item(f"t{k}"), "target_key": f"t{k}"} for k in dialogues]
+        return [
+            p
+            for p in pairs
+            if any(not e.get("leaked") for e in dialogues[p["source_key"]])
+            and any(e.get("leaked") for e in dialogues[p["source_key"]])
+        ]
+
+    def test_only_sources_holding_both_kinds_qualify(self):
+        dialogues = {
+            "both": [{"completion": "c", "leaked": 0}, {"completion": "l", "leaked": 1}],
+            "clean_only": [{"completion": "c", "leaked": 0}],
+            "leaked_only": [{"completion": "l", "leaked": 1}],
+        }
+        self.assertEqual([p["source_key"] for p in self.subset(dialogues)], ["both"])
+
+    def test_pairing_beats_splitting_the_headlines_own_sources(self):
+        """Splitting left the leaked arm at n=16 on the real corpus; pairing gave 83."""
+        dialogues = {f"s{i}": [{"completion": "c", "leaked": 0}, {"completion": "l", "leaked": 1}] for i in range(30)}
+        # every source qualifies, because each holds both kinds
+        self.assertEqual(len(self.subset(dialogues)), 30)
+
+
+class TestStubStudent(unittest.TestCase):
+    def test_answers_gold_when_the_text_contains_it(self):
+        stub = transfer_probe.StubStudent()
+        picked = asyncio.run(stub.choose("q", ["red", "blue", "green"], hint="the answer is blue"))
+        self.assertEqual(picked, 1)
+
+    def test_returns_a_valid_index_with_no_text(self):
+        stub = transfer_probe.StubStudent()
+        for _ in range(10):
+            self.assertIn(asyncio.run(stub.choose("q", ["a", "b", "c", "d"], hint="")), range(4))
+
+
 class TestPrompt(unittest.TestCase):
     def test_transfer_prompt_says_the_context_is_a_different_problem(self):
         text = transfer_probe.TransferStudent.PROMPT.format(hint="D", question="Q")
