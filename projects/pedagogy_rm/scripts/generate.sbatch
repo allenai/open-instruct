@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J pedagogy_gen
 #SBATCH --partition=mit_preemptable
-#SBATCH --gres=gpu:h100:1
+#SBATCH --gres=gpu:h100:2
 #SBATCH --time=4:00:00
 #SBATCH --mem=128G
 #SBATCH --cpus-per-task=16
@@ -13,8 +13,8 @@
 # Generate tutor/student dialogues for labelling. No reward, no judge, no
 # training - this produces text for humans to rate, and nothing else.
 #
-# Both models are served from one card: OLMo-2-7B and a 1.5B student fit
-# together in 80GB at these utilisations. Serving rather than in-process because
+# One card each. They do not co-exist on one; see the note above the launches.
+# Serving rather than running in-process because
 # this job DOES generate (unlike the probes, which only scored), and generation
 # through vLLM's server is what the async client in generate.py expects.
 set -euo pipefail
@@ -57,31 +57,35 @@ mkdir -p logs runs
 cleanup() { kill "${TEACHER_PID:-}" "${STUDENT_PID:-}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-# --gpu-memory-utilization is a fraction of TOTAL device memory, not of what is
-# still free, and vLLM counts memory the other server already took against it.
-# So the SECOND server needs a budget covering the first's share as well: 0.45
-# then 0.85 leaves the student ~32GB of an 80GB card, not 0.85 of it. Setting
-# the intuitive 0.60/0.25 fails with "No available memory for the cache blocks",
-# which reads like the student is too big and is nothing of the sort.
-vllm serve "$TEACHER" --port 8000 --gpu-memory-utilization 0.45 \
+# ONE MODEL PER CARD, because two vLLM servers cannot share one. Its
+# --gpu-memory-utilization is a fraction of TOTAL device memory, and the two
+# checks it applies pull in opposite directions once another server is resident:
+# startup demands util*total <= free, while cache sizing subtracts ALL current
+# device usage (the other server's included) from util*total. With a 7B holding
+# 38GB of an 80GB card, the second server needs util above 0.54 to have any cache
+# and at most 0.52 to start. There is no value that satisfies both, and the two
+# failures look unrelated - "No available memory for the cache blocks" one way,
+# "Free memory on device is less than desired utilization" the other. Do not
+# spend another job trying to thread it.
+CUDA_VISIBLE_DEVICES=0 vllm serve "$TEACHER" --port 8000 --gpu-memory-utilization 0.85 \
     --max-model-len 4096 --disable-log-stats &
 TEACHER_PID=$!
-# Wait for the teacher to finish profiling before the student starts measuring,
-# or both size their caches against a GPU that is about to change underneath them.
-sleep 90
-vllm serve "$STUDENT" --port 8001 --gpu-memory-utilization 0.85 \
+CUDA_VISIBLE_DEVICES=1 vllm serve "$STUDENT" --port 8001 --gpu-memory-utilization 0.40 \
     --max-model-len 4096 --disable-log-stats &
 STUDENT_PID=$!
 
-for port in 8000 8001; do
+wait_for() {  # port, pid, name — watch THAT server's pid, so a dead one fails fast
+    local port=$1 pid=$2 name=$3
     for _ in $(seq 1 120); do
-        curl -sf "http://localhost:$port/v1/models" >/dev/null 2>&1 && break
-        kill -0 $TEACHER_PID 2>/dev/null || { echo "teacher died before ready"; exit 1; }
+        curl -sf "http://localhost:$port/v1/models" >/dev/null 2>&1 && { echo "$name up on :$port"; return 0; }
+        kill -0 "$pid" 2>/dev/null || { echo "$name died before serving; see the .err log"; return 1; }
         sleep 10
     done
-    curl -sf "http://localhost:$port/v1/models" >/dev/null || { echo "port $port never came up"; exit 1; }
-    echo "up on :$port"
-done
+    echo "$name never came up on :$port"
+    return 1
+}
+wait_for 8000 "$TEACHER_PID" teacher || exit 1
+wait_for 8001 "$STUDENT_PID" student || exit 1
 
 # One client, two ports: generate.py routes by model name, so the student is
 # reached through the teacher's base URL only if both are served together. They
