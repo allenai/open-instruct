@@ -45,8 +45,8 @@ VENV=${VENV:-$SCRATCH/venv_v4}
 # Pinned. run_v4.md: "student (answers) Qwen2.5-0.5B-Instruct, frozen - pinned so
 # teacher_acc stays comparable with v0-v3". Changing it changes what every
 # historical number means.
-STUDENT=${STUDENT:-Qwen/Qwen2.5-0.5B-Instruct}
-PORT=${PORT:-8001}
+export STUDENT=${STUDENT:-Qwen/Qwen2.5-0.5B-Instruct}
+export PORT=${PORT:-8001}
 
 # Everything cache-shaped goes to scratch. HOME is a quota that other projects
 # keep full, and a job that overruns it dies during vLLM engine init with
@@ -79,7 +79,7 @@ vllm serve "$STUDENT" \
     --port "$PORT" \
     --gpu-memory-utilization 0.85 \
     --max-model-len 4096 \
-    --disable-log-requests &
+    --disable-log-stats &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null || true' EXIT
 
@@ -88,6 +88,27 @@ until curl -sf "http://localhost:$PORT/v1/models" >/dev/null; do
     kill -0 $SERVER 2>/dev/null || { echo "vllm died before becoming ready"; exit 1; }
 done
 echo "student up on :$PORT"
+
+# PREFLIGHT. The whole measurement rests on scoring each option by
+# length-normalised log-probability, which needs echo=True with logprobs on the
+# COMPLETIONS endpoint. That is a vLLM extension, it has moved between releases,
+# and grpo_tutor always used in-process vllm.LLM rather than a served endpoint,
+# so this path has never run here. Fail now, loudly, rather than after the pairs
+# are built and every score comes back identical.
+python - <<'PREFLIGHT' || { echo "PREFLIGHT FAILED - not spending the allocation"; exit 1; }
+import os, sys, openai
+client = openai.OpenAI(base_url=f"http://localhost:{os.environ.get('PORT','8001')}/v1", api_key="EMPTY")
+model = os.environ["STUDENT"]
+r = client.completions.create(model=model, prompt="Question: 2+2?\nAnswer: four",
+                              max_tokens=0, echo=True, logprobs=0, temperature=0.0)
+lp = r.choices[0].logprobs
+if not lp or not lp.tokens or lp.token_logprobs is None:
+    sys.exit("echo+logprobs returned nothing; ChoiceStudent cannot score options")
+vals = [v for v in lp.token_logprobs if v is not None]
+if not vals:
+    sys.exit("echo returned tokens but no log-probabilities")
+print(f"preflight ok: {len(lp.tokens)} tokens, {len(vals)} logprobs, last={vals[-1]:.3f}")
+PREFLIGHT
 
 python -u -m projects.tutor.transfer_probe \
     --items data/items_all.jsonl \
