@@ -5,14 +5,13 @@ Everything added by this fork lives in two new directories:
 - `open_instruct/scored_rewards/` — the generic score-based reward layer
 - `projects/` — one project's specifics, imported by nothing in `open_instruct/`
 
-Upstream files are touched in **four places**, kept deliberately small so
+Upstream files are touched in **three places**, kept deliberately small so
 rebasing onto `allenai/open-instruct` stays a non-event. With none of the new
 flags set, behaviour is unchanged — and that claim is enforced by a test, not
 just asserted (`test_integration.py::test_no_flags_returns_the_plain_upstream_config`).
 
 ```
 README.md                    | 20 +++++++++++++++++++   docs only
-.gitignore                   |  6 ++++++              appended, ignores only
 open_instruct/data_loader.py | 18 ++++++++++++++++++    six new flags
 open_instruct/grpo_fast.py   | 23 ++++++++++-------------  two call sites
 ```
@@ -35,16 +34,6 @@ derives the CLI from these dataclasses — new fields become new flags with no
 parser changes.
 
 **Conflict risk on rebase: nil.** Added fields, changed none.
-
-## 0b. `.gitignore` — three patterns appended
-
-`data/units*.jsonl`, `data/units*.npz`, `data/items_all.jsonl`: the tutor
-project's knowledge-unit annotations, their embeddings, and the combined item
-pool. All are regenerable from `projects/tutor/units.py` in a couple of minutes,
-and the item pool is derived from the `grpo_tutor` corpus rather than owned here,
-so none of it belongs in the repository.
-
-**Conflict risk on rebase: nil.** Appended at the end, deletes nothing.
 
 ## 0. `README.md` — one section
 
@@ -94,8 +83,8 @@ calls that follow.
 **No LoRA.** `use_peft` is declared in `model_utils.py` and referenced nowhere in
 `grpo_fast.py`; wiring PEFT through DeepSpeed and the vLLM weight sync is a real
 change to the training loop, not a patch, and it is out of scope here. The
-consequence — a 3B policy will not fit on one 80GB card beside vLLM — is
-documented in `projects/tutor/README.md`.
+consequence is that a 3B policy will not fit on one 80GB card beside vLLM, so
+single-GPU users need to serve the environment and judge models externally.
 
 **No changes to the advantage computation.** `normalize_then_sum` in the reward
 produces zero-mean-within-group scores, so upstream's default
@@ -110,11 +99,10 @@ git remote add upstream https://github.com/allenai/open-instruct.git
 git fetch upstream && git rebase upstream/main
 python -m unittest \
     open_instruct.scored_rewards.test_scored_rewards \
-    open_instruct.scored_rewards.test_integration \
-    projects.tutor.test_tutor
+    open_instruct.scored_rewards.test_integration
 ```
 
-No GPU, no ray, no vLLM, no network. The middle one is the one that matters
+No GPU, no ray, no vLLM, no network. The second one is the one that matters
 after a rebase: it builds a real `RewardConfig`, calls `.build()`, and invokes
 the result with the exact argument list `vllm_utils.compute_rewards` passes, so
 a changed reward signature or a new `RewardConfig` field fails there rather than

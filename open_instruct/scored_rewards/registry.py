@@ -12,8 +12,8 @@ at import time. Importing it is the whole protocol: registering a scorer,
 adding an environment to ``TOOL_REGISTRY``, and defining a ``VerifierFunction``
 subclass all happen as a side effect of the import, and all three are picked up.
 
-    --reward_plugins projects.tutor.plugin
-    --reward_plugins projects/tutor/plugin.py,my_other_rewards.py
+    --reward_plugins projects.yours.plugin
+    --reward_plugins projects/yours/plugin.py,my_other_rewards.py
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def build(spec: str, **overrides) -> GroupScorer:
 
     ``spec`` is ``name`` or ``name:key=value,key=value``. Values are parsed as
     JSON when they parse and left as strings when they do not, so
-    ``tutor:turns=3,judge_model=Qwen/Qwen2.5-7B-Instruct`` does what it looks
+    ``yours:turns=3,judge_model=Qwen/Qwen2.5-7B-Instruct`` does what it looks
     like. A per-sample ``Scorer`` is lifted into a group scorer automatically.
     """
     name, _, arg_string = spec.partition(":")

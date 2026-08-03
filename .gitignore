@@ -164,9 +164,3 @@ cache/
 local_dataset_cache/
 scratch/
 .claude/worktrees/
-
-# tutor probe artifacts: annotations and embeddings are regenerable, and the
-# combined item pool is derived from grpo_tutor rather than owned here
-data/units*.jsonl
-data/units*.npz
-data/items_all.jsonl

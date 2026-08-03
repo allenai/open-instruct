@@ -7,9 +7,12 @@ only things a stranger with a different task would want, and this is where the
 things they would not want go. If you find yourself adding a task-specific
 special case to `scored_rewards`, it belongs here instead.
 
-- [`tutor/`](tutor/) — a teacher LLM trained against a frozen student. A judged
-  multi-dimensional score, a rule-based veto, a model as the environment, and a
-  held-out anchor outside the reward.
+This directory is currently empty. The project that shaped `scored_rewards` — a
+teacher LLM trained against a frozen student, using a judged multi-dimensional
+score, a rule-based veto, a model as the environment, and a held-out anchor — was
+removed once its own experiments showed the environment could not distinguish
+teaching from telling. It is recoverable from the history of this branch, and is
+worth reading before building anything model-as-environment shaped.
 
 ---
 
