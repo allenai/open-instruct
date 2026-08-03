@@ -181,6 +181,29 @@ WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
+def _attention_geometry(config) -> tuple:
+    """Attention-shape fingerprint used to decide whether a frozen scorer (the
+    OPD teacher) can share the policy's Ulysses SP attention wrapper. The
+    wrapper is registered once with the policy's head layout and asserts on
+    mismatched query shapes, and the FLA CP contexts bake in the policy's
+    linear-attention conv kernel — so any difference here forces full-sequence
+    (unsplit) teacher scoring under SP."""
+    text_config = getattr(config, "text_config", None) or config
+    return tuple(
+        getattr(text_config, field, None)
+        for field in (
+            "num_attention_heads",
+            "num_key_value_heads",
+            "head_dim",
+            "linear_num_value_heads",
+            "linear_num_key_heads",
+            "linear_key_head_dim",
+            "linear_value_head_dim",
+            "linear_conv_kernel_dim",
+        )
+    )
+
+
 def _build_vlm_name_mapper(model_name: str, model_type: str | None = None):
     """Sometimes we have different weight names btw vLLM and HF, so we build
     a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF.
@@ -477,6 +500,22 @@ class PolicyTrainerRayProcess(RayProcess):
             register_qwen3_5_zero3_external_parameters(self.teacher_model)
             if args.lm_head_fp32:
                 patch_hf_lm_head_fp32(self.teacher_model)
+        # A teacher whose attention geometry differs from the policy cannot run
+        # on SP-split sequence shards (the shared Ulysses wrapper and FLA CP
+        # contexts are sized for the policy), so it scores the full pre-split
+        # sequences instead — replicated across SP ranks, which ZeRO-3 requires
+        # anyway since every rank must join the parameter allgathers.
+        self._teacher_full_sequence_scoring = False
+        if self.teacher_model is not None and args.sequence_parallel_size > 1:
+            teacher_module = getattr(self.teacher_model, "module", self.teacher_model)
+            self._teacher_full_sequence_scoring = _attention_geometry(self.policy.config) != _attention_geometry(
+                teacher_module.config
+            )
+            if self._teacher_full_sequence_scoring:
+                logger.info(
+                    "OPD teacher attention geometry differs from the policy; "
+                    "using full-sequence (unsplit) teacher scoring under SP."
+                )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
         self.value_model = None
         if args.use_value_model:
@@ -894,6 +933,44 @@ class PolicyTrainerRayProcess(RayProcess):
             cp_contexts=cp_contexts_BT,
         )
 
+    def _compute_teacher_logprobs_full_sequence(
+        self, full_data_BT: data_types.CollatedBatchData, data_BT: data_types.CollatedBatchData, shards: int
+    ) -> list[torch.Tensor]:
+        """Score full (pre-SP-split) sequences under the OPD teacher, then
+        re-shard the logprobs to this rank's SP slice.
+
+        Used when the teacher's attention geometry differs from the policy's:
+        every SP rank runs the identical full-sequence no-grad forward (all
+        ranks must participate in the ZeRO-3 allgathers regardless), with plain
+        packed attention (``cp_contexts=None``) exactly like the SP=1 path. The
+        ``[B, T-1]`` logprobs are padded back to ``[B, T]`` and pushed through
+        ``split_collated_batch`` — the same transformation the batch itself
+        underwent — so shard alignment is correct by construction.
+        """
+        full_data_gpu = full_data_BT.to(self.device)
+        logprobs_full = grpo_utils.compute_logprobs_tiled(
+            self.teacher_model,
+            full_data_gpu,
+            self.pad_token_id,
+            self.streaming_config.temperature,
+            shards=shards,
+            lm_head_fp32=self.args.lm_head_fp32,
+            cp_contexts=None,
+        )
+        padded = [torch.cat([lp.new_zeros(lp.shape[0], 1), lp], dim=1).cpu() for lp in logprobs_full]
+        resharded = self.splitter.split_collated_batch(dataclasses.replace(full_data_BT, vllm_logprobs=padded))
+        teacher_logprobs_BT: list[torch.Tensor] = []
+        for i, teacher_logprobs in enumerate(resharded.vllm_logprobs):
+            teacher_logprobs = teacher_logprobs.to(self.device)[:, 1:]
+            expected_shape = data_BT.vllm_logprobs[i][:, 1:].shape
+            if teacher_logprobs.shape != expected_shape:
+                raise RuntimeError(
+                    f"OPD full-sequence teacher shard misaligned for sample {i}: "
+                    f"{tuple(teacher_logprobs.shape)} vs expected {tuple(expected_shape)}"
+                )
+            teacher_logprobs_BT.append(teacher_logprobs)
+        return teacher_logprobs_BT
+
     def step(self, training_step: int | None = None):
         """Execute one training step: fetch data from the dataloader and train on it.
 
@@ -915,6 +992,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
+
+        # Keep the pre-split (full-sequence) batch around when the OPD teacher
+        # cannot consume SP shards; it is re-sharded after scoring.
+        teacher_full_data_BT: data_types.CollatedBatchData | None = None
+        if self.teacher_model is not None and self._teacher_full_sequence_scoring and self.splitter is not None:
+            teacher_full_data_BT = data_BT
 
         # split batch for sequence parallelism. Do before moving data to GPU.
         if self.splitter is not None:
@@ -949,7 +1032,21 @@ class PolicyTrainerRayProcess(RayProcess):
         # policy and composes with every loss_fn / trust-region mask downstream.
         if self.teacher_model is not None:
             with Timer("OPD teacher logprobs", noop=self.rank != 0):
-                teacher_logprobs_BT = self._compute_logprobs(self.teacher_model, data_BT, cp_contexts_BT)
+                teacher_shards = max(1, int(self.args.liger_grpo_loss_chunk_size))
+                if teacher_full_data_BT is not None:
+                    teacher_logprobs_BT = self._compute_teacher_logprobs_full_sequence(
+                        teacher_full_data_BT, data_BT, teacher_shards
+                    )
+                else:
+                    teacher_logprobs_BT = grpo_utils.compute_logprobs_tiled(
+                        self.teacher_model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.streaming_config.temperature,
+                        shards=teacher_shards,
+                        lm_head_fp32=self.args.lm_head_fp32,
+                        cp_contexts=cp_contexts_BT,
+                    )
             with torch.no_grad():
                 opd_kl_sum = torch.zeros((), device=self.device)
                 opd_teacher_logprob_sum = torch.zeros((), device=self.device)

@@ -15,9 +15,12 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 MODEL=hamishivi/Qwen3.5-4B
 TOKENIZER=hamishivi/Qwen3.5-4B
-TEACHER_MODEL=allenai/tmax-4b
+# Override TEACHER_MODEL to smoke other teachers, e.g. allenai/tmax-9b to
+# exercise the mismatched-attention-geometry full-sequence scoring path
+# (set a distinct EXP_NAME too — exp names must not prefix-collide).
+TEACHER_MODEL=${TEACHER_MODEL:-allenai/tmax-4b}
 
-EXP_NAME=swerl_qwen35_4b_dppo_opd_smoke_1node
+EXP_NAME=${EXP_NAME:-swerl_qwen35_4b_dppo_opd_smoke_1node}
 
 uv run python mason.py \
        --cluster ai2/jupiter \

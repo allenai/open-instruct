@@ -5,12 +5,16 @@
 #
 # Student = allenai/tmax-4b (already RL-trained; vLLM-servable CG format).
 # Teacher = allenai/tmax-27b — same qwen3_5 architecture family (64 layers),
-# byte-identical tokenizer, same GDN conv kernel (verified 2026-08-03), loaded
-# learner-side and ZeRO-3-sharded across the 8 learner GPUs (~7 GB/GPU).
+# byte-identical tokenizer (verified 2026-08-03), loaded learner-side and
+# ZeRO-3-sharded across the 16 learner GPUs (~3.4 GB/GPU). The 27B's attention
+# geometry differs from the 4B's, so under SP the teacher scores the full
+# pre-split sequences (tiled lm-head logprobs; auto-detected in grpo_fast).
 #
-# 4 nodes / 32 GPUs: 8 learners (SP=4) + 24 engines — the proven 4B split.
-# 32k response length (matches the tmax 4B RL recipe). Pure OPD: verifier
-# rewards are logged but carry no gradient; reward-variance filtering disabled.
+# Geometry/parallelism mirrors the RELEASED tmax 4B recipe
+# (scripts/tmax/RL_Released/qwen35_4b.sh): 4 nodes = 16 learners (8 8, SP=4)
+# + 16 engines, 64k response / 67584 pack, 8 prompts x 32 samples.
+# Pure OPD: verifier rewards are logged but carry no gradient;
+# reward-variance filtering disabled (no --active_sampling).
 # Watch objective/opd_reverse_kl (should fall) and scores (should climb toward
 # the 27B teacher's solve rate).
 
@@ -20,7 +24,7 @@ MODEL=allenai/tmax-4b
 TOKENIZER=allenai/tmax-4b
 TEACHER_MODEL=allenai/tmax-27b
 
-EXP_NAME=swerl_tmax4b_opd_from_tmax27b_4node_32k
+EXP_NAME=swerl_tmax4b_opd_from_tmax27b_4node_64k
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -61,12 +65,12 @@ uv run python mason.py \
     --dataset_mixer_list allenai/tmax-15k-open-instruct 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
-    --per_turn_max_tokens 8192 \
-    --response_length 32768 \
-    --pack_length 35840 \
+    --per_turn_max_tokens 16384 \
+    --response_length 65536 \
+    --pack_length 67584 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 32 \
-    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 8 \
+    --num_samples_per_prompt_rollout 32 \
     --async_steps 4 \
     --model_name_or_path $MODEL \
     --tokenizer_name_or_path $TOKENIZER \
@@ -81,8 +85,8 @@ uv run python mason.py \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
     --num_epochs 1 \
-    --num_learners_per_node 8 \
-    --vllm_num_engines 24 \
+    --num_learners_per_node 8 8 \
+    --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.0 \
     --use_vllm_logprobs true \

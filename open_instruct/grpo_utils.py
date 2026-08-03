@@ -864,6 +864,58 @@ def compute_tvpo_mask(
     return mask, prompt_tv_per_token
 
 
+def compute_logprobs_tiled(
+    model: torch.nn.Module,
+    data_BT: data_types.CollatedBatchData,
+    pad_token_id: int,
+    temperature: float,
+    shards: int,
+    lm_head_fp32: bool = False,
+    cp_contexts: list[Any] | None = None,
+) -> list[torch.Tensor]:
+    """Per-token logprobs without materializing the full ``[T, vocab]`` logits.
+
+    Runs the backbone for hidden states, then pushes them through the lm head
+    in ``shards`` tiles (gather + logsumexp per tile) — the same trick as the
+    tiled GRPO loss. With a 248k vocab this cuts the transient logits memory by
+    ``shards``x versus :func:`compute_logprobs`, which matters for large frozen
+    scorers (e.g. an OPD teacher) and full-length (unsplit) sequences.
+
+    Always no-grad. Returns one ``[B, T-1]`` tensor per sample, masked via
+    :func:`mask_logprobs` like :func:`compute_logprobs`.
+    """
+    logprobs_BT: list[torch.Tensor] = []
+    with torch.no_grad():
+        for i in range(len(data_BT.query_responses)):
+            cp_context = cp_contexts[i] if cp_contexts is not None else None
+            hidden = forward_for_liger_hidden_states(
+                model, data_BT.query_responses[i], None, data_BT.position_ids[i], cp_context=cp_context
+            )
+            if lm_head_fp32:
+                hidden = hidden.float()
+            _, lm_head = get_causal_lm_backbone_and_lm_head(model)
+            batch_size, seq_len, hidden_size = hidden.shape
+            flat_hidden = hidden.reshape(-1, hidden_size)
+            labels = data_BT.query_responses[i][:, 1:].reshape(-1).clone()
+            labels[labels == pad_token_id] = 0
+            num_tokens = flat_hidden.shape[0]
+            tile_count = max(1, min(shards, num_tokens))
+            logprob_tiles = []
+            for hidden_tile, label_tile in zip(
+                torch.chunk(flat_hidden, chunks=tile_count, dim=0),
+                torch.chunk(labels, chunks=tile_count, dim=0),
+                strict=True,
+            ):
+                logits = lm_head(hidden_tile)
+                if temperature != 1.0:
+                    logits = logits / temperature
+                logprob_tiles.append(model_utils.log_softmax_and_gather(logits, label_tile))
+            logprobs = torch.cat(logprob_tiles, dim=0).reshape(batch_size, seq_len)
+            logprobs = mask_logprobs(logprobs, data_BT.response_masks[i][:, 1:].bool())
+            logprobs_BT.append(logprobs)
+    return logprobs_BT
+
+
 def compute_opd_advantages(
     advantages: torch.Tensor,
     behavior_logprobs: torch.Tensor,
