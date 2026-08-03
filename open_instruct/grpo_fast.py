@@ -82,6 +82,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
@@ -336,6 +337,17 @@ class PolicyTrainerRayProcess(RayProcess):
             local_files_only=True,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        # Ulysses SP registration below overwrites EVERY entry in transformers'
+        # ALL_ATTENTION_FUNCTIONS with a wrapper sized for the policy's head
+        # layout. Snapshot the originals first so a frozen scorer with a
+        # different geometry (the OPD teacher) can temporarily restore plain
+        # attention for its full-sequence forwards.
+        self._original_attention_functions: dict | None = None
+        if args.sequence_parallel_size > 1:
+            self._original_attention_functions = {
+                key: ALL_ATTENTION_FUNCTIONS[key]
+                for key in ALL_ATTENTION_FUNCTIONS.keys()  # noqa: SIM118 — AttentionInterface, not a dict
+            }
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
             core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
@@ -933,6 +945,29 @@ class PolicyTrainerRayProcess(RayProcess):
             cp_contexts=cp_contexts_BT,
         )
 
+    @contextlib.contextmanager
+    def _ulysses_attention_disabled(self):
+        """Temporarily restore transformers' original attention functions.
+
+        Ulysses SP registration replaces every ``ALL_ATTENTION_FUNCTIONS`` entry
+        process-wide with a wrapper sized for the policy's head layout, so a
+        differently-shaped teacher asserts inside it even on full (unsplit)
+        sequences. The learner step is single-threaded, so swapping the mapping
+        around the teacher's forward is safe; the wrapped functions are
+        restored on exit for the policy's own forwards.
+        """
+        if self._original_attention_functions is None:
+            yield
+            return
+        wrapped = {key: ALL_ATTENTION_FUNCTIONS[key] for key in self._original_attention_functions}
+        for key, fn in self._original_attention_functions.items():
+            ALL_ATTENTION_FUNCTIONS[key] = fn
+        try:
+            yield
+        finally:
+            for key, fn in wrapped.items():
+                ALL_ATTENTION_FUNCTIONS[key] = fn
+
     def _compute_teacher_logprobs_full_sequence(
         self, full_data_BT: data_types.CollatedBatchData, data_BT: data_types.CollatedBatchData, shards: int
     ) -> list[torch.Tensor]:
@@ -942,21 +977,23 @@ class PolicyTrainerRayProcess(RayProcess):
         Used when the teacher's attention geometry differs from the policy's:
         every SP rank runs the identical full-sequence no-grad forward (all
         ranks must participate in the ZeRO-3 allgathers regardless), with plain
-        packed attention (``cp_contexts=None``) exactly like the SP=1 path. The
-        ``[B, T-1]`` logprobs are padded back to ``[B, T]`` and pushed through
-        ``split_collated_batch`` — the same transformation the batch itself
-        underwent — so shard alignment is correct by construction.
+        packed attention (``cp_contexts=None`` and Ulysses disabled) exactly
+        like the SP=1 path. The ``[B, T-1]`` logprobs are padded back to
+        ``[B, T]`` and pushed through ``split_collated_batch`` — the same
+        transformation the batch itself underwent — so shard alignment is
+        correct by construction.
         """
         full_data_gpu = full_data_BT.to(self.device)
-        logprobs_full = grpo_utils.compute_logprobs_tiled(
-            self.teacher_model,
-            full_data_gpu,
-            self.pad_token_id,
-            self.streaming_config.temperature,
-            shards=shards,
-            lm_head_fp32=self.args.lm_head_fp32,
-            cp_contexts=None,
-        )
+        with self._ulysses_attention_disabled():
+            logprobs_full = grpo_utils.compute_logprobs_tiled(
+                self.teacher_model,
+                full_data_gpu,
+                self.pad_token_id,
+                self.streaming_config.temperature,
+                shards=shards,
+                lm_head_fp32=self.args.lm_head_fp32,
+                cp_contexts=None,
+            )
         padded = [torch.cat([lp.new_zeros(lp.shape[0], 1), lp], dim=1).cpu() for lp in logprobs_full]
         resharded = self.splitter.split_collated_batch(dataclasses.replace(full_data_BT, vllm_logprobs=padded))
         teacher_logprobs_BT: list[torch.Tensor] = []
