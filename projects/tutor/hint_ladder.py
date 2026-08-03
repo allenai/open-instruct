@@ -69,6 +69,11 @@ def build_rungs(item: dict, unit: units_mod.Unit, dialogue: str) -> list[str]:
     the floor.
     """
     gold = item["choices"][item["gold_idx"]]
+    # CAVEAT ON RUNG 2. It names the misconception without correcting it, so a
+    # negative result here shows that MENTIONING a wrong idea is costly - not
+    # that addressing misconceptions is. Those differ, and separating them needs
+    # a sixth rung that states the correction too. Rung 3 carries no such caveat:
+    # it is the teacher's real output, unedited.
     return [
         "",
         f"This problem is about {unit.primary}.",
@@ -161,6 +166,7 @@ def verdict(rows: list[dict]) -> None:
     clearing by chance is not a remote possibility.
     """
     live = {r["rung"]: r["sigmas"] >= 3 for r in rows[1:]}
+    harmful = {r["rung"]: r["sigmas"] <= -3 for r in rows[1:]}
     print()
     if not live["answer stated"]:
         print(
@@ -174,6 +180,17 @@ def verdict(rows: list[dict]) -> None:
             "     student on its own problem. The environment carries signal, the\n"
             "     reward channel was the broken part, and this measured gain can\n"
             "     serve as the reward directly instead of a judge."
+        )
+    elif harmful["real dialogue"]:
+        print(
+            "  -> THE DIALOGUES ARE HARMFUL, NOT MERELY USELESS. A real dialogue\n"
+            "     leaves the student WORSE than saying nothing, by more than 3 SE.\n"
+            "     Read this next to the misconception rung: if naming a wrong idea\n"
+            "     also hurts, the likely mechanism is that the dialogues rehearse\n"
+            "     the wrong answer and plant it. A reward built on student\n"
+            "     correctness then penalises tutoring and pays only for leaking,\n"
+            "     which is a sign-flipped objective rather than a weak one."
+            + ("\n     The channel is open, though: a bare topic sentence helps." if live["unit named"] else "")
         )
     elif live["unit named"] or live["misconception named"]:
         print(
