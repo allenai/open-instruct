@@ -11,6 +11,17 @@ export VLLM_USE_V1=1
 export SWERL_DOCKER_AUTO_REMOVE=1
 export SWERL_SANDBOX_TIMING_LOGS=1
 
+# Container runtime for the swerl_sandbox tool. Current dev sessions mount a host docker
+# daemon, which the docker SDK (docker.from_env) uses by default. On the podman sandbox
+# image (create_session_sandbox.sh sets BEAKER_SKIP_DOCKER_SOCKET=1, so there is no host
+# docker), bring up an in-session podman system service and point the SDK at it via
+# DOCKER_HOST. Guarded so it stays a no-op on the existing host-docker sessions.
+if [ -z "$DOCKER_HOST" ] && [ ! -S /var/run/docker.sock ]; then
+    echo "No host docker daemon; starting podman via scripts/docker/docker_login.sh"
+    export PODMAN_LOG_DIR="${PODMAN_LOG_DIR:-/tmp/podman-logs}"
+    source scripts/docker/docker_login.sh   # uses DOCKER_PAT from the sandbox session's secret-env
+fi
+
 uv run python open_instruct/grpo_fast.py \
     --exp_name terminal_local_rl_tmax_4gpu \
     --model_name_or_path Qwen/Qwen3-0.6B \
@@ -55,6 +66,6 @@ uv run python open_instruct/grpo_fast.py \
     --seed 42 \
     --report_to wandb \
     --with_tracking \
-    --wandb_project_name oe-general-agents \
+    --wandb_project oe-general-agents \
     --output_dir output/tmax_rl_local_4gpu \
     --push_to_hub false

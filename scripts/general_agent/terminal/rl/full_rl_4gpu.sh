@@ -82,6 +82,6 @@ uv run python open_instruct/grpo_fast.py \
     --seed 42 \
     --report_to wandb \
     --with_tracking \
-    --wandb_project_name oe-general-agents \
+    --wandb_project oe-general-agents \
     --output_dir output/tmax_rl_4gpu_local \
     --push_to_hub false
