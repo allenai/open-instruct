@@ -421,6 +421,7 @@ async def run(args) -> None:
 
     if args.report:
         await leak_contrast(pairs, dialogues, student, args)
+        await positive_control(student, pairs)
 
     if args.out:
         with open(args.out, "w") as handle:
@@ -526,6 +527,49 @@ async def leak_contrast(pairs, dialogues, student, args) -> None:
         )
     else:
         print("\n  -> clean. Leaking about A does not carry to B, which is what the pairing assumed.")
+
+
+async def positive_control(student, pairs: Sequence[dict]) -> None:
+    """Does the answering channel respond to a hint that cannot fail?
+
+    RUN THIS BEFORE BELIEVING ANY NULL RESULT. A null has two explanations that
+    the headline cannot tell apart: the dialogues carry no transferable teaching,
+    or the student does not read prepended text at all. This distinguishes them
+    by prepending the target's own gold answer. That is not teaching and is not
+    meant to be - it is the largest possible hint, so if P(gold) does not move
+    here, the instrument cannot detect any hint and every other number in this
+    file is measuring nothing.
+    """
+    print("\n=== positive control: target's own answer, stated outright ===")
+    targets = list({units_mod.item_key(p["target"]): p["target"] for p in pairs}.values())
+    base, told = await asyncio.gather(
+        asyncio.gather(*(student.prob_gold(t, "") for t in targets)),
+        asyncio.gather(
+            *(
+                student.prob_gold(
+                    t,
+                    f"Tutor: The answer to this question is {t['choices'][t['gold_idx']]}.\n"
+                    f"Student: Thank you, the answer is {t['choices'][t['gold_idx']]}.",
+                )
+                for t in targets
+            )
+        ),
+    )
+    n = len(targets)
+    gains = [t - b for t, b in zip(told, base)]
+    se = statistics.stdev(gains) / math.sqrt(n) if n > 1 else float("nan")
+    print(f"  n={n}, P(gold)")
+    print(f"  baseline        {statistics.fmean(base):.3f}")
+    print(f"  answer given    {statistics.fmean(told):.3f}   gain {statistics.fmean(gains):+.4f} +/- {se:.4f}")
+    if statistics.fmean(gains) < 4 * se:
+        print(
+            "\n  -> INSTRUMENT IS DEAF. Being told the answer does not move the\n"
+            "     student's choice, so this channel cannot register a hint of any\n"
+            "     size. Every null above is a property of the measurement, not of\n"
+            "     the teaching. Fix the answering channel before running again."
+        )
+    else:
+        print("\n  -> responsive. The channel registers a maximal hint, so a null above is about the dialogues.")
 
 
 def main() -> None:
