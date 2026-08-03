@@ -15,6 +15,8 @@ import random
 import tempfile
 import unittest
 
+import numpy as np
+
 from open_instruct.scored_rewards.anchor import Anchor
 from projects.tutor import transfer_probe, units
 from projects.tutor.student import ChoiceStudent
@@ -223,15 +225,109 @@ class TestLeakContrast(unittest.TestCase):
 
 
 class TestStubStudent(unittest.TestCase):
-    def test_answers_gold_when_the_text_contains_it(self):
-        stub = transfer_probe.StubStudent()
-        picked = asyncio.run(stub.choose("q", ["red", "blue", "green"], hint="the answer is blue"))
-        self.assertEqual(picked, 1)
+    def student(self):
+        return transfer_probe.CachingStudent(transfer_probe.StubStudent())
 
-    def test_returns_a_valid_index_with_no_text(self):
-        stub = transfer_probe.StubStudent()
-        for _ in range(10):
-            self.assertIn(asyncio.run(stub.choose("q", ["a", "b", "c", "d"], hint="")), range(4))
+    def test_answers_gold_when_the_text_contains_it(self):
+        it = {"question": "q", "choices": ["red", "blue", "green"], "gold_idx": 1}
+        self.assertEqual(asyncio.run(self.student().correct(it, "the answer is blue")), 1.0)
+
+    def test_prob_gold_is_a_probability(self):
+        it = {"question": "q", "choices": ["a", "b", "c", "d"], "gold_idx": 0}
+        p = asyncio.run(self.student().prob_gold(it, ""))
+        self.assertGreater(p, 0.0)
+        self.assertLess(p, 1.0)
+
+    def test_prob_gold_rises_when_the_text_names_the_answer(self):
+        it = {"question": "q", "choices": ["red", "blue", "green", "grey"], "gold_idx": 1}
+        s = self.student()
+        without = asyncio.run(s.prob_gold(it, "nothing useful"))
+        with_it = asyncio.run(s.prob_gold(it, "the answer is blue"))
+        self.assertGreater(with_it, without)
+
+
+class TestCaching(unittest.TestCase):
+    def test_one_scoring_call_serves_both_measures(self):
+        """Binary and continuous come from the same log-probs; paying twice is waste."""
+
+        class Counting:
+            def __init__(self):
+                self.calls = 0
+
+            async def score_choices(self, question, choices, hint=""):
+                self.calls += 1
+                return [0.1 * i for i in range(len(choices))]
+
+        inner = Counting()
+        student = transfer_probe.CachingStudent(inner)
+        it = {"question": "q", "choices": ["a", "b"], "gold_idx": 1}
+
+        async def go():
+            await student.correct(it, "text")
+            await student.prob_gold(it, "text")
+            await student.correct(it, "text")
+
+        asyncio.run(go())
+        self.assertEqual(inner.calls, 1)
+
+    def test_different_hints_are_scored_separately(self):
+        class Counting:
+            def __init__(self):
+                self.calls = 0
+
+            async def score_choices(self, question, choices, hint=""):
+                self.calls += 1
+                return [0.0] * len(choices)
+
+        inner = Counting()
+        student = transfer_probe.CachingStudent(inner)
+        it = {"question": "q", "choices": ["a", "b"], "gold_idx": 0}
+
+        async def go():
+            await student.correct(it, "one")
+            await student.correct(it, "two")
+
+        asyncio.run(go())
+        self.assertEqual(inner.calls, 2)
+
+
+class TestSimilarityPairing(unittest.TestCase):
+    """Pairing by embedding, because exact unit names almost never repeat."""
+
+    def setUp(self):
+        self.names = ["circumference of a circle", "area of a circle", "photosynthesis"]
+        vecs = np.array([[1.0, 0.0], [0.95, 0.312], [0.0, 1.0]], dtype=np.float32)
+        vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+        self.embeddings = ({n: i for i, n in enumerate(self.names)}, vecs)
+
+    def make(self, unit_names):
+        items = [item(f"q{i}") for i in range(len(unit_names))]
+        units_map = {units.item_key(it): unit(units.item_key(it), n) for it, n in zip(items, unit_names)}
+        dialogues = {units.item_key(it): [{"completion": "talk", "leaked": 0}] for it in items}
+        return items, units_map, dialogues
+
+    def pairs(self, unit_names, threshold):
+        items, units_map, dialogues = self.make(unit_names)
+        return transfer_probe.build_pairs_by_similarity(
+            items, units_map, dialogues, self.embeddings, threshold=threshold
+        )
+
+    def test_near_synonyms_pair_where_exact_matching_would_not(self):
+        got = self.pairs(["circumference of a circle", "area of a circle"], threshold=0.9)
+        self.assertTrue(got)
+        self.assertNotEqual(got[0]["unit"], got[0]["source_unit"])
+
+    def test_unrelated_units_do_not_pair(self):
+        self.assertEqual(self.pairs(["circumference of a circle", "photosynthesis"], threshold=0.9), [])
+
+    def test_threshold_controls_granularity(self):
+        names = ["circumference of a circle", "area of a circle"]
+        self.assertTrue(self.pairs(names, threshold=0.9))
+        self.assertEqual(self.pairs(names, threshold=0.99), [])
+
+    def test_similarity_is_recorded_for_auditing(self):
+        got = self.pairs(["circumference of a circle", "area of a circle"], threshold=0.9)
+        self.assertGreaterEqual(got[0]["similarity"], 0.9)
 
 
 class TestPrompt(unittest.TestCase):

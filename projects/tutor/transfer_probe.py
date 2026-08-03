@@ -52,11 +52,11 @@ import argparse
 import asyncio
 import collections
 import json
+import math
 import random
 import statistics
 from collections.abc import Sequence
 
-from open_instruct.scored_rewards.anchor import Anchor, AnchorResult
 from projects.tutor import units as units_mod
 from projects.tutor.student import ChoiceStudent
 
@@ -89,14 +89,131 @@ class StubStudent:
     """
 
     def __init__(self, seed: int = 0):
-        self.rng = random.Random(seed)
+        self.seed = seed
 
-    async def choose(self, question: str, choices: Sequence[str], hint: str = "") -> int:
+    async def score_choices(self, question: str, choices: Sequence[str], hint: str = "") -> list[float]:
         lowered = hint.lower()
+        rng = random.Random(f"{self.seed}{question}{len(hint)}")
+        scores = [rng.uniform(-3.0, -1.0) for _ in choices]
         for i, choice in enumerate(choices):
             if str(choice).strip().lower() in lowered:
-                return i
-        return random.Random(f"{question}{len(hint)}{self.rng.random()}").randrange(len(choices))
+                scores[i] += 2.0
+        return scores
+
+
+class CachingStudent:
+    """Scores each (question, hint) once and serves both outcome measures from it.
+
+    The binary outcome and P(gold) come from the same option log-probabilities, so
+    computing them separately would double the inference for no new information.
+    The cache also makes the contamination check nearly free, since it re-uses the
+    baseline condition the headline already paid for.
+    """
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.cache: dict[tuple[str, str], list[float]] = {}
+
+    async def scores(self, question: str, choices: Sequence[str], hint: str) -> list[float]:
+        key = (question, hint)
+        if key not in self.cache:
+            self.cache[key] = await self.inner.score_choices(question, choices, hint)
+        return self.cache[key]
+
+    async def correct(self, item: dict, hint: str) -> float:
+        scores = await self.scores(item["question"], item["choices"], hint)
+        return float(max(range(len(scores)), key=scores.__getitem__) == item["gold_idx"])
+
+    async def prob_gold(self, item: dict, hint: str) -> float:
+        """Softmax over the options, restricted to the options offered.
+
+        Continuous because the binary indicator throws away most of the signal: it
+        moves only when a hint flips the argmax, so an effect that shifts belief
+        without crossing the boundary reads as exactly zero. On a four-way item the
+        indicator's variance is near its maximum, and a plausible transfer effect
+        here is a couple of points - smaller than the binary measure can resolve at
+        any n this corpus can supply.
+        """
+        scores = await self.scores(item["question"], item["choices"], hint)
+        top = max(scores)
+        weights = [math.exp(s - top) for s in scores]
+        total = sum(weights)
+        return weights[item["gold_idx"]] / total if total else float("nan")
+
+
+def build_pairs_by_similarity(
+    items: Sequence[dict],
+    units: dict[str, units_mod.Unit],
+    dialogues: dict[str, list[dict]],
+    embeddings: tuple,
+    *,
+    threshold: float = 0.82,
+    sources_per_target: int = 3,
+    seed: int = 0,
+) -> list[dict]:
+    """Pair items whose PRIMARY units are close in embedding space.
+
+    Primary only, deliberately. Items carry two or three units and matching on any
+    of them pairs on a shared prerequisite instead of a shared lesson - it put a
+    stamps-and-rates problem with a rounding problem at similarity 1.000, because
+    both happened to list place value. The first unit is the thing the item
+    actually tests, so it is the only one that makes "teaching A should help on B"
+    a fair claim.
+
+    THE THRESHOLD IS A GRANULARITY DIAL, and it trades power against validity:
+
+        0.88   66 targets   tight; near-duplicate skills only
+        0.82   81 targets   still clean - simple vs compound interest,
+                            rounding to tens vs to hundreds
+        0.75  113 targets   starts admitting neighbours rather than the same skill
+        0.70  144 targets   too loose to call it the same lesson
+
+    Only the SOURCE needs a dialogue; the target just needs to be an item. That is
+    what lets held-out eval items serve as targets, and it is most of where the
+    usable n comes from.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    index, matrix = embeddings
+    rng = random.Random(seed)
+
+    usable, primaries = [], []
+    for item in items:
+        key = units_mod.item_key(item)
+        unit = units.get(key)
+        if unit and unit.primary and unit.primary in index:
+            usable.append(item)
+            primaries.append(index[unit.primary])
+    if not usable:
+        return []
+
+    vectors = matrix[np.asarray(primaries)]
+    similarity = (vectors @ vectors.T).astype(float)
+    np.fill_diagonal(similarity, -1.0)
+
+    keys = [units_mod.item_key(i) for i in usable]
+    source_positions = [i for i, k in enumerate(keys) if dialogues.get(k)]
+
+    pairs: list[dict] = []
+    for t, target in enumerate(usable):
+        scored = [(similarity[t, s], s) for s in source_positions if s != t and similarity[t, s] >= threshold]
+        if not scored:
+            continue
+        scored.sort(key=lambda x: -x[0])
+        for sim, s in scored[:sources_per_target]:
+            pairs.append(
+                {
+                    "unit": units[keys[t]].primary,
+                    "source_unit": units[keys[s]].primary,
+                    "similarity": round(float(sim), 4),
+                    "target": target,
+                    "target_key": keys[t],
+                    "source_key": keys[s],
+                    "source_question": usable[s].get("question", ""),
+                }
+            )
+    rng.shuffle(pairs)
+    return pairs
 
 
 def build_pairs(
@@ -216,68 +333,128 @@ async def run(args) -> None:
     dialogues = load_dialogues(args.traces, tier=args.tier)
     print(f"{len(items)} items, {len(units)} annotated, dialogues for {len(dialogues)} items")
 
-    pairs = build_pairs(
-        items,
-        units,
-        dialogues,
-        seed=args.seed,
-        max_per_unit=args.max_per_unit,
-        sources_per_target=args.sources_per_target,
-    )
+    if args.embeddings:
+        pairs = build_pairs_by_similarity(
+            items,
+            units,
+            dialogues,
+            units_mod.load_embeddings(args.embeddings),
+            threshold=args.pair_threshold,
+            sources_per_target=args.sources_per_target,
+            seed=args.seed,
+        )
+    else:
+        pairs = build_pairs(
+            items,
+            units,
+            dialogues,
+            seed=args.seed,
+            max_per_unit=args.max_per_unit,
+            sources_per_target=args.sources_per_target,
+        )
     if args.limit:
         pairs = pairs[: args.limit]
     if not pairs:
         raise SystemExit(
-            "no pairs. Either the unit tags are all unique (check `units.py --out`'s "
-            "coverage report) or no source item has a dialogue in the traces."
+            "no pairs. Exact unit names rarely repeat - pass --embeddings (written by\n"
+            "units.py --embed) so pairing goes by similarity instead of string equality."
         )
 
     rng = random.Random(args.seed)
     chosen = {p["source_key"]: pick_dialogue(dialogues[p["source_key"]], rng) for p in pairs}
     targets = len({p["target_key"] for p in pairs})
+    sims = [p.get("similarity") for p in pairs if p.get("similarity") is not None]
     print(
-        f"{len(pairs)} pairs over {len({p['unit'] for p in pairs})} units, {targets} distinct targets\n"
-        f"  1 SE = {(0.25 / len(pairs)) ** 0.5:.3f} by pairs, {(0.25 / targets) ** 0.5:.3f} by distinct targets"
+        f"{len(pairs)} pairs, {targets} distinct targets, {len({p['unit'] for p in pairs})} units"
+        + (f", similarity {min(sims):.3f}-{max(sims):.3f}" if sims else "")
     )
 
     if args.show_pairs:
         for p in pairs[: args.show_pairs]:
-            print(f"\n  unit: {p['unit']}")
-            print(f"    taught on: {p['source_question'][:90]}")
-            print(f"    tested on: {p['target'].get('question', '')[:90]}")
+            sim = f" (sim {p['similarity']:.3f})" if p.get("similarity") is not None else ""
+            print(f"\n  {p.get('source_unit', p['unit'])} -> {p['unit']}{sim}")
+            print(f"    taught on: {p['source_question'][:88]}")
+            print(f"    tested on: {p['target'].get('question', '')[:88]}")
 
     if args.dry_run:
         return
 
     if args.stub_student:
         print("\n*** STUB STUDENT - plumbing check only, these numbers mean nothing ***")
-        student = StubStudent(args.seed)
+        student = CachingStudent(StubStudent(args.seed))
     else:
-        student = TransferStudent(args.student_model, args.student_url, args.api_key)
+        student = CachingStudent(TransferStudent(args.student_model, args.student_url, args.api_key))
 
-    async def policy(ps: Sequence[dict]) -> list[str]:
-        return [str(chosen[p["source_key"]].get("completion") or "") for p in ps]
+    texts = [str(chosen[p["source_key"]].get("completion") or "") for p in pairs]
+    swapped = make_swap(units, args.seed)(pairs, texts)
 
-    async def outcome(pair: dict, text: str) -> float:
-        item = pair["target"]
-        picked = await student.choose(item["question"], item["choices"], hint=text)
-        return float(picked == item["gold_idx"])
+    limiter = asyncio.Semaphore(args.concurrency)
 
-    anchor = Anchor(
-        items=pairs, policy=policy, outcome=outcome, concurrency=args.concurrency, swap=make_swap(units, args.seed)
+    async def both(pair: dict, text: str) -> tuple[float, float]:
+        async with limiter:
+            return await student.correct(pair["target"], text), await student.prob_gold(pair["target"], text)
+
+    conditions = await asyncio.gather(
+        asyncio.gather(*(both(p, "") for p in pairs)),
+        asyncio.gather(*(both(p, t) for p, t in zip(pairs, texts))),
+        asyncio.gather(*(both(p, s) for p, s in zip(pairs, swapped))),
     )
-    result = await anchor.run()
+    base, treat, swap = conditions
+
     print("\n=== transfer ===")
-    print(result)
-    verdict(result, targets)
+    results = {}
+    for label, k in (("solved (binary)", 0), ("P(gold) (continuous)", 1)):
+        results[label] = report(label, [x[k] for x in base], [x[k] for x in treat], [x[k] for x in swap])
 
     if args.report:
         await leak_contrast(pairs, dialogues, student, args)
 
     if args.out:
         with open(args.out, "w") as handle:
-            json.dump({**result.to_dict(), "pairs": len(pairs)}, handle, indent=2)
+            json.dump({"pairs": len(pairs), "targets": targets, "measures": results}, handle, indent=2)
         print(f"\nwrote {args.out}")
+
+
+def report(label: str, base: list[float], treated: list[float], swapped: list[float]) -> dict:
+    """Means, plus a PAIRED standard error taken from the data.
+
+    The anchor quotes ``0.5/sqrt(n)``, the worst case for an unpaired proportion.
+    Here every condition is measured on the same target with the same instrument,
+    so the quantity of interest is a per-pair difference and its standard error is
+    the spread of those differences - typically well under the unpaired bound,
+    because most pairs simply do not move and contribute nothing to the variance.
+    Quoting the unpaired figure would hide a real effect behind a bound that does
+    not apply.
+    """
+    n = len(base)
+    gains = [t - b for t, b in zip(treated, base)]
+    specs = [t - s for t, s in zip(treated, swapped)]
+
+    def se(xs: list[float]) -> float:
+        return statistics.stdev(xs) / math.sqrt(len(xs)) if len(xs) > 1 else float("nan")
+
+    gain, spec = statistics.fmean(gains), statistics.fmean(specs)
+    gse, sse = se(gains), se(specs)
+    print(f"\n  {label}  (n={n})")
+    print(
+        f"    baseline {statistics.fmean(base):.3f}   treated {statistics.fmean(treated):.3f}"
+        f"   swapped {statistics.fmean(swapped):.3f}"
+    )
+    print(f"    gain        {gain:+.4f} +/- {gse:.4f}  = {gain / gse:+.1f} SE" if gse else "")
+    print(f"    specificity {spec:+.4f} +/- {sse:.4f}  = {spec / sse:+.1f} SE" if sse else "")
+    verdict_line(spec, sse)
+    return {"n": n, "baseline": statistics.fmean(base), "gain": gain, "gain_se": gse, "spec": spec, "spec_se": sse}
+
+
+def verdict_line(spec: float, se: float) -> None:
+    if not se or math.isnan(se):
+        return
+    if abs(spec) < 2 * se:
+        print("    -> no unit-specific transfer at this n")
+    elif spec > 0:
+        print("    -> unit-specific transfer PRESENT; leakage cannot produce this")
+    else:
+        print("    -> same-unit dialogue is WORSE than a foreign one; investigate before believing it")
 
 
 async def leak_contrast(pairs, dialogues, student, args) -> None:
@@ -311,10 +488,8 @@ async def leak_contrast(pairs, dialogues, student, args) -> None:
     limiter = asyncio.Semaphore(args.concurrency)
 
     async def measure(pair: dict, text: str) -> float:
-        item = pair["target"]
         async with limiter:
-            picked = await student.choose(item["question"], item["choices"], hint=text)
-        return float(picked == item["gold_idx"])
+            return await student.prob_gold(pair["target"], text)
 
     base, with_clean, with_leaked = await asyncio.gather(
         asyncio.gather(*(measure(p, "") for p, _, _ in subset)),
@@ -322,13 +497,15 @@ async def leak_contrast(pairs, dialogues, student, args) -> None:
         asyncio.gather(*(measure(p, str(lk.get("completion") or "")) for p, _, lk in subset)),
     )
     n = len(subset)
-    se = (0.25 / n) ** 0.5
+    clean_gain = [c - b for c, b in zip(with_clean, base)]
+    leaked_gain = [lk - b for lk, b in zip(with_leaked, base)]
+    se = statistics.stdev([c - lk for c, lk in zip(clean_gain, leaked_gain)]) / math.sqrt(n) if n > 1 else float("nan")
     b, c, lk = statistics.fmean(base), statistics.fmean(with_clean), statistics.fmean(with_leaked)
-    print(f"  n={n}  (1 SE = {se:.3f})")
+    print(f"  n={n}, P(gold), paired 1 SE on the difference = {se:.4f}")
     print(f"  baseline           {b:.3f}")
-    print(f"  clean source       {c:.3f}   gain {c - b:+.3f}")
-    print(f"  leaked source      {lk:.3f}   gain {lk - b:+.3f}")
-    if lk - b >= (c - b) - 2 * se and lk - b > 2 * se:
+    print(f"  clean source       {c:.3f}   gain {statistics.fmean(clean_gain):+.4f}")
+    print(f"  leaked source      {lk:.3f}   gain {statistics.fmean(leaked_gain):+.4f}")
+    if statistics.fmean(leaked_gain) >= statistics.fmean(clean_gain) - 2 * se:
         print(
             "\n  -> CONTAMINATED. Leaking about A should be worthless on B, and it\n"
             "     is not. The pairs share more than a knowledge unit; treat the\n"
@@ -336,34 +513,6 @@ async def leak_contrast(pairs, dialogues, student, args) -> None:
         )
     else:
         print("\n  -> clean. Leaking about A does not carry to B, which is what the pairing assumed.")
-
-
-def verdict(result: AnchorResult, distinct_targets: int | None = None) -> None:
-    """State the reading in standard errors, so it cannot be talked up later.
-
-    Judged against the CONSERVATIVE standard error - the one implied by distinct
-    target items rather than by pairs - because pairs sharing a target are not
-    independent observations and the pair-count SE flatters the result.
-    """
-    se = result.standard_error
-    if distinct_targets:
-        se = max(se, (0.25 / distinct_targets) ** 0.5)
-    gain, spec = result.gain, result.specificity
-    print(f"\n  gain        {gain:+.3f} = {gain / se:+.1f} SE")
-    print(f"  specificity {spec:+.3f} = {spec / se:+.1f} SE   (conservative SE = {se:.3f})")
-    if abs(spec) < 2 * se:
-        print(
-            "\n  -> NO transferable teaching signal at this n.\n"
-            "     Same-unit tutoring is worth no more than tutoring about anything\n"
-            "     else, so the outcome measure still has only the one channel.\n"
-            "     Do not run another GRPO job against it."
-        )
-    else:
-        print(
-            "\n  -> There IS a unit-specific transfer effect.\n"
-            "     Leakage cannot produce this, so it is a pedagogy channel the\n"
-            "     current outcome measure cannot see. Worth rebuilding around."
-        )
 
 
 def main() -> None:
@@ -376,6 +525,8 @@ def main() -> None:
     parser.add_argument("--student-url", default="http://localhost:8001/v1")
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--embeddings", default=None, help=".npz from units.py --embed; enables similarity pairing")
+    parser.add_argument("--pair-threshold", type=float, default=0.82, help="min primary-unit cosine similarity")
     parser.add_argument("--max-per-unit", type=int, default=12)
     parser.add_argument("--sources-per-target", type=int, default=3, help="same-unit dialogues tested per target item")
     parser.add_argument("--limit", type=int, default=None)

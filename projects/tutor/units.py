@@ -42,9 +42,10 @@ import asyncio
 import collections
 import dataclasses
 import json
-import os
 import re
 from collections.abc import Sequence
+
+from projects.tutor import gateway
 
 PROMPT = """You are decomposing an assessment item for a tutoring system.
 
@@ -169,14 +170,12 @@ async def annotate(
     items: Sequence[dict],
     believed: dict[str, str] | None = None,
     *,
-    model: str = "gpt-5.1",
+    model: str = gateway.DEFAULT_MODEL,
     base_url: str | None = None,
     api_key: str | None = None,
     concurrency: int = 8,
 ) -> list[Unit]:
-    from openai import AsyncOpenAI  # noqa: PLC0415
-
-    client = AsyncOpenAI(base_url=base_url, api_key=api_key or os.environ.get("OPENAI_API_KEY", "EMPTY"))
+    client = gateway.make_client(base_url, api_key)
     believed = believed or {}
     limiter = asyncio.Semaphore(concurrency)
 
@@ -213,7 +212,11 @@ Rules:
 
 
 async def canonicalize(
-    rows: Sequence[Unit], *, model: str = "gpt-5.1", base_url: str | None = None, api_key: str | None = None
+    rows: Sequence[Unit],
+    *,
+    model: str = gateway.DEFAULT_MODEL,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> list[Unit]:
     """Merge synonymous unit names into one vocabulary.
 
@@ -227,13 +230,11 @@ async def canonicalize(
     the alternatives. Skipping this on a 307-item corpus spread over 3 subjects
     and 8 grades is the likeliest way to get an empty probe.
     """
-    from openai import AsyncOpenAI  # noqa: PLC0415
-
     names = sorted({u.primary for u in rows if u.primary})
     if not names:
         return list(rows)
 
-    client = AsyncOpenAI(base_url=base_url, api_key=api_key or os.environ.get("OPENAI_API_KEY", "EMPTY"))
+    client = gateway.make_client(base_url, api_key)
     reply = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": CANON_PROMPT.format(names="\n".join(f"- {n}" for n in names))}],
@@ -251,6 +252,45 @@ async def canonicalize(
         merged.append(dataclasses.replace(u, units=renamed))
     print(f"canonicalised {len(names)} unit names down to {len({mapping.get(n, n) for n in names})}")
     return merged
+
+
+def embed_units(rows: Sequence[Unit], path: str, *, api_key: str | None = None, batch: int = 256) -> None:
+    """Embed every unit name and cache it beside the annotations.
+
+    WHY EMBEDDINGS AND NOT STRING EQUALITY. Items are annotated independently, so
+    one skill comes back under many names and exact matching splits it: 307 items
+    produced 277 distinct primary units, leaving 51 that could be paired with
+    anything. An LLM synonym merge only recovered 303 -> 277, because most of
+    these are not synonyms - they are neighbours. "estimating sums by rounding to
+    the nearest ten" and "...to the nearest hundred" are the same lesson and no
+    merge pass will call them one name.
+
+    Cosine similarity puts that pair at 0.886 and keeps genuinely different
+    skills apart, which turns a threshold into an honest granularity dial rather
+    than a naming lottery.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    names = sorted({u for r in rows for u in r.units})
+    client = gateway.make_embed_client(api_key)
+    vecs: list[list[float]] = []
+    for i in range(0, len(names), batch):
+        reply = client.embeddings.create(model=gateway.EMBED_MODEL, input=names[i : i + batch])
+        vecs.extend(d.embedding for d in reply.data)
+
+    matrix = np.asarray(vecs, dtype=np.float32)
+    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True)
+    np.savez_compressed(path, names=np.array(names, dtype=object), vectors=matrix)
+    print(f"embedded {len(names)} unit names -> {path}")
+
+
+def load_embeddings(path: str):
+    """``(name -> row index, normalised matrix)``."""
+    import numpy as np  # noqa: PLC0415
+
+    blob = np.load(path, allow_pickle=True)
+    names = [str(n) for n in blob["names"]]
+    return {n: i for i, n in enumerate(names)}, blob["vectors"]
 
 
 def load(path: str) -> dict[str, Unit]:
@@ -289,12 +329,13 @@ def main() -> None:
     parser.add_argument("--items", required=True, help="items JSONL")
     parser.add_argument("--traces", default=None, help="gen_traces JSONL, for the observed wrong answer")
     parser.add_argument("--out", required=True)
-    parser.add_argument("--model", default="gpt-5.1")
+    parser.add_argument("--model", default=gateway.DEFAULT_MODEL)
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--no-canonicalize", action="store_true", help="skip the synonym merge (usually a mistake)")
+    parser.add_argument("--embed", default=None, help="also write unit-name embeddings to this .npz")
     args = parser.parse_args()
 
     with open(args.items) as handle:
@@ -322,6 +363,8 @@ def main() -> None:
     if not args.no_canonicalize:
         units = asyncio.run(canonicalize(units, model=args.model, base_url=args.base_url, api_key=args.api_key))
     save(units, args.out)
+    if args.embed:
+        embed_units(units, args.embed, api_key=args.api_key)
 
     stats = coverage(units)
     if not args.no_canonicalize:
@@ -329,10 +372,12 @@ def main() -> None:
     print(json.dumps(stats, indent=2))
     if stats["pairable_items"] < 40:
         print(
-            f"\nWARNING: only {stats['pairable_items']} items sit on a unit shared with another item.\n"
-            "The transfer probe needs pairs, and at n<40 one standard error is 0.079 -\n"
-            "the smallest difference you could trust is ~0.16, which is larger than the\n"
-            "effect. Annotate more items or loosen the unit naming before running it."
+            f"\nNOTE: only {stats['pairable_items']} items share an EXACT primary unit name with\n"
+            "another item. That is expected and is not by itself a problem - independent\n"
+            "annotation gives one skill many names, and the probe pairs by embedding\n"
+            "similarity rather than string equality. Pass --embed and let\n"
+            "transfer_probe.py report the count at your chosen threshold; on this corpus\n"
+            "that took 51 exact-match items up to 201 at 0.85."
         )
 
 
