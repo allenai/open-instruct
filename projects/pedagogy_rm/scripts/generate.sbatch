@@ -34,7 +34,7 @@ TEACHER=${TEACHER:-allenai/OLMo-2-1124-7B-Instruct}
 STUDENT=${STUDENT:-Qwen/Qwen2.5-1.5B-Instruct}
 ITEMS=${ITEMS:-$DATA/data/state_tests/train_items.jsonl}
 N_ITEMS=${N_ITEMS:-300}
-K=${K:-2}
+K=${K:-4}
 
 # HOME is a 200GB quota; overrunning it kills the job at model load with
 # "Disk quota exceeded". Everything cache-shaped goes to scratch.

@@ -45,6 +45,11 @@ def units(trace: dict, max_per_dialogue: int, rng: random.Random) -> list[dict]:
         tutor_text = (entry.get("text") or "").strip()
         if not tutor_text or not prior:
             continue
+        # A turn cut off at the token cap is unlabelable: rating it for
+        # ``concise`` rates the cap, and ``actionable`` is undefined when the
+        # instruction is the part that got cut.
+        if entry.get("truncated"):
+            continue
         found.append(
             {
                 "id": unit_id(trace, i),
@@ -59,6 +64,7 @@ def units(trace: dict, max_per_dialogue: int, rng: random.Random) -> list[dict]:
                 "subject": trace.get("subject"),
                 "grade": trace.get("grade"),
                 "temperature": trace.get("temperature"),
+                "style": trace.get("style"),
             }
         )
     if max_per_dialogue and len(found) > max_per_dialogue:

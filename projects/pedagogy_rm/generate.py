@@ -19,9 +19,21 @@ humans to rate. Every scoring idea belongs after the labels exist and after
 per-dimension agreement has been measured - see the README's order of work.
 
 SPREAD MATTERS MORE THAN VOLUME. A rater cannot calibrate a scale on 300 turns
-that are all mediocre in the same way, and a probe cannot learn a direction that
-the data does not vary along. ``--temperatures`` samples each dialogue at a
-different temperature to widen the quality range on purpose.
+that are all mediocre in the same way, and a probe cannot learn a direction the
+data does not vary along. The first run made this concrete: one prompt at two
+temperatures gave 1,800 turns with a median of 94 words and almost no short
+ones, so ``concise`` would have been a constant and ``elicits`` nearly one. Two
+knobs widen it deliberately:
+
+    --temperatures  varies how careful the turn is
+    STYLES          varies what KIND of turn it is - a question, a lecture, one
+                    sentence, or unconstrained
+
+The styles are not four prompts hoping for variety. Each one targets a rubric
+dimension that would otherwise be degenerate: ``socratic`` and ``explain`` sit at
+opposite ends of ``elicits``, ``brief`` and ``explain`` at opposite ends of
+``concise``. Sampling per dialogue means the same item appears in several styles,
+so a rater sees the contrast rather than having to imagine it.
 """
 
 from __future__ import annotations
@@ -34,16 +46,27 @@ import random
 TEACHER_SYSTEM = """You are a tutor helping a student with a test question. \
 The student cannot see your instructions.
 
-Guide the student toward understanding. Do not state the answer or eliminate \
-options for them. Keep each message short - one idea at a time."""
+Guide the student toward understanding. Do not state the answer and do not \
+eliminate options for them."""
 
-STUDENT_SYSTEM = """You are a school student working on a test question. You are \
-NOT confident and you do not already know the answer.
+# Appended to the teacher's system prompt, one per dialogue. See the module
+# docstring: these exist to put spread into dimensions that would otherwise be
+# constant, not to find the single best tutor prompt.
+STYLES: dict[str, str] = {
+    "plain": "Reply in at most three sentences.",
+    "brief": "Reply with a single short sentence. No preamble, no summary.",
+    "socratic": "Reply with exactly one question and nothing else. Never explain.",
+    "explain": "Explain the underlying idea thoroughly before asking anything.",
+}
 
-Think out loud in one or two sentences, the way a student would: say what you \
-think is going on, what you are stuck on, or what you would try next. Make the \
-kinds of mistakes a student of your grade makes. Never state that you are an AI. \
-Do not give a final answer unless the tutor asks for one."""
+STUDENT_SYSTEM = """You are a school student working on a test question. You do \
+not know the answer and you are not confident.
+
+Reply in ONE OR TWO SHORT SENTENCES, in a student's plain voice. Say what you \
+half-remember, what you are stuck on, or what you would try next. Guess wrong \
+sometimes. Never lecture, never define terms, never list what you know, and \
+never sound like a textbook or a teacher. Do not thank the tutor. Do not give a \
+final answer unless asked."""
 
 
 def student_opener(item: dict) -> str:
@@ -63,8 +86,54 @@ def student_opener(item: dict) -> str:
     )
 
 
+async def say(client, model: str, messages: list[dict], temperature: float, max_tokens: int) -> tuple[str, bool]:
+    """One completion, plus whether it was cut off at the cap.
+
+    Truncation has to be tracked, not ignored. The first run capped tutor turns
+    at 160 tokens and 11% of them ended mid-word, which is unlabelable: a rater
+    scoring ``concise`` on a turn the cap truncated is scoring the cap.
+    """
+    reply = await client.chat.completions.create(
+        model=model, messages=messages, temperature=temperature, max_tokens=max_tokens
+    )
+    choice = reply.choices[0]
+    return (choice.message.content or "").strip(), choice.finish_reason == "length"
+
+
+def teacher_view(question: str, transcript: list[dict], style: str) -> list[dict]:
+    """The teacher's messages, strictly alternating user/assistant.
+
+    The question is folded into the FIRST user message rather than sent as its
+    own. Two user messages in a row is not something a chat template promises to
+    handle, and OLMo's did not: the first run produced turns that began
+    mid-sentence, in the middle of a word.
+    """
+    messages = [{"role": "system", "content": TEACHER_SYSTEM + "\n\n" + STYLES[style]}]
+    for i, entry in enumerate(transcript):
+        text = entry["text"]
+        if i == 0:
+            text = f"Question I'm working on:\n{question}\n\n{text}"
+        messages.append({"role": "user" if entry["role"] == "student" else "assistant", "content": text})
+    return messages
+
+
+def student_view(item: dict, transcript: list[dict]) -> list[dict]:
+    """The student's messages, strictly alternating, opening with the same prompt."""
+    messages = [{"role": "system", "content": STUDENT_SYSTEM}, {"role": "user", "content": student_opener(item)}]
+    for entry in transcript:
+        messages.append({"role": "assistant" if entry["role"] == "student" else "user", "content": entry["text"]})
+    return messages
+
+
 async def dialogue(
-    teacher_client, student_client, item: dict, teacher_model: str, student_model: str, turns: int, temperature: float
+    teacher_client,
+    student_client,
+    item: dict,
+    teacher_model: str,
+    student_model: str,
+    turns: int,
+    temperature: float,
+    style: str,
 ) -> dict:
     """One dialogue. Student opens, then they alternate for ``turns`` tutor turns.
 
@@ -73,42 +142,21 @@ async def dialogue(
     for the student's model and get a 404 on every dialogue.
     """
     question = item["question"]
-    student_history = [
-        {"role": "system", "content": STUDENT_SYSTEM},
-        {"role": "user", "content": student_opener(item)},
-    ]
-    reply = await student_client.chat.completions.create(
-        model=student_model, messages=student_history, temperature=0.9, max_tokens=120
-    )
-    student_text = (reply.choices[0].message.content or "").strip()
+    text, _ = await say(student_client, student_model, student_view(item, []), 0.9, 100)
+    transcript: list[dict] = [{"role": "student", "text": text}]
 
-    transcript = [{"role": "student", "text": student_text}]
     for _ in range(turns):
-        teacher_messages = [
-            {"role": "system", "content": TEACHER_SYSTEM},
-            {"role": "user", "content": f"Question the student is working on:\n{question}"},
-        ]
-        for entry in transcript:
-            teacher_messages.append(
-                {"role": "user" if entry["role"] == "student" else "assistant", "content": entry["text"]}
-            )
-        reply = await teacher_client.chat.completions.create(
-            model=teacher_model, messages=teacher_messages, temperature=temperature, max_tokens=160
+        # 400 tokens is well above what any style should need, so a turn that
+        # still hits it is a runaway rather than a good turn spoiled by the cap.
+        text, truncated = await say(
+            teacher_client, teacher_model, teacher_view(question, transcript, style), temperature, 400
         )
-        tutor_text = (reply.choices[0].message.content or "").strip()
-        transcript.append({"role": "tutor", "text": tutor_text})
-
-        student_messages = [{"role": "system", "content": STUDENT_SYSTEM}, {"role": "user", "content": question}]
-        for entry in transcript:
-            student_messages.append(
-                {"role": "assistant" if entry["role"] == "student" else "user", "content": entry["text"]}
-            )
-        reply = await student_client.chat.completions.create(
-            model=student_model, messages=student_messages, temperature=0.9, max_tokens=120
-        )
-        transcript.append({"role": "student", "text": (reply.choices[0].message.content or "").strip()})
+        transcript.append({"role": "tutor", "text": text, "truncated": truncated})
+        text, _ = await say(student_client, student_model, student_view(item, transcript), 0.9, 100)
+        transcript.append({"role": "student", "text": text})
 
     return {
+        "style": style,
         "item_id": item.get("id") or item.get("item_no"),
         "question": question,
         "choices": item.get("choices"),
@@ -132,7 +180,15 @@ async def run(args) -> None:
     if args.n_items:
         items = items[: args.n_items]
     temperatures = [float(t) for t in args.temperatures.split(",")]
-    print(f"{len(items)} items x {args.k} dialogues, temperatures {temperatures}")
+    styles = [s for s in args.styles.split(",") if s]
+    unknown = set(styles) - set(STYLES)
+    if unknown:
+        raise SystemExit(f"unknown styles {sorted(unknown)}; have {sorted(STYLES)}")
+    # Each (temperature, style) combination is walked in order rather than
+    # sampled, so the k dialogues for an item differ from each other by
+    # construction instead of by luck.
+    grid = [(t, s) for s in styles for t in temperatures]
+    print(f"{len(items)} items x {args.k} dialogues over {len(grid)} (temp, style) cells: {grid}")
 
     teacher_client = openai.AsyncOpenAI(base_url=args.base_url, api_key=args.api_key or "EMPTY", timeout=600.0)
     student_client = openai.AsyncOpenAI(
@@ -142,6 +198,7 @@ async def run(args) -> None:
 
     async def one(item: dict, index: int):
         async with limiter:
+            temperature, style = grid[index % len(grid)]
             try:
                 return await dialogue(
                     teacher_client,
@@ -150,14 +207,18 @@ async def run(args) -> None:
                     args.teacher_model,
                     args.student_model,
                     args.turns,
-                    temperatures[index % len(temperatures)],
+                    temperature,
+                    style,
                 )
             except Exception as exc:  # a dropped dialogue is not worth losing the run over
                 print(f"  failed on {item.get('question', '')[:50]!r}: {exc}")
                 return None
 
-    jobs = [one(item, i) for item in items for i in range(args.k)]
-    done = 0
+    # Global counter, not a per-item one: indexing by the within-item repeat
+    # would mean k=4 against an 8-cell grid never reaches cells 4-7, so two of
+    # the four styles would silently never be generated.
+    jobs = [one(item, n) for n, (item, _) in enumerate((it, i) for it in items for i in range(args.k))]
+    done = cut = turns = 0
     with open(args.out, "w") as handle:
         for future in asyncio.as_completed(jobs):
             row = await future
@@ -167,7 +228,10 @@ async def run(args) -> None:
                 done += 1
                 if done % 25 == 0:
                     print(f"  {done}/{len(jobs)}")
+                cut += sum(1 for t in row["transcript"] if t.get("truncated"))
+                turns += sum(1 for t in row["transcript"] if t["role"] == "tutor")
     print(f"wrote {done} dialogues to {args.out}")
+    print(f"truncated tutor turns: {cut}/{turns} — build_label_set drops these")
 
 
 def main() -> None:
@@ -183,6 +247,7 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=2, help="dialogues per item")
     parser.add_argument("--n-items", type=int, default=0, help="0 for all")
     parser.add_argument("--temperatures", default="0.7,1.0", help="widen the quality range on purpose")
+    parser.add_argument("--styles", default="plain,brief,socratic,explain", help=f"any of {sorted(STYLES)}")
     parser.add_argument("--concurrency", type=int, default=16)
     parser.add_argument("--seed", type=int, default=0)
     asyncio.run(run(parser.parse_args()))
