@@ -155,6 +155,8 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
         self._backend_kwargs = backend_kwargs
         self._backend: SandboxBackend | None = None
         self._step_count = 0
+        self._sandbox_died = False
+        self._oom_killed = False
         self._task_id: str | None = None
         self._task_data_dir = task_data_dir
         self._task_data_hf_repo = task_data_hf_repo
@@ -316,6 +318,8 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
             record_phase("start")
 
         self._step_count = 0
+        self._sandbox_died = False
+        self._oom_killed = False
         self._task_id = task_id
         self._max_steps = kwargs.get("max_steps", VANILLUX_CALL_LIMIT)
         self._backend.run_command("mkdir -p /workspace /output /logs/verifier")
@@ -419,6 +423,7 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
                 return self._with_last_step_warning(self._execute_bash(args))
             except SandboxOOMError as e:
                 logger.warning(f"[{self._task_id}] sandbox OOM: {e}")
+                self._oom_killed = True
                 self._close_episode_backend()
                 return StepResult(
                     result=("Sandbox container was killed by the OOM reaper. Ending episode with reward 0."),
@@ -428,6 +433,7 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
                 )
             except SandboxDiedError as e:
                 logger.warning(f"[{self._task_id}] sandbox died mid-episode: {e}")
+                self._sandbox_died = True
                 self._close_episode_backend()
                 return StepResult(
                     result=("Sandbox died mid-episode (likely preempted). Ending episode with reward 0."),
@@ -550,7 +556,14 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
         return 0.0
 
     def get_metrics(self) -> dict[str, float]:
-        return {"step_count": float(self._step_count)}
+        # Batch means of the flags land on wandb as env/<name>/sandbox_died
+        # and env/<name>/oom_killed — i.e. the fraction of rollouts lost to
+        # preemption/expiry and OOM respectively.
+        return {
+            "step_count": float(self._step_count),
+            "sandbox_died": float(self._sandbox_died),
+            "oom_killed": float(self._oom_killed),
+        }
 
     def state(self) -> State:
         return State(episode_id=self._task_id, step_count=self._step_count)
