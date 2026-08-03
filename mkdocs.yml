@@ -97,6 +97,7 @@ nav:
     - algorithms/terminal_rl_trajectory_analysis.md
     - algorithms/dr_research_rl_trajectory_analysis.md
     - algorithms/multi_task_rl.md
+    - algorithms/on_policy_distillation.md
     - algorithms/olmo_core_sharding.md
     - algorithms/olmo_core_reference.md
     - algorithms/tool_training.md

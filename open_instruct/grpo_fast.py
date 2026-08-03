@@ -439,6 +439,37 @@ class PolicyTrainerRayProcess(RayProcess):
             register_qwen3_5_zero3_external_parameters(self.ref_policy)
             if args.lm_head_fp32:
                 patch_hf_lm_head_fp32(self.ref_policy)
+
+        # On-policy distillation teacher: a frozen model that scores rollouts
+        # learner-side, loaded with the same eval config as the reference
+        # policy. Unlike the reference policy it is never polyak-updated and
+        # never checkpointed — it is reloaded from its path on restart.
+        self.teacher_model: PreTrainedModel | None = None
+        if args.opd_teacher_model_name_or_path is not None:
+            teacher_ds_config, self.teacher_hf_ds_config = get_eval_ds_config(
+                offload=False,
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
+                per_device_train_batch_size=args.per_device_train_batch_size,
+            )
+            teacher_model_config = dataclasses.replace(
+                model_config,
+                model_name_or_path=args.opd_teacher_model_name_or_path,
+                model_revision=args.opd_teacher_model_revision,
+            )
+            self.teacher_model = load_ref_policy(
+                model_config=teacher_model_config,
+                ds_config=teacher_ds_config,
+                deepspeed_stage=args.deepspeed_stage,
+                local_rank=self.local_rank,
+                device=self.device,
+                rank=self.rank,
+                checkpoint_path=None,
+                mpu=self.mpu,
+            )
+            register_qwen3_5_zero3_external_parameters(self.teacher_model)
+            if args.lm_head_fp32:
+                patch_hf_lm_head_fp32(self.teacher_model)
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
         self.value_model = None
         if args.use_value_model:
@@ -901,6 +932,40 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = self._compute_logprobs(self.ref_policy, data_BT, cp_contexts_BT)
+
+        # On-policy distillation: score the rollout tokens under the frozen
+        # teacher and fold the sampled reverse KL into the advantages before
+        # the minibatch loop. The distillation term uses the vLLM (behavior)
+        # logprobs on the student side, so it is constant w.r.t. the trainer
+        # policy and composes with every loss_fn / trust-region mask downstream.
+        if self.teacher_model is not None:
+            with Timer("OPD teacher logprobs", noop=self.rank != 0):
+                teacher_logprobs_BT = self._compute_logprobs(self.teacher_model, data_BT, cp_contexts_BT)
+            with torch.no_grad():
+                opd_kl_sum = torch.zeros((), device=self.device)
+                opd_teacher_logprob_sum = torch.zeros((), device=self.device)
+                opd_token_count = torch.zeros((), device=self.device)
+                for i in range(len(data_BT.query_responses)):
+                    opd_response_mask = data_BT.response_masks[i][:, 1:].bool()
+                    behavior_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], opd_response_mask)
+                    data_BT.advantages[i], reverse_kl = grpo_utils.compute_opd_advantages(
+                        advantages=data_BT.advantages[i],
+                        behavior_logprobs=behavior_logprobs,
+                        teacher_logprobs=teacher_logprobs_BT[i],
+                        response_mask=opd_response_mask,
+                        kl_coef=self.args.opd_kl_coef,
+                        pure=self.args.opd_pure,
+                    )
+                    opd_kl_sum += reverse_kl.sum()
+                    opd_teacher_logprob_sum += torch.where(
+                        opd_response_mask, teacher_logprobs_BT[i].float(), torch.zeros_like(reverse_kl)
+                    ).sum()
+                    opd_token_count += opd_response_mask.sum()
+                opd_token_count = opd_token_count.clamp(min=1)
+                self.local_metrics["objective/opd_reverse_kl"] = (opd_kl_sum / opd_token_count).item()
+                self.local_metrics["objective/opd_teacher_logprob"] = (
+                    opd_teacher_logprob_sum / opd_token_count
+                ).item()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -3218,6 +3283,9 @@ def main(
         # utils.ensure_hf_repo_cached (utils.py:990).
         if not os.path.exists(model_config.model_name_or_path):
             snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+        if args.opd_teacher_model_name_or_path is not None and not os.path.exists(args.opd_teacher_model_name_or_path):
+            logger.info(f"Pre-downloading OPD teacher model {args.opd_teacher_model_name_or_path}...")
+            snapshot_download(args.opd_teacher_model_name_or_path, revision=args.opd_teacher_model_revision)
         open(barrier_file, "w").close()
         logger.info("Model pre-download complete.")
     else:
@@ -3227,6 +3295,13 @@ def main(
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+
+    if args.opd_teacher_model_name_or_path is not None and args.opd_pure and streaming_config.filter_zero_std_samples:
+        logger.warning(
+            "Pure OPD is enabled but `filter_zero_std_samples=True` (implied by `active_sampling`): groups whose "
+            "rewards all match get dropped, even though pure distillation can still learn from them. Consider "
+            "`--filter_zero_std_samples False` (and dropping `--active_sampling`) to train on every rollout."
+        )
 
     # Patch Qwen3.5 GatedDeltaNet to support packing (seq_idx/cu_seqlens).
     patch_qwen3_5_packing()
