@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # On-policy distillation (OPD) variant of qwen35_9b_dppo_repro_4node_64k.sh:
-# distill the DPPO-trained tmax-15k teacher (TB2.1-best step_120 of the 64k
-# repro run) back into the base Qwen3.5-9B student on the same terminal tasks.
+# distill the released tmax 9B teacher (allenai/tmax-9b) into the base
+# Qwen3.5-9B student on the same terminal tasks.
 #
 # The teacher is loaded learner-side as a frozen HF model (no CG conversion or
 # extra vLLM engines needed) and scores every rollout; the per-token reverse KL
@@ -18,14 +18,14 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
-TEACHER_MODEL=/weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_120
+TEACHER_MODEL=allenai/tmax-9b
 
 EXP_NAME=swerl_qwen35_9b_dppo_opd_4node_64k
 
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k OPD Qwen35 9b (pure distill from dppo_repro step_120; 4-node; 64k)" \
+       --description "tmax-15k OPD Qwen35 9b (pure distill from allenai/tmax-9b; 4-node; 64k)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \

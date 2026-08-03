@@ -1,22 +1,21 @@
 #!/bin/bash
 
 # Beaker OPD smoke test #2 (Qwen3.5, 1 node / 8 GPUs): base Qwen3.5-4B student
-# pure-distills from the GRPO-trained tmax 4B teacher (final/step_360 of
-# swerl_qwen35_4b_base_tmax_10k_verified_grpo) on the terminal sandbox tasks.
+# pure-distills from the released tmax 4B teacher (allenai/tmax-4b) on the
+# terminal sandbox tasks.
 #
 # Exercises the full production stack at small scale before the 4-node 9B run:
 # Qwen3.5 hybrid attention + Ulysses SP=2 + ZeRO-3 (teacher sharded across 4
 # learners) + liger tiled loss + DPPO + podman sandbox tools + OPD.
 # 4 learners (SP=2) + 4 engines. ~50 steps at 64 rollouts/step.
 #
-# The teacher is a raw Qwen3_5ForCausalLM weka checkpoint — fine for OPD since
-# the teacher runs learner-side under HF, never through vLLM (no CG conversion).
+# The teacher runs learner-side under HF, never through vLLM.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 MODEL=hamishivi/Qwen3.5-4B
 TOKENIZER=hamishivi/Qwen3.5-4B
-TEACHER_MODEL=/weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_10k_verified_grpo_4_podman_services__42__1778272031
+TEACHER_MODEL=allenai/tmax-4b
 
 EXP_NAME=swerl_qwen35_4b_dppo_opd_smoke_1node
 
