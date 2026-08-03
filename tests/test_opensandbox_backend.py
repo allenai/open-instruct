@@ -19,7 +19,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from open_instruct.environments import backends
-from open_instruct.environments.backends import _OPENSANDBOX_LIVE_SANDBOXES, OpenSandboxBackend, create_backend
+from open_instruct.environments.backends import (
+    _OPENSANDBOX_LIVE_SANDBOXES,
+    OpenSandboxBackend,
+    SandboxDiedError,
+    create_backend,
+)
 
 
 class _FakeOpenSandboxException(Exception):
@@ -430,17 +435,25 @@ class TestRunCommand(OpenSandboxBackendTestCase):
         self.assertIn("SpawnError", result.stderr)
         self.assertIn("cannot start process", result.stderr)
 
-    def test_run_command_restarts_and_retries_once_when_sandbox_died(self):
+    def test_run_command_raises_sandbox_died_when_sandbox_gone(self):
+        # A dead sandbox must end the episode (SandboxDiedError), never be
+        # silently replaced by a blank container mid-episode.
         backend = self._started_backend()
         [first] = self.fake.sandboxes
         first.state = _FakeSandboxState.TERMINATED
-        self.fake.script_for_substring("echo hi", _FakeOpenSandboxException("sandbox gone"), once=True)
-        self.fake.script_for_substring("echo hi", _make_execution(exit_code=0, stdout="hi\n"))
-        result = backend.run_command("echo hi")
-        self.assertEqual(result.exit_code, 0)
-        self.assertEqual(result.stdout, "hi\n")
-        self.assertEqual(len(self.fake.sandboxes), 2)
-        self.assertTrue(first.killed or first.state == _FakeSandboxState.TERMINATED)
+        self.fake.script_for_substring("echo hi", _FakeOpenSandboxException("sandbox gone"))
+        with self.assertRaisesRegex(SandboxDiedError, "died during exec"):
+            backend.run_command("echo hi")
+        self.assertEqual(len(self.fake.sandboxes), 1)  # No replacement sandbox.
+
+    def test_close_is_quiet_when_sandbox_already_dead(self):
+        backend = self._started_backend()
+        [sandbox] = self.fake.sandboxes
+        sandbox.state = _FakeSandboxState.TERMINATED
+        sandbox.kill_exceptions = [RuntimeError("sandbox not found"), RuntimeError("sandbox not found")]
+        backend.close()  # Must not raise, and must not retry against a gone sandbox.
+        self.assertEqual(len(sandbox.kill_exceptions), 1)  # Only one kill attempt consumed.
+        self.assertNotIn(sandbox, _OPENSANDBOX_LIVE_SANDBOXES)
 
     def test_run_command_does_not_restart_on_transient_error_while_alive(self):
         backend = self._started_backend()

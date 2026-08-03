@@ -28,7 +28,7 @@ from openenv.core.env_server.types import State
 
 from open_instruct import logger_utils
 
-from .backends import SandboxBackend, SandboxOOMError, create_backend
+from .backends import SandboxBackend, SandboxDiedError, SandboxOOMError, create_backend
 from .base import BaseEnvConfig, EnvCall, RLEnvironment, StepResult
 from .tools.utils import coerce_args
 
@@ -367,6 +367,15 @@ class SWERLSandboxEnv(RLEnvironment):
                     reward=0.0,
                     done=True,
                     metadata={"oom_killed": True, "task_id": self._task_id},
+                )
+            except SandboxDiedError as e:
+                logger.warning(f"[{self._task_id}] sandbox died mid-episode: {e}")
+                self._close_episode_backend()
+                return StepResult(
+                    result=("Sandbox died mid-episode (likely preempted). Ending episode with reward 0."),
+                    reward=0.0,
+                    done=True,
+                    metadata={"sandbox_died": True, "task_id": self._task_id},
                 )
         else:
             return self._with_last_step_warning(

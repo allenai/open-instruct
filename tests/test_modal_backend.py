@@ -19,6 +19,7 @@ from open_instruct.environments import backends
 from open_instruct.environments.backends import (
     _MODAL_LIVE_SANDBOXES,
     ModalBackend,
+    SandboxDiedError,
     create_backend,
     parse_mem_limit_mib,
 )
@@ -363,24 +364,17 @@ class TestRunCommand(ModalBackendTestCase):
         with self.assertRaisesRegex(RuntimeError, "not started"):
             backend.run_command("echo hi")
 
-    def test_run_command_restarts_and_retries_once_when_sandbox_died(self):
+    def test_run_command_raises_sandbox_died_when_sandbox_terminated(self):
+        # A dead sandbox must end the episode (SandboxDiedError), never be
+        # silently replaced by a blank container mid-episode.
         backend = self._started_backend()
         first = self.fake.sandboxes[0]
-
-        # The first sandbox is dead: every exec on it raises. The replacement
-        # sandbox created by the retry path succeeds.
-        def route(sandbox, argv):
-            if sandbox is first:
-                return _FakeModalExceptions.SandboxTerminatedError("sandbox terminated")
-            return _FakeProcess(stdout=b"hi\n")
-
-        self.fake.route_exec = route
-        result = backend.run_command("echo hi")
-        self.assertEqual(result.stdout, "hi\n")
-        self.assertEqual(result.exit_code, 0)
-        self.assertEqual(len(self.fake.sandboxes), 2)
-        self.assertTrue(first.terminated)
+        self.fake.script_for_substring("echo hi", _FakeModalExceptions.SandboxTerminatedError("sandbox terminated"))
+        with self.assertRaisesRegex(SandboxDiedError, "died during exec"):
+            backend.run_command("echo hi")
+        self.assertEqual(len(self.fake.sandboxes), 1)  # No replacement sandbox.
         backend.close()
+        self.assertTrue(first.terminated)
 
 
 class TestFileIO(ModalBackendTestCase):

@@ -166,6 +166,17 @@ class SandboxOOMError(RuntimeError):
     """
 
 
+class SandboxDiedError(RuntimeError):
+    """Raised when the sandbox vanished mid-episode (preemption, crash, expiry).
+
+    Callers should treat this as a terminal condition for the current
+    episode rather than restarting the sandbox: a restarted sandbox is a
+    blank container without the task's seed files or any state the agent
+    built up, so continuing the episode against it silently corrupts the
+    trajectory and its reward. Common with Spot/preemptible sandbox pods.
+    """
+
+
 class SandboxBackend(ABC):
     """Abstract interface for code/command execution backends."""
 
@@ -1060,14 +1071,11 @@ class ModalBackend(SandboxBackend):
         try:
             exit_code, stdout_raw, stderr_raw = self._exec(["bash", "-c", wrapped])
         except (modal.exception.SandboxTerminatedError, modal.exception.SandboxTimeoutError) as e:
-            logger.warning(
-                "Modal sandbox died during exec (sandbox=%s, image=%s): %s. Restarting and retrying command once.",
-                sandbox_id,
-                self._image,
-                e,
-            )
-            self.start()
-            exit_code, stdout_raw, stderr_raw = self._exec(["bash", "-c", wrapped])
+            # Restarting here would hand the episode a blank container (no
+            # task files, no agent state) and silently corrupt the trajectory.
+            raise SandboxDiedError(
+                f"Sandbox {sandbox_id} (image={self._image}) died during exec. Aborting episode."
+            ) from e
         stdout = stdout_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         stderr = stderr_raw[: self._MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
         if exit_code == 124:
@@ -1418,6 +1426,9 @@ class OpenSandboxBackend(SandboxBackend):
                 sandbox.kill()
                 break
             except Exception as e:
+                if not self._sandbox_is_alive():
+                    logger.info("OpenSandbox sandbox %s is already gone; nothing to kill.", sandbox.id)
+                    break
                 if attempt == 1:
                     logger.warning("OpenSandbox kill failed (sandbox=%s): %s. Retrying once.", sandbox.id, e)
                 else:
@@ -1479,19 +1490,17 @@ class OpenSandboxBackend(SandboxBackend):
         try:
             exit_code, stdout, stderr = self._exec(wrapped, effective_timeout)
         except OpenSandboxException as e:
-            # Only restart when the sandbox is actually gone — a restart wipes
-            # sandbox state, so a transient network error must not trigger it.
+            # A transient network error with the sandbox still alive is the
+            # caller's to retry; a dead sandbox ends the episode. Restarting
+            # here would hand the episode a blank container (no task files,
+            # no agent state) and silently corrupt the trajectory — common
+            # with Spot sandbox pods, which get preempted mid-episode.
             if self._sandbox_is_alive():
                 raise
-            logger.warning(
-                "OpenSandbox sandbox died during exec (sandbox=%s, image=%s): %s. "
-                "Restarting and retrying command once.",
-                sandbox_id,
-                self._image,
-                e,
-            )
-            self.start()
-            exit_code, stdout, stderr = self._exec(wrapped, effective_timeout)
+            raise SandboxDiedError(
+                f"Sandbox {sandbox_id} (image={self._image}) died during exec "
+                f"(likely preempted or expired). Aborting episode."
+            ) from e
         stdout = stdout[: self._MAX_OUTPUT_CHARS]
         stderr = stderr[: self._MAX_OUTPUT_CHARS]
         if exit_code == 124:

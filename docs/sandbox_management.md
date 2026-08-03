@@ -151,6 +151,13 @@ How it's wired:
   reaper, and an end-of-job janitor
   (`scripts/opensandbox/cleanup_opensandbox_sandboxes.sh`) keyed on the
   `open_instruct_app` metadata tag.
+- **Mid-episode sandbox death is terminal, not retried**: if the sandbox vanishes
+  during an exec (Spot preemption, crash, lifetime expiry), the backend raises
+  `SandboxDiedError` and the SWERL envs end the episode (reward 0,
+  `metadata.sandbox_died=True`). Restarting would hand the episode a blank container
+  and silently corrupt the trajectory — an earlier Spot run corrupted ~66 episodes
+  this way. This makes Spot sandbox pods (60–91% cheaper) safe to use: a preemption
+  costs one episode, not signal integrity.
 - **Feasibility gate**: `scripts/opensandbox/check_opensandbox_egress.sh` verifies
   endpoint reachability and the full create→exec→kill lifecycle from the training
   cluster, mirroring the Modal egress check.
