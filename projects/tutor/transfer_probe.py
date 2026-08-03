@@ -58,7 +58,7 @@ import statistics
 from collections.abc import Sequence
 
 from projects.tutor import units as units_mod
-from projects.tutor.student import ChoiceStudent
+from projects.tutor.student import ChoiceStudent, LocalChoiceStudent
 
 
 class TransferStudent(ChoiceStudent):
@@ -76,6 +76,16 @@ class TransferStudent(ChoiceStudent):
         "{hint}\n\n"
         "Now answer this question.\nQuestion: {question}\nAnswer:"
     )
+
+
+class LocalTransferStudent(LocalChoiceStudent):
+    """The transfer prompt, scored in-process. The default backend.
+
+    Preferred over the served path because this job only scores - it never
+    generates - so a server adds a version-fragile dependency and buys nothing.
+    """
+
+    PROMPT = TransferStudent.PROMPT
 
 
 class StubStudent:
@@ -382,6 +392,9 @@ async def run(args) -> None:
     if args.stub_student:
         print("\n*** STUB STUDENT - plumbing check only, these numbers mean nothing ***")
         student = CachingStudent(StubStudent(args.seed))
+    elif args.backend == "local":
+        print(f"loading {args.student_model} in-process")
+        student = CachingStudent(LocalTransferStudent(args.student_model))
     else:
         student = CachingStudent(TransferStudent(args.student_model, args.student_url, args.api_key))
 
@@ -521,6 +534,12 @@ def main() -> None:
     parser.add_argument("--units", required=True, help="output of units.py")
     parser.add_argument("--traces", required=True, help="gen_traces.jsonl")
     parser.add_argument("--tier", default="policy", help="which tier of dialogue to use; empty for all")
+    parser.add_argument(
+        "--backend",
+        choices=("local", "vllm"),
+        default="local",
+        help="local runs the scorer in-process; vllm talks to a served endpoint",
+    )
     parser.add_argument("--student-model", default="Qwen/Qwen2.5-0.5B-Instruct")
     parser.add_argument("--student-url", default="http://localhost:8001/v1")
     parser.add_argument("--api-key", default=None)

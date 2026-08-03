@@ -344,6 +344,60 @@ class ChoiceStudent:
         return max(range(len(scores)), key=scores.__getitem__)
 
 
+class LocalChoiceStudent:
+    """The same instrument as ``ChoiceStudent``, run in-process via transformers.
+
+    Identical arithmetic - length-normalised mean log-probability of the choice
+    tokens continuing the same prompt - but with no server in the way. This is
+    how ``grpo_tutor/src/zpd_filter.py`` has always computed it; the HTTP path
+    exists for training, where the model is already being served.
+
+    IT IS HERE BECAUSE THE SERVED PATH IS NOT DEPENDABLE. ``echo=True`` with
+    ``logprobs`` is a vLLM extension that moves between releases, and on the
+    cluster this runs on, ``vllm serve`` could not start at all: 0.25.1's kernel
+    warmup imports MiniMax-M3 and Triton fails to parse the kernel source. None
+    of that touches a 0.5B forward pass. For a scoring-only job the server buys
+    nothing and can only break.
+    """
+
+    PROMPT = ChoiceStudent.PROMPT
+
+    def __init__(self, model: str, device: str | None = None, dtype: str = "bfloat16"):
+        import torch  # noqa: PLC0415
+        from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
+
+        self.torch = torch
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.tokenizer = AutoTokenizer.from_pretrained(model)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model, dtype=getattr(torch, dtype) if self.device != "cpu" else torch.float32
+        )
+        self.model.to(self.device).eval()
+
+    async def score_choices(self, question: str, choices: Sequence[str], hint: str = "") -> list[float]:
+        torch = self.torch
+        prompt = self.PROMPT.format(hint=hint.strip(), question=question.strip())
+        prompt_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(self.device)
+        scores = []
+        with torch.no_grad():
+            for choice in choices:
+                choice_ids = self.tokenizer(f" {choice}", add_special_tokens=False, return_tensors="pt").input_ids.to(
+                    self.device
+                )
+                full = torch.cat([prompt_ids, choice_ids], dim=1)
+                logits = self.model(full).logits[:, :-1, :].float()
+                logprobs = torch.log_softmax(logits, dim=-1)
+                targets = full[:, 1:]
+                per_token = logprobs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)[0]
+                # only the tokens the choice contributed
+                scores.append(per_token[prompt_ids.shape[1] - 1 :].mean().item())
+        return scores
+
+    async def choose(self, question: str, choices: Sequence[str], hint: str = "") -> int:
+        scores = await self.score_choices(question, choices, hint)
+        return max(range(len(scores)), key=scores.__getitem__)
+
+
 def _suffix_token_count(tokens: list[str], suffix: str) -> int:
     """How many trailing tokens make up ``suffix``. Tokenizer-agnostic."""
     total, count = "", 0
