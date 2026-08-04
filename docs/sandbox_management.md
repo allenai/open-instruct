@@ -157,7 +157,10 @@ How it's wired:
   `metadata.sandbox_died=True`). Restarting would hand the episode a blank container
   and silently corrupt the trajectory — an earlier Spot run corrupted ~66 episodes
   this way. This makes Spot sandbox pods (60–91% cheaper) safe to use: a preemption
-  costs one episode, not signal integrity.
+  costs one episode, not signal integrity. A preempted node can also *blackhole* the
+  exec stream instead of erroring; the rollout loop ends the episode after
+  `SWERL_MAX_CONSECUTIVE_TOOL_TIMEOUTS` (default 3) consecutive tool-step timeouts so
+  such zombies don't grind through `max_steps × tool_call_timeout`.
 - **Feasibility gate**: `scripts/opensandbox/check_opensandbox_egress.sh` verifies
   endpoint reachability and the full create→exec→kill lifecycle from the training
   cluster, mirroring the Modal egress check.

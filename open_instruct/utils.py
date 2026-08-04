@@ -30,6 +30,7 @@ except Exception:
     pass
 # isort: on
 import dataclasses
+import faulthandler
 import functools
 import importlib
 import json
@@ -2606,6 +2607,61 @@ def get_beaker_experiment_url() -> str | None:
         return url
     except Exception:
         return None
+
+
+class MainLoopStallWatchdog:
+    """Daemon thread that dumps all thread stacks when the training loop stalls.
+
+    The main loop calls ``beat(label)`` at known progress points. If no beat
+    arrives for ``dump_after_s`` seconds (``SWERL_MAIN_LOOP_STALL_DUMP_S``,
+    default 1800; <=0 disables), the watchdog logs a loud warning naming the
+    last progress point and dumps every thread's stack via ``faulthandler``,
+    repeating each interval until the loop advances. Motivated by a 12-hour
+    silent stall between training steps that left no log evidence of where
+    the main thread was blocked.
+    """
+
+    def __init__(self, dump_after_s: float | None = None, poll_interval_s: float = 60.0):
+        if dump_after_s is None:
+            dump_after_s = float(os.getenv("SWERL_MAIN_LOOP_STALL_DUMP_S", "1800"))
+        self.dump_after_s = dump_after_s
+        self.poll_interval_s = poll_interval_s
+        self._lock = threading.Lock()
+        self._last_beat = time.monotonic()
+        self._last_label = "startup"
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def beat(self, label: str) -> None:
+        with self._lock:
+            self._last_beat = time.monotonic()
+            self._last_label = label
+
+    def start(self) -> None:
+        if self.dump_after_s <= 0 or self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True, name="main-loop-stall-watchdog")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.poll_interval_s + 1.0)
+            self._thread = None
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self.poll_interval_s):
+            with self._lock:
+                stalled_s = time.monotonic() - self._last_beat
+                label = self._last_label
+            if stalled_s > self.dump_after_s:
+                logger.warning(
+                    "Main training loop has not advanced past %r for %.0fs. "
+                    "Dumping all thread stacks to stderr to locate the block.",
+                    label,
+                    stalled_s,
+                )
+                faulthandler.dump_traceback(all_threads=True)
 
 
 @dataclass

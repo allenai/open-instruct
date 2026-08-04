@@ -92,6 +92,10 @@ RESET_FAILURE_ZERO_REWARD_MARKERS = (
     "image not known",
     "locating image with id",
 )
+# End a rollout after this many consecutive tool-step timeouts — the signature
+# of an environment whose sandbox hangs instead of erroring (e.g. a preempted
+# Spot node blackholing the exec stream). <=0 disables the circuit breaker.
+MAX_CONSECUTIVE_TOOL_TIMEOUTS = int(os.getenv("SWERL_MAX_CONSECUTIVE_TOOL_TIMEOUTS", "3"))
 
 # ---------------------------------------------------------------------------
 # Monkey-patch: vLLM 0.18.0 hybrid model dtype serialization bug
@@ -1129,6 +1133,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
     response_masks: list[int] = []
     cumulative_logprob = 0.0
     rollout = RolloutState()
+    consecutive_tool_timeouts = 0
 
     base_request_id = split_request_id(sub_request_id)["base_id"]
     request_metadata = actor.request_metadata[base_request_id]
@@ -1298,6 +1303,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                             runtime=meta.get("runtime", 0.0),
                         )
                     )
+                    consecutive_tool_timeouts = 0
                 except asyncio.TimeoutError:
                     add_timing("tool_step", phase_start_time)
                     error_msg = f"Step '{tc.name}' timed out after {actor.tool_call_timeout}s. Args: {tc.args}"
@@ -1309,6 +1315,20 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     rollout.tool_call_stats.append(
                         ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout)
                     )
+                    # Circuit breaker: a sandbox on a dead node hangs instead
+                    # of erroring, so every step times out while the env actor
+                    # is blocked. Without this, a rollout grinds through
+                    # max_steps x tool_call_timeout (observed: hour-long
+                    # zombie rollouts during Spot preemption waves).
+                    consecutive_tool_timeouts += 1
+                    if 0 < MAX_CONSECUTIVE_TOOL_TIMEOUTS <= consecutive_tool_timeouts:
+                        breaker_msg = (
+                            f"{consecutive_tool_timeouts} consecutive tool-step timeouts; "
+                            "environment looks unresponsive (dead sandbox?). Ending rollout."
+                        )
+                        logger.warning(f"[{sub_request_id}] {breaker_msg}")
+                        rollout.tool_error += breaker_msg
+                        rollout.done = True
                 except Exception as e:
                     add_timing("tool_step", phase_start_time)
                     error_msg = f"Step '{tc.name}' failed: {e}. Args: {tc.args}"
@@ -1317,6 +1337,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     rollout.tool_error += error_msg
                     rollout.rewards.append(0.0)
                     rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
+                    consecutive_tool_timeouts = 0
 
                 if rollout.done:
                     break

@@ -2831,6 +2831,7 @@ def run_training(
     def health_check_fn(weight_sync_future: futures.Future | None, expect_new_weight_sync: bool = False):
         seen_actors_paused = False
         start = time.perf_counter()
+        last_wait_log = start
         while True:
             if weight_sync_future is not None and weight_sync_future.done():
                 weight_sync_future.result()
@@ -2839,8 +2840,21 @@ def run_training(
                 seen_actors_paused = True
             if not should_stop and (not expect_new_weight_sync or seen_actors_paused):
                 break
-            if time.perf_counter() - start > WEIGHT_SYNC_TIMEOUT_S:
+            elapsed = time.perf_counter() - start
+            if elapsed > WEIGHT_SYNC_TIMEOUT_S:
                 raise RuntimeError(f"Weight sync timed out after {WEIGHT_SYNC_TIMEOUT_S}s - vLLM engines may be stuck")
+            # This wait is otherwise silent; log so a long weight-sync
+            # handshake is visible in the job log while it is happening.
+            if time.perf_counter() - last_wait_log > 120.0:
+                last_wait_log = time.perf_counter()
+                logger.warning(
+                    "[Main Thread] Still waiting on weight-sync handshake after %.0fs "
+                    "(should_stop=%s, seen_actors_paused=%s, expect_new_weight_sync=%s)",
+                    elapsed,
+                    should_stop,
+                    seen_actors_paused,
+                    expect_new_weight_sync,
+                )
             time.sleep(0.1)
         ray_get_with_progress(
             [engine.check_background_threads.remote() for engine in vllm_engines],
@@ -2921,13 +2935,20 @@ def run_training(
         wandb_url=wandb_url,
     )
     last_eval_collected = True
+    # A silent stall anywhere in this loop (e.g. a wedged ray.get or a stuck
+    # weight-sync handshake) dumps all thread stacks after
+    # SWERL_MAIN_LOOP_STALL_DUMP_S so the block site is identifiable post hoc.
+    stall_watchdog = utils.MainLoopStallWatchdog()
+    stall_watchdog.start()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
+        stall_watchdog.beat(f"step {training_step}: loop top")
 
         # Check if any of the threads have raised an exception.
         health_check_start = time.perf_counter()
         health_check_fn(weight_sync_thread_future)
         health_check_time = time.perf_counter() - health_check_start
+        stall_watchdog.beat(f"step {training_step}: health check done")
 
         if (
             eval_data_loader is not None
@@ -2967,6 +2988,7 @@ def run_training(
             for stat_name, value in ray.get(pool.stats.remote()).items():
                 data_thread_metrics[f"pool/{pool_name}/{stat_name}"] = value
 
+        stall_watchdog.beat(f"step {training_step}: entering one_training_step")
         num_step_tokens, episode = one_training_step(
             args,
             streaming_config,
@@ -2985,6 +3007,7 @@ def run_training(
             actor_manager,
         )
         num_total_tokens += num_step_tokens
+        stall_watchdog.beat(f"step {training_step}: one_training_step done")
 
         # Checkpoint after one_training_step (or even if it was skipped)
         # This ensures we checkpoint progress even if the exact checkpoint step has no data
@@ -3018,6 +3041,7 @@ def run_training(
                 )
                 logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
+        stall_watchdog.beat(f"step {training_step}: checkpoint done")
         if weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
@@ -3047,6 +3071,8 @@ def run_training(
             start_time=training_start_time,
             wandb_url=wandb_url,
         )
+
+    stall_watchdog.stop()
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")
