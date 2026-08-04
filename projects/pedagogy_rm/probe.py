@@ -89,13 +89,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--hidden", required=True, help="npz from extract_hidden")
     parser.add_argument("--labels", nargs="+", required=True)
-    parser.add_argument("--pooling", default="mean", choices=("mean", "last"))
+    parser.add_argument("--pooling", default="", choices=("", "mean", "last", "eot"), help="blank sweeps all three")
     parser.add_argument("--layer", type=int, default=-1, help="index INTO the stored layers; -1 sweeps all")
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--hidden-units", type=int, default=256, help="MLP width")
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--ceilings", action="store_true", help="also print the agreement bound per dimension")
+    parser.add_argument("--verbose", action="store_true", help="every pooling x layer cell, not just the best")
     parser.add_argument(
         "--slices",
         nargs="+",
@@ -107,7 +108,7 @@ def main() -> None:
     blob = np.load(args.hidden, allow_pickle=False)
     ids = [str(x) for x in blob["ids"]]
     stored_layers = list(blob["layers"])
-    feats = blob[args.pooling].astype(np.float32)  # units x layers x dim
+    poolings = [args.pooling] if args.pooling else [p for p in ("eot", "last", "mean") if p in blob]
     index = {uid: i for i, uid in enumerate(ids)}
 
     paths = sorted(set(itertools.chain.from_iterable(glob.glob(p) or [p] for p in args.labels)))
@@ -115,8 +116,9 @@ def main() -> None:
     questions = question_map(args, ids)
 
     layer_choices = range(len(stored_layers)) if args.layer < 0 else [args.layer]
-    print(f"pooling={args.pooling}  layers={stored_layers}  units={len(ids)}\n")
-    header = f"  {'dimension':<12} {'layer':>6} {'n':>5} {'ridge':>7} {'mlp':>7}"
+    print(f"poolings={poolings}  layers={stored_layers}  units={len(ids)}")
+    print("cross-validated r, folds grouped by question\n")
+    header = f"  {'dimension':<12} {'n':>5} {'pooling':>8} {'layer':>6} {'ridge':>7} {'mlp':>7}"
     if args.ceilings:
         header += f" {'ceiling':>8}"
     print(header)
@@ -134,18 +136,28 @@ def main() -> None:
         ceiling = agreement_ceiling(by_unit, dim.key) if args.ceilings else None
 
         best = None
-        for li in layer_choices:
-            result = run_dimension(feats[rows, li, :], y, groups, args)
-            line = f"  {dim.key:<12} {stored_layers[li]:>6} {len(y):>5} {result['ridge']:>7.2f} {result['mlp']:>7.2f}"
+        for pooling in poolings:
+            feats = blob[pooling].astype(np.float32)
+            for li in layer_choices:
+                result = run_dimension(feats[rows, li, :], y, groups, args)
+                score = max(result.values())
+                if best is None or score > best[0]:
+                    best = (score, pooling, stored_layers[li], result)
+                if args.verbose:
+                    print(
+                        f"  {dim.key:<12} {len(y):>5} {pooling:>8} {stored_layers[li]:>6} "
+                        f"{result['ridge']:>7.2f} {result['mlp']:>7.2f}"
+                    )
+        if best:
+            _, pooling, layer, result = best
+            line = f"  {dim.key:<12} {len(y):>5} {pooling:>8} {layer:>6} {result['ridge']:>7.2f} {result['mlp']:>7.2f}"
             if ceiling is not None:
                 line += f" {ceiling:>8.2f}"
-            print(line)
-            if best is None or max(result.values()) > max(best[1].values()):
-                best = (stored_layers[li], result)
-        if best and len(list(layer_choices)) > 1:
-            print(f"     best layer {best[0]}: ridge {best[1]['ridge']:.2f}, mlp {best[1]['mlp']:.2f}")
+            print(line + ("   <- best cell" if args.verbose else ""))
 
-    print("\n  A probe near its ceiling means the labels are the limit, not the representation.")
+    print("\n  Best cell per dimension, chosen over poolings x layers. That selection is")
+    print("  itself fitted, so the number is optimistic; treat a close second as a tie.")
+    print("  A probe near its ceiling means the labels are the limit, not the states.")
     print("  If ridge matches the MLP, ship ridge: it is cheaper inside the RL loop.")
 
 

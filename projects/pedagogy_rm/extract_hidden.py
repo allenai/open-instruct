@@ -11,14 +11,23 @@ assistant message, and reads the states over the TUTOR TURN'S tokens only.
 Encoding the turn as a bare string instead would be easier, cheaper, and would
 measure something the trainer can never reproduce.
 
-TWO POOLINGS, SEVERAL LAYERS, DECIDED LATER. Which layer carries a property is
+THREE POOLINGS, SEVERAL LAYERS, DECIDED LATER. Which layer carries a property is
 not knowable in advance and is cheap to keep open: 600 turns x 8 layers x 4096
-dims x 2 poolings is about 160MB in fp16. Deciding now would be guessing, and
+dims x 3 poolings is about 240MB in fp16. Deciding now would be guessing, and
 re-running the extraction after every guess is the expensive path.
 
-    last   the final tutor-turn token. What a value head would see.
-    mean   averaged over the tutor turn. Steadier, and usually stronger for
-           properties spread across a sentence rather than resolved at its end.
+    eot    the end-of-turn token the template appends after the turn. This is
+           the RLHF reward-model convention - a head on the last position, which
+           under causal attention is the only one that has seen the whole turn -
+           and it is syntactically identical across every example, so the probe
+           cannot partly read "what kind of word ended this turn". The policy
+           emits it during generation, so its state costs nothing at rollout.
+    last   the final CONTENT token. The same idea without the template's anchor;
+           worth keeping because the last layer at the last position is heavily
+           specialised for predicting the next token, which is not summarising.
+    mean   averaged over the turn. Under causal attention early tokens have seen
+           almost none of the turn, which is an argument against it - but with a
+           few hundred labels the averaging denoises, which is an argument for.
 
 The previous project used only a final hidden state with a linear head, which is
 one cell of this grid - and the cell least likely to work for properties like
@@ -87,19 +96,30 @@ def main() -> None:
     )
     print(f"model has {n_layers} layers; taking {layers}")
 
-    last_out, mean_out, ids = [], [], []
+    eot_out, last_out, mean_out, ids = [], [], [], []
     with torch.no_grad():
         for i, unit in enumerate(ordered):
             messages = context_messages(unit)
+            # Two renderings of the same conversation: one stopping where the turn
+            # would begin, one with the turn in place. The difference locates the
+            # turn inside the template without guessing at the template's tokens.
             prefix = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            prefix_ids = tokenizer(prefix, return_tensors="pt", add_special_tokens=False).input_ids
-            turn_ids = tokenizer(unit["tutor_turn"], return_tensors="pt", add_special_tokens=False).input_ids
-            full = torch.cat([prefix_ids, turn_ids], dim=1)[:, -args.max_len :].to(model.device)
-            n_turn = min(turn_ids.shape[1], full.shape[1])
+            whole = tokenizer.apply_chat_template(
+                [*messages, {"role": "assistant", "content": unit["tutor_turn"]}], tokenize=False
+            )
+            prefix_len = tokenizer(prefix, add_special_tokens=False, return_tensors="pt").input_ids.shape[1]
+            full = tokenizer(whole, add_special_tokens=False, return_tensors="pt").input_ids
+            full = full[:, -args.max_len :].to(model.device)
+            # Content runs from the end of the prefix to whatever trailing template
+            # tokens close the turn; the last of those is the end-of-turn position.
+            n_content = tokenizer(unit["tutor_turn"], add_special_tokens=False, return_tensors="pt").input_ids.shape[1]
+            start = max(0, min(prefix_len, full.shape[1] - 1))
+            stop = max(start + 1, min(start + n_content, full.shape[1]))
 
             states = model(full, output_hidden_states=True).hidden_states
-            last_out.append(np.stack([states[j][0, -1].float().cpu().numpy() for j in layers]))
-            mean_out.append(np.stack([states[j][0, -n_turn:].float().mean(0).cpu().numpy() for j in layers]))
+            eot_out.append(np.stack([states[j][0, -1].float().cpu().numpy() for j in layers]))
+            last_out.append(np.stack([states[j][0, stop - 1].float().cpu().numpy() for j in layers]))
+            mean_out.append(np.stack([states[j][0, start:stop].float().mean(0).cpu().numpy() for j in layers]))
             ids.append(unit["id"])
             if (i + 1) % 50 == 0:
                 print(f"  {i + 1}/{len(ordered)}")
@@ -108,10 +128,11 @@ def main() -> None:
         args.out,
         ids=np.array(ids),
         layers=np.array(layers),
+        eot=np.stack(eot_out).astype(np.float16),
         last=np.stack(last_out).astype(np.float16),
         mean=np.stack(mean_out).astype(np.float16),
     )
-    print(f"wrote {args.out}: last/mean each {len(ids)} x {len(layers)} x {model.config.hidden_size}")
+    print(f"wrote {args.out}: eot/last/mean each {len(ids)} x {len(layers)} x {model.config.hidden_size}")
 
 
 if __name__ == "__main__":
