@@ -31,5 +31,5 @@ Related: [research.md#olmo-hybrid-275m-small-suite-grpo-on-gsm8k](research.md#ol
 
 - Script: `scripts/train/debug/olmo_hybrid_275m_4gpu_gsm8k.sh` (response_length 2048→8192, pack_length 4096→16384)
 - Launch: `./scripts/train/build_image_and_launch.sh scripts/train/debug/olmo_hybrid_275m_4gpu_gsm8k.sh`
-- Beaker: TBD
-- Result: TBD
+- Beaker: [01KY2MJSAHCXYFG0ZABBDQDHAW](https://beaker.org/ex/01KY2MJSAHCXYFG0ZABBDQDHAW)
+- Result: TBD (run in progress)
