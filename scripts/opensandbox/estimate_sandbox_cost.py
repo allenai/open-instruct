@@ -34,7 +34,8 @@ from datetime import datetime
 
 TIMESTAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 STARTING_RE = re.compile(r"Starting OpenSandbox sandbox \(.*?cpu=([\d.]+), memory_mib=(\d+), lifetime=(\d+)s\)")
-STARTED_RE = re.compile(r"OpenSandbox sandbox started: ([0-9a-f-]+) \(([\d.]+)s\)")
+# Matches both "(12.3s)" and the post-throttle "(12.3s, semaphore_wait=4.5s)".
+STARTED_RE = re.compile(r"OpenSandbox sandbox started: ([0-9a-f-]+) \(([\d.]+)s(?:, semaphore_wait=([\d.]+)s)?\)")
 ADOPTED_RE = re.compile(r"Adopted OpenSandbox sandbox ([0-9a-f-]+)")
 CLOSING_RE = re.compile(r"Closing OpenSandbox sandbox: ([0-9a-f-]+)")
 JANITOR_RE = re.compile(r"^killed ([0-9a-f-]+)")
@@ -78,10 +79,12 @@ def parse_log(path: str) -> dict:
             started = STARTED_RE.search(line)
             if started and timestamp is not None:
                 # Billing starts roughly when the pod is scheduled, i.e. at the
-                # beginning of the create call — the logged duration before the
-                # "started" line.
+                # beginning of the create call — the logged total duration minus
+                # any time spent queued in the client-side start semaphore.
                 create_seconds = float(started.group(2))
-                starts[started.group(1)] = datetime.fromtimestamp(timestamp.timestamp() - create_seconds)
+                if started.group(3) is not None:
+                    create_seconds -= float(started.group(3))
+                starts[started.group(1)] = datetime.fromtimestamp(timestamp.timestamp() - max(0.0, create_seconds))
                 hidden_started += multiplier - 1
                 continue
 
