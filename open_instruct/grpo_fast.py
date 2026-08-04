@@ -732,8 +732,12 @@ class PolicyTrainerRayProcess(RayProcess):
     def calculate_token_counts(
         self, accumulation_steps: int, data_BT: data_types.CollatedBatchData
     ) -> dict[int, float]:
+        return self._calculate_mask_token_counts(accumulation_steps, data_BT.response_masks)
+
+    def _calculate_mask_token_counts(self, accumulation_steps: int, masks: list[torch.Tensor]) -> dict[int, float]:
+        """Global (all-reduced) token counts per accumulation group for the given masks."""
         accumulation_counts: dict[int, float] = {}
-        local_counts = [mask[:, 1:].sum().float() for mask in data_BT.response_masks]
+        local_counts = [mask[:, 1:].sum().float() for mask in masks]
         if not local_counts:
             return accumulation_counts
 
@@ -787,7 +791,9 @@ class PolicyTrainerRayProcess(RayProcess):
         loss_denominator_mode: str,
         rollout_sample_ids: torch.Tensor | None,
         cp_context: Any,
-    ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
+        echo_mask: torch.Tensor | None = None,
+        echo_token_weight: float = 0.0,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...], torch.Tensor]:
         hidden_states = grpo_utils.forward_for_liger_hidden_states(
             self.model, query_responses, None, position_ids, cp_context=cp_context
         )
@@ -797,7 +803,10 @@ class PolicyTrainerRayProcess(RayProcess):
         _, lm_head = grpo_utils.get_causal_lm_backbone_and_lm_head(self.model)
         selected_token_ids = query_responses[:, 1:].clone()
         response_mask = response_mask.bool()
-        selected_token_ids = torch.where(response_mask, selected_token_ids, torch.zeros_like(selected_token_ids))
+        # ECHO needs real target ids at observation positions too, so keep them
+        # wherever either mask is set.
+        keep_token_ids = response_mask if echo_mask is None else response_mask | echo_mask
+        selected_token_ids = torch.where(keep_token_ids, selected_token_ids, torch.zeros_like(selected_token_ids))
         advantages = torch.where(response_mask, advantages, torch.zeros_like(advantages))
         old_logprobs = torch.where(response_mask, old_logprobs, torch.zeros_like(old_logprobs))
         if ref_logprobs is not None:
@@ -814,7 +823,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.synchronize()
         dp_world_size = self.args.world_size // self.args.sequence_parallel_size
         scale = current_global_count * dp_world_size / (self.args.world_size * float(loss_denominator))
-        loss, kl_avg, clipfrac, ratio_avg = grpo_utils.tiled_grpo_lm_head_loss(
+        loss, kl_avg, clipfrac, ratio_avg, echo_nll_sum = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head,
             hidden_states=hidden_states,
             selected_token_ids=selected_token_ids,
@@ -837,10 +846,12 @@ class PolicyTrainerRayProcess(RayProcess):
             rollout_sample_ids=rollout_sample_ids,
             sequence_process_group=self._sp_group,
             policy_freeze_mask=policy_freeze_mask,
+            echo_mask=echo_mask,
+            echo_token_weight=echo_token_weight,
         )
         if ref_logprobs is not None:
-            return loss, (kl_avg, clipfrac, ratio_avg)
-        return loss, (clipfrac, ratio_avg)
+            return loss, (kl_avg, clipfrac, ratio_avg), echo_nll_sum
+        return loss, (clipfrac, ratio_avg), echo_nll_sum
 
     def _compute_logprobs(
         self, model: torch.nn.Module, data_BT: data_types.CollatedBatchData, cp_contexts_BT: list[Any]
@@ -891,6 +902,16 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.warning(f"{leftover} samples are dropped due to batch size {self.num_mini_batches}")
 
         num_mini_batches = len(data_BT.query_responses) // accumulation_steps
+
+        # ECHO world-modeling loss (arXiv:2605.24517): identify observation
+        # tokens (tool outputs / env feedback masked out of the RL loss) so we
+        # can train the policy to predict them with plain cross-entropy.
+        echo_masks_BT: list[torch.Tensor] | None = None
+        if self.args.echo_loss_alpha > 0:
+            assert data_BT.prompt_masks is not None, "ECHO requires prompt_masks in the collated batch"
+            echo_masks_BT = grpo_utils.compute_echo_masks(
+                data_BT.prompt_masks, data_BT.response_masks, data_BT.attention_masks
+            )
 
         # Build a per-sample FLA CP context for Qwen3.5 hybrid linear attention
         # under Ulysses SP.  Under SP=1 or on non-linear-attention models we
@@ -1081,6 +1102,9 @@ class PolicyTrainerRayProcess(RayProcess):
         tvpo_mask_total_tokens = torch.zeros((), device=device)
         tvpo_tv_weighted_sum = torch.zeros((), device=device)
         tvpo_tv_weight = torch.zeros((), device=device)
+        echo_enabled = echo_masks_BT is not None
+        echo_nll_total = torch.zeros((), device=device)
+        echo_token_total = torch.zeros((), device=device)
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
             loss_stats_B = grpo_utils.create_loss_stats(num_samples, device, record_entropy=self.args.record_entropy)
@@ -1101,11 +1125,28 @@ class PolicyTrainerRayProcess(RayProcess):
                         for group_idx in range((len(data_BT.query_responses) // accumulation_steps) + 1)
                     }
 
+                # ECHO is always normalized by the global observation-token
+                # count, independently of the RL denominator mode, so it never
+                # dilutes the RL term's effective per-token learning rate.
+                echo_denominators: dict[int, float] = {}
+                if echo_enabled:
+                    echo_denominators = self._calculate_mask_token_counts(accumulation_steps, echo_masks_BT)
+
                 for i in range(num_samples):
                     response_mask_BT = data_BT.response_masks[i][:, 1:]
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_loss_denominators[batch_start]
+                    echo_mask_BT = None
+                    echo_token_weight = 0.0
+                    if echo_enabled:
+                        echo_mask_BT = echo_masks_BT[i][:, 1:]
+                        echo_denominator = max(echo_denominators.get(batch_start, 0.0), 1.0)
+                        # Relative per-token weight vs the RL loss: the shared
+                        # loss scaling divides by `loss_denominator`, so
+                        # multiplying by it here nets α / echo_denominator per
+                        # observation token, in any RL denominator mode.
+                        echo_token_weight = self.args.echo_loss_alpha * float(loss_denominator) / echo_denominator
                     # Pass attention_mask=None so HF constructs the correct 3D intra-document
                     # mask from position_ids internally for packed sequences.
                     advantages_BT = data_BT.advantages[i][:, 1:]
@@ -1205,7 +1246,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 tvpo_tv_weight += response_mask_BT.sum()
                         is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                         self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                        loss, tiled_metrics = self._compute_tiled_dapo_loss(
+                        loss, tiled_metrics, echo_nll_sum = self._compute_tiled_dapo_loss(
                             query_responses=data_BT.query_responses[i],
                             position_ids=data_BT.position_ids[i],
                             response_mask=response_mask_BT,
@@ -1222,7 +1263,13 @@ class PolicyTrainerRayProcess(RayProcess):
                                 else None
                             ),
                             cp_context=cp_contexts_BT[i],
+                            echo_mask=echo_mask_BT,
+                            echo_token_weight=echo_token_weight,
                         )
+                        if echo_enabled:
+                            with torch.no_grad():
+                                echo_nll_total += echo_nll_sum
+                                echo_token_total += echo_mask_BT.sum()
 
                         torch.cuda.empty_cache()
                         self.model.backward(loss)
@@ -1261,6 +1308,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         return_entropy=self.args.record_entropy,
                         cp_context=cp_contexts_BT[i],
                     )
+                    raw_local_logprobs_BT = local_logprobs_BT
                     local_logprobs_BT = grpo_utils.mask_logprobs(local_logprobs_BT, response_mask_BT)
                     vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
 
@@ -1383,6 +1431,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     else:
                         loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
+                    if echo_enabled:
+                        # ECHO world-modeling term: cross-entropy on observation
+                        # tokens through the raw (unmasked) trainer logprobs.
+                        # No ratio, clipping, or KL, and its own denominator.
+                        echo_denominator = max(echo_denominators.get(batch_start, 0.0), 1.0)
+                        echo_nll_BT = torch.where(
+                            echo_mask_BT, -raw_local_logprobs_BT, torch.zeros_like(raw_local_logprobs_BT)
+                        )
+                        loss = loss + self.args.echo_loss_alpha * echo_nll_BT.sum() / echo_denominator
+                        with torch.no_grad():
+                            echo_nll_total += echo_nll_BT.detach().sum()
+                            echo_token_total += echo_mask_BT.sum()
+
                     # we already took world size into account via the tokens
                     # but deepspeed will try to average over ranks, so multiply back
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
@@ -1479,6 +1540,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         else torch.zeros((), device=device)
                     )
                     self.local_metrics["debug/dppo_mask_frac_kept"] = float(dppo_frac_kept)
+                if echo_enabled:
+                    echo_nll_per_token = (
+                        echo_nll_total / echo_token_total if echo_token_total > 0 else torch.zeros((), device=device)
+                    )
+                    self.local_metrics["loss/echo_nll_per_token"] = float(echo_nll_per_token)
+                    self.local_metrics["echo/observation_token_count"] = float(echo_token_total)
                 if tvpo_enabled:
                     tvpo_frac_kept = (
                         tvpo_mask_kept_tokens / tvpo_mask_total_tokens
@@ -3227,6 +3294,12 @@ def main(
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+    if args.echo_loss_alpha > 0 and not streaming_config.mask_tool_use:
+        raise ValueError(
+            "`echo_loss_alpha` > 0 requires `mask_tool_use=True`: ECHO trains on the tool/observation "
+            "tokens that tool masking excludes from the RL loss. With `mask_tool_use=False` those tokens "
+            "are already in the policy-gradient loss and would be double-counted."
+        )
 
     # Patch Qwen3.5 GatedDeltaNet to support packing (seq_idx/cu_seqlens).
     patch_qwen3_5_packing()

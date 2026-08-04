@@ -355,6 +355,48 @@ gradient flow on tokens too far from the rollout policy.
 total_loss = policy_loss + β × KL
 ```
 
+### ECHO World-Modeling Loss (`--echo_loss_alpha`)
+
+ECHO (arXiv:2605.24517; see also prime-rl's implementation) adds an auxiliary
+cross-entropy loss that trains the policy to *predict* tool/environment
+observation tokens (stdout, errors, env feedback) — the tokens that
+`mask_tool_use` excludes from the RL loss:
+
+```
+echo_loss = α × Σ_observation_tokens (−log π_θ(token)) / N_observation
+total_loss = rl_loss + echo_loss
+```
+
+Key properties:
+
+- **Observation tokens are identified trainer-side** via
+  `grpo_utils.compute_echo_masks`: positions with `attention_mask > 0`,
+  `prompt_mask == 0`, and `response_mask == 0` — i.e. in-response tokens that
+  tool masking removed from the policy gradient. No rollout or packing changes.
+- **No importance ratio, clipping, or KL** on observation tokens — it is plain
+  CE through the trainer logprobs (equivalently, REINFORCE with constant
+  advantage α and ratio pinned to 1).
+- **Independent normalization:** the echo term is divided by the global
+  observation-token count of the accumulation group (all-reduced), never by the
+  RL denominator — so enabling ECHO does not change the RL term's effective
+  per-token learning rate (matching prime-rl's per-component normalization).
+- Works in both the eager path and the liger tiled path
+  (`--use_liger_grpo_loss`), and composes with DAPO/CISPO/DPPO/TVPO and
+  sequence parallelism.
+- Requires `mask_tool_use=True` (the default); validated at startup.
+- Metrics: `loss/echo_nll_per_token` (raw CE per observation token,
+  α-independent — should trend down), `echo/observation_token_count`.
+- `α = 0.1` is prime-rl's vetted default; their ablations covered
+  {0.005, 0.05, 0.1, 0.5, 1.0}, with low α safer against overfitting on
+  memorization-heavy tool outputs.
+
+Caveats: chat-template scaffolding around tool outputs (role tags/wrappers) is
+included in the observation span (we have no per-token content attribution, so
+this deviates from prime-rl, which trains only on message bodies); those tokens
+are trivially predictable and quickly stop contributing signal. Also note
+`active_sampling`/zero-std filtering drops uniform-reward groups *before*
+training, so ECHO only sees observations from kept groups.
+
 ### KL Estimators (`estimate_kl`, model_utils.py:~795)
 
 Four estimators are always computed (shape `[4, B, T]`); `--kl_estimator` selects

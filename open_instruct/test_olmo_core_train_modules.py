@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import torch
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_utils, model_utils
+from open_instruct import data_types, grpo_utils, model_utils, rl_utils
 from open_instruct.utils import INVALID_LOGPROB
 
 
@@ -197,7 +197,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
         dense_loss.backward()
 
-        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio, _ = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -258,7 +258,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
         dense_loss.backward()
 
-        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio, _ = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -331,7 +331,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
         dense_loss.backward()
 
-        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio, _ = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -406,7 +406,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         dense_loss = ((pg_loss + beta * kl) * response_mask).sum() / response_mask.sum() * loss_scale
         dense_loss.backward()
 
-        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio, _ = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -454,7 +454,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         expected_kl = model_utils.estimate_kl((new_logprobs - ref_logprobs).clamp(-40.0, 40.0), ratio)
         expected_kl = (expected_kl * response_mask).sum(dim=(-2, -1)) / response_mask.sum()
 
-        _, tiled_kl, _, _ = grpo_utils.tiled_grpo_lm_head_loss(
+        _, tiled_kl, _, _, _ = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head,
             hidden_states=hidden_states.detach().clone().requires_grad_(True),
             selected_token_ids=selected_token_ids,
@@ -506,7 +506,7 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         )
         dense_loss.backward()
 
-        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, tiled_kl, tiled_clipfrac, tiled_ratio, _ = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -534,6 +534,130 @@ class TestTiledGRPOLMHeadLoss(unittest.TestCase):
         torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
         torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
         torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
+
+
+class TestEchoLoss(unittest.TestCase):
+    def test_tiled_echo_matches_dense_reference(self):
+        torch.manual_seed(11)
+        batch_size, seq_len, hidden_size, vocab_size = 2, 5, 4, 11
+        lm_head_dense = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled = torch.nn.Linear(hidden_size, vocab_size)
+        lm_head_tiled.load_state_dict(lm_head_dense.state_dict())
+
+        hidden_dense = torch.randn(batch_size, seq_len, hidden_size, requires_grad=True)
+        hidden_tiled = hidden_dense.detach().clone().requires_grad_(True)
+        selected_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+        response_mask = torch.tensor([[True, True, False, True, False], [False, True, True, False, False]])
+        # Observation (tool-output) tokens: disjoint from the RL response mask.
+        echo_mask = torch.tensor([[False, False, True, False, True], [True, False, False, True, False]])
+        advantages = torch.randn(batch_size, seq_len)
+        old_logprobs = torch.randn(batch_size, seq_len)
+        ref_logprobs = torch.randn(batch_size, seq_len)
+        beta = 0.05
+        echo_token_weight = 0.37
+        loss_scale = torch.tensor(0.75)
+
+        logits = lm_head_dense(hidden_dense)
+        new_logprobs = model_utils.log_softmax_and_gather(logits, selected_token_ids)
+        ratio = torch.exp(new_logprobs - old_logprobs)
+        _, _, pg_loss, kl = grpo_utils.compute_grpo_loss(
+            new_logprobs=new_logprobs,
+            ratio=ratio,
+            advantages=advantages,
+            ref_logprobs=ref_logprobs,
+            config=_make_grpo_config(beta=beta),
+        )
+        echo_nll = -new_logprobs * echo_mask
+        denom = response_mask.sum()
+        dense_loss = (
+            (((pg_loss + beta * kl) * response_mask).sum() + echo_token_weight * echo_nll.sum()) / denom * loss_scale
+        )
+        dense_loss.backward()
+
+        tiled_loss, _, _, _, tiled_echo_nll_sum = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head_tiled,
+            hidden_states=hidden_tiled,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=advantages,
+            old_logprobs=old_logprobs,
+            ref_logprobs=ref_logprobs,
+            temperature=1.0,
+            beta=beta,
+            clip_lower=0.2,
+            clip_higher=0.28,
+            shards=3,
+            loss_scale=loss_scale,
+            echo_mask=echo_mask,
+            echo_token_weight=echo_token_weight,
+        )
+        tiled_loss.backward()
+
+        torch.testing.assert_close(tiled_loss, dense_loss.detach())
+        torch.testing.assert_close(tiled_echo_nll_sum, echo_nll.sum().detach())
+        torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
+        torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
+        torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
+
+    def test_echo_gradient_flows_only_through_observation_tokens(self):
+        torch.manual_seed(13)
+        batch_size, seq_len, hidden_size, vocab_size = 1, 4, 4, 7
+        lm_head = torch.nn.Linear(hidden_size, vocab_size)
+        hidden = torch.randn(batch_size, seq_len, hidden_size, requires_grad=True)
+        selected_token_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+        # No RL tokens at all: pure ECHO microbatch must still produce gradients.
+        response_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
+        echo_mask = torch.tensor([[False, True, True, False]])
+
+        loss, _, _, _, echo_nll_sum = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head,
+            hidden_states=hidden,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask,
+            advantages=torch.zeros(batch_size, seq_len),
+            old_logprobs=torch.zeros(batch_size, seq_len),
+            ref_logprobs=None,
+            temperature=1.0,
+            beta=0.0,
+            clip_lower=0.2,
+            clip_higher=0.28,
+            shards=2,
+            loss_scale=torch.tensor(1.0),
+            echo_mask=echo_mask,
+            echo_token_weight=0.1,
+        )
+
+        loss.backward()
+
+        self.assertGreater(float(echo_nll_sum.detach()), 0.0)
+        grad_norms_per_position = hidden.grad.norm(dim=-1).squeeze(0)
+        # Positions feeding echo targets get gradient; the rest stay zero.
+        self.assertTrue(torch.all(grad_norms_per_position[echo_mask.squeeze(0)] > 0))
+        self.assertTrue(torch.all(grad_norms_per_position[~echo_mask.squeeze(0)] == 0))
+
+    def test_compute_echo_masks_from_packed_sequences(self):
+        packed = rl_utils.pack_sequences(
+            queries=[[1, 2], [7, 8]],
+            responses=[[3, 4, 5, 6], [9, 10]],
+            masks=[[1, 1, 0, 0], [1, 1]],
+            pack_length=32,
+            pad_token_id=0,
+            vllm_logprobs=[[-0.1, -0.2, 0.0, 0.0], [-0.3, -0.4]],
+            mask_tool_use=True,
+        )
+        echo_masks = grpo_utils.compute_echo_masks(packed.prompt_masks, packed.response_masks, packed.attention_masks)
+        self.assertEqual(len(echo_masks), 1)
+        # Layout: q1(2) + r1(4, last two = tool) + q2(2) + r2(2, no tool tokens)
+        expected = torch.tensor([False, False, False, False, True, True, False, False, False, False])
+        torch.testing.assert_close(echo_masks[0], expected)
+
+    def test_compute_echo_masks_padding_excluded(self):
+        prompt_masks = [torch.tensor([[1, 0, 0, 0]])]
+        response_masks = [torch.tensor([[0, 1, 0, 0]])]
+        # Last position is collation padding: attention 0, prompt 0, response 0.
+        attention_masks = [torch.tensor([[1, 1, 1, 0]])]
+        echo_masks = grpo_utils.compute_echo_masks(prompt_masks, response_masks, attention_masks)
+        torch.testing.assert_close(echo_masks[0], torch.tensor([[False, False, True, False]]))
 
 
 class TestDAPOLoss(unittest.TestCase):

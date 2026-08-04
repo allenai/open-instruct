@@ -193,6 +193,17 @@ class GRPOExperimentConfig(
     by the TVPO mask, not by this cap; the cap only protects against numerical
     blow-ups in extreme ratios. Only used when ``loss_fn=tvpo``.
     """
+    echo_loss_alpha: float = 0.0
+    """ECHO (arXiv:2605.24517): weight α for the auxiliary world-modeling loss on
+    tool/environment-observation tokens. Per observation token the loss is
+    ``α · (−log π_θ(token))`` — plain cross-entropy, no importance ratio, clipping,
+    or KL — normalized by the global observation-token count of the accumulation
+    group, independently of the RL loss normalization, so enabling ECHO never
+    changes the RL term's effective per-token learning rate (matching prime-rl's
+    per-component normalization). Observation tokens are the response positions
+    excluded from the RL loss by tool masking, so this requires ``mask_tool_use``
+    (the default) and only fires when tools/text-envs are in use. 0 disables.
+    prime-rl's vetted default is 0.1."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
@@ -367,6 +378,8 @@ class GRPOExperimentConfig(
                 raise ValueError(f"`gae_lambda` must be in [0, 1], got {self.gae_lambda}.")
             if self.value_num_mini_batches is not None and self.value_num_mini_batches <= 0:
                 raise ValueError("`value_num_mini_batches` must be greater than 0 when set.")
+        if self.echo_loss_alpha < 0.0:
+            raise ValueError(f"`echo_loss_alpha` must be >= 0, got {self.echo_loss_alpha}.")
         if self.tis_mask_lower < 0.0 or self.tis_mask_upper < 0.0:
             raise ValueError(
                 f"tis_mask_lower and tis_mask_upper must be ≥ 0 "
@@ -454,6 +467,25 @@ def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> t
     vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
     vllm_logprobs = torch.nan_to_num(vllm_logprobs, nan=INVALID_LOGPROB)
     return vllm_logprobs
+
+
+def compute_echo_masks(
+    prompt_masks: list[torch.Tensor], response_masks: list[torch.Tensor], attention_masks: list[torch.Tensor]
+) -> list[torch.Tensor]:
+    """Build ECHO observation masks: response tokens excluded from the RL loss.
+
+    In packed batches, tool/environment-observation tokens are the positions that
+    are neither prompt tokens (``prompt_mask == 1``) nor RL-trainable response
+    tokens (``response_mask != 0``), restricted to real tokens
+    (``attention_mask > 0`` — collation pads all three masks with 0). With
+    ``mask_tool_use=False`` (or no tools) this is empty everywhere.
+
+    Returns a list of bool tensors shaped like the response masks.
+    """
+    return [
+        (attention > 0) & (prompt == 0) & ~response.bool()
+        for prompt, response, attention in zip(prompt_masks, response_masks, attention_masks)
+    ]
 
 
 def compute_tis_weights(
@@ -909,6 +941,9 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         has_policy_mask: bool,
         policy_freeze_mask: torch.Tensor,
         has_policy_freeze_mask: bool,
+        echo_mask: torch.Tensor,
+        has_echo_mask: bool,
+        echo_token_weight: float,
         advantages: torch.Tensor,
         old_logprobs: torch.Tensor,
         ref_logprobs: torch.Tensor,
@@ -939,6 +974,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             raise ValueError("policy_mask must match hidden_states batch/sequence dimensions")
         if has_policy_freeze_mask and policy_freeze_mask.shape != hidden_states.shape[:2]:
             raise ValueError("policy_freeze_mask must match hidden_states batch/sequence dimensions")
+        if has_echo_mask and echo_mask.shape != hidden_states.shape[:2]:
+            raise ValueError("echo_mask must match hidden_states batch/sequence dimensions")
         if shards < 1:
             raise ValueError(f"shards must be >= 1, got {shards}")
         loss_type = GRPOLossType(loss_fn)
@@ -957,6 +994,8 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             policy_mask = policy_mask.reshape(-1)
         if has_policy_freeze_mask:
             policy_freeze_mask = policy_freeze_mask.reshape(-1)
+        if has_echo_mask:
+            echo_mask = echo_mask.reshape(-1)
         if has_ref_logprobs:
             ref_logprobs = ref_logprobs.reshape(-1)
 
@@ -983,12 +1022,14 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         policy_freeze_mask_shards = (
             list(torch.chunk(policy_freeze_mask, chunks=shards, dim=0)) if has_policy_freeze_mask else []
         )
+        echo_mask_shards = list(torch.chunk(echo_mask, chunks=shards, dim=0)) if has_echo_mask else []
         ref_logprob_shards = list(torch.chunk(ref_logprobs, chunks=shards, dim=0)) if has_ref_logprobs else []
 
         total_loss_sum = torch.zeros((), dtype=torch.float32, device=hidden_states.device)
         total_kl_sum = torch.zeros(4, dtype=torch.float32, device=hidden_states.device)
         total_clip_sum = torch.zeros_like(total_loss_sum)
         total_ratio_sum = torch.zeros_like(total_loss_sum)
+        total_echo_nll_sum = torch.zeros_like(total_loss_sum)
         compute_params = [p for p in compute_params if p.requires_grad]
 
         for shard_idx, x_shard in enumerate(x_shards):
@@ -1060,6 +1101,18 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
                 shard_mask = mask_shards[shard_idx].to(dtype=pg_loss.dtype)
                 per_token_loss = pg_loss + beta * kl
                 loss_sum = (per_token_loss * loss_weight_shards[shard_idx].to(dtype=per_token_loss.dtype)).sum()
+                if has_echo_mask:
+                    # ECHO world-modeling term: plain cross-entropy on
+                    # observation tokens — no ratio, clipping, or KL. The
+                    # gradient must flow through `new_logprobs` directly
+                    # (prime-rl's `where`-on-log-ratio variant silently zeroed
+                    # this gradient). `echo_token_weight` already folds in
+                    # α · loss_denom / echo_denom so echo tokens net
+                    # α / echo_denom after `incoming_grad` scaling.
+                    echo_shard = echo_mask_shards[shard_idx].to(dtype=new_logprobs.dtype)
+                    echo_nll_sum = (-new_logprobs * echo_shard).sum()
+                    loss_sum = loss_sum + echo_nll_sum * echo_token_weight
+                    total_echo_nll_sum = total_echo_nll_sum + echo_nll_sum.detach().float()
 
             total_loss_sum = total_loss_sum + loss_sum.detach().float()
             total_kl_sum = total_kl_sum + (kl_all.detach().float() * shard_mask.float()).sum(dim=-1)
@@ -1075,6 +1128,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             dist.all_reduce(total_kl_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
             dist.all_reduce(total_clip_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
             dist.all_reduce(total_ratio_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
+            dist.all_reduce(total_echo_nll_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
             dist.all_reduce(metric_denom, op=dist.ReduceOp.SUM, group=sequence_process_group)
         metric_denom = metric_denom.clamp_min(1.0)
 
@@ -1086,7 +1140,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         kl_avg = total_kl_sum / metric_denom
         clipfrac = total_clip_sum / metric_denom
         ratio_avg = total_ratio_sum / metric_denom
-        return loss, kl_avg, clipfrac, ratio_avg
+        return loss, kl_avg, clipfrac, ratio_avg, total_echo_nll_sum
 
     @staticmethod
     def backward(ctx, *grads) -> tuple:
@@ -1094,7 +1148,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         grad = grads[0]
         if isinstance(grad, torch.Tensor):
             x_grad = x_grad * grad.to(dtype=x_grad.dtype)
-        return (None, x_grad, *([None] * 25))
+        return (None, x_grad, *([None] * 28))
 
 
 def tiled_grpo_lm_head_loss(
@@ -1120,7 +1174,9 @@ def tiled_grpo_lm_head_loss(
     sequence_process_group: dist.ProcessGroup | None = None,
     policy_mask: torch.Tensor | None = None,
     policy_freeze_mask: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    echo_mask: torch.Tensor | None = None,
+    echo_token_weight: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     has_ref_logprobs = ref_logprobs is not None
     if ref_logprobs is None:
         ref_logprobs = torch.empty(0, dtype=old_logprobs.dtype, device=old_logprobs.device)
@@ -1130,6 +1186,9 @@ def tiled_grpo_lm_head_loss(
     has_policy_freeze_mask = policy_freeze_mask is not None
     if policy_freeze_mask is None:
         policy_freeze_mask = torch.empty(0, dtype=response_mask.dtype, device=response_mask.device)
+    has_echo_mask = echo_mask is not None
+    if echo_mask is None:
+        echo_mask = torch.empty(0, dtype=response_mask.dtype, device=response_mask.device)
     has_rollout_sample_ids = rollout_sample_ids is not None
     if rollout_sample_ids is None:
         rollout_sample_ids = torch.empty(0, dtype=torch.long, device=old_logprobs.device)
@@ -1143,6 +1202,9 @@ def tiled_grpo_lm_head_loss(
         has_policy_mask,
         policy_freeze_mask,
         has_policy_freeze_mask,
+        echo_mask,
+        has_echo_mask,
+        echo_token_weight,
         advantages,
         old_logprobs,
         ref_logprobs,

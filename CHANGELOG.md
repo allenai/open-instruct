@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Added
+- ECHO world-modeling loss (arXiv:2605.24517) for tool-use GRPO: `--echo_loss_alpha` adds an auxiliary cross-entropy loss on tool/environment-observation tokens with per-component normalization, supported in both the eager and liger tiled loss paths and composing with DAPO/CISPO/DPPO/TVPO and sequence parallelism.
+
 ### Changed
 - Fix Qwen3.5 packing logprob mismatch: call `patch_qwen3_5_packing()` inside `PolicyTrainerRayProcess.from_pretrained()` so the GatedDeltaNet sequence-isolation patch is applied in the Ray worker process, not only in the main process. Without this, packed rows leaked state between sub-sequences, causing `vllm_vs_local_logprob_diff_mean` ~0.21 instead of the expected ~0.02.
 - Build FLA CP context per-batch with `fla.ops.cp.build_cp_context` so Qwen3.5 hybrid linear-attention correctly starts fresh state for packed sub-sequences that don't cross Ulysses SP rank boundaries; threads un-sharded `global_position_ids` through `UlyssesSPSplitter` → `CollatedBatchData` → `compute_logprobs` / `forward_for_logprobs`.
