@@ -26,6 +26,10 @@ class ToolCallStats:
     tool_name: str
     success: bool
     runtime: float
+    failure_kind: str | None = None
+    """Why the call failed, so metrics can split infra failures from model errors.
+    One of: None (success), "oom", "timeout", "infra", "model", "reset". See
+    ``EnvStatistics.compute_metrics`` and ``docs/sandbox_modal_vs_podman.md``."""
 
 
 @dataclass

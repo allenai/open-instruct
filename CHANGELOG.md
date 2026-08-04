@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Surface Podman/sandbox infra failures in wandb: split `tools/aggregate/failure_rate` into `..._infra` vs `..._model`, and add `sandbox/oom_rate`, `sandbox/timeout_rate`, `sandbox/reset_failure_rate`, `sandbox/infra_failure_per_rollout`. Also fixes OOM-killed episodes being scored as tool-call successes (invisible in `failure_rate`) by tagging `ToolCallStats.failure_kind`.
 - Fix Qwen3.5 packing logprob mismatch: call `patch_qwen3_5_packing()` inside `PolicyTrainerRayProcess.from_pretrained()` so the GatedDeltaNet sequence-isolation patch is applied in the Ray worker process, not only in the main process. Without this, packed rows leaked state between sub-sequences, causing `vllm_vs_local_logprob_diff_mean` ~0.21 instead of the expected ~0.02.
 - Build FLA CP context per-batch with `fla.ops.cp.build_cp_context` so Qwen3.5 hybrid linear-attention correctly starts fresh state for packed sub-sequences that don't cross Ulysses SP rank boundaries; threads un-sharded `global_position_ids` through `UlyssesSPSplitter` → `CollatedBatchData` → `compute_logprobs` / `forward_for_logprobs`.
 - Pass `attention_mask=None` in GRPO `forward_for_logprobs` calls — HF constructs the correct 3D intra-document mask from `position_ids` internally (https://github.com/allenai/open-instruct/pull/1617).

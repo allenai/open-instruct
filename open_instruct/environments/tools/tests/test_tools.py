@@ -1346,6 +1346,43 @@ class TestEnvStatistics(unittest.TestCase):
         self.assertEqual(metrics["tools/python/failure_rate"], 0.0)
         self.assertEqual(metrics["tools/aggregate/failure_rate"], 0.0)
 
+    def test_failure_kind_split_and_sandbox_metrics(self):
+        """Infra failures (oom/timeout/reset) are split from model errors and surfaced,
+        and an OOM is counted as a failure rather than a success."""
+        stats = EnvStatistics()
+        # rollout 1: a good call, then an OOM (previously mis-scored success=True).
+        stats.add_rollout(
+            [
+                data_types.ToolCallStats(tool_name="bash", success=True, runtime=1.0),
+                data_types.ToolCallStats(tool_name="bash", success=False, runtime=0.0, failure_kind="oom"),
+            ]
+        )
+        # rollout 2: a model error and a step timeout.
+        stats.add_rollout(
+            [
+                data_types.ToolCallStats(tool_name="bash", success=False, runtime=0.0, failure_kind="model"),
+                data_types.ToolCallStats(tool_name="bash", success=False, runtime=120.0, failure_kind="timeout"),
+            ]
+        )
+        # rollout 3: an env-reset failure.
+        stats.add_rollout(
+            [data_types.ToolCallStats(tool_name="env_reset", success=False, runtime=0.0, failure_kind="reset")]
+        )
+
+        metrics = stats.compute_metrics()
+
+        # 5 calls total; infra = oom+timeout+reset = 3, model = 1.
+        self.assertAlmostEqual(metrics["tools/aggregate/failure_rate_infra"], 3 / 5)
+        self.assertAlmostEqual(metrics["tools/aggregate/failure_rate_model"], 1 / 5)
+        # Per-rollout episode-terminating rates (3 rollouts).
+        self.assertAlmostEqual(metrics["sandbox/oom_rate"], 1 / 3)
+        self.assertAlmostEqual(metrics["sandbox/reset_failure_rate"], 1 / 3)
+        # Per-call timeout rate (5 calls).
+        self.assertAlmostEqual(metrics["sandbox/timeout_rate"], 1 / 5)
+        self.assertAlmostEqual(metrics["sandbox/infra_failure_per_rollout"], 3 / 3)
+        # The OOM is a failure, so the overall failure_rate reflects it (4 of 5).
+        self.assertAlmostEqual(metrics["tools/aggregate/failure_rate"], 4 / 5)
+
 
 class TestEnvsConfig(unittest.TestCase):
     """Tests for EnvsConfig dataclass."""
