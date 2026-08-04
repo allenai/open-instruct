@@ -50,12 +50,27 @@ DIMENSIONS: tuple[Dimension, ...] = (
     ),
     Dimension(
         "correct",
-        "Is everything the turn asserts about this problem true?",
+        "Could a student take away anything wrong from this turn?",
+        # Rewritten after the first agent run. It used to ask whether the turn
+        # was TRUE, and five raters from five labs read that as "contains no
+        # false statement" - so they returned 3 for 85% of turns and agreed
+        # with the human at kappa 0.06. The human was marking things that are
+        # not false but still leave a wrong impression: a question floating a
+        # wrong operation, a conflict described as an "overlap", filler that
+        # says nothing about the problem. Those are named below, because a
+        # scale whose failure modes are listed can be pointed at, and one that
+        # says "imprecise" cannot.
         {
-            1: "Contains a factual or mathematical error, or an analogy that does "
-            "not map onto this problem. Fluent and confident does not help.",
-            2: "Nothing false, but something is imprecise or could mislead.",
-            3: "Everything asserted is true and precise.",
+            1: "Flatly wrong. A false fact, a bad calculation, or a claim that contradicts the correct answer.",
+            2: "Nothing false, but a student could still come away with something "
+            "wrong. Any of: glosses over a step in a way that hides it; floats a "
+            "wrong operation or relationship, even as a question; describes the "
+            "situation with a word that misdescribes it; is confused or "
+            "self-contradictory; or is filler that asserts nothing about this "
+            "problem at all.",
+            3: "Nothing to take away wrongly. Every claim is true, precise, and "
+            "about THIS problem. This is a high bar - if any phrase makes you "
+            "pause, it is a 2.",
         },
     ),
     Dimension(
@@ -79,12 +94,18 @@ DIMENSIONS: tuple[Dimension, ...] = (
     ),
     Dimension(
         "elicits",
-        "Who does the thinking - the tutor or the student?",
+        "How much thinking does the turn ask the student to do?",
+        # Originally "who does the thinking - the tutor or the student?", which
+        # had no home for a turn where NEITHER does any. Praise, agreement and
+        # restatement are not the tutor reasoning, so they were not a 1, and
+        # they ask nothing, so they were not a 3. Four of the first nine labels
+        # landed on 3 through that gap. The scale is now about demand on the
+        # student, which every turn has some amount of.
         {
-            1: "The tutor does it. Explains or performs the reasoning outright.",
-            2: "Mixed. Explains part, leaves part.",
-            3: "The student does it. The turn is a question or a prompt to try "
-            "something, and the reasoning is left to them.",
+            1: "None. Either the tutor reasons it out for them, or the turn asks "
+            "nothing at all - praise, agreement, or restating what was said.",
+            2: "Some. Explains part and leaves part, or asks something answerable without real thought.",
+            3: "The work is theirs. A question or a prompt to try something, with the reasoning left to them.",
         },
     ),
     Dimension(
@@ -135,10 +156,14 @@ def rubric_markdown() -> str:
     return "\n".join(out)
 
 
-def validate(record: dict) -> list[str]:
-    """Problems with one rater's record, as a list of human-readable strings."""
+def validate(record: dict, dimensions: tuple[Dimension, ...] = DIMENSIONS) -> list[str]:
+    """Problems with one rater's record, as a list of human-readable strings.
+
+    ``dimensions`` narrows the check, for the case where only some are being
+    re-rated and the record is not meant to be complete.
+    """
     problems = []
-    for d in DIMENSIONS:
+    for d in dimensions:
         if d.key not in record:
             if not record.get("flag"):
                 problems.append(f"missing {d.key}")

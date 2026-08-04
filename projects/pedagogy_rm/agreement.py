@@ -88,12 +88,23 @@ def pearson(xs: list[float], ys: list[float]) -> float:
     return num / (dx * dy) if dx and dy else float("nan")
 
 
-def load(paths: list[str]) -> dict[str, dict[str, dict]]:
-    """``{unit_id: {rater: record}}`` from one file per rater."""
+def load(paths: list[str], shots: dict[str, set[str]] | None = None) -> dict[str, dict[str, dict]]:
+    """``{unit_id: {rater: record}}`` from one file per rater.
+
+    Fills ``shots`` with ``{dimension: {unit_id}}`` for units an agent was shown
+    the answer to, per dimension, so a partial re-rate does not needlessly
+    disqualify units from validating the dimensions it left alone.
+    """
     by_unit: dict[str, dict[str, dict]] = collections.defaultdict(dict)
     for path in paths:
         with open(path) as handle:
             blob = json.load(handle)
+        if shots is not None and isinstance(blob, dict):
+            stored = blob.get("shots") or {}
+            if isinstance(stored, list):  # older files predate the per-dimension form
+                stored = {d.key: stored for d in DIMENSIONS}
+            for key, ids in stored.items():
+                shots.setdefault(key, set()).update(ids)
         rater = blob.get("rater") or path.rsplit("/", 1)[-1].removesuffix(".json")
         records = blob.get("labels") if isinstance(blob, dict) else blob
         if isinstance(records, dict):
@@ -103,13 +114,71 @@ def load(paths: list[str]) -> dict[str, dict[str, dict]]:
     return dict(by_unit)
 
 
+def against_reference(by_unit: dict[str, dict[str, dict]], reference: str, contaminated: set[str]) -> None:
+    """Each rater versus one designated rater, plus their consensus versus it.
+
+    Inter-agent agreement and agreement-with-the-human answer different
+    questions, and only the second one licenses using agent labels. Six models
+    can agree closely because they share training data and a house style; that
+    is consistency, not accuracy. The consensus row is the one to read, because
+    the mean of the agents is what a probe would actually be trained on.
+    """
+    raters = sorted({r for records in by_unit.values() for r in records} - {reference})
+    shared = {u: recs for u, recs in by_unit.items() if reference in recs}
+    clean = {d.key: {u for u in shared if u not in contaminated.get(d.key, set())} for d in DIMENSIONS}
+    counts = {d.key: len(clean[d.key]) for d in DIMENSIONS}
+    if not any(counts.values()):
+        print("\n  NO CLEAN UNITS. Every unit you labelled was used to calibrate the agents,")
+        print("  so there is nothing left to check them against. Label some more in the UI:")
+        print("  the agents have already run, so anything you label now is untainted by")
+        print("  construction. Fifteen or so is enough to see whether they track you.")
+        return
+    print(f"\n  Against '{reference}', excluding each dimension's own few-shot examples — kappa_w")
+    print("  n differs per dimension because they were not all calibrated on the same units.")
+    header = "  " + f"{'rater':<11}" + "".join(f"{d.key:>11}" for d in DIMENSIONS)
+    print(header)
+    print("  " + f"{'(n)':<11}" + "".join(f"{counts[d.key]:>11}" for d in DIMENSIONS))
+    print("  " + "-" * (len(header) - 2))
+
+    for rater in [*raters, "CONSENSUS"]:
+        cells = []
+        for dim in DIMENSIONS:
+            a, b = [], []
+            for unit_id in clean[dim.key]:
+                recs = shared[unit_id]
+                truth = recs[reference].get(dim.key)
+                if not isinstance(truth, int):
+                    continue
+                if rater == "CONSENSUS":
+                    votes = [recs[r][dim.key] for r in raters if r in recs and isinstance(recs[r].get(dim.key), int)]
+                    if not votes:
+                        continue
+                    # Rounded mean, so the consensus stays on the rubric's scale
+                    # and can be compared with a single rater on equal terms.
+                    value = round(statistics.fmean(votes))
+                elif rater in recs and isinstance(recs[rater].get(dim.key), int):
+                    value = recs[rater][dim.key]
+                else:
+                    continue
+                a.append(truth)
+                b.append(value)
+            cells.append(weighted_kappa(a, b, dim.lo, dim.hi) if len(a) >= 4 else float("nan"))
+        marker = "  <- what a probe would learn" if rater == "CONSENSUS" else ""
+        print("  " + f"{rater:<11}" + "".join(f"{c:>11.2f}" for c in cells) + marker)
+
+    print("\n  A dimension where the agents agree with EACH OTHER but not with you is")
+    print("  the dangerous case: it looks reliable and is measuring something else.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--labels", nargs="+", required=True, help="one json per rater; globs allowed")
+    parser.add_argument("--reference", default="", help="rater name to score everyone else against, e.g. sophia")
     args = parser.parse_args()
 
     paths = sorted(set(itertools.chain.from_iterable(glob.glob(p) or [p] for p in args.labels)))
-    by_unit = load(paths)
+    shots: dict[str, set[str]] = {}
+    by_unit = load(paths, shots)
     shared = {u: r for u, r in by_unit.items() if len(r) >= 2}
     print(f"{len(paths)} raters, {len(by_unit)} units, {len(shared)} rated by 2+")
     if not shared:
@@ -160,6 +229,12 @@ def main() -> None:
         print("     Compare probe.py against the ceiling column, not against 1.0.")
     if not keep:
         print("  No dimension survives. Rewrite the rubric before labelling more.")
+
+    if args.reference:
+        present = {r for records in by_unit.values() for r in records}
+        if args.reference not in present:
+            raise SystemExit(f"no rater named '{args.reference}'; have {sorted(present)}")
+        against_reference(by_unit, args.reference, shots)
 
 
 if __name__ == "__main__":
