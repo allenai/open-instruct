@@ -35,6 +35,7 @@ import json
 import threading
 
 from open_instruct.scored_rewards import GroupScorer, Sample, ScoreResult, register
+from open_instruct.scored_rewards.guards import MultiDimensional
 from open_instruct.scored_rewards.types import TRANSCRIPT_KEY, parse_transcript
 
 TEACHER_SYSTEM = """You are a tutor helping a student with a test question. \
@@ -192,4 +193,39 @@ class PedagogyHead(GroupScorer):
         return results
 
 
+def normalized(**kwargs) -> GroupScorer:
+    """The same head, with each dimension z-scored inside the group before averaging.
+
+    A SECOND NAME RATHER THAN A REPLACEMENT, because which of the two is right is the
+    question and not a detail. `pedagogy` averages the four signed dimensions on their own
+    1-3 scales, so a dimension with a wider spread across a group moves the group-relative
+    advantage more - and measured on the 600 labelled turns the spreads are not equal:
+
+        elicits     sd 0.72
+        actionable  sd 0.71
+        leak        sd 0.57
+        targeted    sd 0.47
+
+    So the raw mean leans about 1.5x harder on `elicits` than on `targeted`, which is the
+    wrong way round for this project. probe.py measured that eight surface features with no
+    notion of teaching predict `elicits` at 0.81 and `targeted` at 0.36, against the states'
+    0.95 and 0.85 - `targeted` is the dimension carrying something a word counter cannot
+    fake, and it is the one the raw mean discounts.
+
+    MultiDimensional z-scores each dimension within the group and averages those, so the
+    four contribute equally whatever their scales. It is the aggregation the docstring at
+    the top of this file already assumed was happening; nothing was applying it, because
+    --group_scorer builds one registered name and composes no wrappers.
+
+    What it costs is the absolute scale. A z-scored reward says only how a turn compares
+    with the other seven sampled from the same prompt, so `scores` is no longer readable as
+    a rubric number and the [0, 2] bound is gone. For GRPO that is no loss - it centres
+    within the group anyway - but it does mean the two runs' reward curves cannot be
+    compared to each other directly, only their per-dimension `dim_*` metrics can.
+    """
+    head = PedagogyHead(**kwargs)
+    return MultiDimensional(head, dimensions=head.dims, name="pedagogy_z")
+
+
 register("pedagogy", PedagogyHead)
+register("pedagogy_z", normalized)

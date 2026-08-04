@@ -57,6 +57,11 @@ EPISODES=${EPISODES:-100000}
 PROMPTS=${PROMPTS:-32}
 SAMPLES=${SAMPLES:-8}
 MICRO_BATCH=${MICRO_BATCH:-1}
+# Recomputing activations in the backward instead of holding them. On by default because
+# it is what makes a 7B fit beside vLLM and the scorer's encoder on one 80GB card; a card
+# with room to spare should turn it off, since the memory it saves costs a second forward
+# pass through every checkpointed block. It changes speed and memory, not the update.
+GRAD_CKPT=${GRAD_CKPT:-1}
 EVAL_EVERY=${EVAL_EVERY:-10}
 SAVE_FREQ=${SAVE_FREQ:-50}
 BETA=${BETA:-0.02}
@@ -65,6 +70,16 @@ OUTPUT_DIR=${OUTPUT_DIR:-output/$EXP}
 
 LORA_R=${LORA_R:-32}
 LORA_ALPHA=${LORA_ALPHA:-64}
+
+# Where trainer state goes so a killed run resumes instead of restarting. Empty disables
+# it, which is right for a smoke run and wrong for anything long: see the flags below.
+CKPT_ROOT=${CKPT_ROOT:-}
+
+# Which registered scorer computes the reward. `pedagogy` averages the four signed
+# dimensions on their raw 1-3 scales; `pedagogy_z` z-scores each one inside the group first,
+# so they contribute equally rather than in proportion to their spread. plugin.py argues
+# both sides. They are two arms of one experiment, not a setting with a right answer.
+SCORER=${SCORER:-pedagogy}
 
 CACHE_ROOT=${CACHE_ROOT:-${SCRATCH:-/tmp}}
 export HF_HOME=${HF_HOME:-$CACHE_ROOT/hf-cache}
@@ -139,13 +154,32 @@ tuning+=(--push_to_hub False)
 
 # Tracking is off unless a project is named. The eduLLM platform always names one - it
 # is a required field on the submission form and the W&B key reaches the container
-# through its execution role - while the MIT nodes have no route to the internet at all.
+# through its execution role. On the MIT nodes there is no route to the internet, so the
+# caller sets WANDB_MODE=offline and the run writes a local directory to sync later;
+# without that the reward curve, which is the actual output of the experiment, exists
+# only in a terminal.
 if [ -n "${WANDB_PROJECT:-}" ]; then
     tuning+=(--with_tracking --wandb_project "$WANDB_PROJECT")
     # Passed explicitly wherever it is known, because leaving it unset makes
-    # open-instruct call wandb.login() to check for an Ai2 team it will not find.
+    # open-instruct call wandb.login() to check for an Ai2 team it will not find - a
+    # network round trip that fails on an offline node before training starts.
     [ -n "${WANDB_ENTITY:-}" ] && tuning+=(--wandb_entity "$WANDB_ENTITY")
 fi
+
+# RESUMABLE STATE, WHICH ON A PREEMPTABLE PARTITION IS THE DIFFERENCE BETWEEN A REQUEUE
+# COSTING MINUTES AND COSTING THE RUN. mit_preemptable really does preempt - a smoke run
+# was taken at 2:13 and requeued - and Slurm restarts the script from the top, so without
+# this the second attempt begins at step zero. grpo_fast resumes on its own when the
+# directory holds state: it reads optimization_steps_done and continues from the step
+# after. The frequency is tied to --save_freq because grpo_utils warns when they differ,
+# and a warning about two frequencies is worth less than having one number to reason about.
+if [ -n "$CKPT_ROOT" ]; then
+    tuning+=(--checkpoint_state_dir "$CKPT_ROOT/$EXP" --checkpoint_state_freq "$SAVE_FREQ")
+fi
+
+# Tested against "0" explicitly rather than for emptiness, because "0" is a non-empty
+# string and ${GRAD_CKPT:+...} would cheerfully add the flag it was meant to remove.
+[ "$GRAD_CKPT" != "0" ] && tuning+=(--gradient_checkpointing)
 
 # vLLM's share of a card it has to itself can be generous; a card it shares with a
 # learner and with the scorer's frozen encoder cannot. The caller sets it, because only
@@ -165,7 +199,7 @@ exec python -u open_instruct/grpo_fast.py \
     --dataset_mixer_eval_list data/rl/eval.jsonl 1.0 \
     --dataset_mixer_eval_list_splits train \
     --reward_plugins projects/pedagogy_rm/plugin.py \
-    --group_scorer "pedagogy:head=data/head.npz" \
+    --group_scorer "$SCORER:head=data/head.npz" \
     --group_reward_mode replace \
     --apply_verifiable_reward True \
     --max_prompt_token_length 1024 \
@@ -179,7 +213,6 @@ exec python -u open_instruct/grpo_fast.py \
     --lr_scheduler_type constant_with_warmup \
     --warmup_ratio 0.03 \
     --total_episodes "$EPISODES" \
-    --gradient_checkpointing \
     --per_device_train_batch_size "$MICRO_BATCH" \
     --num_mini_batches 1 \
     --num_epochs 1 \

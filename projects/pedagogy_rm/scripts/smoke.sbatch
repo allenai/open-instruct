@@ -31,6 +31,10 @@ export EPISODES=192   # 8 prompts x 8 samples = 64 an episode, so 3 steps
 export EVAL_EVERY=2
 export SAVE_FREQ=1000
 export EXP=pedagogy_smoke
+# No resumable state: three steps cost less to repeat than to checkpoint, and a smoke run
+# that resumed would stop testing the path from a cold start, which is the path being
+# tested. The real run sets this.
+export CKPT_ROOT=
 
 # Not $(dirname $0): sbatch runs a spooled copy of this file, so $0 is somewhere
 # under /var/spool and says nothing about where the repo is.

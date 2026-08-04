@@ -997,7 +997,13 @@ class PolicyTrainerRayProcess(RayProcess):
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):
                 model_to_save.save_pretrained(output_dir)
-                if self.stage == 3:
+                # self.args.deepspeed_stage, not self.stage, which this class has never had.
+                # The line was unreachable until grpo_fast learned to wrap the policy in a
+                # PeftModel, so an AttributeError sat here behind an isinstance nothing
+                # satisfied. It fires at the first checkpoint rather than at startup, which
+                # on a preemptable partition means a run dies exactly when it first tries to
+                # make itself resumable.
+                if self.args.deepspeed_stage == 3:
                     torch.save(
                         get_peft_model_state_dict(model_to_save, output_state_dict), output_path / "adapter_model.bin"
                     )
@@ -2166,6 +2172,29 @@ def run_training(
     save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
 
+#: Extensions ``--dataset_mixer_list`` accepts as a local file, and the builder each one
+#: needs. Mirrors DatasetConfig.__post_init__ in dataset_transformation.py, which is the
+#: loader that actually reads the data.
+_LOCAL_DATASET_BUILDERS = {".jsonl": "json", ".parquet": "parquet"}
+
+
+def _load_dataset_for_scan(dataset_name: str, split: str) -> datasets.Dataset:
+    """Load one entry of a dataset mixer, whether it names the Hub or a file on disk.
+
+    A local path has to be loaded through its builder with ``data_files``: passing the
+    path as the first argument makes ``datasets`` look for a dataset *directory* and
+    raise ``Couldn't find any data file at <the path that exists>``, which is a confusing
+    thing to read about a file you can see. dataset_transformation.py already does this;
+    the scan below did not, so a run reading a local jsonl died here rather than in the
+    loader that supports it.
+    """
+    extension = os.path.splitext(dataset_name)[1]
+    builder = _LOCAL_DATASET_BUILDERS.get(extension)
+    if builder is not None and os.path.exists(dataset_name):
+        return datasets.load_dataset(builder, data_files=dataset_name, split="train")
+    return datasets.load_dataset(dataset_name, split=split)
+
+
 def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_list_splits: list[str]) -> set[str]:
     """Scan datasets for tool names referenced in 'tools' and 'env_config' columns."""
     tool_names: set[str] = set()
@@ -2178,7 +2207,7 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         split = splits[i // 2]
-        ds = datasets.load_dataset(dataset_name, split=split)
+        ds = _load_dataset_for_scan(dataset_name, split)
         if TOOLS_COLUMN_KEY in ds.column_names:
             for tools in ds[TOOLS_COLUMN_KEY]:
                 if tools:
@@ -2305,6 +2334,48 @@ def initialize_tools_and_envs(
     return pools, tool_definitions, stop_sequences
 
 
+def pickle_torch_config_modules_by_reference() -> int:
+    """Let Ray export an actor class that can reach a torch config module.
+
+    Without this, creating the first learner actor dies with `cannot pickle
+    'ConfigModuleInstance' object` and a serializability report that blames
+    PolicyTrainerRayProcess.__init__ for holding its own class - which is circular and
+    names nothing a reader can act on.
+
+    What is actually happening: this file runs as a script, so its module is __main__,
+    and cloudpickle serializes anything defined in __main__ *by value* rather than by
+    reference. Walking the trainer class that way eventually reaches one of torch's
+    config modules - torch._dynamo.config and seven of its siblings - and those are
+    module objects, which pickle refuses outright.
+
+    By reference is also the semantically correct answer rather than a way around the
+    error. These objects are per-process singletons that live in sys.modules under their
+    own names; an actor should be reading its own process's dynamo config, not a copy of
+    the driver's. So the reduction re-imports by name, which returns the actor's.
+
+    One reducer per config module rather than one for the ConfigModule base class,
+    because cloudpickle dispatches on the exact type and torch builds a fresh
+    ConfigModuleInstance subclass for each of them. Everything torch, deepspeed and vllm
+    import is in sys.modules by the time this runs, since all three are imported at the
+    top of this file.
+    """
+    import importlib  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    import ray.cloudpickle  # noqa: PLC0415
+    from torch.utils._config_module import ConfigModule  # noqa: PLC0415
+
+    def by_name(module: ConfigModule):
+        return importlib.import_module, (module.__name__,)
+
+    registered = 0
+    for module in list(sys.modules.values()):
+        if isinstance(module, ConfigModule):
+            ray.cloudpickle.CloudPickler.dispatch_table[type(module)] = by_name
+            registered += 1
+    return registered
+
+
 def main(
     args: grpo_utils.GRPOExperimentConfig,
     tc: TokenizerConfig,
@@ -2313,6 +2384,10 @@ def main(
     vllm_config: data_loader_lib.VLLMConfig,
     tools_config: EnvsConfig,
 ):
+    # Ahead of any actor being created, because the first one to be exported is the one
+    # that would fail. See the function for why this is needed at all.
+    logger.info(f"pickling {pickle_torch_config_modules_by_reference()} torch config modules by reference")
+
     # Before anything else: plugins register scorers AND environments as an
     # import side effect, and initialize_tools_and_envs below reads the registry.
     load_reward_plugins(streaming_config.reward_plugins)

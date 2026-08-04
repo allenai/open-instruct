@@ -797,7 +797,33 @@ class LLMRayActor:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        # THE THREE-CALL BRACKET IS REQUIRED FROM vLLM 0.21. update_weights on its own
+        # raises `start_weight_update must be called before update_weights`, which arrives
+        # as an engine-core error inside a Ray actor and reads like a transfer failure
+        # rather than a missing handshake. 0.19.1, which pyproject pins, had the single
+        # call; this repository runs 0.21 on any host whose glibc predates the 0.19.1
+        # wheel's manylinux tag.
+        #
+        # Once per sync rather than once per chunk, which is what makes bracketing here
+        # correct: broadcast_to_vllm builds one update_info carrying every name, dtype and
+        # shape and sends it to each engine exactly once, and the tensors themselves travel
+        # separately through the IPC or NCCL transfer engine.
+        #
+        # is_checkpoint_format is left at its default of True because the names in
+        # update_info are HuggingFace checkpoint names - that is what _build_vlm_name_mapper
+        # and the PEFT mapper produce - so vLLM has to run its layerwise reload to fold them
+        # into its own fused and sharded layout. finish_weight_update is what runs the
+        # second half of that, so skipping it would leave the model half-reloaded.
+        #
+        # try/finally because the failure mode of not finishing is worse than the original
+        # error: the engine keeps `_weight_update_active` set, and the next sync fails with
+        # `start_weight_update called while a weight update is already active`, which names
+        # the wrong step and buries whatever actually went wrong one sync earlier.
+        self._run_async(self.llm_engine.start_weight_update())
+        try:
+            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        finally:
+            self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
 
