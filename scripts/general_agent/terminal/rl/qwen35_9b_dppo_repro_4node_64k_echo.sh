@@ -21,7 +21,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "tmax-15k DPPO Qwen35 9b (4-node; 64k; ECHO world-modeling loss alpha=0.1)" \
        --pure_docker_mode \
-       --workspace ai2/general-tool-use \
+       --workspace ai2/oe-agents \
        --priority urgent \
        --preemptible \
        --num_nodes 4 \
@@ -45,7 +45,7 @@ uv run python mason.py \
        --env SWERL_PODMAN_IMAGE_JANITOR_ENABLED=1 \
        --env SWERL_PODMAN_IMAGE_JANITOR_INTERVAL_S=60 \
        --env SWERL_PODMAN_IMAGE_JANITOR_UNTIL=10m \
-       --env MIRROR_URL=jupiter-cs-aus-219.reviz.ai2.in:5000 \
+       --env MIRROR_URL=jupiter-cs-aus-106.reviz.ai2.in:5000 \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=shashankg_DOCKER_PAT \
