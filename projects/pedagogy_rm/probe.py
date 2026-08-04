@@ -104,7 +104,8 @@ def run_dimension(X, y, groups, args, models: tuple[str, ...] | None = None) -> 
         predictions["ridge"][test_idx] = ridge.predict(xte)
         if "mlp" in predictions:
             predictions["mlp"][test_idx] = fit_mlp(xtr, y[train_idx], xte, args)
-    return {name: pearson(list(map(float, p)), list(map(float, y))) for name, p in predictions.items()}
+    scores = {name: pearson(list(map(float, p)), list(map(float, y))) for name, p in predictions.items()}
+    return scores, predictions
 
 
 def main() -> None:
@@ -119,6 +120,9 @@ def main() -> None:
     parser.add_argument("--hidden-units", type=int, default=128, help="MLP width")
     parser.add_argument("--components", type=int, default=128, help="PCA rank in front of the MLP")
     parser.add_argument("--skip-mlp", action="store_true", help="ridge only; the sweep is 20x faster")
+    parser.add_argument(
+        "--reference", default="", help="a rater's label file; also score the probe against them alone"
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--ceilings", action="store_true", help="also print the agreement bound per dimension")
     parser.add_argument("--verbose", action="store_true", help="every pooling x layer cell, not just the best")
@@ -139,6 +143,14 @@ def main() -> None:
     paths = sorted(set(itertools.chain.from_iterable(glob.glob(p) or [p] for p in args.labels)))
     by_unit = load_labels(paths)
     questions, texts = read_slices(args, ids)
+    reference: dict[str, dict] = {}
+    without_reference = by_unit
+    if args.reference:
+        name = args.reference.split("/")[-1].removesuffix(".json")
+        reference = {uid: rec[name] for uid, rec in by_unit.items() if name in rec}
+        if not reference:
+            raise SystemExit(f"no rater named {name!r} among {sorted({k for r in by_unit.values() for k in r})}")
+        without_reference = {uid: {k: v for k, v in rec.items() if k != name} for uid, rec in by_unit.items()}
 
     layer_choices = range(len(stored_layers)) if args.layer < 0 else [args.layer]
     print(f"poolings={poolings}  layers={stored_layers}  units={len(ids)}")
@@ -153,6 +165,8 @@ def main() -> None:
 
     for dim in DIMENSIONS:
         scores = consensus(by_unit, dim.key)
+        # Agents only, so the yardstick is not partly the labels it is scored against.
+        agents = consensus(without_reference, dim.key) if reference else {}
         usable = [uid for uid in scores if uid in index]
         if len(usable) < 40:
             print(f"  {dim.key:<12} too few labelled units ({len(usable)})")
@@ -163,24 +177,26 @@ def main() -> None:
         ceiling = agreement_ceiling(by_unit, dim.key) if args.ceilings else None
 
         surface = np.array([surface_features(texts.get(uid, "")) for uid in usable], dtype=np.float32)
-        naive = run_dimension(surface, y, groups, args, models=("ridge",))["ridge"]
+        naive = run_dimension(surface, y, groups, args, models=("ridge",))[0]["ridge"]
 
         best = None
         for pooling in poolings:
             feats = blob[pooling].astype(np.float32)
             for li in layer_choices:
-                result = run_dimension(feats[rows, li, :], y, groups, args)
+                result, preds = run_dimension(feats[rows, li, :], y, groups, args)
                 score = max(result.values())
                 if best is None or score > best[0]:
-                    best = (score, pooling, stored_layers[li], result)
+                    best = (score, pooling, stored_layers[li], result, preds)
                 if args.verbose:
                     print(row(dim.key, len(y), pooling, stored_layers[li], result, naive))
         if best:
-            _, pooling, layer, result = best
+            _, pooling, layer, result, preds = best
             line = row(dim.key, len(y), pooling, layer, result, naive)
             if ceiling is not None:
                 line += f" {ceiling:>8.2f}"
             print(line + ("   <- best cell" if args.verbose else ""))
+            if reference:
+                versus_human(dim.key, usable, preds["ridge"], y, reference, agents)
 
     print("\n  READ THE SURFACE COLUMN FIRST. Eight features - length, question marks,")
     print("  digits - with no idea what teaching is. Where it matches ridge, the label")
@@ -189,6 +205,28 @@ def main() -> None:
     print("\n  Best cell per dimension, chosen over poolings x layers. That selection is")
     print("  itself fitted, so the number is optimistic; treat a close second as a tie.")
     print("  Ceilings use Spearman-Brown for a k-rater mean, not the single-rater bound.")
+
+
+def versus_human(key: str, usable: list[str], pred, y, reference: dict, agents: dict) -> None:
+    """Does the probe track the human, or only the agents it was distilled from?
+
+    The target is a consensus of six models and one person, so the models decide it.
+    A probe can fit that consensus perfectly while tracking something the person does
+    not recognise, and every number above would look the same. The comparison that
+    settles it is against the human alone - with the agents' own score on the same
+    units as the yardstick, because the probe cannot be expected to beat its teachers.
+    """
+    rows = [
+        (i, reference[uid][key]) for i, uid in enumerate(usable) if isinstance(reference.get(uid, {}).get(key), int)
+    ]
+    if len(rows) < 12:
+        print(f"     vs human: only {len(rows)} labelled units, not reporting")
+        return
+    idx = [i for i, _ in rows]
+    human = [float(v) for _, v in rows]
+    probe_r = pearson([float(pred[i]) for i in idx], human)
+    agent_r = pearson([float(agents[usable[i]]) for i in idx], human)
+    print(f"     vs human (n={len(rows)}): probe {probe_r:.2f}, the agents themselves {agent_r:.2f}")
 
 
 def surface_features(text: str) -> list[float]:

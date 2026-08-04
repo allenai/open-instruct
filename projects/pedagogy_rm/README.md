@@ -92,15 +92,43 @@ read exactly that way.
 If ridge matches the MLP, ship ridge — it is cheaper in the loop, which is the
 point of the project.
 
-## State
+## Results
 
-Models are downloaded to scratch (`OLMo-2-1124-7B-Instruct` 14G,
-`Qwen2.5-1.5B-Instruct` 2.9G). The pipeline is written and tested on synthetic
-inputs end to end: the agreement gate correctly drops a dimension built to be
-noisy, and the probe recovers a signal planted in one layer (r = 0.65 against a
-0.61 ceiling) while returning ~0 for five dimensions that carry none.
+600 turns, 282 questions, five dimensions after `correct` failed the agreement
+gate. Labels are the mean of six model raters plus the human on 25 of them.
+Folds are grouped by question. Cross-validated r:
 
-Nothing real has been generated yet. That is the next command.
+| dimension | surface | ridge | MLP | ceiling | vs human | agents vs human |
+| --- | --- | --- | --- | --- | --- | --- |
+| targeted | 0.36 | **0.85** | 0.70 | 0.94 | 0.54 | 0.72 |
+| leak | 0.60 | 0.84 | 0.80 | 0.95 | 0.63 | 0.80 |
+| actionable | 0.75 | 0.94 | 0.92 | 0.98 | 0.90 | 0.92 |
+| elicits | 0.81 | 0.95 | 0.92 | 0.98 | 0.80 | 0.83 |
+| concise | 0.96 | 0.97 | 0.94 | 0.99 | 0.82 | 0.89 |
+
+**Read the surface column first.** Eight features — length, question marks,
+digit density — with no notion of teaching. `concise` is a word counter wearing
+a rubric: 0.96 against the states' 0.97. Training on it would reward brevity and
+nothing else, and reported against zero its 0.97 would have looked like the best
+result in the table. `targeted` is the finding: whether a turn addresses the
+student's actual error is nearly invisible in the shape of the text, and OLMo
+represents it anyway.
+
+**The probe tracks the human, not just its teachers.** The target is a consensus
+the models dominate, so a probe could fit it perfectly while tracking something
+no person recognises. Against the human alone it stays within 0.02–0.18 of what
+the agents themselves score — it is a faithful distillation, losing a little, as
+a student model should. On 25 units, so the standard error is about 0.14; this
+is directional.
+
+**Ridge beats a fair MLP everywhere**, after the MLP was given a PCA in front of
+it and an alpha chosen on its own held-out split. The mapping is linear, which
+is the convenient answer: a dot product costs nothing inside an RL loop.
+
+**Pooling and layer.** The last content token wins most dimensions, the
+end-of-turn token trails it by 0.02–0.04, and mean pooling wins `targeted`.
+Layers 16–20 of 32 beat both ends at every dimension — the last layer is
+specialised for predicting the next token, not for summarising.
 
 ## The caveat you are buying
 
