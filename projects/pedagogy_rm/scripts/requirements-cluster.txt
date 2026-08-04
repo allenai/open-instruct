@@ -1,0 +1,72 @@
+# Environment for running open-instruct's grpo_fast.py on MIT ORCD (Rocky 8, glibc 2.28).
+#
+# WHY THIS FILE EXISTS INSTEAD OF `uv sync`: the lock pins vllm==0.19.1, whose only
+# x86_64 wheel is tagged manylinux_2_31. This cluster is glibc 2.28, so pip and uv
+# both fall through to the sdist and try to compile vLLM from source. vLLM 0.21.0
+# ships a manylinux_2_24 wheel, satisfies the pyproject floor of >=0.19.1, and still
+# exports every symbol open_instruct imports (checked: WeightTransferInitRequest,
+# WeightTransferUpdateRequest, IPC/NCCL TrainerSendWeightsArgs and engines,
+# WeightTransferConfig, FlatLogprobs, FlexibleArgumentParser, MambaSpec).
+#
+# The nvidia-* CUDA libraries are deliberately NOT pinned. Pinning them from a
+# `pip freeze` of a working env pulls cu11 and cu12 wheels side by side, and they
+# collide on the shared nvidia/<lib>/lib/ paths - the older cu11 file wins and torch
+# dies on a missing symbol. Let torch declare its own.
+vllm==0.21.0
+transformers>=5.4.0
+deepspeed>=0.18.3
+ray[default]==2.53.0
+accelerate>=1.10.1
+
+# peft and bitsandbytes are for the QLoRA path: a 4-bit frozen base keeps the probe's
+# activation space fixed by construction, which is the whole reason to prefer LoRA here.
+peft>=0.13.2
+bitsandbytes>=0.44.1
+
+# A CUDA COMPILER, WITHOUT WHICH DEEPSPEED WILL NOT IMPORT. Its op builder shells out to
+# $CUDA_HOME/bin/nvcc while deciding which ops suit the host and raises
+# MissingCUDAException when the variable is unset, so `import deepspeed` fails and takes
+# open_instruct.model_utils with it. torch ships CUDA runtime libraries but no compiler.
+#
+# 13.0.88 rather than the latest, to match torch 2.11.0+cu130: DeepSpeed compares the
+# installed nvcc against torch's CUDA version and only tolerates a mismatch for majors
+# it has an explicit allowance for, which does not yet include 13. This is the same nvcc
+# build as the cluster's cuda/13.0.1 module, so the two ways of satisfying DeepSpeed
+# agree. It unpacks to nvidia/cu13/bin/nvcc under site-packages, which is what CUDA_HOME
+# has to point at - the containing directory, not the binary.
+nvidia-cuda-nvcc==13.0.88
+
+datasets>=4.0.0
+wandb==0.23.1
+scikit-learn
+numpy>=2
+scipy
+pyarrow>=20.0.0
+matplotlib>=3.9.3
+tensorboard>=2.18.0
+hf-transfer>=0.1.8
+
+# open_instruct/utils.py imports beaker at module scope, and data_loader.py imports
+# olmo_core.data; neither is in the pyproject dependency list.
+beaker-py
+ai2-olmo-core @ git+https://github.com/allenai/OLMo-core.git@fa6c5014c9f6e9ee789da2d9c20d5126fee8df0d
+
+openenv-core>=0.2.1
+langdetect==1.0.9
+immutabledict>=1.2.0
+antlr4-python3-runtime==4.11
+multiprocess<0.70.18
+debugpy>=1.8.13
+backoff>=2.2.1
+nltk>=3.9.1
+nvitop>=1.4.2
+mcp>=1.9.0
+docker>=7.0.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# transformers reaches into timm for the gemma3n config; the old timm in venv_test
+# lacks ImageNetInfo and breaks `import transformers` outright.
+timm>=1.0.0
+
+pytest

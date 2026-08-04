@@ -55,6 +55,7 @@ import random
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 from queue import Empty, Full, Queue
 from typing import Any
@@ -70,12 +71,19 @@ import torch.utils.data
 import wandb
 from datasets import Dataset
 from huggingface_hub import HfApi
-from peft import PeftModel, get_peft_model_state_dict
+from peft import (
+    LoraConfig,
+    PeftModel,
+    TaskType,
+    get_peft_model,
+    get_peft_model_state_dict,
+    prepare_model_for_kbit_training,
+)
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
-from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
@@ -165,6 +173,15 @@ PLACEMENT_GROUP_READY_TIMEOUT_S = 300.0
 LEARNER_ACTOR_NUM_CPUS = 4
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
+# Same set finetune.py and dpo_tune_cache.py use, so a LoRA run here is comparable to
+# one from the other trainers.
+DEFAULT_LORA_TARGET_MODULES = ["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"]
+# PEFT names every base weight base_model.model.<hf name>, and wraps each adapted
+# module so its frozen weight lands under an extra .base_layer. vLLM wants the plain
+# HF names, and must never be sent an adapter tensor.
+_PEFT_PREFIX = "base_model.model."
+_PEFT_BASE_LAYER = ".base_layer."
+
 
 def _build_vlm_name_mapper(model_name: str):
     """Sometimes we have different weight names btw vLLM and HF, so we build
@@ -172,6 +189,25 @@ def _build_vlm_name_mapper(model_name: str):
     if "qwen3.5" in model_name.lower():
         return lambda name: f"language_model.{name}"
     return None
+
+
+def _build_peft_name_mapper(inner: Callable[[str], str | None] | None) -> Callable[[str], str | None]:
+    """Present a LoRA-wrapped policy to vLLM as if it were the plain base model.
+
+    Only valid while the adapters are merged: the tensor behind a base weight is the
+    sum the policy actually generates with, and the adapter tensors themselves are
+    dropped rather than renamed, because vLLM has no parameter to receive them.
+    """
+
+    def mapper(name: str) -> str | None:
+        if "lora_" in name:
+            return None
+        if name.startswith(_PEFT_PREFIX):
+            name = name[len(_PEFT_PREFIX) :]
+        name = name.replace(_PEFT_BASE_LAYER, ".")
+        return inner(name) if inner else name
+
+    return mapper
 
 
 def _startup_debug_context(
@@ -352,11 +388,20 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         logger.info(f"Deepspeed config: {dschf=}")
 
+        quantization_config = None
+        if model_config.use_peft and model_config.load_in_4bit:
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=model_config.bnb_4bit_quant_type,
+                bnb_4bit_use_double_quant=model_config.use_bnb_nested_quant,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
+            **({"quantization_config": quantization_config} if quantization_config is not None else {}),
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
@@ -370,10 +415,44 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy.config.use_cache = False
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
+
+        # LoRA turns the base weights into a fixed reference, which is what makes a
+        # frozen-encoder reward legitimate: a probe fitted on this checkpoint's
+        # activations keeps meaning something, because the policy can only change what
+        # it writes and not the space it is read in.
+        self.uses_peft = bool(model_config.use_peft)
+        if self.uses_peft and args.deepspeed_stage == 3:
+            # merge_adapter needs the real base weight, and under ZeRO-3 each rank holds
+            # only a shard of it. LoRA also removes the reason to use stage 3, since the
+            # optimizer state it shards is now a few tens of MB.
+            raise ValueError("use_peft is not supported with deepspeed_stage 3; use stage 2 or lower.")
+        if self.uses_peft:
+            if model_config.load_in_4bit or model_config.load_in_8bit:
+                # True, not a flag: gradient checkpointing is enabled unconditionally above.
+                self.policy = prepare_model_for_kbit_training(self.policy, use_gradient_checkpointing=True)
+            else:
+                # Checkpointed blocks otherwise hand back activations with no grad path,
+                # since every base weight is frozen and only the adapters need one.
+                self.policy.enable_input_require_grads()
+            self.policy = get_peft_model(
+                self.policy,
+                LoraConfig(
+                    task_type=TaskType[model_config.lora_task_type],
+                    inference_mode=False,
+                    r=model_config.lora_r,
+                    lora_alpha=model_config.lora_alpha,
+                    lora_dropout=model_config.lora_dropout,
+                    target_modules=model_config.lora_target_modules or DEFAULT_LORA_TARGET_MODULES,
+                    modules_to_save=model_config.lora_modules_to_save,
+                ),
+            )
+            if self.rank == 0:
+                self.policy.print_trainable_parameters()
+
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
-            optim_params = self.policy.parameters()
+            optim_params = [p for p in self.policy.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
@@ -445,8 +524,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
         self.model.train()
 
-        # reference model
-        if args.load_ref_policy:
+        # reference model. Under LoRA there is nothing to load: the frozen base already
+        # IS the reference, reachable by switching the adapters off, which saves a second
+        # copy of the whole model on the GPU.
+        if args.load_ref_policy and not self.uses_peft:
             ds_config, self.ref_policy_hf_ds_config = get_eval_ds_config(
                 offload=False,
                 # inference model only has stage 3 (sharding) or stage 0 (no sharding)
@@ -558,17 +639,40 @@ class PolicyTrainerRayProcess(RayProcess):
         # Ensure CUDA device is set before broadcast operations.
         # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
         torch.cuda.set_device(self.local_rank)
-        return vllm_utils.broadcast_weights_to_vllm(
-            model=self.model.module,
-            vllm_engines=self.vllm_engines,
-            model_update_group=self.model_update_group,
-            model_step=model_step,
-            gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
-        )
+        module = self.model.module
+        name_mapper = _build_vlm_name_mapper(self._model_name_or_path)
+
+        if not self.uses_peft:
+            return vllm_utils.broadcast_weights_to_vllm(
+                model=module,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=model_step,
+                gather_whole_model=self.args.gather_whole_model,
+                name_mapper=name_mapper,
+            )
+
+        # vLLM knows nothing about adapters, so fold them into the base weights for the
+        # duration of the send and then take them back out. Unmerging matters: leaving
+        # them merged would let the next step's update apply on top of an already-merged
+        # weight, quietly compounding the adapter into the frozen base.
+        module.merge_adapter()
+        try:
+            return vllm_utils.broadcast_weights_to_vllm(
+                model=module,
+                vllm_engines=self.vllm_engines,
+                model_update_group=self.model_update_group,
+                model_step=model_step,
+                gather_whole_model=self.args.gather_whole_model,
+                name_mapper=_build_peft_name_mapper(name_mapper),
+            )
+        finally:
+            module.unmerge_adapter()
 
     def update_ref_policy(self):
-        if not self.args.load_ref_policy:
+        # Nothing to move under LoRA: the reference is the frozen base by construction,
+        # and an EMA towards the policy would defeat the point of freezing it.
+        if not self.args.load_ref_policy or self.uses_peft:
             return
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
             if self.args.deepspeed_stage == 3:
@@ -612,9 +716,15 @@ class PolicyTrainerRayProcess(RayProcess):
         ref_logprobs_BT: list[torch.Tensor] = []
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
-                ref_logprobs_BT = grpo_utils.compute_logprobs(
-                    self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
-                )
+                if self.uses_peft:
+                    with self.model.module.disable_adapter():
+                        ref_logprobs_BT = grpo_utils.compute_logprobs(
+                            self.model, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                        )
+                else:
+                    ref_logprobs_BT = grpo_utils.compute_logprobs(
+                        self.ref_policy, data_BT, self.pad_token_id, self.streaming_config.temperature, use_grad=False
+                    )
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -787,8 +897,10 @@ class PolicyTrainerRayProcess(RayProcess):
         client_state["rng_states"] = rng_states
         client_state["rank"] = self.rank
 
-        # Save reference policy checkpoint (model only, no optimizer)
-        if self.args.load_ref_policy:
+        # Save reference policy checkpoint (model only, no optimizer). Skipped under LoRA
+        # for the same reason it is never loaded: the reference is the untouched base
+        # weights, which the pretrained checkpoint already holds.
+        if self.args.load_ref_policy and not self.uses_peft:
             ref_policy_dir = os.path.join(checkpoint_state_dir, "ref_policy")
             os.makedirs(ref_policy_dir, exist_ok=True)
 

@@ -21,7 +21,11 @@ echo "started $(date -Is) on $(hostname), job ${SLURM_JOB_ID:-none}"
 
 SCRATCH=${SCRATCH:-/orcd/scratch/orcd/013/zsophia}
 REPO=${REPO:-$SCRATCH/open-instruct}
-VENV=${VENV:-$HOME/venv_test}
+# venv_oi, not the venv_test the labels and the probe were produced under: grpo_fast
+# needs vllm's weight_transfer API and Python 3.11+, neither of which venv_test has.
+# That moves transformers from 4.57 to 5.x underneath the head, which is exactly the
+# drift this test exists to catch, so run it here before trusting the reward.
+VENV=${VENV:-$SCRATCH/venv_oi}
 
 export HF_HOME=$SCRATCH/hf-cache
 export HF_HUB_CACHE=$SCRATCH/hf-cache/hub

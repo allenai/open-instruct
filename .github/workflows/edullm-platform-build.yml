@@ -1,0 +1,63 @@
+name: Build eduLLM research image
+
+# A thin caller and nothing else: every decision that matters lives in edu-llm/platform.
+# This file exists to satisfy the two obligations a call site cannot inherit, and to say
+# when a build may fire. Both obligations fail as an AssumeRole denial that reads like a
+# broken role ARN rather than like its cause:
+#
+#   1. `id-token: write` has to be granted on the calling job below. A called workflow can
+#      only downgrade the permissions its caller hands it, so the id-token grant on the
+#      platform's publish job cannot create itself.
+#   2. The `uses:` reference has to be `@main`. The publisher role's trust policy matches
+#      job_workflow_ref with StringEquals against `@refs/heads/main`, so a SHA-pinned or
+#      tag-pinned reference mints a claim the role will never accept. This is the one place
+#      where pinning a ref makes things worse rather than better.
+on:
+  workflow_dispatch:
+  # An opt-in namespace rather than every branch. Every accepted push spends runner time
+  # and publishes an immutable ECR tag that cannot be rewritten. push and workflow_dispatch
+  # are also the only events the reusable workflow accepts: on anything else github.ref
+  # names the default branch rather than the pushed commit, so the run would publish
+  # something other than what the caller meant.
+  #
+  # main is here for the opposite reason to the namespace. The platform's submission form
+  # resolves a branch name to a commit and refuses a commit with no published image, so a
+  # merge to main that nobody built leaves the most obvious thing anyone can type failing
+  # for a reason that names the image rather than the merge.
+  push:
+    branches:
+      - "edullm/**"
+      - main
+
+jobs:
+  publish:
+    permissions:
+      contents: read
+      id-token: write
+    uses: edu-llm/platform/.github/workflows/build-research-image.yml@main
+    with:
+      repository: open-instruct-scored-rewards
+      publisher_role_arn: ${{ vars.AWS_ECR_PUBLISHER_ROLE_ARN }}
+      # Runs in the platform's gate job, which holds no AWS identity and only
+      # `contents: read`. That is why code chosen by whoever pushed the branch is
+      # acceptable here: it runs before anything can reach AWS, with nothing to steal.
+      #
+      # SCOPED TO open_instruct, projects AND mason.py, WHICH IS THIS REPOSITORY'S OWN
+      # SCOPE RATHER THAN A RELAXATION. .pre-commit-config.yaml lints exactly
+      # `^(open_instruct/|[^/]*mason\.py$)`, and `ruff check .` over the whole checkout
+      # reports 147 pre-existing findings, 133 of them in the upstream scripts/ directory
+      # that has never been linted. Blocking our image on inherited debt in code no run
+      # here imports would mean the gate never passes and therefore never means anything.
+      # projects/ is added because it is the code this repository exists for.
+      #
+      # 0.14.13 is the version uv.lock pins and the minor the pre-commit hook pins at
+      # v0.14.0. Version matters more than it looks: UP038 was removed after 0.12, so an
+      # older ruff fails on nine isinstance calls in upstream files that the repository's
+      # own tooling accepts.
+      #
+      # --no-cache keeps .ruff_cache out of the checkout the platform verifies as clean.
+      test_command: |
+        lint_venv="$(mktemp -d)/ruff"
+        python3 -m venv "${lint_venv}"
+        "${lint_venv}/bin/pip" install --quiet --disable-pip-version-check ruff==0.14.13
+        "${lint_venv}/bin/ruff" check --no-cache --config pyproject.toml open_instruct projects mason.py

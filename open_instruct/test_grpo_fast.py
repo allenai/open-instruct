@@ -853,5 +853,103 @@ class TestDataPreparation(TestGrpoFastBase):
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
 
 
+class TestPeftWeightSync(unittest.TestCase):
+    """The LoRA policy has to reach vLLM looking exactly like the base model.
+
+    These run on a tiny randomly-initialized model on CPU, so they are about names and
+    arithmetic rather than about any particular checkpoint.
+    """
+
+    def setUp(self):
+        # Imported here rather than at module scope because grpo_fast imports vllm, which
+        # pyproject excludes on Darwin, and the rest of this file runs without it.
+        from open_instruct import grpo_fast  # noqa: PLC0415
+
+        self.grpo_fast = grpo_fast
+
+    def _tiny_model(self):
+        from transformers import Olmo2Config, Olmo2ForCausalLM  # noqa: PLC0415
+
+        torch.manual_seed(0)
+        return Olmo2ForCausalLM(
+            Olmo2Config(
+                vocab_size=64,
+                hidden_size=32,
+                intermediate_size=64,
+                num_hidden_layers=2,
+                num_attention_heads=4,
+                num_key_value_heads=4,
+                max_position_embeddings=64,
+            )
+        )
+
+    def _wrap(self, model):
+        from peft import LoraConfig, TaskType, get_peft_model  # noqa: PLC0415
+
+        return get_peft_model(
+            model,
+            LoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                inference_mode=False,
+                r=4,
+                lora_alpha=8,
+                lora_dropout=0.0,
+                target_modules=self.grpo_fast.DEFAULT_LORA_TARGET_MODULES,
+            ),
+        )
+
+    def test_mapped_names_are_exactly_the_base_model_names(self):
+        base_names = {name for name, _ in self._tiny_model().named_parameters()}
+        wrapped = self._wrap(self._tiny_model())
+
+        mapper = self.grpo_fast._build_peft_name_mapper(None)
+        mapped = {mapper(name) for name, _ in wrapped.named_parameters()} - {None}
+
+        self.assertEqual(mapped, base_names)
+
+    def test_adapter_tensors_are_dropped(self):
+        wrapped = self._wrap(self._tiny_model())
+        mapper = self.grpo_fast._build_peft_name_mapper(None)
+
+        adapter_names = [n for n, _ in wrapped.named_parameters() if "lora_" in n]
+        self.assertTrue(adapter_names, "LoRA wrapping produced no adapter parameters")
+        for name in adapter_names:
+            self.assertIsNone(mapper(name))
+
+    def test_an_inner_mapper_still_runs(self):
+        mapper = self.grpo_fast._build_peft_name_mapper(lambda name: f"language_model.{name}")
+        self.assertEqual(
+            mapper("base_model.model.model.layers.0.self_attn.q_proj.base_layer.weight"),
+            "language_model.model.layers.0.self_attn.q_proj.weight",
+        )
+        self.assertIsNone(mapper("base_model.model.model.layers.0.self_attn.q_proj.lora_A.default.weight"))
+
+    def test_merged_weight_is_what_the_adapter_computes(self):
+        """What vLLM receives must be base + BA*scale, not the untouched base."""
+        wrapped = self._wrap(self._tiny_model())
+        target = "base_model.model.model.layers.0.self_attn.q_proj"
+        module = wrapped.get_submodule(target)
+
+        # PEFT starts B at zero so a fresh adapter is the identity. Both factors have to
+        # be perturbed, or BA stays zero and this test would pass on an unmerged model.
+        torch.nn.init.normal_(module.lora_A["default"].weight, std=0.02)
+        torch.nn.init.normal_(module.lora_B["default"].weight, std=0.02)
+
+        before = dict(wrapped.named_parameters())[f"{target}.base_layer.weight"].detach().clone()
+        expected = before + (
+            module.lora_B["default"].weight @ module.lora_A["default"].weight
+        ) * module.scaling["default"]
+
+        wrapped.merge_adapter()
+        merged = dict(wrapped.named_parameters())[f"{target}.base_layer.weight"].detach().clone()
+        wrapped.unmerge_adapter()
+        restored = dict(wrapped.named_parameters())[f"{target}.base_layer.weight"].detach().clone()
+
+        self.assertFalse(torch.allclose(merged, before), "merge_adapter did not change the base weight")
+        torch.testing.assert_close(merged, expected, rtol=1e-4, atol=1e-5)
+        # Unmerge has to restore the base, or each step would compound into it.
+        torch.testing.assert_close(restored, before, rtol=1e-4, atol=1e-5)
+
+
 if __name__ == "__main__":
     unittest.main()
