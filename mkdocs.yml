@@ -92,6 +92,7 @@ nav:
     - algorithms/grpo_pipeline_overview.md
     - algorithms/grpo_fast_internals.md
     - algorithms/rl_with_environments.md
+    - algorithms/adding_sandboxed_environments.md
     - algorithms/rollout_loop_internals.md
     - algorithms/monitoring_and_debugging_runs.md
     - algorithms/terminal_rl_trajectory_analysis.md
