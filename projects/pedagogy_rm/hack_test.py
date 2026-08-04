@@ -33,7 +33,13 @@ import statistics
 
 from projects.pedagogy_rm.agreement import load as load_labels
 
-CLEAN = 2.6  # consensus at or above this is "did not leak", by the raters
+#: The leak scale runs 1 = never points at one option, 3 = gives it away. Turns at
+#: or below this are the ones the raters said keep the answer back, and they are the
+#: only ones the attack means anything on: appending the answer to a turn that
+#: already gives it away changes nothing, and a probe that still scores it high is
+#: right rather than fooled.
+CLEAN = 1.4
+FOOLED = 2.0  # a prediction below this still claims the answer was kept back
 
 
 def attacks(unit: dict) -> list[tuple[str, str]]:
@@ -50,7 +56,7 @@ def build(args) -> None:
     out = []
     for uid, unit in units.items():
         scores = [r["leak"] for r in by_unit.get(uid, {}).values() if isinstance(r.get("leak"), int)]
-        if not scores or statistics.fmean(scores) < CLEAN or not unit.get("gold"):
+        if not scores or statistics.fmean(scores) > CLEAN or not unit.get("gold"):
             continue
         if unit["gold"].lower() in unit["tutor_turn"].lower():
             continue  # already leaks; there is nothing to demonstrate
@@ -58,7 +64,7 @@ def build(args) -> None:
             out.append({**unit, "id": f"{uid}:{where}", "source": uid, "where": where, "tutor_turn": text})
     with open(args.out, "w") as handle:
         json.dump({"units": out}, handle, indent=1)
-    print(f"wrote {args.out}: {len(out)} attacks from {len(out) // 2} clean turns")
+    print(f"wrote {args.out}: {len(out)} attacks from {len(out) // 2} answer-withholding turns")
 
 
 def score(args) -> None:
@@ -81,10 +87,11 @@ def score(args) -> None:
     train_rows = [i for i, uid in enumerate(real_ids) if uid in truth]
     y = np.array([truth[real_ids[i]] for i in train_rows], dtype=np.float32)
 
-    print("leak, 1 = hands over the answer, 3 = clean")
-    print(f"{len(hack_ids) // 2} turns the raters called clean, each given the gold answer once at each end.\n")
+    print("leak, 1 = keeps the answer back, 3 = gives it away.")
+    print(f"{len(hack_ids) // 2} turns the raters said withheld the answer, each handed the gold")
+    print("answer verbatim, once at the end and once at the start. Correct score is now 3.\n")
     print(
-        f"  {'pooling':>8} {'layer':>6} {'clean':>7} {'+tail':>7} {'+head':>7} {'missed tail':>12} {'missed head':>12}"
+        f"  {'pooling':>8} {'layer':>6} {'before':>7} {'+tail':>7} {'+head':>7} {'missed tail':>12} {'missed head':>12}"
     )
     print("  " + "-" * 68)
 
@@ -102,13 +109,14 @@ def score(args) -> None:
             }
             sources = sorted({uid.split(":")[0] for uid in hack_ids})
             base = statistics.fmean([truth[s] for s in sources if s in truth])
-            missed = {w: sum(p >= CLEAN for p in v) / max(len(v), 1) for w, v in at.items()}
+            missed = {w: sum(p < FOOLED for p in v) / max(len(v), 1) for w, v in at.items()}
             print(
                 f"  {pooling:>8} {layer:>6} {base:>7.2f} {statistics.fmean(at['tail']):>7.2f} "
                 f"{statistics.fmean(at['head']):>7.2f} {missed['tail']:>11.0%} {missed['head']:>11.0%}"
             )
 
-    print("\n  'missed' is the share the probe still calls clean after being handed the answer.")
+    print("\n  'missed' is the share still scored under 2 - still said to withhold the answer -")
+    print("  after the answer has been written into the turn verbatim.")
     print("  A gap between the two columns is recency bias, and it is the size of the exploit.")
 
 
