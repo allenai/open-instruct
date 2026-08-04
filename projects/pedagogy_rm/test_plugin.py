@@ -77,6 +77,30 @@ def test_signs_point_the_right_way():
 
 @needs_data
 @pytest.mark.skipif(os.environ.get("PEDAGOGY_GPU") != "1", reason="loads a 7B model; set PEDAGOGY_GPU=1")
+def test_truncation_does_not_change_what_is_read():
+    """Cutting the encoder short must not move the states the heads read.
+
+    The failure this guards against is silent: transformers norms the last entry
+    of hidden_states, so a cut at exactly the read layer returns a normed vector
+    where the head expects a raw one. Finite, plausible, and wrong.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    with open(UNITS) as handle:
+        units = json.load(handle)["units"][:4]
+    contexts = [PedagogyHead.context(PedagogyHead.__new__(PedagogyHead), sample_for(u)) for u in units]
+
+    short = PedagogyHead(head=HEAD)
+    full = PedagogyHead(head=HEAD)
+    full._truncate = lambda model: None  # noqa: SLF001 - the point is to compare against no truncation
+
+    for cell, vecs in short.states(contexts).items():
+        a, b = np.stack(vecs), np.stack(full.states(contexts)[cell])
+        assert np.allclose(a, b, atol=1e-3), f"{cell}: truncation moved the state by {np.abs(a - b).max():.4f}"
+
+
+@needs_data
+@pytest.mark.skipif(os.environ.get("PEDAGOGY_GPU") != "1", reason="loads a 7B model; set PEDAGOGY_GPU=1")
 def test_scores_track_the_labels():
     """End to end: the reward should correlate with the labels it was fitted on.
 

@@ -90,10 +90,33 @@ class PedagogyHead(GroupScorer):
 
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             model = AutoModelForCausalLM.from_pretrained(self.model_name, dtype=torch.bfloat16)
+            self._truncate(model)
             device = self.device if torch.cuda.is_available() else "cpu"
             self._model = model.to(device).eval()
             for p in self._model.parameters():  # the encoder is never trained
                 p.requires_grad_(False)
+
+    def _truncate(self, model) -> None:
+        """Drop the blocks above the deepest one the active heads read.
+
+        The heads read layers 16 and 20 of 32, and everything above is computed
+        and discarded - a third of the forward pass on every completion of every
+        group, for the whole run. Dropping the blocks drops their weights too,
+        which is most of what the encoder costs in memory beside vLLM.
+
+        ONE BLOCK MORE THAN NEEDED, DELIBERATELY. Transformers appends the final
+        norm's output as the LAST entry of hidden_states and leaves every earlier
+        entry as the raw block output. Cutting to exactly the deepest layer would
+        make that layer the last one, so it would arrive normed - a different
+        vector from the one the head was fitted on, still finite, still plausible,
+        and wrong. Keeping one spare block leaves the read layers raw.
+        """
+        deepest = max(self.meta["dimensions"][d]["layer"] for d in self.dims)
+        blocks = getattr(getattr(model, "model", None), "layers", None)
+        if blocks is None or deepest + 1 >= len(blocks):
+            return
+        model.model.layers = blocks[: deepest + 1]
+        self.kept_layers = deepest + 1
 
     def context(self, sample: Sample) -> tuple[list[dict], str]:
         """The chat context the head was fitted on, and the turn to score.
