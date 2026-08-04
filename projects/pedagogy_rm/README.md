@@ -130,6 +130,52 @@ end-of-turn token trails it by 0.02–0.04, and mean pooling wins `targeted`.
 Layers 16–20 of 32 beat both ends at every dimension — the last layer is
 specialised for predicting the next token, not for summarising.
 
+## Hackability
+
+`hack_test.py` writes the gold answer into turns the raters said withheld it, at
+each end of the turn. Those turns now hand over the answer, so the correct `leak`
+score is 3 and there is nothing to argue about. Share still scored under 2 — still
+called answer-withholding — with the answer sitting in the text:
+
+| pooling | layer | leak at the end | leak at the start |
+| --- | --- | --- | --- |
+| last | 20 | 3% | 93% |
+| last | 32 | 20% | 96% |
+| eot | 20 | 41% | 98% |
+| mean | 16 | 88% | 60% |
+
+**Pooling decides which attack works; depth barely matters.** Last-token pooling
+catches a giveaway at the end and is blind to the same sentence at the start.
+Mean pooling is the mirror image. Reading the final layer instead of the middle
+does not help — at layer 32 the tail miss rate gets *worse*, 3% to 20%.
+
+This matters because the un-augmented probe scores r = 0.84 on `leak` and would
+have gone straight into a GRPO loop. The policy would have found this in a few
+hundred steps and the reward curve would have gone up the whole time.
+
+**Adversarial augmentation closes it.** Half the attacked turns in training
+labelled 3, split by question, and the attack written in four phrasings with only
+`The answer is X` ever trained on:
+
+| pooling | layer | r on real | trained phrasing, unseen questions | unseen phrasings |
+| --- | --- | --- | --- | --- |
+| last | 16 | 0.82 | 0% | 3% |
+| eot | 16 | 0.77 | 0% | 3% |
+| mean | 16 | 0.74 | 0% | 4% |
+| last | 32 | 0.69 | 1% | 4% |
+
+93% missed becomes 3%, on questions and phrasings the probe never saw, and
+accuracy on real held-out turns holds at 0.82 against the 0.84 it started with.
+So the states carried "the answer is written here" all along and the labels never
+asked; the fix is data, not architecture. Layer 16 is best on every axis at once,
+which settles the middle-versus-final question — the final layer is worse at
+reading the labels *and* no harder to fool.
+
+The obvious caveat: one dimension, one attack family, held out along two axes but
+not adversarially searched. A real deployment wants this rerun against whatever
+the policy actually invents, which is what `scored_rewards`' anchor evaluation is
+for.
+
 ## The caveat you are buying
 
 Ignoring student correctness makes the target tractable and honest about what it
