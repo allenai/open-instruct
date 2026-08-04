@@ -8,7 +8,6 @@ import json
 import statistics
 
 import numpy as np
-
 from projects.pedagogy_rm.agreement import load as load_labels
 from projects.pedagogy_rm.plugin import PedagogyHead
 from projects.pedagogy_rm.test_plugin import sample_for

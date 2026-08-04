@@ -89,7 +89,12 @@ def test_scores_track_the_labels():
 
     with open(UNITS) as handle:
         units = json.load(handle)["units"][:64]
-    by_unit = load_labels(sorted(glob.glob("data/labels/*.json")))
+    paths = sorted(glob.glob("data/labels/*.json"))
+    # Said plainly, because the first run of this on the cluster had no labels
+    # directory, compared two empty lists, and reported a correlation of nan as
+    # "the paths have drifted" - which sent me looking at the wrong file.
+    assert paths, "no data/labels/*.json here; copy the labels to this machine before running"
+    by_unit = load_labels(paths)
     scorer = PedagogyHead(head=HEAD)
     results = asyncio.run(scorer.score_group([sample_for(u) for u in units]))
 
@@ -100,5 +105,6 @@ def test_scores_track_the_labels():
             if scores:
                 truth.append(statistics.fmean(scores))
                 got.append(result.info["raw"][dim])
+        assert len(got) >= 20, f"{dim}: only {len(got)} of {len(units)} units carry labels here"
         r = pearson(got, truth)
         assert r > 0.6, f"{dim}: online scores correlate at {r:.2f} with the labels; the paths have drifted"
