@@ -49,31 +49,6 @@ DIMENSIONS: tuple[Dimension, ...] = (
         },
     ),
     Dimension(
-        "correct",
-        "Could a student take away anything wrong from this turn?",
-        # Rewritten after the first agent run. It used to ask whether the turn
-        # was TRUE, and five raters from five labs read that as "contains no
-        # false statement" - so they returned 3 for 85% of turns and agreed
-        # with the human at kappa 0.06. The human was marking things that are
-        # not false but still leave a wrong impression: a question floating a
-        # wrong operation, a conflict described as an "overlap", filler that
-        # says nothing about the problem. Those are named below, because a
-        # scale whose failure modes are listed can be pointed at, and one that
-        # says "imprecise" cannot.
-        {
-            1: "Flatly wrong. A false fact, a bad calculation, or a claim that contradicts the correct answer.",
-            2: "Nothing false, but a student could still come away with something "
-            "wrong. Any of: glosses over a step in a way that hides it; floats a "
-            "wrong operation or relationship, even as a question; describes the "
-            "situation with a word that misdescribes it; is confused or "
-            "self-contradictory; or is filler that asserts nothing about this "
-            "problem at all.",
-            3: "Nothing to take away wrongly. Every claim is true, precise, and "
-            "about THIS problem. This is a high bar - if any phrase makes you "
-            "pause, it is a 2.",
-        },
-    ),
-    Dimension(
         "targeted",
         "Does the turn address THIS student's stuck point, or would it fit any problem?",
         {
@@ -119,7 +94,39 @@ DIMENSIONS: tuple[Dimension, ...] = (
     ),
 )
 
-BY_KEY = {d.key: d for d in DIMENSIONS}
+#: Rated once, then retired. Kept here so the reason survives and nobody
+#: reintroduces it on the theory that the wording just needed work.
+#:
+#: ``correct`` asked whether a student could take anything wrong from the turn.
+#: Six raters from six labs agreed with the human at kappa 0.18 over 40 units -
+#: below the 0.4 floor - while agreeing with EACH OTHER at 0.41. It was rewritten
+#: once already, from "is everything asserted true?", which they had all read as
+#: "contains no false statement" and answered 3 for 85% of turns (kappa 0.06).
+#: The rewrite moved their behaviour a long way (3s fell to about 60%) and their
+#: agreement with the human hardly at all, which is the signature of a question
+#: that cannot be transferred rather than one that was badly worded.
+#:
+#: The likely reason: it asks whether a STUDENT could be misled, which needs a
+#: model of the student rather than anything checkable in the text. The other
+#: five can be answered by pointing at the turn.
+DROPPED: tuple[Dimension, ...] = (
+    Dimension(
+        "correct",
+        "Could a student take away anything wrong from this turn?",
+        {
+            1: "Flatly wrong. A false fact, a bad calculation, or a claim that contradicts the correct answer.",
+            2: "Nothing false, but a student could still come away with something "
+            "wrong. Any of: glosses over a step in a way that hides it; floats a "
+            "wrong operation or relationship, even as a question; describes the "
+            "situation with a word that misdescribes it; is confused or "
+            "self-contradictory; or is filler that asserts nothing about this problem at all.",
+            3: "Nothing to take away wrongly. Every claim is true, precise, and "
+            "about THIS problem. This is a high bar - if any phrase makes you pause, it is a 2.",
+        },
+    ),
+)
+
+BY_KEY = {d.key: d for d in (*DIMENSIONS, *DROPPED)}
 
 
 def rubric_markdown() -> str:

@@ -32,7 +32,7 @@ import socketserver
 import threading
 import webbrowser
 
-from projects.pedagogy_rm.rubric import DIMENSIONS
+from projects.pedagogy_rm.rubric import BY_KEY, DIMENSIONS
 
 PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>pedagogy labelling</title>
@@ -207,11 +207,17 @@ class State:
 
     Rewriting 600 small records costs nothing and removes a class of bug that
     matters here more than speed: a partially written label file after a crash.
+
+    ``active`` narrows the dimensions in play. Rating one dimension across many
+    turns is a different and much faster task than rating six on a few - you hold
+    one question in your head instead of switching between six - and it is the
+    right shape when a single dimension needs more evidence than the others.
     """
 
-    def __init__(self, units: list[dict], out: str) -> None:
+    def __init__(self, units: list[dict], out: str, active: tuple = DIMENSIONS) -> None:
         self.units = units
         self.out = out
+        self.active = active
         self.labels: dict[str, dict] = {}
         if os.path.exists(out):
             with open(out) as handle:
@@ -223,7 +229,7 @@ class State:
         self.lock = threading.Lock()
 
     def _complete(self, record: dict | None) -> bool:
-        return bool(record) and all(d.key in record for d in DIMENSIONS)
+        return bool(record) and all(d.key in record for d in self.active)
 
     def _first_unlabelled(self) -> int:
         for i, unit in enumerate(self.units):
@@ -267,7 +273,7 @@ def make_handler(state: State):
             "hi": d.hi,
             "anchors": [{"score": s, "text": t} for s, t in sorted(d.anchors.items())],
         }
-        for d in DIMENSIONS
+        for d in state.active
     ]
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -321,6 +327,7 @@ def main() -> None:
     parser.add_argument("--out", required=True, help="labels json; resumed if it exists")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--limit", type=int, default=0, help="stop after N units, 0 for all")
+    parser.add_argument("--dimensions", default="", help="rate only these, e.g. correct; much faster per turn")
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
 
@@ -329,11 +336,14 @@ def main() -> None:
     if args.limit:
         units = units[: args.limit]
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    state = State(units, args.out)
+    active = DIMENSIONS if not args.dimensions else tuple(BY_KEY[k] for k in args.dimensions.split(","))
+    state = State(units, args.out, active)
 
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("127.0.0.1", args.port), make_handler(state)) as server:
         url = f"http://localhost:{args.port}"
+        if len(active) < len(DIMENSIONS):
+            print(f"rating only: {', '.join(d.key for d in active)}")
         print(f"{len(units)} units, {state.done_count()} already labelled")
         print(f"labelling at {url}   (ctrl-c to stop; progress is saved after every answer)")
         if not args.no_open:

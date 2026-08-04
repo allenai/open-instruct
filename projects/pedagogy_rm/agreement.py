@@ -125,7 +125,17 @@ def against_reference(by_unit: dict[str, dict[str, dict]], reference: str, conta
     """
     raters = sorted({r for records in by_unit.values() for r in records} - {reference})
     shared = {u: recs for u, recs in by_unit.items() if reference in recs}
-    clean = {d.key: {u for u in shared if u not in contaminated.get(d.key, set())} for d in DIMENSIONS}
+    # A unit counts for a dimension only when the reference actually scored it.
+    # Single-dimension labelling sessions leave the others blank, and counting
+    # those would advertise power the comparison does not have.
+    clean = {
+        d.key: {
+            u
+            for u in shared
+            if u not in contaminated.get(d.key, set()) and isinstance(shared[u][reference].get(d.key), int)
+        }
+        for d in DIMENSIONS
+    }
     counts = {d.key: len(clean[d.key]) for d in DIMENSIONS}
     if not any(counts.values()):
         print("\n  NO CLEAN UNITS. Every unit you labelled was used to calibrate the agents,")
