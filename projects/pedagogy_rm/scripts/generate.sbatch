@@ -50,9 +50,16 @@ source "$VENV/bin/activate"
 cd "$REPO"
 mkdir -p logs runs
 
-# Pre-download on the login node instead if the compute nodes have no route out:
-#   hf download allenai/OLMo-2-1124-7B-Instruct
-# then set HF_HUB_OFFLINE=1 here.
+# Offline, which is what the run that produced data/traces.jsonl actually used - the flag
+# was added here on the cluster and is folded back in so this file describes that run.
+#
+# Not because the nodes cannot reach the hub: they can, measured on this partition, and an
+# earlier comment here claiming otherwise was wrong. The reason is that the weights are
+# already under $SCRATCH/hf-cache, so pinning offline makes generation independent of hub
+# availability and stops a cache miss from silently fetching a different revision of the
+# model these traces are attributed to. Pre-download with
+# `hf download allenai/OLMo-2-1124-7B-Instruct` on the login node if the cache is ever cold.
+export HF_HUB_OFFLINE=1
 
 cleanup() { kill "${TEACHER_PID:-}" "${STUDENT_PID:-}" 2>/dev/null || true; }
 trap cleanup EXIT
