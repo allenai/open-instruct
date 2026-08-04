@@ -226,17 +226,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     logger.info(f"Total training steps: {effective_steps} (epochs={args.training.num_epochs})")
     if effective_steps < 1:
         raise ValueError(
-            f"Computed {effective_steps} training steps, so there is nothing to train on.\n"
-            f"  packed instances:       {len(np_dataset)}\n"
-            f"  global batch (seqs):    {global_batch_size_seqs} "
-            f"= per_device({args.training.per_device_train_batch_size}) "
-            f"* grad_accum({args.training.gradient_accumulation_steps}) * dp_world({dp_world_size})\n"
-            f"  num_epochs:             {args.training.num_epochs}\n\n"
-            "The dataset must yield at least one global batch: "
-            "len(dataset) // global_batch_size_seqs * num_epochs must be >= 1.\n"
-            "Note that dp_world scales with GPU count, so a dataset sized for a smaller job can "
-            "fall below one global batch when you add nodes. Either use more data, or lower "
-            "--gradient_accumulation_steps / --per_device_train_batch_size."
+            f"Computed {effective_steps} training steps from {len(np_dataset)} packed instances "
+            f"// global batch {global_batch_size_seqs} * {args.training.num_epochs} epochs. "
+            "Use more data, or lower --gradient_accumulation_steps / --per_device_train_batch_size."
         )
     scheduler = olmo_core_utils.build_scheduler(
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
