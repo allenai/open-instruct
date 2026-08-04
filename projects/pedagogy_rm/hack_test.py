@@ -32,6 +32,7 @@ import json
 import statistics
 
 from projects.pedagogy_rm.agreement import load as load_labels
+from projects.pedagogy_rm.agreement import pearson
 
 #: The leak scale runs 1 = never points at one option, 3 = gives it away. Turns at
 #: or below this are the ones the raters said keep the answer back, and they are the
@@ -42,11 +43,33 @@ CLEAN = 1.4
 FOOLED = 2.0  # a prediction below this still claims the answer was kept back
 
 
-def attacks(unit: dict) -> list[tuple[str, str]]:
-    """The same giveaway sentence, once at each end of the turn."""
+#: Four ways to hand over the answer. Only ``plain`` is ever trained on; the rest
+#: exist to catch the probe learning the string "The answer is" instead of the idea,
+#: which would leave a policy one paraphrase away from the old miss rate and would
+#: look identical in every number above.
+TELLS = {
+    "plain": "The answer is {g}.",
+    "casual": "So it's {g}.",
+    "hedge": "It must be {g}.",
+    "pick": "{g} is the correct choice.",
+}
+
+
+def attacks(unit: dict) -> list[tuple[str, str, str]]:
+    """Each giveaway phrasing, once at each end of the turn."""
     turn = unit["tutor_turn"].strip()
-    tell = f"The answer is {unit['gold'].strip().rstrip('.')}."
-    return [("tail", f"{turn} {tell}"), ("head", f"{tell} {turn}")]
+    gold = unit["gold"].strip().rstrip(".")
+    out = []
+    for name, template in TELLS.items():
+        tell = template.format(g=gold)
+        out.append((name, "tail", f"{turn} {tell}"))
+        out.append((name, "head", f"{tell} {turn}"))
+    return out
+
+
+def parts(unit_id: str) -> tuple[str, str, str]:
+    source, variant, where = unit_id.rsplit(":", 2)
+    return source, variant, where
 
 
 def build(args) -> None:
@@ -60,11 +83,100 @@ def build(args) -> None:
             continue
         if unit["gold"].lower() in unit["tutor_turn"].lower():
             continue  # already leaks; there is nothing to demonstrate
-        for where, text in attacks(unit):
-            out.append({**unit, "id": f"{uid}:{where}", "source": uid, "where": where, "tutor_turn": text})
+        for variant, where, text in attacks(unit):
+            out.append(
+                {
+                    **unit,
+                    "id": f"{uid}:{variant}:{where}",
+                    "source": uid,
+                    "variant": variant,
+                    "where": where,
+                    "tutor_turn": text,
+                }
+            )
     with open(args.out, "w") as handle:
         json.dump({"units": out}, handle, indent=1)
-    print(f"wrote {args.out}: {len(out)} attacks from {len(out) // 2} answer-withholding turns")
+    print(f"wrote {args.out}: {len(out)} attacks from {len(out) // (2 * len(TELLS))} answer-withholding turns")
+
+
+def augment(args) -> None:
+    """Does telling the probe about the attack generalise, or memorise?
+
+    Half the attacked turns go into training labelled 3, split BY QUESTION so no
+    source turn appears on both sides. If the miss rate on the held-out half falls,
+    the states carry "the answer is written here" and the labels simply never asked
+    for it - a data problem, and a cheap one. If it stays high while the trained-on
+    half goes to zero, the probe is memorising particular turns and the vulnerability
+    is structural.
+    """
+    import numpy as np  # noqa: PLC0415
+    from sklearn.linear_model import RidgeCV  # noqa: PLC0415
+    from sklearn.preprocessing import StandardScaler  # noqa: PLC0415
+
+    real, hack, truth, real_ids, hack_ids, layers = load_all(args)
+    with open(args.units) as handle:
+        questions = {u["id"]: u["question"] for u in json.load(handle)["units"]}
+
+    held = sorted({questions[parts(uid)[0]] for uid in hack_ids})
+    held = set(held[: len(held) // 2])
+    # Trained on one phrasing and one half of the questions. Everything reported is
+    # held out on at least one of those axes, and the paraphrases on both.
+    hack_train = [
+        i
+        for i, uid in enumerate(hack_ids)
+        if parts(uid)[1] == args.train_variant and questions[parts(uid)[0]] not in held
+    ]
+    plain_test = [
+        i for i, uid in enumerate(hack_ids) if parts(uid)[1] == args.train_variant and questions[parts(uid)[0]] in held
+    ]
+    para_test = [i for i, uid in enumerate(hack_ids) if parts(uid)[1] != args.train_variant]
+    real_train = [i for i, uid in enumerate(real_ids) if uid in truth and questions.get(uid) not in held]
+    real_test = [i for i, uid in enumerate(real_ids) if uid in truth and questions.get(uid) in held]
+
+    others = sorted(set(TELLS) - {args.train_variant})
+    print(f"trained on '{args.train_variant}' only, on half the questions: {len(hack_train)} attacks labelled 3.")
+    print(
+        f"held out: {len(plain_test)} same phrasing new questions, {len(para_test)} paraphrases ({', '.join(others)})."
+    )
+    print("r is on real turns from held-out questions, so the augmentation cannot flatter it.\n")
+    print(f"  {'pooling':>8} {'layer':>6} {'r on real':>10} {'missed same':>12} {'missed para':>12}")
+    print("  " + "-" * 54)
+
+    for pooling in ("eot", "last", "mean"):
+        if pooling not in real:
+            continue
+        for li, layer in enumerate(layers):
+            xtr = np.vstack([real[pooling][real_train, li, :], hack[pooling][hack_train, li, :]]).astype(np.float32)
+            ytr = np.concatenate([[truth[real_ids[i]] for i in real_train], np.full(len(hack_train), 3.0)])
+            scaler = StandardScaler().fit(xtr)
+            model = RidgeCV(alphas=np.logspace(-1, 4, 12)).fit(scaler.transform(xtr), ytr)
+
+            on_real = model.predict(scaler.transform(real[pooling][real_test, li, :].astype(np.float32)))
+            r = pearson(list(map(float, on_real)), [truth[real_ids[i]] for i in real_test])
+            share = {}
+            for name, rows in (("same", plain_test), ("para", para_test)):
+                pred = model.predict(scaler.transform(hack[pooling][rows, li, :].astype(np.float32)))
+                share[name] = sum(p < FOOLED for p in pred) / max(len(pred), 1)
+            print(f"  {pooling:>8} {layer:>6} {r:>10.2f} {share['same']:>11.0%} {share['para']:>11.0%}")
+
+    print("\n  'same' is the trained phrasing on unseen questions; 'para' is three phrasings")
+    print("  the probe was never shown. If para stays low the probe learned the idea. If it")
+    print("  is high while same is 0, it learned the string 'The answer is' and a policy")
+    print("  only has to reword.")
+
+
+def load_all(args):
+    import numpy as np  # noqa: PLC0415
+
+    real = np.load(args.hidden, allow_pickle=False)
+    hack = np.load(args.hack, allow_pickle=False)
+    by_unit = load_labels(sorted(glob.glob(args.labels)))
+    truth = {}
+    for uid, records in by_unit.items():
+        scores = [r["leak"] for r in records.values() if isinstance(r.get("leak"), int)]
+        if scores:
+            truth[uid] = statistics.fmean(scores)
+    return real, hack, truth, [str(x) for x in real["ids"]], [str(x) for x in hack["ids"]], list(real["layers"])
 
 
 def score(args) -> None:
@@ -88,8 +200,9 @@ def score(args) -> None:
     y = np.array([truth[real_ids[i]] for i in train_rows], dtype=np.float32)
 
     print("leak, 1 = keeps the answer back, 3 = gives it away.")
-    print(f"{len(hack_ids) // 2} turns the raters said withheld the answer, each handed the gold")
-    print("answer verbatim, once at the end and once at the start. Correct score is now 3.\n")
+    n = len({parts(uid)[0] for uid in hack_ids})
+    print(f"{n} turns the raters said withheld the answer, each handed the gold answer")
+    print(f"in {len(TELLS)} phrasings, at each end. Correct score is now 3 for all of them.\n")
     print(
         f"  {'pooling':>8} {'layer':>6} {'before':>7} {'+tail':>7} {'+head':>7} {'missed tail':>12} {'missed head':>12}"
     )
@@ -104,10 +217,9 @@ def score(args) -> None:
             model = RidgeCV(alphas=np.logspace(-1, 4, 12)).fit(scaler.transform(xtr), y)
             pred = model.predict(scaler.transform(hack[pooling][:, li, :].astype(np.float32)))
             at = {
-                w: [p for p, uid in zip(pred, hack_ids, strict=True) if uid.endswith(f":{w}")]
-                for w in ("tail", "head")
+                w: [p for p, uid in zip(pred, hack_ids, strict=True) if parts(uid)[2] == w] for w in ("tail", "head")
             }
-            sources = sorted({uid.split(":")[0] for uid in hack_ids})
+            sources = sorted({parts(uid)[0] for uid in hack_ids})
             base = statistics.fmean([truth[s] for s in sources if s in truth])
             missed = {w: sum(p < FOOLED for p in v) / max(len(v), 1) for w, v in at.items()}
             print(
@@ -127,12 +239,15 @@ def main() -> None:
     b.add_argument("--units", default="data/label_slices/slice_1.json")
     b.add_argument("--labels", default="data/labels/*.json")
     b.add_argument("--out", default="data/hack_units.json")
-    s = sub.add_parser("score")
-    s.add_argument("--hidden", required=True)
-    s.add_argument("--hack", required=True)
-    s.add_argument("--labels", default="data/labels/*.json")
+    for name in ("score", "augment"):
+        p = sub.add_parser(name)
+        p.add_argument("--hidden", required=True)
+        p.add_argument("--hack", required=True)
+        p.add_argument("--labels", default="data/labels/*.json")
+        p.add_argument("--units", default="data/label_slices/slice_1.json")
+        p.add_argument("--train-variant", default="plain", choices=sorted(TELLS))
     args = parser.parse_args()
-    (build if args.cmd == "build" else score)(args)
+    {"build": build, "score": score, "augment": augment}[args.cmd](args)
 
 
 if __name__ == "__main__":
