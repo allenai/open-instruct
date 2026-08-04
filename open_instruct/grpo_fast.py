@@ -823,7 +823,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.synchronize()
         dp_world_size = self.args.world_size // self.args.sequence_parallel_size
         scale = current_global_count * dp_world_size / (self.args.world_size * float(loss_denominator))
-        loss, kl_avg, clipfrac, ratio_avg, echo_nll_sum = grpo_utils.tiled_grpo_lm_head_loss(
+        loss, kl_avg, clipfrac, ratio_avg, echo_stats = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head,
             hidden_states=hidden_states,
             selected_token_ids=selected_token_ids,
@@ -850,8 +850,8 @@ class PolicyTrainerRayProcess(RayProcess):
             echo_token_weight=echo_token_weight,
         )
         if ref_logprobs is not None:
-            return loss, (kl_avg, clipfrac, ratio_avg), echo_nll_sum
-        return loss, (clipfrac, ratio_avg), echo_nll_sum
+            return loss, (kl_avg, clipfrac, ratio_avg), echo_stats
+        return loss, (clipfrac, ratio_avg), echo_stats
 
     def _compute_logprobs(
         self, model: torch.nn.Module, data_BT: data_types.CollatedBatchData, cp_contexts_BT: list[Any]
@@ -1246,7 +1246,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 tvpo_tv_weight += response_mask_BT.sum()
                         is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                         self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
-                        loss, tiled_metrics, echo_nll_sum = self._compute_tiled_dapo_loss(
+                        loss, tiled_metrics, echo_stats = self._compute_tiled_dapo_loss(
                             query_responses=data_BT.query_responses[i],
                             position_ids=data_BT.position_ids[i],
                             response_mask=response_mask_BT,
@@ -1268,8 +1268,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                         if echo_enabled:
                             with torch.no_grad():
-                                echo_nll_total += echo_nll_sum
-                                echo_token_total += echo_mask_BT.sum()
+                                # Both entries are SP-group all-reduced inside the
+                                # tiled loss, so numerator and denominator stay
+                                # consistent under sequence parallelism.
+                                echo_nll_total += echo_stats[0]
+                                echo_token_total += echo_stats[1]
 
                         torch.cuda.empty_cache()
                         self.model.backward(loss)

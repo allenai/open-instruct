@@ -574,7 +574,7 @@ class TestEchoLoss(unittest.TestCase):
         )
         dense_loss.backward()
 
-        tiled_loss, _, _, _, tiled_echo_nll_sum = grpo_utils.tiled_grpo_lm_head_loss(
+        tiled_loss, _, _, _, tiled_echo_stats = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head_tiled,
             hidden_states=hidden_tiled,
             selected_token_ids=selected_token_ids,
@@ -594,7 +594,8 @@ class TestEchoLoss(unittest.TestCase):
         tiled_loss.backward()
 
         torch.testing.assert_close(tiled_loss, dense_loss.detach())
-        torch.testing.assert_close(tiled_echo_nll_sum, echo_nll.sum().detach())
+        torch.testing.assert_close(tiled_echo_stats[0], echo_nll.sum().detach())
+        torch.testing.assert_close(tiled_echo_stats[1], echo_mask.sum().float())
         torch.testing.assert_close(hidden_tiled.grad, hidden_dense.grad)
         torch.testing.assert_close(lm_head_tiled.weight.grad, lm_head_dense.weight.grad)
         torch.testing.assert_close(lm_head_tiled.bias.grad, lm_head_dense.bias.grad)
@@ -609,7 +610,7 @@ class TestEchoLoss(unittest.TestCase):
         response_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
         echo_mask = torch.tensor([[False, True, True, False]])
 
-        loss, _, _, _, echo_nll_sum = grpo_utils.tiled_grpo_lm_head_loss(
+        loss, _, _, _, echo_stats = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head,
             hidden_states=hidden,
             selected_token_ids=selected_token_ids,
@@ -629,7 +630,8 @@ class TestEchoLoss(unittest.TestCase):
 
         loss.backward()
 
-        self.assertGreater(float(echo_nll_sum.detach()), 0.0)
+        self.assertGreater(float(echo_stats[0].detach()), 0.0)
+        self.assertEqual(float(echo_stats[1]), 2.0)
         grad_norms_per_position = hidden.grad.norm(dim=-1).squeeze(0)
         # Positions feeding echo targets get gradient; the rest stay zero.
         self.assertTrue(torch.all(grad_norms_per_position[echo_mask.squeeze(0)] > 0))

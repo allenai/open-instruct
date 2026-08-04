@@ -1009,6 +1009,11 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             loss_denom = loss_weights_2d.sum().clamp_min(1.0)
         loss_weights = loss_weights_2d.reshape(-1)
         metric_denom = mask_2d.to(dtype=torch.float32).sum()
+        echo_metric_denom = (
+            echo_mask.to(dtype=torch.float32).sum()
+            if has_echo_mask
+            else torch.zeros((), dtype=torch.float32, device=hidden_states.device)
+        )
         incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / loss_denom).reshape(())
 
         x_grad = torch.zeros_like(x) if x_requires_grad else None
@@ -1129,6 +1134,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
             dist.all_reduce(total_clip_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
             dist.all_reduce(total_ratio_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
             dist.all_reduce(total_echo_nll_sum, op=dist.ReduceOp.SUM, group=sequence_process_group)
+            dist.all_reduce(echo_metric_denom, op=dist.ReduceOp.SUM, group=sequence_process_group)
             dist.all_reduce(metric_denom, op=dist.ReduceOp.SUM, group=sequence_process_group)
         metric_denom = metric_denom.clamp_min(1.0)
 
@@ -1140,7 +1146,10 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         kl_avg = total_kl_sum / metric_denom
         clipfrac = total_clip_sum / metric_denom
         ratio_avg = total_ratio_sum / metric_denom
-        return loss, kl_avg, clipfrac, ratio_avg, total_echo_nll_sum
+        # [nll_sum, token_count], both all-reduced over the SP group so the
+        # per-token metric divides consistent global quantities.
+        echo_stats = torch.stack([total_echo_nll_sum, echo_metric_denom])
+        return loss, kl_avg, clipfrac, ratio_avg, echo_stats
 
     @staticmethod
     def backward(ctx, *grads) -> tuple:
