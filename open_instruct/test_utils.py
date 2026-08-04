@@ -529,6 +529,7 @@ class TestUtilityFunctions(unittest.TestCase):
             ("NVIDIA L40S", "l40s"),
             ("NVIDIA RTX A6000", "a6000"),
             ("NVIDIA A100-SXM4-80GB", "a100"),
+            ("NVIDIA B300", "b300"),
             ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "pro 6000"),
             ("NVIDIA RTX 6000 Ada Generation", "6000"),
             ("NVIDIA GeForce RTX 4090 Laptop GPU", "4090 laptop"),
@@ -541,6 +542,7 @@ class TestUtilityFunctions(unittest.TestCase):
     @parameterized.expand(
         [
             ("NVIDIA H100 80GB HBM3", {"flops": 990e12, "memory_size": 80e9, "memory_bandwidth": 3.35e12}),
+            ("NVIDIA B300", {"flops": 2250e12, "memory_size": 288e9, "memory_bandwidth": 8e12}),
             ("NVIDIA RTX A6000", {"flops": 155e12, "memory_size": 48e9, "memory_bandwidth": 768e9}),
             (
                 "NVIDIA RTX PRO 6000 Blackwell Server Edition",

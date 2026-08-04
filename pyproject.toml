@@ -28,15 +28,16 @@ dependencies = [
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.10.0",
+    # torchvision/torchaudio are only needed transitively (via vllm), but they must
+    # remain direct dependencies so the CUDA-group source pins apply to them.
+    "torchvision>=0.25.0; platform_system == 'Linux'",
+    "torchaudio>=2.10.0; platform_system == 'Linux'",
     "transformers>=5.4.0",
     "vllm>=0.19.1; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    # The flat FA3 wheel index can publish a newer aarch64-only build than the latest x86_64 build.
-    # Pin the Linux x86_64 wheel directly so uv doesn't resolve to an aarch64-only version.
-    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
@@ -76,26 +77,49 @@ vllm = { VLLM_USE_PRECOMPILED = "TRUE", VLLM_PRECOMPILED_WHEEL_COMMIT = "b1388b1
 # pytorch related setups
 [tool.uv.sources]
 # OLMo-hybrid small suite: the `olmo_hybrid_small` architecture lives in maintainer
-# forks of transformers + vLLM + OLMo-core (not yet upstreamed).
+# forks of transformers + vLLM + OLMo-core (not yet upstreamed). This intentionally
+# overrides the upstream `allenai/OLMo-core` pin on main.
 ai2-olmo-core = { git = "https://github.com/YashasSamaga/OLMo-core.git", rev = "hybrid-final" }
 transformers = { git = "https://github.com/yashassamaga/transformers.git", rev = "hybrid-small-suite" }
 vllm = { git = "https://github.com/YashasSamaga/vllm.git", rev = "olmo-hybrid-small", marker = "platform_system != 'Darwin'" }
 flash-attn = [
-  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
+  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda12" },
+  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda13" },
 ]
 
 torch = [
-  { index = "pytorch-cu128", marker = "platform_system == 'Linux' and platform_machine != 'aarch64'"},
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'"},
+  { index = "pytorch-cu128", group = "cuda12" },
+  { index = "pytorch-cu130", group = "cuda13" },
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
 ]
+torchvision = [
+  { index = "pytorch-cu128", group = "cuda12" },
+  { index = "pytorch-cu130", group = "cuda13" },
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
+]
+torchaudio = [
+  { index = "pytorch-cu128", group = "cuda12" },
+  { index = "pytorch-cu130", group = "cuda13" },
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
+]
+
+# NOTE: main routes vllm through the `vllm-cu130` index for the cuda13 group. This
+# branch cannot: the hybrid vLLM fork above reuses precompiled cu128 binaries, so it
+# is pinned for every group and the cu130 index entry is intentionally dropped.
+
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "vllm-cu130"
+url = "https://wheels.vllm.ai/0.19.1/cu130"
 explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
@@ -118,6 +142,13 @@ dr-tulu = [
 preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
+default-groups = ["dev", "cuda12"]
+conflicts = [
+    [
+        { group = "cuda12" },
+        { group = "cuda13" },
+    ],
+]
 override-dependencies = [
     "transformers>=5.4.0",
 ]
@@ -128,6 +159,23 @@ environments = [
 ]
 
 [dependency-groups]
+cuda12 = [
+    "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    # The flat FA3 index can publish a newer aarch64-only build than the latest x86_64 build.
+    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
+cuda13 = [
+    "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
 dev = [
     # >=2.7.0: older versions fail to parse Beaker server responses containing the
     # newer `min_runtime` task-context field.
