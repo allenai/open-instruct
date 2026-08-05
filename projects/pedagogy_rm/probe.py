@@ -32,7 +32,7 @@ import statistics
 
 from projects.pedagogy_rm.agreement import load as load_labels
 from projects.pedagogy_rm.agreement import pearson
-from projects.pedagogy_rm.rubric import DIMENSIONS
+from projects.pedagogy_rm.rubric import BY_KEY, DIMENSIONS
 
 
 def consensus(by_unit: dict[str, dict[str, dict]], key: str) -> dict[str, float]:
@@ -123,6 +123,7 @@ def main() -> None:
     parser.add_argument(
         "--reference", default="", help="a rater's label file; also score the probe against them alone"
     )
+    parser.add_argument("--dimensions", default="", help="comma-separated keys; default is DIMENSIONS")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--ceilings", action="store_true", help="also print the agreement bound per dimension")
     parser.add_argument("--verbose", action="store_true", help="every pooling x layer cell, not just the best")
@@ -133,6 +134,7 @@ def main() -> None:
         help="slice files, read only to group folds by question",
     )
     args = parser.parse_args()
+    dims = DIMENSIONS if not args.dimensions else tuple(BY_KEY[k] for k in args.dimensions.split(","))
 
     blob = np.load(args.hidden, allow_pickle=False)
     ids = [str(x) for x in blob["ids"]]
@@ -163,7 +165,7 @@ def main() -> None:
     print(header)
     print("  " + "-" * (len(header) - 2))
 
-    for dim in DIMENSIONS:
+    for dim in dims:
         scores = consensus(by_unit, dim.key)
         # Agents only, so the yardstick is not partly the labels it is scored against.
         agents = consensus(without_reference, dim.key) if reference else {}

@@ -245,6 +245,16 @@ async def main_async(args) -> None:
             "override deliberately."
         )
 
+    # `active` is resolved before the shots are chosen, and the order matters. An example is
+    # usable when it carries the dimensions being rated, not when it carries all five of
+    # DIMENSIONS: a run rating four of them against labels that deliberately omit `concise`
+    # matched nothing under the old test and printed "0 few-shot examples", which reads like
+    # a missing file rather than a filter that could never pass. Silently unguided agents are
+    # the worst possible failure here, because the output looks the same.
+    active = DIMENSIONS if not args.dimensions else tuple(BY_KEY[k] for k in args.dimensions.split(","))
+    if len(active) < len(DIMENSIONS):
+        print(f"re-rating only {[d.key for d in active]}; other dimensions are left as they are")
+
     shots: list[tuple[dict, dict]] = []
     if args.examples:
         by_id = {u["id"]: u for u in units}
@@ -256,18 +266,20 @@ async def main_async(args) -> None:
             for record in json.load(handle)["labels"]:
                 if record["id"] in held or record["id"] not in by_id:
                     continue
-                if all(d.key in record for d in DIMENSIONS):
+                if all(d.key in record for d in active):
                     shots.append((by_id[record["id"]], record))
         shots = shots[: args.max_shots]
         print(f"{len(shots)} few-shot examples, {len(held)} holdout ids withheld from every rater")
-
-    active = DIMENSIONS if not args.dimensions else tuple(BY_KEY[k] for k in args.dimensions.split(","))
-    if len(active) < len(DIMENSIONS):
-        print(f"re-rating only {[d.key for d in active]}; other dimensions are left as they are")
+        if args.examples and not shots:
+            raise SystemExit(
+                "no usable few-shot examples: every labelled record is either held out or missing "
+                f"one of {[d.key for d in active]}. Rating unguided would produce the agents' own "
+                "standards rather than yours, which is not what this is for."
+            )
     raters = DEFAULT_RATERS if not args.raters else {k: DEFAULT_RATERS[k] for k in args.raters.split(",")}
     print(f"{len(units)} units x {len(raters)} raters: {', '.join(raters)}")
     os.makedirs(args.out_dir, exist_ok=True)
-    rubric = rubric_markdown()
+    rubric = rubric_markdown(active)
     await asyncio.gather(
         *(run_rater(n, m, units, rubric, calibration, shots, args, active) for n, m in raters.items())
     )

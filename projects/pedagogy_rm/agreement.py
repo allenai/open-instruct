@@ -43,7 +43,7 @@ import json
 import math
 import statistics
 
-from projects.pedagogy_rm.rubric import DIMENSIONS
+from projects.pedagogy_rm.rubric import BY_KEY, DIMENSIONS
 
 
 def weighted_kappa(a: list[int], b: list[int], lo: int, hi: int) -> float:
@@ -114,7 +114,9 @@ def load(paths: list[str], shots: dict[str, set[str]] | None = None) -> dict[str
     return dict(by_unit)
 
 
-def against_reference(by_unit: dict[str, dict[str, dict]], reference: str, contaminated: set[str]) -> None:
+def against_reference(
+    by_unit: dict[str, dict[str, dict]], reference: str, contaminated: set[str], dims: tuple = DIMENSIONS
+) -> None:
     """Each rater versus one designated rater, plus their consensus versus it.
 
     Inter-agent agreement and agreement-with-the-human answer different
@@ -134,9 +136,9 @@ def against_reference(by_unit: dict[str, dict[str, dict]], reference: str, conta
             for u in shared
             if u not in contaminated.get(d.key, set()) and isinstance(shared[u][reference].get(d.key), int)
         }
-        for d in DIMENSIONS
+        for d in dims
     }
-    counts = {d.key: len(clean[d.key]) for d in DIMENSIONS}
+    counts = {d.key: len(clean[d.key]) for d in dims}
     if not any(counts.values()):
         print("\n  NO CLEAN UNITS. Every unit you labelled was used to calibrate the agents,")
         print("  so there is nothing left to check them against. Label some more in the UI:")
@@ -145,14 +147,14 @@ def against_reference(by_unit: dict[str, dict[str, dict]], reference: str, conta
         return
     print(f"\n  Against '{reference}', excluding each dimension's own few-shot examples — kappa_w")
     print("  n differs per dimension because they were not all calibrated on the same units.")
-    header = "  " + f"{'rater':<11}" + "".join(f"{d.key:>11}" for d in DIMENSIONS)
+    header = "  " + f"{'rater':<11}" + "".join(f"{d.key:>11}" for d in dims)
     print(header)
-    print("  " + f"{'(n)':<11}" + "".join(f"{counts[d.key]:>11}" for d in DIMENSIONS))
+    print("  " + f"{'(n)':<11}" + "".join(f"{counts[d.key]:>11}" for d in dims))
     print("  " + "-" * (len(header) - 2))
 
     for rater in [*raters, "CONSENSUS"]:
         cells = []
-        for dim in DIMENSIONS:
+        for dim in dims:
             a, b = [], []
             for unit_id in clean[dim.key]:
                 recs = shared[unit_id]
@@ -184,7 +186,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--labels", nargs="+", required=True, help="one json per rater; globs allowed")
     parser.add_argument("--reference", default="", help="rater name to score everyone else against, e.g. sophia")
+    parser.add_argument("--dimensions", default="", help="comma-separated keys; default is DIMENSIONS")
     args = parser.parse_args()
+    dims = DIMENSIONS if not args.dimensions else tuple(BY_KEY[k] for k in args.dimensions.split(","))
 
     paths = sorted(set(itertools.chain.from_iterable(glob.glob(p) or [p] for p in args.labels)))
     shots: dict[str, set[str]] = {}
@@ -205,7 +209,7 @@ def main() -> None:
     print(header)
     print("  " + "-" * (len(header) - 2))
     verdicts = {}
-    for dim in DIMENSIONS:
+    for dim in dims:
         pairs = []
         for records in shared.values():
             scores = [r[dim.key] for r in records.values() if isinstance(r.get(dim.key), int)]
@@ -244,7 +248,7 @@ def main() -> None:
         present = {r for records in by_unit.values() for r in records}
         if args.reference not in present:
             raise SystemExit(f"no rater named '{args.reference}'; have {sorted(present)}")
-        against_reference(by_unit, args.reference, shots)
+        against_reference(by_unit, args.reference, shots, dims)
 
 
 if __name__ == "__main__":

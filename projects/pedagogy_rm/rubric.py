@@ -126,15 +126,71 @@ DROPPED: tuple[Dimension, ...] = (
     ),
 )
 
-BY_KEY = {d.key: d for d in (*DIMENSIONS, *DROPPED)}
+#: RATED AFTER TRAINING, NEVER TRAINED AGAINST. These exist because the first GRPO runs
+#: produced turns a human called too short and sometimes wrong, and no dimension above can
+#: say so.
+#:
+#: `substance` is the one the five scored dimensions cannot express, and the gap is
+#: structural rather than an oversight. A bare one-line question - "What specifically were
+#: they fighting for at that moment?" - scores 3 on `actionable` (a specific answerable
+#: question), 3 on `elicits` (all the work left to the student) and 3 on `concise` (short and
+#: single-purpose) at once. Three dimensions maxed by a turn that does almost no teaching.
+#: That is a degenerate optimum sitting inside the rubric, reachable by anything optimising
+#: against it, and a run found it. `substance` asks the question the others assume: did the
+#: tutor do any work before handing back?
+#:
+#: `correct` is reused from DROPPED unchanged. It was dropped for failing its agreement gate
+#: - raters could not agree on the 2s - and that verdict stands for using it as a reward.
+#: Using it here is a different claim: one rater flagging turns that are flatly wrong is
+#: evidence about whether training broke factual accuracy, which nothing else measures.
+#: `length_fit` IS THE ONE DIMENSION HERE THAT IS NOT ORDINAL, AND NOTHING MAY TREAT IT AS
+#: ONE. 2 is good; 1 and 3 are both bad, in opposite directions. Averaging it, correlating
+#: it, or fitting a ridge to it would all be meaningless - a mean of 2.0 could be every turn
+#: correct or half of them cut off and half padded. Report it as three counts per arm.
+#:
+#: It exists because length is the one thing a character count cannot judge. The count is
+#: already measured automatically by compare_policies.py; what a human adds is whether the
+#: length was *right for this moment*, and forty characters can be either.
+#:
+#: An earlier version of this tuple carried `substance` - "did the tutor do any work, or only
+#: hand the problem back" - aimed at the same defect from the other side. It was removed
+#: after one rating: its top anchor asked whether the turn engaged with the student's actual
+#: reasoning, which is what `targeted` already asks, and a rater reading both found the pair
+#: confusing. This file's design rule is that a question needing a holistic judgement is
+#: broken, and rater confusion is the evidence for it.
+DIAGNOSTIC: tuple[Dimension, ...] = (
+    Dimension(
+        "length_fit",
+        "Is this the right length for this moment? (2 is good; 1 and 3 are both bad)",
+        {
+            1: "Too short. Cut off mid-thought, or so brief it does nothing for this student "
+            "here - a bare question or line that could follow almost any turn.",
+            2: "About right. Long enough to do its job, short enough to act on.",
+            3: "Too long. Padding, repetition, or several ideas the student has to choose "
+            "between before they can start.",
+        },
+    ),
+    *DROPPED,
+)
+
+BY_KEY = {d.key: d for d in (*DIMENSIONS, *DROPPED, *DIAGNOSTIC)}
 
 
-def rubric_markdown() -> str:
-    """The rater-facing rubric.
+def rubric_markdown(dimensions: tuple[Dimension, ...] = DIMENSIONS) -> str:
+    """The rater-facing rubric, for whichever dimensions are being rated.
 
     Generated from the same objects the loader validates against, so the
     document raters read and the schema the code enforces cannot drift apart -
     which they did last time, when the rubric lived only in a hand-written file.
+
+    ``dimensions`` exists because the default drifted anyway, in the other
+    direction. A run rating the six of this round got a rubric describing the
+    five of DIMENSIONS: `concise` was defined and not asked for, `length_fit`
+    and `correct` were asked for and never defined. The agents guessed the two
+    undefined ones from their names and the few-shot examples, and `length_fit`
+    - whose whole point is that 1 and 3 are both bad - came back 2 on all 25
+    holdout turns, correlating -0.36 with the human. An undefined dimension does
+    not fail loudly; it comes back plausible and empty.
     """
     out = [
         "# Rubric: rating one tutor turn",
@@ -148,7 +204,7 @@ def rubric_markdown() -> str:
         "that means the question is badly written and we want to know.",
         "",
     ]
-    for d in DIMENSIONS:
+    for d in dimensions:
         out.append(f"## {d.key}: {d.lo}-{d.hi} — {d.question}")
         out.append("")
         out.extend(f"- **{score}** — {text}" for score, text in sorted(d.anchors.items()))

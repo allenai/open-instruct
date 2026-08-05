@@ -29,7 +29,7 @@ import asyncio
 import json
 import random
 
-from projects.pedagogy_rm.rubric import DIMENSIONS, rubric_markdown
+from projects.pedagogy_rm.rubric import BY_KEY, DIMENSIONS, rubric_markdown
 
 PROMPT = """Below is a rubric for rating tutor turns, then {n} turns rated by ONE \
 human rater. Your job is to write the instructions that would let someone else \
@@ -67,8 +67,8 @@ distrust later.
 """
 
 
-def render_example(unit: dict, record: dict, index: int) -> str:
-    scores = "  ".join(f"{d.key}={record[d.key]}" for d in DIMENSIONS if d.key in record)
+def render_example(unit: dict, record: dict, index: int, dims: tuple = DIMENSIONS) -> str:
+    scores = "  ".join(f"{d.key}={record[d.key]}" for d in dims if d.key in record)
     flag = f"\nRATER FLAGGED: {record['flag']}" if record.get("flag") else ""
     return (
         f"--- example {index} ---\n"
@@ -79,28 +79,43 @@ def render_example(unit: dict, record: dict, index: int) -> str:
     )
 
 
-def load(labels_path: str, units_path: str) -> tuple[list[dict], dict[str, dict]]:
+def load(labels_path: str, units_path: str, dims: tuple = DIMENSIONS) -> tuple[list[dict], dict[str, dict]]:
     with open(units_path) as handle:
         units = {u["id"]: u for u in json.load(handle)["units"]}
     with open(labels_path) as handle:
         records = json.load(handle)["labels"]
-    complete = [r for r in records if all(d.key in r for d in DIMENSIONS) and r["id"] in units]
+    complete = [r for r in records if all(d.key in r for d in dims) and r["id"] in units]
     return complete, units
 
 
 async def main_async(args) -> None:
     from projects.pedagogy_rm import gateway  # noqa: PLC0415
 
-    records, units = load(args.labels, args.units)
-    if len(records) < args.holdout + 5:
-        raise SystemExit(f"only {len(records)} complete labels; need more than --holdout ({args.holdout}) plus a few")
+    active = DIMENSIONS if not args.dimensions else tuple(BY_KEY[k] for k in args.dimensions.split(","))
+    records, units = load(args.labels, args.units, active)
+    if not records:
+        raise SystemExit(f"no label carries all of {[d.key for d in active]} — check --dimensions")
 
-    random.Random(args.seed).shuffle(records)
-    holdout, train = records[: args.holdout], records[args.holdout :]
-    print(f"{len(records)} complete labels: {len(train)} for calibration, {len(holdout)} held out")
+    # An existing split is reused when offered, because the calibration document and the
+    # few-shot examples have to be withheld on the *same* ids or the holdout is not held out.
+    # Writing a fresh random split here after label_agents.py has already been pointed at one
+    # would leak most of the validation turns through the document instead of the prompt,
+    # which is the same contamination wearing a different hat and harder to notice.
+    if args.holdout_ids:
+        with open(args.holdout_ids) as handle:
+            held = set(json.load(handle)["ids"])
+        holdout = [r for r in records if r["id"] in held]
+        train = [r for r in records if r["id"] not in held]
+        print(f"{len(records)} complete labels, reusing {args.holdout_ids}: {len(train)} for calibration")
+    else:
+        if len(records) < args.holdout + 5:
+            raise SystemExit(f"only {len(records)} complete labels; need more than --holdout plus a few")
+        random.Random(args.seed).shuffle(records)
+        holdout, train = records[: args.holdout], records[args.holdout :]
+    print(f"{len(train)} for calibration, {len(holdout)} held out")
 
-    examples = "\n".join(render_example(units[r["id"]], r, i + 1) for i, r in enumerate(train))
-    prompt = PROMPT.format(n=len(train), rubric=rubric_markdown(), examples=examples)
+    examples = "\n".join(render_example(units[r["id"]], r, i + 1, active) for i, r in enumerate(train))
+    prompt = PROMPT.format(n=len(train), rubric=rubric_markdown(active), examples=examples)
 
     client = gateway.make_client()
     reply = await client.chat.completions.create(
@@ -128,7 +143,9 @@ def main() -> None:
     parser.add_argument("--units", required=True)
     parser.add_argument("--out", default="data/calibration.md")
     parser.add_argument("--holdout-out", default="data/holdout.json")
+    parser.add_argument("--holdout-ids", default="", help="reuse this split instead of drawing a new one")
     parser.add_argument("--holdout", type=int, default=10, help="labels withheld from every agent")
+    parser.add_argument("--dimensions", default="", help="comma-separated keys; default is DIMENSIONS")
     parser.add_argument("--model", default="openai-group/gpt-5.6-terra")
     parser.add_argument("--seed", type=int, default=0)
     asyncio.run(main_async(parser.parse_args()))
