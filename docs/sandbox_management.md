@@ -161,6 +161,19 @@ How it's wired:
   exec stream instead of erroring; the rollout loop ends the episode after
   `SWERL_MAX_CONSECUTIVE_TOOL_TIMEOUTS` (default 3) consecutive tool-step timeouts so
   such zombies don't grind through `max_steps × tool_call_timeout`.
+- **TODO — exclude infra-failed rollouts from the loss.** Died/OOM-killed episodes
+  currently end with reward 0, and GRPO's group-relative advantages then actively push
+  the policy away from trajectories that were fine until the pod vanished. At observed
+  Spot death rates (~15% mean, 30% spikes on 2026-08-04's ps256 run) this is real
+  gradient bias. Planned design: add a `valid_mask` to `compute_group_advantages`
+  (`data_loader.py`) so infra-failed samples are excluded from group mean/std and get
+  advantage 0, feed their indices into the existing `mask_truncated_completions`
+  `keep_idxes_list` drop machinery (which already filters all parallel arrays
+  post-advantage), gate behind a `mask_infra_failed_completions` config flag, and log
+  `val/infra_failed_rate`. The `sandbox_died`/`oom_killed` flags already flow into
+  `result.request_info.rollout_states[i]["info"]`. A follow-up beyond that: retry the
+  failed rollout inside `process_request` (capped attempts, exclusion as the terminal
+  fallback) instead of discarding it.
 - **Feasibility gate**: `scripts/opensandbox/check_opensandbox_egress.sh` verifies
   endpoint reachability and the full create→exec→kill lifecycle from the training
   cluster, mirroring the Modal egress check.
