@@ -46,6 +46,7 @@ from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
 
 from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct.olmo_core_callbacks import PerfCallback
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -291,6 +292,15 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
+    if use_hf_ckpt:
+        trainer_callbacks["perf"] = PerfCallback(
+            model_dims=utils.ModelDims.from_hf_config(args.model.model_name_or_path),
+            gradient_accumulation_steps=args.training.gradient_accumulation_steps,
+            dp_world_size=dp_world_size,
+            tensor_parallel_degree=1,
+        )
+    else:
+        logger.warning("Skipping PerfCallback: ModelDims requires an HF checkpoint config.")
 
     load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
 
