@@ -17,8 +17,7 @@ TOKENIZER=hamishivi/Qwen3.5-9B
 EXP_NAME=swerl_qwen35_9b_dppo_repro_4node_64k_echo005
 
 uv run python mason.py \
-       --cluster ai2/jupiter \
-       --cluster ai2/ceres \
+       --cluster ai2/jupiter ai2/ceres \
        --image "$BEAKER_IMAGE" \
        --description "tmax-15k DPPO Qwen35 9b (4-node; 64k; ECHO world-modeling loss alpha=0.005)" \
        --pure_docker_mode \
