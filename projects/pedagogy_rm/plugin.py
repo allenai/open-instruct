@@ -46,7 +46,12 @@ options for them. Keep each message short - one idea at a time."""
 
 #: Higher is better for all of these once the sign is applied. leak runs the other
 #: way on its own scale: 1 keeps the answer back, 3 hands it over.
-SIGNS = {"leak": -1.0, "targeted": 1.0, "actionable": 1.0, "elicits": 1.0}
+#:
+#: `correct` is here so a five-dimension head can be loaded, but it is NOT in every head
+#: file: it was dropped from the first one for missing its agreement gate and re-added after
+#: the rewritten rubric reached kappa 0.43. Which dimensions a run rewards is therefore
+#: decided by the head file it loads, not by this table - see the default below.
+SIGNS = {"leak": -1.0, "targeted": 1.0, "actionable": 1.0, "elicits": 1.0, "correct": 1.0}
 
 
 class PedagogyHead(GroupScorer):
@@ -67,10 +72,19 @@ class PedagogyHead(GroupScorer):
 
         blob = np.load(head, allow_pickle=False)
         self.meta = json.loads(str(blob["meta"]))
-        wanted = [d.strip() for d in dimensions.split(",") if d.strip()] or list(SIGNS)
+        # Default to what the head file actually holds, intersected with the signs this
+        # module knows. Defaulting to list(SIGNS) instead would mean that adding a dimension
+        # here breaks every older head file, which is backwards: the file is the artefact
+        # with the fitted weights and it should decide. An explicit --group_scorer
+        # dimensions= still errors on anything missing, because that is a request that
+        # cannot be honoured rather than a default that can be narrowed.
+        asked = [d.strip() for d in dimensions.split(",") if d.strip()]
+        wanted = asked or [d for d in SIGNS if d in self.meta["dimensions"]]
         missing = [d for d in wanted if d not in self.meta["dimensions"]]
         if missing:
             raise ValueError(f"{head} has no head for {missing}; it holds {sorted(self.meta['dimensions'])}")
+        if not wanted:
+            raise ValueError(f"{head} holds {sorted(self.meta['dimensions'])}, none of which have a sign here")
         self.dims = wanted
         self.weights = {d: {k: blob[f"{d}/{k}"] for k in ("mean", "scale", "coef", "intercept")} for d in self.dims}
         self.model_name = model or self.meta["model"]

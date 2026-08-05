@@ -27,7 +27,7 @@ import glob
 import json
 import statistics
 
-from projects.pedagogy_rm.rubric import DIMENSIONS
+from projects.pedagogy_rm.rubric import BY_KEY, DIMENSIONS
 
 #: (pooling, layer) per dimension, from probe.py's sweep over three poolings and
 #: seven layers. Layer 16 of 32 wins nearly everywhere: the last layer is
@@ -38,8 +38,19 @@ CELLS = {
     "actionable": ("last", 20),
     "elicits": ("last", 16),
     "concise": ("eot", 12),
+    "correct": ("mean", 16),
 }
-SURFACE_BOUND = {"concise": 0.96}  # dimensions a bag of trivial features already predicts
+# (surface baseline, what the states reach), from probe.py's cross-validated sweep. A
+# dimension is disqualified by the RATIO of the two, not by appearing in this table: what
+# matters is how much the 4096 numbers add over eight features that have no idea what
+# teaching is, and a dimension can be highly predictable from surface and still be worth
+# rewarding if the states beat that comfortably.
+#
+# `concise` is 0.96 against 0.97 - a word counter wearing a rubric, and the reason this
+# check exists. `correct` is 0.47 against 0.63, so a word counter gets three quarters of
+# the way there and the states earn the rest; it passes, but it is the weakest of the five.
+SURFACE_BOUND = {"concise": (0.96, 0.97), "correct": (0.47, 0.63)}
+SURFACE_RATIO = 0.9  # above this, the states bought nothing and the label is about form
 
 
 def choose_attacks(hack, n_real: int, ratio: float, seed: int) -> list[int]:
@@ -81,8 +92,10 @@ def main() -> None:
     parser.add_argument("--out", default="data/head.npz")
     parser.add_argument("--model", default="allenai/OLMo-2-1124-7B-Instruct")
     parser.add_argument("--attack-ratio", type=float, default=0.5, help="attacks as a fraction of real rows")
+    parser.add_argument("--dimensions", default="", help="comma-separated keys; default is DIMENSIONS")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
+    dims = DIMENSIONS if not args.dimensions else tuple(BY_KEY[k] for k in args.dimensions.split(","))
 
     real = np.load(args.hidden, allow_pickle=False)
     hack = np.load(args.hack, allow_pickle=False) if glob.glob(args.hack) else None
@@ -92,7 +105,7 @@ def main() -> None:
 
     out: dict[str, np.ndarray] = {}
     meta = {"model": args.model, "dimensions": {}}
-    for dim in DIMENSIONS:
+    for dim in dims:
         pooling, layer = CELLS[dim.key]
         li = layers.index(layer)
         rows, y = [], []
@@ -125,7 +138,7 @@ def main() -> None:
             "n": len(rows),
             "augmented": augmented,
             "alpha": float(model.alpha_),
-            "surface_baseline": SURFACE_BOUND.get(dim.key),
+            "surface_baseline": (SURFACE_BOUND.get(dim.key) or (None, None))[0],
         }
         # A head whose output barely moves across real turns is a constant reward,
         # and it looks like a working head everywhere except in the spread. The
@@ -159,14 +172,19 @@ def main() -> None:
                 )
 
         note = f", +{augmented} attacks" if augmented else ""
-        warn = "  SURFACE - a word counter, do not reward on this" if dim.key in SURFACE_BOUND else ""
+        surface, states = SURFACE_BOUND.get(dim.key) or (0.0, 1.0)
+        warn = (
+            f"  SURFACE {surface:.2f}/{states:.2f} - a word counter, do not reward on this"
+            if states and surface / states > SURFACE_RATIO
+            else (f"  surface {surface:.2f}/{states:.2f}" if surface else "")
+        )
         print(
             f"  {dim.key:<12} {pooling:>5} layer {layer:<3} n={len(rows)}{note}  "
             f"alpha={model.alpha_:g}  spread={spread:.2f}{held}{warn}"
         )
 
     np.savez_compressed(args.out, meta=np.array(json.dumps(meta)), **out)
-    print(f"\nwrote {args.out}: {len(DIMENSIONS)} heads over {real[CELLS['leak'][0]].shape[-1]} dims")
+    print(f"\nwrote {args.out}: {len(dims)} heads over {real[CELLS['leak'][0]].shape[-1]} dims")
 
 
 if __name__ == "__main__":
