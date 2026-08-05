@@ -147,7 +147,19 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         return
 
     if not _numpy_dir_is_populated(numpy_dir):
-        mixer = " ".join(args.dataset.mixer_list)
+        cache_args = [
+            f"--model_name_or_path {args.model.model_name_or_path}",
+            f"--tokenizer_name_or_path {tc.tokenizer_name_or_path}",
+            f"--max_seq_length {args.training.max_seq_length}",
+            f"--mixer_list {' '.join(args.dataset.mixer_list)}",
+            f"--seed {args.tracking.seed}",
+        ]
+        if tc.chat_template_name is not None:
+            cache_args.append(f"--chat_template_name {tc.chat_template_name}")
+        if args.dataset.transform_fn:
+            cache_args.append(f"--transform_fn {' '.join(args.dataset.transform_fn)}")
+        cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
+        cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
             "Pre-tokenized numpy SFT dataset not found.\n"
             f"  expected: {numpy_dir}\n"
@@ -158,12 +170,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             '      --priority urgent --image "$BEAKER_IMAGE" --budget ai2/oe-adapt \\\n'
             "      --gpus 0 --num_nodes 1 --no_auto_dataset_cache \\\n"
             "      -- uv run python open_instruct/olmo_core_finetune.py \\\n"
-            f"      --model_name_or_path {args.model.model_name_or_path} \\\n"
-            f"      --tokenizer_name_or_path {tc.tokenizer_name_or_path} \\\n"
-            f"      --max_seq_length {args.training.max_seq_length} \\\n"
-            f"      --mixer_list {mixer} \\\n"
-            f"      --local_cache_dir {args.dataset.local_cache_dir} \\\n"
-            "      --cache_dataset_only\n\n"
+            f"      {cache_cmd}\n\n"
             "Re-launch training once the tokenization job has completed."
         )
 
