@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 8 GPU GRPO (OLMo-core grpo.py) Dolci-Think-RL run for the OLMo-hybrid small suite
+# 8 GPU GRPO (OLMo-core grpo.py) Dolci RL run for the OLMo-hybrid small suite
 # (275M SFT checkpoint): 4 GPUs for training, 4 GPUs for generation.
 # Requires a Beaker image built from the transformers / vLLM / OLMo-core
 # maintainer forks that implement the `olmo_hybrid_small` architecture (see
@@ -10,6 +10,12 @@
 # Uses local evals (aime25, a lcbv6 subset, and an IF eval) every 200 steps
 # instead of oe-eval.
 #
+# NOTE: allenai/Dolci-Think-RL-7B (the exact dataset used for Olmo-3-7B-Think)
+# is pre-tokenized for the 7B tokenizer and has no "messages" column, so it
+# can't be re-tokenized by rlvr_tokenize_v3 (crashes with KeyError: 'messages').
+# Using allenai/Dolci-RL-Zero-Mix-7B instead: same math/code/IF/general mix,
+# but ships raw chat-format "messages", so it re-tokenizes cleanly for any model.
+#
 # Batch-size defaults (num_samples_per_prompt_rollout, num_unique_prompts_rollout,
 # learning_rate, max_prompt_token_length) taken from scripts/train/olmo3/7b_think_rl.sh.
 # Pack length bumped to 32k (response_length 30720 + max_prompt_token_length 2048,
@@ -17,8 +23,8 @@
 #
 # Inspired by scripts/train/debug/olmo_hybrid_275m_4gpu_gsm8k.sh.
 
-EXP_NAME="olmo_hybrid_275m_dolci_think_rl"
-DATASETS="allenai/Dolci-Think-RL-7B 1.0"
+EXP_NAME="olmo_hybrid_275m_dolci_rl"
+DATASETS="allenai/Dolci-RL-Zero-Mix-7B 1.0"
 EVAL_DATASETS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/sdpo_lcbv6 1.0 allenai/IF_multi_constraints_upto5 32"
 EVAL_SPLITS="train test train"
 MODEL_PATH=/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/hybrid-small-sft-think-275M-lr2e-4/step23206-hf
@@ -36,12 +42,13 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 uv run python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ai2/jupiter \
-    --workspace ai2/olmo-instruct \
+    --workspace ai2/open-instruct-dev \
     --priority urgent \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     --preemptible \
     --num_nodes 1 \
+    --budget ai2/oe-other \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --no_auto_dataset_cache \
