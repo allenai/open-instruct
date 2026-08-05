@@ -4,9 +4,7 @@ import parameterized
 import pytest
 import torch
 
-pytest.importorskip("vllm")
-
-from open_instruct import grpo_utils, olmo_core_utils
+from open_instruct import olmo_core_utils
 
 
 class ComputeOlmoCoreDocLensTest(unittest.TestCase):
@@ -52,9 +50,18 @@ class ComputeOlmoCoreDocLensTest(unittest.TestCase):
 
 
 class CheckOlmoCoreCompatibleConfigTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # grpo_utils transitively imports vllm, which is unavailable on macOS dev machines.
+        # We scope the skip to this test class only so ComputeOlmoCoreDocLensTest can still run locally.
+        pytest.importorskip("vllm")
+        from open_instruct import grpo_utils  # noqa: PLC0415
+
+        cls.grpo_utils = grpo_utils
+
     def test_default_config_passes(self):
-        args = grpo_utils.GRPOExperimentConfig()
-        grpo_utils.check_olmo_core_compatible_config(args)  # must not raise
+        args = self.grpo_utils.GRPOExperimentConfig()
+        self.grpo_utils.check_olmo_core_compatible_config(args)  # must not raise
 
     @parameterized.parameterized.expand(
         [
@@ -71,8 +78,8 @@ class CheckOlmoCoreCompatibleConfigTest(unittest.TestCase):
     )
     def test_deepspeed_only_flag_raises(self, flag, overrides):
         with self.assertRaisesRegex(ValueError, flag):
-            args = grpo_utils.GRPOExperimentConfig(**overrides)
-            grpo_utils.check_olmo_core_compatible_config(args)
+            args = self.grpo_utils.GRPOExperimentConfig(**overrides)
+            self.grpo_utils.check_olmo_core_compatible_config(args)
 
 
 if __name__ == "__main__":
