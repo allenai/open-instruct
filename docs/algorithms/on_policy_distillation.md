@@ -75,6 +75,43 @@ otherwise.
   pure-distill the DPPO-trained tmax-15k teacher (step_120) back into base Qwen3.5-9B on
   the same sandboxed terminal tasks.
 
+## Empirical results (2026-08, terminal RL / tmax-15k)
+
+Two 4-node experiments, both pure OPD (`opd_kl_coef 1.0`), evaluated on full
+TerminalBench-2.1 (89 tasks) and TBlite (100 tasks) at 64k, pass@1:
+
+**Same-lineage distillation works dramatically well.** Distilling
+`allenai/tmax-9b` (an RL fine-tune of the student's own base) into base
+`Qwen3.5-9B`: `opd_reverse_kl` fell 0.26 → 0.01 in ~40 steps, and the student
+reached **teacher parity on both benchmarks in ~40–60 steps (~7–10 h)** —
+TB2.1 0.281–0.292 vs teacher 0.276; TBlite 0.540–0.580 vs teacher 0.534 —
+capability the equivalent DPPO RL run needed 300+ steps (days) to build. After
+KL convergence the curve plateaus at teacher level (steps 60–120 oscillate
+within noise): pure OPD matches but does not exceed the teacher. The runs are
+rollout-bound: the teacher forward is a small share of step time.
+
+**Cross-policy distillation (independently-trained teacher) shows a transition
+dip.** Distilling `allenai/tmax-27b` into the already-RL-trained
+`allenai/tmax-4b`: the KL stalls (~0.36 → 0.18) instead of converging, and the
+student goes through a disrupted phase (~steps 20–60: truncation spikes to
+~33%, benchmark scores drop well below its starting level) before recovering
+(TBlite 0.448 → 0.310 → ~0.40 by step 60–80; train metrics healed by step
+~110+ with `opd_teacher_logprob` still improving). For this experiment shape,
+prefer a smaller `opd_kl_coef` (0.25–0.5) and/or keep the environment reward
+(drop `--opd_pure`) as ballast; expect a mid-run behavioral trough either way.
+
+## Evaluating OPD checkpoints
+
+- Checkpoints save as raw `Qwen3_5ForCausalLM` — CG-convert before vLLM-serving
+  (`convert_qwen35_causallm_to_cg.py`, donor = the student's base model).
+- Beaker retries move checkpoints to a new
+  `<exp>__<seed>__<NEW_TIMESTAMP>_checkpoints/` dir while the step counter
+  continues — glob for `step_N` across instances rather than hardcoding one.
+- **Always check `result.json` → `stats.n_errored_trials`** before trusting an
+  eval score. Model-behavior timeouts run 5–25% of trials on these benchmarks;
+  a dead docker mirror instead shows up as **mass `docker-compose` startup
+  failures (50–90% errored) with silently depressed scores**.
+
 ## Caveats
 
 - The teacher forward adds one no-grad pass per step over the packed batch (same cost
