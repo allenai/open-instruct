@@ -11,7 +11,14 @@ LB data processing). See docs/sandbox_management.md.
 
 Usage:
     python scripts/opensandbox/estimate_sandbox_cost.py <beaker-job-log> \
+        [--pricing {auto,on-demand,spot}] [--spot-discount 0.70] \
         [--vcpu-rate 0.0445] [--gib-rate 0.0049] [--cpu N] [--memory-gib N]
+
+Spot vs on-demand: the capacity type of sandbox pods is a property of the
+OpenSandbox deployment and is invisible to the client, so the log only
+identifies the endpoint domain. ``--pricing auto`` picks spot rates when the
+domain contains a ``--spot-domain-markers`` substring; otherwise pass
+``--pricing spot`` explicitly for runs against a spot-backed server.
 
 cpu / memory / lifetime-cap default to the values parsed from the backend's
 own "Starting OpenSandbox sandbox (...)" log lines; rates default to GKE
@@ -34,6 +41,7 @@ from datetime import datetime
 
 TIMESTAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 STARTING_RE = re.compile(r"Starting OpenSandbox sandbox \(.*?cpu=([\d.]+), memory_mib=(\d+), lifetime=(\d+)s\)")
+DOMAIN_RE = re.compile(r"Starting OpenSandbox sandbox \(image=[^,]*, domain=([^,)]+)")
 # Matches both "(12.3s)" and the post-throttle "(12.3s, semaphore_wait=4.5s)".
 STARTED_RE = re.compile(r"OpenSandbox sandbox started: ([0-9a-f-]+) \(([\d.]+)s(?:, semaphore_wait=([\d.]+)s)?\)")
 ADOPTED_RE = re.compile(r"Adopted OpenSandbox sandbox ([0-9a-f-]+)")
@@ -56,6 +64,7 @@ def parse_log(path: str) -> dict:
     hidden_started = 0  # events hidden by Ray log dedup
     hidden_closed = 0
     detected: dict[str, float] = {}
+    domains: set[str] = set()
     last_timestamp: datetime | None = None
 
     with open(path, errors="replace") as f:
@@ -63,6 +72,10 @@ def parse_log(path: str) -> dict:
             timestamp = parse_timestamp(line)
             if timestamp is not None:
                 last_timestamp = timestamp
+
+            domain_match = DOMAIN_RE.search(line)
+            if domain_match:
+                domains.add(domain_match.group(1).strip())
 
             if not detected:
                 config = STARTING_RE.search(line)
@@ -112,6 +125,7 @@ def parse_log(path: str) -> dict:
         "hidden_started": hidden_started,
         "hidden_closed": hidden_closed,
         "detected": detected,
+        "domains": domains,
         "last_timestamp": last_timestamp,
     }
 
@@ -126,16 +140,49 @@ def main() -> int:
     )
     parser.add_argument("--vcpu-rate", type=float, default=0.0445, help="$/vCPU-hour (Autopilot on-demand)")
     parser.add_argument("--gib-rate", type=float, default=0.0049, help="$/GiB-hour (Autopilot on-demand)")
+    parser.add_argument(
+        "--pricing",
+        choices=["auto", "on-demand", "spot"],
+        default="auto",
+        help="Capacity pricing for the run's sandbox pods. 'auto' guesses from the "
+        "endpoint domain via --spot-domain-markers, else assumes on-demand. The "
+        "capacity type is a property of the OpenSandbox deployment, not visible "
+        "to the client, so pass this explicitly when the domain name doesn't say.",
+    )
+    parser.add_argument(
+        "--spot-domain-markers",
+        default="spot",
+        help="Comma-separated substrings; if any appears in the run's endpoint "
+        "domain, --pricing auto selects spot rates.",
+    )
+    parser.add_argument(
+        "--spot-discount",
+        type=float,
+        default=0.70,
+        help="Fraction off the on-demand rates for spot pods (GCP quotes 60-91%%; "
+        "the BigQuery billing export shows the realized discount).",
+    )
     args = parser.parse_args()
 
     events = parse_log(args.log)
     starts, closes = events["starts"], events["closes"]
     detected = events["detected"]
+    domains = sorted(events["domains"])
+    domain = domains[0] if domains else "<unknown>"
+    if len(domains) > 1:
+        print(f"WARNING: multiple endpoint domains in one log ({domains}); pricing all usage as {domain}.")
+
+    pricing = args.pricing
+    if pricing == "auto":
+        markers = [m.strip().lower() for m in args.spot_domain_markers.split(",") if m.strip()]
+        pricing = "spot" if any(marker in domain.lower() for marker in markers) else "on-demand"
 
     cpu = args.cpu if args.cpu is not None else detected.get("cpu", 1.0)
     memory_gib = args.memory_gib if args.memory_gib is not None else detected.get("memory_gib", 4.0)
     lifetime_cap = args.lifetime_cap if args.lifetime_cap is not None else int(detected.get("lifetime_s", 3600))
     hourly_rate = cpu * args.vcpu_rate + memory_gib * args.gib_rate
+    if pricing == "spot":
+        hourly_rate *= 1.0 - args.spot_discount
 
     if not starts:
         print("No OpenSandbox sandbox lifecycle events found in the log.")
@@ -170,6 +217,8 @@ def main() -> int:
     unclosed_hours = truly_unclosed * min(unclosed_tail, lifetime_cap) / 3600
     total_hours = paired_hours + assumed_hours + unclosed_hours
 
+    pricing_note = f" ({args.spot_discount:.0%} off on-demand)" if pricing == "spot" else ""
+    print(f"Endpoint: {domain} | pricing: {pricing}{pricing_note}")
     print(f"Profile: {cpu} vCPU + {memory_gib:.1f} GiB per sandbox -> ${hourly_rate:.4f}/sandbox-hour")
     print(f"Total sandboxes: ~{total_starts} started, ~{total_closes} closed (incl. Ray-dedup-hidden + janitor)")
     print(f"  exactly paired: {len(paired_seconds)}", end="")
@@ -188,6 +237,10 @@ def main() -> int:
     print(f"Sandbox-hours: paired={paired_hours:.2f} assumed~={assumed_hours:.2f} leaked~={unclosed_hours:.2f}")
     print(f"ESTIMATED COST: ${total_hours * hourly_rate:.2f} ({total_hours:.2f} sandbox-hours)")
     print()
+    if pricing == "spot":
+        print("Spot caveats: preempted pods stop billing at reclaim, so the 'leaked' bucket")
+        print("(priced to the lifetime cap) overestimates; realized spot discounts vary by")
+        print("region and time — the BigQuery export's Spot SKUs show the true rate.")
     print("Not included: LB data processing, orphans invisible to the client, cluster management fee.")
     print("Cross-check against the BigQuery billing export (see docs/sandbox_management.md).")
     return 0
