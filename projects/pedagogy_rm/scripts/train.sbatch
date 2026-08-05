@@ -33,6 +33,24 @@
 # train_full_4gpu.sbatch is the four-card full-weight variant on the same cluster.
 set -euo pipefail
 
+# RUN FROM A SNAPSHOT, BECAUSE BASH READS A SCRIPT BY BYTE OFFSET RATHER THAN INTO MEMORY.
+# Editing this file while a job is executing it makes bash resume at its saved offset in
+# the *new* bytes, which lands mid-line and executes whatever it finds. That happened: a
+# `git checkout` during two live runs left one of them exiting 127 with
+# `patible: command not found` - the tail of the word "compatible" in a comment - after it
+# had trained all 120 steps and saved every checkpoint. The work survived and the job was
+# recorded as FAILED.
+#
+# Copying to a private path under $SLURM_JOB_ID and re-execing costs one file copy and
+# makes the whole class impossible: the copy nothing else writes to is the one being read.
+# The guard variable stops the re-exec from recursing.
+if [ -z "${PEDAGOGY_SNAPSHOT:-}" ]; then
+    snapshot="${TMPDIR:-/tmp}/train_${SLURM_JOB_ID:-$$}.sbatch"
+    cp "${BASH_SOURCE[0]}" "$snapshot"
+    export PEDAGOGY_SNAPSHOT="$snapshot"
+    exec bash "$snapshot"
+fi
+
 echo "started $(date -Is) on $(hostname), job ${SLURM_JOB_ID:-none}"
 
 SCRATCH=${SCRATCH:-/orcd/scratch/orcd/013/zsophia}
@@ -129,6 +147,24 @@ if [ -f "$PY_INCLUDE/Python.h" ]; then
 else
     echo "warning: no Python.h at $PY_INCLUDE; Triton will fail to build its C extension" >&2
 fi
+
+# THE JIT CACHE IS SHARED BETWEEN NODES THAT DO NOT SHARE A libstdc++, WHICH IS A TRAP.
+# flashinfer compiles kernels on first use and caches them under $HOME, which every node
+# mounts. The nodes are not identical: the ones these jobs get have GLIBCXX up to 3.4.26
+# through the spack gcc, and others top out at the system's 3.4.25. A kernel compiled on
+# the first kind and loaded on the second dies with
+# `libstdc++.so.6: version GLIBCXX_3.4.26 not found`, which reads like a broken install
+# rather than like a cache built somewhere else. A sampling job hit exactly that on
+# node1703 against a kernel two training runs had compiled on node2901 and node2433.
+#
+# Two fixes, because either alone leaves a hole. The spack libstdc++ goes on
+# LD_LIBRARY_PATH so the newer symbols exist wherever the job lands; and the cache is keyed
+# by hostname so a library built for one node's toolchain is never offered to another.
+# Keying by node costs one recompile per new node and buys a cache that cannot be wrong.
+GCC_LIB=${GCC_LIB:-/orcd/software/core/001/spack/pkg/gcc/12.2.0/yt6vabm/lib64}
+[ -d "$GCC_LIB" ] && export LD_LIBRARY_PATH="$GCC_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export FLASHINFER_CACHE_DIR=${FLASHINFER_CACHE_DIR:-$SCRATCH/flashinfer-cache/$(hostname -s)}
+mkdir -p "$FLASHINFER_CACHE_DIR"
 
 # vLLM 0.21 encodes engine output with msgspec and refuses torch.dtype, which its own
 # KV-cache specs contain: the engine starts, reports the API server ready, and then the
