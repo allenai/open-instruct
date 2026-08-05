@@ -78,16 +78,25 @@ scripts). All six built from ONE commit into ONE image via
 |---|---|---|---|---|---|
 | 1 | SFT | DeepSpeed | `finetune.py` | OLMo-2-1124-7B | 2 nodes × 8 H100 |
 | 2 | SFT | OLMo-core | `olmo_core_finetune.py` | OLMo-2-1124-7B | 2 nodes × 8 H100 |
-| 3 | DPO | DeepSpeed | `dpo_tune_cache.py` | Olmo-3-Hybrid-7B | 4 nodes × 8 H100 |
-| 4 | DPO | OLMo-core | `dpo.py` | Olmo-3-Hybrid-7B | 4 nodes × 8 H100 |
+| 3 | DPO | DeepSpeed | `dpo_tune_cache.py` | Olmo-3-7B (instruct SFT ckpt) | 4 nodes × 8 H100 |
+| 4 | DPO | OLMo-core | `dpo.py` | Olmo-3-7B (instruct SFT ckpt) | 4 nodes × 8 H100 |
 | 5 | GRPO | DeepSpeed | `grpo_fast.py` | Qwen3-4B-Base | 1 node × 8 H100 |
 | 6 | GRPO | OLMo-core | `grpo.py` | Qwen3-4B-Base | 1 node × 8 H100 |
 
 Base configs: #1/#2 from `scripts/train/olmo2/finetune_7b.sh` +
 `scripts/train/debug/oc_sft_multinode.sh` (flag renames:
 `dataset_mixer_list`→`mixer_list`, `num_train_epochs`→`num_epochs`); #3/#4 from
-the two `olmo-hybrid/7b_instruct_dpo_sweep*.sh` scripts; #5/#6 from the two
+the two `olmo3/7b_instruct_dpo*.sh` scripts; #5/#6 from the two
 `qwen/qwen3_4b_dapo_math*.sh` scripts.
+
+**Amendment (2026-08-05):** DPO originally targeted Olmo-3-Hybrid-7B, but the
+`olmo3_hybrid_7B` TransformerConfig was lost when PR #1723 bumped the olmo-core
+pin from branch commit `76c239ca` (PR #1715) to main's `9aa3280` — the hybrid
+config never landed on olmo-core main. The committed hybrid OC scripts are
+broken on current main (tracked separately). User decision: substitute the
+Olmo-3 7B instruct-SFT checkpoint
+(`/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115`),
+which both committed olmo3 DPO production scripts already share.
 
 ### Controls (each fixes a known confound)
 
