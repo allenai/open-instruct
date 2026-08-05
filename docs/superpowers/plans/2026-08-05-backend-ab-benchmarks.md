@@ -414,7 +414,7 @@ git commit -m "Add SFT backend A/B benchmark scripts"
 
 **Amendment (2026-08-05):** originally Hybrid-7B; substituted with Olmo-3-7B (user decision) because `olmo3_hybrid_7B` is missing from the current olmo-core pin (lost in the #1723 pin bump — tracked separately). Base scripts are now `scripts/train/olmo3/7b_instruct_dpo.sh` (DS) and `scripts/train/olmo3/7b_instruct_dpo_olmocore.sh` (OC).
 
-Matched config: model `/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115`, `--config_name olmo3_7B` on the OC side, mixer `allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 30000` (single dataset from the production mix, 30k pairs; 150 steps × 128 pairs/step needs 19,200 — identical on both sides is what matters), seq 16384, bs 1 × ga 4 over 4 nodes × 8, lr 1e-6, linear, wd 0, seed 42 (the production pair disagrees: DS default 42, OC 123 — pin both), chat template `olmo123`, `--max_train_steps 150`, `--num_epochs 1`, `--logging_steps 1`, checkpointing_steps 500 (> 150 ⇒ no checkpoint I/O noise), push/eval/beaker-save off. Env vars: use the SAME jupiter-appropriate set on both sides (from the hybrid sweeps) — do NOT copy the DS production script's TCPXO/`/var/lib/tcpxo` env block or its `source ... &&` prefix (that is Augusta/GCP-specific and a confound), and do NOT copy the OC production script's `NCCL_DEBUG=INFO`/`TORCH_LOGS` debug envs. Backend-specific memory strategy per production config: DS keeps `--gradient_checkpointing`; OC keeps `--activation_memory_budget 0.1` + `--compile_model true`. No `--packing` on either side (the olmo3 production pair doesn't use it).
+Matched config: model `/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115`, `--config_name olmo3_7B` on the OC side, mixer `allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 30000` (single dataset from the production mix, 30k pairs; 150 steps × 128 pairs/step needs 19,200 — identical on both sides is what matters), seq 16384, bs 1 × ga 4 over 4 nodes × 8, lr 1e-6, linear, wd 0, seed 42 (the production pair disagrees: DS default 42, OC 123 — pin both), chat template `olmo123`, `--max_train_steps 150`, `--num_epochs 1`, `--logging_steps 1`, checkpointing_steps 500 (> 150 ⇒ no checkpoint I/O noise), push/eval/beaker-save off. Env vars: use the SAME jupiter-appropriate set on both sides (from the hybrid sweeps) — do NOT copy the DS production script's TCPXO/`/var/lib/tcpxo` env block or its `source ... &&` prefix (that is Augusta/GCP-specific and a confound), and do NOT copy the OC production script's `NCCL_DEBUG=INFO`/`TORCH_LOGS` debug envs. Backend-specific memory strategy per production config: DS enables gradient checkpointing via `--activation_memory_budget 0.5` (NOT `--gradient_checkpointing` — that flag no longer exists on DPOExperimentConfig post-refactor and crashes the parser; `dpo_tune_cache.py` calls `model.gradient_checkpointing_enable()` whenever the budget is < 1.0, so this reproduces the production behavior); OC keeps `--activation_memory_budget 0.1` + `--compile_model true`. No `--packing` on either side (the olmo3 production pair doesn't use it).
 
 - [ ] **Step 1: Verify the Olmo-3 TransformerConfig and checkpoint exist**
 
@@ -475,7 +475,7 @@ uv run python mason.py \
     --max_train_steps 150 \
     --seed 42 \
     --logging_steps 1 \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --chat_template_name olmo123 \
     --push_to_hub False \
     --try_launch_beaker_eval_jobs False \
