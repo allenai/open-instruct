@@ -337,6 +337,37 @@ class GRPOExperimentConfig(
                 raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
 
 
+_DEEPSPEED_ONLY_FLAG_DEFAULTS: dict[str, Any] = {
+    "deepspeed_stage": 0,
+    "deepspeed_zpg": 8,
+    "deepspeed_offload_param": False,
+    "deepspeed_offload_optimizer": False,
+    "deepspeed_checkpoint_load_universal": False,
+    "sequence_parallel_size": 1,
+}
+
+
+def check_olmo_core_compatible_config(args: GRPOExperimentConfig) -> None:
+    """Reject DeepSpeed-only flags on the OLMo-core GRPO path.
+
+    grpo.py (OLMo-core) shares GRPOExperimentConfig with grpo_fast.py (DeepSpeed)
+    but never reads these flags, so setting them there silently produces a
+    differently-configured run. Raise instead.
+    """
+    violations = [
+        f"--{name}={getattr(args, name)!r} (default: {default!r})"
+        for name, default in _DEEPSPEED_ONLY_FLAG_DEFAULTS.items()
+        if getattr(args, name) != default
+    ]
+    if violations:
+        raise ValueError(
+            "These flags are only supported by the DeepSpeed trainer (grpo_fast.py) "
+            "and are ignored by the OLMo-core trainer (grpo.py):\n  "
+            + "\n  ".join(violations)
+            + "\nRemove them, or use open_instruct/grpo_fast.py."
+        )
+
+
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
     """Set non-response positions to INVALID_LOGPROB and replace NaNs."""
     vllm_logprobs = torch.masked_fill(vllm_logprobs, ~response_mask, INVALID_LOGPROB)
