@@ -152,6 +152,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             f"--tokenizer_name_or_path {tc.tokenizer_name_or_path}",
             f"--max_seq_length {args.training.max_seq_length}",
             f"--mixer_list {' '.join(args.dataset.mixer_list)}",
+            f"--mixer_list_splits {' '.join(args.dataset.mixer_list_splits)}",
             f"--seed {args.tracking.seed}",
         ]
         if tc.chat_template_name is not None:
