@@ -80,6 +80,16 @@ class TestWorldAwarePacking(unittest.TestCase):
 
 
 class TestResultIsStale(unittest.TestCase):
+    def test_streaming_config_disables_max_result_age_by_default(self):
+        config = data_loader.StreamingDataLoaderConfig()
+
+        self.assertIsNone(config.max_result_age_steps)
+
+    def test_streaming_config_accepts_explicit_max_result_age(self):
+        config = data_loader.StreamingDataLoaderConfig(max_result_age_steps=4)
+
+        self.assertEqual(config.max_result_age_steps, 4)
+
     def test_disabled_when_max_age_none(self):
         self.assertFalse(data_loader.result_is_stale(model_step=0, training_step=100, max_result_age_steps=None))
 
