@@ -1,4 +1,4 @@
-# On-Policy Distillation (OPD)
+# On-Policy Distillation (OPD / multi-teacher MOPD)
 
 On-policy distillation trains a student model on its **own rollouts**, using a frozen
 teacher's per-token log-probabilities as the learning signal instead of (or in addition
@@ -8,6 +8,13 @@ tokens the student is overconfident about get pushed down. This follows the reci
 [Thinking Machines' On-Policy Distillation](https://thinkingmachines.ai/blog/on-policy-distillation/),
 matching the implementations in [slime](https://github.com/THUDM/slime)
 (`apply_opd_kl_to_advantages`) and the tinker cookbook.
+
+**Multiple teachers** are supported: pass several models to
+`--opd_teacher_model_name_or_path` and pick a combination strategy with
+`--opd_teacher_combine` (see [Multi-teacher distillation](#multi-teacher-distillation-mopd)
+below). The `route` strategy reproduces
+[MOPD](https://arxiv.org/abs/2606.30406) — merging several per-domain RL
+specialists into one student on the student's own rollouts.
 
 Typical uses:
 
@@ -43,12 +50,55 @@ Typical uses:
    every `loss_fn` (DAPO/CISPO/DPPO/TVPO), the TIS/trust-region masks, and both the
    eager and tiled (liger) loss paths.
 
+## Multi-teacher distillation (MOPD)
+
+With more than one teacher, every teacher scores every rollout token and the per-teacher
+logprobs are combined into a single `log π_teacher(y_t)` before the KL fold
+(`combine_opd_teacher_logprobs` in `grpo_utils.py`). Strategies
+(`--opd_teacher_combine`, default `mixture`):
+
+| Strategy | Combined target | Semantics |
+| --- | --- | --- |
+| `mixture` | `logsumexp_k(log w_k + log π_k)` | Distill toward the (weighted) probability **mixture** of the teachers. Weights via `--opd_teacher_weights` (default uniform). |
+| `max` | `max_k log π_k` | Optimistic **union of experts**: each token is judged by whichever teacher likes it most; the student is only penalized where it out-confidences *every* teacher. |
+| `min` | `min_k log π_k` | Pessimistic **consensus**: a token must be probable under *all* teachers to escape penalty. |
+| `route` | `log π_{k(sample)}` | **MOPD-style deterministic routing**: each rollout is scored only by the teacher that owns its dataset/domain (`--opd_teacher_domains`). |
+
+`route` is the strategy validated by the [MOPD paper](https://arxiv.org/abs/2606.30406)
+(per-domain RL specialists → one student, on Qwen3-30B-A3B it inherited nearly all of
+each teacher's capability and beat Mix-RL / Cascade-RL / Param-Merge baselines). Domain
+claims are matched against each sample's RLVR `dataset` field (the verifier name(s)),
+case-insensitively; `*` marks a catch-all teacher:
+
+```bash
+--opd_teacher_model_name_or_path path/to/math_teacher path/to/code_teacher \
+--opd_teacher_combine route \
+--opd_teacher_domains "gsm8k,math" "*"
+```
+
+Routing rides on plumbing that ships each step's `{rollout_sample_id: dataset}` map from
+the data-prep actor to the learners, so it needs no changes to packing/collation and
+works under sequence parallelism. Note that even under `route`, **all** teachers forward
+**all** tokens (only the routed teacher's logprobs are kept): skipping non-routed
+forwards would desynchronize ZeRO-3 allgathers across ranks whose microbatches route
+differently. Budget one no-grad forward per teacher per step.
+
+The MOPD paper's findings transfer here: teachers work best when they are RL fine-tunes
+**of the student's own starting checkpoint** (same-origin); a foreign/much larger
+teacher can destabilize training (see the cross-policy dip below, and the paper's
+Qwen3-235B failure). `--opd_adv_clip 2.0` (their `A_max`) bounds the per-token pull and
+is their default stabilizer.
+
 ## Arguments
 
 | Argument | Default | Meaning |
 | --- | --- | --- |
-| `--opd_teacher_model_name_or_path` | `None` | Enables OPD: HF name or local/weka path of the frozen teacher. Must share the student's tokenizer. |
-| `--opd_teacher_model_revision` | `None` | Teacher revision. |
+| `--opd_teacher_model_name_or_path` | `None` | Enables OPD: HF name(s) or local/weka path(s) of the frozen teacher(s), space-separated. All must share the student's tokenizer. |
+| `--opd_teacher_model_revision` | `None` | Teacher revision(s); omit entirely or give one per teacher. |
+| `--opd_teacher_combine` | `mixture` | Multi-teacher combination: `mixture` \| `max` \| `min` \| `route`. Irrelevant with one teacher. |
+| `--opd_teacher_weights` | `None` | Per-teacher mixture weights (`mixture` only), normalized internally. |
+| `--opd_teacher_domains` | `None` | Per-teacher comma-separated dataset claims (`route` only); `*` = catch-all. |
+| `--opd_adv_clip` | `None` | Clamp the folded per-token KL term to `±clip` (MOPD's `A_max`; logged KL stays unclipped). |
 | `--opd_kl_coef` | `1.0` | Coefficient on the reverse-KL advantage term. |
 | `--opd_pure` | `False` | Replace the environment advantage entirely instead of adding to it. Rewards are still computed and logged. |
 
@@ -61,16 +111,26 @@ otherwise.
 
 ## Metrics
 
-- `objective/opd_reverse_kl` — masked mean of the per-token reverse KL. **The main
-  convergence signal: it should decrease** as the student approaches the teacher on the
-  student's own distribution.
-- `objective/opd_teacher_logprob` — masked mean teacher logprob of the sampled tokens
-  (rises as rollouts move into regions the teacher likes).
+- `objective/opd_reverse_kl` — masked mean of the per-token reverse KL against the
+  **combined** teacher signal. **The main convergence signal: it should decrease** as
+  the student approaches the teacher on the student's own distribution.
+- `objective/opd_teacher_logprob` — masked mean combined teacher logprob of the sampled
+  tokens (rises as rollouts move into regions the teacher likes).
+- `objective/opd_reverse_kl_teacher_{k}` (multi-teacher only) — per-teacher reverse KL
+  over all response tokens; shows which teacher the student is tracking.
+- `objective/opd_route_frac_teacher_{k}` (`route` only) — fraction of response tokens
+  routed to teacher k; sanity-checks the domain claims against the data mix.
 
 ## Example scripts
 
 - `scripts/train/debug/grpo_fast_opd.sh` — local 2-GPU smoke test (Qwen3-0.6B student,
   Qwen3-1.7B teacher, gsm8k, full DPPO+liger production loss path).
+- `scripts/train/debug/grpo_fast_mopd.sh` — multi-teacher twin (two teachers, defaults
+  to `mixture`; append flags to exercise `max`/`min`/`route`/weights/clip).
+- `scripts/train/debug/grpo_fast_mopd_sp2.sh` — 4-GPU SP=2 multi-teacher test with
+  heterogeneous teacher geometries (one full-sequence-scored, one shard-scored).
+- `scripts/train/debug/grpo_fast_mopd_beaker.sh` — Beaker smoke: two teachers routed
+  over a real two-domain mix (gsm8k + math); `OPD_COMBINE=mixture` for the mixture path.
 - `scripts/general_agent/terminal/rl/qwen35_9b_dppo_opd_4node_64k.sh` — Terminal RL:
   pure-distill the DPPO-trained tmax-15k teacher (step_120) back into base Qwen3.5-9B on
   the same sandboxed terminal tasks.
