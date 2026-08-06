@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 8 GPU GRPO (OLMo-core grpo.py) Dolci RL run for the OLMo-hybrid small suite
+# 8 GPU GRPO (OLMo-core grpo.py) Dolci-Think-RL run for the OLMo-hybrid small suite
 # (275M SFT checkpoint): 4 GPUs for training, 4 GPUs for generation.
 # Requires a Beaker image built from the transformers / vLLM / OLMo-core
 # maintainer forks that implement the `olmo_hybrid_small` architecture (see
@@ -13,8 +13,11 @@
 # NOTE: allenai/Dolci-Think-RL-7B (the exact dataset used for Olmo-3-7B-Think)
 # is pre-tokenized for the 7B tokenizer and has no "messages" column, so it
 # can't be re-tokenized by rlvr_tokenize_v3 (crashes with KeyError: 'messages').
-# Using allenai/Dolci-RL-Zero-Mix-7B instead: same math/code/IF/general mix,
-# but ships raw chat-format "messages", so it re-tokenizes cleanly for any model.
+# mnoukhov/dolci_think_rl_7b_messages is a cleaned version (built by
+# scripts/data/rlvr/dolci_think_rl_7b_messages.py) that drops the pre-tokenized
+# fields and reconstructs a proper "messages" list from the flattened "prompt"
+# string, correctly splitting genuine multi-turn conversations (e.g. WildChat)
+# while leaving single-turn and adversarial/jailbreak-style prompts intact.
 #
 # Batch-size defaults (num_samples_per_prompt_rollout, num_unique_prompts_rollout,
 # learning_rate, max_prompt_token_length) taken from scripts/train/olmo3/7b_think_rl.sh.
@@ -23,8 +26,8 @@
 #
 # Inspired by scripts/train/debug/olmo_hybrid_275m_4gpu_gsm8k.sh.
 
-EXP_NAME="olmo_hybrid_275m_dolci_rl"
-DATASETS="allenai/Dolci-RL-Zero-Mix-7B 1.0"
+EXP_NAME="olmo_hybrid_275m_dolci_think_rl"
+DATASETS="mnoukhov/dolci_think_rl_7b_messages 1.0"
 EVAL_DATASETS="mnoukhov/aime_2025_openinstruct 1.0 mnoukhov/sdpo_lcbv6 1.0 allenai/IF_multi_constraints_upto5 32"
 EVAL_SPLITS="train test train"
 MODEL_PATH=/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/hybrid-small-sft-think-275M-lr2e-4/step23206-hf
@@ -76,7 +79,6 @@ uv run python mason.py \
     --response_length 30720 \
     --pack_length 32768 \
     --model_name_or_path "$MODEL_PATH" \
-    --chat_template_name olmo_thinker \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \
@@ -95,4 +97,5 @@ uv run python mason.py \
     --mask_truncated_completions False \
     --load_ref_policy True \
     --with_tracking \
+    --wandb_entity mnoukhov \
     --push_to_hub False "$@"

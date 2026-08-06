@@ -1,0 +1,27 @@
+version: v2
+budget: ai2/oe-other
+description: "vLLM server for Qwen3-32B general-quality LLM judge (hosted_vllm/Qwen/Qwen3-32B)"
+tasks:
+  - name: "vllm-job"
+    image:
+      beaker: ai2/pytorch2.0.0-cuda11.8-python3.10
+    hostNetworking: true
+    command: ["/bin/sh", "-c"]
+    arguments:
+      [
+        "pip install vllm && \
+          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-32B \
+            --tensor-parallel-size 2 \
+            --max-model-len 32768 \
+            --trust-remote-code \
+            --port 8001 \
+            --enforce-eager"
+      ]
+    constraints:
+      cluster:
+        - ai2/saturn
+    resources:
+      gpuCount: 2
+    context:
+      priority: high
+      preemptible: False
