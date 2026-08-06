@@ -51,7 +51,7 @@ else
   docker build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
-    --build-arg CUDA_VERSION="$cuda_version" \
+    --build-arg OI_CUDA_GROUP="$cuda_version" \
     . -t "$image_name"
 
   beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
