@@ -10,12 +10,12 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
 
-EXP_NAME=swerl_qwen35_9b_dppo_prod_4node_64k_holmes
+EXP_NAME=swerl_qwen35_9b_dppo_bs4_4node
 
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; full 64-step run)" \
+       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; A/B: per_device_train_batch_size 4 vs prod 1 (raise per-GPU work; MFU ~3.3% in all configs))" \
        --pure_docker_mode \
        --workspace ai2/oe-agents-holmes \
        --priority urgent \
@@ -56,7 +56,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --per_turn_max_tokens 16384 \
     --response_length 65536 \
     --pack_length 67584 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 4 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 32 \
     --async_steps 4 \
@@ -94,7 +94,6 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --active_sampling \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1785922778_101903 \
     --checkpoint_state_freq 10 \
     --inflight_updates true \
     --lm_head_fp32 true \
