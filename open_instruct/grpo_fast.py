@@ -1512,9 +1512,17 @@ class PolicyTrainerRayProcess(RayProcess):
         After the step we invalidate ZeRO-3's parameter-fetch trace so that the
         first real training step (which may use different code paths, e.g. the
         Qwen3.5 hybrid packing patch) re-records a fresh trace rather than
-        replaying the one built from the dummy 2-token input."""
+        replaying the one built from the dummy 2-token input.
+
+        The dummy batch dimension MUST match `per_device_train_batch_size`: with
+        sequence parallelism, `UlyssesSPAttentionHF.register_with_transformers` is given
+        `micro_batch_size=args.per_device_train_batch_size` and bakes it into a fixed
+        `required_query_shape = [local_seq_length, batch_size, heads, head_dim]`. Deepspeed
+        updates `local_seq_length` per batch but never `batch_size`, so a hardcoded batch-1
+        probe asserts ("query input tensor does not match the required shape") for any
+        `per_device_train_batch_size > 1`. Harmless at bs=1 (identical to the old behavior)."""
         device = next(self.model.parameters()).device
-        dummy_ids = torch.ones(1, 2, dtype=torch.long, device=device)
+        dummy_ids = torch.ones(self.args.per_device_train_batch_size, 2, dtype=torch.long, device=device)
         output = self.model(input_ids=dummy_ids, labels=dummy_ids)
         self.model.backward(output.loss * 0.0)
         self.model.step()
