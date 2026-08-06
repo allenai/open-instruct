@@ -4,7 +4,8 @@ EXP_NAME="${EXP_NAME:-ab_grpo_olmocore}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 NUM_GPUS="${NUM_GPUS:-8}"
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+BEAKER_IMAGE="${BEAKER_USER}/open-instruct-integration-test"
+if [ $# -gt 0 ]; then BEAKER_IMAGE="$1"; shift; fi
 
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"

@@ -16,6 +16,7 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env NCCL_IB_HCA=^=mlx5_bond_0 \
     --env NCCL_SOCKET_IFNAME=ib \
     --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
@@ -47,7 +48,7 @@ uv run python mason.py \
     --max_train_steps 150 \
     --seed 42 \
     --logging_steps 1 \
-    --activation_memory_budget 0.1 \
+    --activation_memory_budget 0.05 \
     --compile_model true \
     --push_to_hub False \
     --try_launch_beaker_eval_jobs False \
