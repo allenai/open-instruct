@@ -1,26 +1,28 @@
 #!/bin/bash
 
-# OPD "gentle optimization" arm — identical to
-# qwen35_4b_opd_from_tmax4b_4node_64k.sh except: lr 1e-6 -> 5e-7 and
-# constant -> constant_with_warmup (warmup_ratio 0.05 ~= 25 steps of the ~500).
+# OPD lower-LR arm — identical to qwen35_4b_opd_from_tmax4b_4node_64k.sh
+# except `--learning_rate 1e-6 -> 5e-7`. Single-variable change: same
+# `constant` schedule as every production DPPO/tmax recipe, no warmup.
 #
 # Hypothesis under test: the early eval dip in the same-lineage OPD runs
 # (base 4B TB2.1 0.135 -> 0.101 at step 20 before recovering to 0.202 at s40)
 # is optimization damage, not distillation. In pure OPD the per-token advantage
 # IS the raw reverse KL (unnormalized), so updates are LARGEST at step 1
 # (KL 0.65 here) and decay 10-30x — the opposite of RL's stationary advantage
-# scale, and exactly when Adam's moments are coldest. Production DPPO/tmax
-# recipes all use constant 1e-6 with no warmup; this arm deliberately breaks
-# that inheritance. NOTE: --opd_kl_coef would NOT test this (AdamW normalizes a
-# uniform loss rescale away); LR/warmup are the knobs that change step size.
+# scale, and exactly when Adam's moments are coldest. NOTE: --opd_kl_coef would
+# NOT test this (AdamW normalizes a uniform loss rescale away); LR is the knob
+# that changes step size.
 #
-# Union test on purpose (both knobs at once) to maximize the chance of seeing an
-# effect on a GPU budget; decompose only if the dip disappears.
-# Baseline to compare against: swerl_qwen35_4b_opd_from_tmax4b_4node_64k
-# (TB2.1 s20 0.101 / s40 0.202 / s60 0.112 / s80 0.180 / s100 0.135).
+# ⚠ Comparison caveat: at half LR the whole trajectory stretches in step-space,
+# so step-indexed comparisons against the baseline are NOT equal-progress.
+# Compare at matched opd_reverse_kl (baseline: 0.65 start / 0.076 s20 / 0.059
+# s40 / 0.039 s60 / 0.025 s100) rather than at matched step number.
+# Baseline evals: TB2.1 s20 0.101 / s40 0.202 / s60 0.112 / s80 0.180 / s100 0.135.
 #
-# Released 4B recipe otherwise: 4 nodes = 16 learners (8 8, SP=4) + 16 engines,
-# 64k. Pure OPD: rewards logged, no gradient. Watch objective/opd_reverse_kl.
+# If the dip survives this, the follow-up arm is `constant_with_warmup`
+# (+`--warmup_ratio`), which targets the early phase without slowing late
+# convergence. Released 4B recipe otherwise: 4 nodes = 16 learners (8 8, SP=4)
+# + 16 engines, 64k. Pure OPD: rewards logged, no gradient.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
@@ -28,12 +30,12 @@ MODEL=hamishivi/Qwen3.5-4B
 TOKENIZER=hamishivi/Qwen3.5-4B
 TEACHER_MODEL=allenai/tmax-4b
 
-EXP_NAME=swerl_qwen35_4b_opd_from_tmax4b_gentlelr_4node_64k
+EXP_NAME=swerl_qwen35_4b_opd_from_tmax4b_lr5e7_4node_64k
 
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "OPD gentle-LR arm: base Qwen3.5-4B <- tmax-4b, lr 5e-7 + 5% warmup (dip hypothesis test; 4-node; 64k)" \
+       --description "OPD lower-LR arm: base Qwen3.5-4B <- tmax-4b, lr 5e-7 only (dip hypothesis test; 4-node; 64k)" \
        --pure_docker_mode \
        --workspace ai2/general-tool-use \
        --priority urgent \
@@ -85,8 +87,7 @@ uv run python mason.py \
     --temperature 1.0 \
     --learning_rate 5e-7 \
     --total_episodes 128000 \
-    --lr_scheduler_type constant_with_warmup \
-    --warmup_ratio 0.05 \
+    --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
     --num_epochs 1 \
