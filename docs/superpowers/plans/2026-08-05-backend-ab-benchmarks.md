@@ -414,7 +414,7 @@ git commit -m "Add SFT backend A/B benchmark scripts"
 
 **Amendment (2026-08-05):** originally Hybrid-7B; substituted with Olmo-3-7B (user decision) because `olmo3_hybrid_7B` is missing from the current olmo-core pin (lost in the #1723 pin bump — tracked separately). Base scripts are now `scripts/train/olmo3/7b_instruct_dpo.sh` (DS) and `scripts/train/olmo3/7b_instruct_dpo_olmocore.sh` (OC).
 
-Matched config: model `/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115`, `--config_name olmo3_7B` on the OC side, mixer `allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 30000` (single dataset from the production mix, 30k pairs; 150 steps × 128 pairs/step needs 19,200 — identical on both sides is what matters), seq 16384, bs 1 × ga 4 over 4 nodes × 8, lr 1e-6, linear, wd 0, seed 42 (the production pair disagrees: DS default 42, OC 123 — pin both), chat template `olmo123`, `--max_train_steps 150`, `--num_epochs 1`, `--logging_steps 1`, checkpointing_steps 500 (> 150 ⇒ no checkpoint I/O noise), push/eval/beaker-save off. Env vars: use the SAME jupiter-appropriate set on both sides (from the hybrid sweeps) — do NOT copy the DS production script's TCPXO/`/var/lib/tcpxo` env block or its `source ... &&` prefix (that is Augusta/GCP-specific and a confound), and do NOT copy the OC production script's `NCCL_DEBUG=INFO`/`TORCH_LOGS` debug envs. Backend-specific memory strategy per production config: DS enables gradient checkpointing via `--activation_memory_budget 0.5` (NOT `--gradient_checkpointing` — that flag no longer exists on DPOExperimentConfig post-refactor and crashes the parser; `dpo_tune_cache.py` calls `model.gradient_checkpointing_enable()` whenever the budget is < 1.0, so this reproduces the production behavior); OC keeps `--activation_memory_budget 0.1` + `--compile_model true`. No `--packing` on either side (the olmo3 production pair doesn't use it).
+Matched config: model `/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115`, `--config_name olmo3_7B` on the OC side, mixer `allenai/olmo-3-pref-mix-deltas-complement2-DECON-tpc-kwd-ch-dedup5-lbc100-grafmix-unbal 30000` (single dataset from the production mix, 30k pairs; 150 steps × 128 pairs/step needs 19,200 — identical on both sides is what matters), seq 16384, bs 1 × ga 4 over 4 nodes × 8, lr 1e-6, linear, wd 0, seed 42 (the production pair disagrees: DS default 42, OC 123 — pin both), chat template `olmo123`, `--max_train_steps 150`, `--num_epochs 1`, `--logging_steps 1`, checkpointing_steps 500 (> 150 ⇒ no checkpoint I/O noise), push/eval/beaker-save off. Env vars: use the SAME jupiter-appropriate set on both sides (from the hybrid sweeps) — do NOT copy the DS production script's TCPXO/`/var/lib/tcpxo` env block or its `source ... &&` prefix (that is Augusta/GCP-specific and a confound), and do NOT copy the OC production script's `NCCL_DEBUG=INFO`/`TORCH_LOGS` debug envs. Backend-specific memory strategy per production config: DS enables gradient checkpointing via `--activation_memory_budget 0.5` (NOT `--gradient_checkpointing` — that flag no longer exists on DPOExperimentConfig post-refactor and crashes the parser; `dpo_tune_cache.py` calls `model.gradient_checkpointing_enable()` whenever the budget is < 1.0, so this reproduces the production behavior); OC uses `--activation_memory_budget 0.05` + `--compile_model true` (amended 2026-08-06: 0.1 OOM'd at 16k seq by ~148 MiB — observed 01KZA7JD...; 0.05 trades recompute for headroom). No `--packing` on either side (the olmo3 production pair doesn't use it). Both DPO scripts additionally set `--env PYTORCH_ALLOC_CONF=expandable_segments:True` (torch renamed the allocator var; the old `PYTORCH_CUDA_ALLOC_CONF` may be ignored) — added to BOTH sides to keep env identical, and the DS run is re-run with it for a clean pair.
 
 - [ ] **Step 1: Verify the Olmo-3 TransformerConfig and checkpoint exist**
 
@@ -445,6 +445,7 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env NCCL_IB_HCA=^=mlx5_bond_0 \
     --env NCCL_SOCKET_IFNAME=ib \
     --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
@@ -506,6 +507,7 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env NCCL_IB_HCA=^=mlx5_bond_0 \
     --env NCCL_SOCKET_IFNAME=ib \
     --env TORCH_NCCL_AVOID_RECORD_STREAMS=1 \
@@ -537,7 +539,7 @@ uv run python mason.py \
     --max_train_steps 150 \
     --seed 42 \
     --logging_steps 1 \
-    --activation_memory_budget 0.1 \
+    --activation_memory_budget 0.05 \
     --compile_model true \
     --push_to_hub False \
     --try_launch_beaker_eval_jobs False \
@@ -579,7 +581,9 @@ The committed pair `scripts/train/qwen/qwen3_4b_dapo_math.sh` / `_oc.sh` is alre
 8. Delete `--send_slack_alerts`.
 9. Add `--max_retries 0` to the mason flags (before `--`).
 
-Backend-specific flags stay as committed: DS keeps `--deepspeed_stage 2`; OC keeps `--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5`. Everything else (async_steps 4, active_sampling, inflight_updates, bs, pack_length 10240, response_length 8192, temperature 1.0, seed 1, `--load_ref_policy False`) is already identical between the two — do not touch it. Note: the OC original passes `--gradient_checkpointing`, which the OLMo-core path ignores; keep it anyway to stay byte-comparable with the committed script and mnoukhov's production runs.
+Backend-specific flags stay as committed: DS keeps `--deepspeed_stage 2`; OC keeps `--fsdp_shard_degree 4 --fsdp_num_replicas 1 --activation_memory_budget 0.5`.
+
+**Amendment (2026-08-06, post-launch fix):** both GRPO scripts must consume the image argument safely — the source scripts forward `"$@"` to the trainer, so `$1` must be shifted out: replace the `BEAKER_IMAGE="${1:-...}"` line with `BEAKER_IMAGE="${BEAKER_USER}/open-instruct-integration-test"` then `if [ $# -gt 0 ]; then BEAKER_IMAGE="$1"; shift; fi`. Without this, the image name reaches HfArgumentParser and the run dies at startup (observed: 01KZA7JG..., 01KZA7JJ...). Everything else (async_steps 4, active_sampling, inflight_updates, bs, pack_length 10240, response_length 8192, temperature 1.0, seed 1, `--load_ref_policy False`) is already identical between the two — do not touch it. Note: the OC original passes `--gradient_checkpointing`, which the OLMo-core path ignores; keep it anyway to stay byte-comparable with the committed script and mnoukhov's production runs.
 
 - [ ] **Step 1: Create both scripts as described**
 
