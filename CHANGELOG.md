@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
+### Fixed
+- Make the dataset cache hash independent of HF cache state and tokenizer access order: `compute_config_hash` now resolves the tokenizer before snapshotting the config, and `tokenizer_files_hash` / `dataset_commit_hash` are computed only after the tokenizer/dataset download has populated the HF hub cache, so cache jobs and training jobs agree on the numpy SFT cache dir name (https://github.com/allenai/open-instruct/pull/1802).
+
 ### Changed
 - Automatically publish stable CUDA 12 and CUDA 13 Beaker image aliases after merge-queue integration tests pass (https://github.com/allenai/open-instruct/pull/1783).
 - Wire `keep_last_n_checkpoints` through `build_checkpointer_callback` and `build_base_callbacks` to OLMo-core's new `max_checkpoints` parameter across SFT, DPO, and GRPO training paths; bump OLMo-core to the commit that added `max_checkpoints` (`fa6c501`). Negative values (e.g. `-1`) mean unlimited (https://github.com/allenai/open-instruct/pull/1701).
