@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import dataclasses
 import hashlib
 import os
 import random
@@ -147,6 +148,18 @@ def get_args():
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    parser.add_argument(
+        "--min_runtime",
+        type=str,
+        default=None,
+        help="Beaker min_runtime (protobuf Duration JSON, e.g. '28800s' for 8h). Required for Holmes/B300. "
+        "Supersedes the deprecated bare --preemptible; pair with --auto_resume.",
+    )
+    parser.add_argument(
+        "--auto_resume",
+        action="store_true",
+        help="If given (with --min_runtime), auto-resume the job after it is preempted past min_runtime.",
+    )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
         "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
@@ -558,6 +571,16 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
         constraints = beaker.BeakerConstraints(cluster=args.cluster)
+    # This beaker-py version's BeakerTaskContext dataclass only exposes cluster/priority/preemptible,
+    # but the beaker REST spec (and proto) also accept min_runtime + auto_resume (the non-deprecated
+    # replacement for bare preemptible; required on Holmes/B300). experiment.create POSTs spec.to_json(),
+    # and to_json() iterates dataclass fields, so subclassing to add these fields makes them serialize
+    # as minRuntime/autoResume for the server. None-valued fields are omitted → non-Holmes launches unchanged.
+    @dataclasses.dataclass
+    class _BeakerTaskContextWithMinRuntime(beaker.BeakerTaskContext):
+        min_runtime: str | None = None
+        auto_resume: bool | None = None
+
     spec = beaker.BeakerTaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.BeakerImageSource(beaker=args.image),
@@ -565,8 +588,11 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
-        context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+        context=_BeakerTaskContextWithMinRuntime(
+            priority=beaker.BeakerJobPriority[args.priority],
+            preemptible=args.preemptible,
+            min_runtime=args.min_runtime,
+            auto_resume=True if (args.auto_resume and args.min_runtime) else None,
         ),
         constraints=constraints,
         env_vars=get_env_vars(
