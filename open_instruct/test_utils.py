@@ -90,6 +90,52 @@ MODEL_DIMS: dict[str, utils.ModelDims] = {
 }
 
 
+class TestEnsureHfRepoCached(unittest.TestCase):
+    @mock.patch("open_instruct.utils.huggingface_hub.snapshot_download")
+    def test_local_path_skips_hub_download(self, mock_snapshot_download):
+        with tempfile.TemporaryDirectory() as model_dir:
+            utils.ensure_hf_repo_cached(model_dir, revision="main")
+
+        mock_snapshot_download.assert_not_called()
+
+
+class TestGetDeviceMemoryMetrics(unittest.TestCase):
+    @mock.patch("open_instruct.utils.torch.cuda")
+    def test_uses_selected_accelerator_module(self, mock_cuda):
+        mock_cuda.current_device.return_value = 2
+        mock_cuda.max_memory_reserved.return_value = 3 * 2**30
+        mock_cuda.max_memory_allocated.return_value = 2 * 2**30
+
+        metrics = utils.get_device_memory_metrics(torch.device("cuda"))
+
+        self.assertEqual(metrics, {"reserved_mem_GiB": 3.0, "allocated_mem_GiB": 2.0})
+        mock_cuda.max_memory_reserved.assert_called_once_with(device=2)
+        mock_cuda.max_memory_allocated.assert_called_once_with(device=2)
+
+    def test_cpu_has_no_accelerator_memory_metrics(self):
+        self.assertEqual(utils.get_device_memory_metrics(torch.device("cpu")), {})
+
+
+class TestAcceleratorSelection(unittest.TestCase):
+    def test_preserves_cuda_default_when_cuda_and_npu_are_available(self):
+        with (
+            mock.patch("open_instruct.utils.torch.cuda.is_available", return_value=True),
+            mock.patch.object(utils.torch, "npu", create=True) as mock_npu,
+        ):
+            mock_npu.is_available.return_value = True
+
+            self.assertEqual(utils.get_accelerator_type(), "cuda")
+
+    def test_selects_npu_when_cuda_is_unavailable(self):
+        with (
+            mock.patch("open_instruct.utils.torch.cuda.is_available", return_value=False),
+            mock.patch.object(utils.torch, "npu", create=True) as mock_npu,
+        ):
+            mock_npu.is_available.return_value = True
+
+            self.assertEqual(utils.get_accelerator_type(), "npu")
+
+
 class GetDatasetsTest(unittest.TestCase):
     """Each of these test datasets has 100 examples"""
 
@@ -533,6 +579,7 @@ class TestUtilityFunctions(unittest.TestCase):
             ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "pro 6000"),
             ("NVIDIA RTX 6000 Ada Generation", "6000"),
             ("NVIDIA GeForce RTX 4090 Laptop GPU", "4090 laptop"),
+            ("Ascend910B3", "ascend910b"),
         ]
     )
     def test_get_device_name(self, device_name: str, expected_name: str):
@@ -678,6 +725,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config) as mock_from_pretrained,
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
             mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cuda"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/model")
 
@@ -706,6 +754,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
             mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cuda"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/defaults")
         self.assertEqual(
@@ -741,6 +790,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
             mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cuda"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/model")
 
@@ -754,6 +804,7 @@ class TestModelDimsFromHFConfig(unittest.TestCase):
         with (
             mock.patch("transformers.AutoConfig.from_pretrained", return_value=config),
             mock.patch("torch.cuda.is_available", return_value=False),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cpu"),
         ):
             model_dims = utils.ModelDims.from_hf_config("test/cpu")
 
