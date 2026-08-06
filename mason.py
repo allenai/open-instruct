@@ -1,6 +1,5 @@
 import argparse
 import contextlib
-import dataclasses
 import hashlib
 import os
 import random
@@ -152,8 +151,10 @@ def get_args():
         "--min_runtime",
         type=str,
         default=None,
-        help="Beaker min_runtime (protobuf Duration JSON, e.g. '28800s' for 8h). Required for Holmes/B300. "
-        "Supersedes the deprecated bare --preemptible; pair with --auto_resume.",
+        help="Beaker min_runtime as a proto-Duration STRING, e.g. '28800s' for 8h (Holmes caps at 8h, "
+        "min 5m). Non-deprecated replacement for bare --preemptible; pair with --auto_resume. NOTE: pass a "
+        "string like '28800s' — beaker-py 2.7.1's native int min_runtime serializes as a bare int the "
+        "server misreads; the Duration string is what the REST API accepts.",
     )
     parser.add_argument(
         "--auto_resume",
@@ -571,16 +572,6 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
         constraints = beaker.BeakerConstraints(cluster=args.cluster)
-    # This beaker-py version's BeakerTaskContext dataclass only exposes cluster/priority/preemptible,
-    # but the beaker REST spec (and proto) also accept min_runtime + auto_resume (the non-deprecated
-    # replacement for bare preemptible; required on Holmes/B300). experiment.create POSTs spec.to_json(),
-    # and to_json() iterates dataclass fields, so subclassing to add these fields makes them serialize
-    # as minRuntime/autoResume for the server. None-valued fields are omitted → non-Holmes launches unchanged.
-    @dataclasses.dataclass
-    class _BeakerTaskContextWithMinRuntime(beaker.BeakerTaskContext):
-        min_runtime: str | None = None
-        auto_resume: bool | None = None
-
     spec = beaker.BeakerTaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.BeakerImageSource(beaker=args.image),
@@ -588,7 +579,10 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
-        context=_BeakerTaskContextWithMinRuntime(
+        # beaker-py>=2.7.1 exposes min_runtime + auto_resume natively (no subclass needed). Pass
+        # min_runtime as a proto-Duration STRING ('28800s'); the native int type serializes as a bare
+        # int the REST server misreads. Both None -> omitted, so non-Holmes launches are unchanged.
+        context=beaker.BeakerTaskContext(
             priority=beaker.BeakerJobPriority[args.priority],
             preemptible=args.preemptible,
             min_runtime=args.min_runtime,
