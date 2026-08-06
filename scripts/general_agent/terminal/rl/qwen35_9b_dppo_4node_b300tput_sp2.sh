@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 4-node / 32 GPU DPPO throughput probe @ 64k max length (full DPPO_repro recipe).
-# Same as qwen35_9b_dppo_repro.sh (8-node) but --num_nodes 4 / --vllm_num_engines 16
+# Same as qwen35_9b_dppo_repro.sh (8-node) but --num_nodes 4 / --vllm_num_engines 24
 # (16 learners 8 8 + 16 engines). Launched on ai2/general-tool-use to gather 4-node
 # throughput numbers at 64k vs its 32k twin (qwen35_9b_dppo_repro_4node_32k.sh).
 
@@ -10,12 +10,12 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
 
-EXP_NAME=swerl_qwen35_9b_dppo_prod_4node_64k_holmes
+EXP_NAME=swerl_qwen35_9b_dppo_b300tput_sp2_4node
 
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; full 64-step run)" \
+       --description "B300 throughput A/B: SP2 + 8 learners + 24 engines + vllm memutil 0.9 (vs prod SP4/16+16) - 4-node/32xB300 holmes cu13 fa4" \
        --pure_docker_mode \
        --workspace ai2/oe-agents-holmes \
        --priority urgent \
@@ -67,12 +67,13 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --total_episodes 128000 \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
-    --sequence_parallel_size 4 \
+    --sequence_parallel_size 2 \
     --attn_implementation flash_4 \
     --num_epochs 1 \
-    --num_learners_per_node 8 8 \
-    --vllm_num_engines 16 \
+    --num_learners_per_node 8 \
+    --vllm_num_engines 24 \
     --vllm_tensor_parallel_size 1 \
+    --vllm_gpu_memory_utilization 0.9 \
     --beta 0.0 \
     --use_vllm_logprobs true \
     --truncated_importance_sampling_ratio_cap 0.0 \
