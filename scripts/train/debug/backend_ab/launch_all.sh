@@ -19,6 +19,11 @@ bash "$DIR/ab_grpo_olmocore.sh" "$BEAKER_IMAGE"
 
 echo "=== Waiting for cache job $CACHE_ID ==="
 beaker experiment await-all "$CACHE_ID"
+if ! beaker experiment get "$CACHE_ID" --format json | jq -e '[.[0].jobs[]?.status.exitCode] | any(. == 0)' > /dev/null; then
+  echo "ERROR: cache job $CACHE_ID did not succeed; not launching ab_sft_olmocore."
+  beaker experiment get "$CACHE_ID" --format json | jq '.[0].jobs[]?.status' >&2
+  exit 1
+fi
 echo "=== Launching ab_sft_olmocore ==="
 bash "$DIR/ab_sft_olmocore.sh" "$BEAKER_IMAGE"
 echo "=== All launched ==="
