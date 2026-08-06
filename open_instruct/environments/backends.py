@@ -1367,6 +1367,64 @@ class OpenSandboxBackend(SandboxBackend):
             return True
         return "HTTP 504" in str(error)
 
+    # Cap on relayed diagnostic text so one stuck pod can't flood the log.
+    _DIAGNOSTIC_CONTENT_MAX_CHARS = 2000
+    # Set once the server reports DIAGNOSTICS_NOT_IMPLEMENTED so later
+    # failures don't re-attempt (and re-warn about) the unsupported call.
+    _diagnostics_unsupported = False
+
+    def _log_adoption_failure_diagnostics(self, manager, infos: list, create_id: str) -> None:
+        """Best-effort: surface WHY the sandbox never became Running.
+
+        The scheduling reason (Spot stockout, CPU-family quota, pod IP space,
+        …) lives in the sandbox cluster's Kubernetes events, which the server
+        relays through its diagnostics API. Without this, capacity problems
+        reach the training log only as a bare 'no sandbox appeared'.
+        """
+        if not infos:
+            logger.error(
+                "Adoption diagnostics (create_id=%s): the control plane never admitted a sandbox "
+                "for this create — the request was likely dropped before a record was persisted "
+                "(overloaded control plane), not a pod-scheduling failure.",
+                create_id,
+            )
+            return
+        for info in infos:
+            logger.error(
+                "Adoption diagnostics (create_id=%s): sandbox %s state=%s reason=%s message=%s",
+                create_id,
+                info.id,
+                info.status.state,
+                getattr(info.status, "reason", None),
+                getattr(info.status, "message", None),
+            )
+            if type(self)._diagnostics_unsupported:
+                continue
+            try:
+                diagnostics = manager.get_diagnostic_events(info.id, "all")
+                content = (diagnostics.content or "").strip()
+                if content:
+                    logger.error(
+                        "Adoption diagnostics: sandbox %s events (truncated=%s):\n%s",
+                        info.id,
+                        diagnostics.truncated,
+                        content[: self._DIAGNOSTIC_CONTENT_MAX_CHARS],
+                    )
+                elif diagnostics.content_url:
+                    logger.error(
+                        "Adoption diagnostics: sandbox %s events available at %s", info.id, diagnostics.content_url
+                    )
+            except Exception as e:
+                if "DIAGNOSTICS_NOT_IMPLEMENTED" in str(e):
+                    type(self)._diagnostics_unsupported = True
+                    logger.warning(
+                        "This OpenSandbox server does not implement the diagnostics API; "
+                        "pod-scheduling reasons will not appear in this log. "
+                        "(Enable diagnostics in the server deployment to change that.)"
+                    )
+                else:
+                    logger.warning("Could not fetch diagnostic events for sandbox %s: %s", info.id, e)
+
     def _adopt_after_gateway_timeout(self, create_id: str, original_error: Exception):
         """Find and connect to the sandbox a gateway-timeout create still spawned.
 
@@ -1377,6 +1435,7 @@ class OpenSandboxBackend(SandboxBackend):
         Re-raises ``original_error`` if no sandbox appears in time.
         """
         adopted_id = None
+        last_seen_infos: list = []
         deadline = time.monotonic() + self._ready_timeout
         manager = OpenSandboxManagerSync.create(self._connection_config())
         try:
@@ -1385,6 +1444,8 @@ class OpenSandboxBackend(SandboxBackend):
                     OpenSandboxFilter(metadata={"open_instruct_create_id": create_id}, page=1, page_size=10)
                 )
                 infos = page.sandbox_infos
+                if infos:
+                    last_seen_infos = infos
                 running = [info for info in infos if info.status.state == OpenSandboxState.RUNNING]
                 if running:
                     adopted_id = running[0].id
@@ -1399,6 +1460,8 @@ class OpenSandboxBackend(SandboxBackend):
                                 manager.kill_sandbox(info.id)
                     break
                 time.sleep(self._ADOPT_POLL_INTERVAL_S)
+            if adopted_id is None:
+                self._log_adoption_failure_diagnostics(manager, last_seen_infos, create_id)
         finally:
             manager.close()
         if adopted_id is None:

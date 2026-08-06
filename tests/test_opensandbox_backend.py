@@ -88,6 +88,7 @@ class _FakeManager:
         self.killed: list[str] = []
         self.closed = False
         self.last_filter: _FakeSandboxFilter | None = None
+        self.diagnostic_calls: list[tuple[str, str]] = []
 
     def list_sandbox_infos(self, filter):
         self.last_filter = filter
@@ -96,6 +97,12 @@ class _FakeManager:
 
     def kill_sandbox(self, sandbox_id: str) -> None:
         self.killed.append(sandbox_id)
+
+    def get_diagnostic_events(self, sandbox_id: str, scope: str):
+        self.diagnostic_calls.append((sandbox_id, scope))
+        if isinstance(self.fake.diagnostic_content, Exception):
+            raise self.fake.diagnostic_content
+        return SimpleNamespace(content=self.fake.diagnostic_content, truncated=False, content_url=None)
 
     def close(self) -> None:
         self.closed = True
@@ -183,6 +190,7 @@ class _FakeOpenSandboxSync:
         self.sandboxes: list[_FakeSandbox] = []
         self.create_exceptions: list[Exception] = []  # raised (and consumed) by successive create() calls
         self.adoption_pages: list[list] = []  # successive list_sandbox_infos results for _FakeManager
+        self.diagnostic_content: str = ""  # returned by _FakeManager.get_diagnostic_events
         self.managers: list[_FakeManager] = []
         self.connect_calls: list[str] = []
         self._scripted: list[dict] = []
@@ -243,6 +251,9 @@ class OpenSandboxBackendTestCase(unittest.TestCase):
         env_patcher.start()
         self.addCleanup(env_patcher.stop)
         self.addCleanup(_OPENSANDBOX_LIVE_SANDBOXES.clear)
+        flag_patcher = patch.object(OpenSandboxBackend, "_diagnostics_unsupported", False)
+        flag_patcher.start()
+        self.addCleanup(flag_patcher.stop)
 
     def _started_backend(self, **kwargs) -> OpenSandboxBackend:
         kwargs.setdefault("image", "python:3.12-slim")
@@ -604,11 +615,55 @@ class TestAdoptOnGatewayTimeout(OpenSandboxBackendTestCase):
     def test_start_reraises_when_no_sandbox_appears(self):
         self.fake.create_exceptions = [self._gateway_timeout_error()]
         backend = OpenSandboxBackend(ready_timeout=0)
-        with self.assertRaisesRegex(_FakeOpenSandboxException, "HTTP 504"):
+        with (
+            self.assertRaisesRegex(_FakeOpenSandboxException, "HTTP 504"),
+            self.assertLogs("open_instruct.environments.backends", level="ERROR") as logs,
+        ):
             backend.start()
+        self.assertTrue(any("never admitted a sandbox" in line for line in logs.output))
         self.assertEqual(self.fake.connect_calls, [])
         [manager] = self.fake.managers
         self.assertTrue(manager.closed)
+
+    def test_adoption_failure_logs_pending_sandbox_diagnostics(self):
+        # A pod that exists but never reaches Running (quota / IP space / Spot
+        # stockout): the failure path must relay the server-side diagnostics.
+        self.fake.create_exceptions = [self._gateway_timeout_error()]
+        pending = SimpleNamespace(
+            id="orphan-1",
+            status=SimpleNamespace(state=_FakeSandboxState.PENDING, reason="Unschedulable", message="0/3 nodes"),
+        )
+        self.fake.adoption_pages = [[pending]]
+        self.fake.diagnostic_content = "FailedScaleUp: GCE_STOCKOUT in us-central1"
+        backend = OpenSandboxBackend(ready_timeout=1)
+        with (
+            self.assertRaisesRegex(_FakeOpenSandboxException, "HTTP 504"),
+            self.assertLogs("open_instruct.environments.backends", level="ERROR") as logs,
+        ):
+            backend.start()
+        joined = "\n".join(logs.output)
+        self.assertIn("state=Pending", joined)
+        self.assertIn("reason=Unschedulable", joined)
+        self.assertIn("GCE_STOCKOUT", joined)
+        [manager] = self.fake.managers
+        self.assertEqual(manager.diagnostic_calls, [("orphan-1", "all")])
+        self.assertTrue(manager.closed)
+
+    def test_diagnostics_not_implemented_disables_future_fetches(self):
+        # Servers without the diagnostics API answer DIAGNOSTICS_NOT_IMPLEMENTED;
+        # the backend should warn once and stop attempting the fetch.
+        self.fake.create_exceptions = [self._gateway_timeout_error(), self._gateway_timeout_error()]
+        pending = SimpleNamespace(
+            id="orphan-1", status=SimpleNamespace(state=_FakeSandboxState.PENDING, reason=None, message=None)
+        )
+        self.fake.adoption_pages = [[pending]] * 400
+        self.fake.diagnostic_content = _FakeOpenSandboxException("[DIAGNOSTICS_NOT_IMPLEMENTED] not available")
+        backend = OpenSandboxBackend(ready_timeout=1)
+        for _ in range(2):
+            with self.assertRaisesRegex(_FakeOpenSandboxException, "HTTP 504"):
+                backend.start()
+        total_diagnostic_calls = sum(len(m.diagnostic_calls) for m in self.fake.managers)
+        self.assertEqual(total_diagnostic_calls, 1)  # Second failure skipped the unsupported fetch.
 
     def test_start_raises_non_timeout_errors_without_adoption(self):
         self.fake.create_exceptions = [_FakeOpenSandboxException("HTTP 403 Forbidden")]
