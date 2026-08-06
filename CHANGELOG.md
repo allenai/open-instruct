@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Backend A/B benchmark scripts (`scripts/train/debug/backend_ab/`) comparing DeepSpeed vs OLMo-core for SFT/DPO/GRPO, plus `PerfCallback` on OLMo-core SFT, a per-log-period TPS metric in `finetune.py`, and a guard rejecting DeepSpeed-only flags in `grpo.py` (PR link TBD on PR creation).
 
 ### Changed
 - Change the default generation `temperature` to 1.0 and make `SamplingConfig.temperature` a required field so `StreamingConfig.temperature` is the single source of truth (https://github.com/allenai/open-instruct/pull/1725).
