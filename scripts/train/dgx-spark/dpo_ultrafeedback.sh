@@ -28,7 +28,7 @@ uv run python -m accelerate.commands.launch \
     --lr_scheduler_type linear \
     --warmup_ratio 0.1 \
     --weight_decay 0.0 \
-    --num_train_epochs 1 \
+    --num_epochs 1 \
     --logging_steps 10 \
     --mixer_list argilla/ultrafeedback-binarized-preferences-cleaned 1.0 \
     --add_bos \
@@ -36,7 +36,7 @@ uv run python -m accelerate.commands.launch \
     --beta 5 \
     --seed 42 \
     --output_dir /tmp/dpo_qwen3_ultrafeedback \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --report_to wandb \
     --with_tracking \
     --try_launch_beaker_eval_jobs false

@@ -41,7 +41,7 @@ uv run python mason.py \
     --model_name_or_path $MODEL_NAME \
     --tokenizer_name $MODEL_NAME \
     --use_slow_tokenizer False \
-    --dataset_mixer_list $DATASET_MIXER_LIST \
+    --mixer_list $DATASET_MIXER_LIST \
     --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 2 \
@@ -50,7 +50,7 @@ uv run python mason.py \
     --lr_scheduler_type linear \
     --weight_decay 0.0 \
     --logging_steps 1 \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --report_to wandb \
     --chat_template_name olmo123 \
     --with_tracking \

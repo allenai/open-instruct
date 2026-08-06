@@ -43,10 +43,9 @@ do
         --lr_scheduler_type linear \
         --weight_decay 0.0 \
         --logging_steps 1 \
-        --gradient_checkpointing \
+        --activation_memory_budget 0.5 \
         --chat_template_name olmo123 \
         --with_tracking \
-        --log_grad_norm True \
         --seed 42 \
         --oe_eval_max_length 32768 \
         --oe_eval_tasks "gpqa:0shot_cot::qwen3-instruct,codex_humanevalplus:0-shot-chat::tulu-thinker_deepseek,mbppplus:0-shot-chat::tulu-thinker_deepseek,alpaca_eval_v3::hamish_zs_reasoning_deepseek,ifeval::hamish_zs_reasoning_deepseek,agi_eval_english:0shot_cot::hamish_zs_reasoning_deepseek,omega_500:0-shot-chat_deepseek,minerva_math_500::hamish_zs_reasoning_deepseek,livecodebench_codegeneration::tulu-thinker_deepseek_no_think_tags_lite,aime:zs_cot_r1::pass_at_32_2024_deepseek,aime:zs_cot_r1::pass_at_32_2025_deepseek,zebralogic::hamish_zs_reasoning_deepseek,bbh:cot::hamish_zs_reasoning_deepseek_v2,mmlu_humanities:cot::hamish_zs_reasoning_deepseek,mmlu_other:cot::hamish_zs_reasoning_deepseek,mmlu_social_sciences:cot::hamish_zs_reasoning_deepseek,mmlu_stem:cot::hamish_zs_reasoning_deepseek,popqa::hamish_zs_reasoning_deepseek"
