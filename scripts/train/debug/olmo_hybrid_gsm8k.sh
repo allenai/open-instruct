@@ -8,7 +8,7 @@
 # Points at the HF-converted checkpoint (-hf suffix); grpo.py deserializes the
 # sibling olmo-core-native checkpoint's own TransformerConfig to build the model.
 #
-# Usage: ./olmo_hybrid_gsm8k.sh BEAKER_IMAGE MODEL_PATH EXP_NAME [GPUS]
+# Usage: ./olmo_hybrid_gsm8k.sh BEAKER_IMAGE MODEL_PATH EXP_NAME [GPUS] [CLUSTERS]
 # (BEAKER_IMAGE is required here, not optional-with-default, since with a
 # variable number of following args there's no reliable way to tell an
 # omitted image apart from MODEL_PATH.)
@@ -16,7 +16,7 @@
 # e.g.: ./olmo_hybrid_gsm8k.sh \
 #         michaeln/open-instruct-integration-test-hybrid-small-suite-cuda12 \
 #         /weka/oe-training-default/ai2-llm/checkpoints/saumyam/hybrid-small-sft-think-450m-lr8e-4/step24834-hf \
-#         olmo_hybrid_450m_gsm8k_8gpu 8
+#         olmo_hybrid_450m_gsm8k_8gpu 8 "ai2/jupiter"
 
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 EVAL_DATASETS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
@@ -25,11 +25,12 @@ BEAKER_IMAGE="$1"
 MODEL_PATH="$2"
 EXP_NAME="$3"
 GPUS="${4:-8}"
+CLUSTERS="${5:-ai2/saturn ai2/jupiter ai2/ceres}"
 if [[ -z "$BEAKER_IMAGE" || -z "$MODEL_PATH" || -z "$EXP_NAME" ]]; then
-    echo "Usage: $0 BEAKER_IMAGE MODEL_PATH EXP_NAME [GPUS]"
+    echo "Usage: $0 BEAKER_IMAGE MODEL_PATH EXP_NAME [GPUS] [CLUSTERS]"
     exit 1
 fi
-shift $(( $# < 4 ? $# : 4 ))
+shift $(( $# < 5 ? $# : 5 ))
 LEARNERS=$((GPUS / 2))
 VLLM_ENGINES=$((GPUS / 2))
 
@@ -37,10 +38,11 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Model: $MODEL_PATH"
 echo "Exp name: $EXP_NAME"
 echo "GPUs: $GPUS ($LEARNERS learners, $VLLM_ENGINES vLLM engines)"
+echo "Clusters: $CLUSTERS"
 
 uv run python mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ai2/saturn ai2/jupiter ai2/ceres \
+    --cluster $CLUSTERS \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --pure_docker_mode \
