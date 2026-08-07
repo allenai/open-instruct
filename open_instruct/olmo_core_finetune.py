@@ -82,6 +82,32 @@ def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
 
+_TOKENIZER_FLAGS_NOT_ON_CLI = frozenset(
+    {
+        "tokenizer_name_or_path",  # emitted separately
+        "tokenizer_files_hash",  # computed in __post_init__
+        "use_slow_tokenizer",  # ignored by get_tokenizer_tulu_v2_2
+    }
+)
+
+
+def _non_default_tokenizer_flags(tc: dataset_transformation.TokenizerConfig) -> list[str]:
+    """Emit CLI flags for tokenizer settings that differ from their defaults.
+
+    compute_config_hash() hashes every non-None TokenizerConfig field, so anything left out
+    here yields a different cache key than the run that printed the command.
+    """
+    flags = []
+    for field in dataclasses.fields(tc):
+        if field.name in _TOKENIZER_FLAGS_NOT_ON_CLI or field.default is dataclasses.MISSING:
+            continue
+        value = getattr(tc, field.name)
+        if value is None or value == field.default:
+            continue
+        flags.append(f"--{field.name}" if value is True else f"--{field.name} {value}")
+    return flags
+
+
 def _tokenize_to_numpy_dir(
     numpy_dir: str,
     args: "SFTArguments",
@@ -155,8 +181,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             f"--mixer_list_splits {' '.join(args.dataset.mixer_list_splits)}",
             f"--seed {args.tracking.seed}",
         ]
-        if tc.chat_template_name is not None:
-            cache_args.append(f"--chat_template_name {tc.chat_template_name}")
+        cache_args += _non_default_tokenizer_flags(tc)
         if args.dataset.transform_fn:
             cache_args.append(f"--transform_fn {' '.join(args.dataset.transform_fn)}")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
