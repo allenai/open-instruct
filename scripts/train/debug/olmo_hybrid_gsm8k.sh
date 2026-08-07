@@ -1,35 +1,48 @@
 #!/bin/bash
 
-# 8 GPU GRPO (OLMo-core grpo.py) gsm8k run for the OLMo-hybrid small suite
-# (275M SFT checkpoint): 4 GPUs for training, 4 GPUs for generation.
+# GRPO (OLMo-core grpo.py) gsm8k run for the OLMo-hybrid small suite.
+# GPUS is split evenly between training (FSDP) and generation (vLLM).
 # Requires a Beaker image built from the transformers / vLLM / OLMo-core
 # maintainer forks that implement the `olmo_hybrid_small` architecture (see
 # pyproject.toml [tool.uv.sources]).
 # Points at the HF-converted checkpoint (-hf suffix); grpo.py deserializes the
 # sibling olmo-core-native checkpoint's own TransformerConfig to build the model.
 #
-# 8-GPU variant of olmo_hybrid_275m_4gpu_gsm8k.sh.
+# Usage: ./olmo_hybrid_gsm8k.sh BEAKER_IMAGE MODEL_PATH EXP_NAME [GPUS]
+# (BEAKER_IMAGE is required here, not optional-with-default, since with a
+# variable number of following args there's no reliable way to tell an
+# omitted image apart from MODEL_PATH.)
+#
+# e.g.: ./olmo_hybrid_gsm8k.sh \
+#         michaeln/open-instruct-integration-test-hybrid-small-suite-cuda12 \
+#         /weka/oe-training-default/ai2-llm/checkpoints/saumyam/hybrid-small-sft-think-450m-lr8e-4/step24834-hf \
+#         olmo_hybrid_450m_gsm8k_8gpu 8
 
-EXP_NAME="olmo_hybrid_275m_gsm8k_8gpu"
 DATASETS="ai2-adapt-dev/rlvr_gsm8k_zs 1.0"
 EVAL_DATASETS="mnoukhov/gsm8k-platinum-openinstruct 1.0"
-MODEL_PATH=/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/hybrid-small-sft-think-275M-lr2e-4/step23206-hf
 
-# Default to this branch's integration test image, as built by
-# scripts/train/build_image_and_launch.sh.
-BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test-${SANITIZED_BRANCH}}"
-[[ $# -gt 0 ]] && shift
+BEAKER_IMAGE="$1"
+MODEL_PATH="$2"
+EXP_NAME="$3"
+GPUS="${4:-8}"
+if [[ -z "$BEAKER_IMAGE" || -z "$MODEL_PATH" || -z "$EXP_NAME" ]]; then
+    echo "Usage: $0 BEAKER_IMAGE MODEL_PATH EXP_NAME [GPUS]"
+    exit 1
+fi
+shift $(( $# < 4 ? $# : 4 ))
+LEARNERS=$((GPUS / 2))
+VLLM_ENGINES=$((GPUS / 2))
 
 echo "Using Beaker image: $BEAKER_IMAGE"
+echo "Model: $MODEL_PATH"
+echo "Exp name: $EXP_NAME"
+echo "GPUs: $GPUS ($LEARNERS learners, $VLLM_ENGINES vLLM engines)"
 
 uv run python mason.py \
     --task_name ${EXP_NAME} \
     --cluster ai2/saturn ai2/jupiter ai2/ceres \
     --workspace ai2/open-instruct-dev \
-    --priority high \
+    --priority urgent \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     --preemptible \
@@ -39,7 +52,7 @@ uv run python mason.py \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --no_auto_dataset_cache \
     --artifact_ttl 1d \
-    --gpus 8 \
+    --gpus "$GPUS" \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
     --exp_name ${EXP_NAME} \
     --run_name ${EXP_NAME} \
@@ -66,10 +79,10 @@ uv run python mason.py \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes 512000 \
-    --fsdp_shard_degree 4 \
+    --fsdp_shard_degree $LEARNERS \
     --fsdp_num_replicas 1 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node $LEARNERS \
+    --vllm_num_engines $VLLM_ENGINES \
     --vllm_tensor_parallel_size 1 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
