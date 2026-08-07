@@ -14,11 +14,18 @@
 # cluster. Ceres (H100 80GB) and Saturn (A100 80GB) are both Eager-scheduled and sized for
 # exactly this kind of small distributed job.
 #
-# Single node: 8 GPUs schedule far more easily than 2x8, and this is a correctness run --
-# throughput does not matter. Global batch is held at 64 sequences (8 GPUs * per_device 1 *
-# grad_accum 8) so the batch/LR relationship matches the reference recipe rather than being
-# silently halved by using fewer GPUs. 1000 steps is ~64k sequences: a partial pass over
-# Dolci, not a full epoch.
+# ONE GPU, not eight. An 8-slot request needs 8 free slots on a single node and queued for
+# hours; a 1-slot request schedules almost immediately. Throughput does not matter for a
+# correctness run -- this trades ~40min of compute for ~5-6h, in exchange for actually
+# starting.
+#
+# This only works on B300 (288GB). A full-finetune 7B with AdamW needs ~112GB steady state
+# (14GB bf16 params + 14GB grads + 84GB fp32 optimizer states and master weights) plus
+# activations, which does NOT fit a single 80GB H100. Multi-GPU is required on ceres/jupiter.
+#
+# Global batch is held at 64 sequences (1 GPU * per_device 1 * grad_accum 64), identical to
+# the 8-GPU configuration, so the learning rate below stays valid unchanged. 1000 steps is
+# ~64k sequences: a partial pass over Dolci, not a full epoch.
 # LR is the reference 7B recipe's 8e-5 linearly scaled for batch size. The reference
 # (scripts/train/olmo3/7b_instruct_sft.sh) uses --global_batch_size=1048576 tokens; this run
 # uses 64 seqs * 4096 = 262144, a 4x smaller batch, so 8e-5 / 4 = 2e-5. Copying 8e-5 across
@@ -43,18 +50,18 @@ uv run python mason.py \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
-    --gpus 8 \
+    --gpus 1 \
     --non_resumable \
     --no-host-networking \
     --no_auto_dataset_cache \
     -- torchrun \
-    --nproc_per_node=8 \
+    --nproc_per_node=1 \
     open_instruct/olmo_core_finetune.py \
     --model_name_or_path allenai/Olmo-3-1025-7B \
     --chat_template_name olmo_thinker_no_think_sft_tokenization \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 8 \
+    --gradient_accumulation_steps 64 \
     --learning_rate 2e-5 \
     --warmup_ratio 0.03 \
     --num_epochs 1 \
