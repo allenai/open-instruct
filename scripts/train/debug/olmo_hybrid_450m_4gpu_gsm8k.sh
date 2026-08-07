@@ -27,9 +27,7 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
     --task_name ${EXP_NAME} \
-    --cluster ai2/saturn \
-    --cluster ai2/jupiter \
-    --cluster ai2/ceres \
+    --cluster ai2/saturn ai2/jupiter ai2/ceres \
     --workspace ai2/open-instruct-dev \
     --priority high \
     --pure_docker_mode \
