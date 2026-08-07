@@ -1284,15 +1284,26 @@ def _verify_assistant_spans_cover_content(
     *later* message's content) means the span ran past the end of the turn and the prompt is
     being trained on -- a later turn cannot legitimately appear inside an earlier one, so
     this does not false-positive on an assistant quoting something said before it.
+
+    A span that runs to the end of a `max_seq_length`-truncated sequence is exempt from the
+    "too narrow" check when what survives is a prefix of the content: truncation legitimately
+    cuts the tail off the final turn, and requiring whole-content coverage there would reject
+    every conversation longer than the sequence limit.
     """
+    sequence_end = input_ids.shape[1]
     for message_idx, start, end in spans:
         content = messages[message_idx].get("content")
         if not content or content not in rendered:
             continue
-        start, end = max(0, start), min(end, input_ids.shape[1])
+        truncated_tail = end >= sequence_end
+        start, end = max(0, start), min(end, sequence_end)
         if start >= end:
             continue
         decoded = tokenizer.decode(input_ids[0, start:end])
+        # Truncated final span: correct as long as what survived is a prefix of the content.
+        # Checked before the narrow/header tests, both of which assume the whole turn is present.
+        if truncated_tail and decoded.lstrip() and content.startswith(decoded.lstrip()):
+            continue
         if content not in decoded:
             raise AssistantSpanDerivationError(
                 f"Assistant label span for message {message_idx} does not cover its content: the span "

@@ -853,6 +853,39 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
             messages[:1], tokenize=True, return_tensors="pt", return_dict=False, add_generation_prompt=True
         ).shape[1]
 
+    def test_truncated_final_turn_is_kept_not_dropped(self):
+        # A conversation longer than max_seq_length has its final assistant turn cut off. The
+        # span is still correctly aligned -- what survives is a prefix of the content -- so the
+        # row must be kept. Requiring whole-content coverage here rejected every long
+        # conversation: it discarded ~1000 rows of Dolci-Instruct-SFT before this was fixed.
+        # Needs a *non-final* assistant turn: that is what makes `olmo` prefix-unstable at
+        # native eos (it swaps <|im_end|> for eos_token only on the last turn) and so routes
+        # the conversation through the token-count fallback where the check lives. A
+        # single-assistant-turn conversation is prefix-stable and never reaches it.
+        tokenizer = self._tokenizer_for("olmo", None)
+        messages = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "FIRSTANSWER"},
+            {"role": "user", "content": "tell me a long story"},
+            {"role": "assistant", "content": "BEGINNING " + ("filler words that go on and on " * 400) + " ENDING"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=512
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        # 512 lands *inside* the final assistant turn (its span is [132, 2938]); a cut before
+        # the span start would skip it entirely and not exercise the check.
+        self.assertEqual(len(input_ids), 512, "sequence should be truncated to max_seq_length")
+        self.assertTrue(
+            open_instruct.dataset_transformation.sft_tulu_filter_v1(out, tokenizer),
+            "a merely-truncated conversation must be kept, not dropped",
+        )
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("FIRSTANSWER", trained_text)
+        self.assertNotIn("first question", trained_text)
+        self.assertNotIn("tell me a long story", trained_text)
+
     def test_span_starting_inside_the_header_is_rejected(self):
         # Guards the too-early direction: a template with no add_generation_prompt support puts
         # the boundary a token or two before the content, leaking header text into the loss
