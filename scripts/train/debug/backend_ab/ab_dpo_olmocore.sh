@@ -48,7 +48,8 @@ uv run python mason.py \
     --max_train_steps 150 \
     --seed 42 \
     --logging_steps 1 \
-    --activation_memory_budget 0.05 \
+    --activation_checkpointing_mode selected_modules \
+    --activation_checkpointing_modules 'blocks.*' \
     --compile_model true \
     --push_to_hub False \
     --try_launch_beaker_eval_jobs False \

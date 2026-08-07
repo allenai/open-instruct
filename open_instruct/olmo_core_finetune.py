@@ -292,6 +292,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
+    trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
     if use_hf_ckpt:
         trainer_callbacks["perf"] = PerfCallback(
             model_dims=utils.ModelDims.from_hf_config(args.model.model_name_or_path),
