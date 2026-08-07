@@ -19,7 +19,11 @@
 # grad_accum 8) so the batch/LR relationship matches the reference recipe rather than being
 # silently halved by using fewer GPUs. 1000 steps is ~64k sequences: a partial pass over
 # Dolci, not a full epoch.
-# LR matches the Olmo 3 reference 7B SFT recipe (scripts/train/olmo3/7b_instruct_sft.sh).
+# LR is the reference 7B recipe's 8e-5 linearly scaled for batch size. The reference
+# (scripts/train/olmo3/7b_instruct_sft.sh) uses --global_batch_size=1048576 tokens; this run
+# uses 64 seqs * 4096 = 262144, a 4x smaller batch, so 8e-5 / 4 = 2e-5. Copying 8e-5 across
+# unscaled diverged during warmup: CE 0.95 at step 10 -> 8.29 at step 20, never recovered
+# (wandb c7odd0hp). Rescale this if you change GPUs, per_device batch, or grad_accum.
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 # Cluster is overridable so the same recipe can chase whichever pool has capacity.
@@ -51,7 +55,7 @@ uv run python mason.py \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 8 \
-    --learning_rate 8e-5 \
+    --learning_rate 2e-5 \
     --warmup_ratio 0.03 \
     --num_epochs 1 \
     --max_train_steps 1000 \
