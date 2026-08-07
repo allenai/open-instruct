@@ -41,6 +41,8 @@ uv run python mason.py \
     --num_epochs 1 \
     --max_train_steps 150 \
     --logging_steps 1 \
+    --checkpointing_steps 10000 \
+    --ephemeral_save_interval 9999 \
     --seed 42 \
     --compile_model true \
     --with_tracking \
