@@ -83,4 +83,5 @@ uv run python mason.py \
     --mask_truncated_completions False \
     --load_ref_policy True \
     --with_tracking \
+    --wandb_entity mnoukhov \
     --push_to_hub False "$@"
