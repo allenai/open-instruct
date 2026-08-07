@@ -411,6 +411,7 @@ class StreamingDataLoaderConfig:
 
     # Batching
     async_steps: int = 8
+    max_result_age_steps: int | None = None
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -1431,7 +1432,7 @@ class DataPreparationActor:
                 max_possible_score=self.config.max_possible_score,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
-                max_result_age_steps=self.config.async_steps,
+                max_result_age_steps=self.config.max_result_age_steps,
             )
             logger.info(
                 f"[DataPreparationActor] Step {self.training_step}: accumulate_inference_batches returned, result type: {type(result).__name__}"
