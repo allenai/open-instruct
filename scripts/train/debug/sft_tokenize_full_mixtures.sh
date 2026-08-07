@@ -1,10 +1,11 @@
 #!/bin/bash
-# Re-runs the two SFT tokenization jobs that failed on the prefix-stability check
-# (https://github.com/allenai/open-instruct/issues/1800). Both are CPU-only
-# `--cache_dataset_only` jobs, so they exercise label derivation without training.
+# Full-scale SFT tokenization smoke test: two model/template/tokenizer combinations that
+# exercise assistant-label derivation over complete mixtures, without training. Both are
+# CPU-only `--cache_dataset_only` jobs, so they are cheap to run and catch label-masking
+# regressions that small fixtures miss (see https://github.com/allenai/open-instruct/issues/1800).
 #
-#   rung 5:  OLMo-2-1B + tulu template + the FULL tulu-3-sft-olmo-2-mixture
-#   probe D: Olmo-3-7B + olmo_thinker_no_think_sft_tokenization + Dolci-Instruct-SFT
+#   1. OLMo-2-1B + tulu template + the full tulu-3-sft-olmo-2-mixture
+#   2. Olmo-3-7B + olmo_thinker_no_think_sft_tokenization + the full Dolci-Instruct-SFT
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
@@ -15,7 +16,7 @@ uv run python mason.py \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
-    --description "Rerun rung 5: OLMo-2-1B, tulu template, tulu-3-sft-olmo-2-mixture FULL, seq4096" \
+    --description "SFT tokenization: OLMo-2-1B, tulu template, tulu-3-sft-olmo-2-mixture, seq4096" \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
@@ -37,7 +38,7 @@ uv run python mason.py \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
-    --description "Rerun probe D: Olmo-3-7B, olmo_thinker_no_think_sft_tokenization, Dolci-Instruct-SFT FULL, seq4096" \
+    --description "SFT tokenization: Olmo-3-7B, olmo_thinker_no_think template, Dolci-Instruct-SFT, seq4096" \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
