@@ -26,11 +26,15 @@
 # Global batch is held at 64 sequences (2 GPUs * per_device 1 * grad_accum 32), identical to
 # every other configuration tried, so the learning rate below stays valid unchanged. 1000
 # steps is ~64k sequences: a partial pass over Dolci, not a full epoch.
-# LR is the reference 7B recipe's 8e-5 linearly scaled for batch size. The reference
-# (scripts/train/olmo3/7b_instruct_sft.sh) uses --global_batch_size=1048576 tokens; this run
-# uses 64 seqs * 4096 = 262144, a 4x smaller batch, so 8e-5 / 4 = 2e-5. Copying 8e-5 across
-# unscaled diverged during warmup: CE 0.95 at step 10 -> 8.29 at step 20, never recovered
-# (wandb c7odd0hp). Rescale this if you change GPUs, per_device batch, or grad_accum.
+# LR 5e-6 with gradient clipping. Do not copy the reference recipe's 8e-5: that run
+# (scripts/train/olmo3/7b_instruct_sft.sh) *resumes from an olmo-core checkpoint with
+# optimizer state*, while this starts cold from the HF base, so its LR does not transfer even
+# after scaling for batch size. Two runs diverged once LR hit peak, both recoverable only by
+# lowering it: 8e-5 -> CE 0.95@10 to 8.29@20 (wandb c7odd0hp); 2e-5 -> CE 0.87@10 to 2.69@30
+# to 8.70@60 (wandb hn9nfjfh).
+#
+# max_grad_norm defaults to None (no clipping at all), which lets a single bad batch move the
+# weights arbitrarily far. Clipping at 1.0 is the standard guard and costs nothing.
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 # Cluster is overridable so the same recipe can chase whichever pool has capacity.
@@ -62,7 +66,8 @@ uv run python mason.py \
     --max_seq_length 4096 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 32 \
-    --learning_rate 2e-5 \
+    --learning_rate 5e-6 \
+    --max_grad_norm 1.0 \
     --warmup_ratio 0.03 \
     --num_epochs 1 \
     --max_train_steps 1000 \
