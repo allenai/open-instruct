@@ -9,6 +9,11 @@
 # template, dataset_transformation asserts add_bos is off (it is only required with older,
 # non-olmo templates such as `tulu`).
 #
+# Ceres/Saturn rather than Jupiter: Jupiter uses Strict Priority scheduling, where a
+# --preemptible job only ever gets backfill capacity and can queue for hours on a busy
+# cluster. Ceres (H100 80GB) and Saturn (A100 80GB) are both Eager-scheduled and sized for
+# exactly this kind of small distributed job.
+#
 # Single node: 8 GPUs schedule far more easily than 2x8, and this is a correctness run --
 # throughput does not matter. Global batch is held at 64 sequences (8 GPUs * per_device 1 *
 # grad_accum 8) so the batch/LR relationship matches the reference recipe rather than being
@@ -21,7 +26,7 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 uv run python mason.py \
-    --cluster ai2/jupiter \
+    --cluster ai2/ceres ai2/saturn \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
