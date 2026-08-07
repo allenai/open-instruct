@@ -22,11 +22,16 @@
 # LR matches the Olmo 3 reference 7B SFT recipe (scripts/train/olmo3/7b_instruct_sft.sh).
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+# Cluster is overridable so the same recipe can chase whichever pool has capacity.
+# NOTE: ai2/holmes is B300 and only accepts CUDA 13 images -- build with
+# `build_image_and_launch.sh --cuda-version 13` when targeting it (see PR #1758).
+CLUSTER="${2:-ai2/ceres ai2/saturn}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
+echo "Targeting cluster(s): $CLUSTER"
 
 uv run python mason.py \
-    --cluster ai2/ceres ai2/saturn \
+    --cluster $CLUSTER \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
