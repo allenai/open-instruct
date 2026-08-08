@@ -47,6 +47,7 @@ uv run python mason.py \
     --max_train_steps 150 \
     --seed 42 \
     --logging_steps 1 \
+    --packing \
     --activation_memory_budget 0.5 \
     --chat_template_name olmo123 \
     --push_to_hub False \
