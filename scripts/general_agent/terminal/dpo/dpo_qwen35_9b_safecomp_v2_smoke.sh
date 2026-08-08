@@ -32,6 +32,10 @@ REF_CACHE="${REF_CACHE:-/weka/oe-adapt-default/mingqianz/models/.ref_logprobs_ca
 # made cross-node ref-cache builds differ by ~4e-3 max; compile-off is the reproducible path.
 # Decide + validate the compile setting separately before any full run.
 COMPILE="${COMPILE:-false}"
+# DEVIATION from the prereg's listed source default "concatenated forward enabled":
+# the concatenated 2x32k forward peaks over 80 GiB even with whole-block AC (two OOMs
+# measured); separate chosen/rejected forwards are mathematically identical and halve the
+# activation peak. Engineering fix on smoke failure — permitted and reported.
 
 CACHE_FLAG=""
 case "${CACHE_ONLY:-}" in
@@ -67,6 +71,7 @@ uv run python mason.py \
     --packing false \
     --loss_type dpo_norm \
     --beta 5.0 \
+    --concatenated_forward false \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 2 \
     --learning_rate 5e-7 \
