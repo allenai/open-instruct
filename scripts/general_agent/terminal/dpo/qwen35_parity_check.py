@@ -110,49 +110,44 @@ def build_prompt(args, tokenizer) -> torch.Tensor:
     return input_ids
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", required=True)
-    parser.add_argument("--config_name", default="qwen3_5_9B")
-    parser.add_argument("--tokenizer_name_or_path", default="hamishivi/Qwen3.5-9B")
-    parser.add_argument(
-        "--dpo_jsonl", default="/weka/oe-adapt-default/mingqianz/agent-safety/data/dpo/dpo_comp1k_v2.jsonl"
-    )
-    parser.add_argument("--attn_implementation", default="flash_2")
-    parser.add_argument("--max_prompt_tokens", type=int, default=4096)
-    parser.add_argument("--work_dir", default="/tmp/qwen35_parity_work")
-    args = parser.parse_args()
-
+def run_checks(args, model_name_or_path: str) -> None:
     device = torch.device("cuda")
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.tokenizer_name_or_path, use_fast=True)
 
+    logger.info(f"=== Parity checks for {model_name_or_path} ===")
+    check_args = argparse.Namespace(**{**vars(args), "model_name_or_path": model_name_or_path})
     logger.info("Building OLMo-core model...")
     model_config_args = MinimalModelConfig(
-        model_name_or_path=args.model_name_or_path,
+        model_name_or_path=model_name_or_path,
         config_name=args.config_name,
         attn_implementation=args.attn_implementation,
     )
     olmo_model, _ = olmo_core_utils.setup_model(model_config_args, init_device="cpu")
 
-    check_tensor_accounting(args, olmo_model)
+    check_tensor_accounting(check_args, olmo_model)
 
     logger.info("Loading HF weights into the OLMo-core model...")
     sd = olmo_model.state_dict()
-    load_hf_model(args.model_name_or_path, sd, work_dir=args.work_dir)
+    load_hf_model(model_name_or_path, sd, work_dir=args.work_dir)
     olmo_model.load_state_dict(sd)
     olmo_model = olmo_model.to(device=device, dtype=torch.bfloat16).eval()
 
     input_ids = build_prompt(args, tokenizer).to(device)
     with torch.no_grad():
         olmo_logits = olmo_model(input_ids=input_ids).float()
+    del sd
+    olmo_model = olmo_model.cpu()
+    torch.cuda.empty_cache()
 
     logger.info("Loading HF reference model...")
     hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-        args.model_name_or_path, dtype=torch.bfloat16, trust_remote_code=True
+        model_name_or_path, dtype=torch.bfloat16, trust_remote_code=True
     ).to(device)
     hf_model.eval()
     with torch.no_grad():
         hf_logits = hf_model(input_ids=input_ids).logits.float()
+    del hf_model
+    torch.cuda.empty_cache()
 
     assert olmo_logits.shape == hf_logits.shape, f"logit shape mismatch: {olmo_logits.shape} vs {hf_logits.shape}"
     argmax_agreement = (olmo_logits.argmax(-1) == hf_logits.argmax(-1)).float().mean().item()
@@ -165,7 +160,32 @@ def main():
     )
     assert argmax_agreement == 1.0, f"argmax disagreement at {1 - argmax_agreement:.4%} of positions"
     assert max_delta <= MAX_ABS_LOGIT_DELTA and mean_delta <= MEAN_ABS_LOGIT_DELTA, "logit deltas out of tolerance"
-    logger.info("CHECK 2 PASS")
+    logger.info(f"CHECK 2 PASS for {model_name_or_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=[
+            "/weka/oe-adapt-default/mingqianz/models/qwen35-9b-safecomp-v2/sft_qwen35_9b_safecomp_v2",
+            "/weka/oe-adapt-default/mingqianz/models/Qwen3.5-9B",
+        ],
+    )
+    parser.add_argument("--config_name", default="qwen3_5_9B")
+    parser.add_argument("--tokenizer_name_or_path", default="hamishivi/Qwen3.5-9B")
+    parser.add_argument(
+        "--dpo_jsonl", default="/weka/oe-adapt-default/mingqianz/agent-safety/data/dpo/dpo_comp1k_v2.jsonl"
+    )
+    parser.add_argument("--attn_implementation", default="flash_2")
+    parser.add_argument("--max_prompt_tokens", type=int, default=4096)
+    parser.add_argument("--work_dir", default="/tmp/qwen35_parity_work")
+    args = parser.parse_args()
+
+    for model_name_or_path in args.models:
+        run_checks(args, model_name_or_path)
+    logger.info("ALL PARITY CHECKS PASSED")
 
 
 if __name__ == "__main__":

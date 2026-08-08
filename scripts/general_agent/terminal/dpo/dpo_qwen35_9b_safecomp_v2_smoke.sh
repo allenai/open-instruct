@@ -24,7 +24,8 @@ TOKENIZER=hamishivi/Qwen3.5-9B
 DATA=/weka/oe-adapt-default/mingqianz/agent-safety/data/dpo/dpo_comp1k_v2.jsonl
 OUT=/weka/oe-adapt-default/mingqianz/models/qwen35-9b-safecomp-v2-dpo-smoke
 EXP_NAME=dpo_qwen35_9b_safecomp_v2_smoke
-REF_CACHE=/weka/oe-adapt-default/mingqianz/models/.ref_logprobs_cache
+# Overridable so rung 3b can run twice into distinct paths and compare (determinism check).
+REF_CACHE="${REF_CACHE:-/weka/oe-adapt-default/mingqianz/models/.ref_logprobs_cache}"
 
 CACHE_FLAG=""
 case "${CACHE_ONLY:-}" in
