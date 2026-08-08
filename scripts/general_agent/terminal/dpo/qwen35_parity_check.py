@@ -32,7 +32,10 @@ from olmo_core.nn.hf.checkpoint import load_hf_model
 from safetensors.torch import load_file
 
 from open_instruct import logger_utils, olmo_core_utils
-from open_instruct.dataset_transformation import _normalize_tools_for_chat_template
+from open_instruct.dataset_transformation import (
+    _normalize_messages_for_chat_template,
+    _normalize_tools_for_chat_template,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -101,8 +104,11 @@ def build_prompt(args, tokenizer) -> torch.Tensor:
             if tools:
                 break
     n_prefix = row["metadata"]["n_prefix_messages"]
+    # Same normalization the training path applies: tool_call arguments are JSON strings on
+    # disk, and the Qwen3.5 template iterates `arguments|items` (needs a mapping).
+    messages = _normalize_messages_for_chat_template(row["chosen"][:n_prefix])
     rendered = tokenizer.apply_chat_template(
-        conversation=row["chosen"][:n_prefix], tools=tools, tokenize=False, add_generation_prompt=True
+        conversation=messages, tools=tools, tokenize=False, add_generation_prompt=True
     )
     input_ids = tokenizer(rendered, add_special_tokens=False, return_tensors="pt")["input_ids"]
     input_ids = input_ids[:, : args.max_prompt_tokens]
