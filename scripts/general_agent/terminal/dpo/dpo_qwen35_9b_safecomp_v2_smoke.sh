@@ -49,7 +49,6 @@ uv run python mason.py \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env REFERENCE_LOGPROBS_CACHE_PATH="$REF_CACHE" \
     --num_nodes 1 \
-    --budget ai2/oe-adapt \
     --gpus 8 -- .venv/bin/torchrun --nproc_per_node=8 open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --do_not_randomize_output_dir \

@@ -20,5 +20,4 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --num_nodes 1 \
-    --budget ai2/oe-adapt \
     --gpus 1 -- .venv/bin/python scripts/general_agent/terminal/dpo/qwen35_parity_check.py
