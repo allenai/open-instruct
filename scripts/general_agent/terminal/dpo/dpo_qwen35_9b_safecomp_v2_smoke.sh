@@ -28,6 +28,10 @@ OUT=/weka/oe-adapt-default/mingqianz/models/qwen35-9b-safecomp-v2-dpo-smoke
 EXP_NAME=dpo_qwen35_9b_safecomp_v2_smoke
 # Overridable so rung 3b can run twice into distinct paths and compare (determinism check).
 REF_CACHE="${REF_CACHE:-/weka/oe-adapt-default/mingqianz/models/.ref_logprobs_cache}"
+# Compile default OFF for the smoke: inductor autotune selects per-node kernel configs, which
+# made cross-node ref-cache builds differ by ~4e-3 max; compile-off is the reproducible path.
+# Decide + validate the compile setting separately before any full run.
+COMPILE="${COMPILE:-false}"
 
 CACHE_FLAG=""
 case "${CACHE_ONLY:-}" in
@@ -71,6 +75,7 @@ uv run python mason.py \
     --seed 42 \
     --fsdp_shard_degree 8 \
     --fsdp_num_replicas 1 \
+    --compile_model "$COMPILE" \
     --activation_checkpointing_mode selected_modules \
     --output_dir "$OUT" \
     --checkpointing_steps 20 \
