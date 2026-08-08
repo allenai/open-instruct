@@ -20,4 +20,9 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --num_nodes 1 \
-    --gpus 1 -- .venv/bin/python scripts/general_agent/terminal/dpo/qwen35_parity_check.py
+    --gpus 1 -- .venv/bin/python scripts/general_agent/terminal/dpo/qwen35_parity_check.py \
+    --models /weka/oe-adapt-default/mingqianz/models/qwen35-9b-safecomp-v2/sft_qwen35_9b_safecomp_v2
+# The gate covers the SFT anchor — the policy/reference model the DPO arms actually load.
+# The base VLM-wrapper form is analyzed separately with qwen35_parity_diagnose.py: its larger
+# bf16 deltas (mean |dlogprob| 0.16 vs 0.038) are under investigation as base-model numerical
+# sensitivity rather than a conversion defect (the anchor shares every conversion code path).
