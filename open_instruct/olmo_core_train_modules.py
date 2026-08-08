@@ -256,6 +256,14 @@ class DPOTrainModule(TransformerTrainModule):
     def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
         self.model.train()
 
+        # Debugging aid: DPO_MEM_SNAPSHOT=<dir> records the CUDA allocation history and dumps a
+        # per-rank snapshot pickle if a training step OOMs (view with torch.cuda._memory_viz or
+        # https://pytorch.org/memory_viz). No overhead when unset.
+        snapshot_dir = os.environ.get("DPO_MEM_SNAPSHOT")
+        if snapshot_dir and not getattr(self, "_mem_history_started", False):
+            torch.cuda.memory._record_memory_history(max_entries=200000)
+            self._mem_history_started = True
+
         micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
         device = batch["chosen_input_ids"].device
@@ -267,12 +275,19 @@ class DPOTrainModule(TransformerTrainModule):
 
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
-                loss, step_metrics = self._compute_microbatch_loss(micro_batch)
-                micro_tokens = micro_token_counts[micro_batch_idx]
-                weight = micro_tokens / total_tokens
-                for k, v in step_metrics.items():
-                    self._metrics[k] += v.detach() * micro_tokens
-                (loss * weight).backward()
+                try:
+                    loss, step_metrics = self._compute_microbatch_loss(micro_batch)
+                    micro_tokens = micro_token_counts[micro_batch_idx]
+                    weight = micro_tokens / total_tokens
+                    for k, v in step_metrics.items():
+                        self._metrics[k] += v.detach() * micro_tokens
+                    (loss * weight).backward()
+                except torch.OutOfMemoryError:
+                    if snapshot_dir:
+                        path = f"{snapshot_dir}/mem_snapshot_rank{dist_utils.get_rank()}.pickle"
+                        torch.cuda.memory._dump_snapshot(path)
+                        logger.error(f"OOM: dumped CUDA memory snapshot to {path}")
+                    raise
 
         self.model.post_batch(dry_run=dry_run)
 
