@@ -51,6 +51,8 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env PYTORCH_ALLOC_CONF=expandable_segments:True \
+    --env DPO_LOGPROB_CHUNK_SIZE=1024 \
     --env REFERENCE_LOGPROBS_CACHE_PATH="$REF_CACHE" \
     --num_nodes 1 \
     --gpus 8 -- .venv/bin/torchrun --nproc_per_node=8 open_instruct/dpo.py \
@@ -77,6 +79,7 @@ uv run python mason.py \
     --fsdp_num_replicas 1 \
     --compile_model "$COMPILE" \
     --activation_checkpointing_mode selected_modules \
+    --activation_checkpointing_modules 'blocks.*' \
     --output_dir "$OUT" \
     --checkpointing_steps 20 \
     --logging_steps 1 \
