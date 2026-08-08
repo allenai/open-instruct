@@ -5,12 +5,14 @@ OLMo-core's native training infrastructure.
 """
 
 import math
+import os
 from typing import Any, Literal
 
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
+import torch.utils.checkpoint
 import wandb
 from olmo_core.distributed import utils as dist_utils
 from olmo_core.nn.attention import AttentionBackendName
@@ -36,6 +38,13 @@ _DOC_LENS_ATTN_BACKENDS = frozenset(
 )
 
 
+# Sequence-chunk size for per-token logprob computation in DPOLMHead. Materializing full
+# logits for a concatenated chosen+rejected pair at (2, 32768, 248320-vocab) needs ~65 GiB in
+# fp32 twice over (upcast + log_softmax output) — the measured 110 GiB OOM on Qwen3.5-9B at
+# 32k. Chunking bounds the transient to ~10 GiB per chunk with identical outputs.
+DPO_LOGPROB_CHUNK_SIZE = int(os.environ.get("DPO_LOGPROB_CHUNK_SIZE", "2048"))
+
+
 class DPOLMHead(LMHead):
     """LM head that returns per-token log-probabilities for DPO training.
 
@@ -43,7 +52,16 @@ class DPOLMHead(LMHead):
     avoiding DTensor/compile backward incompatibilities in the DPO loss code.
     Returns per-token logps with the same semantics as calculate_per_token_logps:
     output[i] = log p(labels[i+1] | logits[i]), with label shifting done internally.
+
+    The projection + log_softmax + gather runs in sequence chunks so the full
+    (batch, seq, vocab) logits are never materialized; each chunk is activation-
+    checkpointed under grad so the backward recomputes chunk logits instead of
+    storing them.
     """
+
+    def _chunk_per_token_logps(self, h_chunk: torch.Tensor, safe_labels_chunk: torch.Tensor) -> torch.Tensor:
+        logits = dist_utils.get_local_tensor(self.w_out(h_chunk)).to(torch.float32)
+        return torch.gather(logits.log_softmax(-1), 2, safe_labels_chunk.unsqueeze(2)).squeeze(2)
 
     def forward(
         self,
@@ -69,11 +87,25 @@ class DPOLMHead(LMHead):
             )
 
         h = self.norm(x) if self.norm is not None else x
-        logits = self.w_out(h)
-
-        local_logits = dist_utils.get_local_tensor(logits)
         local_labels = dist_utils.get_local_tensor(labels)
-        per_token_logps = padding_free_collator.calculate_per_token_logps(local_logits, local_labels)
+        # Shift once on the full tensor so chunk boundaries see the correct next-token label.
+        shifted_labels = torch.full_like(local_labels, -100)
+        shifted_labels[:, :-1] = local_labels[:, 1:]
+        safe_labels = shifted_labels.clamp(min=0)
+
+        pieces = []
+        seq_len = h.shape[1]
+        for start in range(0, seq_len, DPO_LOGPROB_CHUNK_SIZE):
+            end = min(start + DPO_LOGPROB_CHUNK_SIZE, seq_len)
+            h_chunk, safe_chunk = h[:, start:end], safe_labels[:, start:end]
+            if torch.is_grad_enabled() and h.requires_grad:
+                piece = torch.utils.checkpoint.checkpoint(
+                    self._chunk_per_token_logps, h_chunk, safe_chunk, use_reentrant=False
+                )
+            else:
+                piece = self._chunk_per_token_logps(h_chunk, safe_chunk)
+            pieces.append(piece)
+        per_token_logps = torch.cat(pieces, dim=1)
         if self.tp_enabled:
             per_token_logps = (
                 DTensor.from_local(per_token_logps, self._tp_mesh, (Shard(1),))
