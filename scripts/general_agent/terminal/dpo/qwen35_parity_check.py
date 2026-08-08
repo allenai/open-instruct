@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Rung-2 load-parity check for Qwen3.5-9B on the OLMo-core DPO path (prereg checks 1+2).
+
+Check 1 — tensor accounting: every text tensor of the HF checkpoint is consumed by
+`convert_qwen3_5_state_from_hf` with the expected name/shape; for a VLM-wrapper base
+checkpoint the unconsumed set must be exactly the vision tower + MTP head.
+
+Check 2 — logit parity: the OLMo-core model built via `setup_model` + `load_hf_model`
+matches the HF `AutoModelForCausalLM` on a fixed tool-bearing prompt (rendered from a
+row of the exported SafeComp preference set): 100% argmax agreement across positions,
+and max/mean |Δlogit| at the final position within the declared bf16 tolerance
+(logits compared in fp32).
+
+Requires one GPU (the GDN layers need the flash-linear-attention kernels).
+
+Usage:
+  uv run python scripts/general_agent/terminal/dpo/qwen35_parity_check.py \
+      --model_name_or_path /weka/.../models/qwen35-9b-safecomp-v2/sft_qwen35_9b_safecomp_v2 \
+      --dpo_jsonl /weka/.../agent-safety/data/dpo/dpo_comp1k_v2.jsonl
+"""
+
+import argparse
+import dataclasses
+import glob
+import json
+import os
+
+import torch
+import transformers
+from olmo_core.nn.hf import convert as olmo_hf_convert
+from olmo_core.nn.hf.checkpoint import load_hf_model
+from safetensors.torch import load_file
+
+from open_instruct import logger_utils, olmo_core_utils
+from open_instruct.dataset_transformation import _normalize_tools_for_chat_template
+
+logger = logger_utils.setup_logger(__name__)
+
+MAX_ABS_LOGIT_DELTA = 0.5
+MEAN_ABS_LOGIT_DELTA = 0.05
+
+
+@dataclasses.dataclass
+class MinimalModelConfig:
+    model_name_or_path: str
+    config_name: str
+    attn_implementation: str
+    loss_implementation: str = "fused_linear"
+    rope_scaling_factor: float | None = None
+
+
+def load_hf_state(path: str) -> dict[str, torch.Tensor]:
+    state: dict[str, torch.Tensor] = {}
+    index = os.path.join(path, "model.safetensors.index.json")
+    if os.path.exists(index):
+        with open(index) as f:
+            shards = sorted(set(json.load(f)["weight_map"].values()))
+        for shard in shards:
+            state.update(load_file(os.path.join(path, shard)))
+    else:
+        for shard in sorted(glob.glob(os.path.join(path, "model*.safetensors"))):
+            state.update(load_file(shard))
+    return state
+
+
+def check_tensor_accounting(args, olmo_model) -> None:
+    hf_config = transformers.AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+    hf_state = load_hf_state(args.model_name_or_path)
+    converted = olmo_hf_convert.convert_qwen3_5_state_from_hf(hf_config, dict(hf_state))
+
+    model_keys = set(olmo_model.state_dict().keys())
+    produced = set(converted.keys())
+    missing = model_keys - produced
+    extra = produced - model_keys
+    assert not missing, f"converter produced no value for {len(missing)} model tensors: {sorted(missing)[:8]}"
+    assert not extra, f"converter produced {len(extra)} unknown tensors: {sorted(extra)[:8]}"
+    for key in model_keys:
+        expected_shape = olmo_model.state_dict()[key].shape
+        assert converted[key].shape == expected_shape, (
+            f"{key}: converted shape {converted[key].shape} != model shape {expected_shape}"
+        )
+
+    # Which source tensors the text conversion never reads: must be exactly non-text weights.
+    normalized = olmo_hf_convert._normalize_qwen3_5_hf_state(dict(hf_state))
+    text_sources = set(normalized.keys())
+    unconsumed = {k for k in hf_state if not any(s in k for s in ("visual.", "vision", "mtp."))}
+    unconsumed = {k for k in unconsumed if k.replace("model.language_model.", "model.") not in text_sources}
+    assert not unconsumed, f"text tensors unconsumed by the converter: {sorted(unconsumed)[:8]}"
+    n_dropped = len(hf_state) - len([k for k in hf_state if not any(s in k for s in ("visual.", "vision", "mtp."))])
+    logger.info(
+        f"CHECK 1 PASS: {len(model_keys)} olmo-core tensors covered with expected shapes; "
+        f"{n_dropped} non-text tensors (vision/MTP) dropped by design."
+    )
+
+
+def build_prompt(args, tokenizer) -> torch.Tensor:
+    with open(args.dpo_jsonl) as f:
+        for line in f:
+            row = json.loads(line)
+            tools = _normalize_tools_for_chat_template(row.get("tools"))
+            if tools:
+                break
+    n_prefix = row["metadata"]["n_prefix_messages"]
+    rendered = tokenizer.apply_chat_template(
+        conversation=row["chosen"][:n_prefix], tools=tools, tokenize=False, add_generation_prompt=True
+    )
+    input_ids = tokenizer(rendered, add_special_tokens=False, return_tensors="pt")["input_ids"]
+    input_ids = input_ids[:, : args.max_prompt_tokens]
+    logger.info(f"parity prompt: task_id={row['metadata'].get('task_id')} tokens={input_ids.shape[1]}")
+    return input_ids
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_name_or_path", required=True)
+    parser.add_argument("--config_name", default="qwen3_5_9B")
+    parser.add_argument("--tokenizer_name_or_path", default="hamishivi/Qwen3.5-9B")
+    parser.add_argument(
+        "--dpo_jsonl", default="/weka/oe-adapt-default/mingqianz/agent-safety/data/dpo/dpo_comp1k_v2.jsonl"
+    )
+    parser.add_argument("--attn_implementation", default="flash_2")
+    parser.add_argument("--max_prompt_tokens", type=int, default=4096)
+    parser.add_argument("--work_dir", default="/tmp/qwen35_parity_work")
+    args = parser.parse_args()
+
+    device = torch.device("cuda")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(args.tokenizer_name_or_path, use_fast=True)
+
+    logger.info("Building OLMo-core model...")
+    model_config_args = MinimalModelConfig(
+        model_name_or_path=args.model_name_or_path,
+        config_name=args.config_name,
+        attn_implementation=args.attn_implementation,
+    )
+    olmo_model, _ = olmo_core_utils.setup_model(model_config_args, init_device="cpu")
+
+    check_tensor_accounting(args, olmo_model)
+
+    logger.info("Loading HF weights into the OLMo-core model...")
+    sd = olmo_model.state_dict()
+    load_hf_model(args.model_name_or_path, sd, work_dir=args.work_dir)
+    olmo_model.load_state_dict(sd)
+    olmo_model = olmo_model.to(device=device, dtype=torch.bfloat16).eval()
+
+    input_ids = build_prompt(args, tokenizer).to(device)
+    with torch.no_grad():
+        olmo_logits = olmo_model(input_ids=input_ids).float()
+
+    logger.info("Loading HF reference model...")
+    hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path, dtype=torch.bfloat16, trust_remote_code=True
+    ).to(device)
+    hf_model.eval()
+    with torch.no_grad():
+        hf_logits = hf_model(input_ids=input_ids).logits.float()
+
+    assert olmo_logits.shape == hf_logits.shape, f"logit shape mismatch: {olmo_logits.shape} vs {hf_logits.shape}"
+    argmax_agreement = (olmo_logits.argmax(-1) == hf_logits.argmax(-1)).float().mean().item()
+    delta_final = (olmo_logits[0, -1] - hf_logits[0, -1]).abs()
+    max_delta, mean_delta = delta_final.max().item(), delta_final.mean().item()
+    logger.info(
+        f"CHECK 2: argmax agreement {argmax_agreement:.4%}; final-position "
+        f"max|dlogit|={max_delta:.4f} mean|dlogit|={mean_delta:.5f} "
+        f"(tolerances: {MAX_ABS_LOGIT_DELTA}, {MEAN_ABS_LOGIT_DELTA})"
+    )
+    assert argmax_agreement == 1.0, f"argmax disagreement at {1 - argmax_agreement:.4%} of positions"
+    assert max_delta <= MAX_ABS_LOGIT_DELTA and mean_delta <= MEAN_ABS_LOGIT_DELTA, "logit deltas out of tolerance"
+    logger.info("CHECK 2 PASS")
+
+
+if __name__ == "__main__":
+    main()

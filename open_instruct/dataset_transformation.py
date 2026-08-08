@@ -43,6 +43,7 @@ The main things we are looking for are:
 ## TODO: We should just simplify the tokenization setups. We have multiple "rlvr_tokenize", etc. This came from a previous version of version handling that prioritised backwards compatibility, but I think in practice we should just directly edit these functions + invalidate caches.
 """
 
+import contextlib
 import copy
 import hashlib
 import json
@@ -945,7 +946,39 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v7: SFT tokenization passes the tools column to the chat
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
-DATASET_CACHE_VERSION = "v7"
+DATASET_CACHE_VERSION = "v8"
+
+
+def _normalize_messages_for_chat_template(messages: Any) -> list[dict[str, Any]]:
+    """Normalize dataset messages before passing them to chat templates."""
+    if isinstance(messages, str):
+        try:
+            messages = json.loads(messages)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"messages must be a JSON-encoded chat message list, got: {messages!r}") from exc
+
+    if not isinstance(messages, list):
+        raise TypeError(f"messages must be a list or JSON string, got {type(messages).__name__}")
+
+    if not all(isinstance(message, dict) for message in messages):
+        raise TypeError(f"messages must contain chat message dictionaries, got: {messages!r}")
+
+    # Tool-call arguments may be stored as JSON strings on disk so that datasets
+    # with heterogeneous multi-tool argument schemas keep a uniform Arrow schema
+    # and load_dataset("json") succeeds. Chat templates that iterate
+    # `tool_call.arguments | items` need a mapping, so deserialize back to a dict
+    # here (mirrors how `tools` is handled in _normalize_tools_for_chat_template).
+    for message in messages:
+        for tool_call in message.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function")
+            if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                # On failure leave it as a string; some templates accept string arguments.
+                with contextlib.suppress(json.JSONDecodeError):
+                    function["arguments"] = json.loads(function["arguments"])
+
+    return messages
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
@@ -1210,6 +1243,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
     tools: list | None,
     max_seq_length: int | None,
     last_turn_only: bool = False,
+    label_from_message_idx: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # Assistant label spans are derived from `return_offsets_mapping`, which slow
     # (Python) tokenizers do not support. Fail with a clear message instead of the
@@ -1246,6 +1280,8 @@ def _tokenize_tulu_sft_with_assistant_labels(
         if message["role"] != "assistant":
             continue
         if last_turn_only and message_idx != last_assistant_idx:
+            continue
+        if label_from_message_idx is not None and message_idx < label_from_message_idx:
             continue
 
         # The trainable span runs from the end of the assistant header (the generation
@@ -1306,7 +1342,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
 
 def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
-    messages = row["messages"]
+    messages = _normalize_messages_for_chat_template(row["messages"])
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
@@ -1333,7 +1369,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreT
     Reuses the offset-based assistant-label derivation (which forwards the tools
     column to the chat template) rather than the legacy mask_labels path.
     """
-    messages = row["messages"]
+    messages = _normalize_messages_for_chat_template(row["messages"])
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
@@ -1408,11 +1444,14 @@ def preference_tulu_tokenize_and_truncate_v1(
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
 
+    # Forward the tools column so both branches render the identical tool schemas into their
+    # chat templates; without it the wrapped single-key dict silently tokenized tool-less prompts.
+    tools = row.get(TOOLS_COLUMN_KEY)
     chosen_encoded = sft_tulu_tokenize_and_truncate_v1(
-        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
+        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages, TOOLS_COLUMN_KEY: tools}, tokenizer, max_seq_length
     )
     rejected_encoded = sft_tulu_tokenize_and_truncate_v1(
-        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages}, tokenizer, max_seq_length
+        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages, TOOLS_COLUMN_KEY: tools}, tokenizer, max_seq_length
     )
 
     return {
@@ -1444,11 +1483,14 @@ def preference_tulu_tokenize_and_truncate_v1_2(
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
 
+    # Forward the tools column so both branches render the identical tool schemas into their
+    # chat templates; without it the wrapped single-key dict silently tokenized tool-less prompts.
+    tools = row.get(TOOLS_COLUMN_KEY)
     chosen_encoded = last_turn_tulu_tokenize_and_truncate_v1(
-        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
+        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages, TOOLS_COLUMN_KEY: tools}, tokenizer, max_seq_length
     )
     rejected_encoded = last_turn_tulu_tokenize_and_truncate_v1(
-        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages}, tokenizer, max_seq_length
+        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages, TOOLS_COLUMN_KEY: tools}, tokenizer, max_seq_length
     )
 
     return {
@@ -1459,6 +1501,58 @@ def preference_tulu_tokenize_and_truncate_v1_2(
         REJECTED_LABELS_KEY: rejected_encoded["labels"],
         REJECTED_ATTENTION_MASK_KEY: rejected_encoded["attention_mask"],
     }
+
+
+def preference_safecomp_tail_tokenize_v1(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+    chosen_key: str = DEFAULT_CHOSEN_KEY,
+    rejected_key: str = DEFAULT_REJECTED_KEY,
+):
+    """Preference tokenization for prefix-matched agentic pairs (SafeComp).
+
+    ``chosen``/``rejected`` are full multi-turn conversations sharing a byte-identical
+    prefix of ``metadata.n_prefix_messages`` messages; the pair differs only in the tail.
+    Loss labels cover every assistant turn of the TAIL and nothing before it: the stock
+    ``preference_tulu_tokenize_and_truncate_v1`` (via the registry, the ``_v1_2``
+    last-turn-only variant) would label only the closing message — ignoring the actions
+    the pair is actually about — while full-assistant labeling would dilute the
+    length-normalized ``dpo_norm`` margin with shared-prefix tokens identical on both
+    sides. The tools column is forwarded so both branches render the same tool schemas.
+
+    A pair whose EITHER branch exceeds ``max_seq_length`` untruncated is emitted with
+    all-masked labels on both branches so the standard ``preference_tulu_filter_v1``
+    drops it: truncating would cut the closing assistant turn (the legal ending sits at
+    the very end of every branch), which invalidates the row rather than shortening it.
+    """
+    chosen_messages = row[chosen_key]
+    rejected_messages = row[rejected_key]
+    if len(chosen_messages) == 0:
+        raise ValueError("chosen messages field is empty.")
+    if len(rejected_messages) == 0:
+        raise ValueError("rejected messages field is empty.")
+    metadata = row.get("metadata") or {}
+    n_prefix = metadata.get("n_prefix_messages")
+    if not isinstance(n_prefix, int) or not 0 < n_prefix <= min(len(chosen_messages), len(rejected_messages)):
+        raise ValueError(f"metadata.n_prefix_messages missing or invalid for tail labeling: {n_prefix!r}")
+
+    tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
+    encoded = {}
+    over_budget = False
+    for branch, messages in (("chosen", chosen_messages), ("rejected", rejected_messages)):
+        messages = _normalize_messages_for_chat_template(messages)
+        input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
+            messages, tokenizer, tools, max_seq_length=None, label_from_message_idx=n_prefix
+        )
+        over_budget = over_budget or input_ids.shape[1] > max_seq_length
+        encoded[f"{branch}_{INPUT_IDS_KEY}"] = input_ids.flatten()[:max_seq_length]
+        encoded[f"{branch}_{LABELS_KEY}"] = labels.flatten()[:max_seq_length]
+        encoded[f"{branch}_{ATTENTION_MASK_KEY}"] = attention_mask.flatten()[:max_seq_length]
+    if over_budget:
+        for branch in ("chosen", "rejected"):
+            encoded[f"{branch}_{LABELS_KEY}"] = torch.full_like(encoded[f"{branch}_{LABELS_KEY}"], MASKED_TOKEN_VALUE)
+    return encoded
 
 
 def preference_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
@@ -1663,6 +1757,7 @@ TRANSFORM_FNS = {
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
+    "preference_safecomp_tail_tokenize_v1": (preference_safecomp_tail_tokenize_v1, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
@@ -1677,6 +1772,10 @@ _SFT_TOKENIZE_FNS = {
     "sft_tulu_tokenize_without_truncation_v1",
     "sft_tulu_tokenize_and_truncate_v1",
     "last_turn_tulu_tokenize_and_truncate_v1",
+    # The preference transforms now consume tools too (rendered into both branches' templates),
+    # so the raw column must likewise be stripped after tokenization.
+    "preference_tulu_tokenize_and_truncate_v1",
+    "preference_safecomp_tail_tokenize_v1",
 }
 
 

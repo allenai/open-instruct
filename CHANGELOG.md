@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Enable the OLMo-core DPO path for Qwen3.5-9B (hybrid GatedDeltaNet): read `vocab_size`/`tie_word_embeddings` through `get_text_config()` in `setup_model` (VLM-wrapper configs), forward `tie_word_embeddings` to `qwen3_5*` presets, and add `open_instruct/qwen3_5_export.py` — the OLMo-core→HF inverse converter (GDN qkv/conv1d re-fusing, q/gate re-interleave, −1.0 norm offset) wired into `verify_can_save_as_hf`/`save_state_dict_as_hf`, with CPU round-trip tests against OLMo-core's own from-HF converter.
+- Forward the `tools` column through the preference tokenization wrappers (both `preference_tulu_tokenize_and_truncate_v1` variants) so chosen/rejected render identical tool schemas; consume the column post-tokenization and bump `DATASET_CACHE_VERSION` to `v8`.
+- Add `preference_safecomp_tail_tokenize_v1`: preference tokenization for prefix-matched multi-turn agentic pairs that labels exactly the divergent tail's assistant turns (via a new `label_from_message_idx` span filter) and drops pairs exceeding `max_seq_length` untruncated instead of cutting their closing turn.
+- Normalize messages before chat templating (`_normalize_messages_for_chat_template`): deserialize JSON-string `tool_call.function.arguments` so templates that iterate `arguments|items` (e.g. Qwen3.5) render correctly.
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 

@@ -29,7 +29,7 @@ from olmo_core.train.train_module.transformer import (
 )
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
 
-from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
+from open_instruct import logger_utils, model_utils, olmo_core_callbacks, qwen3_5_export, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
@@ -356,16 +356,24 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "Qwen/Qwen3-8B": "qwen3_8B",
     "Qwen/Qwen3-14B": "qwen3_14B",
     "Qwen/Qwen3-32B": "qwen3_32B",
+    "Qwen/Qwen3.5-9B": "qwen3_5_9B",
+    "hamishivi/Qwen3.5-9B": "qwen3_5_9B",
 }
 
 
-def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_backend: str) -> TransformerConfig:
+def get_transformer_config(
+    model_name_or_config: str, vocab_size: int, attn_backend: str, tie_word_embeddings: bool | None = None
+) -> TransformerConfig:
     """Get the appropriate TransformerConfig for a given model name or config name.
 
     Args:
         model_name_or_config: HuggingFace model name, path, or direct config name (e.g., 'olmo3_7B').
         vocab_size: Vocabulary size for the model.
         attn_backend: Attention backend name (e.g., 'flash_2', 'flash_3', 'torch').
+        tie_word_embeddings: Whether the checkpoint ties lm_head to the embeddings, read from its
+            HF config. Only forwarded to qwen3_5 presets: their default is True, but e.g.
+            Qwen3.5-9B is untied — building it tied would make load_hf_model silently clobber the
+            shared embedding storage with lm_head weights. Other presets don't accept the kwarg.
 
     Returns:
         TransformerConfig for the specified model.
@@ -387,8 +395,11 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
             f"Available models: {available_models}. "
             f"Available config names: {', '.join(available_configs)}"
         )
+    kwargs = {}
+    if config_name.startswith("qwen3_5") and tie_word_embeddings is not None:
+        kwargs["tie_word_embeddings"] = tie_word_embeddings
     return getattr(TransformerConfig, config_name)(
-        vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend)
+        vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend), **kwargs
     )
 
 
@@ -396,10 +407,15 @@ def setup_model(
     model_config_args: ModelConfig, tc: TokenizerConfig | None = None, init_device: str = "cpu"
 ) -> tuple[Transformer, TransformerConfig]:
     model_name_or_path = model_config_args.model_name_or_path
+    tie_word_embeddings = None
     if is_hf_checkpoint(model_name_or_path):
         logger.info(f"Detected HuggingFace checkpoint at {model_name_or_path}")
         hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-        vocab_size = hf_config.vocab_size
+        # VLM-wrapper configs (e.g. Qwen3.5's Qwen3_5Config) nest the decoder under text_config;
+        # get_text_config() returns the config itself when there is no nesting.
+        text_config = hf_config.get_text_config()
+        vocab_size = text_config.vocab_size
+        tie_word_embeddings = getattr(text_config, "tie_word_embeddings", None)
     else:
         logger.info(f"Detected olmo-core checkpoint at {model_name_or_path}")
         assert model_config_args.config_name is not None, (
@@ -412,6 +428,7 @@ def setup_model(
         model_config_args.config_name or model_name_or_path,
         vocab_size,
         attn_backend=model_config_args.attn_implementation,
+        tie_word_embeddings=tie_word_embeddings,
     )
     model_config.lm_head.loss_implementation = LMLossImplementation(model_config_args.loss_implementation)
     if model_config_args.rope_scaling_factor is not None:
@@ -497,6 +514,22 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
+def _convert_olmo_core_state_to_hf(
+    hf_config: transformers.PretrainedConfig, state_dict: dict[str, torch.Tensor]
+) -> tuple[transformers.PretrainedConfig, dict[str, torch.Tensor]]:
+    """Route an olmo-core state dict to the right HF converter and target config.
+
+    Qwen3.5 hybrids need the dedicated exporter in ``qwen3_5_export`` (OLMo-core has no
+    to-HF mapping for them) and are always exported as the text-only ``Qwen3_5ForCausalLM``
+    — the layout the project's serving wrapper consumes — even when the original checkpoint
+    was the VLM wrapper. Everything else goes through OLMo-core's template converter.
+    """
+    if getattr(hf_config, "model_type", None) in ("qwen3_5", "qwen3_5_text"):
+        target_config = qwen3_5_export.get_qwen3_5_text_model_config(hf_config)
+        return target_config, qwen3_5_export.convert_qwen3_5_state_to_hf(target_config, state_dict)
+    return hf_config, olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+
+
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -508,7 +541,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
+    hf_config, converted = _convert_olmo_core_state_to_hf(hf_config, olmo_core_state)
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
@@ -543,7 +576,7 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+    hf_config, converted = _convert_olmo_core_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
