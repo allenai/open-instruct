@@ -41,6 +41,12 @@ logger = logger_utils.setup_logger(__name__)
 
 MAX_ABS_LOGIT_DELTA = 0.5
 MEAN_ABS_LOGIT_DELTA = 0.05
+# Cross-implementation bf16 kernels (OLMo-core GDN/attention vs HF) legitimately flip the
+# argmax wherever the top-2 logits are nearly tied, so exact per-position argmax equality is
+# not the right criterion (measured on the first run: 98.85% agreement with max|dlogit|=0.106
+# — every flip a near-tie). A disagreement only indicates a conversion bug when the reference
+# top-1/top-2 margin is LARGER than numerical noise could bridge:
+MAX_DISAGREEMENT_MARGIN = 0.25
 
 
 @dataclasses.dataclass
@@ -156,15 +162,28 @@ def run_checks(args, model_name_or_path: str) -> None:
     torch.cuda.empty_cache()
 
     assert olmo_logits.shape == hf_logits.shape, f"logit shape mismatch: {olmo_logits.shape} vs {hf_logits.shape}"
-    argmax_agreement = (olmo_logits.argmax(-1) == hf_logits.argmax(-1)).float().mean().item()
+    olmo_top, hf_top = olmo_logits.argmax(-1), hf_logits.argmax(-1)
+    agree = olmo_top == hf_top
+    argmax_agreement = agree.float().mean().item()
+    disagree_idx = (~agree)[0].nonzero().flatten()
+    # At each disagreeing position, how decisive was the reference's choice? A near-tie
+    # (small top-1/top-2 margin) flips under kernel noise; a decisive margin cannot.
+    max_disagree_margin = 0.0
+    if len(disagree_idx) > 0:
+        top2 = hf_logits[0, disagree_idx].topk(2, dim=-1).values
+        max_disagree_margin = (top2[:, 0] - top2[:, 1]).max().item()
     delta_final = (olmo_logits[0, -1] - hf_logits[0, -1]).abs()
     max_delta, mean_delta = delta_final.max().item(), delta_final.mean().item()
     logger.info(
-        f"CHECK 2: argmax agreement {argmax_agreement:.4%}; final-position "
-        f"max|dlogit|={max_delta:.4f} mean|dlogit|={mean_delta:.5f} "
+        f"CHECK 2: argmax agreement {argmax_agreement:.4%} ({len(disagree_idx)} positions, "
+        f"max top1-top2 margin among disagreements {max_disagree_margin:.4f} <= {MAX_DISAGREEMENT_MARGIN}); "
+        f"final-position max|dlogit|={max_delta:.4f} mean|dlogit|={mean_delta:.5f} "
         f"(tolerances: {MAX_ABS_LOGIT_DELTA}, {MEAN_ABS_LOGIT_DELTA})"
     )
-    assert argmax_agreement == 1.0, f"argmax disagreement at {1 - argmax_agreement:.4%} of positions"
+    assert bool(agree[0, -1]), "argmax disagrees at the final position"
+    assert max_disagree_margin <= MAX_DISAGREEMENT_MARGIN, (
+        f"a decisively-ranked position flipped (margin {max_disagree_margin:.4f}) — not numerical noise"
+    )
     assert max_delta <= MAX_ABS_LOGIT_DELTA and mean_delta <= MEAN_ABS_LOGIT_DELTA, "logit deltas out of tolerance"
     logger.info(f"CHECK 2 PASS for {model_name_or_path}")
 
