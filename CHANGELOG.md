@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Count each training batch's per-sample lengths exactly once when computing `val/num_step_tokens`, `learner_tokens_per_second_step`, `learner_mfu`, and `actor_mfu` in `grpo_fast.py`: every learner rank receives the same global metrics dict from the `DataPreparationActor`, but the lengths were concatenated across sp-leader ranks, inflating these metrics by the number of learner ranks. Historical grpo_fast MFU/TPS numbers were inflated accordingly; the OLMo-core path was unaffected (https://github.com/allenai/open-instruct/pull/1808).
 - Raise a `ValueError` naming the packed instance count, global batch size, and epoch count when `olmo_core_finetune.py` computes fewer than one training step, instead of letting an undersized dataset surface as a bare `ZeroDivisionError` from olmo-core's LR scheduler (https://github.com/allenai/open-instruct/pull/1796).
 - Track the CUDA 12 image suffix in the merge-queue Beaker workflow and allow enough time for the larger image build and upload (https://github.com/allenai/open-instruct/pull/1783).
 - Exclude nested virtualenvs (e.g. `oe-eval-internal/.venv/`) from the Docker build context, so a uv venv inside a nested clone no longer fails the image build on a dangling host-interpreter symlink (https://github.com/allenai/open-instruct/pull/1786).
