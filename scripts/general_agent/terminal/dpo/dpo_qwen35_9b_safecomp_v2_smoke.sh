@@ -36,6 +36,11 @@ COMPILE="${COMPILE:-false}"
 # the concatenated 2x32k forward peaks over 80 GiB even with whole-block AC (two OOMs
 # measured); separate chosen/rejected forwards are mathematically identical and halve the
 # activation peak. Engineering fix on smoke failure — permitted and reported.
+#
+# AC granularity: olmo-core matches activation_checkpointing_modules with fnmatch over ALL
+# named_modules, so 'blocks.*' also wraps every SUBMODULE (memory snapshot showed ~43 GiB of
+# per-boundary activations — same as the submodule default). The digit-anchored patterns below
+# match exactly the 32 block modules, giving true whole-block checkpointing.
 
 CACHE_FLAG=""
 case "${CACHE_ONLY:-}" in
@@ -84,7 +89,7 @@ uv run python mason.py \
     --fsdp_num_replicas 1 \
     --compile_model "$COMPILE" \
     --activation_checkpointing_mode selected_modules \
-    --activation_checkpointing_modules 'blocks.*' \
+    --activation_checkpointing_modules 'blocks.[0-9]' 'blocks.[0-9][0-9]' \
     --output_dir "$OUT" \
     --checkpointing_steps 20 \
     --logging_steps 1 \
