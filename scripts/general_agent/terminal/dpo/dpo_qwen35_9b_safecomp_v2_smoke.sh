@@ -18,7 +18,9 @@
 # --tokenizer_name_or_path. Amount "1.0" = 100% of the file; "1" = ONE row.
 set -euo pipefail
 
-BEAKER_IMAGE="${1:-mingqianz/open-instruct-safecomp-dpo}"
+# NON-pure-docker mode (no docker buildx on this host): the job cds into this weka-hosted
+# repo and uses its `.venv`; the image supplies only CUDA/glibc.
+BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 MODEL=/weka/oe-adapt-default/mingqianz/models/qwen35-9b-safecomp-v2/sft_qwen35_9b_safecomp_v2
 TOKENIZER=hamishivi/Qwen3.5-9B
 DATA=/weka/oe-adapt-default/mingqianz/agent-safety/data/dpo/dpo_comp1k_v2.jsonl
@@ -41,14 +43,14 @@ uv run python mason.py \
     --description "SafeComp DPO smoke: Qwen3.5-9B, 32k seq, 1 node ${CACHE_ONLY:+(cache: $CACHE_ONLY)}" \
     --priority urgent \
     --preemptible \
-    --image "$BEAKER_IMAGE" --pure_docker_mode \
+    --image "$BEAKER_IMAGE" \
     --no_auto_dataset_cache \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env REFERENCE_LOGPROBS_CACHE_PATH="$REF_CACHE" \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- torchrun --nproc_per_node=8 open_instruct/dpo.py \
+    --gpus 8 -- .venv/bin/torchrun --nproc_per_node=8 open_instruct/dpo.py \
     --exp_name "$EXP_NAME" \
     --do_not_randomize_output_dir \
     --model_name_or_path "$MODEL" \
