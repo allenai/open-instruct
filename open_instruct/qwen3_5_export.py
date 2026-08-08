@@ -18,7 +18,26 @@ an equivalent lands there.
 import re
 
 import torch
+from olmo_core.nn.hf import convert as _olmo_hf_convert
 from transformers import PretrainedConfig
+
+# ---------------------------------------------------------------------------------------------
+# WORKAROUND for an OLMo-core bug (present at pin fa6c5014): `_normalize_qwen3_5_hf_state`
+# skips vision keys but NOT the MTP head, and `mtp.layers.0.*` contains ".layers." — so on a
+# VLM-wrapper checkpoint the normalizer rewrites MTP tensors to `model.layers.0.*`, clobbering
+# layer 0's MLP and norms with MTP-head weights (and `mtp.norm.weight` races the real final
+# norm on dict order). Measured effect: mean |dlogprob| 0.16 vs 0.038 on the text-only
+# checkpoint of the same model. Filter `mtp.` keys before the original normalizer runs.
+# Remove when fixed upstream in allenai/OLMo-core.
+if not getattr(_olmo_hf_convert._normalize_qwen3_5_hf_state, "_skips_mtp", False):
+    _original_normalize = _olmo_hf_convert._normalize_qwen3_5_hf_state
+
+    def _normalize_qwen3_5_hf_state_skipping_mtp(hf_state):
+        return _original_normalize({k: v for k, v in hf_state.items() if not k.startswith("mtp.")})
+
+    _normalize_qwen3_5_hf_state_skipping_mtp._skips_mtp = True
+    _olmo_hf_convert._normalize_qwen3_5_hf_state = _normalize_qwen3_5_hf_state_skipping_mtp
+# ---------------------------------------------------------------------------------------------
 
 # The norm families that HF stores zero-initialized (``hidden * (1 + w)``) and OLMo-core
 # stores ones-initialized (``hidden * w``). The from-HF converter adds 1.0 to exactly

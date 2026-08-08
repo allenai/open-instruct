@@ -118,6 +118,26 @@ def test_tied_embeddings_roundtrip_has_no_lm_head():
     assert set(recovered) == set(hf_state)
 
 
+def test_mtp_keys_do_not_clobber_layer_zero():
+    """Regression for the OLMo-core normalizer bug worked around in qwen3_5_export: a wrapper
+    checkpoint's `mtp.layers.0.*` keys must not overwrite the real layer-0 weights, and
+    `mtp.norm.weight` must not race the real final norm."""
+    config = _tiny_text_config()
+    torch.manual_seed(4)
+    model = Qwen3_5ForCausalLM(config)
+    hf_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    real_gate = hf_state["model.layers.0.mlp.gate_proj.weight"].clone()
+    real_norm = hf_state["model.norm.weight"].clone()
+    # Impostors AFTER the real keys, so naive normalization would let them win on dict order.
+    hf_state["mtp.layers.0.mlp.gate_proj.weight"] = torch.full_like(real_gate, 7.0)
+    hf_state["mtp.norm.weight"] = torch.full_like(real_norm, 7.0)
+    hf_state["mtp.fc.weight"] = torch.randn(4, 4)
+    olmo_state = olmo_hf_convert.convert_qwen3_5_state_from_hf(config, hf_state)
+    assert torch.equal(olmo_state["blocks.0.feed_forward.w1.weight"], real_gate)
+    # The final norm carries the +1.0 load transform; compare against the transformed real value.
+    torch.testing.assert_close(olmo_state["lm_head.norm.weight"], real_norm + 1.0, atol=1e-6, rtol=0)
+
+
 @pytest.mark.skipif(
     not os.environ.get("QWEN3_5_REAL_CHECKPOINT"), reason="set QWEN3_5_REAL_CHECKPOINT to run the full-size round-trip"
 )
