@@ -63,6 +63,9 @@ def report(tag, olmo_logits, hf_logits, input_ids, tokenizer):
         f"p50={quantiles[0]:.4f} p90={quantiles[1]:.4f} p99={quantiles[2]:.4f} max={quantiles[3]:.4f} "
         f"(worst at position {worst_pos})"
     )
+    for idx in per_pos_max.topk(5).indices.tolist():
+        context = tokenizer.decode(input_ids[0, max(0, idx - 8) : idx + 1])
+        logger.info(f"[{tag}] top-delta pos {idx}: max|d|={per_pos_max[idx]:.3f}; ...{context[-80:]!r}")
     for idx in disagree_idx.tolist()[:20]:
         hf_row, olmo_row = hf_logits[0, idx], olmo_logits[0, idx]
         hf_top2 = hf_row.topk(2)
@@ -82,8 +85,10 @@ def report(tag, olmo_logits, hf_logits, input_ids, tokenizer):
 
 def run(args, dtype, tag, input_ids, tokenizer):
     device = torch.device("cuda")
+    # FlashAttention is bf16/fp16-only; the fp32 discriminator pass uses the torch backend.
+    attn = "flash_2" if dtype == torch.bfloat16 else "torch"
     model_config_args = MinimalModelConfig(
-        model_name_or_path=args.model_name_or_path, config_name=args.config_name, attn_implementation="flash_2"
+        model_name_or_path=args.model_name_or_path, config_name=args.config_name, attn_implementation=attn
     )
     olmo_model, _ = olmo_core_utils.setup_model(model_config_args, init_device="cpu")
     sd = olmo_model.state_dict()
