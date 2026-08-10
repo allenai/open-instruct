@@ -405,6 +405,8 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=False,
             mpu=self.mpu,
         )
+        if self.device.type == "npu":
+            model_utils.restore_npu_olmo3_rope_buffers(self.model.module, self.device)
         optimization_steps_done = 0
         checkpoint_state = None
         if args.checkpoint_state_dir:

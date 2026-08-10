@@ -64,6 +64,49 @@ class TestLogSoftmaxAndGather(unittest.TestCase):
         self.assertTrue(torch.all(torch.isfinite(result)))
 
 
+class TestOlmo3RopeBuffers(unittest.TestCase):
+    def test_restore_rope_buffers_uses_cpu_fp32_reference(self):
+        class Config:
+            model_type = "olmo3"
+
+        class Rotary(torch.nn.Module):
+            def __init__(self, _config, device=None):
+                super().__init__()
+                values = torch.tensor([1.0, 0.8146172166, 0.6636012793], dtype=torch.float32, device=device)
+                self.register_buffer("inv_freq", values, persistent=False)
+                self.register_buffer("original_inv_freq", values.clone(), persistent=False)
+                self.attention_scaling = 1.25
+                self.max_seq_len_cached = 8192
+                self.original_max_seq_len = 8192
+
+        class BaseModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rotary_emb = Rotary(Config())
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = Config()
+                self.model = BaseModel()
+
+        model = Model()
+        model.model.rotary_emb.inv_freq = model.model.rotary_emb.inv_freq.to(torch.bfloat16)
+        model.model.rotary_emb.original_inv_freq = model.model.rotary_emb.original_inv_freq.to(torch.bfloat16)
+
+        restored = open_instruct.model_utils.restore_npu_olmo3_rope_buffers(model, torch.device("cpu"))
+
+        self.assertTrue(restored)
+        self.assertEqual(model.model.rotary_emb.inv_freq.dtype, torch.float32)
+        self.assertEqual(model.model.rotary_emb.original_inv_freq.dtype, torch.float32)
+        torch.testing.assert_close(
+            model.model.rotary_emb.inv_freq,
+            torch.tensor([1.0, 0.8146172166, 0.6636012793], dtype=torch.float32),
+            rtol=0,
+            atol=0,
+        )
+
+
 class TestTensorCache(unittest.TestCase):
     def test_getitem_returns_correct_tensors(self):
         chosen_logps = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
