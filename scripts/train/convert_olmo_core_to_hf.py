@@ -9,8 +9,8 @@ Example usage:
 
 import argparse
 
-import olmo_core.distributed.checkpoint as olmo_core_checkpoint
 import transformers
+from olmo_core.distributed import checkpoint as olmo_core_checkpoint
 
 from open_instruct import logger_utils, olmo_core_utils
 
