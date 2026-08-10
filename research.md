@@ -193,4 +193,14 @@ a persistent mode advantage. Small-N eval noise (single eval-set pass) means a 2
 dip isn't itself alarming, but worth watching whether 450M think continues to fall
 behind or recovers. 275M open_close_think unchanged, still flat at 0.22-0.24.
 
+**Update (2026-08-10, ~17:22 UTC) — dip resolved as noise:** 450M think recovered and
+hit a new high, 0.50→**0.53** (steps 700→800); 450M open_close_think held essentially
+flat, 0.52→0.51 (steps 700→800). Confirms the earlier dip was eval-noise, not a real
+regression, and both 450M modes are now settled around **0.51-0.53** — genuinely
+converged to the same plateau, no lasting mode advantage at this model size. 275M
+open_close_think remains extremely stable: 0.23/0.23/0.24/0.23 across steps
+1199/1299/1399/1499 (800+ steps flat) and is now approaching the full ~2000-step run
+with total_episodes=512000. 275M think has no new eval point (still step 299, 0.20) —
+expected, given its rollout-length bottleneck.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
