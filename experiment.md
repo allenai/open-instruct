@@ -194,4 +194,44 @@ not changing parallelism.
 - 810M think: Beaker [01KZPQGDQBSRZBBY2A2C92ZKH9](https://beaker.org/ex/01KZPQGDQBSRZBBY2A2C92ZKH9)
 - 1.4B think: Beaker [01KZPQJJBYEV6C6838KQDZXQAP](https://beaker.org/ex/01KZPQJJBYEV6C6838KQDZXQAP)
 - 1.4B open_close_think: Beaker [01KZPQNDWJMTVTCJRP86B0WHVW](https://beaker.org/ex/01KZPQNDWJMTVTCJRP86B0WHVW)
+- Result: **all 3 crashed again, in ~3 minutes, with a different and deterministic error**:
+  `ValueError: There is no module or parameter named 'blocks' in
+  OlmoHybridSmallForCausalLM.` — identical across all 3. Root cause:
+  `activation_checkpointing_mode=selected_modules` wraps individual block submodules,
+  which changes their qualified parameter names in the state dict (PyTorch's checkpoint
+  wrapper inserts an extra name segment). `olmo_core_to_hf_name`
+  (`open_instruct/grpo_callbacks.py:48`) does regex-based renaming from OLMo-core-native
+  names (`blocks.N.<submodule>`) to HF/vLLM names (`model.layers.N.<submodule>`) via a
+  small lookup dict (`_OLMO_CORE_TO_HF_LAYER_MAPPINGS`) keyed on exact submodule-name
+  strings (e.g. `"attention.w_q.weight"`). The wrapped names no longer match those exact
+  strings, so the lookup silently misses and the function falls through to
+  `return name` (the raw, untranslated OLMo-core-native name) — which vLLM's HF-style
+  weight loader then can't find, since it has no `blocks` attribute at all. This breaks
+  the weight sync from trainer to vLLM inference engine entirely, for any sequence
+  length/model size — not something worth blindly retrying, since it reproduced
+  identically 3/3 times. **Reverted** the `--activation_checkpointing_mode
+  selected_modules` change (removed the flag entirely, since the underlying
+  `--gradient_checkpointing` it replaced was already a proven no-op anyway — see the
+  root-cause note above). Fixing this properly would require patching
+  `olmo_core_to_hf_name` to strip the checkpoint-wrapper's inserted name segment before
+  the lookup (exact wrapper name not yet confirmed — would need to inspect the live
+  wrapped module hierarchy, not just static code reading) or an upstream olmo-core fix.
+  **Net status: 810M think, 1.4B think, and 1.4B open_close_think remain unresolved** —
+  blocked on either this weight-sync bug or the original GPU OOM, whichever is fixed
+  first. 810M open_close_think's baseline (`correct_rate` 0.32) stands as the only
+  usable result from this size range so far.
+
+### 2026-08-10 collateral OOM in the 4 ongoing GRPO training runs
+
+While the above 3 eval-only relaunches were running (8 more GPUs each on the shared
+`saturn`/`jupiter`/`ceres` clusters, on top of the 4 already-running training jobs), 3 of
+the 4 training jobs hit the familiar Ray-GCS host-RAM OOM (see the 2026-08-10 crash note
+under the main GRPO training section above) within the same ~20:42-21:08 UTC window —
+plausibly triggered or worsened by the extra concurrent load, though not confirmed.
+Only 450M think (`01KZNDZEXB349J3VP3QFD3VPSW`) survived. Resumed the other 3 from their
+latest saved checkpoints:
+
+- 275M think: resumed from `step400` (`.../deletable_checkpoint_states/michaeln/1786351916_614241`) — Beaker [01KZPS2TF1NN97HPH5YCH9RQ95](https://beaker.org/ex/01KZPS2TF1NN97HPH5YCH9RQ95)
+- 275M open_close_think: resumed from `step1800` (`.../deletable_checkpoint_states/michaeln/1786342568_674077`) — Beaker [01KZPS5EAYP94HFPCCYXAWFWHN](https://beaker.org/ex/01KZPS5EAYP94HFPCCYXAWFWHN)
+- 450M open_close_think: resumed from `step1000` (`.../deletable_checkpoint_states/michaeln/1786351978_851104`) — Beaker [01KZPS7CWBAC1RPC0EGXCBDDGY](https://beaker.org/ex/01KZPS7CWBAC1RPC0EGXCBDDGY)
 - Result: TBD

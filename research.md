@@ -250,4 +250,35 @@ open_close_think with the fix; results pending.
 **0.32**, the highest of any size/mode combo so far (vs. 0.06-0.14 at 275M/450M) —
 consistent with GSM8K accuracy scaling with model size once `think` isn't a confound.
 
+**`selected_modules` checkpointing itself broken (2026-08-10, ~21:15 UTC): reverted.**
+All 3 relaunches (810M think, 1.4B think, 1.4B open_close_think) crashed again — this
+time in ~3 min, with an identical, deterministic error across all 3:
+`ValueError: There is no module or parameter named 'blocks' in
+OlmoHybridSmallForCausalLM`. Cause: wrapping submodules for checkpointing changes their
+qualified parameter names, which breaks `olmo_core_to_hf_name`'s regex/dict-based
+OLMo-core-to-HF weight renaming (`grpo_callbacks.py`) used to sync weights into vLLM —
+the lookup silently misses the wrapped name and falls through to returning the raw,
+untranslated name, which vLLM's HF-style loader can't resolve. This is a real bug in the
+weight-sync path, not fixable by retrying, and not something addressed here (would need
+either patching `olmo_core_to_hf_name` to strip the checkpoint-wrapper's inserted name
+segment, or an upstream olmo-core change). **Reverted** the flag — back to no real
+activation checkpointing on this script, same as before. **810M think, 1.4B think, and
+1.4B open_close_think remain unresolved**, blocked on this weight-sync bug (or the
+original GPU OOM, whichever gets fixed first); 810M open_close_think's 0.32 baseline is
+the only usable 810M/1.4B result so far. Deprioritizing further attempts at these three
+absent a real code fix, rather than continuing to spend GPU-hours on the same failure.
+
+**Collateral OOM in the ongoing 275M/450M GRPO training runs (2026-08-10, ~21:00 UTC):**
+while these 3 relaunches (and the earlier round of 4) were running, 3 of the 4
+already-stable GRPO training jobs (275M think, 275M open_close_think, 450M
+open_close_think) hit the familiar Ray-GCS host-OOM within the same ~20:42-21:08 UTC
+window, after 12+ hours of stable running — the tight time correlation with launching 3
+more 8-GPU jobs on the same shared clusters is suspicious (possible resource
+contention), though not confirmed. Only 450M think survived uninterrupted. Resumed the
+other 3 from their latest saved checkpoints (275M think: step400, 275M open_close_think:
+step1800, 450M open_close_think: step1000) — see experiment.md for links. Given this is
+the second time concurrent large launches have coincided with a training-job crash
+wave, worth keeping in mind: avoid launching many new large jobs on `saturn`/`jupiter`/
+`ceres` while the training runs are still going, if avoidable.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
