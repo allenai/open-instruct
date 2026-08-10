@@ -125,4 +125,18 @@ pre-crash trend), 450M open_close_think 0.14→0.17 (steps 0/99), 450M think 0.0
 its poor (0.05) eval-only baseline, 275M think still only has its step-0 eval (0.11,
 consistent with the earlier baseline) since think-mode rollouts remain the slowest.
 
+**Update (2026-08-10, ~11:05 UTC):** both 450M runs jumped sharply between their last
+two eval points — 450M think 0.15→**0.38** and 450M open_close_think 0.17→**0.33**
+(both steps ~100→200) — while 275M open_close_think continues its slower steady climb
+(0.21→0.22, steps 499→599) and 275M think is still stuck at its step-0 eval (0.11; long
+think-mode rollouts mean it's only completed ~1/5 as many steps as the open_close_think
+runs in the same wall-clock time). This resolves the earlier "450M inverts the
+think/open_close_think pattern" baseline puzzle: at the *eval-only* baseline (no
+training), forcing `<think>` open hurt the 450M checkpoint (0.05 vs. 0.14) — but a
+couple hundred steps of GRPO fixes this, and 450M-think ends up *higher* (0.38) than
+450M-open_close_think (0.33) at the same step. Consistent with the hypothesis that the
+450M SFT checkpoint just wasn't well-calibrated to always opening `<think>` out of the
+box, and RL quickly corrects that miscalibration rather than reasoning being
+fundamentally harmful for this checkpoint.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
