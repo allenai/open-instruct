@@ -110,15 +110,25 @@ Models:
 - 275M open_close_think: `EXP_NAME=olmo_hybrid_275m_gsm8k_open_close_think_grpo MODE=open_close_think` — Beaker: [01KZN511RWBVNBK4S11BHX8Y71](https://beaker.org/ex/01KZN511RWBVNBK4S11BHX8Y71)
 - 450M think: `EXP_NAME=olmo_hybrid_450m_gsm8k_think_grpo MODE=think` — Beaker: [01KZN52HSKZH7DFK46MEFA5790](https://beaker.org/ex/01KZN52HSKZH7DFK46MEFA5790)
 - 450M open_close_think: `EXP_NAME=olmo_hybrid_450m_gsm8k_open_close_think_grpo MODE=open_close_think` — Beaker: [01KZN54NHSTX7J9KRC9368E3PG](https://beaker.org/ex/01KZN54NHSTX7J9KRC9368E3PG)
-- Result: in progress as of 2026-08-10 ~07:15 UTC, all 4 still running with no errors.
-  `total_episodes=512000` / 256 episodes-per-step = ~2000 steps planned (`save_freq`/
-  `local_eval_every`=100). Progress is uneven since "think" rollouts are much longer
-  (~9.5k tokens/response at baseline) than "open_close_think" (~0.8-1k), so think runs
-  are bottlenecked on generation: 275M think at step 27, 450M think at step 73, vs.
-  275M open_close_think at step 220, 450M open_close_think at step 119. Early
-  `objective/gsm8k_correct_rate` trend (both open_close_think runs, which have reached
-  a second eval point) is upward — 275M open_close_think 0.04→0.06→0.09 (steps 0/99/199),
-  450M open_close_think 0.15→0.17 (steps 0/99) — real training signal, not degenerate.
+- Result: all 4 progressed with a healthy upward `objective/gsm8k_correct_rate` trend
+  (275M open_close_think 0.04→0.06→0.09→0.13 over steps 0/99/199/299; 450M
+  open_close_think 0.15→0.17 over steps 0/99; 275M think and 450M think only reached
+  their step-0 eval before crashing, since "think" rollouts are ~10x longer and
+  generation-bottlenecked), then **all 4 crashed within the same ~07:29-07:30 UTC
+  window** (see the 2026-08-10 crash note in research.md) — a Ray GCS host-RAM OOM,
+  independent of step count/MODE/model size, most likely tied to repeated
+  `[layerwise.py:230] <Module>: Failed to load weights` warnings for OLMo-hybrid's
+  custom modules during `--inflight_updates` vLLM weight sync. Not caused by this
+  task's script/template changes. Only 275M open_close_think had a checkpoint at a
+  `save_freq` boundary (`step200`); the other 3 only had `step0`.
+
+### 2026-08-10 GRPO training relaunch after OOM crash
+
+- 275M think (fresh restart): `EXP_NAME=olmo_hybrid_275m_gsm8k_think_grpo` — Beaker: TBD
+- 275M open_close_think (resumed from `step200` via `--checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1786342568_674077`): `EXP_NAME=olmo_hybrid_275m_gsm8k_open_close_think_grpo` — Beaker: TBD
+- 450M think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_think_grpo` — Beaker: TBD
+- 450M open_close_think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_open_close_think_grpo` — Beaker: TBD
+- Result: TBD
 
 Note: the first eval-only launch's Docker build failed once transiently (a `git
 status` call inside a cached vllm git checkout timed out after 40s during the

@@ -85,4 +85,30 @@ linked in experiment.md) to confirm before drawing conclusions from the GRPO tra
 runs. GRPO training runs for all 4 combinations are in progress; will check whether RL
 narrows or preserves this gap.
 
+**Crash (2026-08-10, ~07:29-07:30 UTC):** all 4 GRPO training runs died within the same
+~2-minute wall-clock window, roughly 65-70 minutes after each one's own start time,
+despite being at very different training steps (275M think ~step 40, 450M think ~step
+99, 450M open_close_think ~step 161, 275M open_close_think ~step 300+). Root cause:
+Ray's GCS process got killed by the Linux OOM killer (host RAM, not GPU memory —
+`ray.exceptions.OutOfMemoryError: Task was killed due to the node running low on
+memory`, raylet "marked dead", then `Failed to connect to GCS within 60 seconds`).
+Since crash timing tracked wall-clock time rather than step count across 4 very
+different progress rates, this looks like a memory leak proportional to elapsed time
+(e.g. per weight-sync round) rather than to training steps. Suspicious correlated
+signal in the logs: repeated `WARNING [layerwise.py:230] <Module>: Failed to load
+weights` for OLMo-hybrid-specific modules (`OlmoHybridMLP`, `OlmoHybridSmallAttention`,
+`OlmoHybridSmallDecoderLayer`, `SiluAndMul`, ...) during vLLM in-flight weight sync
+(`--inflight_updates`), recurring on every sync round — a plausible leak source, though
+not confirmed as the cause. This is a pre-existing infra issue in the `olmo_hybrid_small`
+vLLM weight-sync path, not something introduced by this task's script/template changes
+(the crash is independent of MODE and model size). Worth a follow-up investigation into
+`layerwise.py`'s weight-loading path for the OLMo-hybrid architecture under
+`--inflight_updates`, and/or adding host-memory monitoring or lower weight-sync
+frequency as a workaround if it recurs. Only one run (275M open_close_think) had a
+save at a step-100 boundary (`step200` in its `checkpoint_state_dir`) to resume from;
+the other 3 only ever reached `step0`. Relaunched all 4 (275M open_close_think resumed
+from its step200 checkpoint via `--checkpoint_state_dir`, the rest restarted fresh).
+See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo)
+for the relaunch links and whatever happens next.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
