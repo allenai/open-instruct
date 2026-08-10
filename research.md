@@ -107,8 +107,22 @@ vLLM weight-sync path, not something introduced by this task's script/template c
 frequency as a workaround if it recurs. Only one run (275M open_close_think) had a
 save at a step-100 boundary (`step200` in its `checkpoint_state_dir`) to resume from;
 the other 3 only ever reached `step0`. Relaunched all 4 (275M open_close_think resumed
-from its step200 checkpoint via `--checkpoint_state_dir`, the rest restarted fresh).
-See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo)
-for the relaunch links and whatever happens next.
+from its step200 checkpoint via `--checkpoint_state_dir`, the rest restarted fresh);
+confirmed `--checkpoint_state_dir` resume works cleanly as a crash-recovery pattern for
+this script (see the 2026-08-10 relaunch note in experiment.md).
+
+**Crash did not recur (2026-08-10, checked at ~10:02 UTC, ~65-70 min past the relaunch,
+same critical window as the first crash):** all 4 relaunched runs were still healthy
+with no errors — the OOM was **not deterministic/reliably reproducible on a second
+attempt**, so it's more likely transient (e.g. host memory pressure from a co-located
+job on that particular node/moment) than a hard bug that will reliably recur every run.
+Downgrading this from "avoid re-running until root-caused" to "known occasional
+failure mode, worth an occasional health check + resume via `--checkpoint_state_dir`
+if it happens again." Training is progressing well past the crash point with real
+accuracy gains: 275M open_close_think 0.14→0.18→0.21 (steps 299/399/499, continuing its
+pre-crash trend), 450M open_close_think 0.14→0.17 (steps 0/99), 450M think 0.06→0.15
+(steps 0/99-100) — notably, 450M think is now improving substantially with RL despite
+its poor (0.05) eval-only baseline, 275M think still only has its step-0 eval (0.11,
+consistent with the earlier baseline) since think-mode rollouts remain the slowest.
 
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
