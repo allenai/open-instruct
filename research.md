@@ -220,6 +220,26 @@ baseline (think + open_close_think) for the two remaining small-suite sizes, to
 complete the eval-only comparison table across all 4 sizes before deciding whether to
 also run GRPO training at 810M/1.4B. Both checkpoints turned out to be under `saumyam`
 on disk, not `yashasbls` as originally assumed when requesting this batch — see the
-2026-08-10 note in experiment.md. Results TBD.
+2026-08-10 note in experiment.md.
+
+**Finding: `think` mode GPU-OOMs at 810M+ under current settings (2026-08-10, ~20:47
+UTC).** Both `think`-mode eval-only runs (810M and 1.4B) crashed with a genuine CUDA
+`OutOfMemoryError` during the backward pass (e.g. "GPU 0 has a total capacity of 79.25
+GiB ... 75.60 GiB memory in use" for 810M) — a different failure mode from the Ray-GCS
+host-RAM OOM seen in the 275M/450M GRPO training runs above. Both `open_close_think`
+runs (short rollouts) succeeded fine on identical hardware (`GPUS=8`, 4 learners/4 vLLM
+engines). Leading explanation: `think` mode's long rollouts (~9-16k response tokens)
+create much larger backward-pass activation memory than `open_close_think`'s ~1-1.5k
+tokens, and that gap becomes GPU-OOM-inducing once the model itself is large enough
+(810M+) — `gradient_checkpointing` is already on. **This means the "think" GRPO training
+runs at 275M/450M above are not directly comparable in kind to what 810M/1.4B think
+training would need** — scaling `think`-mode training to 810M/1.4B would require either
+a shorter `response_length`/`pack_length` or more FSDP shard degree (more learner GPUs,
+which `gsm8k_grpo.sh` doesn't currently support independent of vLLM engine count without
+a script change, since it hardcodes `--num_nodes 1` and splits GPUs 50/50). Not attempted
+yet. 810M open_close_think baseline: `correct_rate` **0.32**, the highest of any
+size/mode combo so far (vs. 0.06-0.14 at 275M/450M) — consistent with GSM8K accuracy
+scaling with model size once `think` isn't a confound. 1.4B open_close_think result
+pending.
 
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

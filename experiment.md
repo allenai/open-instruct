@@ -160,5 +160,23 @@ Models:
 - 810M open_close_think: `EXP_NAME=olmo_hybrid_810m_gsm8k_open_close_think_eval MODE=open_close_think` — Beaker: [01KZPNNEA485AP4K6SJVBQDRTM](https://beaker.org/ex/01KZPNNEA485AP4K6SJVBQDRTM)
 - 1.4B think: `EXP_NAME=olmo_hybrid_1.4b_gsm8k_think_eval MODE=think` — Beaker: [01KZPNRMF4RH023EE15BPSYQD8](https://beaker.org/ex/01KZPNRMF4RH023EE15BPSYQD8)
 - 1.4B open_close_think: `EXP_NAME=olmo_hybrid_1.4b_gsm8k_open_close_think_eval MODE=open_close_think` — Beaker: [01KZPNVJDBBFW49AJ4TXVD6W65](https://beaker.org/ex/01KZPNVJDBBFW49AJ4TXVD6W65)
-- Result: TBD (all 4 launched; image was cached from the earlier launches so all 4
-  started without a rebuild)
+- Result: **both `think`-mode runs (810M and 1.4B) crashed with a genuine CUDA GPU
+  OOM** (distinct from the Ray-GCS host-RAM OOM seen in the 275M/450M training runs) —
+  `torch.OutOfMemoryError` during `loss.backward()`, e.g. "Tried to allocate 6.07 GiB.
+  GPU 0 has a total capacity of 79.25 GiB ... 75.60 GiB memory in use" for 810M think.
+  Both `open_close_think` runs (short rollouts, no long reasoning) succeeded normally on
+  the same GPU/FSDP config (`GPUS=8`, 4 learners / 4 vLLM engines). This points to
+  `think` mode's long rollouts (~9-16k response tokens vs. ~1-1.5k for
+  `open_close_think`) pushing backward-pass activation memory over the 80GB A100 budget
+  at 810M+ params, even with `--gradient_checkpointing` on — the 275M/450M "think" GRPO
+  training runs (still in progress, see below) apparently fit because the model itself
+  is much smaller, not because think-mode sequences are shorter. No eval score was
+  recorded for either crashed run (crash occurred before/during the step, not after eval
+  collection). Would need either a smaller `response_length`/`pack_length` or more
+  learners (higher `fsdp_shard_degree`, i.e. more GPUs per node or fewer vLLM engines)
+  to run `think` mode at these sizes — not attempted here since `gsm8k_grpo.sh`
+  hardcodes `--num_nodes 1` and computes `LEARNERS=VLLM_ENGINES=GPUS/2`, so scaling
+  learners up would need a script change.
+  - 810M open_close_think: `correct_rate` **0.32**, stop_rate 0.99, seq_len 1335 — highest
+    eval-only baseline of any size/mode combo so far (cf. 275M 0.06-0.12, 450M 0.05-0.14).
+  - 1.4B open_close_think: still running as of this note.
