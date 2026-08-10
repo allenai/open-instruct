@@ -124,11 +124,12 @@ Models:
 
 ### 2026-08-10 GRPO training relaunch after OOM crash
 
-- 275M think (fresh restart): `EXP_NAME=olmo_hybrid_275m_gsm8k_think_grpo` — Beaker: TBD
-- 275M open_close_think (resumed from `step200` via `--checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1786342568_674077`): `EXP_NAME=olmo_hybrid_275m_gsm8k_open_close_think_grpo` — Beaker: TBD
-- 450M think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_think_grpo` — Beaker: TBD
-- 450M open_close_think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_open_close_think_grpo` — Beaker: TBD
-- Result: TBD
+- 275M think (fresh restart): `EXP_NAME=olmo_hybrid_275m_gsm8k_think_grpo` — Beaker: [01KZNDY5W488WAGDR4CJT4PRW6](https://beaker.org/ex/01KZNDY5W488WAGDR4CJT4PRW6)
+- 275M open_close_think (resumed from `step200` via `--checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1786342568_674077`): `EXP_NAME=olmo_hybrid_275m_gsm8k_open_close_think_grpo` — Beaker: [01KZNDYSBJ2Z269R7A77TZ17XS](https://beaker.org/ex/01KZNDYSBJ2Z269R7A77TZ17XS)
+- 450M think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_think_grpo` — Beaker: [01KZNDZEXB349J3VP3QFD3VPSW](https://beaker.org/ex/01KZNDZEXB349J3VP3QFD3VPSW)
+- 450M open_close_think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_open_close_think_grpo` — Beaker: [01KZNE01XAA65XJXPCH9SHVQPN](https://beaker.org/ex/01KZNE01XAA65XJXPCH9SHVQPN)
+- Result: TBD (all 4 launched; will confirm the 275M open_close_think resume actually
+  picked up from step200 rather than restarting from scratch)
 
 Note: the first eval-only launch's Docker build failed once transiently (a `git
 status` call inside a cached vllm git checkout timed out after 40s during the
