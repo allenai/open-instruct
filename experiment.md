@@ -110,7 +110,15 @@ Models:
 - 275M open_close_think: `EXP_NAME=olmo_hybrid_275m_gsm8k_open_close_think_grpo MODE=open_close_think` — Beaker: [01KZN511RWBVNBK4S11BHX8Y71](https://beaker.org/ex/01KZN511RWBVNBK4S11BHX8Y71)
 - 450M think: `EXP_NAME=olmo_hybrid_450m_gsm8k_think_grpo MODE=think` — Beaker: [01KZN52HSKZH7DFK46MEFA5790](https://beaker.org/ex/01KZN52HSKZH7DFK46MEFA5790)
 - 450M open_close_think: `EXP_NAME=olmo_hybrid_450m_gsm8k_open_close_think_grpo MODE=open_close_think` — Beaker: [01KZN54NHSTX7J9KRC9368E3PG](https://beaker.org/ex/01KZN54NHSTX7J9KRC9368E3PG)
-- Result: TBD (all 4 launched)
+- Result: in progress as of 2026-08-10 ~07:15 UTC, all 4 still running with no errors.
+  `total_episodes=512000` / 256 episodes-per-step = ~2000 steps planned (`save_freq`/
+  `local_eval_every`=100). Progress is uneven since "think" rollouts are much longer
+  (~9.5k tokens/response at baseline) than "open_close_think" (~0.8-1k), so think runs
+  are bottlenecked on generation: 275M think at step 27, 450M think at step 73, vs.
+  275M open_close_think at step 220, 450M open_close_think at step 119. Early
+  `objective/gsm8k_correct_rate` trend (both open_close_think runs, which have reached
+  a second eval point) is upward — 275M open_close_think 0.04→0.06→0.09 (steps 0/99/199),
+  450M open_close_think 0.15→0.17 (steps 0/99) — real training signal, not degenerate.
 
 Note: the first eval-only launch's Docker build failed once transiently (a `git
 status` call inside a cached vllm git checkout timed out after 40s during the
