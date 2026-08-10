@@ -119,8 +119,11 @@ Models:
   independent of step count/MODE/model size, most likely tied to repeated
   `[layerwise.py:230] <Module>: Failed to load weights` warnings for OLMo-hybrid's
   custom modules during `--inflight_updates` vLLM weight sync. Not caused by this
-  task's script/template changes. Only 275M open_close_think had a checkpoint at a
-  `save_freq` boundary (`step200`); the other 3 only had `step0`.
+  task's script/template changes. Only 275M open_close_think had a checkpoint past
+  `step0` (`step200`) — note `--save_freq` is a no-op on the olmo-core path; full
+  training-state checkpoints are actually controlled by `--checkpoint_state_freq`
+  (default 200, per a `grpo_utils.py:258` warning seen in the relaunch logs), which is
+  why only the run that got past step 200 had anything to resume from.
 
 ### 2026-08-10 GRPO training relaunch after OOM crash
 
@@ -128,8 +131,12 @@ Models:
 - 275M open_close_think (resumed from `step200` via `--checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1786342568_674077`): `EXP_NAME=olmo_hybrid_275m_gsm8k_open_close_think_grpo` — Beaker: [01KZNDYSBJ2Z269R7A77TZ17XS](https://beaker.org/ex/01KZNDYSBJ2Z269R7A77TZ17XS)
 - 450M think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_think_grpo` — Beaker: [01KZNDZEXB349J3VP3QFD3VPSW](https://beaker.org/ex/01KZNDZEXB349J3VP3QFD3VPSW)
 - 450M open_close_think (fresh restart): `EXP_NAME=olmo_hybrid_450m_gsm8k_open_close_think_grpo` — Beaker: [01KZNE01XAA65XJXPCH9SHVQPN](https://beaker.org/ex/01KZNE01XAA65XJXPCH9SHVQPN)
-- Result: TBD (all 4 launched; will confirm the 275M open_close_think resume actually
-  picked up from step200 rather than restarting from scratch)
+- Result: all 4 launched and running with no errors. **Confirmed the resume worked**:
+  01KZNDYSBJ2Z269R7A77TZ17XS's logs show `Loading checkpoint from
+  '.../1786342568_674077/step200'...` and `Will resume training from step 200, epoch 1`
+  — passing an existing `--checkpoint_state_dir` to `gsm8k_grpo.sh`'s trailing args is a
+  valid crash-recovery pattern for this script (mason.py only auto-generates a fresh
+  `--checkpoint_state_dir` when one isn't already explicitly passed).
 
 Note: the first eval-only launch's Docker build failed once transiently (a `git
 status` call inside a cached vllm git checkout timed out after 40s during the
