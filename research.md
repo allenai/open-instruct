@@ -154,4 +154,16 @@ steps — currently only 275M's mode comparison at step ~99 area is available: 2
 from the *eval-only baseline* where 275M favored think but 450M favored
 open_close_think).
 
+**Update (2026-08-10, ~13:09 UTC) — growth leveling off:** 275M open_close_think has
+essentially plateaued: 0.21→0.22→**0.23→0.22** (steps 499→599→699→799), i.e. flat/noisy
+around 0.22-0.23 for the last ~300 steps after its earlier steady climb. Both 450M runs
+are still climbing but with clearly diminishing returns compared to their earlier
+sharp jump: 450M think 0.47→**0.49** and 450M open_close_think 0.45→**0.46** (both
+steps 300→400, vs. the ~2x jump seen from step 100→200). If this pattern holds, 450M
+may be converging somewhere in the high-0.4s/low-0.5s range on this GSM8K eval set
+within the next few hundred steps, well short of `total_episodes=512000`'s full ~2000
+planned steps — worth revisiting whether to early-stop these runs once the plateau is
+confirmed, rather than running all the way to 2000 steps for no further gain. 275M
+think still only has its step0/step99 pair (no new eval since last check).
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
