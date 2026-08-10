@@ -142,3 +142,23 @@ Note: the first eval-only launch's Docker build failed once transiently (a `git
 status` call inside a cached vllm git checkout timed out after 40s during the
 nltk-downloader build step) — unrelated to any code change here. Retried and
 succeeded; the resulting image was reused (cache hit) for all 7 subsequent launches.
+
+### 2026-08-10 eval-only baselines (810M & 1.4B, think & open_close_think)
+
+Extends the eval-only baseline comparison to the two larger sizes in the small suite.
+Both checkpoints are under `saumyam`, not `yashasbls` as originally assumed when this
+batch was requested (`yashasbls`'s 810M lr-sweep only goes up to `lr4e-4`, no `lr8e-4`;
+`yashasbls` does also have an identically-named `hybrid-small-sft-think-1.4b-lr4e-4`,
+but `saumyam`'s was used per the explicit "from saumya" request).
+
+Models:
+- 810M: `/weka/oe-training-default/ai2-llm/checkpoints/saumyam/hybrid-small-sft-think-810m-lr8e-4/step24834-hf`
+- 1.4B: `/weka/oe-training-default/ai2-llm/checkpoints/saumyam/hybrid-small-sft-think-1.4b-lr4e-4/step24834-hf`
+
+- Launch (each): `./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_grpo.sh MODEL_PATH EXP_NAME MODE true`
+- 810M think: `EXP_NAME=olmo_hybrid_810m_gsm8k_think_eval MODE=think` — Beaker: [01KZPNKJRWQRHAHHTJK3FRRXEQ](https://beaker.org/ex/01KZPNKJRWQRHAHHTJK3FRRXEQ)
+- 810M open_close_think: `EXP_NAME=olmo_hybrid_810m_gsm8k_open_close_think_eval MODE=open_close_think` — Beaker: [01KZPNNEA485AP4K6SJVBQDRTM](https://beaker.org/ex/01KZPNNEA485AP4K6SJVBQDRTM)
+- 1.4B think: `EXP_NAME=olmo_hybrid_1.4b_gsm8k_think_eval MODE=think` — Beaker: [01KZPNRMF4RH023EE15BPSYQD8](https://beaker.org/ex/01KZPNRMF4RH023EE15BPSYQD8)
+- 1.4B open_close_think: `EXP_NAME=olmo_hybrid_1.4b_gsm8k_open_close_think_eval MODE=open_close_think` — Beaker: [01KZPNVJDBBFW49AJ4TXVD6W65](https://beaker.org/ex/01KZPNVJDBBFW49AJ4TXVD6W65)
+- Result: TBD (all 4 launched; image was cached from the earlier launches so all 4
+  started without a rebuild)

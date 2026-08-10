@@ -215,4 +215,11 @@ direction that baseline gap originally favored. Both 450M runs continue their sl
 convergent climb: 450M think 0.54→**0.55** (steps 900→1000), 450M open_close_think
 0.51→**0.53** (steps 800→900).
 
+**Extension to 810M & 1.4B (2026-08-10, ~20:30 UTC):** launched the same eval-only
+baseline (think + open_close_think) for the two remaining small-suite sizes, to
+complete the eval-only comparison table across all 4 sizes before deciding whether to
+also run GRPO training at 810M/1.4B. Both checkpoints turned out to be under `saumyam`
+on disk, not `yashasbls` as originally assumed when requesting this batch — see the
+2026-08-10 note in experiment.md. Results TBD.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
