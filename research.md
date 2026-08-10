@@ -182,4 +182,15 @@ rollouts mean it's only ~1/5 as far along in step count as its open_close_think
 counterpart at the same wall-clock time; worth letting it run longer to see where it
 lands before drawing final conclusions about 275M think vs. open_close_think.
 
+**Update (2026-08-10, ~16:14 UTC):** 275M think got another point and keeps climbing:
+0.18→**0.20** (steps 199→299). More interesting: 450M think **dipped slightly**
+(0.52→0.50, steps 600→700) — its first non-monotonic move — while 450M open_close_think
+kept climbing and caught up (0.48→**0.52**, steps 600→700). At matching step counts the
+two 450M modes are now statistically indistinguishable (~0.50-0.52 each), which reframes
+the earlier "think pulls ahead once RL kicks in" read from the ~13:09 update: that gap
+looks like it was transient (think converged faster, not necessarily higher) rather than
+a persistent mode advantage. Small-N eval noise (single eval-set pass) means a 2-point
+dip isn't itself alarming, but worth watching whether 450M think continues to fall
+behind or recovers. 275M open_close_think unchanged, still flat at 0.22-0.24.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
