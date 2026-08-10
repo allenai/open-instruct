@@ -226,20 +226,28 @@ on disk, not `yashasbls` as originally assumed when requesting this batch — se
 UTC).** Both `think`-mode eval-only runs (810M and 1.4B) crashed with a genuine CUDA
 `OutOfMemoryError` during the backward pass (e.g. "GPU 0 has a total capacity of 79.25
 GiB ... 75.60 GiB memory in use" for 810M) — a different failure mode from the Ray-GCS
-host-RAM OOM seen in the 275M/450M GRPO training runs above. Both `open_close_think`
-runs (short rollouts) succeeded fine on identical hardware (`GPUS=8`, 4 learners/4 vLLM
-engines). Leading explanation: `think` mode's long rollouts (~9-16k response tokens)
-create much larger backward-pass activation memory than `open_close_think`'s ~1-1.5k
-tokens, and that gap becomes GPU-OOM-inducing once the model itself is large enough
-(810M+) — `gradient_checkpointing` is already on. **This means the "think" GRPO training
-runs at 275M/450M above are not directly comparable in kind to what 810M/1.4B think
-training would need** — scaling `think`-mode training to 810M/1.4B would require either
-a shorter `response_length`/`pack_length` or more FSDP shard degree (more learner GPUs,
-which `gsm8k_grpo.sh` doesn't currently support independent of vLLM engine count without
-a script change, since it hardcodes `--num_nodes 1` and splits GPUs 50/50). Not attempted
-yet. 810M open_close_think baseline: `correct_rate` **0.32**, the highest of any
-size/mode combo so far (vs. 0.06-0.14 at 275M/450M) — consistent with GSM8K accuracy
-scaling with model size once `think` isn't a confound. 1.4B open_close_think result
-pending.
+host-RAM OOM seen in the 275M/450M GRPO training runs above. 1.4B `open_close_think`
+subsequently crashed the same way too (only 810M `open_close_think` actually succeeded);
+so 3 of the 4 new launches OOM'd.
+
+**Root cause (2026-08-10): `--gradient_checkpointing` was a dead flag on this whole
+script all along.** It only wires up in the older DeepSpeed-based trainer path;
+`grpo.py`'s OLMo-core actor never reads it. The real control,
+`--activation_checkpointing_mode`, defaults to `"budget"` with
+`activation_memory_budget=1.0` — per `olmo_core_utils.build_ac_config`, that combination
+applies **zero** activation checkpointing, at any model size, in every run of this
+script so far (275M/450M just happened to fit in 80GB without it). Separately, `"budget"`
+mode can't checkpoint through this architecture's opaque GDN kernels regardless —
+`"selected_modules"` mode (wraps individual block submodules including the GDN mixer)
+is the one that's actually safe and effective here. Fixed in `gsm8k_grpo.sh`:
+swapped `--gradient_checkpointing` for `--activation_checkpointing_mode
+selected_modules`. Per explicit instruction, the 4/4 GPU (learner/vLLM) split was left
+unchanged — this is a correctness fix (turning on checkpointing that was silently never
+applied), not a parallelism change. Relaunched 810M think, 1.4B think, and 1.4B
+open_close_think with the fix; results pending.
+
+810M open_close_think baseline (from the run that succeeded pre-fix): `correct_rate`
+**0.32**, the highest of any size/mode combo so far (vs. 0.06-0.14 at 275M/450M) —
+consistent with GSM8K accuracy scaling with model size once `think` isn't a confound.
 
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
