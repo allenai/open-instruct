@@ -166,4 +166,20 @@ planned steps — worth revisiting whether to early-stop these runs once the pla
 confirmed, rather than running all the way to 2000 steps for no further gain. 275M
 think still only has its step0/step99 pair (no new eval since last check).
 
+**Update (2026-08-10, ~14:11 UTC) — plateau confirmed durable for 3/4 runs:**
+275M open_close_think has now been flat for 400+ steps: 0.23→0.22→0.22→**0.24→0.23**
+(steps 699/799/899/999/1099) — noisy around 0.22-0.24, not a temporary dip, genuinely
+converged. 450M open_close_think is flat too: 0.46→**0.46** (steps 400→500). 450M think
+has nearly converged with only marginal residual growth: 0.49→**0.50** (steps 400→500).
+**Recommendation for whoever picks this up next:** given `total_episodes=512000` implies
+~2000 planned steps but 3/4 runs converged by step ~500-1100, these are very likely done
+extracting signal from GSM8K's difficulty ceiling for these model sizes — continuing to
+2000 steps is probably not worth the compute unless the goal is specifically to confirm
+long-run stability. Not stopping the jobs myself since that's a call best left to a
+human, but flagging it clearly. 275M think, by contrast, is *not* plateaued — it's still
+climbing steadily (0.11→0.15→**0.18**, steps 0/99/199) since its long think-mode
+rollouts mean it's only ~1/5 as far along in step count as its open_close_think
+counterpart at the same wall-clock time; worth letting it run longer to see where it
+lands before drawing final conclusions about 275M think vs. open_close_think.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
