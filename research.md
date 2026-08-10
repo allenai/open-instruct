@@ -203,4 +203,16 @@ open_close_think remains extremely stable: 0.23/0.23/0.24/0.23 across steps
 with total_episodes=512000. 275M think has no new eval point (still step 299, 0.20) —
 expected, given its rollout-length bottleneck.
 
+**Update (2026-08-10, ~19:26 UTC) — 275M think closing the gap:** 275M think reached
+0.20→**0.22** (steps 299→399), now nearly matching 275M open_close_think's plateau
+(0.23-0.24, currently at step 1599, still flat). If 275M think's climb continues even a
+little further it will likely match or exceed open_close_think's ceiling — mirroring the
+450M pattern (both modes converge to the same plateau, `think` if anything reaching
+it slightly higher/faster). This is the clearest evidence yet against a persistent
+`open_close_think` advantage for GSM8K at either model size: at both 275M and 450M, GRPO
+appears to erase whatever gap existed at the eval-only baseline, regardless of which
+direction that baseline gap originally favored. Both 450M runs continue their slow
+convergent climb: 450M think 0.54→**0.55** (steps 900→1000), 450M open_close_think
+0.51→**0.53** (steps 800→900).
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
