@@ -139,4 +139,19 @@ couple hundred steps of GRPO fixes this, and 450M-think ends up *higher* (0.38) 
 box, and RL quickly corrects that miscalibration rather than reasoning being
 fundamentally harmful for this checkpoint.
 
+**Update (2026-08-10, ~12:07 UTC):** 275M think finally reached its second eval point —
+0.11→0.15 (steps 0→99) — so all 4 configs now have a real trajectory, not just a
+baseline. Both 450M runs keep climbing steeply: 450M think 0.38→**0.47**, 450M
+open_close_think 0.33→**0.45** (both steps 200→300) — both now ~4x their step-0 eval.
+275M open_close_think is growing more gradually at this point: 0.22→0.23 (steps
+599→699). Current ranking at comparable step counts: 450M think > 450M open_close_think
+> 275M open_close_think > 275M think, i.e. bigger model wins regardless of mode, and
+within a model size the `think` mode is now pulling ahead for 450M specifically (the
+open question is whether the same holds for 275M once its `think` run has more
+steps — currently only 275M's mode comparison at step ~99 area is available: 275M think
+0.15 @ step99 vs. 275M open_close_think 0.09 @ step199, so early signal is `think` >
+`open_close_think` for 275M too, matching 450M's pattern once RL kicks in — differs
+from the *eval-only baseline* where 275M favored think but 450M favored
+open_close_think).
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
