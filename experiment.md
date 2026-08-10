@@ -90,7 +90,18 @@ Models:
 - 275M open_close_think: `EXP_NAME=olmo_hybrid_275m_gsm8k_open_close_think_eval MODE=open_close_think` — Beaker: [01KZN4G055K2QCTC0G6ED8HGQD](https://beaker.org/ex/01KZN4G055K2QCTC0G6ED8HGQD)
 - 450M think: `EXP_NAME=olmo_hybrid_450m_gsm8k_think_eval MODE=think` — Beaker: [01KZN4H87DZYJR973AJMZPTPQT](https://beaker.org/ex/01KZN4H87DZYJR973AJMZPTPQT)
 - 450M open_close_think: `EXP_NAME=olmo_hybrid_450m_gsm8k_open_close_think_eval MODE=open_close_think` — Beaker: [01KZN4J9F782RFYYDWV9ZHK45Q](https://beaker.org/ex/01KZN4J9F782RFYYDWV9ZHK45Q)
-- Result: TBD (all 4 launched and confirmed past model-init/kernel-compile with no errors; 1 training step + eval, discarded afterward since learning_rate=0)
+- Result: all 4 exited cleanly (exitCode 0). `gsm8k-platinum-openinstruct` eval at
+  step 0 (`objective/gsm8k_correct_rate`, `stop_rate`, avg `sequence_lengths`):
+  - 275M think: correct_rate **0.12**, stop_rate 0.79, seq_len 9492 — [wandb](https://wandb.ai/mnoukhov/open_instruct_internal/runs/tktv3usv)
+  - 275M open_close_think: correct_rate 0.06, stop_rate 0.98, seq_len 765 — [wandb](https://wandb.ai/mnoukhov/open_instruct_internal/runs/iv64fs5x)
+  - 450M think: correct_rate 0.05, stop_rate 0.97, seq_len 1905 — [wandb](https://wandb.ai/mnoukhov/open_instruct_internal/runs/zuvh4s9e)
+  - 450M open_close_think: correct_rate **0.14**, stop_rate 0.99, seq_len 1027 — [wandb](https://wandb.ai/mnoukhov/open_instruct_internal/runs/61fc3sf2)
+  - Stop rates (0.79-0.99) confirm the `response_length=16384` + corrected default
+    system prompt fix worked — run 1's ~12% stop rate is resolved. Surprising result:
+    275M follows the expected think > open_close_think pattern, but 450M inverts it
+    (open_close_think > think) despite a healthy stop rate — see the
+    2026-08-10 note in research.md for the leading hypothesis (450M's own baked-in
+    chat template doesn't force `<think>` open, unlike 275M's).
 
 ### 2026-08-09 GRPO training runs (275M & 450M, think & open_close_think)
 

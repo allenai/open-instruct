@@ -60,4 +60,29 @@ Plan: an eval-only baseline (single training step, `learning_rate=0`,
 `--eval_on_step_0` so a GSM8K eval is still collected) for each of {275M, 450M} x
 {think, open_close_think}, then full GRPO training runs for the same 4 combinations.
 
+**Eval-only baseline results (2026-08-10):** all 4 confirm the `response_length=16384`
++ corrected-system-prompt fix worked — stop rates are now 0.79-0.99 (vs. ~12% in the
+original run 1), so truncation is no longer the dominant failure mode. GSM8K
+`correct_rate`:
+
+| | think | open_close_think |
+|---|---|---|
+| 275M | **0.12** | 0.06 |
+| 450M | 0.05 | **0.14** |
+
+275M behaves as expected (reasoning helps a small model: 0.12 > 0.06). **450M inverts
+this** (0.05 < 0.14) — forcing reasoning makes the 450M checkpoint noticeably worse than
+both forcing no-reasoning and the smaller 275M-think baseline, despite a healthy 0.97
+stop rate (so it's not truncation). Leading hypothesis: the 450M checkpoint's own
+baked-in `tokenizer_config.json` chat template does *not* end its generation prompt
+with `<think>` (unlike 275M's, which does) — see the 2026-08-07 chat template re-audit
+in experiment.md. If 450M's SFT data trained it to *decide* whether to open a `<think>`
+block rather than always expecting one to be forced open, then forcing `<think>` open
+(as `olmo_hybrid_small_think` does, matching `olmo_thinker`'s behavior) may push it
+off-distribution in a way it doesn't recover from within a single unconditioned
+response — worth inspecting a handful of raw 450M-think eval transcripts (wandb run
+linked in experiment.md) to confirm before drawing conclusions from the GRPO training
+runs. GRPO training runs for all 4 combinations are in progress; will check whether RL
+narrows or preserves this gap.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
