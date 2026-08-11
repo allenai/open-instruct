@@ -25,7 +25,6 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_utils, logger_utils, utils, vllm_utils
-from open_instruct.grpo_name_mapping import olmo_core_to_hf_name
 
 logger = logger_utils.setup_logger(__name__)
 
