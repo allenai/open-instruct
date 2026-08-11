@@ -114,6 +114,18 @@ def main(
     using Ray actors for both training and inference. The same code path is used for
     single GPU mode and multi-node training.
     """
+    if (
+        model_config.gradient_checkpointing
+        and args.activation_checkpointing_mode == "budget"
+        and args.activation_memory_budget >= 1.0
+    ):
+        logger.warning(
+            "--gradient_checkpointing is a legacy option on the OLMo-core GRPO path; "
+            "enabling native selected_modules activation checkpointing. Prefer "
+            "--activation_checkpointing_mode selected_modules explicitly."
+        )
+        args = dataclasses.replace(args, activation_checkpointing_mode="selected_modules")
+
     tokenizer = grpo_fast.make_tokenizer(tc, model_config)
 
     grpo_fast.setup_runtime_variables(args, streaming_config, tools_config)
