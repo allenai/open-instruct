@@ -131,7 +131,6 @@ uv run python mason.py \
     --local_eval_every 100 \
     --eval_on_step_0 \
     --save_freq 100 \
-    --activation_checkpointing_mode selected_modules \
     --vllm_enable_prefix_caching \
     --mask_truncated_completions False \
     --load_ref_policy True \
