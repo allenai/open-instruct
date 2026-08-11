@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 ### Fixed
+- Make OLMo-core GRPO honor the legacy `--gradient_checkpointing` option and preserve HF/vLLM parameter names when native activation-checkpoint wrappers are enabled (https://github.com/allenai/open-instruct/pull/1813).
 - Raise a `ValueError` naming the packed instance count, global batch size, and epoch count when `olmo_core_finetune.py` computes fewer than one training step, instead of letting an undersized dataset surface as a bare `ZeroDivisionError` from olmo-core's LR scheduler (https://github.com/allenai/open-instruct/pull/1796).
 - Track the CUDA 12 image suffix in the merge-queue Beaker workflow and allow enough time for the larger image build and upload (https://github.com/allenai/open-instruct/pull/1783).
 - Exclude nested virtualenvs (e.g. `oe-eval-internal/.venv/`) from the Docker build context, so a uv venv inside a nested clone no longer fails the image build on a dangling host-interpreter symlink (https://github.com/allenai/open-instruct/pull/1786).
