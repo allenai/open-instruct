@@ -345,4 +345,34 @@ cleaner cross-size comparison.
 \*810M/1.4B `think` used `response_length=8192` (half of everything else's 16384),
 so treat as a lower bound, not directly comparable.
 
+**PR #1813 fixes one bug but exposes a second, deeper one (2026-08-11, ~03:45 UTC):**
+the 1.4B `open_close_think` relaunch with the properly-cherry-picked fix crashed with
+the *identical* error as before, at the very first weight sync (before any training
+step — checkpoint wrapping applies at model construction, not lazily during backward).
+This is **not** the bug #1813 fixed — it's a second, independent gap in the same
+name-mapping table. This architecture's GDN mixer is natively named `attention` in
+OLMo-core (confirmed by `olmo_core_utils.py`'s own docstring), so `selected_modules`
+checkpointing's default module list wraps GDN layers exactly like real attention
+layers. After #1813's wrapper-name stripping, a GDN parameter's cleaned name looks like
+`blocks.N.attention.in_proj_qkvg.weight` — syntactically valid, but
+`_OLMO_CORE_TO_HF_LAYER_MAPPINGS` (`grpo_name_mapping.py`) only has entries for
+standard-attention param names (`w_q`/`w_k`/`w_v`/`w_out`/`q_norm`/`k_norm`), nothing
+for GDN-specific ones (`in_proj_qkvg`, `A_log`, `dt_bias`, `conv1d`, `o_norm`,
+`a_proj`, `b_proj`, `o_proj` — all confirmed present in this model's actual vLLM-side
+`linear_attn.*` parameters). So it falls through to the unmapped name again, same
+end symptom, different root cause. Also spotted a likely-unrelated third mismatch:
+this model's HF/vLLM side uses a **fused** `self_attn.qkv_proj.weight` (+
+`attn_gate.weight`), not the separate `q_proj`/`k_proj`/`v_proj` the mapping dict
+assumes — not confirmed to matter yet since no standard-attention layer has failed.
+
+**Since this whole architecture is GDN-based, `selected_modules` checkpointing would
+break every future checkpointed run regardless of model size** — reverted the script
+flag again. **1.4B `open_close_think` remains unresolved.** Real options left: (1)
+extend `_OLMO_CORE_TO_HF_LAYER_MAPPINGS` with GDN parameter mappings (a further PR /
+code change, not attempted here), or (2) the GPU-split lever (more learner GPUs),
+previously declined. Given two independent name-mapping gaps have now surfaced from
+the same underlying fix attempt, checkpointing for this architecture likely needs a
+more systematic pass over the mapping table (all param name variants across both
+attention and GDN layers) rather than another one-off patch.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

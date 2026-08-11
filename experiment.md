@@ -297,4 +297,33 @@ in `grpo_callbacks.py` from the PR, removed). Re-added
 - 1.4B open_close_think relaunch (real checkpointing, normal `response_length=16384`/
   `pack_length=32768` — no need for the length-reduction workaround now): Beaker
   [01KZQEE8KGWQ9KF6PRRMBKS84H](https://beaker.org/ex/01KZQEE8KGWQ9KF6PRRMBKS84H) —
-  result TBD.
+  **crashed again with the identical error** (`ValueError: There is no module or
+  parameter named 'blocks' in OlmoHybridSmallForCausalLM`), this time at
+  `run_initial_weight_sync` (the very first weight sync, before any training step —
+  PyTorch's checkpoint wrapper applies structurally at model-construction time, not
+  just during backward passes). **Root cause is different from what PR #1813 fixed,
+  and is a second, pre-existing gap in the same weight-sync code**: per
+  `olmo_core_utils.py`'s own docstring, this architecture's GDN mixer is natively named
+  `attention` in OLMo-core (same submodule name as real self-attention layers), so
+  `selected_modules` checkpointing's default `activation_checkpointing_modules` list
+  (`blocks.*.attention`, etc.) wraps GDN layers too. After PR #1813's fix strips the
+  `_checkpoint_wrapped_module` segment, the resulting name for a GDN layer looks like
+  `blocks.N.attention.in_proj_qkvg.weight` (or `.A_log`, `.dt_bias`, `.conv1d.weight`,
+  `.o_norm.weight`, `.a_proj.weight`, `.b_proj.weight`, `.o_proj.weight` — all visible
+  in this run's "available parameters" error dump under `linear_attn.*` on the vLLM/HF
+  side) — none of which appear in `_OLMO_CORE_TO_HF_LAYER_MAPPINGS`
+  (`grpo_name_mapping.py`), which only has entries for standard-attention parameter
+  names (`w_q`/`w_k`/`w_v`/`w_out`/`q_norm`/`k_norm`). So the lookup still falls through
+  to the raw, untranslated OLMo-core name, and vLLM still can't resolve it — same
+  symptom, different cause. Also noticed in the same error dump: this model's HF/vLLM
+  side uses a **fused** `self_attn.qkv_proj.weight` (plus `self_attn.attn_gate.weight`),
+  not separate `q_proj`/`k_proj`/`v_proj` as the mapping dict assumes — a third,
+  possibly-unrelated mismatch, not confirmed to matter here since standard-attention
+  layers weren't the ones failing in this run.
+  **Since this architecture is entirely GDN-based, `selected_modules` checkpointing
+  would break every future checkpointed run of this script regardless of model size —
+  reverted `--activation_checkpointing_mode selected_modules` from `gsm8k_grpo.sh`
+  again.** 1.4B `open_close_think` remains unresolved; would need
+  `_OLMO_CORE_TO_HF_LAYER_MAPPINGS` extended with GDN (`linear_attn.*`) entries (and
+  possibly the fused-qkv naming) before checkpointing is viable here, or the GPU-split
+  lever (more learner GPUs) as a fallback.
