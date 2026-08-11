@@ -395,7 +395,18 @@ climbing another ~0.10 to their final ~0.60-0.61.
 
 | | think | open_close_think |
 |---|---|---|
-| 275M | in progress | 0.23 (final) |
+| 275M | in progress (plateauing 0.15-0.18, step 1568) | 0.23 (final) |
 | 450M | **0.61** (final) | **0.60** (final) |
+| 810M | in progress — jumped 0.33→**0.62** (steps 0→99) | 0.32 (baseline only) |
+| 1.4B | in progress (still step 0, 0.74 baseline) | blocked (weight-sync/OOM) |
+
+810M think's early jump (nearly doubling in its first 99 steps) is the steepest
+early-training climb seen yet, consistent with 450M's pattern of rapid gains in the
+first few hundred steps before slowing down. 275M think, by contrast, still shows no
+sign of matching 275M open_close_think's 0.23 — plateauing lower (0.15-0.18) even
+approaching its full run length (step 1568/2000), unlike the other sizes where think
+and open_close_think converged to the same endpoint. Worth flagging as a possible
+genuine model-size-dependent difference (275M may be too small to make think-mode's
+extra reasoning pay off) rather than assuming think always catches up.
 
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
