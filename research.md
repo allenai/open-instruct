@@ -409,4 +409,9 @@ and open_close_think converged to the same endpoint. Worth flagging as a possibl
 genuine model-size-dependent difference (275M may be too small to make think-mode's
 extra reasoning pay off) rather than assuming think always catches up.
 
+1.4B think's first post-baseline point: 0.74→0.75 (steps 0→99) — essentially flat,
+unlike 810M's steep early jump, consistent with a ceiling effect since 1.4B already
+started so high. 275M think still at 0.15 (step 1499 eval; training itself has
+progressed to ~step 1600, next eval pending).
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
