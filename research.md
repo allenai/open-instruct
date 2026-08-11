@@ -428,7 +428,32 @@ second, separate bug. Fixed with the identical wrapper-stripping approach, added
 hybrid-small mapper's unwrapped/wrapped-GDN/wrapped-full-attention cases, plus the 3
 existing ones for the generic mapper). This fix is local to the hybrid-small-suite
 branch, not something to upstream via #1813. Re-enabled `--activation_checkpointing_mode
-selected_modules` as the script default. Third attempt at 1.4B open_close_think
-launched with the real fix; result pending.
+selected_modules` as the script default.
+
+**1.4B open_close_think finally resolved (2026-08-11, ~17:38 UTC):** third attempt,
+with the real fix, succeeded cleanly at the normal `response_length=16384`/
+`pack_length=32768` settings — `correct_rate` **0.61**, stop_rate 0.99. No more
+workarounds needed for this config. This completes the eval-only baseline across all 4
+sizes × 2 modes:
+
+| | think | open_close_think |
+|---|---|---|
+| 275M | 0.12 | 0.06 |
+| 450M | 0.05 | 0.14 |
+| 810M | 0.34* | 0.32 |
+| 1.4B | 0.74* | **0.61** |
+
+\*810M/1.4B `think` still used the halved-length workaround (launched before the fix),
+so treat those two as lower bounds, not directly comparable to the rest. Pattern across
+sizes: 275M and 450M favor `open_close_think` or are mixed at baseline; 810M and 1.4B
+clearly favor `think` at baseline (0.34>0.32, 0.74>0.61) — though recall from the GRPO
+training runs that this baseline gap tends to *close* under RL (275M/450M converged to
+near-identical endpoints regardless of starting direction), so whether that holds at
+810M/1.4B is still open pending their training runs finishing.
+
+With this config now working, a full 1.4B `open_close_think` GRPO training run could be
+launched next (mirroring the `think` training runs already in progress for 810M/1.4B) —
+not launched automatically here since it's a further multi-hour compute commitment;
+flagging as the natural next step.
 
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

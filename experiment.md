@@ -390,4 +390,17 @@ cases, alongside the 3 existing tests for the generic mapper — 6/6 pass. Re-ad
 
 - 1.4B open_close_think eval-only relaunch (third attempt, real fix): Beaker
   [01KZRXVBBDNK9KP6SMQYDNTZQN](https://beaker.org/ex/01KZRXVBBDNK9KP6SMQYDNTZQN) —
-  result TBD.
+  **succeeded** (exitCode 0). `correct_rate` **0.61**, stop_rate 0.99, seq_len 1284, at
+  the *normal* `response_length=16384`/`pack_length=32768` (no reduction workaround
+  needed — real activation checkpointing gave it enough headroom). This completes the
+  eval-only baseline for all 8 size × mode combinations:
+
+  | | think | open_close_think |
+  |---|---|---|
+  | 275M | 0.12 | 0.06 |
+  | 450M | 0.05 | 0.14 |
+  | 810M | 0.34* | 0.32 |
+  | 1.4B | 0.74* | **0.61** |
+
+  \*810M/1.4B `think` still used the halved `response_length=8192` workaround (launched
+  before this fix landed), so not directly comparable to the others.
