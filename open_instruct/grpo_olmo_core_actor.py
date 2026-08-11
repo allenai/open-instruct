@@ -35,8 +35,8 @@ from open_instruct.grpo_callbacks import (
     RefPolicyUpdateCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
-    olmo_core_to_hf_name,
 )
+from open_instruct.grpo_name_mapping import olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
