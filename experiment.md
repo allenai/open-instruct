@@ -356,3 +356,38 @@ through to the end — no late-training degradation signal here. Also note: grow
 continued well past what was earlier called a "plateau" (~0.5 range around step
 800-1000) up to ~0.60-0.61 by step 2000 — the mid-training slowdown was real but not a
 hard ceiling.
+
+### 2026-08-11 real root cause found: wrong mapper was being debugged
+
+PR #1813's fix targets `grpo_name_mapping.olmo_core_to_hf_name`, but that generic
+mapper turns out **not to be what's actually used for our checkpoints**. In
+`grpo_olmo_core_actor.py`'s `setup_model()`, `self.name_mapper` gets set twice: once
+(early) to the generic mapper (with or without PR #1813's fix), then — a few dozen
+lines later, inside the same method, unconditionally overwriting the first assignment
+— to `olmo_core_utils.make_hybrid_small_name_mapper(...)` whenever
+`is_hybrid_small_checkpoint(self.model_name_or_path)` is true, which it is for every
+checkpoint used in this suite. This dedicated, more specific mapper (local to this
+branch, not part of #1813 upstream) is the one actually exercised at weight-sync time.
+
+Its bug was structurally identical to the one #1813 fixed, but independent: its
+GDN-layer detection (`match.group(2) == "attention.A_log"`) and its HF-name lookup both
+matched on exact, unwrapped submodule names. Under `selected_modules` checkpointing,
+every parameter name gets a `_checkpoint_wrapped_module` segment inserted, so **zero**
+layers were ever detected as GDN (the detection pass silently found nothing), and every
+lookup missed too — same end symptom (`no module or parameter named 'blocks'`), same
+fix shape (strip the wrapper segment first), different function
+(`open_instruct/olmo_core_utils.py::make_hybrid_small_name_mapper`, not
+`grpo_name_mapping.py`). Its underlying naming scheme (unfused `w_q`/`w_k`/`w_v`, split
+`q_conv1d`/`k_conv1d`/`v_conv1d`) was otherwise correct — vLLM fuses them during its own
+loading — so this was purely the missing wrapper strip, not a naming-scheme mismatch.
+
+Added `_strip_checkpoint_wrapper` + applied it before both the GDN-detection regex
+match and the lookup; 3 new regression tests
+(`tests/test_olmo_core_utils.py`) cover unwrapped/wrapped-GDN/wrapped-full-attention
+cases, alongside the 3 existing tests for the generic mapper — 6/6 pass. Re-added
+`--activation_checkpointing_mode selected_modules` to `gsm8k_grpo.sh` as the default
+(now genuinely working for both mapper code paths).
+
+- 1.4B open_close_think eval-only relaunch (third attempt, real fix): Beaker
+  [01KZRXVBBDNK9KP6SMQYDNTZQN](https://beaker.org/ex/01KZRXVBBDNK9KP6SMQYDNTZQN) —
+  result TBD.

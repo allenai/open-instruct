@@ -414,4 +414,21 @@ unlike 810M's steep early jump, consistent with a ceiling effect since 1.4B alre
 started so high. 275M think still at 0.15 (step 1499 eval; training itself has
 progressed to ~step 1600, next eval pending).
 
+**Real root cause of the checkpointing weight-sync bug found (2026-08-11):** PR #1813's
+fix was correct but for a mapper that isn't actually used here — `grpo_olmo_core_actor.py`
+unconditionally overwrites the generic mapper with a **dedicated**
+`make_hybrid_small_name_mapper` (local to this branch) whenever the checkpoint is
+detected as `olmo_hybrid_small`, which is every checkpoint in this suite. That
+dedicated mapper had the *same class of bug* as #1813 fixed, independently: its
+GDN-layer detection and its HF-name lookup both required exact unwrapped submodule
+names, so `selected_modules` checkpointing's inserted `_checkpoint_wrapped_module`
+segment made it detect **zero** GDN layers and fail every lookup — same symptom, a
+second, separate bug. Fixed with the identical wrapper-stripping approach, added to
+`open_instruct/olmo_core_utils.py`; 6/6 regression tests pass (3 new, for the
+hybrid-small mapper's unwrapped/wrapped-GDN/wrapped-full-attention cases, plus the 3
+existing ones for the generic mapper). This fix is local to the hybrid-small-suite
+branch, not something to upstream via #1813. Re-enabled `--activation_checkpointing_mode
+selected_modules` as the script default. Third attempt at 1.4B open_close_think
+launched with the real fix; result pending.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
