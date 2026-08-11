@@ -296,4 +296,19 @@ one eval batch, so could be noise, but also could indicate some late-training dr
 (e.g. drifting away from the closed `<think></think>` prefix's intended brevity) worth a
 closer look at the actual generations before treating this checkpoint as final.
 
+**More OOM tricks tried for 810M/1.4B (2026-08-11), one confirms a real capacity limit:**
+added `PYTORCH_ALLOC_CONF=expandable_segments:True` (all launches) plus halved
+`response_length`/`pack_length` (8192/16384, `think`-mode retries only). **1.4B
+open_close_think still OOMs** — and the diagnostic is now unambiguous: allocator
+fragmentation dropped sharply (expandable_segments worked as intended) but *allocated*
+memory still climbed to 73-74GB and total usage still hit ~79GB. This means 1.4B's
+model + optimizer state + reference policy, sharded across only 4 FSDP-degree learner
+GPUs, doesn't fit in an 80GB A100 regardless of sequence length or allocator tuning —
+a genuine capacity ceiling, not a memory-management inefficiency. The only remaining
+lever is more FSDP shards (more learner GPUs, i.e. changing the 4/4 learner/vLLM
+split) or cutting per-GPU memory some other way. Not attempted without explicit
+sign-off, since changing the GPU split was previously specifically declined. 810M think
+and 1.4B think are still running as of this note, past the point where they previously
+failed both times — a good sign, but not yet confirmed successful.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

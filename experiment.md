@@ -243,3 +243,31 @@ latest saved checkpoints:
   (from ~800-1000) in this final eval batch — worth inspecting raw generations before
   treating this checkpoint as final, though could just be single-batch noise. 275M
   think and 450M open_close_think still running as of this note.
+
+### 2026-08-11 additional OOM-avoidance tricks for 810M/1.4B (no code checkpointing changes)
+
+Added `--env PYTORCH_ALLOC_CONF=expandable_segments:True` to `gsm8k_grpo.sh` (all
+launches, low-risk). For the two `think`-mode retries specifically, also overrode
+`--response_length 8192 --pack_length 16384` (half the script's 16384/32768 default)
+via trailing args, since `think` mode's long rollouts were the driver of that OOM.
+1.4B `open_close_think` got the env var only (no sequence-length change), since its
+short rollouts meant sequence length wasn't the issue.
+
+- 1.4B open_close_think: Beaker [01KZQCKGDRTP2HVQE3WGE1K956](https://beaker.org/ex/01KZQCKGDRTP2HVQE3WGE1K956)
+  — **still OOMs** (exitCode 1). Diagnostic: `expandable_segments` clearly reduced
+  fragmentation (the "reserved by PyTorch but unallocated" figure dropped from ~3GB to
+  380-695MB across the 3 failing processes), but PyTorch's actual *allocated* memory
+  grew to 73-74GB (up from 70-72GB pre-fix) and the process still hit ~78.6-79.2GB
+  total, i.e. this is a genuine capacity shortfall, not fragmentation — 1.4B's
+  base memory footprint (model + optimizer state + reference policy, sharded 4-way via
+  FSDP) doesn't fit in 79GB regardless of allocator tuning or sequence length.
+  `response_length` reduction wouldn't help this one even if applied, since its
+  rollouts were already short. The only remaining lever is more FSDP shards (more
+  learner GPUs) or reducing per-GPU memory some other way (e.g. dropping the reference
+  policy, though `--load_ref_policy True` is presumably needed for KL). Not attempted —
+  would mean changing the 4/4 learner/vLLM split, which needs explicit sign-off.
+- 810M think: Beaker [01KZQCM8YQ8HR2PPXNNFNP9PXS](https://beaker.org/ex/01KZQCM8YQ8HR2PPXNNFNP9PXS)
+  — still running as of this note, past the point where it previously crashed (~3 min
+  for the weight-sync bug, ~10 min for the original OOM); promising sign.
+- 1.4B think: Beaker [01KZQCN2NHABMQ18XPT4YY97HA](https://beaker.org/ex/01KZQCN2NHABMQ18XPT4YY97HA)
+  — still running (early stage, compiling kernels).
