@@ -7,6 +7,7 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 
 import os
 from datetime import timedelta
+from functools import partial
 from typing import Any
 
 import ray
@@ -15,6 +16,7 @@ import transformers
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn.attention.recurrent import GatedDeltaNetConfig
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import LoadStrategy, callbacks
@@ -35,8 +37,8 @@ from open_instruct.grpo_callbacks import (
     RefPolicyUpdateCallback,
     StepTimingCallback,
     VLLMWeightSyncCallback,
-    olmo_core_to_hf_name,
 )
+from open_instruct.grpo_name_mapping import olmo_core_to_hf_name
 from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 from open_instruct.olmo_core_train_modules import GRPOTrainModule
 from open_instruct.utils import RayProcess, is_beaker_job, ray_get_with_progress
@@ -129,6 +131,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
+        self.gdn_layer_indices = frozenset(
+            idx
+            for idx, block_config in enumerate(self.model_config.resolved_block_configs)
+            if isinstance(block_config.sequence_mixer, GatedDeltaNetConfig)
+        )
+        self.name_mapper = partial(olmo_core_to_hf_name, gdn_layer_indices=self.gdn_layer_indices)
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
@@ -260,7 +268,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             model_step=0,
-            name_mapper=olmo_core_to_hf_name,
+            name_mapper=self.name_mapper,
         )
         if self.rank == 0:
             utils.ray_get_with_progress(refs, desc="Initial vLLM weight sync", enable=False)
@@ -334,7 +342,7 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             actor_manager=self.actor_manager,  # ty: ignore[invalid-argument-type]
-            name_mapper=olmo_core_to_hf_name,
+            name_mapper=self.name_mapper,
         )
 
         if self.ref_policy is not None and self.grpo_config.beta > 0 and self.ref_policy_update_freq is not None:
