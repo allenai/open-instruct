@@ -31,6 +31,19 @@ class TestVllmWorkerHelpers(unittest.TestCase):
         with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="npu"):
             self.assertIs(vllm_utils._get_kv_cache_spec_rpc_target(), vllm_utils._get_kv_cache_spec_as_dict)
 
+    def test_vllm_worker_cls_preserves_cuda_default(self):
+        with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="cuda"):
+            self.assertEqual(vllm_utils._get_vllm_worker_cls(), "auto")
+
+    def test_vllm_worker_cls_uses_open_instruct_npu_worker(self):
+        with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="npu"):
+            expected = (
+                f"{vllm_utils.__name__}.OpenInstructNPUWorker"
+                if vllm_utils.OpenInstructNPUWorker is not None
+                else "auto"
+            )
+            self.assertEqual(vllm_utils._get_vllm_worker_cls(), expected)
+
     def test_update_weights_uses_complete_vllm_lifecycle(self):
         actor = object.__new__(vllm_utils.LLMRayActor)
         actor.inflight_updates = True
