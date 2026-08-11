@@ -375,4 +375,11 @@ the same underlying fix attempt, checkpointing for this architecture likely need
 more systematic pass over the mapping table (all param name variants across both
 attention and GDN layers) rather than another one-off patch.
 
+**First 810M/1.4B GRPO training runs (2026-08-11, ~14:48 UTC), `think` mode only:**
+launched using the same `response_length=8192`/`pack_length=16384` override that
+already worked for both sizes' `think` eval-only baseline (0.34 and 0.74). Not
+`open_close_think` at these sizes — 810M open_close_think already has a clean baseline
+without needing training yet, and 1.4B open_close_think is still blocked on the
+checkpointing/GDN-mapping gap above, so wasn't launched.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

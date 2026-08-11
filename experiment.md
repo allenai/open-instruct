@@ -327,3 +327,15 @@ in `grpo_callbacks.py` from the PR, removed). Re-added
   `_OLMO_CORE_TO_HF_LAYER_MAPPINGS` extended with GDN (`linear_attn.*`) entries (and
   possibly the fused-qkv naming) before checkpointing is viable here, or the GPU-split
   lever (more learner GPUs) as a fallback.
+
+### 2026-08-11 first GRPO training runs at 810M/1.4B (think only)
+
+First full training runs (not eval-only) at these sizes, using the same
+`response_length=8192`/`pack_length=16384` override that already got both `think`
+eval-only baselines working (0.34 and 0.74 respectively) — no activation checkpointing
+(currently broken for this GDN architecture, see above), same 4/4 learner/vLLM split as
+every other run.
+
+- 810M think: `EXP_NAME=olmo_hybrid_810m_gsm8k_think_grpo` — Beaker [01KZRMQ4KNAJMG09AEEZY4PV8V](https://beaker.org/ex/01KZRMQ4KNAJMG09AEEZY4PV8V)
+- 1.4B think: `EXP_NAME=olmo_hybrid_1.4b_gsm8k_think_grpo` — Beaker [01KZRMQV47PHK15WJVN36JDZ90](https://beaker.org/ex/01KZRMQV47PHK15WJVN36JDZ90)
+- Result: TBD (just launched)
