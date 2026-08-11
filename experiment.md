@@ -267,7 +267,34 @@ short rollouts meant sequence length wasn't the issue.
   policy, though `--load_ref_policy True` is presumably needed for KL). Not attempted —
   would mean changing the 4/4 learner/vLLM split, which needs explicit sign-off.
 - 810M think: Beaker [01KZQCM8YQ8HR2PPXNNFNP9PXS](https://beaker.org/ex/01KZQCM8YQ8HR2PPXNNFNP9PXS)
-  — still running as of this note, past the point where it previously crashed (~3 min
-  for the weight-sync bug, ~10 min for the original OOM); promising sign.
+  — **succeeded** (exitCode 0). `correct_rate` **0.34**, stop_rate 0.88, seq_len 2583
+  (max hit the reduced 8192 cap). First usable "think" result at 810M+.
 - 1.4B think: Beaker [01KZQCN2NHABMQ18XPT4YY97HA](https://beaker.org/ex/01KZQCN2NHABMQ18XPT4YY97HA)
-  — still running (early stage, compiling kernels).
+  — **succeeded** (exitCode 0). `correct_rate` **0.74**, stop_rate 0.88, seq_len 3179
+  (max hit the reduced 8192 cap) — by far the highest score in this whole study (next
+  highest was 810M open_close_think at 0.32). Both of these used the halved
+  `response_length=8192`/`pack_length=16384`, so are not directly apples-to-apples with
+  the 16384/32768 used at 275M/450M/810M-open_close_think/1.4B-open_close_think — a
+  shorter reasoning budget could understate `think` mode further, so if anything this
+  0.74 is a lower bound.
+
+### 2026-08-11 real fix: cherry-picked allenai/open-instruct#1813
+
+The user opened a PR fixing the actual root cause of the weight-sync break:
+`grpo_name_mapping.olmo_core_to_hf_name` (moved out of `grpo_callbacks.py`) now strips
+PyTorch's `_checkpoint_wrapped_module` path segment — the exact wrapper name inserted by
+`selected_modules` checkpointing — before doing the OLMo-core-to-HF name lookup, which
+is exactly the bug diagnosed above. Also adds a legacy-flag shim (`grpo.py`: setting
+`--gradient_checkpointing` now auto-enables `selected_modules` checkpointing if native
+checkpointing wasn't otherwise configured) and two regression tests
+(`tests/test_grpo_callbacks.py`) confirming the exact `blocks.N.attention._checkpoint_wrapped_module.*`
+and `blocks.N.attention_norm._checkpoint_wrapped_module.*` cases. Cherry-picked commit
+`62985feda1485e556640d31f126daba79f1f93d1` cleanly (`git cherry-pick -x`); both new
+tests pass; `make style && make quality` clean (ruff caught one leftover unused import
+in `grpo_callbacks.py` from the PR, removed). Re-added
+`--activation_checkpointing_mode selected_modules` to `gsm8k_grpo.sh`.
+
+- 1.4B open_close_think relaunch (real checkpointing, normal `response_length=16384`/
+  `pack_length=32768` — no need for the length-reduction workaround now): Beaker
+  [01KZQEE8KGWQ9KF6PRRMBKS84H](https://beaker.org/ex/01KZQEE8KGWQ9KF6PRRMBKS84H) —
+  result TBD.

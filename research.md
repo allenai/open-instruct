@@ -311,4 +311,38 @@ sign-off, since changing the GPU split was previously specifically declined. 810
 and 1.4B think are still running as of this note, past the point where they previously
 failed both times — a good sign, but not yet confirmed successful.
 
+**810M/1.4B think both succeeded (2026-08-11, ~03:30 UTC), and real activation
+checkpointing fixed via allenai/open-instruct#1813:** 810M think finished with
+`correct_rate` **0.34**; 1.4B think finished with `correct_rate` **0.74** — by far the
+highest of any size/mode combo in this whole study (previous max was 810M
+open_close_think's 0.32). Both used the halved `response_length=8192`/`pack_length=16384`
+workaround, so aren't strictly apples-to-apples with the 16384/32768 everything else
+used — if anything this makes 0.74 a *lower bound* on 1.4B think's true capability.
+
+Separately, the user opened and I cherry-picked
+[allenai/open-instruct#1813](https://github.com/allenai/open-instruct/pull/1813), which
+fixes the actual weight-sync bug diagnosed above: PyTorch's checkpoint wrapper inserts a
+`_checkpoint_wrapped_module` path segment into parameter names, and the old
+`olmo_core_to_hf_name` didn't strip it before its OLMo-core-to-HF lookup — the PR does,
+plus adds regression tests confirming the exact case. With this fix, `--activation_checkpointing_mode
+selected_modules` is real and usable again — re-added to `gsm8k_grpo.sh`. Relaunched
+1.4B `open_close_think` (the one config that OOM'd for a fundamental capacity reason,
+not sequence length) with the real fix and normal-length settings, no more need for the
+`response_length` workaround; result pending. If this succeeds, all 8 eval-only
+size/mode combos will finally have a real baseline, and it may be worth redoing 810M/
+1.4B `think` at full `response_length=16384` too, now that checkpointing works, for a
+cleaner cross-size comparison.
+
+**Eval-only baseline `correct_rate` summary across all sizes (2026-08-11):**
+
+| | think | open_close_think |
+|---|---|---|
+| 275M | 0.12 | 0.06 |
+| 450M | 0.05 | 0.14 |
+| 810M | 0.34* | 0.32 |
+| 1.4B | **0.74**\* | pending |
+
+\*810M/1.4B `think` used `response_length=8192` (half of everything else's 16384),
+so treat as a lower bound, not directly comparable.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
