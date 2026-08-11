@@ -251,13 +251,7 @@ def build_checkpointer_callback(
     unlimited.  Negative values are mapped to ``None`` (keep all).
 
     ``ephemeral_save_interval`` follows the same convention: a non-positive value
-    disables ephemeral checkpoints entirely.  Without this there is no way to turn
-    them off from the CLI, because ``olmo_core_finetune.py`` forces a default of
-    500 via ``parser.set_defaults`` and omitting the flag yields 500 rather than
-    ``None``.  Disabling matters because olmo-core deletes each ephemeral
-    checkpoint once the next one lands, and deleting a ~100 GB checkpoint tree on
-    Weka can overrun the bookkeeping soft timeout and kill the job with
-    ``RuntimeError: Application timeout caused pair closure``.
+    disables ephemeral checkpoints.
     """
     return CheckpointerCallback(
         save_interval=checkpointing_steps,
