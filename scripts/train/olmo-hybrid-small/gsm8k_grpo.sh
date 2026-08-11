@@ -91,6 +91,7 @@ uv run python mason.py \
     --budget ai2/oe-other \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
+    --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --no_auto_dataset_cache \
     --gpus "$GPUS" \
     -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
