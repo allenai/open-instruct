@@ -234,30 +234,6 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
-def restore_npu_olmo3_rope_buffers(model: torch.nn.Module, device: torch.device) -> bool:
-    """Restore Olmo 3 RoPE buffers to FP32 after NPU ZeRO-3 initialization."""
-    config = getattr(model, "config", None)
-    base_model = getattr(model, "model", None)
-    rotary = getattr(base_model, "rotary_emb", None)
-    if getattr(config, "model_type", None) != "olmo3" or rotary is None:
-        return False
-
-    # HfDeepSpeedConfig constructs the model directly on NPU under ZeRO-3.
-    # Its dtype context can quantize non-persistent RoPE buffers to BF16, while
-    # the ordinary HF path constructs them in FP32 on CPU. Long positions then
-    # amplify the frequency error into a large learner/rollout logprob gap.
-    cpu_rotary = type(rotary)(config, device="cpu")
-    for name in ("inv_freq", "original_inv_freq"):
-        reference = getattr(cpu_rotary, name, None)
-        if reference is not None:
-            setattr(rotary, name, reference.detach().to(device=device))
-    rotary.attention_scaling = cpu_rotary.attention_scaling
-    rotary.max_seq_len_cached = cpu_rotary.max_seq_len_cached
-    rotary.original_max_seq_len = cpu_rotary.original_max_seq_len
-    logger.info("Restored Olmo 3 RoPE buffers from CPU FP32 reference on %s", device)
-    return True
-
-
 def maybe_load_checkpoint(
     model: torch.nn.Module, checkpoint_path: str, device: torch.device, rank: int, throw_on_error: bool = True
 ) -> None:
@@ -333,8 +309,6 @@ def load_ref_policy(
     ref_policy.config.use_cache = False
     disable_dropout_in_model(ref_policy)
     ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
-    if device.type == "npu":
-        restore_npu_olmo3_rope_buffers(ref_policy.module, device)
     ref_policy.eval()
 
     if checkpoint_path:
