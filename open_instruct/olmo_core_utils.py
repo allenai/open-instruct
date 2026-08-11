@@ -619,6 +619,12 @@ _HYBRID_SMALL_FULL_ATTN_LAYER_TO_HF: dict[str, str] = {
 }
 
 _HYBRID_SMALL_BLOCK_RE = re.compile(r"blocks\.(\d+)\.(.*)")
+_CHECKPOINT_WRAPPED_MODULE = "_checkpoint_wrapped_module"
+
+
+def _strip_checkpoint_wrapper(name: str) -> str:
+    """Remove PyTorch's activation-checkpoint wrapper module segment from a parameter name."""
+    return ".".join(part for part in name.split(".") if part != _CHECKPOINT_WRAPPED_MODULE)
 
 
 def is_hybrid_small_checkpoint(model_name_or_path: str) -> bool:
@@ -672,18 +678,22 @@ def make_hybrid_small_name_mapper(state_dict_keys: Iterable[str]) -> Callable[[s
     Used during GRPO weight sync to translate learner parameter names to the HF names the
     vLLM model expects. The mapping is layer-type dependent (`attention.w_q` becomes
     `linear_attn.q_proj` in GDN blocks but `self_attn.q_proj` in full-attention blocks), so
-    GDN layers are detected up front from the GDN-specific `A_log` key.
+    GDN layers are detected up front from the GDN-specific `A_log` key. Strips PyTorch's
+    activation-checkpoint wrapper module segment first, since `selected_modules`
+    checkpointing inserts it into both the detection and lookup keys otherwise.
     """
     gdn_layers = {
         int(match.group(1))
         for key in state_dict_keys
-        if (match := _HYBRID_SMALL_BLOCK_RE.match(key)) and match.group(2) == "attention.A_log"
+        if (match := _HYBRID_SMALL_BLOCK_RE.match(_strip_checkpoint_wrapper(key)))
+        and match.group(2) == "attention.A_log"
     }
 
     def mapper(name: str) -> str:
-        if name in _HYBRID_SMALL_TOP_LEVEL_TO_HF:
-            return _HYBRID_SMALL_TOP_LEVEL_TO_HF[name]
-        match = _HYBRID_SMALL_BLOCK_RE.match(name)
+        stripped = _strip_checkpoint_wrapper(name)
+        if stripped in _HYBRID_SMALL_TOP_LEVEL_TO_HF:
+            return _HYBRID_SMALL_TOP_LEVEL_TO_HF[stripped]
+        match = _HYBRID_SMALL_BLOCK_RE.match(stripped)
         if match:
             layer_idx, rest = match.group(1), match.group(2)
             layer_type = "linear_attention" if int(layer_idx) in gdn_layers else "full_attention"

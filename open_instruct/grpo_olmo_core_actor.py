@@ -17,7 +17,6 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn.attention.recurrent import GatedDeltaNetConfig
-from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
