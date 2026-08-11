@@ -9,9 +9,8 @@ Example usage:
 
 import argparse
 
-import torch
-import torch.distributed.checkpoint.state_dict as dcp_state_dict
 import transformers
+from olmo_core.distributed import checkpoint as olmo_core_checkpoint
 
 from open_instruct import logger_utils, olmo_core_utils
 
@@ -34,8 +33,14 @@ def main():
     model_config = olmo_core_utils.get_transformer_config(args.model_name, vocab_size, attn_backend="torch")
     model = model_config.build(init_device="cpu")
 
+    # Load through olmo-core rather than torch's own DCP reader. olmo-core writes
+    # these checkpoints with its own storage layout, and torch 2.10's filesystem
+    # reader fails on them with `'_StorageInfo' object has no attribute
+    # 'transform_descriptors'`. (The previously used
+    # `torch.distributed.checkpoint.state_dict.load_state_dict` no longer exists at
+    # all.) Loads in place, so read the state dict back off the model afterwards.
+    olmo_core_checkpoint.load_model_and_optim_state(args.checkpoint_dir, model)
     state_dict = {"model": model.state_dict()}
-    dcp_state_dict.load_state_dict(state_dict, checkpoint_id=args.checkpoint_dir)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
     olmo_core_utils.save_state_dict_as_hf(state_dict["model"], args.output_dir, args.model_name, tokenizer)
