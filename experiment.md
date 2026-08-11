@@ -338,4 +338,21 @@ every other run.
 
 - 810M think: `EXP_NAME=olmo_hybrid_810m_gsm8k_think_grpo` — Beaker [01KZRMQ4KNAJMG09AEEZY4PV8V](https://beaker.org/ex/01KZRMQ4KNAJMG09AEEZY4PV8V)
 - 1.4B think: `EXP_NAME=olmo_hybrid_1.4b_gsm8k_think_grpo` — Beaker [01KZRMQV47PHK15WJVN36JDZ90](https://beaker.org/ex/01KZRMQV47PHK15WJVN36JDZ90)
-- Result: TBD (just launched)
+- Result: both healthy as of 2026-08-11 ~15:05 UTC, no crash yet, results TBD
+
+### 2026-08-11 450M think and 450M open_close_think GRPO training completed
+
+Both finished cleanly at step 2000/2000 ("Training complete", exitCode 0):
+
+- **450M think** (`01KZNDZEXB349J3VP3QFD3VPSW`, completed ~07:44 UTC): final
+  `correct_rate` **0.61**, stop_rate 0.96, seq_len 7385 (up from baseline 0.05).
+- **450M open_close_think** (`01KZPS7CWBAC1RPC0EGXCBDDGY`, completed ~14:50 UTC): final
+  `correct_rate` **0.60**, stop_rate 0.96, seq_len 7713 (up from baseline 0.14).
+
+Both modes converge to essentially the same final performance (0.60 vs 0.61), matching
+the pattern already seen mid-training. Unlike 275M open_close_think's anomalous final
+eval (stop_rate dropped to 0.79), both of these kept a healthy 0.94-0.96 stop_rate
+through to the end — no late-training degradation signal here. Also note: growth
+continued well past what was earlier called a "plateau" (~0.5 range around step
+800-1000) up to ~0.60-0.61 by step 2000 — the mid-training slowdown was real but not a
+hard ceiling.

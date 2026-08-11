@@ -382,4 +382,20 @@ already worked for both sizes' `think` eval-only baseline (0.34 and 0.74). Not
 without needing training yet, and 1.4B open_close_think is still blocked on the
 checkpointing/GDN-mapping gap above, so wasn't launched.
 
+**450M think and 450M open_close_think both completed (2026-08-11):** final
+`correct_rate` **0.61** (think) and **0.60** (open_close_think) — essentially identical,
+confirming the mode-convergence pattern held all the way to the end at 450M. Both had
+healthy stop_rate (0.96) at completion, unlike 275M open_close_think's anomalous final
+eval (stop_rate dropped to 0.79) — that earlier anomaly looks specific to that run, not
+a general late-training pattern. Also: the ~13:09 UTC "plateau" call for 450M (~0.5
+range around step 800-1000) turned out to be a slowdown, not a ceiling — both kept
+climbing another ~0.10 to their final ~0.60-0.61.
+
+**Completed-run summary so far:**
+
+| | think | open_close_think |
+|---|---|---|
+| 275M | in progress | 0.23 (final) |
+| 450M | **0.61** (final) | **0.60** (final) |
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
