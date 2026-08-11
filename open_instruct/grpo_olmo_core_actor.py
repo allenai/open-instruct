@@ -7,6 +7,7 @@ allowing distributed GRPO training across multiple GPUs and nodes.
 
 import os
 from datetime import timedelta
+from functools import partial
 from typing import Any
 
 import ray
@@ -15,6 +16,8 @@ import transformers
 from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn.attention.recurrent import GatedDeltaNetConfig
+from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.optim import AdamWConfig, ConstantWithWarmup, CosWithWarmup, LinearWithWarmup
 from olmo_core.train import LoadStrategy, callbacks
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -129,6 +132,12 @@ class PolicyTrainerOLMoCoreProcess(RayProcess):
         )
         logger.info(f"[Rank {self.rank}] Building OLMo-core model from {self.model_name_or_path}")
         self.model, self.model_config = olmo_core_utils.setup_model(model_config_args)
+        self.gdn_layer_indices = frozenset(
+            idx
+            for idx, block_config in enumerate(self.model_config.resolved_block_configs)
+            if isinstance(block_config.sequence_mixer, GatedDeltaNetConfig)
+        )
+        self.name_mapper = partial(olmo_core_to_hf_name, gdn_layer_indices=self.gdn_layer_indices)
 
         if self.grpo_config.load_ref_policy and self.grpo_config.beta > 0:
             logger.info(f"[Rank {self.rank}] Building reference policy...")
