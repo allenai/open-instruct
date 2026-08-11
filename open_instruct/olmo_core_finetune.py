@@ -224,6 +224,12 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.max_train_steps if args.training.max_train_steps is not None else num_training_steps
     )
     logger.info(f"Total training steps: {effective_steps} (epochs={args.training.num_epochs})")
+    if effective_steps < 1:
+        raise ValueError(
+            f"Computed {effective_steps} training steps from {len(np_dataset)} packed instances "
+            f"// global batch {global_batch_size_seqs} * {args.training.num_epochs} epochs. "
+            "Use more data, or lower --gradient_accumulation_steps / --per_device_train_batch_size."
+        )
     scheduler = olmo_core_utils.build_scheduler(
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
     )
