@@ -281,4 +281,19 @@ the second time concurrent large launches have coincided with a training-job cra
 wave, worth keeping in mind: avoid launching many new large jobs on `saturn`/`jupiter`/
 `ceres` while the training runs are still going, if avoidable.
 
+**First completed run (2026-08-11, ~00:39 UTC): 275M open_close_think finished its full
+2000-step training run cleanly** (resumed from step1800, ran to step 2000/2000, "Training
+complete", exited 0, final model saved). This is the first genuinely-completed run of
+all 8. **Final eval:** `correct_rate` **0.23** (consistent with its long-standing
+0.22-0.24 plateau — confirms the plateau held all the way to the end, no late
+improvement or regression in accuracy). Two things worth flagging in the final eval,
+though, both notably different from its plateau-era numbers: `stop_rate` dropped to
+**0.79** (down from ~0.98-0.99 throughout most of training) and average
+`sequence_lengths` jumped to **3730** tokens (up from ~800-1000) — i.e. the *final*
+policy is generating substantially longer responses and finishing at `eos_token` less
+often than it was mid-training, even though final-answer accuracy didn't change. Only
+one eval batch, so could be noise, but also could indicate some late-training drift
+(e.g. drifting away from the closed `<think></think>` prefix's intended brevity) worth a
+closer look at the actual generations before treating this checkpoint as final.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

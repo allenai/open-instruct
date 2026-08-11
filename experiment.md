@@ -234,4 +234,12 @@ latest saved checkpoints:
 - 275M think: resumed from `step400` (`.../deletable_checkpoint_states/michaeln/1786351916_614241`) — Beaker [01KZPS2TF1NN97HPH5YCH9RQ95](https://beaker.org/ex/01KZPS2TF1NN97HPH5YCH9RQ95)
 - 275M open_close_think: resumed from `step1800` (`.../deletable_checkpoint_states/michaeln/1786342568_674077`) — Beaker [01KZPS5EAYP94HFPCCYXAWFWHN](https://beaker.org/ex/01KZPS5EAYP94HFPCCYXAWFWHN)
 - 450M open_close_think: resumed from `step1000` (`.../deletable_checkpoint_states/michaeln/1786351978_851104`) — Beaker [01KZPS7CWBAC1RPC0EGXCBDDGY](https://beaker.org/ex/01KZPS7CWBAC1RPC0EGXCBDDGY)
-- Result: TBD
+- Result: **275M open_close_think completed its full run** (2026-08-11 ~00:39 UTC, ran
+  step1800→2000/2000, exited 0, "Training complete", final model saved to
+  `/weka/oe-adapt-default/allennlp/deletable_checkpoint/michaeln/olmo_hybrid_275m_gsm8k_open_close_think_grpo__1__1786398974`)
+  — first fully-completed run of all 8. Final eval: `correct_rate` **0.23** (matches its
+  long-standing plateau — no late change in accuracy), but `stop_rate` dropped to
+  **0.79** (from ~0.98-0.99) and average `sequence_lengths` jumped to **3730** tokens
+  (from ~800-1000) in this final eval batch — worth inspecting raw generations before
+  treating this checkpoint as final, though could just be single-batch noise. 275M
+  think and 450M open_close_think still running as of this note.
