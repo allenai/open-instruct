@@ -45,6 +45,7 @@ The main things we are looking for are:
 
 import copy
 import hashlib
+import inspect
 import json
 import multiprocessing
 import os
@@ -60,10 +61,19 @@ from datasets import Dataset, concatenate_datasets, load_dataset
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
-from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
+from transformers import (
+    AutoConfig,
+    AutoProcessor,
+    AutoTokenizer,
+    GPTNeoXTokenizerFast,
+    LlamaTokenizer,
+    LlamaTokenizerFast,
+    PreTrainedTokenizer,
+)
 from transformers.utils.hub import extract_commit_hash
 
 from open_instruct import launch_utils, logger_utils
+from open_instruct.mm_plugin import IMAGES_KEY, attach_processor_config, get_mm_plugin
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -117,14 +127,31 @@ def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_p
 COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
 
 
-def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
-    i = 0
+def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer, collapse_repeats: int | None = None):
+    """Pretty-print a tokenized example.
+
+    `collapse_repeats` folds any run of >= N identical tokens into one annotated entry, so the
+    thousands of consecutive image-pad tokens in a multimodal example do not flood the log.
+    """
     console = Console()
     rich_text = Text()
-    for i, token in enumerate(tokens):
-        color = COLORS[i % len(COLORS)]
-        decoded_token = tokenizer.decode(int(token))
-        rich_text.append(f"{decoded_token}", style=color)
+    i = 0
+    color_idx = 0
+    while i < len(tokens):
+        token = int(tokens[i])
+        run_length = 1
+        if collapse_repeats is not None:
+            while i + run_length < len(tokens) and int(tokens[i + run_length]) == token:
+                run_length += 1
+
+        color = COLORS[color_idx % len(COLORS)]
+        color_idx += 1
+        decoded_token = tokenizer.decode(token)
+        if collapse_repeats is not None and run_length >= collapse_repeats:
+            rich_text.append(f"{decoded_token}*{run_length}", style=color)
+        else:
+            rich_text.append(f"{decoded_token}" * run_length, style=color)
+        i += run_length
     console.print(rich_text)
 
 
@@ -150,6 +177,21 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
 # For Olmo 3 tokenizer settings and chat template decisions, see:
 # docs/olmo3.md (https://allenai.github.io/open-instruct/olmo3/#tokenizer-settings)
 CHAT_TEMPLATES = {
+    # Qwen3.5 without the reasoning block. The stock template emits `<think>...</think>` only for
+    # the assistant turn following the *last* user message, so a conversation prefix does not render
+    # as a prefix of the full conversation -- which breaks offset-based assistant label derivation.
+    "qwen3_5_nothink": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+        "{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
+    ),
     "simple_concat_with_space": (
         "{% for message in messages %}"
         "{{ ' ' if not loop.first else '' }}"
@@ -892,6 +934,52 @@ class TokenizerConfig:
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
     """columns name for the sft messages"""
 
+    # Multimodal. None by default so existing text-only cache keys stay byte-identical (None-valued
+    # fields are dropped before hashing). When set they do enter the hash, which is required:
+    # `image_max_pixels` changes the number of image tokens and therefore `input_ids`.
+    processor_name_or_path: str | None = None
+    """when set, load an `AutoProcessor` from here to enable multimodal tokenization"""
+    image_max_pixels: int | None = None
+    """cap applied to each image before the model's own image processor runs"""
+    image_min_pixels: int | None = None
+    """floor applied to each image before the model's own image processor runs"""
+
+    @cached_property
+    def processor(self):
+        """The `AutoProcessor` for multimodal runs, or None for text-only runs."""
+        if self.processor_name_or_path is None:
+            return None
+
+        processor = AutoProcessor.from_pretrained(
+            self.processor_name_or_path, revision=self.tokenizer_revision, trust_remote_code=self.trust_remote_code
+        )
+        # AutoProcessor returns a bare tokenizer for text-only repos, which is not usable here.
+        if "Processor" not in processor.__class__.__name__:
+            raise ValueError(
+                f"Loaded a {processor.__class__.__name__} from {self.processor_name_or_path}, which is not a "
+                "multimodal processor. Check that this checkpoint is a VLM."
+            )
+        # Keep the tokenizer we configured (chat template, pad token) rather than the processor's own.
+        processor.tokenizer = self.tokenizer
+        return attach_processor_config(processor, self.image_max_pixels, self.image_min_pixels)
+
+    @cached_property
+    def mm_plugin(self):
+        """The model-family plugin matching `processor_name_or_path`, or None for text-only runs."""
+        if self.processor_name_or_path is None:
+            return None
+
+        config = AutoConfig.from_pretrained(
+            self.processor_name_or_path, revision=self.tokenizer_revision, trust_remote_code=self.trust_remote_code
+        )
+        plugin = get_mm_plugin(config.model_type, processor=self.processor)
+        if plugin is None:
+            raise ValueError(
+                f"No multimodal plugin registered for model_type '{config.model_type}'. Supported types are listed "
+                "in `open_instruct/mm_plugin.py:MM_PLUGIN_REGISTRY`; adding one is a small subclass."
+            )
+        return plugin
+
     @cached_property
     def tokenizer(self):
         if self.tokenizer_name_or_path is None:
@@ -925,6 +1013,8 @@ MASKED_TOKEN_VALUE = -100
 DATASET_ORIGIN_KEY = "dataset_source"  # just 'dataset' clashes with RLVR stuff (see VERIFIER_SOURCE_KEY)
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_ORIGIN_KEY]
+# Multimodal SFT additionally carries the (unprocessed) images through to the collator.
+TOKENIZED_SFT_DATASET_KEYS_MM = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, IMAGES_KEY]
 
 
 def remove_dataset_source_field(dataset: Dataset) -> Dataset:
@@ -1486,6 +1576,63 @@ def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return any(x != MASKED_TOKEN_VALUE for x in row[LABELS_KEY])
 
 
+def _resolve_media_paths(images: list[Any], media_dir: str | None) -> list[Any]:
+    """Join relative image paths against `media_dir`.
+
+    A path that does not resolve is passed through untouched, so the failure surfaces at load time
+    with the original path rather than a rewritten one.
+    """
+    if not media_dir:
+        return images
+
+    resolved = []
+    for image in images:
+        if isinstance(image, str) and not os.path.isabs(image):
+            candidate = os.path.join(media_dir, image)
+            resolved.append(candidate if os.path.isfile(candidate) else image)
+        else:
+            resolved.append(image)
+    return resolved
+
+
+def sft_tulu_tokenize_mm_v1(
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, processor: Any, mm_plugin: Any, media_dir: str | None = None
+):
+    """Tokenize a multimodal SFT row, keeping the images for the collator.
+
+    There is deliberately no truncation: cutting through the middle of an image-token block fails
+    deep in the model's forward. Over-length rows are dropped by chaining
+    `sft_mm_max_length_filter_v1` after this function.
+    """
+    messages = row[DEFAULT_SFT_MESSAGES_KEY]
+    if len(messages) == 0:
+        raise ValueError("messages field is empty.")
+
+    images = row.get(IMAGES_KEY) or []
+    if not isinstance(images, list):
+        images = [images]
+    images = _resolve_media_paths(images, media_dir)
+
+    # Expand `<image>` before the chat template runs, so the offset-based label derivation below
+    # needs no multimodal awareness.
+    messages = mm_plugin.process_messages(messages, images, processor)
+
+    tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
+    input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
+        messages, tokenizer, tools, max_seq_length=None
+    )
+    row[INPUT_IDS_KEY] = input_ids.flatten()
+    row[LABELS_KEY] = labels.flatten()
+    row[ATTENTION_MASK_KEY] = attention_mask.flatten()
+    row[IMAGES_KEY] = images
+    return row
+
+
+def sft_mm_max_length_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+    """Drop rows longer than `max_seq_length` (see `sft_tulu_tokenize_mm_v1` for why we filter)."""
+    return len(row[INPUT_IDS_KEY]) <= max_seq_length
+
+
 def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     # Extract prompt (all messages except the last one)
     prompt = row["chosen"][:-1]
@@ -1802,7 +1949,15 @@ TRANSFORM_FNS = {
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
+    "sft_tulu_tokenize_mm_v1": (sft_tulu_tokenize_mm_v1, "map"),
+    "sft_mm_max_length_filter_v1": (sft_mm_max_length_filter_v1, "filter"),
 }
+
+# Tokenization functions that keep the images column and need a processor + plugin.
+_MM_SFT_TOKENIZE_FNS = {"sft_tulu_tokenize_mm_v1"}
+
+# Tokenize, drop rows with no trainable tokens, then drop rows over max_seq_length.
+MM_SFT_TRANSFORM_FNS = ["sft_tulu_tokenize_mm_v1", "sft_tulu_filter_v1", "sft_mm_max_length_filter_v1"]
 
 # SFT tokenization functions that consume the tools column — don't re-add it to target_columns.
 # Only list functions that actually forward `tools` to the chat template: for a function that
@@ -1986,6 +2141,13 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
         fn_kwargs = {"tokenizer": tokenizer}
+        # The processor and plugin are objects, so they cannot travel through `transform_fn_args`
+        # (which must stay JSON-serializable for the fingerprint); pass them by signature instead.
+        fn_params = inspect.signature(fn).parameters
+        if "processor" in fn_params:
+            fn_kwargs["processor"] = tc.processor
+        if "mm_plugin" in fn_params:
+            fn_kwargs["mm_plugin"] = tc.mm_plugin
         fn_kwargs.update(fn_args)
 
         # Compute a custom fingerprint that includes DATASET_CACHE_VERSION to invalidate
@@ -2002,11 +2164,16 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # Always preserve dataset_source if it exists
         target_columns = _preserve_column(DATASET_ORIGIN_KEY, dataset, target_columns)
         # SFT tokenization consumes the tools column and must not persist it; other transforms keep it.
-        if fn_name not in _SFT_TOKENIZE_FNS:
+        if fn_name not in _SFT_TOKENIZE_FNS and fn_name not in _MM_SFT_TOKENIZE_FNS:
             target_columns = _preserve_column(TOOLS_COLUMN_KEY, dataset, target_columns)
         else:
             target_columns = [col for col in target_columns if col != TOOLS_COLUMN_KEY]
         target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
+        # The images column must survive tokenization; the collator turns it into pixels at batch
+        # time. Scoped to multimodal transforms so a text run over a dataset that happens to have an
+        # `images` column behaves as before.
+        if fn_name in _MM_SFT_TOKENIZE_FNS:
+            target_columns = _preserve_column(IMAGES_KEY, dataset, target_columns)
 
         if fn_type == "map":
             dataset = dataset.map(

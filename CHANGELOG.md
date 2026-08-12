@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add multimodal (VLM) SFT support to `finetune.py` for the Qwen2-VL, Qwen2.5-VL, Qwen3-VL and Qwen3.5 families. `<image>` placeholders are expanded to the model's real image tokens before tokenization, so offset-based assistant labeling is unchanged; images travel through the dataset cache as paths and become pixels per batch in a new collator. Multimodal mode is detected from the checkpoint's `model_type`. See `docs/algorithms/multimodal_sft.md` (https://github.com/allenai/open-instruct/pull/1816).
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 

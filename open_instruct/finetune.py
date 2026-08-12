@@ -43,17 +43,27 @@ from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_tr
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, DataCollatorForSeq2Seq, get_scheduler
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    BitsAndBytesConfig,
+    DataCollatorForSeq2Seq,
+    get_scheduler,
+)
 from transformers.training_args import _convert_str_dict
 
-from open_instruct import logger_utils, model_utils, utils
+from open_instruct import logger_utils, mm_plugin, model_utils, utils
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
+    MM_SFT_TRANSFORM_FNS,
     TOKENIZED_SFT_DATASET_KEYS,
+    TOKENIZED_SFT_DATASET_KEYS_MM,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
 )
+from open_instruct.mm_collator import MultiModalDataCollator
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 from open_instruct.utils import (
@@ -324,6 +334,58 @@ class FlatArguments:
         },
     )
 
+    adam_beta1: float = field(default=0.9, metadata={"help": "AdamW beta1."})
+    adam_beta2: float = field(
+        default=0.999,
+        metadata={
+            "help": "AdamW beta2. Torch's default is 0.999 while many LLM recipes use 0.95; the "
+            "two are not interchangeable on short runs."
+        },
+    )
+    adam_epsilon: float = field(default=1e-8, metadata={"help": "AdamW epsilon."})
+    dataloader_num_workers: int = field(
+        default=0,
+        metadata={
+            "help": "DataLoader worker processes. Multimodal runs want >0: image decode/resize "
+            "happens in the collator, and with 0 workers it blocks the training process."
+        },
+    )
+    allow_missing_checkpoint_keys: bool = field(
+        default=False,
+        metadata={
+            "help": "Proceed even when weights fail to load from the checkpoint and are randomly "
+            "initialised. Off by default: a silently unloaded model trains from noise with a "
+            "healthy-looking loss curve."
+        },
+    )
+    attn_implementation: str | None = field(
+        default=None,
+        metadata={
+            "help": "Override the auto-detected attention backend (e.g. 'sdpa', 'eager', "
+            "'flash_attention_2'). Needed when the auto-detected kernel cannot serve the model: "
+            "FlashAttention-4 supports head_dim <= 128 on SM100/SM110, so Qwen3.5 (head_dim 256) "
+            "must run with sdpa on B300."
+        },
+    )
+
+    # ---------------------------------------------------------------- multimodal (VLM) SFT
+    media_dir: str | None = field(
+        default=None,
+        metadata={"help": "Root directory that relative image paths in the dataset are resolved against."},
+    )
+    # `--image_max_pixels` / `--image_min_pixels` live on TokenizerConfig: they change the
+    # tokenization and so the dataset cache key. Both dataclasses feed the same argparse parser, so
+    # defining them here too is a "conflicting option strings" error at startup.
+    freeze_vision_tower: bool = field(
+        default=True, metadata={"help": "Freeze the vision encoder during multimodal training."}
+    )
+    freeze_multi_modal_projector: bool = field(
+        default=False, metadata={"help": "Freeze the vision->text projector during multimodal training."}
+    )
+    freeze_language_model: bool = field(
+        default=False, metadata={"help": "Freeze the language model during multimodal training."}
+    )
+
     def __post_init__(self):
         if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
@@ -361,6 +423,31 @@ def _create_scheduler(args: FlatArguments, optimizer, num_training_steps: int):
         num_training_steps=num_training_steps,
         num_warmup_steps=num_warmup_steps,
     )
+
+
+def _check_checkpoint_fully_loaded(loading_info: dict, args: FlatArguments) -> None:
+    """Fail loudly when weights silently did not load.
+
+    Under DeepSpeed ZeRO-3, some checkpoints load with every `model.language_model.*` key missing:
+    the vision tower loads, the language model is randomly initialised, and training proceeds from
+    loss ~= ln(vocab) on a curve that looks healthy because it descends fast.
+    """
+    missing = list(loading_info.get("missing_keys") or [])
+    if not missing:
+        return
+
+    sample = ", ".join(missing[:5])
+    message = (
+        f"{len(missing)} weight(s) were not initialised from the checkpoint and are randomly "
+        f"initialised, e.g. {sample}. Training would start from noise for those parameters. "
+        "If this is a ZeRO-3 run, try ZeRO-2: `zero.Init` is known to skip loading for some "
+        "composite VLM checkpoints. Pass --allow_missing_checkpoint_keys if this is intentional "
+        "(e.g. a deliberately new head)."
+    )
+    if args.allow_missing_checkpoint_keys:
+        logger.warning(message)
+    else:
+        raise RuntimeError(message)
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -494,10 +581,47 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     accelerator.wait_for_everyone()
 
+    # Detected from the checkpoint rather than requested with a flag: pairing a VLM with the text
+    # tokenization chain silently trains on `<image>` as literal text.
+    model_config = AutoConfig.from_pretrained(
+        args.config_name or args.model_name_or_path,
+        revision=args.model_revision,
+        trust_remote_code=tc.trust_remote_code,
+    )
+    is_multimodal = mm_plugin.is_multimodal_model_type(getattr(model_config, "model_type", ""))
+    if is_multimodal:
+        if args.packing:
+            raise ValueError(
+                "--packing is not supported for multimodal training. TensorDataCollatorWithFlattening is text-only, "
+                "and packed multimodal batches additionally need per-sub-sequence vision slicing."
+            )
+        if args.sequence_parallel_size > 1:
+            raise ValueError(
+                "--sequence_parallel_size > 1 is not supported for multimodal training: splitting the sequence "
+                "across ranks breaks the image-token to vision-feature correspondence."
+            )
+        if args.dataset_cache_mode == "hf":
+            raise ValueError(
+                "--dataset_cache_mode hf is not supported for multimodal training; a media-bearing dataset should "
+                "not be pushed to the Hub. Use the default local cache."
+            )
+
+        # `image_max_pixels` / `image_min_pixels` are already populated on tc straight from the CLI.
+        tc.processor_name_or_path = args.model_name_or_path
+        if args.dataset_transform_fn == FlatArguments.__dataclass_fields__["dataset_transform_fn"].default_factory():
+            logger.info(f"Detected multimodal model ({model_config.model_type}); using {MM_SFT_TRANSFORM_FNS}.")
+            args.dataset_transform_fn = list(MM_SFT_TRANSFORM_FNS)
+            args.dataset_target_columns = list(TOKENIZED_SFT_DATASET_KEYS_MM)
+
     if args.dataset_mixer is not None:
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
-        transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
+        # Keyed off the actual chain, not `is_multimodal`: a VLM run with a custom
+        # `--dataset_transform_fn` must not get the multimodal argument list.
+        if args.dataset_transform_fn == list(MM_SFT_TRANSFORM_FNS):
+            transform_fn_args = [{"media_dir": args.media_dir}, {}, {"max_seq_length": args.max_seq_length}]
+        else:
+            transform_fn_args = [{"max_seq_length": args.max_seq_length}, {}]
         train_dataset = get_cached_dataset_tulu(
             dataset_mixer_list=args.dataset_mixer_list,
             dataset_mixer_list_splits=args.dataset_mixer_list_splits,
@@ -512,9 +636,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             dataset_skip_cache=args.dataset_skip_cache,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
-        train_dataset.set_format(type="pt")
+        if is_multimodal:
+            # The images column holds paths/bytes and cannot be tensorized.
+            train_dataset.set_format(type="pt", columns=TOKENIZED_SFT_DATASET_KEYS, output_all_columns=True)
+        else:
+            train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
-        visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer)
+        visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer, collapse_repeats=8 if is_multimodal else None)
 
     if args.cache_dataset_only:
         return
@@ -523,7 +651,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # when multiple ranks on a shared filesystem all try to access the
     # HF hub cache concurrently.
     model_path = args.config_name or args.model_name_or_path
-    if model_path and accelerator.is_main_process:
+    # A local checkpoint directory (e.g. on weka) is not a hub repo id; snapshot_download would
+    # reject it as a malformed repo name.
+    if model_path and accelerator.is_main_process and not os.path.isdir(model_path):
         snapshot_download(model_path, revision=args.model_revision)
     accelerator.wait_for_everyone()
 
@@ -547,6 +677,26 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
 
+    # VLMs are not in the CausalLM auto-mapping at all, so this selection is load-bearing.
+    if is_multimodal:
+        mm_plugin.configure_visual_config(config)
+        if type(config) not in AutoModelForImageTextToText._model_mapping:
+            raise ValueError(
+                f"model_type '{config.model_type}' has a multimodal plugin registered but is not in the "
+                "AutoModelForImageTextToText mapping for this transformers version."
+            )
+        model_class = AutoModelForImageTextToText
+        if args.use_qlora:
+            raise ValueError("QLoRA is not supported for multimodal training (untested with vision towers).")
+        if args.use_liger_kernel:
+            raise ValueError("liger-kernel is not supported for multimodal training.")
+    else:
+        model_class = AutoModelForCausalLM
+
+    # Resolved once so an override applies to every load path below.
+    attn_implementation = args.attn_implementation or model_utils.detect_hf_attn_implementation()
+    logger.info(f"Using attention implementation: {attn_implementation}")
+
     if args.model_name_or_path:
         if args.use_qlora:
             bnb_config = BitsAndBytesConfig(
@@ -566,7 +716,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 quantization_config=bnb_config,
                 device_map=device_map,
                 dtype=torch.bfloat16,
-                attn_implementation=model_utils.detect_hf_attn_implementation(),
+                attn_implementation=attn_implementation,
             )
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM  # noqa: PLC0415
@@ -581,12 +731,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 config=config,
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                attn_implementation=model_utils.detect_hf_attn_implementation(),
+                attn_implementation=attn_implementation,
                 # liger-kernel specific args
                 fused_linear_cross_entropy=True,
             )
         else:
-            model = AutoModelForCausalLM.from_pretrained(
+            model, loading_info = model_class.from_pretrained(
                 args.model_name_or_path,
                 revision=args.model_revision,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
@@ -594,11 +744,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 dtype=torch.bfloat16,
-                attn_implementation=model_utils.detect_hf_attn_implementation(),
+                attn_implementation=attn_implementation,
+                output_loading_info=True,
             )
+            _check_checkpoint_fully_loaded(loading_info, args)
     else:
         logger.info("Training new model from scratch")
-        model = AutoModelForCausalLM.from_config(config)
+        model = model_class.from_config(config)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -615,6 +767,31 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
 
+    frozen_module_keys: list[str] = []
+    if is_multimodal:
+        frozen_module_keys = mm_plugin.get_frozen_module_keys(
+            config.model_type, args.freeze_vision_tower, args.freeze_multi_modal_projector, args.freeze_language_model
+        )
+        if frozen_module_keys and not args.use_lora:
+            num_frozen_params = 0
+            num_frozen_tensors = 0
+            for name, param in model.named_parameters():
+                if any(key in name for key in frozen_module_keys):
+                    param.requires_grad = False
+                    num_frozen_tensors += 1
+                    # Under ZeRO-3 `numel()` is 0 for a partitioned param; the real size is in
+                    # `ds_numel`, without which the log reads "0.0M" as if nothing was frozen.
+                    num_frozen_params += getattr(param, "ds_numel", None) or param.numel()
+            logger.info(
+                f"Froze {num_frozen_tensors} tensors ({num_frozen_params / 1e6:.1f}M params) "
+                f"matching {frozen_module_keys}."
+            )
+            if num_frozen_tensors == 0:
+                raise ValueError(
+                    f"--freeze_* was requested but no parameters matched {frozen_module_keys} for model_type "
+                    f"{config.model_type}. The COMPOSITE_MODULES entry is stale for this checkpoint."
+                )
+
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
@@ -623,21 +800,34 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             model.gradient_checkpointing_enable()
 
         logger.info("Initializing LORA model...")
+        lora_target_modules = ["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"]
+        if is_multimodal:
+            lora_target_modules = mm_plugin.filter_lora_target_modules(
+                model, config.model_type, lora_target_modules, frozen_module_keys
+            )
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
-            target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"],
+            target_modules=lora_target_modules,
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
+    if is_multimodal and args.gradient_checkpointing and args.freeze_vision_tower:
+        disabled = mm_plugin.disable_vision_gradient_checkpointing(model, config.model_type)
+        logger.info(f"Disabled gradient checkpointing on the frozen vision tower: {disabled}.")
+
     # DataLoaders creation:
-    if args.packing:
+    if is_multimodal:
+        collate_fn = MultiModalDataCollator(
+            tokenizer=tokenizer, processor=tc.processor, plugin=tc.mm_plugin, model=model, compute_dtype=torch.bfloat16
+        )
+    elif args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
     else:
         base_collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
@@ -661,7 +851,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     accelerator.print("Creating dataloader")
     train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
+        train_dataset,
+        shuffle=True,
+        collate_fn=collate_fn,
+        batch_size=args.per_device_train_batch_size,
+        num_workers=args.dataloader_num_workers,
+        persistent_workers=args.dataloader_num_workers > 0,
+        pin_memory=args.dataloader_num_workers > 0,
     )
 
     # Optimizer
@@ -677,7 +873,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
+        optimizer = torch.optim.AdamW(
+            optimizer_grouped_parameters,
+            lr=args.learning_rate,
+            betas=(args.adam_beta1, args.adam_beta2),
+            eps=args.adam_epsilon,
+            fused=args.fused_optimizer,
+        )
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -991,7 +1193,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     if args.output_dir is not None:
         save_with_accelerate(
-            accelerator, model, tokenizer, args.output_dir, args.use_lora, chat_template_name=tc.chat_template_name
+            accelerator,
+            model,
+            tokenizer,
+            args.output_dir,
+            args.use_lora,
+            chat_template_name=tc.chat_template_name,
+            processor=tc.processor if is_multimodal else None,
         )
 
     # remove all checkpoints to save space
