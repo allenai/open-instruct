@@ -511,3 +511,20 @@ prebuilt wheel from GitHub releases — confirmed the URL itself is reachable (p
 `curl` succeeded), so this looks like a `uv`-specific transient HTTP/2 hiccup, not a
 real network/connectivity problem. Third attempt succeeded. Resumed: Beaker
 [01KZVPTCJW89KJPRAHQPVZYQDK](https://beaker.org/ex/01KZVPTCJW89KJPRAHQPVZYQDK).
+
+### 2026-08-12 450M fixed-chat-template eval result
+
+`01KZVM5VB3C9TTQSWX5MA9XYP2` succeeded (exitCode 0) after the symlink fix.
+`correct_rate` **0.05**, stop_rate 0.98, seq_len 1872 — essentially identical to the
+original 450M `think` baseline (also 0.05, using the hand-rolled
+`olmo_hybrid_small_think` override template). Good sanity check: the checkpoint's own
+corrected built-in template and the manually-reconstructed override template produce
+matching behavior, validating the earlier template-correction work.
+
+### 2026-08-12 Dolci difficulty scoring progressing
+
+Both jobs started (~19:25-19:26 UTC) after clearing the GPU queue. `code_api_setup.sh`
+came up cleanly on both (128 uvicorn workers + nginx load balancer, health checks
+passing). 275m: dataset download from the hub completed (102,014/102,014 rows, ~5 min)
+and moved into the actual scoring pass. 450m: still downloading as of this check. No
+errors on either.

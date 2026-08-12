@@ -504,4 +504,15 @@ transient, unrelated `uv sync` HTTP/2 hiccup fetching the `flash-attn` wheel (pl
 `curl` to the same URL worked fine, so not a real connectivity issue — just retry if
 this recurs).
 
+**450M fixed-chat-template eval confirms the corrected template is accurate
+(2026-08-12):** `correct_rate` 0.05, matching the original 450M `think` baseline
+exactly — the checkpoint's own baked-in corrected chat template and the earlier
+hand-reconstructed `olmo_hybrid_small_think` override produce equivalent behavior.
+
+**Dolci difficulty scoring (275m/450m) launched and progressing (2026-08-12):** both
+jobs cleared the GPU queue, `code_api_setup.sh` came up cleanly on both, and dataset
+download is complete/in-progress. No errors yet; this is a long-running job (102,014
+rows × up to 16 completions each need per-completion verifier calls across rule-based
+math/ifeval, the code API, and the LLM judge) — expect it to take a while.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
