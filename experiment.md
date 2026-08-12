@@ -528,3 +528,19 @@ came up cleanly on both (128 uvicorn workers + nginx load balancer, health check
 passing). 275m: dataset download from the hub completed (102,014/102,014 rows, ~5 min)
 and moved into the actual scoring pass. 450m: still downloading as of this check. No
 errors on either.
+
+**Known non-fatal issue found in 275m scoring (~20:11 UTC):** the LLM judge
+(`--llm_judge_max_tokens 2048` against the judge server's `--max-model-len 32768`)
+fails with `litellm.ContextWindowExceededError` for any `general-quality`/
+`general-quality_ref` prompt whose input alone exceeds ~30.7k tokens (input + the
+requested 2048 output tokens > 32768). `filter_existing_dataset_correctness.py`
+catches this after 3 retries and falls back to a default score of `0.0` for that
+sample — the job does **not** crash, but affected long-context general-quality rows
+will get a spuriously low (0.0) passrate rather than a real judged score. Not
+intervening mid-run (would lose all progress so far for a partial-data-quality issue,
+not a systemic failure) — flagging for whoever consumes `_scored`'s
+`general-quality`/`general-quality_ref` rows: treat exact-0.0 passrates in those two
+domains with suspicion, they may be context-overflow artifacts rather than genuine
+low-quality judgments. A future re-run could avoid this with a larger
+`--llm_judge_max_context_length`-compatible judge server config or a shorter
+`--llm_judge_max_tokens`.

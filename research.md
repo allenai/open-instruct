@@ -515,4 +515,14 @@ download is complete/in-progress. No errors yet; this is a long-running job (102
 rows × up to 16 completions each need per-completion verifier calls across rule-based
 math/ifeval, the code API, and the LLM judge) — expect it to take a while.
 
+**Caveat found mid-run: LLM judge context overflow silently zeroes some scores.** The
+judge server's `--max-model-len 32768` can't fit some `general-quality`/
+`general-quality_ref` prompts (input alone >30.7k tokens) plus the requested 2048
+output tokens; those calls fail and get a `0.0` default after 3 retries — not a crash,
+but means some long-context general-quality rows in the `_scored` output will have
+spuriously low passrates that reflect context overflow, not actual judged quality.
+Left running rather than restarting (would lose all progress for a partial-data
+issue). Whoever uses the `_scored` datasets should treat exact-0.0
+general-quality/general-quality_ref passrates with some suspicion.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
