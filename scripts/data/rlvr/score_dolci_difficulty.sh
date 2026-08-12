@@ -24,19 +24,21 @@
 # then resolve its hostname (beaker experiment get / beaker node get, see
 # configs/judge_configs/qwen3_32b_judge.yaml) into a HOSTED_VLLM_API_BASE.
 #
-# Usage: ./score_dolci_difficulty.sh [BEAKER_IMAGE] MODEL_TAG HOSTED_VLLM_API_BASE
+# Usage: [BEAKER_IMAGE=...] ./score_dolci_difficulty.sh MODEL_TAG HOSTED_VLLM_API_BASE
+# (BEAKER_IMAGE is an env var override here, not a positional arg — with a variable
+# number of following args there's no reliable way to tell an omitted image apart
+# from MODEL_TAG, same reasoning as scripts/train/olmo-hybrid-small/gsm8k_grpo.sh.)
 # e.g.:  ./score_dolci_difficulty.sh hybrid_450m http://saturn-cs-aus-240.reviz.ai2.in:8001/v1
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test-${SANITIZED_BRANCH}-cuda12}"
-[[ $# -gt 0 ]] && shift
+BEAKER_IMAGE="${BEAKER_IMAGE:-${BEAKER_USER}/open-instruct-integration-test-${SANITIZED_BRANCH}-cuda12}"
 
 MODEL_TAG="$1"
 JUDGE_API_BASE="$2"
 if [[ -z "$MODEL_TAG" || -z "$JUDGE_API_BASE" ]]; then
-    echo "Usage: $0 [BEAKER_IMAGE] MODEL_TAG HOSTED_VLLM_API_BASE"
+    echo "Usage: [BEAKER_IMAGE=...] $0 MODEL_TAG HOSTED_VLLM_API_BASE"
     exit 1
 fi
 
