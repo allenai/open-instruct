@@ -496,4 +496,12 @@ achieved with *less* reasoning budget (8192 vs 16384 tokens). 810M think GRPO tr
 is still in progress (was resumed by the user after its own OOM crash); no completed
 number for it yet.
 
+**275M think's 4th host-RAM-OOM occurrence, resumed near the finish (2026-08-12):**
+same Ray host-memory-monitor signature as every prior crash in this session (never GPU
+memory) — now 4 occurrences total across 275M/450M/810M. Recovered from `step1600`
+(only ~400 steps short of the full run) after two failed resume attempts hit a
+transient, unrelated `uv sync` HTTP/2 hiccup fetching the `flash-attn` wheel (plain
+`curl` to the same URL worked fine, so not a real connectivity issue — just retry if
+this recurs).
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

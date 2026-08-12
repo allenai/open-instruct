@@ -486,6 +486,28 @@ positional arg).
 
 - 275m scoring: `EXP_NAME=dolci_difficulty_scoring_hybrid_275m` — Beaker [01KZVN9K504CT8J3AHZAS3NDEY](https://beaker.org/ex/01KZVN9K504CT8J3AHZAS3NDEY)
 - 450m scoring: `EXP_NAME=dolci_difficulty_scoring_hybrid_450m` — Beaker [01KZVNBH8BF3327WV96RB04XR1](https://beaker.org/ex/01KZVNBH8BF3327WV96RB04XR1)
-- Result: TBD (just launched; expect a substantial runtime — 102,014 rows × up to 16
-  completions each need per-completion verifier calls, spread across ~60k rule-based
-  math/ifeval, ~21k via the code API, ~20.6k via the LLM judge)
+- Result: both still queued (only `created`, no `scheduled`) as of ~19:20 UTC, ~25 min
+  after launch — GPU contention remains heavy this session.
+
+### 2026-08-12 275M think GRPO crashed (host-RAM OOM, 4th occurrence), resumed near the finish
+
+`01KZPS2TF1NN97HPH5YCH9RQ95` crashed at 00:56 UTC (missed in earlier checks — this
+session's monitoring cadence had shifted focus to other jobs). Same signature as every
+prior occurrence: `ray.exceptions.OutOfMemoryError: Task was killed due to the node
+running low on memory` — Ray's host-memory monitor, not GPU. This is now the 4th time
+this exact failure mode has hit a training run in this session (275M think ×2, 450M
+think, 810M think), always on `saturn`/`jupiter`/`ceres`, never GPU memory — reinforces
+that this looks like a systemic host-memory issue in the pipeline rather than
+per-job bad luck, still not root-caused to a specific leak source.
+
+Found a checkpoint at `step1600` (much further along than the first crash's `step400`)
+under the same `checkpoint_state_dir`
+(`/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/michaeln/1786351916_614241`)
+— only ~400 steps from the full 2000-step run. Resume hit a **separate, transient local
+issue** on the first two attempts: `uv sync` (inside `build_image_and_launch.sh`, and
+again when the target script's own `uv run python mason.py` triggered a re-sync)
+failed with an HTTP/2 "stream error received: refused stream" fetching the `flash-attn`
+prebuilt wheel from GitHub releases — confirmed the URL itself is reachable (plain
+`curl` succeeded), so this looks like a `uv`-specific transient HTTP/2 hiccup, not a
+real network/connectivity problem. Third attempt succeeded. Resumed: Beaker
+[01KZVPTCJW89KJPRAHQPVZYQDK](https://beaker.org/ex/01KZVPTCJW89KJPRAHQPVZYQDK).
