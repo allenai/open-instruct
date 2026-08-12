@@ -14,9 +14,15 @@
 #   open_close_think - generation prompt pre-fills a closed, empty "<think></think>",
 #                       the standard way to turn a thinking model into instruct-only
 #                       (cf. Qwen3's enable_thinking=False).
-# Both use a corrected default system prompt matching this checkpoint's actual
-# tokenizer_config.json (see research.md#olmo-hybrid-275m-small-suite-grpo-on-gsm8k
-# for why "olmo_thinker"'s default system prompt is wrong for this checkpoint).
+#   builtin          - omits --chat_template_name entirely, so
+#                       get_tokenizer_tulu_v2_2 (dataset_transformation.py) falls
+#                       through to the checkpoint's own tokenizer_config.json
+#                       chat_template, unmodified.
+# think/open_close_think use a corrected default system prompt matching this
+# checkpoint's actual tokenizer_config.json (see
+# research.md#olmo-hybrid-275m-small-suite-grpo-on-gsm8k for why "olmo_thinker"'s
+# default system prompt is wrong for this checkpoint) — builtin uses whatever the
+# checkpoint's own template does instead.
 #
 # EVAL_ONLY=true runs a single training step (learning_rate=0, so weights don't
 # move) with an eval collected at step 1, to get a baseline GSM8K number for the
@@ -44,14 +50,15 @@ GPUS="${6:-8}"
 CLUSTERS="${7:-ai2/saturn ai2/jupiter ai2/ceres}"
 if [[ -z "$BEAKER_IMAGE" || -z "$MODEL_PATH" || -z "$EXP_NAME" || -z "$MODE" ]]; then
     echo "Usage: $0 BEAKER_IMAGE MODEL_PATH EXP_NAME MODE [EVAL_ONLY] [GPUS] [CLUSTERS]"
-    echo "  MODE: think | open_close_think"
+    echo "  MODE: think | open_close_think | builtin"
     exit 1
 fi
 case "$MODE" in
     think) CHAT_TEMPLATE_NAME="olmo_hybrid_small_think" ;;
     open_close_think) CHAT_TEMPLATE_NAME="olmo_hybrid_small_open_close_think" ;;
+    builtin) CHAT_TEMPLATE_NAME="" ;;
     *)
-        echo "Unknown MODE '$MODE', expected 'think' or 'open_close_think'"
+        echo "Unknown MODE '$MODE', expected 'think', 'open_close_think', or 'builtin'"
         exit 1
         ;;
 esac
@@ -74,10 +81,15 @@ fi
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Model: $MODEL_PATH"
 echo "Exp name: $EXP_NAME"
-echo "Mode: $MODE (chat template: $CHAT_TEMPLATE_NAME)"
+echo "Mode: $MODE (chat template: ${CHAT_TEMPLATE_NAME:-<builtin from checkpoint>})"
 echo "Eval only: $EVAL_ONLY (total_episodes=$TOTAL_EPISODES, learning_rate=$LEARNING_RATE)"
 echo "GPUs: $GPUS ($LEARNERS learners, $VLLM_ENGINES vLLM engines)"
 echo "Clusters: $CLUSTERS"
+
+CHAT_TEMPLATE_ARGS=()
+if [[ -n "$CHAT_TEMPLATE_NAME" ]]; then
+    CHAT_TEMPLATE_ARGS=(--chat_template_name "$CHAT_TEMPLATE_NAME")
+fi
 
 uv run python mason.py \
     --task_name ${EXP_NAME} \
@@ -116,7 +128,7 @@ uv run python mason.py \
     --response_length 16384 \
     --pack_length 32768 \
     --model_name_or_path "$MODEL_PATH" \
-    --chat_template_name "$CHAT_TEMPLATE_NAME" \
+    "${CHAT_TEMPLATE_ARGS[@]}" \
     --non_stop_penalty False \
     --temperature 1.0 \
     --total_episodes $TOTAL_EPISODES \
