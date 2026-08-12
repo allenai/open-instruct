@@ -456,4 +456,20 @@ launched next (mirroring the `think` training runs already in progress for 810M/
 not launched automatically here since it's a further multi-hour compute commitment;
 flagging as the natural next step.
 
+**810M think crash root-caused as host-RAM OOM, not GPU (2026-08-11):** died at step
+513/2000. No CUDA/GPU OOM anywhere in the log — Ray's own host-memory monitor killed a
+worker, and the job hung for ~15 min on the dead worker before an RPC keepalive
+timeout finally killed it. Same failure category as the earlier 275M/450M crashes
+(all traced to Ray/raylet host-memory pressure, never GPU memory), now confirmed a
+third time across different sizes and physical nodes — looks like a systemic host-memory
+issue in the pipeline rather than bad luck, though not root-caused to a specific leak
+source here. User resumed from the `step400` checkpoint themselves.
+
+**New checkpoint variant with a corrected built-in chat template (2026-08-11):**
+`saumyam/hybrid-small-sft-think-450m-lr8e-4/step24834-hf-fixed-chat-template` bakes the
+corrected system prompt directly into `tokenizer_config.json`, rather than needing
+`gsm8k_grpo.sh`'s `think`/`open_close_think` override templates. Added a `builtin` mode
+to the script (omits `--chat_template_name` so the checkpoint's own template is used
+unmodified) and launched an eval-only baseline; result pending.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

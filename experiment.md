@@ -404,3 +404,35 @@ cases, alongside the 3 existing tests for the generic mapper — 6/6 pass. Re-ad
 
   \*810M/1.4B `think` still used the halved `response_length=8192` workaround (launched
   before this fix landed), so not directly comparable to the others.
+
+### 2026-08-11 810M think GRPO training crashed (host-RAM OOM, not GPU), resumed by user
+
+`01KZRMQ4KNAJMG09AEEZY4PV8V` died at step 513/2000 (exitCode 1, ~19:43 UTC). Confirmed
+**not** a CUDA/GPU OOM — no `torch.OutOfMemoryError` anywhere in the log. Root cause:
+Ray's own host-memory monitor killed a worker (`(raylet) node_manager.cc:3256: 1
+Workers (tasks / actors) killed due to memory pressure (OOM)`), after which the rest of
+the job hung for ~15 minutes waiting on the dead worker (`wait_count=1000`+, gRPC
+`keepalive_ping_end` errors) before the RPC keepalive watchdog finally timed out and
+cascaded into `ray.exceptions.ActorUnavailableError`. Same underlying failure mode as
+the earlier 275M/450M host-RAM OOM crashes, just a different (slower, RPC-timeout-based)
+downstream symptom this time instead of an immediate Python `OutOfMemoryError`. Given
+this has now recurred across multiple sizes/GPU configs/physical nodes over the course
+of this session, it looks systemic (a host-memory leak somewhere in the CPU-side
+rollout/data-prep pipeline that grows with wall-clock time) rather than one-off bad
+luck — not root-caused further here; would need live host-memory profiling during a run
+to pin down. User resumed the job themselves (checkpoint was available at `step400`).
+
+### 2026-08-11 450M "fixed-chat-template" checkpoint eval, using the checkpoint's own template
+
+New checkpoint variant with a corrected chat template baked directly into
+`tokenizer_config.json` (rather than needing `--chat_template_name` to override it):
+`saumyam/hybrid-small-sft-think-450m-lr8e-4/step24834-hf-fixed-chat-template`. Added a
+`builtin` `MODE` to `gsm8k_grpo.sh` that omits `--chat_template_name` entirely
+(previously the script always passed one of the two hardcoded `olmo_hybrid_small_*`
+templates), so `get_tokenizer_tulu_v2_2` falls through to the checkpoint's own
+`tokenizer_config.json` `chat_template` unmodified. Confirmed via the printed launch
+command that no `--chat_template_name` flag is present.
+
+- Launch: `./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_grpo.sh MODEL_PATH EXP_NAME builtin true`
+- `EXP_NAME=olmo_hybrid_450m_gsm8k_fixed_chat_template_eval` — Beaker [01KZVG1PZJBHXR5K3GRR16EXV3](https://beaker.org/ex/01KZVG1PZJBHXR5K3GRR16EXV3)
+- Result: TBD
