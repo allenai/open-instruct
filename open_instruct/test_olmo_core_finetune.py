@@ -3,6 +3,7 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from parameterized import parameterized
 
@@ -85,12 +86,31 @@ class IsHfCheckpointTest(unittest.TestCase):
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
 
 
+class QwenMoeConfigTest(unittest.TestCase):
+    def test_qwen3_config_is_detected(self) -> None:
+        config = SimpleNamespace(model_type="qwen3_moe", vocab_size=151936)
+
+        self.assertTrue(olmo_core_utils._is_qwen_moe_config(config))
+        self.assertEqual(151936, olmo_core_utils._get_hf_vocab_size(config))
+
+    def test_qwen35_multimodal_config_uses_nested_text_config(self) -> None:
+        text_config = SimpleNamespace(model_type="qwen3_5_moe_text", vocab_size=248320)
+        config = SimpleNamespace(model_type="qwen3_5_moe", text_config=text_config)
+
+        self.assertTrue(olmo_core_utils._is_qwen_moe_config(config))
+        self.assertEqual(248320, olmo_core_utils._get_hf_vocab_size(config))
+
+    def test_unrelated_nested_text_config_is_not_detected(self) -> None:
+        text_config = SimpleNamespace(model_type="other_text_model", vocab_size=32000)
+        config = SimpleNamespace(model_type="other_multimodal_model", text_config=text_config)
+
+        self.assertFalse(olmo_core_utils._is_qwen_moe_config(config))
+
+
 class RetainedCheckpointerCallbackTest(unittest.TestCase):
     def test_build_checkpointer_can_disable_all_saves(self) -> None:
         callback = olmo_core_utils.build_checkpointer_callback(
-            checkpointing_steps=1000,
-            ephemeral_save_interval=None,
-            enabled=False,
+            checkpointing_steps=1000, ephemeral_save_interval=None, enabled=False
         )
 
         self.assertFalse(callback.enabled)

@@ -171,6 +171,49 @@ class CombineDatasetTest(unittest.TestCase):
             utils.combine_dataset(mixer, splits=["train"], columns_to_keep=["messages"])
 
 
+class ConversationsToMessagesTest(unittest.TestCase):
+    def test_legacy_sharegpt_records(self):
+        row = {"conversations": [{"from": "human", "value": "question"}, {"from": "gpt", "value": "answer"}]}
+
+        converted = utils.conversations_to_messages(row)
+
+        self.assertEqual(
+            converted["messages"],
+            [{"role": "user", "content": "question"}, {"role": "assistant", "content": "answer"}],
+        )
+
+    def test_canonical_role_content_records(self):
+        row = {
+            "conversations": [
+                {"role": "user", "content": "terminal task"},
+                {"role": "assistant", "content": "commands"},
+                {"role": "environment", "content": "terminal output"},
+            ]
+        }
+
+        converted = utils.conversations_to_messages(row)
+
+        self.assertEqual(converted["messages"], row["conversations"])
+
+    def test_json_encoded_records(self):
+        row = {
+            "conversations": json.dumps(
+                [{"role": "User", "content": "question"}, {"role": "Assistant", "content": "answer"}]
+            )
+        }
+
+        converted = utils.conversations_to_messages(row)
+
+        self.assertEqual(
+            converted["messages"],
+            [{"role": "user", "content": "question"}, {"role": "assistant", "content": "answer"}],
+        )
+
+    def test_unknown_shape_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "role/content or from/value"):
+            utils.conversations_to_messages({"conversations": [{"speaker": "user", "text": "question"}]})
+
+
 class ParseDatasetMixerListTest(unittest.TestCase):
     @parameterized.expand(
         [

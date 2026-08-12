@@ -332,23 +332,44 @@ def convert_open_orca_to_messages(example):
 
 def conversations_to_messages(example):
     """
-    Convert from conversations format to messages.
+    Convert common ``conversations`` formats to canonical messages.
 
-    E.g. change "from": "user" to "role": "user"
-        and "value" to "content"
-        and "gpt" to "assistant"
+    Supports both legacy ShareGPT ``from``/``value`` records and canonical
+    ``role``/``content`` records used by OpenThoughts-Agent.
 
     WizardLMTeam/WizardLM_evol_instruct_V2_196k
     """
     name_mapping = {
         "gpt": "assistant",
-        "Assistant": "assistant",
         "assistant": "assistant",
         "user": "user",
-        "User": "user",
         "human": "user",
+        "system": "system",
+        "tool": "tool",
+        "environment": "environment",
     }
-    messages = [{"role": name_mapping[conv["from"]], "content": conv["value"]} for conv in example["conversations"]]
+    conversations = example["conversations"]
+    if isinstance(conversations, str):
+        conversations = json.loads(conversations)
+
+    messages = []
+    for index, conversation in enumerate(conversations):
+        if "role" in conversation and "content" in conversation:
+            role = conversation["role"]
+            content = conversation["content"]
+        elif "from" in conversation and "value" in conversation:
+            role = conversation["from"]
+            content = conversation["value"]
+        else:
+            raise ValueError(
+                f"Conversation at index {index} must contain role/content or from/value keys: {conversation}"
+            )
+
+        normalized_role = name_mapping.get(str(role).lower())
+        if normalized_role is None:
+            raise ValueError(f"Unsupported conversation role at index {index}: {role!r}")
+        messages.append({"role": normalized_role, "content": content})
+
     example["messages"] = messages
     return example
 
