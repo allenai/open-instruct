@@ -1,0 +1,21 @@
+ARG BASE_IMAGE=gcr.io/ai2-beaker-core/public/d98he3um0urc73cruscg
+FROM ${BASE_IMAGE}
+
+WORKDIR /stage
+
+# OLMo-core pins FLA 0.4.1 while its FLA 0.5 TileLang integration is unstable.
+RUN uv pip uninstall --python .venv/bin/python tilelang fla-core flash-linear-attention && \
+    uv pip install --python .venv/bin/python flash-linear-attention==0.4.1
+
+COPY configs configs
+COPY scripts scripts
+COPY mason.py mason.py
+COPY open_instruct open_instruct
+COPY oe-eval-interna[l] oe-eval-internal/
+
+ARG GIT_COMMIT="" \
+    GIT_BRANCH=""
+
+ENV GIT_COMMIT=${GIT_COMMIT} \
+    GIT_BRANCH=${GIT_BRANCH} \
+    PATH=/stage/.venv/bin:$PATH
