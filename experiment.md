@@ -435,4 +435,13 @@ command that no `--chat_template_name` flag is present.
 
 - Launch: `./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_grpo.sh MODEL_PATH EXP_NAME builtin true`
 - `EXP_NAME=olmo_hybrid_450m_gsm8k_fixed_chat_template_eval` — Beaker [01KZVG1PZJBHXR5K3GRR16EXV3](https://beaker.org/ex/01KZVG1PZJBHXR5K3GRR16EXV3)
-- Result: TBD
+- Result: queued for ~30 min on GPU contention, scheduled 2026-08-12 ~17:55 UTC, not yet
+  started as of this note.
+
+### 2026-08-12 1.4B think GRPO training nearing completion with an exceptional result
+
+`01KZRMQV47PHK15WJVN36JDZ90`, at step 1899/2000 as of ~17:00 UTC:
+`objective/gsm8k_correct_rate` progression 0.90 (step 1399) → 0.91 (1499-1799) → 0.92
+(1899) — up from its 0.74/0.75 baseline, and by far the best result anywhere in this
+study, achieved with the halved `response_length=8192` workaround (not even the full
+16384 budget). Should finish within the next ~1-2 eval cycles.

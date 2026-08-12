@@ -472,4 +472,14 @@ corrected system prompt directly into `tokenizer_config.json`, rather than needi
 to the script (omits `--chat_template_name` so the checkpoint's own template is used
 unmodified) and launched an eval-only baseline; result pending.
 
+**1.4B think GRPO training: exceptional result (2026-08-12, ~17:00 UTC).** Now at step
+1899/2000 (essentially done), `correct_rate` has climbed to **0.90-0.92**, up from its
+0.74/0.75 baseline — by a wide margin the best result anywhere in this study (next
+highest was 810M think's ~0.62-ish trajectory and the 450M runs' ~0.60-0.61 finals).
+Progression: 0.90 (step 1399) → 0.91 (1499-1799, briefly flat) → 0.92 (1899). Given
+`response_length=8192` was used for this run (the length-reduction workaround, not the
+full 16384), this is an even more striking result — 1.4B think is solving GSM8K at
+>90% with half the reasoning budget the smaller sizes get. Worth watching for the final
+step-2000 number and updating the completed-run summary table once it finishes.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
