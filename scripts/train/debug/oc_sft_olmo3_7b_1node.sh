@@ -54,6 +54,11 @@ CHAT_TEMPLATE=olmo123
 MAX_SEQ_LENGTH=32768
 MIXER="allenai/Dolci-Instruct-SFT 1.0"
 SEED=33333
+# Passed for parity with the 4-node script, but note it does not take effect on
+# Beaker: setup_tokenizer_and_cache overrides local_cache_dir to
+# /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache for any
+# Beaker job. Both modes are Beaker jobs, so both land on the same Weka path.
+LOCAL_CACHE_DIR=/weka/oe-adapt-default/allennlp/numpy_sft_cache
 # add_bos must stay off: dataset_transformation.py asserts it for any "olmo*"
 # chat template.
 # ----------------------------------------------------------------------
