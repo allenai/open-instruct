@@ -457,4 +457,35 @@ command that no `--chat_template_name` flag is present.
 `objective/gsm8k_correct_rate` progression 0.90 (step 1399) → 0.91 (1499-1799) → 0.92
 (1899) — up from its 0.74/0.75 baseline, and by far the best result anywhere in this
 study, achieved with the halved `response_length=8192` workaround (not even the full
-16384 budget). Should finish within the next ~1-2 eval cycles.
+16384 budget).
+
+**Completed 2026-08-12 ~18:53 UTC**: final `correct_rate` **0.92** at step 2000/2000,
+exitCode 0, clean finish ("Training complete"). Best result in this whole study.
+
+### 2026-08-12 Dolci difficulty scoring pipeline launched
+
+Completes the pipeline from the 2026-08-06 generation runs (see the
+`dolci-difficulty-estimation-pipeline` memory) — the raw-completions datasets
+(`mnoukhov/dolci_think_rl_7b_messages_hybrid_275m` / `_hybrid_450m`, 102,014 rows each,
+confirmed pushed successfully) had never been scored for pass-rate. Added
+`scripts/data/rlvr/score_dolci_difficulty.sh` (downloads the hub dataset, converts to
+local jsonl, scores via `filter_existing_dataset_correctness.py` using RLVR verifiers +
+a self-hosted code API + the LLM judge, pushes the annotated
+`<repo>_scored` dataset with `total_rollouts`/`total_correct_rollouts`/`passrate`
+columns) and a small `download_hub_dataset_as_jsonl.py` helper.
+
+Relaunched the Qwen3-32B judge server (both prior instances from 08-06 had since died)
+as `01KZVK7C2AA0VE1H7547TQ8DBQ`; took ~20 min to schedule (heavy GPU contention this
+session), confirmed working at `http://ceres-cs-aus-447.reviz.ai2.in:8001/v1`
+(`/v1/models` returns `Qwen/Qwen3-32B`).
+
+Hit and fixed a positional-arg bug in the new script (`BEAKER_IMAGE="${1:-default}"` is
+ambiguous when called with exactly 2 args — same class of issue `gsm8k_grpo.sh`'s own
+comments warn about; fixed by making `BEAKER_IMAGE` an env var override instead of a
+positional arg).
+
+- 275m scoring: `EXP_NAME=dolci_difficulty_scoring_hybrid_275m` — Beaker [01KZVN9K504CT8J3AHZAS3NDEY](https://beaker.org/ex/01KZVN9K504CT8J3AHZAS3NDEY)
+- 450m scoring: `EXP_NAME=dolci_difficulty_scoring_hybrid_450m` — Beaker [01KZVNBH8BF3327WV96RB04XR1](https://beaker.org/ex/01KZVNBH8BF3327WV96RB04XR1)
+- Result: TBD (just launched; expect a substantial runtime — 102,014 rows × up to 16
+  completions each need per-completion verifier calls, spread across ~60k rule-based
+  math/ifeval, ~21k via the code API, ~20.6k via the LLM judge)

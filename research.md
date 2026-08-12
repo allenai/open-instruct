@@ -479,7 +479,21 @@ highest was 810M think's ~0.62-ish trajectory and the 450M runs' ~0.60-0.61 fina
 Progression: 0.90 (step 1399) → 0.91 (1499-1799, briefly flat) → 0.92 (1899). Given
 `response_length=8192` was used for this run (the length-reduction workaround, not the
 full 16384), this is an even more striking result — 1.4B think is solving GSM8K at
->90% with half the reasoning budget the smaller sizes get. Worth watching for the final
-step-2000 number and updating the completed-run summary table once it finishes.
+>90% with half the reasoning budget the smaller sizes get.
+
+**Finished (2026-08-12, ~18:53 UTC): final `correct_rate` 0.92 at step 2000/2000**,
+exitCode 0, clean completion — confirms the 0.90-0.92 plateau held all the way through,
+no late regression. Completed-run summary across all sizes now:
+
+| | think (final) | open_close_think (final) |
+|---|---|---|
+| 275M | in progress | 0.23 |
+| 450M | 0.61 | 0.60 |
+| 1.4B | **0.92** | not yet trained |
+
+1.4B think is the standout result of the whole study — nearly 3x 450M's ceiling, and
+achieved with *less* reasoning budget (8192 vs 16384 tokens). 810M think GRPO training
+is still in progress (was resumed by the user after its own OOM crash); no completed
+number for it yet.
 
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
