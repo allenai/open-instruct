@@ -435,8 +435,21 @@ command that no `--chat_template_name` flag is present.
 
 - Launch: `./scripts/train/build_image_and_launch.sh scripts/train/olmo-hybrid-small/gsm8k_grpo.sh MODEL_PATH EXP_NAME builtin true`
 - `EXP_NAME=olmo_hybrid_450m_gsm8k_fixed_chat_template_eval` — Beaker [01KZVG1PZJBHXR5K3GRR16EXV3](https://beaker.org/ex/01KZVG1PZJBHXR5K3GRR16EXV3)
-- Result: queued for ~30 min on GPU contention, scheduled 2026-08-12 ~17:55 UTC, not yet
-  started as of this note.
+- Result: **crashed in ~40s** (exitCode 1) with `ValueError: Model/config
+  '.../step24834-hf-fixed-chat-template' not found`. Root cause unrelated to the
+  `builtin` MODE change: `olmo_core_utils._load_native_transformer_config` requires
+  `model_name_or_path` to literally end in the suffix `-hf` to find its sibling
+  olmo-core-native checkpoint (`path.with_name(path.name[:-len("-hf")])` — deserializes
+  that sibling's `config.json` for the exact `TransformerConfig`, since there's no
+  named `olmo_hybrid_small` preset). `step24834-hf-fixed-chat-template` doesn't end in
+  `-hf`, so the check fails immediately and falls through to the "no matching preset"
+  error. **Fix**: rather than touch this shared detection helper or the checkpoint
+  owner's (`saumyam`) directory, created a small symlink pair in my own weka space —
+  `/weka/oe-adapt-default/michaeln/checkpoint_symlinks/hybrid-small-450m-fixed-chat-template/`
+  with `step24834-hf` → the real `-fixed-chat-template` dir and `step24834` → the
+  original native checkpoint (identical architecture, only `tokenizer_config.json`
+  differs) — satisfying the naming convention without modifying either. Relaunched
+  pointed at the symlink: Beaker [01KZVM5VB3C9TTQSWX5MA9XYP2](https://beaker.org/ex/01KZVM5VB3C9TTQSWX5MA9XYP2).
 
 ### 2026-08-12 1.4B think GRPO training nearing completion with an exceptional result
 
