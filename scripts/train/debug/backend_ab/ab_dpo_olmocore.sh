@@ -49,7 +49,7 @@ uv run python mason.py \
     --seed 42 \
     --logging_steps 1 \
     --packing \
-    --activation_memory_budget 0.5 \
+    --activation_memory_budget 0.1 \
     --compile_model true \
     --push_to_hub False \
     --try_launch_beaker_eval_jobs False \
