@@ -568,20 +568,20 @@ def save_state_dict_as_hf(
         )
     else:
         converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
-    # clone(), not contiguous(). olmo-core's load_model_and_optim_state materializes
-    # parameters as views into shared flat buffers, and contiguous() returns self for a
-    # tensor that is already contiguous, so the sharing survives. save_pretrained then
-    # identifies shared tensors by storage pointer and writes only one of each group,
-    # silently dropping the rest -- small tensors like the norms, which get packed
-    # together, went missing entirely and vLLM refused to load the result.
-    converted = {k: v.detach().clone() for k, v in converted.items()}
+    converted = {k: v.contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
     hf_model.load_state_dict(converted, assign=True)
 
     os.makedirs(save_dir, exist_ok=True)
-    hf_model.save_pretrained(save_dir)
+    # save_original_format=False. For any model_type with an entry in transformers'
+    # conversion_mapping (olmo_hybrid renames input_layernorm -> attention_layer_norm and
+    # post_attention_layernorm -> feedforward_layer_norm), the default True writes the
+    # legacy names. The released Olmo-Hybrid checkpoints -- and vLLM, which reads the file
+    # directly -- use the modern names, so a default save produced checkpoints vLLM
+    # rejected with "Following weights were not initialized from checkpoint".
+    hf_model.save_pretrained(save_dir, save_original_format=False)
     tokenizer.save_pretrained(save_dir)
 
     index_path = os.path.join(save_dir, "model.safetensors.index.json")
@@ -592,11 +592,12 @@ def save_state_dict_as_hf(
         # Reads only the header, not the tensors.
         with safetensors.safe_open(os.path.join(save_dir, "model.safetensors"), framework="pt") as shard:
             saved = set(shard.keys())
-    dropped = sorted(set(converted) - saved)
-    if dropped:
+    missing = sorted(set(converted) - saved)
+    if missing:
         raise RuntimeError(
-            f"save_pretrained dropped {len(dropped)} tensors (e.g. {dropped[:5]}); "
-            "the exported checkpoint is incomplete and will not load."
+            f"{len(missing)} converted tensors are absent from the saved checkpoint "
+            f"(e.g. {missing[:5]}); it will not load. Check whether transformers renamed "
+            f"them on save: the file contains {sorted(saved - set(converted))[:5]}."
         )
 
 
