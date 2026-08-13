@@ -51,9 +51,7 @@ logger = logger_utils.setup_logger(__name__)
 
 
 # Must stay strictly below CheckpointConfig.checkpointing_steps (500), which olmo-core
-# requires; at 500 the two defaults collided and every run that did not override one of
-# them was rejected at startup. Runs using --checkpointing_steps at or below this value
-# still need to pass --ephemeral_save_interval themselves (-1 disables it).
+# requires;
 _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
 
 _TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
