@@ -496,6 +496,32 @@ achieved with *less* reasoning budget (8192 vs 16384 tokens). 810M think GRPO tr
 is still in progress (was resumed by the user after its own OOM crash); no completed
 number for it yet.
 
+**275M think GRPO finished (2026-08-13, ~03:39 UTC): final `correct_rate` 0.13**,
+step 1999/2000, exitCode 0, "Training complete". This is the last of the 8 size×mode
+training runs to finish (excluding 810M think, still tracked by the user directly).
+Unlike every other size, 275M's `think` mode plateaus **well below**
+`open_close_think` (0.13 vs 0.23) rather than catching up to or exceeding it — `stop_rate`
+also stayed low throughout the back half of training (0.57-0.64 across the last 4 evals,
+never approaching the ~0.9+ seen at other sizes/modes), so 275M `think` likely never
+learned to reliably terminate its `<think>` reasoning within the 16384-token budget,
+capping its effective score. Final completed-run summary across the whole study
+(all 8 size×mode combos, 810M think excluded — still training, user-tracked):
+
+| | think (final) | open_close_think (final) |
+|---|---|---|
+| 275M | **0.13** | 0.23 |
+| 450M | 0.61 | 0.60 |
+| 810M | in progress (user-tracked) | 0.32 (baseline only, never trained) |
+| 1.4B | **0.92** | 0.61 (baseline only, never trained) |
+
+Takeaways: (1) `think` mode's benefit scales strongly with model size — it's a clear
+liability at 275M (worse than open_close_think), roughly on par at 450M, and the
+runaway best result at 1.4B (0.92, using half the reasoning budget). (2) Only 275M and
+450M got both modes fully trained; 810M and 1.4B only have `open_close_think` and
+`think` baselines respectively for the other mode (810M `open_close_think` and 1.4B
+`open_close_think` were never launched for full GRPO training in this study — the
+baseline eval numbers shown are the only data for those cells).
+
 **275M think's 4th host-RAM-OOM occurrence, resumed near the finish (2026-08-12):**
 same Ray host-memory-monitor signature as every prior crash in this session (never GPU
 memory) — now 4 occurrences total across 275M/450M/810M. Recovered from `step1600`

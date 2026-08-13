@@ -558,3 +558,18 @@ server capacity, not verifier/CPU throughput, is the bottleneck. Job is healthy,
 slow; not intervening (see research.md for the write-up and possible future fixes:
 more judge replicas, or splitting `general-quality*` into a separate lower-concurrency
 pass).
+
+### 2026-08-13 275M think GRPO training completed — last of the 8 core runs
+
+`01KZVPTCJW89KJPRAHQPVZYQDK` (resumed from `step1600` after its 4th host-RAM-OOM crash)
+finished cleanly at step 1999/2000 (~03:39 UTC, exitCode 0, "Training complete"). Final
+`objective/gsm8k_correct_rate` **0.13**, `stop_rate` 0.62, seq_len 6610 — well below its
+`open_close_think` counterpart's final 0.23, and the only size in the study where
+`think` mode ends up *worse* than `open_close_think` rather than matching or exceeding
+it (450M: 0.61 vs 0.60; 1.4B: 0.92 vs 0.61-baseline-only). `stop_rate` stayed in the
+0.57-0.64 range across the last 4 eval checkpoints (steps 1699/1799/1899/1999), well
+below the ~0.9+ typically seen elsewhere, suggesting 275M `think` never reliably learned
+to close its `<think>` block within the 16384-token budget. This completes all 8
+size×mode eval-only baselines and 6 of 8 full GRPO training runs (810M `think` still
+training, resumed and tracked by the user directly; 810M/1.4B `open_close_think` were
+never launched for full training in this study, only eval-only baselines).
