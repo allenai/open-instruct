@@ -38,7 +38,10 @@ def main() -> None:
     ).to(device)
     hf_model.eval()
     with torch.no_grad():
-        hf_logits = hf_model(ids).logits.float()
+        hf_out = hf_model(ids, output_hidden_states=True)
+    hf_logits = hf_out.logits.float()
+    # hidden_states[0] is the embedding output, so [i + 1] is the output of block i.
+    hf_hidden = [h.float() for h in hf_out.hidden_states]
     hf_state = {k: v.clone() for k, v in hf_model.state_dict().items()}
     hf_config = hf_model.config
     del hf_model
@@ -54,9 +57,40 @@ def main() -> None:
     model.load_state_dict(converted, assign=True)
     model = model.to(device=device, dtype=torch.bfloat16)
     model.eval()
+
+    # Capture each block's output so a mismatch can be traced to the first layer that
+    # diverges, which tells us whether the GDN or the attention block is at fault.
+    olmo_hidden: dict[int, torch.Tensor] = {}
+
+    def _record(idx: int):
+        def hook(_module, _args, output):
+            olmo_hidden[idx] = (output[0] if isinstance(output, (tuple, list)) else output).detach().float()
+
+        return hook
+
+    handles = [block.register_forward_hook(_record(int(i))) for i, block in model.blocks.items()]
     with torch.no_grad():
         out = model(ids)
+    for handle in handles:
+        handle.remove()
     olmo_logits = (out[0] if isinstance(out, (tuple, list)) else out).float()
+
+    logger.info("per-layer divergence (block index, type, max abs diff vs HF):")
+    first_bad = None
+    for idx in sorted(olmo_hidden):
+        if idx + 1 >= len(hf_hidden):
+            break
+        layer_diff = (hf_hidden[idx + 1] - olmo_hidden[idx]).abs().max().item()
+        scale = hf_hidden[idx + 1].abs().max().item()
+        relative_layer = layer_diff / max(scale, 1e-6)
+        if relative_layer > 0.01 and first_bad is None:
+            first_bad = idx
+        if idx < 6 or relative_layer > 0.01:
+            logger.info(
+                f"  block {idx:2d} ({layer_types[idx]:17s}) max abs diff {layer_diff:9.4f} ({relative_layer:.2%})"
+            )
+    if first_bad is not None:
+        logger.info(f"first diverging block: {first_bad} ({layer_types[first_bad]})")
 
     diff = (hf_logits - olmo_logits).abs()
     logit_range = hf_logits.abs().max().item()

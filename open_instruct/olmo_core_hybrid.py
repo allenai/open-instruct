@@ -104,6 +104,9 @@ def olmo_hybrid_like(
     linear_conv_kernel_dim: int = 4,
     linear_allow_neg_eigval: bool = True,
     layer_norm_eps: float = 1e-6,
+    # The GDN output norm does NOT use rms_norm_eps: HF hardcodes 1e-5 for it
+    # (see OlmoHybridGatedDeltaNet.__init__), which is also olmo-core's default.
+    gdn_norm_eps: float = 1e-5,
     attn_backend: AttentionBackendName = AttentionBackendName.flash_2,
     dtype: DType = DType.float32,
     **kwargs: Any,
@@ -125,7 +128,7 @@ def olmo_hybrid_like(
             expand_v=linear_value_head_dim / linear_key_head_dim,
             allow_neg_eigval=linear_allow_neg_eigval,
             conv_size=linear_conv_kernel_dim,
-            norm_eps=layer_norm_eps,
+            norm_eps=gdn_norm_eps,
             dtype=dtype,
         ),
         feed_forward=feed_forward,
