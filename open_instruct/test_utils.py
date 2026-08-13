@@ -27,10 +27,11 @@ import pytest
 import ray
 import responses
 import torch
+from datasets import Dataset
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import data_types, launch_utils, utils
+from open_instruct import data_types, dataset_transformation, launch_utils, utils
 
 
 def _load_mbu_test_cases():
@@ -212,6 +213,40 @@ class ConversationsToMessagesTest(unittest.TestCase):
     def test_unknown_shape_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "role/content or from/value"):
             utils.conversations_to_messages({"conversations": [{"speaker": "user", "text": "question"}]})
+
+    def test_dataset_normalization_adds_messages(self):
+        dataset = Dataset.from_list(
+            [
+                {
+                    "conversations": [
+                        {"role": "user", "content": "question"},
+                        {"role": "assistant", "content": "answer"},
+                    ]
+                }
+            ]
+        )
+
+        normalized = dataset_transformation._normalize_conversations_column(
+            dataset, num_proc=1, dataset_name="test"
+        )
+
+        self.assertEqual(normalized[0]["messages"], dataset[0]["conversations"])
+
+    def test_dataset_normalization_preserves_messages(self):
+        dataset = Dataset.from_list(
+            [
+                {
+                    "messages": [{"role": "user", "content": "already canonical"}],
+                    "conversations": [{"role": "user", "content": "ignored"}],
+                }
+            ]
+        )
+
+        normalized = dataset_transformation._normalize_conversations_column(
+            dataset, num_proc=1, dataset_name="test"
+        )
+
+        self.assertIs(normalized, dataset)
 
 
 class ParseDatasetMixerListTest(unittest.TestCase):

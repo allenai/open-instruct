@@ -64,7 +64,7 @@ from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, Ll
 from transformers.utils.hub import extract_commit_hash
 
 from open_instruct import launch_utils, logger_utils
-from open_instruct.utils import hf_whoami, max_num_processes
+from open_instruct.utils import conversations_to_messages, hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -943,8 +943,8 @@ ENV_CONFIG_KEY = "env_config"
 EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 
 # Cache version: increment this when transformation logic changes significantly
-# to invalidate old caches. v6: Added return_dict=False to apply_chat_template calls for transformers 5.x.
-DATASET_CACHE_VERSION = "v6"
+# to invalidate old caches. v7: Normalize conversations columns before SFT tokenization.
+DATASET_CACHE_VERSION = "v7"
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -985,6 +985,22 @@ def _normalize_env_config_row(row: dict[str, Any]) -> dict[str, Any]:
     """HF map wrapper for env_config normalization."""
     _normalize_env_config_column(row)
     return row
+
+
+def _normalize_conversations_column(dataset: Dataset, *, num_proc: int, dataset_name: str) -> Dataset:
+    """Add canonical ``messages`` when a dataset only exposes ``conversations``."""
+    if DEFAULT_SFT_MESSAGES_KEY in dataset.column_names or "conversations" not in dataset.column_names:
+        return dataset
+
+    fingerprint = hashlib.sha256(
+        f"{DATASET_CACHE_VERSION}:normalize_conversations:{dataset._fingerprint}".encode()
+    ).hexdigest()[:16]
+    return dataset.map(
+        conversations_to_messages,
+        num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+        new_fingerprint=fingerprint,
+        desc=f"Normalizing conversations for {dataset_name}",
+    )
 
 
 def validate_dataset_tools(dataset: Dataset, configured_tool_names: list[str], dataset_name: str = "dataset") -> None:
@@ -1702,6 +1718,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+    dataset = _normalize_conversations_column(dataset, num_proc=num_proc, dataset_name=dc.dataset_name)
     chat_template = getattr(tokenizer, "chat_template", None)
     try:
         chat_template_str = json.dumps(chat_template, sort_keys=True)
