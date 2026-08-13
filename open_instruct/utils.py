@@ -1344,6 +1344,58 @@ python scripts/submit_eval_jobs_old.py \
     print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
 
+def launch_local_vllm_eval(
+    model_path: str,
+    tasks: list[str],
+    output_dir: str,
+    num_gpus: int = 1,
+    max_model_len: int | None = None,
+    limit: int | None = None,
+    max_tokens: int | None = None,
+    trust_remote_code: bool = False,
+) -> None:
+    """Run olmo-eval locally with its vLLM server provider."""
+    olmo_eval = shutil.which("olmo-eval")
+    if olmo_eval is None:
+        raise RuntimeError(
+            "Local evaluation requested, but `olmo-eval` is not installed in the active environment. "
+            "Install the local oe-eval-internal checkout before retrying."
+        )
+
+    command = [
+        olmo_eval,
+        "run",
+        "-m",
+        model_path,
+        "--harness",
+        "default",
+        "-o",
+        "provider.kind=vllm_server",
+        "-o",
+        f"provider.trust_remote_code={str(trust_remote_code).lower()}",
+    ]
+    if max_model_len is not None:
+        command.extend(["-o", f"provider.max_model_len={max_model_len}"])
+    for task in tasks:
+        command.extend(["-t", task])
+        if limit is not None:
+            command.extend(["-o", f"limit={limit}"])
+        if max_tokens is not None:
+            command.extend(["-o", f"max_tokens={max_tokens}"])
+    command.extend(["--num-gpus", str(num_gpus), "--output-dir", output_dir])
+
+    env = os.environ.copy()
+    for variable in ("NO_PROXY", "no_proxy"):
+        entries = [entry for entry in env.get(variable, "").split(",") if entry]
+        for local_address in ("localhost", "127.0.0.1", "0.0.0.0"):
+            if local_address not in entries:
+                entries.append(local_address)
+        env[variable] = ",".join(entries)
+
+    logger.info("Launching local vLLM evaluation: %s", " ".join(command))
+    subprocess.run(command, check=True, env=env)
+
+
 def wandb_url_to_run_path(url: str) -> str:
     """
     Convert a wandb URL to a wandb run path.

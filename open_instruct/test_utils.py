@@ -99,6 +99,43 @@ class TestEnsureHfRepoCached(unittest.TestCase):
         mock_snapshot_download.assert_not_called()
 
 
+class TestLaunchLocalVllmEval(unittest.TestCase):
+    @mock.patch("open_instruct.utils.subprocess.run")
+    @mock.patch("open_instruct.utils.shutil.which", return_value="/env/bin/olmo-eval")
+    def test_builds_vllm_command_and_bypasses_proxy_for_local_health_checks(self, _mock_which, mock_run):
+        with mock.patch.dict(os.environ, {"NO_PROXY": "internal.example"}, clear=False):
+            utils.launch_local_vllm_eval(
+                model_path="/models/checkpoint",
+                tasks=["gsm8k", "ifeval"],
+                output_dir="/results/eval",
+                num_gpus=2,
+                max_model_len=2048,
+                limit=3,
+                max_tokens=64,
+                trust_remote_code=True,
+            )
+
+        command = mock_run.call_args.args[0]
+        self.assertEqual(
+            command[:6], ["/env/bin/olmo-eval", "run", "-m", "/models/checkpoint", "--harness", "default"]
+        )
+        self.assertIn("provider.kind=vllm_server", command)
+        self.assertIn("provider.trust_remote_code=true", command)
+        self.assertIn("provider.max_model_len=2048", command)
+        self.assertEqual(command.count("-t"), 2)
+        self.assertEqual(command.count("limit=3"), 2)
+        self.assertEqual(command.count("max_tokens=64"), 2)
+        self.assertEqual(command[-4:], ["--num-gpus", "2", "--output-dir", "/results/eval"])
+        self.assertTrue(mock_run.call_args.kwargs["check"])
+        no_proxy = mock_run.call_args.kwargs["env"]["NO_PROXY"].split(",")
+        self.assertEqual(no_proxy, ["internal.example", "localhost", "127.0.0.1", "0.0.0.0"])
+
+    @mock.patch("open_instruct.utils.shutil.which", return_value=None)
+    def test_fails_loud_when_olmo_eval_is_missing(self, _mock_which):
+        with self.assertRaisesRegex(RuntimeError, "olmo-eval.*not installed"):
+            utils.launch_local_vllm_eval("/models/checkpoint", ["gsm8k"], "/results/eval")
+
+
 class TestGetDeviceMemoryMetrics(unittest.TestCase):
     @mock.patch("open_instruct.utils.torch.cuda")
     def test_uses_selected_accelerator_module(self, mock_cuda):
