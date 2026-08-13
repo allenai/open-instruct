@@ -40,8 +40,10 @@ def main() -> None:
     with torch.no_grad():
         hf_out = hf_model(ids, output_hidden_states=True)
     hf_logits = hf_out.logits.float()
-    # hidden_states[0] is the embedding output, so [i + 1] is the output of block i.
-    hf_hidden = [h.float() for h in hf_out.hidden_states]
+    # hidden_states[0] is the embedding output, so [i + 1] is the output of block i --
+    # except for the last entry, which transformers appends *after* the final norm.
+    # Comparing a raw block output against that would report a spurious mismatch.
+    hf_hidden = [h.float() for h in hf_out.hidden_states[:-1]]
     hf_state = {k: v.clone() for k, v in hf_model.state_dict().items()}
     hf_config = hf_model.config
     del hf_model
