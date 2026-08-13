@@ -50,7 +50,9 @@ from open_instruct import dataset_transformation, logger_utils, numpy_dataset_co
 logger = logger_utils.setup_logger(__name__)
 
 
-_DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
+# Must stay strictly below CheckpointConfig.checkpointing_steps (500), which olmo-core
+# requires;
+_DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
 
 _TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
 
