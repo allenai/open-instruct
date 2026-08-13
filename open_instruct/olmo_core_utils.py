@@ -3,11 +3,13 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import accelerate
+import safetensors
 import torch
 import torch.distributed as dist
 import transformers
@@ -566,7 +568,13 @@ def save_state_dict_as_hf(
         )
     else:
         converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
-    converted = {k: v.contiguous() for k, v in converted.items()}
+    # clone(), not contiguous(). olmo-core's load_model_and_optim_state materializes
+    # parameters as views into shared flat buffers, and contiguous() returns self for a
+    # tensor that is already contiguous, so the sharing survives. save_pretrained then
+    # identifies shared tensors by storage pointer and writes only one of each group,
+    # silently dropping the rest -- small tensors like the norms, which get packed
+    # together, went missing entirely and vLLM refused to load the result.
+    converted = {k: v.detach().clone() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
@@ -575,6 +583,21 @@ def save_state_dict_as_hf(
     os.makedirs(save_dir, exist_ok=True)
     hf_model.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
+
+    index_path = os.path.join(save_dir, "model.safetensors.index.json")
+    if os.path.isfile(index_path):
+        with open(index_path) as index_file:
+            saved = set(json.load(index_file)["weight_map"])
+    else:
+        # Reads only the header, not the tensors.
+        with safetensors.safe_open(os.path.join(save_dir, "model.safetensors"), framework="pt") as shard:
+            saved = set(shard.keys())
+    dropped = sorted(set(converted) - saved)
+    if dropped:
+        raise RuntimeError(
+            f"save_pretrained dropped {len(dropped)} tensors (e.g. {dropped[:5]}); "
+            "the exported checkpoint is incomplete and will not load."
+        )
 
 
 def doc_lens_from_attention_mask(attention_mask_BS: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
