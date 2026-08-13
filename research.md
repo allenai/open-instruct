@@ -565,4 +565,13 @@ than CPU/verifier speed. Not a crash, no action taken — flagging so nobody exp
 out the judge server (more replicas) or splitting `general-quality*` scoring into its
 own lower-concurrency pass, not something to change mid-run.
 
+**Throughput improved substantially since the initial ETA estimate (2026-08-13,
+~24h in):** 450m scoring's tqdm bar now reads `33%|███▎| 33323/102014
+[24:07:26<39:13:17, 2.06s/it]` — per-sample time roughly halved (2.06s/it vs the
+original 4.58s/it), dropping the remaining-time estimate from ~120h to ~39h. Likely
+explanation: judge-server load evens out over a long run as the mix of
+`general-quality`-heavy vs rule-based-verifier-heavy rows varies, or judge-server
+contention eased. Still a multi-day job, but meaningfully better than the initial
+worst-case estimate; no action needed, just an updated expectation.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

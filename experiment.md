@@ -559,6 +559,14 @@ slow; not intervening (see research.md for the write-up and possible future fixe
 more judge replicas, or splitting `general-quality*` into a separate lower-concurrency
 pass).
 
+### 2026-08-13 Dolci scoring throughput update: faster than initially measured
+
+~24h after launch, 450m scoring's tqdm bar reads `33%|███▎| 33323/102014
+[24:07:26<39:13:17, 2.06s/it]` — per-sample rate nearly doubled vs the ~6h mark
+(2.06s/it vs 4.58s/it), bringing the ETA down from ~126h to ~39h remaining. Still
+running, no crashes, no new error types (same context-overflow/timeout/504-gateway/
+aiohttp-unclosed-session set as before). Updated expectation only, no action taken.
+
 ### 2026-08-13 275M think GRPO training completed — last of the 8 core runs
 
 `01KZVPTCJW89KJPRAHQPVZYQDK` (resumed from `step1600` after its 4th host-RAM-OOM crash)
