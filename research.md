@@ -525,4 +525,18 @@ Left running rather than restarting (would lose all progress for a partial-data
 issue). Whoever uses the `_scored` datasets should treat exact-0.0
 general-quality/general-quality_ref passrates with some suspicion.
 
+**Dolci scoring is much slower than expected — ~5-6 day ETA per model (2026-08-13):**
+275m scoring's own tqdm bar surfaced in the logs after ~6h: `7%|▋| 7356/102014
+[5:56:27<120:32:30, 4.58s/it]`, i.e. ~126 hours (5.25 days) total wall time at the
+observed per-sample rate. Root cause is almost certainly the LLM judge server: every
+`general-quality`/`general-quality_ref` row that hits it is paying for up to 3 retries
+at ~60-180s each (context-overflow failures are fast, but the `litellm.Timeout`s
+observed alongside them take a full 181s per attempt under load) before falling back
+to 0.0, and with a single Qwen3-32B judge instance serving both the 275m and 450m
+scoring jobs concurrently, throughput is bottlenecked on judge-server capacity rather
+than CPU/verifier speed. Not a crash, no action taken — flagging so nobody expects
+`_scored` datasets imminently; if the wait is unacceptable, the fix would be scaling
+out the judge server (more replicas) or splitting `general-quality*` scoring into its
+own lower-concurrency pass, not something to change mid-run.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

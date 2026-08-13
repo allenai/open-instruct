@@ -544,3 +544,17 @@ domains with suspicion, they may be context-overflow artifacts rather than genui
 low-quality judgments. A future re-run could avoid this with a larger
 `--llm_judge_max_context_length`-compatible judge server config or a shorter
 `--llm_judge_max_tokens`.
+
+### 2026-08-13 Dolci scoring throughput measured: ~5 day ETA
+
+275m scoring's tqdm bar surfaced in the logs (~02:10 UTC, ~6.75h since launch):
+`Scoring: 7%|▋| 7356/102014 [5:56:27<120:32:30, 4.58s/it]` — at this rate the full
+102,014-row pass is ~126 hours (~5.25 days), far slower than anticipated for what's
+mostly rule-based verification. Both 275m and 450m scoring jobs share one Qwen3-32B
+judge instance; `general-quality`/`general-quality_ref` rows there are paying for up
+to 3 retries at up to 181s each (`litellm.Timeout`, judge server under concurrent
+load from both jobs) on top of the already-known context-overflow failures — judge
+server capacity, not verifier/CPU throughput, is the bottleneck. Job is healthy, just
+slow; not intervening (see research.md for the write-up and possible future fixes:
+more judge replicas, or splitting `general-quality*` into a separate lower-concurrency
+pass).
