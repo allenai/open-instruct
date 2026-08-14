@@ -10,6 +10,7 @@
 - When creating a PR, always add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
+- If a change alters SFT tokenization or assistant-label derivation, either bump `DATASET_CACHE_VERSION` when existing caches become invalid or document why old caches remain valid; validate the change with a fresh `--seed` or cache key.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
 - To launch experiment scripts, use the `build_image_and_launch.sh` script, like this: `./scripts/train/build_image_and_launch.sh $SOME_SCRIPT`.
 - For GRPO, we have three test scripts:
