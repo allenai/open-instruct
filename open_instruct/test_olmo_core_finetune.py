@@ -3,6 +3,8 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 from parameterized import parameterized
 
@@ -92,6 +94,41 @@ class TestCheckpointerDefaults(unittest.TestCase):
             with self.subTest(interval=interval):
                 callback = olmo_core_utils.build_checkpointer_callback(345, interval)
                 self.assertIsNone(callback.ephemeral_save_interval)
+
+
+class TestWandBConfig(unittest.TestCase):
+    def test_beaker_runtime_metadata_is_added_without_mutating_training_config(self) -> None:
+        config = {"seed": 42}
+        beaker_config = SimpleNamespace(
+            beaker_workload_id="01TEST",
+            beaker_experiment_url="https://beaker.org/ex/01TEST/",
+        )
+
+        with (
+            mock.patch.object(olmo_core_utils.utils, "maybe_get_beaker_config", return_value=beaker_config),
+            mock.patch.object(olmo_core_utils.olmo_core_callbacks, "BeakerCallbackV2"),
+            mock.patch.object(olmo_core_utils.train_callbacks, "GPUMemoryMonitorCallback"),
+            mock.patch.object(olmo_core_utils, "build_checkpointer_callback"),
+            mock.patch.object(olmo_core_utils.train_callbacks, "WandBCallback") as wandb_callback,
+        ):
+            olmo_core_utils.build_base_callbacks(
+                config,
+                run_name="test-run",
+                checkpointing_steps=500,
+                ephemeral_save_interval=250,
+                with_tracking=True,
+                wandb_project="test-project",
+            )
+
+        self.assertEqual(
+            wandb_callback.call_args.kwargs["config"],
+            {
+                "seed": 42,
+                "beaker_workload_id": "01TEST",
+                "beaker_experiment_url": "https://beaker.org/ex/01TEST/",
+            },
+        )
+        self.assertEqual(config, {"seed": 42})
 
 
 if __name__ == "__main__":
