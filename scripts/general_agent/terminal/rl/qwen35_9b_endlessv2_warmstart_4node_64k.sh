@@ -26,9 +26,9 @@ TOKENIZER=hamishivi/Qwen3.5-9B
 
 EXP_NAME=swerl_qwen35_9b_endlessv2_4node_64k
 
-# Stamp the resume point into the beaker description: warm-start weights are
-# fixed (v1 step_80); the state-resume step is read from the state dir's
-# `latest` pointer at launch time (empty dir => fresh optimizer, "none").
+# Single source of truth for the trainer-state dir: feeds BOTH
+# --checkpoint_state_dir and the resume-step stamp in the description (read
+# from the `latest` pointer at launch time; empty dir => fresh, "none").
 STATE_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endlessv2_state
 RESUME_STEP=$(cat "$STATE_DIR/latest" 2>/dev/null || echo "none")
 
@@ -113,7 +113,7 @@ uv run python mason.py \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
     --checkpoint_state_freq 10 \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endlessv2_state \
+    --checkpoint_state_dir "$STATE_DIR" \
     --inflight_updates true \
     --lm_head_fp32 true \
     --use_liger_grpo_loss \
