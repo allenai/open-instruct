@@ -84,6 +84,18 @@ def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
 
+def _compute_numpy_sft_cache_hash(
+    dcs: list[dataset_transformation.DatasetConfig], tc: dataset_transformation.TokenizerConfig
+) -> str:
+    """Compute the numpy SFT key without access-order-dependent tracking state."""
+    tokenizer_files_hash = tc.tokenizer_files_hash
+    tc.tokenizer_files_hash = None
+    try:
+        return dataset_transformation.compute_config_hash(dcs, tc)
+    finally:
+        tc.tokenizer_files_hash = tokenizer_files_hash
+
+
 def _tokenize_to_numpy_dir(
     numpy_dir: str,
     args: "SFTArguments",
@@ -134,7 +146,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         transform_fn_args=transform_fn_args,
         target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE),
     )
-    cache_hash = dataset_transformation.compute_config_hash(dcs, tc)
+    cache_hash = _compute_numpy_sft_cache_hash(dcs, tc)
     seed_suffix = _seed_cache_suffix(args.tracking.seed, args.training.max_seq_length)
     numpy_dir = os.path.join(args.dataset.local_cache_dir, _NUMPY_SFT_SUBDIR, f"{cache_hash}-{seed_suffix}")
 
