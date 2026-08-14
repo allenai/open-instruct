@@ -249,10 +249,13 @@ def build_checkpointer_callback(
 
     ``max_checkpoints`` accepts the open-instruct convention where ``-1`` means
     unlimited.  Negative values are mapped to ``None`` (keep all).
+
+    ``ephemeral_save_interval`` follows the same convention: a non-positive value
+    disables ephemeral checkpoints.
     """
     return CheckpointerCallback(
         save_interval=checkpointing_steps,
-        ephemeral_save_interval=ephemeral_save_interval,
+        ephemeral_save_interval=ephemeral_save_interval if (ephemeral_save_interval or 0) > 0 else None,
         save_async=save_async,
         max_checkpoints=max_checkpoints if max_checkpoints is not None and max_checkpoints >= 0 else None,
     )

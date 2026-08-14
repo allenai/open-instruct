@@ -79,5 +79,20 @@ class IsHfCheckpointTest(unittest.TestCase):
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
 
 
+class TestCheckpointerDefaults(unittest.TestCase):
+    def test_default_intervals_build_a_checkpointer(self) -> None:
+        """The two defaults must not collide: olmo-core requires ephemeral < save_interval."""
+        callback = olmo_core_utils.build_checkpointer_callback(
+            olmo_core_utils.CheckpointConfig.checkpointing_steps, olmo_core_finetune._DEFAULT_EPHEMERAL_SAVE_INTERVAL
+        )
+        self.assertEqual(callback.ephemeral_save_interval, olmo_core_finetune._DEFAULT_EPHEMERAL_SAVE_INTERVAL)
+
+    def test_non_positive_interval_disables_ephemeral_checkpoints(self) -> None:
+        for interval in (-1, 0):
+            with self.subTest(interval=interval):
+                callback = olmo_core_utils.build_checkpointer_callback(345, interval)
+                self.assertIsNone(callback.ephemeral_save_interval)
+
+
 if __name__ == "__main__":
     unittest.main()
