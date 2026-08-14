@@ -26,10 +26,16 @@ TOKENIZER=hamishivi/Qwen3.5-9B
 
 EXP_NAME=swerl_qwen35_9b_endlessv2_4node_64k
 
+# Stamp the resume point into the beaker description: warm-start weights are
+# fixed (v1 step_80); the state-resume step is read from the state dir's
+# `latest` pointer at launch time (empty dir => fresh optimizer, "none").
+STATE_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endlessv2_state
+RESUME_STEP=$(cat "$STATE_DIR/latest" 2>/dev/null || echo "none")
+
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "Endless-terminals prod RL: base Qwen3.5-9B DPPO on allenai/open-instruct-endless-terminals (4-node; 64k)" \
+       --description "Endless-terminals prod RL v2: warm-start v1 step_80; state resume at ${RESUME_STEP} (4-node; 64k)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
