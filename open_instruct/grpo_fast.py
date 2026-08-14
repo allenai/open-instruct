@@ -1184,6 +1184,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 opd_token_count = torch.zeros((), device=self.device)
                 per_teacher_kl_sums = torch.zeros(num_teachers, device=self.device)
                 per_teacher_route_counts = torch.zeros(num_teachers, device=self.device)
+                per_teacher_routed_kl_sums = torch.zeros(num_teachers, device=self.device)
                 for i in range(len(data_BT.query_responses)):
                     opd_response_mask = data_BT.response_masks[i][:, 1:].bool()
                     behavior_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], opd_response_mask)
@@ -1221,6 +1222,14 @@ class PolicyTrainerRayProcess(RayProcess):
                             per_teacher_route_counts += torch.bincount(
                                 routed_ids.clamp(min=0), minlength=num_teachers
                             ).float()
+                            # On-domain KL: teacher k's reverse KL over ONLY the
+                            # tokens routed to it (the marginal per-teacher KL
+                            # above spans every token, on- and off-domain).
+                            for k in range(num_teachers):
+                                routed_mask_k = (teacher_ids_BT[i] == k) & opd_response_mask
+                                per_teacher_routed_kl_sums[k] += torch.where(
+                                    routed_mask_k, per_teacher_kl[k], torch.zeros_like(per_teacher_kl[k])
+                                ).sum()
                 opd_token_count = opd_token_count.clamp(min=1)
                 self.local_metrics["objective/opd_reverse_kl"] = (opd_kl_sum / opd_token_count).item()
                 self.local_metrics["objective/opd_teacher_logprob"] = (
@@ -1234,6 +1243,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         if teacher_ids_BT is not None:
                             self.local_metrics[f"objective/opd_route_frac_teacher_{k}"] = (
                                 per_teacher_route_counts[k] / opd_token_count
+                            ).item()
+                            self.local_metrics[f"objective/opd_reverse_kl_teacher_{k}_routed"] = (
+                                per_teacher_routed_kl_sums[k] / per_teacher_route_counts[k].clamp(min=1)
                             ).item()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
