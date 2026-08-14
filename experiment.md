@@ -567,6 +567,15 @@ pass).
 running, no crashes, no new error types (same context-overflow/timeout/504-gateway/
 aiohttp-unclosed-session set as before). Updated expectation only, no action taken.
 
+### 2026-08-14 Dolci scoring throughput fluctuates, not monotonically improving
+
+~45.5h after launch, 450m scoring is at 60% (61625/102014) but tqdm's own ETA has
+regressed back to 36-55h remaining (worse than the ~39h read a day earlier at 33%) —
+per-sample rate bounced between ~2s/it and ~5s/it across the two checks. Confirms
+throughput is noisy (judge-server contention varies with load, not steadily
+improving), so any single tqdm reading is a rough sense-of-scale, not a reliable
+forecast. No crashes, no new error types.
+
 ### 2026-08-13 275M think GRPO training completed — last of the 8 core runs
 
 `01KZVPTCJW89KJPRAHQPVZYQDK` (resumed from `step1600` after its 4th host-RAM-OOM crash)

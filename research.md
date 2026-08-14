@@ -574,4 +574,13 @@ explanation: judge-server load evens out over a long run as the mix of
 contention eased. Still a multi-day job, but meaningfully better than the initial
 worst-case estimate; no action needed, just an updated expectation.
 
+**Throughput fluctuates — treat any single ETA as noisy (2026-08-14, ~45.5h in):**
+450m scoring is now 60% done (61625/102014) but tqdm's own ETA has regressed to
+36-55h remaining (worse than the ~39h estimated at the 33% mark a day earlier),
+per-sample rate bouncing between ~2s/it and ~5s/it across checks. Confirms the
+judge-server-contention theory (shared with 275m's concurrent job, load varies with
+whatever else is hitting the judge at a given moment) rather than a steady-state rate
+— don't treat any single tqdm reading as a reliable completion forecast, just a rough
+sense of "still multi-day." Job otherwise healthy, no new error types.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
