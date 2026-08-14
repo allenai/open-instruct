@@ -29,9 +29,11 @@ import dataclasses
 import datetime
 import glob
 import hashlib
+import json
 import os
 import pathlib
 import re
+import subprocess
 from typing import Any
 
 import torch
@@ -57,6 +59,7 @@ _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
 _TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
 
 _NUMPY_SFT_SUBDIR = "numpy_sft"
+_NUMPY_CACHE_PROVENANCE_FILE = "open_instruct_cache_provenance.json"
 
 _PART_INDEX_RE = re.compile(r"_part_(\d+)\.")
 
@@ -80,6 +83,84 @@ def _numpy_dir_is_populated(numpy_dir: str) -> bool:
     return token_chunks == labels_chunks == metadata_chunks
 
 
+def _numpy_dir_has_payload(numpy_dir: str) -> bool:
+    return bool(
+        _chunk_indices(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB)
+        or _chunk_indices(numpy_dir, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB)
+        or _chunk_indices(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB)
+    )
+
+
+def _current_source_commit() -> str | None:
+    commit = os.environ.get("GIT_COMMIT", "").strip()
+    if commit:
+        return commit
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=pathlib.Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
+
+
+def _numpy_cache_provenance_path(numpy_dir: str) -> str:
+    return os.path.join(numpy_dir, _NUMPY_CACHE_PROVENANCE_FILE)
+
+
+def _record_numpy_cache_provenance(numpy_dir: str) -> None:
+    commit = _current_source_commit()
+    if commit is None:
+        return
+    provenance_path = _numpy_cache_provenance_path(numpy_dir)
+    if os.path.exists(provenance_path):
+        return
+    if _numpy_dir_has_payload(numpy_dir):
+        logger.warning(
+            f"Numpy SFT cache at {numpy_dir} already contains data but has no source provenance; "
+            "leaving provenance unset rather than attributing existing chunks to the current code."
+        )
+        return
+    os.makedirs(numpy_dir, exist_ok=True)
+    with open(provenance_path, "w", encoding="utf-8") as f:
+        json.dump({"git_commit": commit}, f)
+        f.write("\n")
+
+
+def _warn_if_numpy_cache_provenance_mismatch(numpy_dir: str) -> None:
+    current_commit = _current_source_commit()
+    if current_commit is None:
+        return
+    provenance_path = _numpy_cache_provenance_path(numpy_dir)
+    try:
+        with open(provenance_path, encoding="utf-8") as f:
+            provenance = json.load(f)
+    except FileNotFoundError:
+        logger.warning(
+            f"Numpy SFT cache at {numpy_dir} has no source provenance. It may have been built by code with "
+            "different tokenization or label derivation; rebuild the cache before validating such changes."
+        )
+        return
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"Could not read numpy SFT cache provenance at {provenance_path}: {e}")
+        return
+
+    cached_commit = provenance.get("git_commit") if isinstance(provenance, dict) else None
+    if not isinstance(cached_commit, str) or not cached_commit:
+        logger.warning(f"Numpy SFT cache provenance at {provenance_path} does not contain a valid git commit.")
+    elif cached_commit != current_commit:
+        logger.warning(
+            f"Numpy SFT cache at {numpy_dir} was built from Open Instruct commit {cached_commit}, but the "
+            f"current code is {current_commit}. Cached label masks may be stale if tokenization or label "
+            "derivation changed; rebuild the cache before relying on it for validation."
+        )
+
+
 def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
@@ -92,6 +173,7 @@ def _tokenize_to_numpy_dir(
     visualize: bool,
 ) -> None:
     logger.info(f"Tokenizing dataset into numpy format at {numpy_dir}")
+    _record_numpy_cache_provenance(numpy_dir)
     numpy_dataset_conversion.convert_hf_to_numpy_sft(
         output_dir=pathlib.Path(numpy_dir),
         dataset_mixer_list=args.dataset.mixer_list,
@@ -142,6 +224,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         pre_init_rank = int(os.environ.get("RANK", 0))
         if pre_init_rank == 0:
             if _numpy_dir_is_populated(numpy_dir):
+                _warn_if_numpy_cache_provenance_mismatch(numpy_dir)
                 logger.info(f"Numpy SFT files already present at {numpy_dir}; nothing to do.")
             else:
                 _tokenize_to_numpy_dir(numpy_dir, args, tc, transform_fn_args, visualize=True)
@@ -178,6 +261,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             f"      {cache_cmd}\n\n"
             "Re-launch training once the tokenization job has completed."
         )
+    _warn_if_numpy_cache_provenance_mismatch(numpy_dir)
 
     global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
         seed=args.tracking.seed, timeout=datetime.timedelta(hours=_TOKENIZE_BARRIER_TIMEOUT_HOURS)
