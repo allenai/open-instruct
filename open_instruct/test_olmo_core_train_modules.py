@@ -5,6 +5,7 @@ import torch
 from parameterized import parameterized
 
 from open_instruct import data_types, grpo_utils
+from open_instruct.rl_utils import masked_mean
 from open_instruct.utils import INVALID_LOGPROB
 
 
@@ -57,7 +58,7 @@ class TestComputeLogprobs(unittest.TestCase):
         self.assertEqual(len(result), 2)
         for logprob in result:
             self.assertEqual(logprob.shape, (batch_size, seq_len - 1))
-            self.assertTrue(torch.all(logprob <= INVALID_LOGPROB))
+            self.assertTrue(torch.all(logprob <= 0))
 
     def test_with_response_mask(self):
         batch_size, seq_len, vocab_size = 2, 5, 10
@@ -130,6 +131,74 @@ class TestForwardForLogprobs(unittest.TestCase):
 
         self.assertFalse(torch.allclose(logprob_t1, logprob_t2))
 
+    def test_pad_positions_invalidated(self):
+        batch_size, seq_len, vocab_size = 1, 5, 10
+        model = _make_mock_model(vocab_size, seq_len, batch_size)
+        # Mid-sequence pad token (pad_token_id=0) at position 2.
+        query_responses = torch.tensor([[3, 5, 0, 7, 9]])
+        attention_mask = torch.ones(batch_size, seq_len)
+        position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
+
+        logprob, _ = grpo_utils.forward_for_logprobs(
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
+        )
+
+        # logprob is aligned to labels = query_responses[:, 1:], so the pad at
+        # index 2 maps to logprob index 1.
+        self.assertEqual(logprob[0, 1].item(), INVALID_LOGPROB)
+        # Non-pad positions must be real logprobs, not the sentinel.
+        self.assertTrue(torch.all(logprob[0, [0, 2, 3]] != INVALID_LOGPROB))
+
+    def test_pad_positions_zero_gradient(self):
+        batch_size, seq_len, vocab_size = 1, 5, 10
+        logits = torch.randn(batch_size, seq_len, vocab_size, requires_grad=True)
+        model = MagicMock()
+        model.parameters.side_effect = lambda: iter([torch.zeros(1)])
+        model.return_value = logits
+        query_responses = torch.tensor([[3, 5, 0, 7, 9]])
+        attention_mask = torch.ones(batch_size, seq_len)
+        position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
+
+        logprob, _ = grpo_utils.forward_for_logprobs(
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
+        )
+        logprob.sum().backward()
+
+        # The pad position (logprob index 1) must have zero gradient across the whole vocab.
+        self.assertTrue(torch.all(logits.grad[0, 1] == 0.0))
+        # Non-pad positions must have non-zero gradient.
+        self.assertTrue(torch.any(logits.grad[0, 0] != 0.0))
+        self.assertTrue(torch.any(logits.grad[0, 2] != 0.0))
+        self.assertTrue(torch.any(logits.grad[0, 3] != 0.0))
+
+    def test_masked_positions_contribute_zero_to_loss(self):
+        batch_size, seq_len, vocab_size = 1, 5, 10
+        logits = torch.randn(batch_size, seq_len, vocab_size, requires_grad=True)
+        model = MagicMock()
+        model.parameters.side_effect = lambda: iter([torch.zeros(1)])
+        model.return_value = logits
+        query_responses = torch.tensor([[3, 5, 0, 7, 9]])
+        attention_mask = torch.ones(batch_size, seq_len)
+        position_ids = torch.arange(seq_len).unsqueeze(0).expand(batch_size, -1)
+
+        logprob, _ = grpo_utils.forward_for_logprobs(
+            model, query_responses, attention_mask, position_ids, pad_token_id=0, temperature=1.0, return_entropy=False
+        )
+        # Mask out the pad position (logprob index 1) and one real position.
+        mask = torch.ones(batch_size, seq_len - 1, dtype=torch.bool)
+        mask[0, 1] = False
+        mask[0, 3] = False
+
+        loss = masked_mean(logprob, mask)
+        loss.backward()
+
+        # Masked positions must contribute zero gradient across the whole vocab.
+        self.assertTrue(torch.all(logits.grad[0, 1] == 0.0))
+        self.assertTrue(torch.all(logits.grad[0, 3] == 0.0))
+        # Unmasked positions must contribute non-zero gradient.
+        self.assertTrue(torch.any(logits.grad[0, 0] != 0.0))
+        self.assertTrue(torch.any(logits.grad[0, 2] != 0.0))
+
 
 class TestDAPOLoss(unittest.TestCase):
     def test_negative_advantages_clipping(self):
@@ -163,6 +232,7 @@ def _make_grpo_config(**kwargs) -> grpo_utils.GRPOExperimentConfig:
         "rho_mask_sequence_level": False,
         "rho_clamp_lower_bound": 0.0,
         "rho_clamp_upper_bound": 0.0,
+        "rho_logprob_diff_clamp": 10.0,
         "rho_mask_lower_bound": 0.0,
         "rho_mask_upper_bound": 0.0,
         "rho_mask_tv_divergence": False,

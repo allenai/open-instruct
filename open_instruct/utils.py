@@ -80,7 +80,7 @@ MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 DISK_USAGE_WARNING_THRESHOLD = 0.85
 CLOUD_PATH_PREFIXES = ("gs://", "s3://", "az://", "hdfs://", "/filestore")
-INVALID_LOGPROB = 1.0  # Sentinel value for masked/invalid log probabilities
+INVALID_LOGPROB = -1e9  # Sentinel value for masked/invalid log probabilities (clearly-impossible logprob)
 
 logger = logger_utils.setup_logger(__name__)
 
