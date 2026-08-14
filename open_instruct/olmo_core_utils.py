@@ -3,11 +3,13 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import accelerate
+import safetensors
 import torch
 import torch.distributed as dist
 import transformers
@@ -554,8 +556,32 @@ def save_state_dict_as_hf(
     hf_model.load_state_dict(converted, assign=True)
 
     os.makedirs(save_dir, exist_ok=True)
-    hf_model.save_pretrained(save_dir)
+    # save_original_format=False. For any model_type with an entry in transformers'
+    # conversion_mapping, the default True writes the *legacy* weight names by applying
+    # the mapping in reverse. Consumers that read the file directly rather than through
+    # transformers -- vLLM, and therefore olmo-eval -- then reject the checkpoint with
+    # "Following weights were not initialized from checkpoint".
+    hf_model.save_pretrained(save_dir, save_original_format=False)
     tokenizer.save_pretrained(save_dir)
+
+    # Verify every converted tensor actually reached the file. Without this the failure
+    # is silent: save_pretrained returns cleanly and the checkpoint only breaks later,
+    # in whatever tries to load it.
+    index_path = os.path.join(save_dir, "model.safetensors.index.json")
+    if os.path.isfile(index_path):
+        with open(index_path) as index_file:
+            saved = set(json.load(index_file)["weight_map"])
+    else:
+        # Reads only the header, not the tensors.
+        with safetensors.safe_open(os.path.join(save_dir, "model.safetensors"), framework="pt") as shard:
+            saved = set(shard.keys())
+    missing = sorted(set(converted) - saved)
+    if missing:
+        raise RuntimeError(
+            f"{len(missing)} converted tensors are absent from the saved checkpoint "
+            f"(e.g. {missing[:5]}); it will not load. Check whether transformers renamed "
+            f"them on save: the file contains {sorted(saved - set(converted))[:5]}."
+        )
 
 
 def doc_lens_from_attention_mask(attention_mask_BS: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
