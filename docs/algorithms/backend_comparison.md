@@ -1,8 +1,10 @@
 # Backend Comparison: DeepSpeed vs OLMo-core
 
 Matched-config A/B benchmarks (150 steps; steady-state = mean over steps 20–150;
-one Docker image built from branch `backend-parity` commit `eedd78a9f`, with
-launch-script fixes through `93a5b3c51`; cluster ai2/jupiter H100s). Scripts:
+one Docker image lineage from branch `backend-parity` (base commit `eedd78a9f`;
+instrumentation + launch-script fixes through `93a5b3c51` — the only Python
+change post-launch was a metrics callback, results-neutral); cluster ai2/jupiter
+H100s). Scripts:
 `scripts/train/debug/backend_ab/`. Spec:
 `docs/superpowers/specs/2026-08-05-backend-consolidation-design.md`.
 

@@ -294,6 +294,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
     trainer_callbacks["speed_monitor"] = callbacks.SpeedMonitorCallback()
     if use_hf_ckpt:
+        # NOTE: PerfCallback currently no-ops on this path (TransformerTrainModule never
+        # records train/token_count); SpeedMonitorCallback above is the working metric source.
+        # Tracked separately.
         trainer_callbacks["perf"] = PerfCallback(
             model_dims=utils.ModelDims.from_hf_config(args.model.model_name_or_path),
             gradient_accumulation_steps=args.training.gradient_accumulation_steps,
