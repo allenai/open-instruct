@@ -54,8 +54,6 @@ logger = logger_utils.setup_logger(__name__)
 # requires;
 _DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
 
-_TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
-
 _NUMPY_SFT_SUBDIR = "numpy_sft"
 
 _PART_INDEX_RE = re.compile(r"_part_(\d+)\.")
@@ -180,7 +178,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         )
 
     global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
-        seed=args.tracking.seed, timeout=datetime.timedelta(hours=_TOKENIZE_BARRIER_TIMEOUT_HOURS)
+        seed=args.tracking.seed, timeout=datetime.timedelta(hours=args.training.dist_timeout_hours)
     )
 
     if is_main_process:
@@ -307,6 +305,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
         max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
+        save_async=args.checkpoint.save_async,
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
