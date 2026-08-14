@@ -64,6 +64,14 @@ LOCAL_CACHE_DIR=/weka/oe-adapt-default/allennlp/numpy_sft_cache
 MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-861}"
 CHECKPOINTING_STEPS="${CHECKPOINTING_STEPS:-172}"
 
+# The first attempt at this run went silent at step 580, ~15 min after an async
+# checkpoint save, and the 24h tokenize-barrier timeout meant nothing aborted it:
+# it held 8 GPUs for 2h40m. With the cache pre-built, training never needs that
+# headroom, so cap it and let a hang crash promptly. SAVE_ASYNC=false makes saves
+# synchronous, which is the way to test whether the async writer is implicated.
+DIST_TIMEOUT_HOURS="${DIST_TIMEOUT_HOURS:-2}"
+if [ "${SAVE_ASYNC:-true}" = "false" ]; then SAVE_ASYNC_FLAG="--no_save_async"; else SAVE_ASYNC_FLAG="--save_async"; fi
+
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Mode: $MODE"
 
@@ -127,6 +135,8 @@ elif [[ "$MODE" == "train" ]]; then
         --checkpointing_steps $CHECKPOINTING_STEPS \
         --ephemeral_save_interval -1 \
         --keep_last_n_checkpoints -1 \
+        --dist_timeout_hours $DIST_TIMEOUT_HOURS \
+        $SAVE_ASYNC_FLAG \
         --with_tracking \
         --logging_steps 1 \
         --mixer_list $MIXER \
