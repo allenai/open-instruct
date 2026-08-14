@@ -236,7 +236,11 @@ class CheckpointConfig:
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
-    """If the training should continue from a checkpoint folder."""
+    """Continue from a checkpoint in a *different* directory.
+
+    Not needed to resume a run that died: olmo-core always tries ``output_dir`` first
+    and picks up the newest checkpoint there, with trainer and optimizer state. Use
+    this only to start from some other run's checkpoint."""
 
 
 def build_checkpointer_callback(
