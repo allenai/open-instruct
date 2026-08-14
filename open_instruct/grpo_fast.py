@@ -379,7 +379,12 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        # ZeRO-Offload requires DeepSpeedCPUAdam (deepspeed hard-errors on a
+        # client torch AdamW); mirror the value-model optimizer selection.
+        if args.deepspeed_offload_optimizer:
+            self.optimizer = DeepSpeedCPUAdam(optim_params, lr=args.learning_rate)
+        else:
+            self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
