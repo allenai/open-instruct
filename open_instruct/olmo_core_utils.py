@@ -305,6 +305,24 @@ def build_scheduler(lr_scheduler_type: str, warmup_ratio: float, num_training_st
     raise ValueError(f"Unknown lr_scheduler_type: {lr_scheduler_type!r}")
 
 
+def load_hf_weights_into_olmo_core(
+    model_state_dict: dict[str, Any], model_name_or_path: str, work_dir: str | None = None
+) -> None:
+    """Load HF weights into an olmo-core state dict in place, dispatching on model type.
+
+    Kept as one function so the offline check in
+    ``scripts/train/debug/check_olmo_core_matches_hf.py`` exercises the same dispatch
+    training uses. Verifying the converter directly would leave this branch untested,
+    and picking the wrong branch is silent: olmo-core's converter has no ``olmo_hybrid``
+    case and would fall through to the llama-style key templates.
+    """
+    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
+        olmo_core_hybrid.load_hf_hybrid_model(model_name_or_path, model_state_dict)
+    else:
+        load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
+
+
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
     """Reload HF weights into a parallelized train_module.
 
@@ -313,13 +331,7 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     """
     logger.info("Reloading HuggingFace weights after parallelization...")
     sd = train_module.model.state_dict()
-    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
-    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
-        # olmo-core's converter has no olmo_hybrid branch; it would silently fall
-        # through to the llama-style key templates. See open_instruct.olmo_core_hybrid.
-        olmo_core_hybrid.load_hf_hybrid_model(model_name_or_path, sd)
-    else:
-        load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    load_hf_weights_into_olmo_core(sd, model_name_or_path, work_dir=work_dir)
     train_module.model.load_state_dict(sd)
 
 

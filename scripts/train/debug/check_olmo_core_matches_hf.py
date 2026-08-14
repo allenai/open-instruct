@@ -44,7 +44,6 @@ def main() -> None:
     # except for the last entry, which transformers appends *after* the final norm.
     # Comparing a raw block output against that would report a spurious mismatch.
     hf_hidden = [h.float() for h in hf_out.hidden_states[:-1]]
-    hf_state = {k: v.clone() for k, v in hf_model.state_dict().items()}
     hf_config = hf_model.config
     del hf_model
     torch.cuda.empty_cache()
@@ -55,7 +54,10 @@ def main() -> None:
     )
     model = model_config.build(init_device="meta")
     layer_types = olmo_core_hybrid.layer_types_from_hf_config(hf_config)
-    converted = olmo_core_hybrid.convert_hybrid_state_from_hf(hf_state, layer_types)
+    # Go through the same dispatch training uses, so this checks the branch that runs
+    # rather than a converter called directly.
+    converted = model.state_dict()
+    olmo_core_utils.load_hf_weights_into_olmo_core(converted, args.model_name)
     model.load_state_dict(converted, assign=True)
     model = model.to(device=device, dtype=torch.bfloat16)
     model.eval()
