@@ -150,6 +150,15 @@ class TrainingConfig:
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
+    dist_timeout_hours: float = 24
+    """Timeout for distributed collectives, in hours.
+
+    The default is long because rank 0 may tokenize the dataset for hours while the other
+    ranks wait at a barrier. It then applies for the rest of the run, so a mid-training
+    hang also gets that long to do nothing -- one such stall burned 8 GPUs for 2h40m
+    before anyone noticed. When the cache is pre-built (the two-job workflow), drop this
+    to an hour or so and a hang becomes a prompt, diagnosable crash.
+    """
 
 
 def build_ac_config(
@@ -237,6 +246,14 @@ class CheckpointConfig:
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
     """If the training should continue from a checkpoint folder."""
+    save_async: bool = True
+    """Whether olmo-core saves checkpoints asynchronously.
+
+    Async saving keeps training moving while a ~100 GB checkpoint is written, but it also
+    puts the write on a background thread whose failures are harder to attribute: a
+    1-node Olmo-Hybrid-7B run went silent at step 580, roughly 15 minutes after an async
+    save, with no traceback. Set false to make saves synchronous when diagnosing a stall.
+    """
 
 
 def build_checkpointer_callback(
