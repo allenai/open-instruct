@@ -6,7 +6,11 @@
 # RUN AS TWO JOBS:
 #
 #   ./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_olmo_hybrid_7b_1node.sh tokenize
-#   ./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_olmo_hybrid_7b_1node.sh train
+#   ./scripts/train/build_image_and_launch.sh --cuda-version 13 \
+#       scripts/train/debug/oc_sft_olmo_hybrid_7b_1node.sh train
+#
+# Training runs on ai2/holmes (B300) and needs the CUDA 13 image; it hangs on H100. See
+# the note above the train branch.
 #
 # The tokenize job is normally a cache hit -- see the tokenizer note below.
 #
@@ -99,8 +103,18 @@ if [[ "$MODE" == "tokenize" ]]; then
         --seed $SEED \
         --cache_dataset_only
 elif [[ "$MODE" == "train" ]]; then
+    # Blackwell, not Hopper, and this is not a preference. Four runs of this exact
+    # configuration on H100 went silent mid-training -- steps 65, 205, 350 and 580, on four
+    # different nodes -- stalled in the FSDP2 post-backward gradient reduce-scatter with
+    # every rank enqueued and none completing (allenai/OLMo-core#829). The same
+    # configuration completed all 861 steps on a B300 node, and ran 81% faster while doing
+    # it (16,392 vs 9,073 tokens/s/device).
+    #
+    # ai2/holmes requires the CUDA 13 image, hence --cuda-version 13 when building:
+    #   ./scripts/train/build_image_and_launch.sh --cuda-version 13 \
+    #       scripts/train/debug/oc_sft_olmo_hybrid_7b_1node.sh train
     uv run python mason.py \
-        --cluster ai2/jupiter \
+        --cluster ai2/holmes \
         --workspace ai2/open-instruct-dev \
         --priority urgent \
         --image "$BEAKER_IMAGE" \
