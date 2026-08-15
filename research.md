@@ -591,4 +591,18 @@ sometime around 2026-08-16.
 (97559/102014, ETA ~2h) — should finish imminently. 450m is at 90% (91534/102014, ETA
 ~8.5h) — also close. Both still healthy, no new error types.
 
+**275m scoring completed the scoring pass (102014/102014, ~20:15:30 UTC 2026-08-15,
+~72h wall time) and moved into the post-scoring `push_to_hub` step**
+(`filter_existing_dataset_correctness.py:188` logged "Filtered 0 samples out of
+102014" as expected, since `--lower_bound 0 --upper_bound 1` keeps every row). No new
+log lines appeared for 40+ minutes after that and the target dataset
+(`mnoukhov/dolci_think_rl_7b_messages_hybrid_275m_scored`) doesn't exist on the hub
+yet as of this check — the job hasn't exited either way (no crash, no success signal).
+Plausible explanation: `push_to_hub` for a 102k-row dataset with long generation-text
+columns can take a long time to serialize/upload without incremental per-shard
+logging showing up in the captured beaker logs, so this isn't necessarily a hang —
+but it's also not confirmed healthy. Continuing to monitor closely; if it's still
+silent much longer this is worth someone checking the raw pod logs directly (beaker
+logs may just not be capturing HF's own upload progress bar).
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
