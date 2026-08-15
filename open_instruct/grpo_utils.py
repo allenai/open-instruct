@@ -117,6 +117,10 @@ class GRPOExperimentConfig(
     """Lower bound for clamping ρ before reweighting the policy loss (0 disables)."""
     rho_clamp_upper_bound: float = 2.0
     """Upper bound for clamping ρ before reweighting the policy loss (0 disables)."""
+    rho_logprob_diff_clamp: float = 10.0
+    """Clamp applied to the per-token log-ratio log(π^train_old / π^infer_old) before
+    exponentiating to ρ, to avoid numerical instability. This caps ρ at e^clamp; set it
+    high enough to not interfere with rho_clamp_upper_bound (e.g. 10 caps ρ at ~22026)."""
     rho_mask_lower_bound: float = 0.0
     """Tokens with ρ below this value are dropped (0 disables)."""
     rho_mask_upper_bound: float = 0.0
@@ -335,6 +339,8 @@ class GRPOExperimentConfig(
                 )
             if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
                 raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
+            if self.rho_logprob_diff_clamp < 0.0:
+                raise ValueError(f"rho_logprob_diff_clamp must be >= 0, got {self.rho_logprob_diff_clamp}.")
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -416,7 +422,9 @@ def compute_rho_correction(
 ) -> RhoCorrection:
     """Compute the unified ρ = π^train_old / π^infer_old correction (clamp + mask)."""
     logprob_diff = torch.where(
-        response_mask, (old_logprob - vllm_logprobs).clamp(-10.0, 10.0), torch.zeros_like(old_logprob)
+        response_mask,
+        (old_logprob - vllm_logprobs).clamp(-config.rho_logprob_diff_clamp, config.rho_logprob_diff_clamp),
+        torch.zeros_like(old_logprob),
     )
     rho = torch.exp(logprob_diff)
     rho_hist = {"val/rho_hist": rho[response_mask].detach().float()}
@@ -561,9 +569,13 @@ def forward_for_logprobs(
     # The logits at position i predict token i+1, so we align them with labels shifted by 1
     logits = logits[:, :-1]
     labels = query_responses[:, 1:].clone().to(logits.device)
-    # Replace pad tokens with 0 to avoid index out of bounds errors in gather
-    labels[labels == pad_token_id] = 0
-    logprob_BT = model_utils.log_softmax_and_gather(logits, labels)
+    # Clamp to valid vocab range so gather never OOBs; pad positions are
+    # explicitly invalidated below rather than silently mapped to token 0.
+    safe_labels = labels.clamp(max=logits.size(-1) - 1)
+    logprob_BT = model_utils.log_softmax_and_gather(logits, safe_labels)
+    # Explicitly invalidate pad positions (defense-in-depth; response_mask
+    # already excludes them downstream).
+    logprob_BT = torch.where(labels == pad_token_id, INVALID_LOGPROB, logprob_BT)
 
     # For now, entropy is just for monitoring, and we don't pass gradients through it.
     entropy = None
