@@ -416,6 +416,28 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     Raises:
         ValueError: If model/config not found.
     """
+    # A path to an olmo-core config.json: build the architecture the checkpoint records
+    # rather than a preset. Hand-transcribing an architecture into a preset is how the
+    # Olmo Hybrid GDN norm epsilon ended up wrong (1e-6 against HF's 1e-5), which cost a
+    # 38% logit error that no key or shape check could see. Reading the checkpoint's own
+    # config removes that whole class of mistake, and it is the only way to load a model
+    # that has no preset at all.
+    if model_name_or_config.endswith(".json") and os.path.isfile(model_name_or_config):
+        with open(model_name_or_config) as config_file:
+            payload = json.load(config_file)
+        model_section = payload.get("model", payload)
+        config = TransformerConfig.from_dict(model_section)
+        logger.info(
+            f"Built TransformerConfig from {model_name_or_config}: "
+            f"{config.num_params:,} params, {config.n_layers} layers, vocab {config.vocab_size}"
+        )
+        if config.vocab_size != vocab_size:
+            logger.warning(
+                f"Config vocab_size {config.vocab_size} != tokenizer-derived {vocab_size}; "
+                "keeping the checkpoint's value so the weights still load."
+            )
+        return config
+
     config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_config)
     if config_name is None:
         config_name = model_name_or_config
