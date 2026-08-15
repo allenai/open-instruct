@@ -1,0 +1,115 @@
+# Failure-isolated garbage collector for OpenSandbox sandbox objects.
+#
+# WHY THIS EXISTS: OpenSandbox's built-in TTL reaper lives inside the same
+# control plane it is supposed to protect. During the 2026-08-12 incident the
+# control plane overloaded, the reaper stopped working, and ~2,300 expired
+# sandbox pods plus ~2,300 finished BatchSandbox records accumulated —
+# exhausting Spot capacity and grinding a production training run to a crawl
+# for 19 hours (see docs/sandbox_management.md). This CronJob is scheduled by
+# Kubernetes itself and deletes objects through the Kubernetes API directly,
+# so it keeps working precisely when the OpenSandbox server/controller are
+# unhealthy — which is the only time it has real work to do.
+#
+# WHAT IT DOES, every 10 minutes, in the `opensandbox` namespace:
+#   1. Deletes BatchSandbox CRs in a finished phase (Succeed/Failed) older
+#      than FINISHED_MAX_AGE_S  (default 30 min).
+#   2. Deletes ANY BatchSandbox CR older than HARD_MAX_AGE_S (default 2 h) —
+#      the orphan backstop. ASSUMPTION: all sandboxes on this cluster use
+#      lifetimes well under 2 h (training uses 1 h). If you ever create
+#      longer-lived sandboxes, raise HARD_MAX_AGE_S accordingly.
+#
+# WHERE IT RUNS: on the sandbox GKE cluster itself (apply to BOTH
+# sandbox-cluster and test-sandbox-cluster). It is independent of the
+# training jobs and of the OpenSandbox deployment.
+#
+# APPLY:    kubectl apply -f scripts/opensandbox/gc-cronjob.yaml
+# VERIFY:   kubectl get cronjob -n opensandbox-system
+# DRY RUN:  kubectl create job --from=cronjob/opensandbox-gc gc-manual-test \
+#               -n opensandbox-system && kubectl logs -n opensandbox-system \
+#               job/gc-manual-test -f
+#
+# RBAC NOTE: apiGroups is a wildcard because the BatchSandbox CRD's group is
+# deployment-specific; tighten it to the exact group from
+# `kubectl api-resources | grep batchsandbox` if you prefer.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-gc
+  namespace: opensandbox-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opensandbox-gc
+  namespace: opensandbox
+rules:
+  - apiGroups: ["*"]
+    resources: ["batchsandboxes"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opensandbox-gc
+  namespace: opensandbox
+subjects:
+  - kind: ServiceAccount
+    name: opensandbox-gc
+    namespace: opensandbox-system
+roleRef:
+  kind: Role
+  name: opensandbox-gc
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opensandbox-gc
+  namespace: opensandbox-system
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 480
+      template:
+        spec:
+          serviceAccountName: opensandbox-gc
+          restartPolicy: Never
+          containers:
+            - name: gc
+              image: bitnami/kubectl:1.35
+              env:
+                - name: SANDBOX_NAMESPACE
+                  value: "opensandbox"
+                - name: FINISHED_MAX_AGE_S
+                  value: "1800"
+                - name: HARD_MAX_AGE_S
+                  value: "7200"
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {cpu: 500m, memory: 256Mi}
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -uo pipefail
+                  now=$(date +%s)
+                  kubectl get batchsandbox -n "$SANDBOX_NAMESPACE" \
+                    -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.creationTimestamp} {.status.phase}{"\n"}{end}' |
+                  while read -r name created phase; do
+                    [ -z "$name" ] && continue
+                    created_s=$(date -d "$created" +%s 2>/dev/null) || continue
+                    age=$(( now - created_s ))
+                    if { [ "$phase" = "Succeed" ] || [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ]; } \
+                        && [ "$age" -gt "$FINISHED_MAX_AGE_S" ]; then
+                      echo "deleting finished $name (phase=$phase age=${age}s)"
+                      kubectl delete batchsandbox "$name" -n "$SANDBOX_NAMESPACE" --wait=false
+                    elif [ "$age" -gt "$HARD_MAX_AGE_S" ]; then
+                      echo "deleting over-age $name (phase=${phase:-unknown} age=${age}s > ${HARD_MAX_AGE_S}s)"
+                      kubectl delete batchsandbox "$name" -n "$SANDBOX_NAMESPACE" --wait=false
+                    fi
+                  done
+                  echo "gc pass complete"

@@ -177,6 +177,13 @@ How it's wired:
 - **Feasibility gate**: `scripts/opensandbox/check_opensandbox_egress.sh` verifies
   endpoint reachability and the full create→exec→kill lifecycle from the training
   cluster, mirroring the Modal egress check.
+- **Failure-isolated GC on the sandbox cluster**: `scripts/opensandbox/gc-cronjob.yaml`
+  (apply once per cluster with kubectl) deletes finished `BatchSandbox` records and
+  force-expires over-age ones every 10 minutes, through the Kubernetes API directly.
+  OpenSandbox's built-in TTL reaper shares fate with its control plane and stopped
+  working during a 2026-08-12 overload — ~2,300 expired-but-running pods exhausted
+  Spot capacity and stalled a production run for 19 hours. The CronJob works exactly
+  when the control plane doesn't.
 - **Launch example**:
   `scripts/general_agent/terminal/rl/qwen35_4b_base_tmax_10k_opensandbox_2node_toy.sh`.
 
