@@ -587,4 +587,8 @@ sense of "still multi-day." Job otherwise healthy, no new error types.
 done, tqdm ETA ~25h remaining. Still healthy, no new error types — should complete
 sometime around 2026-08-16.
 
+**Both scoring jobs approaching completion (2026-08-15, ~68.5h in):** 275m is at 96%
+(97559/102014, ETA ~2h) — should finish imminently. 450m is at 90% (91534/102014, ETA
+~8.5h) — also close. Both still healthy, no new error types.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
