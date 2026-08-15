@@ -34,7 +34,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "Terminal-expert MOPD prod: Qwen3.5-9B <- termigen/endless/tmax 9B experts, routed (4-node; 64k)" \
        --pure_docker_mode \
-       --workspace ai2/oe-agents \
+       --workspace ai2/general-tool-use \
        --priority urgent \
        --preemptible \
        --num_nodes 4 \

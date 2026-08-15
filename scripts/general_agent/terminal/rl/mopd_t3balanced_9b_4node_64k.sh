@@ -32,7 +32,7 @@ EXP_NAME=swerl_mopd_t3balanced_9b_4node_64k
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "MOPD Option-2: BALANCED per-domain mix (14601 each, endless x5.9 / termigen x4.1 upsampled), routed, fresh run no resume (4-node; 64k; ~64 steps)" \
+       --description "MOPD Option-2: BALANCED per-domain mix (14601 each, endless x5.9 / termigen x4.1 upsampled), routed, fresh run no resume (4-node; 64k; 500 steps)" \
        --pure_docker_mode \
        --workspace ai2/general-tool-use \
        --priority urgent \
@@ -85,7 +85,7 @@ uv run python mason.py \
     --filter_zero_std_samples false \
     --temperature 1.0 \
     --learning_rate 1e-6 \
-    --total_episodes 16384 \
+    --total_episodes 128000 \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
