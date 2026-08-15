@@ -605,4 +605,23 @@ but it's also not confirmed healthy. Continuing to monitor closely; if it's stil
 silent much longer this is worth someone checking the raw pod logs directly (beaker
 logs may just not be capturing HF's own upload progress bar).
 
+**ESCALATION — 275m scoring job likely genuinely stuck in `push_to_hub` (2026-08-15,
+~1h50m silent):** as of ~22:04 UTC, still no new log output since the 20:15:33 UTC
+"Filtered 0 samples" line, still no `exited` status, and
+`mnoukhov/dolci_think_rl_7b_messages_hybrid_275m_scored` still doesn't exist on the
+hub (checked via the HF API). By contrast, **450m scoring (running the identical
+`push_to_hub` code path, just not there yet) is still progressing completely
+normally** — 95% done, actively logging new tqdm lines every few minutes as of the
+same check. This makes "large dataset, slow upload with no logging" a much less
+likely explanation than it seemed at the 40-minute mark, since there's nothing
+architecturally different about 275m's push that should make it dramatically slower
+or silent compared to 450m's (same row count target, same columns, same HF library
+call). Genuinely looks stuck (network stall, silent exception swallowed somewhere, or
+a hung Beaker log stream not actually reflecting a hung process — can't distinguish
+these from Beaker's log API alone). **Not killing the job** — no destructive action
+taken, this needs a human decision (worth checking Beaker's own dashboard/node view
+directly, or considering a restart of just the push step from the already-written
+local `/tmp/hybrid_275m_scored.jsonl` if the process is confirmed dead, since all the
+expensive scoring compute already completed and shouldn't need to be redone).
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
