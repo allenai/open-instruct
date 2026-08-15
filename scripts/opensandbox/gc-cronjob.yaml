@@ -28,9 +28,8 @@
 #               -n opensandbox-system && kubectl logs -n opensandbox-system \
 #               job/gc-manual-test -f
 #
-# RBAC NOTE: apiGroups is a wildcard because the BatchSandbox CRD's group is
-# deployment-specific; tighten it to the exact group from
-# `kubectl api-resources | grep batchsandbox` if you prefer.
+# RBAC is scoped to the BatchSandbox CRD's group (sandbox.opensandbox.io)
+# in the sandbox namespace only.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -43,7 +42,7 @@ metadata:
   name: opensandbox-gc
   namespace: opensandbox
 rules:
-  - apiGroups: ["*"]
+  - apiGroups: ["sandbox.opensandbox.io"]
     resources: ["batchsandboxes"]
     verbs: ["get", "list", "delete"]
 ---
@@ -81,7 +80,9 @@ spec:
           restartPolicy: Never
           containers:
             - name: gc
-              image: bitnami/kubectl:1.35
+              # Google-hosted (pulls in-GCP, no Docker Hub): debian-based,
+              # ships kubectl + bash + GNU date.
+              image: gcr.io/cloud-builders/kubectl
               env:
                 - name: SANDBOX_NAMESPACE
                   value: "opensandbox"
