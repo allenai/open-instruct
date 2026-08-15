@@ -624,4 +624,33 @@ directly, or considering a restart of just the push step from the already-writte
 local `/tmp/hybrid_275m_scored.jsonl` if the process is confirmed dead, since all the
 expensive scoring compute already completed and shouldn't need to be redone).
 
+**ROOT CAUSE FOUND — host OOM kill, not a hang (2026-08-15, resolved after ~3h11m
+silent):** `01KZVN9K504CT8J3AHZAS3NDEY` finally exited at 23:26:10 UTC with
+**`exitCode 137`, `message: "out of memory"`** — the process was silently killed by
+the host's OOM killer (SIGKILL, so no Python traceback or error log — explains the
+total silence), not stuck on a network call. A `multiprocessing.resource_tracker`
+"leaked semaphore" warning appeared ~1 minute before the kill, consistent with the
+OS reclaiming memory out from under a live process. Root cause is almost certainly
+`datasets.Dataset.push_to_hub()`'s in-memory serialization of the full 102,014-row
+scored dataset (with long `messages`/generation-text columns) exceeding the
+container's memory limit — the scoring pass itself (streaming, incremental) never
+came close to this, but building + serializing the final Arrow/Parquet table
+in-memory for upload apparently does.
+
+**Consequence: the 275m scored dataset was lost.** The only copy of the fully-scored
+data was the local `/tmp/hybrid_275m_scored.jsonl` inside that now-dead container —
+it was never pushed to the hub before the kill, and Beaker containers don't persist
+local disk after exit. All ~72h of scoring compute for 275m needs to be re-run (or
+the push step needs to be restructured to avoid the memory spike — e.g. streaming
+push, sharded push, or writing the scored jsonl to persistent /weka storage as a
+safety net before attempting push_to_hub) before this model's difficulty scores can
+be recovered.
+
+**450m is at serious risk of hitting the identical failure**: as of this same check
+it's at 99% (100927/102014) and will enter the same `push_to_hub` step within
+minutes. Flagging this urgently — if it OOMs the same way, both scoring jobs will
+need a full redo. Nothing to intervene with proactively (can't resize a running
+container's memory limit or preemptively change its code), just watching closely and
+will flag immediately if it recurs.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

@@ -590,3 +590,33 @@ to close its `<think>` block within the 16384-token budget. This completes all 8
 size×mode eval-only baselines and 6 of 8 full GRPO training runs (810M `think` still
 training, resumed and tracked by the user directly; 810M/1.4B `open_close_think` were
 never launched for full training in this study, only eval-only baselines).
+
+### 2026-08-15 275m Dolci scoring OOM-killed in push_to_hub — scored data lost
+
+`01KZVN9K504CT8J3AHZAS3NDEY` completed its full scoring pass (102014/102014 rows,
+~72h wall time) at 20:15:30 UTC, logged `filter_existing_dataset_correctness.py`'s
+"Filtered 0 samples out of 102014" line, then went completely silent. Initially
+suspected as a hung `push_to_hub()` network call (no new log output, no `exited`
+status, target dataset not appearing on the hub for 3+ hours, while 450m running the
+identical code path continued logging normally). At 23:26:10 UTC the job finally
+exited with **`exitCode 137`, `message: "out of memory"`** — a host-level OOM kill
+(SIGKILL), not a hang. A `multiprocessing.resource_tracker` "leaked semaphore"
+warning appeared ~1 min before the kill (expected side effect of the OS reclaiming
+memory from a live process). Root cause: almost certainly `datasets.Dataset.
+push_to_hub()`'s in-memory Arrow/Parquet serialization of the full 102k-row dataset
+(long `messages`/generation-text columns) exceeding the container's memory limit —
+the streaming/incremental scoring pass itself never approached this.
+
+**The scored dataset was never pushed and is now lost** — the only copy was the
+local `/tmp/hybrid_275m_scored.jsonl` inside the now-terminated container, and Beaker
+doesn't persist local disk after a job exits. Recovering 275m's difficulty scores
+requires either re-running the full ~72h scoring pass, or (better) fixing
+`score_dolci_difficulty.sh`/`filter_existing_dataset_correctness.py` to write the
+scored jsonl to persistent `/weka` storage before attempting `push_to_hub`, and/or
+switching to a lower-memory push strategy (sharded/streaming push) so a future re-run
+doesn't lose all its work to the same failure mode.
+
+450m (`01KZVNBH8BF3327WV96RB04XR1`) was at 99% (100927/102014) at the time this was
+diagnosed and is expected to hit the same `push_to_hub` step within minutes — at
+serious risk of an identical OOM kill. Flagged to the user; no proactive fix possible
+without modifying/relaunching the running job.
