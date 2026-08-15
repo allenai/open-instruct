@@ -583,4 +583,8 @@ whatever else is hitting the judge at a given moment) rather than a steady-state
 — don't treat any single tqdm reading as a reliable completion forecast, just a rough
 sense of "still multi-day." Job otherwise healthy, no new error types.
 
+**450m scoring at 80%, nearing completion (2026-08-15, ~61h in):** 80944/102014 rows
+done, tqdm ETA ~25h remaining. Still healthy, no new error types — should complete
+sometime around 2026-08-16.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).
