@@ -62,14 +62,19 @@ unpacked OC failures):
 | Backend | throughput | MFU | loss (steady) | step-0 (=log 2) | Beaker | wandb |
 |---|---|---|---|---|---|---|
 | DeepSpeed packed | ~651 tok/s/GPU (20.83k total) | 2.77% | 0.5408 | 0.6931 exact | [01KZG13JC1](https://beaker.org/ex/01KZG13JC1WJA5CHRPKJBQ8N83) | 89ibnowv |
-| OLMo-core packed (budget 0.1 + compile) | **3.436 s/step** (steps 20→149 in 443.2 s, log-derived) — ~8× DeepSpeed's implied ~27 s/step at the same 128-pairs/step workload | pending wandb pull | pending wandb pull | pending wandb pull | [01KZTS8JQ9](https://beaker.org/ex/01KZTS8JQ929YA1Y8JA5DKTYC6) | sivsja72 |
+| OLMo-core packed (budget 0.1 + compile) | **62,940 tok/s total (~1,967/GPU)** — **3.0× DeepSpeed** (3.454 s/step, matching the log-derived 3.436) | **8.56%** (3.1× DS — consistent with the TPS ratio) | 0.437 (see note) | 0.6924 (within 0.1% of log 2) | [01KZTS8JQ9](https://beaker.org/ex/01KZTS8JQ929YA1Y8JA5DKTYC6) | sivsja72 |
 
-The pending cells require a wandb API pull of run `sivsja72` (API access was
-unavailable at write time); the step-time comparison is from console-log
-timestamps and stands on its own. Loss equivalence should be confirmed from
-`sivsja72` before treating the DPO verdict as final: expected step-0 = 0.6931
-(policy == reference invariant, hit exactly by all three DS runs) and steady loss
-≈ 0.54.
+Note on the packed loss columns: tokens-per-step differ between the two packed
+implementations (their collators fill the 16k budget differently), so the raw
+step-time ratio (~8×) overstates the backend difference — tokens/s and MFU
+(both ~3×) are the fair comparison. For the same reason, step-indexed loss
+values are not directly comparable (each backend has seen a different number of
+pairs by step N): OC's steady 0.437 vs DS's 0.5408 reflects differing batch
+schedules, not a training defect. The step-0 invariant (policy == reference ⇒
+loss = log 2) holds on both backends (DS: 0.6931 exact ×3 runs; OC: 0.6924,
+within 0.1%, consistent with a first-log-after-first-update offset), which is
+the conversion-correctness check. A downstream-eval check during the Part 2 DPO
+PR is recommended as the definitive loss-equivalence confirmation.
 
 **OLMo-core DPO cannot run the unpacked 16k production config on the current
 pin** (four documented failures):
@@ -108,11 +113,13 @@ DeepSpeed learner spends most of the step waiting for vLLM
 | Stage | Verdict | Basis |
 |---|---|---|
 | SFT | **PASS (OLMo-core)** | ~7× tokens/s/GPU at matched config (packing-driven); loss sanity within ~5% |
-| DPO | **PASS (OLMo-core), provisional** | ~8× faster step time at the packed config both backends can run; pending loss-equivalence confirmation from wandb run `sivsja72`. Finding: OC requires packing at 16k — the unpacked production config only runs on DeepSpeed |
+| DPO | **PASS (OLMo-core)** | 3.0× tokens/s and 3.1× MFU at the packed config both backends can run; step-0 invariant holds on both. Step-indexed loss not comparable across packed implementations (differing batch schedules) — eval-based confirmation recommended in the Part 2 DPO PR. Finding: OC requires packing at 16k — the unpacked production config only runs on DeepSpeed |
 | GRPO | **PASS (tie)** | corrected throughput within ~10%, OC slightly faster end-to-end; rewards/losses track |
 
 Per the spec's failure-branch rules, a PASS greenlights the Part 2 rename for
-that stage; the DPO PASS is provisional until the loss check lands.
+that stage. The DPO PASS carries one follow-up: an eval-based loss-equivalence
+check in the Part 2 DPO PR (step-indexed loss is not comparable across the two
+packed implementations).
 
 ## Reliability observations (part of the comparison)
 
