@@ -653,4 +653,34 @@ need a full redo. Nothing to intervene with proactively (can't resize a running
 container's memory limit or preemptively change its code), just watching closely and
 will flag immediately if it recurs.
 
+**450m SUCCEEDED — narrowly survived the same risky window (2026-08-16, exited
+02:36:15 UTC, exitCode 0):** `01KZVNBH8BF3327WV96RB04XR1` finished cleanly.
+`mnoukhov/dolci_think_rl_7b_messages_hybrid_450m_scored` is live on the hub
+(confirmed via HF API, `lastModified` 02:35:22 UTC). This resolves the OOM question:
+**both jobs hit the identical silent gap** (finished scoring → "Filtered 0 samples" →
+total silence with no log output) — 275m's gap ended in an OOM kill at ~3h11m, 450m's
+ended in success at ~2h28m. The final log lines from 450m show *why* the gap is so
+long and silent: the actual `push_to_hub` shard upload (151 shards, ~235MB) only
+took **~37 minutes** once it started and *did* log progress — so roughly **~2 hours
+of the silent gap is spent building/serializing the in-memory Arrow table before any
+upload progress appears**, and that serialization step is where the OOM risk lives
+(not the upload itself). 450m's serialization apparently fit in memory (barely,
+given how long it took — possibly swapping/thrashing near the limit) where 275m's
+didn't; this reads as a **timing/memory-pressure-dependent failure, not fully
+deterministic** — re-running 275m's scoring+push under the same code isn't
+guaranteed to fail again, but isn't guaranteed to succeed either.
+
+**Recommendation for any future re-run of 275m** (or any similar scoring job): before
+attempting `push_to_hub`, first write the scored dataset to persistent `/weka`
+storage (not just `/tmp`) so a mid-push OOM doesn't lose the ~72h of scoring compute
+again, and/or investigate whether `push_to_hub` can be made to serialize
+incrementally/in shards rather than building the full in-memory table upfront (e.g.
+`Dataset.to_parquet` in chunks, or `max_shard_size` tuning) to reduce peak memory.
+
+**This closes out the Dolci difficulty-scoring pipeline for this session**: 450m
+scoring succeeded end-to-end (`mnoukhov/dolci_think_rl_7b_messages_hybrid_450m_scored`
+live); 275m scoring completed all compute but lost its final output to an OOM kill
+during push and needs a re-run (with the persistence fix above) to actually produce
+`mnoukhov/dolci_think_rl_7b_messages_hybrid_275m_scored`.
+
 See [experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo](experiment.md#olmo-hybrid-small-think-vs-open-close-think-gsm8k-grpo).

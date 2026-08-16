@@ -620,3 +620,27 @@ doesn't lose all its work to the same failure mode.
 diagnosed and is expected to hit the same `push_to_hub` step within minutes — at
 serious risk of an identical OOM kill. Flagged to the user; no proactive fix possible
 without modifying/relaunching the running job.
+
+### 2026-08-16 450m Dolci scoring succeeded — survived the same risky window
+
+`01KZVNBH8BF3327WV96RB04XR1` exited cleanly at 02:36:15 UTC (exitCode 0).
+`mnoukhov/dolci_think_rl_7b_messages_hybrid_450m_scored` is live on the hub
+(`lastModified` 02:35:22 UTC, confirmed via HF API). Reached the same
+"finished scoring → silent" state as 275m at 00:07:51 UTC and stayed silent for
+~2h28m before exiting successfully — comparable to but shorter than 275m's ~3h11m
+before its OOM kill. The final logs explain the silent gap: 450m's actual
+`push_to_hub` shard upload (151 shards, ~235MB) only took ~37 minutes once it started
+and logged visible progress throughout — meaning roughly ~2h of the ~2.5h gap is
+spent building/serializing the in-memory dataset table *before* any upload progress
+appears, and that's where the OOM risk lives, not the upload transfer itself. 450m's
+serialization fit in memory (barely, given the unusually long silent stretch — likely
+near the container's memory ceiling); 275m's didn't. Reads as a **timing/
+memory-pressure-dependent failure, not fully deterministic**.
+
+**Net outcome for the Dolci difficulty-scoring pipeline this session:** 450m
+succeeded end-to-end, scored dataset live. 275m completed all ~72h of scoring compute
+but lost the final output to the OOM kill during push and needs a re-run to produce
+`mnoukhov/dolci_think_rl_7b_messages_hybrid_275m_scored` — ideally after fixing the
+push step to persist to `/weka` before attempting `push_to_hub` (or reducing peak
+memory via a sharded/incremental serialization approach), so a repeat OOM doesn't
+lose the work again.
