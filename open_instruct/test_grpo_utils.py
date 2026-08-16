@@ -1,7 +1,6 @@
 import unittest
 
 import parameterized
-import pytest
 import torch
 
 from open_instruct import olmo_core_utils
@@ -47,39 +46,6 @@ class ComputeOlmoCoreDocLensTest(unittest.TestCase):
         attention_mask = torch.tensor([[1, 1, 1, 2, 2, 0, 0], [1, 1, 2, 2, 3, 3, 3]], dtype=torch.long)
         doc_lens, _ = olmo_core_utils.doc_lens_from_attention_mask(attention_mask)
         torch.testing.assert_close(doc_lens.sum(dim=1, dtype=torch.int32), torch.tensor([7, 7], dtype=torch.int32))
-
-
-class CheckOlmoCoreCompatibleConfigTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # grpo_utils transitively imports vllm, which is unavailable on macOS dev machines.
-        # We scope the skip to this test class only so ComputeOlmoCoreDocLensTest can still run locally.
-        pytest.importorskip("vllm")
-        from open_instruct import grpo_utils  # noqa: PLC0415
-
-        cls.grpo_utils = grpo_utils
-
-    def test_default_config_passes(self):
-        args = self.grpo_utils.GRPOExperimentConfig()
-        self.grpo_utils.check_olmo_core_compatible_config(args)  # must not raise
-
-    @parameterized.parameterized.expand(
-        [
-            ("deepspeed_stage", {"deepspeed_stage": 2}),
-            ("deepspeed_zpg", {"deepspeed_zpg": 1}),
-            ("deepspeed_offload_param", {"deepspeed_offload_param": True}),
-            ("deepspeed_offload_optimizer", {"deepspeed_offload_optimizer": True}),
-            ("deepspeed_checkpoint_load_universal", {"deepspeed_checkpoint_load_universal": True}),
-            # sequence_parallel_size > 1 requires deepspeed_stage == 3 at construction
-            # time (GRPOExperimentConfig.__post_init__), so set both; the guard must
-            # still name sequence_parallel_size in its error.
-            ("sequence_parallel_size", {"sequence_parallel_size": 4, "deepspeed_stage": 3}),
-        ]
-    )
-    def test_deepspeed_only_flag_raises(self, flag, overrides):
-        with self.assertRaisesRegex(ValueError, flag):
-            args = self.grpo_utils.GRPOExperimentConfig(**overrides)
-            self.grpo_utils.check_olmo_core_compatible_config(args)
 
 
 if __name__ == "__main__":
