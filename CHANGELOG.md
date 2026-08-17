@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Final HF export in `olmo_core_finetune.py` after training completes (previously runs ended with only interval checkpoints and no HF-format model), sharing a single `export_to_hf` implementation with DPO via `olmo_core_utils` (https://github.com/allenai/open-instruct/pull/1830).
 - Backend A/B benchmark scripts (`scripts/train/debug/backend_ab/`) comparing DeepSpeed vs OLMo-core for SFT/DPO/GRPO, plus `PerfCallback` on OLMo-core SFT, a per-log-period TPS metric in `finetune.py`, and a guard rejecting DeepSpeed-only flags in `grpo.py` (https://github.com/allenai/open-instruct/pull/1827).
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
