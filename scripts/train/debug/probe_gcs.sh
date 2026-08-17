@@ -24,4 +24,5 @@ uv run python mason.py \
     --non_resumable \
     --no_auto_dataset_cache \
     --secret GOOGLE_APPLICATION_CREDENTIALS=GOOGLE_APPLICATION_CREDENTIALS \
+    --env GOOGLE_CLOUD_PROJECT=ai2-allennlp \
     -- uv run python scripts/train/debug/probe_gcs_access.py

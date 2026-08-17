@@ -324,7 +324,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     if not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
-        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
+        # model_name_or_path is weight initialization, not a resume: skip the optimizer
+        # state (SFT starts a fresh optimizer) as well as the trainer state (step counter,
+        # LR schedule position, data order).
+        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False, load_optim_state=False)
 
     logger.info("Starting training...")
     trainer.fit()

@@ -374,7 +374,13 @@ def is_hf_checkpoint(path: str) -> bool:
     olmo-core distributed checkpoints.
     """
     if os.path.isdir(path):
-        return os.path.isfile(os.path.join(path, "config.json"))
+        config_path = os.path.join(path, "config.json")
+        if not os.path.isfile(config_path):
+            return False
+        # olmo-core checkpoints also carry a config.json (the full experiment config),
+        # so presence alone is not enough: HF configs have a top-level "model_type".
+        with open(config_path) as config_file:
+            return "model_type" in json.load(config_file)
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True
