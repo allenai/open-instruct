@@ -288,7 +288,7 @@ GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
 # Build model args JSON with optional process_output
-MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": true"
 if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
 fi
@@ -319,7 +319,7 @@ for TASK in "${TASKS[@]}"; do
             # HF model: check if it's supported
             if [[ " ${SUPPORTED_MODELS[*]} " =~ " ${MODEL_LOCATION} " ]]; then
                 # Supported HF model: remove model_path, no metadata needed
-                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
+                BASE_ARGS="{\"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": true"
                 if [[ -n "$PROCESS_OUTPUT" ]]; then
                     BASE_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
                 fi
@@ -344,9 +344,9 @@ for TASK in "${TASKS[@]}"; do
     # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     # Build gantry args
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
-        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#42\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\"${MAX_TOKENS_ARG}}"
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=OPENAI_API_KEY\", \"weka\": \"oe-adapt-default:/weka/oe-adapt-default\", \"weka#44\": \"oe-training-default:/weka/oe-training-default\", \"env-secret#2\":\"HF_TOKEN=SAUMYAM_HF_TOKEN\", \"env#132\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\"${MAX_TOKENS_ARG}}"
     else
-        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
+        GANTRY_ARGS="{\"env-secret\": \"OPENAI_API_KEY=OPENAI_API_KEY\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=SAUMYAM_HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"${MAX_TOKENS_ARG}}"
     fi
 
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
