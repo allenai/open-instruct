@@ -79,6 +79,20 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
 
+# MoE v2's token permutation hard-requires transformer_engine's kernels
+# (olmo_core/nn/moe/utils.py guards the import, olmo_core/nn/moe/v2/no_ep.py calls
+# them unconditionally). Only the CUDA 13 image gets it: that's where the MoE spike
+# runs, and the torch-binding sdist compiles against the venv's torch, so
+# --no-build-isolation with the build tools preinstalled. transformer_engine_cu13
+# itself is a prebuilt wheel; only the bindings compile here.
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    if [ "$CUDA_VERSION" = "13" ]; then \
+        uv pip install cmake ninja pybind11 setuptools wheel && \
+        MAX_JOBS=8 uv pip install --no-build-isolation "transformer-engine[pytorch]==2.18.0"; \
+    fi
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
