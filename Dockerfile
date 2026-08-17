@@ -1,6 +1,10 @@
 ARG CUDA_VERSION=12
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS cuda12
-FROM nvidia/cuda:13.0.3-devel-ubuntu22.04 AS cuda13
+# SPIKE: 13.3.1 rather than 13.0.3, and the -cudnn- variant. transformer-engine's
+# prebuilt cu13 wheel needs cublasLtGroupedMatrixLayoutInit_internal, absent from
+# 13.0.3's libcublasLt (13.1.1.3), and its bindings need cudnn.h, absent from the
+# plain devel image. Revert both if TE is ever dropped.
+FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS cuda13
 FROM cuda${CUDA_VERSION}
 
 ARG CUDA_VERSION
