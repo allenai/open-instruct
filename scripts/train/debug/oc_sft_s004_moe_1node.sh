@@ -74,8 +74,11 @@ LOCAL_CACHE_DIR=/weka/oe-adapt-default/allennlp/numpy_sft_cache
 #   committing the node for hours.
 MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-172}"
 CHECKPOINTING_STEPS="${CHECKPOINTING_STEPS:-86}"
-DIST_TIMEOUT_HOURS="${DIST_TIMEOUT_HOURS:-2}"
-if [ "${SAVE_ASYNC:-true}" = "false" ]; then SAVE_ASYNC_FLAG="--no_save_async"; else SAVE_ASYNC_FLAG="--save_async"; fi
+DIST_TIMEOUT_HOURS="${DIST_TIMEOUT_HOURS:-4}"
+# Synchronous saves are mandatory here, not a tuning choice: OLMoDDPTrainModule
+# raises "does not support async checkpointing" (hit at the step-30 save in
+# 01M08XZS450RKD0NHJBSV87MPR, after all 30 steps had trained cleanly).
+SAVE_ASYNC_FLAG="--no_save_async"
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Mode: $MODE"
