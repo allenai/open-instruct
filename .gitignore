@@ -163,3 +163,4 @@ cache/
 local_dataset_cache/
 scratch/
 .claude/worktrees/
+scratchpad/
