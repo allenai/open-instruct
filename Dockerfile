@@ -85,12 +85,18 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 # runs, and the torch-binding sdist compiles against the venv's torch, so
 # --no-build-isolation with the build tools preinstalled. transformer_engine_cu13
 # itself is a prebuilt wheel; only the bindings compile here.
+# No pyproject/uv.lock mounts here: the project's extra-build-dependencies
+# config (torch, match-runtime, for flash-attn) would otherwise apply to these
+# unrelated installs and fail them. uv pip targets /stage/.venv directly.
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     if [ "$CUDA_VERSION" = "13" ]; then \
         uv pip install cmake ninja pybind11 setuptools wheel && \
-        MAX_JOBS=8 uv pip install --no-build-isolation "transformer-engine[pytorch]==2.18.0"; \
+        CUDNN_DIR=$(/stage/.venv/bin/python -c "import nvidia.cudnn; print(list(nvidia.cudnn.__path__)[0])") && \
+        CUDNN_PATH="$CUDNN_DIR" \
+        CPLUS_INCLUDE_PATH="$CUDNN_DIR/include" \
+        C_INCLUDE_PATH="$CUDNN_DIR/include" \
+        LIBRARY_PATH="$CUDNN_DIR/lib" \
+        MAX_JOBS=8 uv pip install --no-build-isolation "transformer-engine[pytorch]==2.16.1"; \
     fi
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
