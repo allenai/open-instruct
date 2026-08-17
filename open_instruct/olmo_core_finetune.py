@@ -41,6 +41,7 @@ from olmo_core import optim
 from olmo_core.config import DType
 from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import is_distributed
+from olmo_core.nn.ddp import model as ddp_model_lib
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -244,22 +245,46 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
     )
 
-    train_module_config = train_module_lib.TransformerTrainModuleConfig(
-        rank_microbatch_size=rank_microbatch_size,
-        max_sequence_length=args.training.max_seq_length,
-        z_loss_multiplier=None,
-        compile_model=args.training.compile_model,
-        optim=optim.SkipStepAdamWConfig(
-            lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
-        ),
-        dp_config=dp_config,
-        cp_config=cp_config,
-        ac_config=ac_config,
-        scheduler=scheduler,
-        max_grad_norm=args.training.max_grad_norm
-        if args.training.max_grad_norm and args.training.max_grad_norm > 0
-        else None,
+    max_grad_norm = (
+        args.training.max_grad_norm if args.training.max_grad_norm and args.training.max_grad_norm > 0 else None
     )
+    if isinstance(model, ddp_model_lib.OLMoDDPModel):
+        # MoE v2 models refuse FSDP; they train through the branch's own DDP train
+        # module, configured from the checkpoint's train_module section. Requires
+        # --config_name to be the checkpoint config json.
+        assert args.model.config_name is not None and args.model.config_name.endswith(".json"), (
+            "OLMoDDPModel requires --config_name pointing at the (migrated) checkpoint config json"
+        )
+        assert cp_config is None, "context parallelism is not wired for the DDP train module"
+        train_module_config = olmo_core_utils.build_ddp_train_module_config(
+            args.model.config_name,
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            learning_rate=args.training.learning_rate,
+            weight_decay=args.training.weight_decay,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+            compile_model=args.training.compile_model,
+            ac_config=ac_config,
+        )
+    else:
+        train_module_config = train_module_lib.TransformerTrainModuleConfig(
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            z_loss_multiplier=None,
+            compile_model=args.training.compile_model,
+            optim=optim.SkipStepAdamWConfig(
+                lr=args.training.learning_rate,
+                weight_decay=args.training.weight_decay,
+                betas=(0.9, 0.95),
+                compile=False,
+            ),
+            dp_config=dp_config,
+            cp_config=cp_config,
+            ac_config=ac_config,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+        )
 
     train_module = train_module_config.build(model)
 

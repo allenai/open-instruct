@@ -35,11 +35,16 @@
 # * LR 2.5e-5 is the Olmo Hybrid SFT rate. It is NOT validated for this
 #   architecture: s004 pretrained with Muon at peak LR 4.4e-4, which does not
 #   translate to AdamW. If the loss is flat or unstable, this is the first knob.
+# * The model trains through the branch's nn.ddp train module, NOT FSDP2:
+#   OLMoDDPModel refuses prepare_experts_for_fsdp by design (first smoke run,
+#   01M08QTBC0KW7FKVYSJG1H9Y55). The DDP module's optimizer and dp_config come
+#   verbatim from the checkpoint's train_module section. Full 26.7B replication
+#   per rank: ~53 GB bf16 params + fp32 grads on a 288 GB B300 -- fits, but only
+#   because it is Blackwell.
 # * No --activation_checkpointing_mode and no --compile_model: at micro-batch
-#   1 x 8192 the activations are small next to 26.7B params of FSDP2 state on a
-#   288 GB B300, and each removed feature is a removed failure mode for a
-#   first-of-its-kind run. Pretraining compiled; turn it back on for speed once
-#   the path is proven.
+#   1 x 8192 the activations are small next to the replicated param+grad state,
+#   and each removed feature is a removed failure mode for a first-of-its-kind
+#   run. Pretraining compiled; turn it back on for speed once the path is proven.
 # * ai2/holmes (B300, CUDA 13): the FSDP2 reduce-scatter hang killed 4/4 H100
 #   runs of the hybrid (allenai/OLMo-core#829), and this model shares the GDN
 #   blocks. Do not spend H100 queue time finding out it reproduces.

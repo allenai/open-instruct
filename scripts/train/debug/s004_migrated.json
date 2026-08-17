@@ -361,8 +361,7 @@
             "*feed_forward_norm.weight"
           ],
           "opts": {
-            "weight_decay": 0.0,
-            "use_muon": false
+            "weight_decay": 0.0
           },
           "_CLASS_": "olmo_core.optim.config.OptimGroupOverride"
         }
@@ -379,15 +378,6 @@
       "eps": 1e-08,
       "weight_decay": 0.1,
       "dtype": "float32",
-      "muon_momentum": 0.95,
-      "muon_nesterov": true,
-      "muon_ns_coefficients": [
-        3.4445,
-        -4.775,
-        2.0315
-      ],
-      "muon_eps": 1e-07,
-      "muon_ns_steps": 5,
       "rolling_interval_length": 128,
       "sigma_factor": 12,
       "max_grad_norm": 1.0,

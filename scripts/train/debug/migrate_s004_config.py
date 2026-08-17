@@ -69,6 +69,29 @@ def migrate_block(name: str, block: dict) -> list[str]:
     return changes
 
 
+def migrate_train_module(train_module: dict) -> list[str]:
+    """Rewrite the train_module section in place. Returns the changes applied.
+
+    The checkpoint's optimizer was Muon (peak lr 4.4e-4); the branch has since
+    removed Muon from OLMoDDPOptimizerConfig entirely, so the muon_* fields and
+    the use_muon group-override key no longer parse. Dropping them changes the
+    optimizer to the branch's current distributed skip-step AdamW -- which is
+    what the branch itself now trains these models with. SFT overrides lr anyway.
+    """
+    changes = []
+    optim = train_module.get("optim", {})
+    stale = [k for k in optim if k.startswith("muon_")]
+    for k in stale:
+        optim.pop(k)
+    if stale:
+        changes.append(f"dropped {len(stale)} muon_* optimizer fields (Muon removed from the branch)")
+    for override in optim.get("group_overrides", []):
+        if "use_muon" in override.get("opts", {}):
+            override["opts"].pop("use_muon")
+            changes.append("dropped use_muon from a group override")
+    return changes
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=pathlib.Path, help="config.json from the checkpoint")
@@ -87,6 +110,11 @@ def main() -> int:
         changes = migrate_block(name, block)
         total += len(changes)
         print(f"{name}: {', '.join(changes) if changes else 'no change needed'}")
+
+    if "train_module" in payload:
+        changes = migrate_train_module(payload["train_module"])
+        total += len(changes)
+        print(f"train_module: {', '.join(changes) if changes else 'no change needed'}")
 
     args.dest.write_text(json.dumps(payload, indent=2))
     print(f"\n{total} rewrite(s) applied; wrote {args.dest}")
