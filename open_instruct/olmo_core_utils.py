@@ -242,6 +242,7 @@ class CheckpointConfig:
     save_async: bool = True
     """Whether olmo-core saves checkpoints asynchronously."""
 
+
 def build_checkpointer_callback(
     checkpointing_steps: int,
     ephemeral_save_interval: int | None,
