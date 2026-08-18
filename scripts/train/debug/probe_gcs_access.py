@@ -32,7 +32,11 @@ def _materialize_credential() -> None:
     logger.info("GOOGLE_APPLICATION_CREDENTIALS present=%s length=%d", bool(value), len(value))
     if not value:
         return
-    if value.lstrip().startswith("{"):
+    # `beaker secret write <<< "..."` stores a trailing newline, which google.auth
+    # does not strip -- the path then silently fails to resolve.
+    value = value.strip()
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = value
+    if value.startswith("{"):
         path = "/tmp/gcp_service_account.json"
         with open(path, "w") as handle:
             handle.write(value)
@@ -59,7 +63,7 @@ def main() -> None:
         logger.info("  %s", entry)
 
     metadata = f"{S004_STEP}/model_and_optim/.metadata"
-    size = olmo_core_io.file_size(metadata)
+    size = olmo_core_io.get_file_size(metadata)
     logger.info("file_size(.metadata) = %d bytes", size)
 
     head = olmo_core_io.get_bytes_range(metadata, 0, 16)
