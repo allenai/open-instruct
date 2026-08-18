@@ -534,12 +534,8 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     )
 
 
-#: Model types whose released checkpoints are published in transformers' *in-memory*
-#: weight naming rather than the "legacy" naming its conversion_mapping expects on disk.
-#: For these, save_pretrained must be told not to apply the reverse rename. Everything
-#: else keeps transformers' default, which reproduces the layout its released checkpoints
-#: use. If an export trips the key check in save_state_dict_as_hf, this set is the first
-#: thing to look at.
+#: Model types whose released checkpoints use transformers' in-memory weight naming, so
+#: save_pretrained must not apply its conversion_mapping in reverse on the way out.
 _MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}
 
 
@@ -565,24 +561,10 @@ def save_state_dict_as_hf(
     hf_model.load_state_dict(converted, assign=True)
 
     os.makedirs(save_dir, exist_ok=True)
-    # transformers' conversion_mapping declares a "legacy" on-disk naming for ~30 model
-    # types and renames it to the in-memory naming on load; save_pretrained applies that
-    # in reverse by default (save_original_format=True). Which value is correct depends
-    # on what the *released* checkpoint of this model actually uses, and it differs:
-    #
-    #   olmoe / mixtral / qwen2_moe   released in the legacy per-expert layout -> True
-    #   olmo_hybrid                   released in the in-memory naming         -> False
-    #
-    # Getting it wrong is silent here and only fails in whatever loads the checkpoint
-    # (vLLM reads the file directly, so olmo-eval rejects it), which is what the
-    # verification below is for.
     model_type = getattr(hf_config, "model_type", None)
     hf_model.save_pretrained(save_dir, save_original_format=model_type not in _MODERN_NAMING_MODEL_TYPES)
     tokenizer.save_pretrained(save_dir)
 
-    # Verify every converted tensor actually reached the file. Without this the failure
-    # is silent: save_pretrained returns cleanly and the checkpoint only breaks later,
-    # in whatever tries to load it.
     index_path = os.path.join(save_dir, "model.safetensors.index.json")
     if os.path.isfile(index_path):
         with open(index_path) as index_file:
