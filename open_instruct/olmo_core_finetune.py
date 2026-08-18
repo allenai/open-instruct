@@ -311,10 +311,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
 
-    # olmo-core always tries save_folder first, which is what resumes a run that was
-    # preempted or died. resume_from_checkpoint is the fallback for continuing from a
-    # *different* directory, so it also has to force load_strategy on: the default is
-    # `never` for olmo-core checkpoints, which would ignore the path silently.
+    # load_path is only consulted when load_strategy is not `never`, so setting
+    # resume_from_checkpoint has to turn it on.
     load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
     if args.checkpoint.resume_from_checkpoint is not None:
         load_strategy = LoadStrategy.if_available

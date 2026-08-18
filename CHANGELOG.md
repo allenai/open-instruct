@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
 ### Fixed
-- Wire `--resume_from_checkpoint` to olmo-core's `TrainerConfig.load_path` in the SFT path; it was declared but never read, so passing it silently did nothing (https://github.com/allenai/open-instruct/pull/1823).
+- `--resume_from_checkpoint` is now honored in the olmo-core SFT path instead of being silently ignored (https://github.com/allenai/open-instruct/pull/1823).
 - SFT tokenization no longer aborts on chat templates whose rendered prefixes are not literal prefixes of the full render (the olmo family swaps `<|im_end|>` for `eos_token` on the final assistant turn, which breaks whenever `eos_token` is not `<|im_end|>`). Label spans now fall back to prefix token counts, verified in three directions (span too narrow, starting inside the assistant header, or running past the turn), so a fallback can never silently mis-mask. Conversations whose spans remain underivable are masked out and dropped by `sft_tulu_filter_v1` instead of raising inside `dataset.map` and killing the whole job. Spans truncated by `max_seq_length` are exempt from the coverage check, so long conversations are kept rather than discarded (https://github.com/allenai/open-instruct/pull/1806, fixes https://github.com/allenai/open-instruct/issues/1800).
 
 ### Changed
