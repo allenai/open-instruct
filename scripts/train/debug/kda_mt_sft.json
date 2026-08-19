@@ -1,0 +1,1763 @@
+{
+  "run_name": "olmoe3-1p4b-legacy-1p2b-l2-Cx8-mtlr0p00016-midtrain",
+  "launch": {
+    "name": "olmoe3-1p4b-legacy-1p2b-l2-Cx8-mtlr0p00016-midtrain-train-e0ea5cf8",
+    "cmd": [
+      "ladders/olmoe3/workloads/midtraining.py",
+      "train",
+      "olmoe3-1p4b-legacy-1p2b-l2-Cx8-mtlr0p00016-midtrain",
+      "ai2/holmes",
+      "--launch.num_nodes=4",
+      "--launch.priority=urgent",
+      "--launch.budget=ai2/oe-other",
+      "--launch.workspace=ai2/OLMo-3-moe-experiments",
+      "--launch.beaker_image=akshitab/olmo-core-tch2110cu130-fa4-rma-2026-07-24",
+      "--launch.min_runtime=8h",
+      "--launch.follow=false",
+      "--launch.step_soft_timeout=null",
+      "--launch.shared_memory=128GiB",
+      "--trainer.callbacks.wandb.project=jacobm-olmoe3-scaling-ladder",
+      "--trainer.callbacks.wandb.name=olmoe3-1p2b-legacy-l2-Cx8-mtlr0p00016-midtrain",
+      "--trainer.callbacks.wandb.group=v0.1.0-dev-olmoe3-midtrain-legacy-fullsparse-l2-scale40-0dc2930430be",
+      "--trainer.callbacks.wandb.tags=[\"midtraining\",\"architecture:legacy-fullsparse-kda-l2\",\"size:1p2b\",\"cx:8\",\"lr-fraction:0.4\",\"ladder-run:0dc2930430be\",\"ladder-job:olmoe3-1p2b-legacy-l2-Cx8-mtlr0p00016-midtrain\"]",
+      "--train_module.optim.lr=0.00016",
+      "--dataset.source_mixture_config.global_batch_size=786432",
+      "--dataset.work_dir=/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/dataset-cache",
+      "--data_loader.global_batch_size=786432",
+      "--train_module.rank_microbatch_size=24576",
+      "--trainer.load_path=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/pretraining/pt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-lr4e-4-r1/step236078",
+      "--trainer.load_trainer_state=false",
+      "--trainer.load_optim_state=false",
+      "--trainer.save_folder=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/midtraining/mt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-samebatch-lr1p6e-4-r1",
+      "--trainer.max_duration.value=50175380703",
+      "--trainer.max_duration.unit=tokens"
+    ],
+    "budget": "ai2/oe-other",
+    "task_name": "train",
+    "workspace": "ai2/OLMo-3-moe-experiments",
+    "beaker_image": "akshitab/olmo-core-tch2110cu130-fa4-rma-2026-07-24",
+    "num_nodes": 4,
+    "num_gpus": 8,
+    "shared_memory": "128GiB",
+    "clusters": [
+      "ai2/holmes"
+    ],
+    "shared_filesystem": true,
+    "priority": "urgent",
+    "min_runtime": "8h",
+    "env_vars": [
+      {
+        "name": "PYTORCH_CUDA_ALLOC_CONF",
+        "value": "expandable_segments:True",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "OLMO_SYMM_VDEV2D_AUTO_BUILD",
+        "value": "1",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "S3_PROFILE",
+        "value": "default",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "PYTHONPATH",
+        "value": "olmo-core/src",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "OLMOE3_EP_SIZE",
+        "value": "8",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      },
+      {
+        "name": "OLMOE3_SOURCE_MODEL_CONFIG",
+        "value": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/pretraining/pt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-lr4e-4-r1/step236078/config.json",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar"
+      }
+    ],
+    "env_secrets": [
+      {
+        "name": "BEAKER_TOKEN",
+        "secret": "jacobm_BEAKER_TOKEN",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "WANDB_API_KEY",
+        "secret": "jacobm_WANDB_API_KEY",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "AWS_ACCESS_KEY_ID",
+        "secret": "jacobm_AWS_ACCESS_KEY_ID",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "AWS_SECRET_ACCESS_KEY",
+        "secret": "jacobm_AWS_SECRET_ACCESS_KEY",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      }
+    ],
+    "google_credentials_secret": "jacobm_GOOGLE_CREDENTIALS",
+    "aws_config_secret": "jacobm_AWS_CONFIG",
+    "aws_credentials_secret": "jacobm_AWS_CREDENTIALS",
+    "weka_buckets": [
+      {
+        "bucket": "oe-training-default",
+        "mount": "/weka/oe-training-default",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerWekaBucket"
+      }
+    ],
+    "allow_dirty": false,
+    "git": {
+      "repo": "allenai/scaling-ladders",
+      "repo_url": "https://github.com/allenai/scaling-ladders",
+      "ref": "e574bcf38ee02b3656f8fa819c91c23f27e3caa0",
+      "_CLASS_": "gantry.git_utils.GitRepoState"
+    },
+    "gh_token_secret": "jacobm_GITHUB_TOKEN",
+    "result_dir": "/results",
+    "system_python": true,
+    "num_execution_units": 1,
+    "follow": false,
+    "launch_timeout": 300,
+    "post_setup": "python -m olmo_core.kernels.build_symm_mem_vdev2d_ext --inplace --backend cmake",
+    "_CLASS_": "olmo_core.launch.beaker.BeakerLaunchConfig"
+  },
+  "model": {
+    "d_model": 1280,
+    "vocab_size": 100352,
+    "n_layers": 20,
+    "block": {
+      "sequence_mixer": {
+        "n_heads": 16,
+        "n_v_heads": 16,
+        "head_dim": 128,
+        "expand_v": 2.0,
+        "allow_neg_eigval": true,
+        "conv_size": 4,
+        "conv_bias": false,
+        "norm_eps": 1e-05,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.attention.kda.KimiDeltaAttentionConfig",
+        "type": "kimi_delta_attention"
+      },
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-06,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "name": "moe_fused_v2",
+      "shared_experts": {
+        "d_model": 1280,
+        "hidden_size": 952,
+        "num_experts": 1,
+        "bias": false,
+        "dtype": "float32",
+        "activation": "swiglu",
+        "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+      },
+      "routed_experts": {
+        "d_model": 640,
+        "hidden_size": 952,
+        "num_experts": 512,
+        "bias": false,
+        "dtype": "float32",
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "activation": "swiglu",
+        "activation_alpha": 1.702,
+        "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+      },
+      "routed_experts_router": {
+        "d_model": 1280,
+        "num_experts": 512,
+        "top_k": 16,
+        "bias": false,
+        "normalize_expert_weights": 1.0,
+        "uniform_expert_assignment": false,
+        "random_expert_assignment": false,
+        "gating_function": "softmax",
+        "dtype": "float32",
+        "record_routing_batch_size": false,
+        "lb_loss_weight": 0.01,
+        "lb_loss_granularity": "instance",
+        "z_loss_weight": 1e-05,
+        "restore_weight_scale": true,
+        "use_recompute_fp32_cast": false,
+        "score_correction_bias": false,
+        "sigmoid_stability_epsilon": 1e-07,
+        "global_load_balancing": false,
+        "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+      },
+      "latent_moe": {
+        "latent_dim": 640,
+        "bias": false,
+        "up_proj_input_norm_enabled": false,
+        "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+      },
+      "use_peri_norm": true,
+      "use_pre_norm": false,
+      "checkpoint_attn": true,
+      "checkpoint_permute_moe_unpermute": true,
+      "checkpoint_second_unpermute": true,
+      "rowwise_fp8": {
+        "enabled": false,
+        "block_size": 32,
+        "scale_mode": "rceil",
+        "use_fast_accum": true,
+        "fp8_only_params": true,
+        "fused_autograd": true,
+        "fused_autograd_recompute_swiglu": true,
+        "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+      },
+      "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+    },
+    "lm_head": {
+      "name": "default",
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-06,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "bias": false,
+      "dtype": "float32",
+      "loss_implementation": "default",
+      "_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig"
+    },
+    "embedding_norm": {
+      "name": "rms",
+      "eps": 1e-06,
+      "bias": false,
+      "dtype": "float32",
+      "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+    },
+    "name": "moe_fused_v2",
+    "dtype": "float32",
+    "init_method": "normal",
+    "init_seed": 2026,
+    "init_std": 0.01,
+    "block_overrides": {
+      "0": {
+        "sequence_mixer": {
+          "n_heads": 16,
+          "n_v_heads": 16,
+          "head_dim": 128,
+          "expand_v": 2.0,
+          "allow_neg_eigval": true,
+          "conv_size": 4,
+          "conv_bias": false,
+          "norm_eps": 1e-05,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.attention.kda.KimiDeltaAttentionConfig",
+          "type": "kimi_delta_attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 8568,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "4": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "te",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "ep": {
+          "path": "rowwise_nvshmem",
+          "schedule": "normal",
+          "capacity_factor": 1.25,
+          "shared_slots": 1,
+          "major_align": 1,
+          "rowwise_get_nblocks": 256,
+          "rowwise_put_nblocks": 256,
+          "rowwise_weighted_put_nblocks": 128,
+          "share_dispatch_out": false,
+          "share_combine_out": false,
+          "restore_unpermute_backend": "te_fused",
+          "rowwise_wave_num_waves": 1,
+          "rowwise_wave_mode": "expert",
+          "rowwise_wave_recompute_linear1": false,
+          "rowwise_wave_recompute_act": false,
+          "checkpoint_tbo": false,
+          "deepep": {
+            "num_sms": 0,
+            "num_qps": 0,
+            "num_allocated_qps": 0,
+            "expert_alignment": 1,
+            "async_mode": false,
+            "prefer_overlap_with_compute": true,
+            "allow_hybrid_mode": true,
+            "allow_multiple_reduction": true,
+            "weighting": "swiglu",
+            "_CLASS_": "olmo_core.nn.moe.v2.ep_config.DeepEPConfig"
+          },
+          "_CLASS_": "olmo_core.nn.moe.v2.ep_config.ExpertParallelConfig"
+        },
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "9": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "te",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "ep": {
+          "path": "rowwise_nvshmem",
+          "schedule": "normal",
+          "capacity_factor": 1.25,
+          "shared_slots": 1,
+          "major_align": 1,
+          "rowwise_get_nblocks": 256,
+          "rowwise_put_nblocks": 256,
+          "rowwise_weighted_put_nblocks": 128,
+          "share_dispatch_out": false,
+          "share_combine_out": false,
+          "restore_unpermute_backend": "te_fused",
+          "rowwise_wave_num_waves": 1,
+          "rowwise_wave_mode": "expert",
+          "rowwise_wave_recompute_linear1": false,
+          "rowwise_wave_recompute_act": false,
+          "checkpoint_tbo": false,
+          "deepep": {
+            "num_sms": 0,
+            "num_qps": 0,
+            "num_allocated_qps": 0,
+            "expert_alignment": 1,
+            "async_mode": false,
+            "prefer_overlap_with_compute": true,
+            "allow_hybrid_mode": true,
+            "allow_multiple_reduction": true,
+            "weighting": "swiglu",
+            "_CLASS_": "olmo_core.nn.moe.v2.ep_config.DeepEPConfig"
+          },
+          "_CLASS_": "olmo_core.nn.moe.v2.ep_config.ExpertParallelConfig"
+        },
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "14": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "te",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "ep": {
+          "path": "rowwise_nvshmem",
+          "schedule": "normal",
+          "capacity_factor": 1.25,
+          "shared_slots": 1,
+          "major_align": 1,
+          "rowwise_get_nblocks": 256,
+          "rowwise_put_nblocks": 256,
+          "rowwise_weighted_put_nblocks": 128,
+          "share_dispatch_out": false,
+          "share_combine_out": false,
+          "restore_unpermute_backend": "te_fused",
+          "rowwise_wave_num_waves": 1,
+          "rowwise_wave_mode": "expert",
+          "rowwise_wave_recompute_linear1": false,
+          "rowwise_wave_recompute_act": false,
+          "checkpoint_tbo": false,
+          "deepep": {
+            "num_sms": 0,
+            "num_qps": 0,
+            "num_allocated_qps": 0,
+            "expert_alignment": 1,
+            "async_mode": false,
+            "prefer_overlap_with_compute": true,
+            "allow_hybrid_mode": true,
+            "allow_multiple_reduction": true,
+            "weighting": "swiglu",
+            "_CLASS_": "olmo_core.nn.moe.v2.ep_config.DeepEPConfig"
+          },
+          "_CLASS_": "olmo_core.nn.moe.v2.ep_config.ExpertParallelConfig"
+        },
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      },
+      "19": {
+        "sequence_mixer": {
+          "name": "default",
+          "n_heads": 16,
+          "n_kv_heads": 8,
+          "head_dim": 128,
+          "bias": false,
+          "gate": {
+            "granularity": "elementwise",
+            "full_precision": true,
+            "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          },
+          "qk_norm": {
+            "name": "rms",
+            "eps": 1e-06,
+            "bias": false,
+            "dtype": "float32",
+            "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+          },
+          "backend": "te",
+          "dtype": "float32",
+          "use_head_qk_norm": true,
+          "attention_sinks": false,
+          "mxfp8_qkv_projection": false,
+          "mxfp8_out_projection": false,
+          "use_recompute_qkv_prep": false,
+          "mxfp8_save_qkv_for_backward": false,
+          "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+          "type": "attention"
+        },
+        "layer_norm": {
+          "name": "rms",
+          "eps": 1e-06,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "name": "moe_fused_v2",
+        "shared_experts": {
+          "d_model": 1280,
+          "hidden_size": 952,
+          "num_experts": 1,
+          "bias": false,
+          "dtype": "float32",
+          "activation": "swiglu",
+          "_CLASS_": "olmo_core.nn.moe.v2.shared_experts.SharedExpertsConfig"
+        },
+        "routed_experts": {
+          "d_model": 640,
+          "hidden_size": 952,
+          "num_experts": 512,
+          "bias": false,
+          "dtype": "float32",
+          "rowwise_fp8": {
+            "enabled": false,
+            "block_size": 32,
+            "scale_mode": "rceil",
+            "use_fast_accum": true,
+            "fp8_only_params": true,
+            "fused_autograd": true,
+            "fused_autograd_recompute_swiglu": true,
+            "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+          },
+          "activation": "swiglu",
+          "activation_alpha": 1.702,
+          "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig"
+        },
+        "routed_experts_router": {
+          "d_model": 1280,
+          "num_experts": 512,
+          "top_k": 16,
+          "bias": false,
+          "normalize_expert_weights": 1.0,
+          "uniform_expert_assignment": false,
+          "random_expert_assignment": false,
+          "gating_function": "softmax",
+          "dtype": "float32",
+          "record_routing_batch_size": false,
+          "lb_loss_weight": 0.01,
+          "lb_loss_granularity": "instance",
+          "z_loss_weight": 1e-05,
+          "restore_weight_scale": true,
+          "use_recompute_fp32_cast": false,
+          "score_correction_bias": false,
+          "sigmoid_stability_epsilon": 1e-07,
+          "global_load_balancing": false,
+          "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2"
+        },
+        "latent_moe": {
+          "latent_dim": 640,
+          "bias": false,
+          "up_proj_input_norm_enabled": false,
+          "_CLASS_": "olmo_core.nn.moe.moe.LatentMoEConfig"
+        },
+        "use_peri_norm": true,
+        "use_pre_norm": false,
+        "checkpoint_attn": false,
+        "checkpoint_permute_moe_unpermute": false,
+        "checkpoint_second_unpermute": false,
+        "ep": {
+          "path": "rowwise_nvshmem",
+          "schedule": "normal",
+          "capacity_factor": 1.25,
+          "shared_slots": 1,
+          "major_align": 1,
+          "rowwise_get_nblocks": 256,
+          "rowwise_put_nblocks": 256,
+          "rowwise_weighted_put_nblocks": 128,
+          "share_dispatch_out": false,
+          "share_combine_out": false,
+          "restore_unpermute_backend": "te_fused",
+          "rowwise_wave_num_waves": 1,
+          "rowwise_wave_mode": "expert",
+          "rowwise_wave_recompute_linear1": false,
+          "rowwise_wave_recompute_act": false,
+          "checkpoint_tbo": false,
+          "deepep": {
+            "num_sms": 0,
+            "num_qps": 0,
+            "num_allocated_qps": 0,
+            "expert_alignment": 1,
+            "async_mode": false,
+            "prefer_overlap_with_compute": true,
+            "allow_hybrid_mode": true,
+            "allow_multiple_reduction": true,
+            "weighting": "swiglu",
+            "_CLASS_": "olmo_core.nn.moe.v2.ep_config.DeepEPConfig"
+          },
+          "_CLASS_": "olmo_core.nn.moe.v2.ep_config.ExpertParallelConfig"
+        },
+        "rowwise_fp8": {
+          "enabled": false,
+          "block_size": 32,
+          "scale_mode": "rceil",
+          "use_fast_accum": true,
+          "fp8_only_params": true,
+          "fused_autograd": true,
+          "fused_autograd_recompute_swiglu": true,
+          "_CLASS_": "olmo_core.nn.moe.v2.fp8.MoERowwiseFP8Config"
+        },
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig"
+      }
+    },
+    "embed_scale": 35.77708763999664,
+    "tie_word_embeddings": false,
+    "two_batch_overlap": false,
+    "recompute_all_blocks_by_chunk": false,
+    "recompute_each_block": false,
+    "_CLASS_": "olmo_core.nn.transformer.config.OLMoDDPModelConfig"
+  },
+  "dataset": {
+    "tokenizer": {
+      "vocab_size": 100278,
+      "eos_token_id": 100257,
+      "pad_token_id": 100277,
+      "identifier": "allenai/dolma2-tokenizer",
+      "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+    },
+    "expand_glob": false,
+    "include_instance_metadata": true,
+    "instance_filter_config": {
+      "repetition_max_period": 13,
+      "repetition_min_period": 1,
+      "repetition_max_count": 32,
+      "_CLASS_": "olmo_core.data.numpy_dataset.InstanceFilterConfig"
+    },
+    "work_dir": "/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/dataset-cache",
+    "ignore_fingerprint_mismatch": false,
+    "sequence_length": 8192,
+    "generate_doc_lengths": false,
+    "source_mixture_config": {
+      "source_list": {
+        "sources": [
+          {
+            "source_name": "sponge",
+            "target_ratio": 0.05,
+            "paths": [
+              "gs://ai2-llm/preprocessed/sponge_63_mixes/eli5_60pct_filter-decon-2/**/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "code_fim",
+            "target_ratio": 0.1,
+            "paths": [
+              "gs://ai2-llm/preprocessed/stack-edu/sample-fim-weighted-pl-edu-score-decon/**/**/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "swallowcode",
+            "target_ratio": 0.1,
+            "paths": [
+              "gs://ai2-llm/preprocessed/tokyotech-llm/swallowcode/scor_final_data-decon-sparkle-motion-with-ids-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "megamatt",
+            "target_ratio": 0.01726315213,
+            "paths": [
+              "gs://ai2-llm/preprocessed/megamath_web_pro_max/beaker_rewrites-decon-sparkle-motion-modelnamefilter2/**/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "dolminos2math",
+            "target_ratio": 0.18273684787,
+            "paths": [
+              "gs://ai2-llm/preprocessed/tokyotech-llm/swallowmath/beaker_outputs-decon-sparkle-motion-withids-modelnamefilter2/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/flat_dolmino_math-decon-sparkle-motion-SCHEMAFIX-modelnamefilter2/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/OpenMathReasoning/OpenMathReasoning-rewrite-full-thoughts/jsonls-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/tinyMATH/MIND/data/processed-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/tinyMATH/PoT/processed_data/processed-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "reddit",
+            "target_ratio": 0.059,
+            "paths": [
+              "gs://ai2-llm/preprocessed/reddit-rewrites/densesub_highthresh_microanneal_4omini_rewrite/documents-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/reddit-rewrites/densesub_lowthresh_4omini_rewrite/documents-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "rcqa",
+            "target_ratio": 0.03,
+            "paths": [
+              "gs://ai2-llm/preprocessed/wiki_psgqa_rewrites/psgqa_rewrites_v1-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "nemotron-synth-qa",
+            "target_ratio": 0.05,
+            "paths": [
+              "gs://ai2-llm/preprocessed/Nemotron-CC/v0/quality=high/kind=synthetic/kind2=diverse_qa_pairs-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "instruction-new-format",
+            "target_ratio": 0.011,
+            "paths": [
+              "gs://ai2-llm/preprocessed/ai2-llm/preprocessed/tulu-3-sft-for-olmo-3-midtraining/partitioned/v0-data-simple-concat-with-double-new-line-with-generation-prompt-decon-sparkle-motion-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "flan",
+            "target_ratio": 0.05,
+            "paths": [
+              "gs://ai2-llm/preprocessed/tulu_flan/v1-FULLDECON-HARD-TRAIN-60M-shots_all-upweight_1-dialog_false-sep_rulebased/documents-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "r1_reasoning",
+            "target_ratio": 0.01875,
+            "paths": [
+              "gs://ai2-llm/preprocessed/thinking-data/big-reasoning-traces-reformatted-keyword-filter-datecutoff-chinese-ngram-no-special-tokens-decon-sparkle-motion-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "qwq_reasoning",
+            "target_ratio": 0.01875,
+            "paths": [
+              "gs://ai2-llm/preprocessed/thinking-data/qwq-redo-reformatted-ngram-no-special-tokens-decon-sparkle-motion-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "gemini_reasoning",
+            "target_ratio": 0.00245738848,
+            "paths": [
+              "gs://ai2-llm/preprocessed/thinking-data/gemini-redo-reformatted-ngram-no-special-tokens-decon-sparkle-motion-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "llamanemotron_reasoning",
+            "target_ratio": 0.0125,
+            "paths": [
+              "gs://ai2-llm/preprocessed/thinking-data/llama-nemotron-processed-chinese-filtered-ngram-filtered-with-token-counts-decon-sparkle-motion-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "openthoughts2",
+            "target_ratio": 0.01254261152,
+            "paths": [
+              "gs://ai2-llm/preprocessed/thinking-data/openthoughts2-filtered-chinese-filtered-ngram-filtered-with-token-counts-stripped-decon-sparkle-motion-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "verifiable_41",
+            "target_ratio": 0.001323656354,
+            "paths": [
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/verifiable/gpt-41/cleaned-documents-decon-2-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "verifiable_o4",
+            "target_ratio": 0.0002675179157,
+            "paths": [
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/verifiable/o4-mini-high-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "math_meta",
+            "target_ratio": 0.00381286794,
+            "paths": [
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/math-meta-reasoning-cleaned-latex-delim-randomly-cleaned-with-id-decon-sparkle-motion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "code_meta",
+            "target_ratio": 0.004596570853,
+            "paths": [
+              "gs://ai2-llm/preprocessed/midtraining-reasoning/code-meta-reasoning-cleaned-latex-delim-randomly-cleaned-with-id-decon-sparkle-motion-modelnamefilter2/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-art_design",
+            "target_ratio": 3.5e-05,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/art_design/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/art_design/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-crime_law",
+            "target_ratio": 0.000775,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/crime_law/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/crime_law/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-education_jobs",
+            "target_ratio": 0.00258,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/education_jobs/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/education_jobs/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-entertainment",
+            "target_ratio": 0.00011,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/entertainment/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/entertainment/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-finance_business",
+            "target_ratio": 0.0007,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/finance_business/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/finance_business/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-hardware",
+            "target_ratio": 0.00024,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/hardware/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/hardware/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-health",
+            "target_ratio": 0.005935,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/health/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/health/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-history",
+            "target_ratio": 0.00027,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/history/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/history/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-home_hobbies",
+            "target_ratio": 3.5e-05,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/home_hobbies/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/home_hobbies/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-industrial",
+            "target_ratio": 0.00269,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/industrial/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/industrial/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-literature",
+            "target_ratio": 0.00045,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/literature/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/literature/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-politics",
+            "target_ratio": 0.00092,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/politics/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/politics/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-religion",
+            "target_ratio": 0.00026,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/religion/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/religion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-science_tech",
+            "target_ratio": 0.02976,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/science_tech/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/science_tech/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-software",
+            "target_ratio": 0.00059,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/software/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/software/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-software_dev",
+            "target_ratio": 0.00435,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/software_dev/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/software_dev/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-sports_fitness",
+            "target_ratio": 0.00019,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/sports_fitness/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/sports_fitness/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "pdf-quality-transportation",
+            "target_ratio": 0.00011,
+            "paths": [
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e12/transportation/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/s2pdf_dedupe_minhash_v1_with_no_pii_basic_quality_datadelve_norefs_mdtables_v2_denylisted_reshard_length-buckets_compression-decon-2_denyagain/length_2e13/transportation/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--adult_content",
+            "target_ratio": 0.0002556935,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/adult_content/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/adult_content/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--art_and_design",
+            "target_ratio": 0.0028240385,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/art_and_design/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/art_and_design/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--crime_and_law",
+            "target_ratio": 0.0065884955,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/crime_and_law/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/crime_and_law/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--education_and_jobs",
+            "target_ratio": 0.009653949,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/education_and_jobs/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/education_and_jobs/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--electronics_and_hardware",
+            "target_ratio": 0.007793589,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/electronics_and_hardware/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/electronics_and_hardware/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--entertainment",
+            "target_ratio": 0.021607659,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/entertainment/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/entertainment/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--fashion_and_beauty",
+            "target_ratio": 2.867e-05,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/fashion_and_beauty/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/fashion_and_beauty/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--finance_and_business",
+            "target_ratio": 0.009142255,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/finance_and_business/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/finance_and_business/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--food_and_dining",
+            "target_ratio": 0.003163234,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/food_and_dining/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/food_and_dining/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--games",
+            "target_ratio": 0.0154939065,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/games/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/games/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--health",
+            "target_ratio": 0.0224049655,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/health/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/health/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--history_and_geography",
+            "target_ratio": 0.006118564,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/history_and_geography/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/history_and_geography/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--home_and_hobbies",
+            "target_ratio": 0.002058489,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/home_and_hobbies/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/home_and_hobbies/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--industrial",
+            "target_ratio": 0.0035336085,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/industrial/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/industrial/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--literature",
+            "target_ratio": 0.015340814,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/literature/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/literature/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--politics",
+            "target_ratio": 0.0048655335,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/politics/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/politics/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--religion",
+            "target_ratio": 0.0044465105,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/religion/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/religion/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--science_math_and_technology",
+            "target_ratio": 0.0473059895,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/science_math_and_technology/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/science_math_and_technology/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--social_life",
+            "target_ratio": 0.001035274,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/social_life/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/social_life/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--software_development",
+            "target_ratio": 0.010649571,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/software_development/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/software_development/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--software",
+            "target_ratio": 0.0250799635,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/software/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/software/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--sports_and_fitness",
+            "target_ratio": 0.0029238175,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/sports_and_fitness/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/sports_and_fitness/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--transportation",
+            "target_ratio": 0.0021929705,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/transportation/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/transportation/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          },
+          {
+            "source_name": "web-all_dressed-snazzy2-v18-v20--travel_and_tourism",
+            "target_ratio": 0.0004924385,
+            "paths": [
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0018_subset-decon-2/travel_and_tourism/allenai/dolma2-tokenizer/*.npy",
+              "gs://ai2-llm/preprocessed/all_dressed_v3_weborganizer_ft_dclm_plus2_vigintiles/vigintile_0020_subset-decon-2/travel_and_tourism/allenai/dolma2-tokenizer/*.npy"
+            ],
+            "max_repetition_ratio": 1.0,
+            "max_source_fraction": 1.0,
+            "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureConfig"
+          }
+        ],
+        "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureList"
+      },
+      "requested_tokens": 100000000000,
+      "global_batch_size": 786432,
+      "processes": 16,
+      "seed": 1387822106,
+      "render_tables": true,
+      "quiet": false,
+      "_CLASS_": "olmo_core.data.source_mixture.SourceMixtureDatasetConfig"
+    },
+    "_CLASS_": "olmo_core.data.numpy_dataset.NumpyFSLDatasetConfig"
+  },
+  "data_loader": {
+    "global_batch_size": 786432,
+    "seed": 1387822106,
+    "num_threads": 4,
+    "num_workers": 8,
+    "prefetch_factor": 8,
+    "ignore_fingerprint_mismatch": false,
+    "_CLASS_": "olmo_core.data.data_loader.NumpyDataLoaderConfig",
+    "type": "numpy"
+  },
+  "train_module": {
+    "rank_microbatch_size": 24576,
+    "max_sequence_length": 8192,
+    "optim": {
+      "group_overrides": [
+        {
+          "params": [
+            "embeddings.weight"
+          ],
+          "opts": {
+            "weight_decay": 0.0
+          },
+          "_CLASS_": "olmo_core.optim.config.OptimGroupOverride"
+        },
+        {
+          "params": [
+            "*routed_experts.w_up_gate",
+            "*routed_experts.w_down"
+          ],
+          "opts": {},
+          "_CLASS_": "olmo_core.optim.config.OptimGroupOverride"
+        }
+      ],
+      "compile": true,
+      "fixed_fields": [
+        "initial_lr"
+      ],
+      "lr": 0.00016,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "eps": 1e-08,
+      "weight_decay": 0.1,
+      "dtype": "float32",
+      "rolling_interval_length": 128,
+      "sigma_factor": 6,
+      "max_grad_norm": 1.0,
+      "use_distributed": true,
+      "reset_optimizer_moments_on_load": false,
+      "check_nan_inf_grad": true,
+      "_CLASS_": "olmo_core.optim.moe_optimizer.OLMoDDPOptimizerConfig"
+    },
+    "max_grad_norm": 1.0,
+    "scheduler": {
+      "lr_field": "lr",
+      "initial_lr_field": "initial_lr",
+      "units": "steps",
+      "alpha_f": 0.0,
+      "warmup": 2000,
+      "warmup_min_lr": 0.0,
+      "_CLASS_": "olmo_core.optim.scheduler.LinearWithWarmup",
+      "type": "linear_with_warmup"
+    },
+    "compile_model": true,
+    "dp_config": {
+      "name": "ddp",
+      "reduce_dtype": "float32",
+      "wrapping_strategy": "full",
+      "prefetch_factor": 0,
+      "only_allreduce_last_microbatch": true,
+      "reduce_grads_in_fp32": true,
+      "accumulate_grads_in_fp32": true,
+      "use_reduce_scatter": false,
+      "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerDataParallelConfig"
+    },
+    "ep_config": {
+      "degree": 8,
+      "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerExpertParallelConfig"
+    },
+    "z_loss_multiplier": 1e-05,
+    "reset_optimizer_states_on_load": true,
+    "reset_optimizer_states_on_resume": false,
+    "label_ignore_index": -100,
+    "_CLASS_": "olmo_core.train.train_module.transformer.config.OLMoDDPTrainModuleConfig"
+  },
+  "trainer": {
+    "save_folder": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/midtraining/mt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-samebatch-lr1p6e-4-r1",
+    "work_dir": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/dataset-cache",
+    "load_path": "/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/pretraining/pt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-lr4e-4-r1/step236078",
+    "load_strategy": "always",
+    "load_optim_state": false,
+    "load_trainer_state": false,
+    "checkpointer": {
+      "pre_download": false,
+      "save_thread_count": 3,
+      "load_thread_count": 8,
+      "throttle_uploads": true,
+      "_CLASS_": "olmo_core.train.checkpoint.CheckpointerConfig"
+    },
+    "save_overwrite": false,
+    "max_duration": {
+      "value": 50175380703,
+      "unit": "tokens",
+      "_CLASS_": "olmo_core.train.common.Duration"
+    },
+    "cancel_check_interval": 1000,
+    "metrics_collect_interval": 10,
+    "callbacks": {
+      "checkpointer": {
+        "save_interval": 1000,
+        "ephemeral_save_interval": 500,
+        "pre_train_checkpoint": false,
+        "save_async": false,
+        "remove": "ephemeral_only",
+        "max_checkpoints": 3,
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.checkpointer.CheckpointerCallback"
+      },
+      "speed_monitor": {
+        "_CLASS_": "olmo_core.train.callbacks.speed_monitor.SpeedMonitorCallback"
+      },
+      "beaker": {
+        "enabled": true,
+        "result_dir": "/results",
+        "_CLASS_": "olmo_core.train.callbacks.beaker.BeakerCallback"
+      },
+      "wandb": {
+        "enabled": true,
+        "name": "olmoe3-1p2b-legacy-l2-Cx8-mtlr0p00016-midtrain",
+        "project": "jacobm-olmoe3-scaling-ladder",
+        "entity": "ai2-llm",
+        "group": "v0.1.0-dev-olmoe3-midtrain-legacy-fullsparse-l2-scale40-0dc2930430be",
+        "tags": [
+          "midtraining",
+          "architecture:legacy-fullsparse-kda-l2",
+          "size:1p2b",
+          "cx:8",
+          "lr-fraction:0.4",
+          "ladder-run:0dc2930430be",
+          "ladder-job:olmoe3-1p2b-legacy-l2-Cx8-mtlr0p00016-midtrain"
+        ],
+        "cancel_tags": [
+          "cancel",
+          "canceled",
+          "cancelled"
+        ],
+        "cancel_check_interval": 1000,
+        "_CLASS_": "olmo_core.train.callbacks.wandb.WandBCallback"
+      },
+      "config_saver": {
+        "fname": "config.json",
+        "_CLASS_": "olmo_core.train.callbacks.config_saver.ConfigSaverCallback"
+      },
+      "profiler": {
+        "skip_first": 0,
+        "wait": 1,
+        "warmup": 5,
+        "active": 3,
+        "repeat": 1,
+        "with_stack": true,
+        "profile_memory": false,
+        "enable_cuda_sync_events": false,
+        "export_distributed_event_summary": false,
+        "enabled": false,
+        "_CLASS_": "olmo_core.train.callbacks.profiler.ProfilerCallback"
+      },
+      "garbage_collector": {
+        "gc_interval": 1000,
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.garbage_collector.GarbageCollectorCallback"
+      },
+      "slack_notifier": {
+        "name": "olmoe3-1p4b-legacy-1p2b-l2-Cx8-mtlr0p00016-midtrain",
+        "notifications": "end_only",
+        "enabled": false,
+        "_CLASS_": "olmo_core.train.callbacks.slack_notifier.SlackNotifierCallback"
+      },
+      "gap_monitor": {
+        "enabled": false,
+        "interval": 1,
+        "dump_gradients_start_step": 0,
+        "dump_gradients_step_interval": 1,
+        "_CLASS_": "olmo_core.train.callbacks.gap_monitor.GAPMonitorCallback"
+      },
+      "gpu_monitor": {
+        "_CLASS_": "olmo_core.train.callbacks.gpu_memory_monitor.GPUMemoryMonitorCallback"
+      }
+    },
+    "async_bookkeeping": false,
+    "bookkeeping_soft_timeout": 30,
+    "no_checkpoints": false,
+    "no_evals": false,
+    "_CLASS_": "olmo_core.train.config.TrainerConfig"
+  },
+  "init_seed": 12536,
+  "backend": "cpu:gloo,cuda:nccl",
+  "_CLASS_": "olmo_core.internal.experiment.ExperimentConfig"
+}

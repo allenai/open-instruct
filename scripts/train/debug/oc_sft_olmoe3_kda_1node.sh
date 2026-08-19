@@ -45,7 +45,11 @@ MODE="${2:-train}"
 
 # ---- cache-key arguments: MUST be byte-identical across both jobs ----
 MODEL=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/midtraining/mt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-samebatch-lr1p6e-4-r1/step63802
-CONFIG_NAME=$MODEL/config.json
+# Not the checkpoint's own config: activation checkpointing is enabled and the
+# expert-parallel block config dropped, because midtraining sharded the 512
+# experts across 8 ranks and we replicate them. Regenerate with
+# scripts/train/debug/make_kda_sft_config.py if the checkpoint moves.
+CONFIG_NAME=scripts/train/debug/kda_mt_sft.json
 TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
 CHAT_TEMPLATE=olmo123
 MAX_SEQ_LENGTH=8192
