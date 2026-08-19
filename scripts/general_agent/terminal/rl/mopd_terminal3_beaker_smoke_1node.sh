@@ -17,6 +17,7 @@
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 EXP_NAME=${EXP_NAME:-mopd_terminal3_beaker_smoke_tmax2b}
+WANDB_MODE=${WANDB_MODE:-offline}
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -35,6 +36,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
+       --env WANDB_MODE="$WANDB_MODE" \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=shashankg209 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
