@@ -50,8 +50,8 @@ wheels = [
 
 [[package]]
 name = "ai2-olmo-core"
-version = "2.6.0"
-source = { git = "https://github.com/allenai/OLMo-core.git?rev=8f508637b57e#8f508637b57e443808f920cf2ae8714fa840a9c3" }
+version = "2.5.0"
+source = { git = "https://github.com/allenai/OLMo-core.git?rev=f2cf93839#f2cf93839a823b88955e94a851c808829c5201ba" }
 dependencies = [
     { name = "bettermap", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "cached-path", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
@@ -3165,7 +3165,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.10.1" },
-    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=8f508637b57e" },
+    { name = "ai2-olmo-core", git = "https://github.com/allenai/OLMo-core.git?rev=f2cf93839" },
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "authlib", marker = "extra == 'dr-tulu'" },
     { name = "backoff", specifier = ">=2.2.1" },
