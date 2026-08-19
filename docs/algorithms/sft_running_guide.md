@@ -1,7 +1,6 @@
 # Running SFT: a known-good starting point
 
-Olmo 3 7B dense, **one epoch of Dolci-Instruct-SFT, one 8×H100 node**. Start here
-unless you have a reason not to, then change one thing at a time.
+Olmo 3 7B dense, **one epoch of Dolci-Instruct-SFT, one 8×H100 node**.
 
 Measured cost and outcome: ~1.5 h tokenization (CPU, 0 GPUs) + ~9.5 h training
 (~77 GPU-hours) + ~15 min per checkpoint to evaluate. IFBench +6.7 and GSM8K +1.8
@@ -13,16 +12,12 @@ Read its header before editing it: several flags look wrong and are not, and the
 reasons are recorded there rather than repeated here. For a flag-by-flag reference
 see [Supervised finetuning](finetune.md).
 
-!!! note "Live document"
-    Verified 2026-08-19 at [`6256267`](https://github.com/allenai/open-instruct/commit/62562670d).
-    Recipes drift. If you run this and something has moved, update this page.
-
 ## Example runs
 
 | Report | What it is |
 |---|---|
 | [Olmo 3 7B SFT pipeline validation](https://wandb.ai/ai2-llm/open_instruct_internal/reports/Olmo-3-7B-SFT-pipeline-validation-and-eval-results--VmlldzoxNzcwOTIyMg) | This recipe, verbatim. [Beaker](https://beaker.org/ex/01KZHT32T30M2VHCWKRJS1G9P7) · [W&B run](https://wandb.ai/ai2-llm/open_instruct_internal/runs/ed453531) |
-| [Olmo-Hybrid-7B SFT](https://wandb.ai/ai2-llm/open_instruct_internal/reports/Olmo-Hybrid-7B-SFT-through-open-instruct-it-works-on-Blackwell--VmlldzoxNzcyMjMzOQ) | The same recipe pointed at a different base model, and the seven bugs that surfaced. [Beaker](https://beaker.org/ex/01M013HTEWJYVHAKPHHJ762YJW) |
+| [Olmo-Hybrid-7B SFT](https://wandb.ai/ai2-llm/open_instruct_internal/reports/Olmo-Hybrid-7B-SFT-through-open-instruct-it-works-on-Blackwell--VmlldzoxNzcyMjMzOQ) | The same recipe pointed at the hybrid base model. [Beaker](https://beaker.org/ex/01M013HTEWJYVHAKPHHJ762YJW) |
 
 ## Before you start
 
@@ -61,10 +56,8 @@ the tokenizer's own template, which prepends a function-calling system block to 
 conversation without a system message, so rows average 840 tokens rather than the
 ~643 you get under the `olmo_thinker` templates.
 
-Checkpoints land every 345 steps (five per epoch) in
-`/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/$WANDB_RUN_ID/stepN/`,
-where `$WANDB_RUN_ID` is the W&B run id and the directory is also exported to the job
-as `CHECKPOINT_OUTPUT_DIR`.
+Checkpoints are written every 345 steps — five per epoch, which is what the eval
+table below covers — into the directory the job logs as `CHECKPOINT_OUTPUT_DIR`.
 
 If the job stays queued, run `beaker job events <job-id>` and read the scheduler's own
 reason — the two common ones need opposite fixes, and both are spelled out in the
@@ -76,7 +69,7 @@ olmo-eval can serve a raw olmo-core checkpoint, but the verified path exports to
 first. One 0-GPU job per checkpoint:
 
 ```bash
-CKPT=/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/$WANDB_RUN_ID
+CKPT=<the checkpoint directory the training job wrote to>
 STEP=1723
 BEAKER_IMAGE=<the image build_image_and_launch.sh printed in step 1>
 
@@ -102,12 +95,13 @@ template, which is what makes the model answer chat-formatted eval prompts at al
 
 ## 4. Evaluate
 
-From an olmo-eval checkout, one job per checkpoint on 1 GPU (~15 min each):
+From an olmo-eval checkout, one job per checkpoint on 1 GPU (~15 min each).
+`$CKPT` and `$STEP` are the same as in step 3:
 
 ```bash
 uv run olmo-eval beaker launch \
-    -n olmo3-7b-sft-step1723 \
-    -m /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/$WANDB_RUN_ID/hf_step1723 \
+    -n olmo3-7b-sft-step$STEP \
+    -m $CKPT/hf_step$STEP \
     -t ifeval_ood -t gsm8k \
     --harness default \
     -o provider.tokenizer=allenai/olmo-3-tokenizer-instruct-dev \
