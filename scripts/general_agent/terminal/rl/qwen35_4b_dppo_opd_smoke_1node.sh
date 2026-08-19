@@ -22,6 +22,7 @@ TEACHER_MODEL=${TEACHER_MODEL:-allenai/tmax-4b}
 
 EXP_NAME=${EXP_NAME:-swerl_qwen35_4b_dppo_opd_smoke_1node}
 TOTAL_EPISODES=${TOTAL_EPISODES:-3200}
+WANDB_MODE=${WANDB_MODE:-offline}
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -40,6 +41,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
+       --env WANDB_MODE="$WANDB_MODE" \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=shashankg209 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \

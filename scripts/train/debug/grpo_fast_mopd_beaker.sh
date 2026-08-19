@@ -19,6 +19,7 @@
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 OPD_COMBINE="${OPD_COMBINE:-route}"
+WANDB_MODE="${WANDB_MODE:-offline}"
 
 COMBINE_ARGS=(--opd_teacher_combine "$OPD_COMBINE")
 if [ "$OPD_COMBINE" = "route" ]; then
@@ -42,6 +43,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
+       --env WANDB_MODE="$WANDB_MODE" \
        --budget ai2/oe-omai \
        --gpus 2 \
        --no_auto_dataset_cache \
