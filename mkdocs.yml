@@ -111,6 +111,7 @@ nav:
     - checkpoint_resumption.md
     - debug_envs_reference.md
     - registry_mirror.md
+    - podman_sandboxes.md
     - algorithms/tmax_4b_script_reference.md
     - tmax_rl_args_reference.md
     - dr_tulu_rl_args_reference.md
