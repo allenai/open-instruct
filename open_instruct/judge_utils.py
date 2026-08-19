@@ -207,6 +207,24 @@ def extract_score_web_instruct(score_str: str) -> "tuple[str, float]":
     return score_str, 0.0
 
 
+def coerce_score(raw_score) -> float:
+    """Turn a judge's SCORE field into a float.
+
+    The factuality and refusal templates instruct the judge to answer exactly
+    "True" or "False", so a compliant judge emits `"SCORE": "True"`. `float()`
+    raises on that, and the except path scored every verdict 0.0, making correct
+    and incorrect answers indistinguishable. Booleans (JSON `true`/`false` or
+    their string forms) map to 1.0/0.0; everything else keeps float semantics.
+    """
+    if isinstance(raw_score, str):
+        lowered = raw_score.strip().lower()
+        if lowered == "true":
+            return 1.0
+        if lowered == "false":
+            return 0.0
+    return float(raw_score)
+
+
 def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
     """Extractor based on json score with fallback"""
     try:
@@ -230,11 +248,11 @@ def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
         try:
             data = json.loads(cleaned_str)
             reasoning = data.get("REASONING", "")
-            score = float(data.get("SCORE", 0.0))
+            score = coerce_score(data.get("SCORE", 0.0))
         except json.JSONDecodeError as e:
-            score_match = re.search(r'"SCORE"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?', cleaned_str)
+            score_match = re.search(r'"SCORE"\s*:\s*"?(true|false|[0-9]+(?:\.[0-9]+)?)"?', cleaned_str, re.IGNORECASE)
             if score_match:
-                score = float(score_match.group(1))
+                score = coerce_score(score_match.group(1))
                 reasoning = cleaned_str
             else:
                 raise ValueError() from e
