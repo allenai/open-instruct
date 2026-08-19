@@ -523,6 +523,21 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
+def convert_olmo_core_state_to_hf(hf_config: transformers.PretrainedConfig, state_dict: dict[str, Any]) -> dict:
+    """Convert an olmo-core state dict to HF format, dispatching on model type.
+
+    Both the pre-training export check and the actual save go through here, so they
+    cannot disagree about which converter a model needs. olmo-core's converter has
+    no ``olmo_hybrid`` case and falls through to the llama-style key templates,
+    where it raises on every GDN parameter.
+    """
+    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
+        return olmo_core_hybrid.convert_hybrid_state_to_hf(
+            state_dict, olmo_core_hybrid.layer_types_from_hf_config(hf_config)
+        )
+    return olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+
+
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -534,7 +549,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
+    converted = convert_olmo_core_state_to_hf(hf_config, olmo_core_state)
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
@@ -569,12 +584,7 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
-        converted = olmo_core_hybrid.convert_hybrid_state_to_hf(
-            state_dict, olmo_core_hybrid.layer_types_from_hf_config(hf_config)
-        )
-    else:
-        converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+    converted = convert_olmo_core_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
