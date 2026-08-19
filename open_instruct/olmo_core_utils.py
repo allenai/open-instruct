@@ -150,8 +150,6 @@ class TrainingConfig:
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
-    dist_timeout_hours: float = 24
-    """Timeout for distributed collectives, in hours."""
 
 
 def build_ac_config(
@@ -239,8 +237,6 @@ class CheckpointConfig:
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
     """If the training should continue from a checkpoint folder."""
-    save_async: bool = True
-    """Whether olmo-core saves checkpoints asynchronously."""
 
 
 def build_checkpointer_callback(

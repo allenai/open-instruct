@@ -110,6 +110,20 @@ def _tokenize_to_numpy_dir(
 
 
 @dataclasses.dataclass
+class SFTConfig:
+    """Settings read only by this script.
+
+    They stay out of the shared configs because DPO and GRPO inherit those and
+    would advertise flags neither trainer reads.
+    """
+
+    dist_timeout_hours: float = 24
+    """Timeout for distributed collectives, in hours."""
+    save_async: bool = True
+    """Whether olmo-core saves checkpoints asynchronously."""
+
+
+@dataclasses.dataclass
 class SFTArguments:
     tracking: olmo_core_utils.ExperimentConfig
     model: olmo_core_utils.ModelConfig
@@ -117,6 +131,7 @@ class SFTArguments:
     dataset: olmo_core_utils.DatasetConfig
     logging: olmo_core_utils.LoggingConfig
     checkpoint: olmo_core_utils.CheckpointConfig
+    sft: SFTConfig
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
@@ -178,7 +193,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         )
 
     global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
-        seed=args.tracking.seed, timeout=datetime.timedelta(hours=args.training.dist_timeout_hours)
+        seed=args.tracking.seed, timeout=datetime.timedelta(hours=args.sft.dist_timeout_hours)
     )
 
     if is_main_process:
@@ -305,7 +320,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
         max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
-        save_async=args.checkpoint.save_async,
+        save_async=args.sft.save_async,
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
@@ -342,6 +357,7 @@ if __name__ == "__main__":
             olmo_core_utils.DatasetConfig,
             olmo_core_utils.LoggingConfig,
             olmo_core_utils.CheckpointConfig,
+            SFTConfig,
             dataset_transformation.TokenizerConfig,
         )
     )
@@ -355,8 +371,14 @@ if __name__ == "__main__":
         transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
         target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS),
     )
-    tracking, model, training, dataset, logging_cfg, checkpoint, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
+    tracking, model, training, dataset, logging_cfg, checkpoint, sft, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
     args = SFTArguments(
-        tracking=tracking, model=model, training=training, dataset=dataset, logging=logging_cfg, checkpoint=checkpoint
+        tracking=tracking,
+        model=model,
+        training=training,
+        dataset=dataset,
+        logging=logging_cfg,
+        checkpoint=checkpoint,
+        sft=sft,
     )
     main(args, tc)
