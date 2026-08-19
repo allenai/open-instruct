@@ -311,16 +311,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
 
-    # load_path is only consulted when load_strategy is not `never`, so setting
-    # resume_from_checkpoint has to turn it on.
-    load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
-    if args.checkpoint.resume_from_checkpoint is not None:
-        load_strategy = LoadStrategy.if_available
-
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
-        load_path=args.checkpoint.resume_from_checkpoint,
-        load_strategy=load_strategy,
+        load_strategy=LoadStrategy.never,
         max_duration=max_duration,
         metrics_collect_interval=args.logging.logging_steps,
         callbacks=trainer_callbacks,
@@ -328,7 +321,15 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
     ).build(train_module, data_loader)
 
-    if not use_hf_ckpt:
+    # Loaded here rather than by fit(), which skips its own load once anything has
+    # been loaded: putting the base weights in first would suppress it. Precedence
+    # is fit()'s own -- an interrupted run in output_dir, then an explicit resume,
+    # then the base weights.
+    resumed = trainer.maybe_load_checkpoint(args.checkpoint.output_dir, load_trainer_state=True, load_optim_state=True)
+    if not resumed and args.checkpoint.resume_from_checkpoint is not None:
+        logger.info(f"Resuming from {args.checkpoint.resume_from_checkpoint}...")
+        resumed = trainer.maybe_load_checkpoint(args.checkpoint.resume_from_checkpoint)
+    if not resumed and not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
 
