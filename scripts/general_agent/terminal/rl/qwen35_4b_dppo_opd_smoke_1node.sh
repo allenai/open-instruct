@@ -21,11 +21,12 @@ TOKENIZER=hamishivi/Qwen3.5-4B
 TEACHER_MODEL=${TEACHER_MODEL:-allenai/tmax-4b}
 
 EXP_NAME=${EXP_NAME:-swerl_qwen35_4b_dppo_opd_smoke_1node}
+TOTAL_EPISODES=${TOTAL_EPISODES:-3200}
 
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "OPD smoke: Qwen3.5-4B pure-distill from tmax-GRPO 4B teacher (1 node; terminal sandbox)" \
+       --description "OPD smoke: Qwen3.5-4B pure-distill from ${TEACHER_MODEL} (${TOTAL_EPISODES} episodes; 1 node; terminal sandbox)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -76,7 +77,7 @@ uv run python mason.py \
     --filter_zero_std_samples false \
     --temperature 1.0 \
     --learning_rate 1e-6 \
-    --total_episodes 3200 \
+    --total_episodes $TOTAL_EPISODES \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 2 \
