@@ -1,19 +1,7 @@
 """Olmo Hybrid (gated DeltaNet + attention) support for the olmo-core training path.
 
-olmo-core can *export* a hybrid model to HF format (``convert_hybrid_state_to_hf``)
-but it has neither a :class:`TransformerConfig` preset for Olmo Hybrid 7B nor the
-inverse HF -> olmo-core conversion needed to fine-tune from ``allenai/Olmo-Hybrid-7B``.
-Both live here until they land upstream.
-
-Two things to know about this architecture, because neither matches Olmo 3:
-
-* It is **NoPE**. ``config.json`` carries ``rope_parameters = {"rope_theta": null}``
-  and HF's ``OlmoHybrid`` builds no rotary embedding, so the full-attention layers
-  have no positional encoding at all -- position comes from the GDN layers. Do not
-  pass ``--rope_scaling_factor``.
-* The two block types use **different norm conventions**: GDN blocks are pre-norm
-  and attention blocks are reordered-norm (Olmo 2 style). The HF key names differ
-  accordingly, which is why the per-layer key maps below are split in two.
+Holds the ``TransformerConfig`` preset for Olmo Hybrid 7B and the HF <-> olmo-core
+state conversion for ``model_type: olmo_hybrid``, neither of which olmo-core has.
 """
 
 from typing import Any
@@ -107,8 +95,8 @@ def olmo_hybrid_like(
     """Build an Olmo-Hybrid-style config: three GDN blocks per full-attention block.
 
     Only the geometry varies between hybrid checkpoints, so everything else is
-    fixed below. The attention blocks carry no RoPE (see the module docstring) and
-    use full-width (not per-head) QK norm, matching Olmo 2/3.
+    fixed below. The attention blocks use full-width (not per-head) QK norm,
+    matching Olmo 2/3.
     """
     layer_norm = LayerNormConfig(name=LayerNormType.rms, eps=1e-6, bias=False, dtype=dtype)
     feed_forward = FeedForwardConfig(hidden_size=intermediate_size, bias=False, dtype=dtype)
@@ -138,6 +126,10 @@ def olmo_hybrid_like(
             n_kv_heads=n_kv_heads,
             head_dim=head_dim,
             bias=False,
+            # NoPE: config.json carries rope_parameters = {"rope_theta": null} and HF
+            # builds no rotary embedding, so these layers have no positional encoding.
+            # A RoPE here is one the trained weights never saw; do not pass
+            # --rope_scaling_factor either.
             rope=None,
             qk_norm=layer_norm,
             use_head_qk_norm=False,
