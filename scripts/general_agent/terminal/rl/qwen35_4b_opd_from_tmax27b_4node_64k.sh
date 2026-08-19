@@ -18,7 +18,10 @@ MODEL=hamishivi/Qwen3.5-4B
 TOKENIZER=hamishivi/Qwen3.5-4B
 TEACHER_MODEL=allenai/tmax-27b
 
-EXP_NAME=swerl_qwen35_4b_opd_from_tmax27b_4node_64k
+EXP_NAME=${EXP_NAME:-swerl_qwen35_4b_opd_from_tmax27b_4node_64k}
+TOTAL_EPISODES=${TOTAL_EPISODES:-128000}
+WANDB_MODE=${WANDB_MODE:-online}
+WANDB_SECRET=${WANDB_SECRET:-kevinfarhat_WANDB_API_KEY}
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -37,6 +40,7 @@ uv run python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
+       --env WANDB_MODE="$WANDB_MODE" \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=shashankg209 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
@@ -53,6 +57,7 @@ uv run python mason.py \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=shashankg_DOCKER_PAT \
+       --secret WANDB_API_KEY="$WANDB_SECRET" \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
@@ -74,7 +79,7 @@ uv run python mason.py \
     --filter_zero_std_samples false \
     --temperature 1.0 \
     --learning_rate 1e-6 \
-    --total_episodes 128000 \
+    --total_episodes $TOTAL_EPISODES \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
