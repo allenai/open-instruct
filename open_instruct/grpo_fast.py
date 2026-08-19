@@ -496,53 +496,78 @@ class PolicyTrainerRayProcess(RayProcess):
             if args.lm_head_fp32:
                 patch_hf_lm_head_fp32(self.ref_policy)
 
-        # On-policy distillation teacher: a frozen model that scores rollouts
+        # On-policy distillation teachers: frozen models that score rollouts
         # learner-side, loaded with the same eval config as the reference
-        # policy. Unlike the reference policy it is never polyak-updated and
-        # never checkpointed — it is reloaded from its path on restart.
-        self.teacher_model: PreTrainedModel | None = None
+        # policy. Unlike the reference policy they are never polyak-updated and
+        # never checkpointed — they are reloaded from their paths on restart.
+        # With multiple teachers (MOPD), every teacher scores every rollout
+        # token — even under `route` combination, where only the routed
+        # teacher's logprobs are kept per sample. Skipping non-routed teacher
+        # forwards would desynchronize the ZeRO-3 parameter allgathers across
+        # ranks whose local microbatches route differently, so we trade the
+        # extra forwards for unconditional collective safety (and free
+        # per-teacher KL diagnostics on every token).
+        self.teacher_models: list[PreTrainedModel] = []
         if args.opd_teacher_model_name_or_path is not None:
-            teacher_ds_config, self.teacher_hf_ds_config = get_eval_ds_config(
-                offload=False,
-                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-                bf16=True,
-                per_device_train_batch_size=args.per_device_train_batch_size,
-            )
-            teacher_model_config = dataclasses.replace(
-                model_config,
-                model_name_or_path=args.opd_teacher_model_name_or_path,
-                model_revision=args.opd_teacher_model_revision,
-            )
-            self.teacher_model = load_ref_policy(
-                model_config=teacher_model_config,
-                ds_config=teacher_ds_config,
-                deepspeed_stage=args.deepspeed_stage,
-                local_rank=self.local_rank,
-                device=self.device,
-                rank=self.rank,
-                checkpoint_path=None,
-                mpu=self.mpu,
-            )
-            register_qwen3_5_zero3_external_parameters(self.teacher_model)
-            if args.lm_head_fp32:
-                patch_hf_lm_head_fp32(self.teacher_model)
+            for teacher_idx, teacher_path in enumerate(args.opd_teacher_model_name_or_path):
+                teacher_ds_config, _ = get_eval_ds_config(
+                    offload=False,
+                    stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                    bf16=True,
+                    per_device_train_batch_size=args.per_device_train_batch_size,
+                )
+                teacher_model_config = dataclasses.replace(
+                    model_config,
+                    model_name_or_path=teacher_path,
+                    model_revision=args.opd_teacher_model_revision[teacher_idx]
+                    if args.opd_teacher_model_revision is not None
+                    else None,
+                )
+                teacher_model = load_ref_policy(
+                    model_config=teacher_model_config,
+                    ds_config=teacher_ds_config,
+                    deepspeed_stage=args.deepspeed_stage,
+                    local_rank=self.local_rank,
+                    device=self.device,
+                    rank=self.rank,
+                    checkpoint_path=None,
+                    mpu=self.mpu,
+                )
+                register_qwen3_5_zero3_external_parameters(teacher_model)
+                if args.lm_head_fp32:
+                    patch_hf_lm_head_fp32(teacher_model)
+                self.teacher_models.append(teacher_model)
         # A teacher whose attention geometry differs from the policy cannot run
         # on SP-split sequence shards (the shared Ulysses wrapper and FLA CP
         # contexts are sized for the policy), so it scores the full pre-split
         # sequences instead — replicated across SP ranks, which ZeRO-3 requires
-        # anyway since every rank must join the parameter allgathers.
-        self._teacher_full_sequence_scoring = False
-        if self.teacher_model is not None and args.sequence_parallel_size > 1:
-            teacher_module = getattr(self.teacher_model, "module", self.teacher_model)
-            self._teacher_full_sequence_scoring = _attention_geometry(self.policy.config) != _attention_geometry(
-                teacher_module.config
+        # anyway since every rank must join the parameter allgathers. Decided
+        # per teacher: a same-geometry teacher keeps the cheap sharded path
+        # even when a sibling teacher needs full-sequence scoring.
+        self._teacher_full_sequence_scoring: list[bool] = [False] * len(self.teacher_models)
+        if self.teacher_models and args.sequence_parallel_size > 1:
+            for teacher_idx, teacher_model in enumerate(self.teacher_models):
+                teacher_module = getattr(teacher_model, "module", teacher_model)
+                self._teacher_full_sequence_scoring[teacher_idx] = _attention_geometry(
+                    self.policy.config
+                ) != _attention_geometry(teacher_module.config)
+                if self._teacher_full_sequence_scoring[teacher_idx]:
+                    logger.info(
+                        f"OPD teacher {teacher_idx} attention geometry differs from the policy; "
+                        "using full-sequence (unsplit) teacher scoring under SP "
+                        "with Ulysses attention disabled around that teacher's forward."
+                    )
+        # MOPD route combination: parse the per-teacher domain claims once.
+        self._opd_dataset_to_teacher: dict[str, int] | None = None
+        self._opd_catch_all_teacher: int | None = None
+        if self.teacher_models and args.opd_teacher_combine == "route":
+            self._opd_dataset_to_teacher, self._opd_catch_all_teacher = grpo_utils.parse_opd_teacher_domains(
+                args.opd_teacher_domains
             )
-            if self._teacher_full_sequence_scoring:
-                logger.info(
-                    "OPD teacher attention geometry differs from the policy; "
-                    "using full-sequence (unsplit) teacher scoring under SP "
-                    "with Ulysses attention disabled around the teacher forward."
-                )
+        self._opd_log_weights: torch.Tensor | None = None
+        if self.teacher_models and args.opd_teacher_weights is not None:
+            weights = torch.tensor(args.opd_teacher_weights, dtype=torch.float32, device=self.device)
+            self._opd_log_weights = torch.log(weights / weights.sum())
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
         self.value_model = None
         if args.use_value_model:
@@ -985,9 +1010,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 attention_functions[key] = fn
 
     def _compute_teacher_logprobs_full_sequence(
-        self, full_data_BT: data_types.CollatedBatchData, data_BT: data_types.CollatedBatchData, shards: int
+        self,
+        teacher_model: PreTrainedModel,
+        full_data_BT: data_types.CollatedBatchData,
+        data_BT: data_types.CollatedBatchData,
+        shards: int,
     ) -> list[torch.Tensor]:
-        """Score full (pre-SP-split) sequences under the OPD teacher, then
+        """Score full (pre-SP-split) sequences under one OPD teacher, then
         re-shard the logprobs to this rank's SP slice.
 
         Used when the teacher's attention geometry differs from the policy's:
@@ -1002,7 +1031,7 @@ class PolicyTrainerRayProcess(RayProcess):
         full_data_gpu = full_data_BT.to(self.device)
         with self._ulysses_attention_disabled():
             logprobs_full = grpo_utils.compute_logprobs_tiled(
-                self.teacher_model,
+                teacher_model,
                 full_data_gpu,
                 self.pad_token_id,
                 self.streaming_config.temperature,
@@ -1023,6 +1052,40 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
             teacher_logprobs_BT.append(teacher_logprobs)
         return teacher_logprobs_BT
+
+    def _build_opd_teacher_ids(
+        self, rollout_datasets: dict[int, str | list[str]] | None, data_BT: data_types.CollatedBatchData
+    ) -> list[torch.Tensor] | None:
+        """Per-token OPD teacher indices for MOPD ``route`` combination.
+
+        The data-prep actor ships each step's ``{rollout_sample_id: dataset
+        name}`` alongside the batch; every packed token already carries its
+        sample id in ``rollout_sample_ids`` (which survives packing, collation
+        and SP-splitting, padded with -1). Routing therefore never touches the
+        packing pipeline: a lookup table over sample ids maps each token to
+        the teacher claiming its dataset. Returns one ``[B, T-1]`` long tensor
+        per microbatch (aligned with the shifted logprob positions), or
+        ``None`` unless routing is enabled.
+        """
+        if self._opd_dataset_to_teacher is None:
+            return None
+        if not rollout_datasets:
+            raise RuntimeError(
+                "OPD `route` combination needs the per-sample dataset map (`rollout_datasets`) from the "
+                "data-prep actor, but the dataloader did not provide it."
+            )
+        if data_BT.rollout_sample_ids is None:
+            raise RuntimeError("OPD `route` combination requires `rollout_sample_ids` in the collated batch.")
+        max_sample_id = max(rollout_datasets)
+        # The extra final slot holds the sentinel for padding ids: -1 wraps to
+        # the last row under tensor indexing.
+        lookup_list = [-1] * (max_sample_id + 2)
+        for sample_id, dataset_name in rollout_datasets.items():
+            lookup_list[sample_id] = grpo_utils.resolve_opd_teacher_for_dataset(
+                dataset_name, self._opd_dataset_to_teacher, self._opd_catch_all_teacher
+            )
+        lookup = torch.tensor(lookup_list, dtype=torch.long, device=self.device)
+        return [lookup[ids[:, 1:]] for ids in data_BT.rollout_sample_ids]
 
     def step(self, training_step: int | None = None):
         """Execute one training step: fetch data from the dataloader and train on it.
@@ -1046,10 +1109,10 @@ class PolicyTrainerRayProcess(RayProcess):
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
 
-        # Keep the pre-split (full-sequence) batch around when the OPD teacher
+        # Keep the pre-split (full-sequence) batch around when any OPD teacher
         # cannot consume SP shards; it is re-sharded after scoring.
         teacher_full_data_BT: data_types.CollatedBatchData | None = None
-        if self.teacher_model is not None and self._teacher_full_sequence_scoring and self.splitter is not None:
+        if self.teacher_models and any(self._teacher_full_sequence_scoring) and self.splitter is not None:
             teacher_full_data_BT = data_BT
 
         # split batch for sequence parallelism. Do before moving data to GPU.
@@ -1078,53 +1141,95 @@ class PolicyTrainerRayProcess(RayProcess):
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = self._compute_logprobs(self.ref_policy, data_BT, cp_contexts_BT)
 
-        # On-policy distillation: score the rollout tokens under the frozen
-        # teacher and fold the sampled reverse KL into the advantages before
-        # the minibatch loop. The distillation term uses the vLLM (behavior)
-        # logprobs on the student side, so it is constant w.r.t. the trainer
-        # policy and composes with every loss_fn / trust-region mask downstream.
-        if self.teacher_model is not None:
+        # On-policy distillation: score the rollout tokens under every frozen
+        # teacher, combine the per-teacher logprobs into a single distillation
+        # target (mixture/max/min/route — see `opd_teacher_combine`), and fold
+        # the sampled reverse KL into the advantages before the minibatch loop.
+        # The distillation term uses the vLLM (behavior) logprobs on the
+        # student side, so it is constant w.r.t. the trainer policy and
+        # composes with every loss_fn / trust-region mask downstream.
+        if self.teacher_models:
+            num_teachers = len(self.teacher_models)
             with Timer("OPD teacher logprobs", noop=self.rank != 0):
                 teacher_shards = max(1, int(self.args.liger_grpo_loss_chunk_size))
-                if teacher_full_data_BT is not None:
-                    teacher_logprobs_BT = self._compute_teacher_logprobs_full_sequence(
-                        teacher_full_data_BT, data_BT, teacher_shards
-                    )
-                else:
-                    teacher_logprobs_BT = grpo_utils.compute_logprobs_tiled(
-                        self.teacher_model,
-                        data_BT,
-                        self.pad_token_id,
-                        self.streaming_config.temperature,
-                        shards=teacher_shards,
-                        lm_head_fp32=self.args.lm_head_fp32,
-                        cp_contexts=cp_contexts_BT,
-                    )
+                all_teacher_logprobs_BT: list[list[torch.Tensor]] = []
+                for teacher_idx, teacher_model in enumerate(self.teacher_models):
+                    if teacher_full_data_BT is not None and self._teacher_full_sequence_scoring[teacher_idx]:
+                        all_teacher_logprobs_BT.append(
+                            self._compute_teacher_logprobs_full_sequence(
+                                teacher_model, teacher_full_data_BT, data_BT, teacher_shards
+                            )
+                        )
+                    else:
+                        all_teacher_logprobs_BT.append(
+                            grpo_utils.compute_logprobs_tiled(
+                                teacher_model,
+                                data_BT,
+                                self.pad_token_id,
+                                self.streaming_config.temperature,
+                                shards=teacher_shards,
+                                lm_head_fp32=self.args.lm_head_fp32,
+                                cp_contexts=cp_contexts_BT,
+                            )
+                        )
             with torch.no_grad():
+                teacher_ids_BT = self._build_opd_teacher_ids(batch_data.get("rollout_datasets"), data_BT)
                 opd_kl_sum = torch.zeros((), device=self.device)
                 opd_teacher_logprob_sum = torch.zeros((), device=self.device)
                 opd_token_count = torch.zeros((), device=self.device)
+                per_teacher_kl_sums = torch.zeros(num_teachers, device=self.device)
+                per_teacher_route_counts = torch.zeros(num_teachers, device=self.device)
                 for i in range(len(data_BT.query_responses)):
                     opd_response_mask = data_BT.response_masks[i][:, 1:].bool()
                     behavior_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], opd_response_mask)
+                    stacked_teacher_logprobs = torch.stack(
+                        [all_teacher_logprobs_BT[k][i] for k in range(num_teachers)], dim=0
+                    )
+                    combined_teacher_logprobs = grpo_utils.combine_opd_teacher_logprobs(
+                        stacked_teacher_logprobs,
+                        self.args.opd_teacher_combine,
+                        opd_response_mask,
+                        log_weights=self._opd_log_weights,
+                        teacher_ids=teacher_ids_BT[i] if teacher_ids_BT is not None else None,
+                    )
                     data_BT.advantages[i], reverse_kl = grpo_utils.compute_opd_advantages(
                         advantages=data_BT.advantages[i],
                         behavior_logprobs=behavior_logprobs,
-                        teacher_logprobs=teacher_logprobs_BT[i],
+                        teacher_logprobs=combined_teacher_logprobs,
                         response_mask=opd_response_mask,
                         kl_coef=self.args.opd_kl_coef,
                         pure=self.args.opd_pure,
+                        adv_clip=self.args.opd_adv_clip,
                     )
                     opd_kl_sum += reverse_kl.sum()
                     opd_teacher_logprob_sum += torch.where(
-                        opd_response_mask, teacher_logprobs_BT[i].float(), torch.zeros_like(reverse_kl)
+                        opd_response_mask, combined_teacher_logprobs, torch.zeros_like(reverse_kl)
                     ).sum()
                     opd_token_count += opd_response_mask.sum()
+                    if num_teachers > 1:
+                        per_teacher_kl = behavior_logprobs.float().unsqueeze(0) - stacked_teacher_logprobs.float()
+                        per_teacher_kl_sums += torch.where(
+                            opd_response_mask.unsqueeze(0), per_teacher_kl, torch.zeros_like(per_teacher_kl)
+                        ).sum(dim=(1, 2))
+                        if teacher_ids_BT is not None:
+                            routed_ids = teacher_ids_BT[i][opd_response_mask]
+                            per_teacher_route_counts += torch.bincount(
+                                routed_ids.clamp(min=0), minlength=num_teachers
+                            ).float()
                 opd_token_count = opd_token_count.clamp(min=1)
                 self.local_metrics["objective/opd_reverse_kl"] = (opd_kl_sum / opd_token_count).item()
                 self.local_metrics["objective/opd_teacher_logprob"] = (
                     opd_teacher_logprob_sum / opd_token_count
                 ).item()
+                if num_teachers > 1:
+                    for k in range(num_teachers):
+                        self.local_metrics[f"objective/opd_reverse_kl_teacher_{k}"] = (
+                            per_teacher_kl_sums[k] / opd_token_count
+                        ).item()
+                        if teacher_ids_BT is not None:
+                            self.local_metrics[f"objective/opd_route_frac_teacher_{k}"] = (
+                                per_teacher_route_counts[k] / opd_token_count
+                            ).item()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -3442,9 +3547,16 @@ def main(
         # utils.ensure_hf_repo_cached (utils.py:990).
         if not os.path.exists(model_config.model_name_or_path):
             snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
-        if args.opd_teacher_model_name_or_path is not None and not os.path.exists(args.opd_teacher_model_name_or_path):
-            logger.info(f"Pre-downloading OPD teacher model {args.opd_teacher_model_name_or_path}...")
-            snapshot_download(args.opd_teacher_model_name_or_path, revision=args.opd_teacher_model_revision)
+        if args.opd_teacher_model_name_or_path is not None:
+            for teacher_idx, teacher_path in enumerate(args.opd_teacher_model_name_or_path):
+                if not os.path.exists(teacher_path):
+                    logger.info(f"Pre-downloading OPD teacher model {teacher_path}...")
+                    snapshot_download(
+                        teacher_path,
+                        revision=args.opd_teacher_model_revision[teacher_idx]
+                        if args.opd_teacher_model_revision is not None
+                        else None,
+                    )
         open(barrier_file, "w").close()
         logger.info("Model pre-download complete.")
     else:

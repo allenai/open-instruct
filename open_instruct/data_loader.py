@@ -23,6 +23,7 @@ from pathlib import Path
 from queue import Empty
 from typing import Any, Literal
 
+import docker as docker_sdk
 import numpy as np
 import ray
 import torch
@@ -125,8 +126,6 @@ class ImagePrewarmActor:
             return dict(self._stats) | {"seen": len(self._seen), "inflight": len(self._inflight)}
 
     def _pull_image(self, image: str) -> None:
-        import docker as docker_sdk
-
         client = docker_sdk.from_env(timeout=300)
         try:
             client.images.get(image)
@@ -1573,6 +1572,11 @@ class DataPreparationActor:
 
         self.prepared_data: dict[int, list[data_types.CollatedBatchData]] = {}
         self.metrics: dict[int, dict] = {}
+        self.rollout_datasets: dict[int, dict[int, str | list[str]]] = {}
+        """Per-step {rollout_sample_id: dataset field} for the kept rollouts (the RLVR `dataset`
+        value — a verifier name or list of them), aligned with the per-token `rollout_sample_ids`
+        shipped in the collated batch. Lets learner-side consumers (e.g. MOPD per-domain teacher
+        routing) recover each packed token's source dataset."""
         self.current_prepared_step = -1
         self._last_consumed_step = -1
         self.lock = threading.Lock()
@@ -1799,10 +1803,10 @@ class DataPreparationActor:
             num_before_filter = len(result.finish_reasons)
             response_length_cap = self.config.response_length
 
-            def _is_truncated(i: int) -> bool:
+            def _is_truncated(i: int, result=result, response_length_cap=response_length_cap) -> bool:
                 return result.finish_reasons[i] != "stop" or len(result.responses[i]) >= response_length_cap
 
-            def _is_non_submitting(i: int) -> bool:
+            def _is_non_submitting(i: int, result=result) -> bool:
                 states = result.request_info.rollout_states
                 if i >= len(states):
                     return False
@@ -1995,6 +1999,7 @@ class DataPreparationActor:
             with self.lock:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
+                self.rollout_datasets[step] = dict(zip(rollout_sample_ids, batch.datasets, strict=True))
                 self.current_prepared_step = step
 
     def get_data(self, rank: int, step: int) -> dict:
@@ -2011,7 +2016,11 @@ class DataPreparationActor:
             with self.lock:
                 if step <= self.current_prepared_step:
                     batch_data = self.prepared_data[step][rank]
-                    result = {"batch": batch_data, "metrics": self.metrics[step]}
+                    result = {
+                        "batch": batch_data,
+                        "metrics": self.metrics[step],
+                        "rollout_datasets": self.rollout_datasets.get(step, {}),
+                    }
                     self._last_consumed_step = max(self._last_consumed_step, step)
                     self._cleanup_old_steps(step)
                     logger.info(
@@ -2032,6 +2041,8 @@ class DataPreparationActor:
             del self.prepared_data[s]
             if s in self.metrics:
                 del self.metrics[s]
+            if s in self.rollout_datasets:
+                del self.rollout_datasets[s]
 
     def get_state(self) -> dict:
         return {

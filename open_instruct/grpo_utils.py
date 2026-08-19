@@ -198,23 +198,63 @@ class GRPOExperimentConfig(
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
-    # On-policy distillation (OPD)
-    opd_teacher_model_name_or_path: str | None = None
-    """Enables on-policy distillation when set: path or HF name of a frozen teacher model.
+    # On-policy distillation (OPD / MOPD)
+    opd_teacher_model_name_or_path: list[str] | None = None
+    """Enables on-policy distillation when set: path(s) or HF name(s) of one or
+    more frozen teacher models (space-separated on the CLI; a single value keeps
+    the original single-teacher OPD behavior).
 
-    The teacher is loaded learner-side (like the reference policy) and scores every
-    rollout token with a no-grad forward pass. The per-token sampled reverse KL
-    ``log π_student(y_t) − log π_teacher(y_t)`` (student side = the vLLM rollout
-    logprobs) is then folded into the advantages:
-    ``A_t ← A_t − opd_kl_coef · reverse_kl_t`` (see :func:`compute_opd_advantages`).
-    This is orthogonal to ``loss_fn`` and composes with DAPO/CISPO/DPPO/TVPO and
-    both the eager and tiled (liger) loss paths. The teacher must share the
-    student's tokenizer. Follows the recipe from Thinking Machines' On-Policy
-    Distillation (https://thinkingmachines.ai/blog/on-policy-distillation/), as
-    implemented in slime and the tinker cookbook.
+    Each teacher is loaded learner-side (like the reference policy) and scores
+    every rollout token with a no-grad forward pass. The per-teacher logprobs
+    are combined per ``opd_teacher_combine`` into a single teacher signal, and
+    the per-token sampled reverse KL ``log π_student(y_t) − log π_teacher(y_t)``
+    (student side = the vLLM rollout logprobs) is then folded into the
+    advantages: ``A_t ← A_t − opd_kl_coef · reverse_kl_t`` (see
+    :func:`compute_opd_advantages`). This is orthogonal to ``loss_fn`` and
+    composes with DAPO/CISPO/DPPO/TVPO and both the eager and tiled (liger)
+    loss paths. All teachers must share the student's tokenizer. Follows the
+    recipe from Thinking Machines' On-Policy Distillation
+    (https://thinkingmachines.ai/blog/on-policy-distillation/), as implemented
+    in slime and the tinker cookbook; the multi-teacher ``route`` strategy
+    follows MOPD (https://arxiv.org/abs/2606.30406).
     """
-    opd_teacher_model_revision: str | None = None
-    """The revision of the OPD teacher model."""
+    opd_teacher_model_revision: list[str] | None = None
+    """The revision(s) of the OPD teacher model(s). Either omitted (default
+    revision for every teacher) or one revision per teacher, positionally
+    aligned with ``opd_teacher_model_name_or_path``."""
+    opd_teacher_combine: str = "mixture"
+    """How multiple teachers' logprobs are combined into the single distillation
+    target (irrelevant with one teacher — all strategies coincide):
+
+    - ``"mixture"``: distill toward the (weighted) probability mixture,
+      ``log π_T(y_t) = logsumexp_k(log w_k + log π_k(y_t))``.
+    - ``"max"``: optimistic union-of-experts — each token is judged by the
+      teacher that likes it most (``max_k log π_k(y_t)``); the student is only
+      penalized where it exceeds *every* teacher's confidence.
+    - ``"min"``: pessimistic consensus — a token must be probable under *all*
+      teachers to escape penalty.
+    - ``"route"``: MOPD-style deterministic per-sample routing — every rollout
+      is scored by the single teacher owning its dataset/domain (requires
+      ``opd_teacher_domains``).
+    """
+    opd_teacher_weights: list[float] | None = None
+    """Per-teacher mixture weights (only valid with ``opd_teacher_combine =
+    "mixture"``). Positive, positionally aligned with the teacher list, and
+    normalized to sum to 1 internally. Defaults to uniform."""
+    opd_teacher_domains: list[str] | None = None
+    """Required with ``opd_teacher_combine = "route"``: one comma-separated list
+    of dataset names (the RLVR ``dataset`` field of each sample — a verifier
+    name or list of them, matched case-insensitively) per teacher, e.g.
+    ``--opd_teacher_domains "gsm8k,math" "swerl" "*"``. A ``*`` entry is a
+    catch-all for datasets not claimed by any other teacher. Every rollout's
+    dataset must resolve to exactly one teacher; unmatched datasets raise at
+    the first training step."""
+    opd_adv_clip: float | None = None
+    """Optional symmetric clip on the per-token distillation term: the sampled
+    reverse KL is clamped to ``[-opd_adv_clip, +opd_adv_clip]`` before being
+    folded into the advantages (the MOPD paper's ``A_max``; they use 2.0).
+    Bounds the pull of any single token when student and teacher disagree
+    wildly. Default: no clipping (original OPD behavior)."""
     opd_kl_coef: float = 1.0
     """Coefficient on the per-token reverse-KL distillation advantage."""
     opd_pure: bool = False
@@ -386,7 +426,16 @@ class GRPOExperimentConfig(
                     "Pass `--use_vllm_logprobs True --truncated_importance_sampling_ratio_cap 0` "
                     "alongside `--loss_fn tvpo`."
                 )
+        # Tolerate bare-string teacher specs from programmatic construction
+        # (the CLI's nargs="+" always yields lists).
+        if isinstance(self.opd_teacher_model_name_or_path, str):
+            self.opd_teacher_model_name_or_path = [self.opd_teacher_model_name_or_path]
+        if isinstance(self.opd_teacher_model_revision, str):
+            self.opd_teacher_model_revision = [self.opd_teacher_model_revision]
         if self.opd_teacher_model_name_or_path is not None:
+            num_teachers = len(self.opd_teacher_model_name_or_path)
+            if num_teachers == 0:
+                raise ValueError("`opd_teacher_model_name_or_path` must list at least one teacher.")
             if self.opd_kl_coef <= 0.0:
                 raise ValueError(f"OPD requires `opd_kl_coef` > 0 (got {self.opd_kl_coef}).")
             if self.use_value_model:
@@ -394,6 +443,42 @@ class GRPOExperimentConfig(
                     "`opd_teacher_model_name_or_path` cannot be combined with `use_value_model`: "
                     "both replace the per-token advantages."
                 )
+            if self.opd_teacher_combine not in OPD_COMBINE_STRATEGIES:
+                raise ValueError(
+                    f"`opd_teacher_combine` must be one of {sorted(OPD_COMBINE_STRATEGIES)} "
+                    f"(got {self.opd_teacher_combine!r})."
+                )
+            if self.opd_teacher_model_revision is not None and len(self.opd_teacher_model_revision) != num_teachers:
+                raise ValueError(
+                    f"`opd_teacher_model_revision` must have one entry per teacher "
+                    f"({num_teachers}), got {len(self.opd_teacher_model_revision)}."
+                )
+            if self.opd_teacher_weights is not None:
+                if self.opd_teacher_combine != "mixture":
+                    raise ValueError(
+                        "`opd_teacher_weights` is only meaningful with `opd_teacher_combine='mixture'` "
+                        f"(got {self.opd_teacher_combine!r})."
+                    )
+                if len(self.opd_teacher_weights) != num_teachers:
+                    raise ValueError(
+                        f"`opd_teacher_weights` must have one entry per teacher ({num_teachers}), "
+                        f"got {len(self.opd_teacher_weights)}."
+                    )
+                if any(w <= 0.0 for w in self.opd_teacher_weights):
+                    raise ValueError(f"`opd_teacher_weights` must all be > 0 (got {self.opd_teacher_weights}).")
+            if self.opd_teacher_combine == "route":
+                if self.opd_teacher_domains is None:
+                    raise ValueError("`opd_teacher_combine='route'` requires `opd_teacher_domains`.")
+                if len(self.opd_teacher_domains) != num_teachers:
+                    raise ValueError(
+                        f"`opd_teacher_domains` must have one entry per teacher ({num_teachers}), "
+                        f"got {len(self.opd_teacher_domains)}."
+                    )
+                parse_opd_teacher_domains(self.opd_teacher_domains)  # raises on empty/duplicate claims
+            elif self.opd_teacher_domains is not None:
+                raise ValueError("`opd_teacher_domains` is only used with `opd_teacher_combine='route'`.")
+            if self.opd_adv_clip is not None and self.opd_adv_clip <= 0.0:
+                raise ValueError(f"`opd_adv_clip` must be > 0 when set (got {self.opd_adv_clip}).")
         elif self.opd_pure:
             raise ValueError("`opd_pure=True` requires `opd_teacher_model_name_or_path` to be set.")
         if self.use_value_model:
@@ -916,6 +1001,122 @@ def compute_logprobs_tiled(
     return logprobs_BT
 
 
+OPD_COMBINE_STRATEGIES = {"mixture", "max", "min", "route"}
+
+OPD_ROUTE_CATCH_ALL = "*"
+
+
+def parse_opd_teacher_domains(domains: list[str]) -> tuple[dict[str, int], int | None]:
+    """Parse per-teacher domain claims into a dataset→teacher-index mapping.
+
+    ``domains`` has one comma-separated list of dataset names per teacher; a
+    bare ``*`` entry marks that teacher as the catch-all for unclaimed
+    datasets. Raises when a teacher claims nothing, a dataset is claimed twice,
+    or more than one catch-all is given.
+
+    Returns:
+        ``(dataset_to_teacher, catch_all_teacher)`` where ``catch_all_teacher``
+        is the index of the ``*`` teacher or ``None``.
+    """
+    dataset_to_teacher: dict[str, int] = {}
+    catch_all_teacher: int | None = None
+    for teacher_idx, entry in enumerate(domains):
+        names = [name.strip().lower() for name in entry.split(",") if name.strip()]
+        if not names:
+            raise ValueError(f"`opd_teacher_domains` entry {teacher_idx} is empty: {entry!r}.")
+        for name in names:
+            if name == OPD_ROUTE_CATCH_ALL:
+                if catch_all_teacher is not None:
+                    raise ValueError(
+                        f"`opd_teacher_domains` has multiple '*' catch-all entries "
+                        f"(teachers {catch_all_teacher} and {teacher_idx})."
+                    )
+                catch_all_teacher = teacher_idx
+            elif name in dataset_to_teacher:
+                raise ValueError(
+                    f"`opd_teacher_domains` claims dataset {name!r} for both "
+                    f"teacher {dataset_to_teacher[name]} and teacher {teacher_idx}."
+                )
+            else:
+                dataset_to_teacher[name] = teacher_idx
+    return dataset_to_teacher, catch_all_teacher
+
+
+def resolve_opd_teacher_for_dataset(
+    dataset_name: str | list[str], dataset_to_teacher: dict[str, int], catch_all_teacher: int | None
+) -> int:
+    """Route one sample's dataset field to its OPD teacher index (MOPD-style).
+
+    The RLVR ``dataset`` field is a verifier name or a list of them; matching
+    is case-insensitive (like the reward-function lookup) and the first
+    claimed verifier wins, falling back to the ``*`` catch-all teacher.
+    """
+    names = [dataset_name] if isinstance(dataset_name, str) else list(dataset_name)
+    for name in names:
+        teacher_idx = dataset_to_teacher.get(name.lower())
+        if teacher_idx is not None:
+            return teacher_idx
+    if catch_all_teacher is not None:
+        return catch_all_teacher
+    raise ValueError(
+        f"OPD routing: dataset {dataset_name!r} is not claimed by any teacher in "
+        f"`opd_teacher_domains` and no '*' catch-all teacher is configured. "
+        f"Claimed datasets: {sorted(dataset_to_teacher)}."
+    )
+
+
+def combine_opd_teacher_logprobs(
+    teacher_logprobs: torch.Tensor,
+    strategy: str,
+    response_mask: torch.Tensor,
+    log_weights: torch.Tensor | None = None,
+    teacher_ids: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Combine per-teacher sampled-token logprobs into one distillation target.
+
+    Args:
+        teacher_logprobs: ``[K, B, T-1]`` — ``log π_k(y_t)`` for each of the
+            ``K`` teachers at the rollout tokens (masked positions may hold
+            anything; the output is re-masked).
+        strategy: one of :data:`OPD_COMBINE_STRATEGIES`.
+        response_mask: ``[B, T-1]`` bool mask of valid response positions.
+        log_weights: ``[K]`` log mixture weights (``mixture`` only; ``None``
+            means uniform).
+        teacher_ids: ``[B, T-1]`` long tensor of per-token teacher indices
+            (``route`` only); positions outside ``response_mask`` may be -1.
+
+    Returns:
+        ``[B, T-1]`` float32 combined ``log π_teacher(y_t)``, zeroed outside
+        ``response_mask``.
+    """
+    response_mask = response_mask.bool()
+    teacher_logprobs = teacher_logprobs.float()
+    num_teachers = teacher_logprobs.shape[0]
+    if strategy == "route":
+        if teacher_ids is None:
+            raise ValueError("`route` combination requires per-token `teacher_ids`.")
+        if bool(((teacher_ids < 0) | (teacher_ids >= num_teachers))[response_mask].any()):
+            raise ValueError(
+                f"OPD routing: response tokens carry teacher ids outside [0, {num_teachers}); "
+                "routing info is missing or misaligned for part of the batch."
+            )
+        gather_ids = teacher_ids.clamp(min=0, max=num_teachers - 1).unsqueeze(0)
+        combined = teacher_logprobs.gather(0, gather_ids).squeeze(0)
+    elif strategy == "mixture":
+        if log_weights is None:
+            log_weights = torch.full(
+                (num_teachers,), -math.log(num_teachers), dtype=torch.float32, device=teacher_logprobs.device
+            )
+        combined = torch.logsumexp(teacher_logprobs + log_weights.view(-1, 1, 1), dim=0)
+    elif strategy == "max":
+        combined = teacher_logprobs.amax(dim=0)
+    elif strategy == "min":
+        combined = teacher_logprobs.amin(dim=0)
+    else:
+        raise ValueError(f"Unknown OPD combine strategy: {strategy!r}.")
+    return torch.where(response_mask, combined, torch.zeros_like(combined))
+
+
 def compute_opd_advantages(
     advantages: torch.Tensor,
     behavior_logprobs: torch.Tensor,
@@ -923,6 +1124,7 @@ def compute_opd_advantages(
     response_mask: torch.Tensor,
     kl_coef: float,
     pure: bool,
+    adv_clip: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Fold the on-policy distillation signal into the per-token advantages.
 
@@ -945,6 +1147,10 @@ def compute_opd_advantages(
         kl_coef:           coefficient on the reverse-KL term.
         pure:              when True, the environment advantage is replaced by
             the distillation term instead of added to it.
+        adv_clip:          optional symmetric clamp on the reverse-KL term
+            (the MOPD paper's ``A_max``): the *folded* term is clipped to
+            ``[-adv_clip, +adv_clip]`` while the returned ``reverse_kl`` stays
+            unclipped for faithful logging.
 
     Returns:
         ``(new_advantages, reverse_kl)`` where ``new_advantages`` is ``[B, T]``
@@ -954,9 +1160,10 @@ def compute_opd_advantages(
     response_mask = response_mask.bool()
     reverse_kl = behavior_logprobs.float() - teacher_logprobs.float()
     reverse_kl = torch.where(response_mask, reverse_kl, torch.zeros_like(reverse_kl))
+    folded_kl = reverse_kl if adv_clip is None else reverse_kl.clamp(min=-adv_clip, max=adv_clip)
     new_advantages = advantages.clone()
     base = torch.zeros_like(new_advantages[:, 1:]) if pure else new_advantages[:, 1:]
-    updated = base - kl_coef * reverse_kl.to(new_advantages.dtype)
+    updated = base - kl_coef * folded_kl.to(new_advantages.dtype)
     new_advantages[:, 1:] = torch.where(response_mask, updated, new_advantages[:, 1:])
     return new_advantages, reverse_kl
 
