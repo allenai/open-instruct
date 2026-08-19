@@ -17,7 +17,8 @@
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
 EXP_NAME=${EXP_NAME:-mopd_terminal3_beaker_smoke_tmax2b}
-WANDB_MODE=${WANDB_MODE:-offline}
+WANDB_MODE=${WANDB_MODE:-online}
+WANDB_SECRET=${WANDB_SECRET:-kevinfarhat_WANDB_API_KEY}
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -53,6 +54,7 @@ uv run python mason.py \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=shashankg_DOCKER_PAT \
+       --secret WANDB_API_KEY="$WANDB_SECRET" \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python scripts/data/prepare_terminal3_mopd.py --task-data-dir /tmp/terminal3_task_data --jsonl-dir /tmp/mopd_terminal3 --rows-per-dataset 512 \&\& python open_instruct/grpo_fast.py \

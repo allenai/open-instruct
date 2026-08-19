@@ -22,7 +22,8 @@ TEACHER_MODEL=${TEACHER_MODEL:-allenai/tmax-4b}
 
 EXP_NAME=${EXP_NAME:-swerl_qwen35_4b_dppo_opd_smoke_1node}
 TOTAL_EPISODES=${TOTAL_EPISODES:-3200}
-WANDB_MODE=${WANDB_MODE:-offline}
+WANDB_MODE=${WANDB_MODE:-online}
+WANDB_SECRET=${WANDB_SECRET:-kevinfarhat_WANDB_API_KEY}
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -58,6 +59,7 @@ uv run python mason.py \
        --env PODMAN_NUM_LOCKS=65536 \
        --env CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf \
        --secret DOCKER_PAT=shashankg_DOCKER_PAT \
+       --secret WANDB_API_KEY="$WANDB_SECRET" \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source scripts/docker/docker_login.sh \&\& source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
