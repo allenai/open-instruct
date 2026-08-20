@@ -17,7 +17,7 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-10k GRPO with Qwen3.5-4B pool size 128 (OpenSandbox sandboxes)" \
+       --description "SWERL tmax-10k GRPO with Qwen3.5-4B pool size 768 (OpenSandbox spot sandboxes)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -35,7 +35,7 @@ uv run python mason.py \
        --env SWERL_OPENSANDBOX_DOMAIN="${SWERL_OPENSANDBOX_DOMAIN:-sandbox.oe-rl-sandbox.apps.allenai.org}" \
        --env SWERL_OPENSANDBOX_PROTOCOL="${SWERL_OPENSANDBOX_PROTOCOL:-https}" \
        --env SWERL_OPENSANDBOX_LIFETIME_S=3600 \
-       --env SWERL_OPENSANDBOX_START_CONCURRENCY="${SWERL_OPENSANDBOX_START_CONCURRENCY:-64}" \
+       --env SWERL_OPENSANDBOX_START_CONCURRENCY="${SWERL_OPENSANDBOX_START_CONCURRENCY:-128}" \
        --env SWERL_OPENSANDBOX_APP_NAME=swerl-tmax-opensandbox-toy \
        --env DOCKERHUB_USERNAME=pdasigi \
        --secret DOCKER_PAT=pradeepd_DOCKER_PAT \
@@ -91,7 +91,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_grpo_15k_opensandbox \
+    --exp_name swerl_qwen35_4b_base_tmax_grpo_15k_opensandbox_toy_ps768 \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False \

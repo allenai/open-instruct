@@ -27,7 +27,7 @@ uv run python mason.py \
        --image "$BEAKER_IMAGE" \
        --description "SWERL tmax-15k GRPO with Qwen3.5-4B (OpenSandbox spot sandboxes)" \
        --pure_docker_mode \
-       --workspace ai2/general-tool-use \
+       --workspace ai2/oe-agents \
        --priority urgent \
        --preemptible \
        --num_nodes 4 \
@@ -48,6 +48,7 @@ uv run python mason.py \
        --env DOCKERHUB_USERNAME=pdasigi \
        --secret DOCKER_PAT=pradeepd_DOCKER_PAT \
        --secret OPEN_SANDBOX_API_KEY=pradeepd_OPEN_SANDBOX_API_KEY \
+       --secret WANDB_API_KEY=pradeepd_WANDB_API_KEY \
        --gpus 8 \
        --no_auto_dataset_cache \
        -- source configs/beaker_configs/ray_node_setup.sh  \&\& python open_instruct/grpo_fast.py \
