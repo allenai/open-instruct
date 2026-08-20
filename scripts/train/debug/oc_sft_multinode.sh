@@ -1,4 +1,5 @@
 #!/bin/bash
+# Mixer size must yield at least one global batch (64 seqs here), or num_training_steps floors to 0.
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 
@@ -33,7 +34,7 @@ uv run python mason.py \
     --num_epochs 2 \
     --ephemeral_save_interval 100 \
     --logging_steps 1 \
-    --mixer_list allenai/tulu-3-sft-personas-algebra 100 \
+    --mixer_list allenai/tulu-3-sft-personas-algebra 1000 \
     --seed 123 \
     --compile_model true \
     --with_tracking \
