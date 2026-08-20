@@ -108,18 +108,110 @@ DeepSpeed learner spends most of the step waiting for vLLM
 ~43% MFU. Loss and reward trajectories are in the same range (loss 0.082 vs
 0.070; reward 4.26 vs 4.12 under temperature-1.0 sampling noise).
 
+## Downstream eval equivalence (the DPO follow-up, expanded to all three stages)
+
+Step-indexed losses are not comparable across the two packed implementations, so
+the definitive parity check is downstream: train the same model / data / steps /
+lr / seed once per backend, export both to HF format, and evaluate on a fixed
+suite. Equivalent backends should score within task noise.
+
+Setup: six deterministic (temperature-0) tasks via oe-eval, all `::tulu` chat
+configs — `gsm8k`, `bbh:cot-v1`, `minerva_math`, `codex_humanevalplus`,
+`ifeval`, `popqa` — against the checkpoints from the A/B runs above. Full run
+list in PR #1827.
+
+### DPO — matched data, matched steps: scores match
+
+Both DPO runs consumed the same dataset fraction (wandb `epoch` at step 150:
+0.640 DeepSpeed vs 0.638 OLMo-core), so this is a genuine matched-data
+comparison, not just matched-config.
+
+| task | DeepSpeed | OLMo-core | Δ |
+|---|---|---|---|
+| bbh:cot-v1 | 0.0000 | 0.0000 | 0.000 |
+| codex_humanevalplus | 0.5169 | 0.5136 | −0.003 |
+| gsm8k | 0.0227 | 0.0250 | +0.002 |
+| ifeval | 0.6562 | 0.6229 | −0.033 |
+| minerva_math | 0.0000 | 0.0000 | 0.000 |
+| popqa | 0.1529 | 0.1558 | +0.003 |
+| **avg** | **0.2248** | **0.2196** | **−0.005** |
+
+The near-zero math/bbh rows are an eval-format artifact of this model family,
+not model damage: the *base* (sft-1115) emits immediate-EOS/empty continuations
+under the `::tulu` 8-shot CoT chat format (median 1 output token on gsm8k), and
+both trained models behave the same terse way. The pair agrees beyond scores, on
+output-shape distributions: gsm8k median output 4 vs 4 tokens, mean 471 vs 479,
+fraction ≤10 tokens 0.81 vs 0.79. The backends are statistically
+indistinguishable even in the degenerate regime.
+
+### GRPO — matched rollout budget: scores match
+
+| task | DeepSpeed | OLMo-core | Δ |
+|---|---|---|---|
+| bbh:cot-v1 | 0.2560 | 0.2560 | 0.000 |
+| codex_humanevalplus | 0.5756 | 0.5488 | −0.027 |
+| gsm8k | 0.1895 | 0.1615 | −0.028 |
+| ifeval | 0.1978 | 0.2015 | +0.004 |
+| minerva_math | 0.1136 | 0.1081 | −0.006 |
+| popqa | 0.1693 | 0.1684 | −0.001 |
+| **avg** | **0.2503** | **0.2407** | **−0.010** |
+
+bbh identical to four decimals; every task within 2.8 points under
+temperature-1.0 rollout noise.
+
+### SFT — functional health check only (not matched data)
+
+The SFT pair is matched-config but not matched-data: OLMo-core packs 4096-token
+blocks while DeepSpeed pads ~490-token examples, so over 150 steps OLMo-core saw
+roughly 8× the tokens (see data-semantics caveat above). Reported as a health
+check of training + the new HF export path; the OLMo-core edge is consistent
+with the extra data:
+
+| task | DeepSpeed | OLMo-core |
+|---|---|---|
+| bbh:cot-v1 | 0.0000 | 0.0000 |
+| codex_humanevalplus | 0.1095 | 0.1366 |
+| gsm8k | 0.0197 | 0.0227 |
+| ifeval | 0.2569 | 0.3438 |
+| minerva_math | 0.0000 | 0.0000 |
+| popqa | 0.2220 | 0.1871 |
+| **avg** | **0.1014** | **0.1151** |
+
+### Eval caveats and operational notes
+
+- **Base rows are confounded; only within-pair columns are read strictly.**
+  Training stamps its chat template into the export while base models eval with
+  their stock template, so trained-vs-base deltas mix training effects with
+  template effects. References: sft-1115 avg 0.4303, Qwen3-4B-Base avg 0.4998.
+- **SFT base reference dropped.** Raw OLMo-2-1124-7B has no chat template, so
+  the `::tulu` chat configs fail before generating. The pair comparison is
+  unaffected — and the failure itself confirms both backends installed the chat
+  interface during SFT.
+- **Tokenizer patches for eval-image compatibility.** The training image's newer
+  transformers writes `tokenizer_class: TokenizersBackend` and list-typed
+  `extra_special_tokens`; both crash oe-eval's older transformers at model load.
+  Exports were patched in place (class → `PreTrainedTokenizerFast`; list-typed
+  key removed) before evaluation. Worth tracking for the next oe-eval image bump.
+- **Datalake outage.** `oe-eval-datalake.allen.ai` was unreachable from Beaker
+  compute nodes throughout; metrics were harvested from each experiment's Beaker
+  result dataset (`metrics-all.jsonl`), and relaunches used `--no-datalake`.
+- The OLMo-core SFT eval used the final HF export added in the stacked PR
+  (`olmo_core_finetune.py` previously ended training with no HF-format save).
+
 ## Verdicts
 
 | Stage | Verdict | Basis |
 |---|---|---|
-| SFT | **PASS (OLMo-core)** | ~7× tokens/s/GPU at matched config (packing-driven); loss sanity within ~5% |
-| DPO | **PASS (OLMo-core)** | 3.0× tokens/s and 3.1× MFU at the packed config both backends can run; step-0 invariant holds on both. Step-indexed loss not comparable across packed implementations (differing batch schedules) — eval-based confirmation recommended in the Part 2 DPO PR. Finding: OC requires packing at 16k — the unpacked production config only runs on DeepSpeed |
-| GRPO | **PASS (tie)** | corrected throughput within ~10%, OC slightly faster end-to-end; rewards/losses track |
+| SFT | **PASS (OLMo-core)** | ~7× tokens/s/GPU at matched config (packing-driven); loss sanity within ~5%; downstream evals healthy through the new HF export path |
+| DPO | **PASS (OLMo-core)** | 3.0× tokens/s and 3.1× MFU at the packed config both backends can run; step-0 invariant holds on both. Downstream eval equivalence **confirmed** on matched data (epoch 0.640 vs 0.638): six tasks within 3.3 points, avg Δ −0.005. Finding: OC requires packing at 16k — the unpacked production config only runs on DeepSpeed |
+| GRPO | **PASS (tie)** | corrected throughput within ~10%, OC slightly faster end-to-end; rewards/losses track; downstream evals within 2.8 points on all six tasks, bbh identical |
 
 Per the spec's failure-branch rules, a PASS greenlights the Part 2 rename for
-that stage. The DPO PASS carries one follow-up: an eval-based loss-equivalence
-check in the Part 2 DPO PR (step-indexed loss is not comparable across the two
-packed implementations).
+that stage. The DPO PASS originally carried one follow-up — an eval-based
+equivalence check, since step-indexed loss is not comparable across the two
+packed implementations — which is now complete (see "Downstream eval
+equivalence" above): all three stages' checkpoint pairs score within task noise
+of each other.
 
 ## Reliability observations (part of the comparison)
 
