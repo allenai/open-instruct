@@ -1,4 +1,12 @@
-FROM nvidia/cuda:12.8.1-devel-ubuntu24.04
+# NOTE: do NOT name this CUDA_VERSION -- the nvidia/cuda base images set ENV CUDA_VERSION=13.0.3,
+# and ENV takes precedence over a same-named ARG (podman/buildah especially), so cuda${CUDA_VERSION}
+# expanded to "cuda13.0.3" -> uv error: Group `cuda13-0-3` is not defined.
+ARG OI_CUDA_GROUP=12
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS cuda12
+FROM nvidia/cuda:13.0.3-devel-ubuntu24.04 AS cuda13
+FROM cuda${OI_CUDA_GROUP}
+
+ARG OI_CUDA_GROUP
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles" \
@@ -135,7 +143,8 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv run --frozen python -m nltk.downloader punkt punkt_tab words
+    uv run --frozen --no-default-groups --group dev --group cuda${OI_CUDA_GROUP} \
+        python -m nltk.downloader punkt punkt_tab words
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
