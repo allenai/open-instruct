@@ -7,7 +7,9 @@
 
 
 # Workflow
-- When creating a PR, always add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`).
+- When a PR changes anything under `open_instruct/`, add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`). This is what CI enforces; PRs touching only `scripts/`, docs, or config are exempt, though an entry is still welcome for anything user-visible.
+  - The entry must contain the PR's own URL, which does not exist until the PR is opened. Add the entry, open the PR, then amend the entry with the URL and push again.
+  - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body (same mechanism as `GPU_TESTS=bypass`).
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
 - To run the `./scripts/train/build_image_and_launch.sh` script, you must commit the current changes.
@@ -33,6 +35,8 @@
 - Launch the GPU tests with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
 - When creating a PR that includes GPU test results, include `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body. The CI will verify the experiment passed instead of re-running the tests. Use `GPU_TESTS=bypass` to skip GPU tests entirely. **IMPORTANT**: The experiment ID must be from actually running the GPU test script (`scripts/test/run_gpu_pytest.sh`), NOT from training or debug scripts. Training experiments and GPU tests are different things.
 - If you are given a Beaker URL (beaker\.allen\.ai.*) use the Beaker CLI tool to interact with it.
+- When a Beaker job stays queued or pending, run `beaker job events <job-id>` before diagnosing why — it prints the scheduler's own reason; don't infer one from cluster documentation. If that reason is the workspace slot limit, it applies to every cluster at once: wait or request fewer GPUs rather than relaunching elsewhere.
+- A Beaker experiment can hold several jobs when a preempted one is retried. Read status from the most recently created job, not `jobs[0]`, or a successful retry looks like a failure.
 - Experiment launch scripts that call `mason.py` must include `--no_auto_dataset_cache` (before the `--` separator) because vllm is not installed locally on macOS. Without this flag, mason.py tries to cache the dataset locally which fails on the `import vllm` in `data_loader.py`.
 - The `oe-eval-internal` directory is required in the Docker image for experiments that use `--try_launch_beaker_eval_jobs_on_weka`. If it's missing (e.g. in a fresh clone or worktree), clone it with: `git clone --depth=1 https://github.com/allenai/oe-eval-internal.git oe-eval-internal`.
 - When updating PR bodies with experiment results, use the "Runs:" format (numbered list with Beaker links):
