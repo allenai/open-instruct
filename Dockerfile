@@ -127,3 +127,18 @@ ARG GIT_COMMIT="" \
 ENV GIT_COMMIT=${GIT_COMMIT} \
     GIT_BRANCH=${GIT_BRANCH} \
     PATH=/stage/.venv/bin:$PATH
+
+# SPIKE: torch 2.11 ships its own cuBLAS under site-packages/nvidia/cu13/lib, and
+# that copy lacks cublasLtGroupedMatrixLayoutInit_internal, which
+# transformer-engine's prebuilt wheel needs -- so TE fails to load with "undefined
+# symbol" (01M0GHTACW41HX078H0474A7Y1) even though the CUDA 13.3 base image's
+# 13.6.0.2 exports it. LD_LIBRARY_PATH does not help: torch dlopens its bundled
+# copy at import, so the soname is already resolved before TE loads. Point the
+# bundled path at the system library instead. Drop this with the torch override.
+RUN if [ "$CUDA_VERSION" = "13" ]; then \
+        for lib in libcublasLt libcublas; do \
+            target=$(ls /usr/local/cuda/lib64/${lib}.so.13.* 2>/dev/null | head -1); \
+            bundled=/stage/.venv/lib/python3.12/site-packages/nvidia/cu13/lib/${lib}.so.13; \
+            if [ -n "$target" ] && [ -e "$bundled" ]; then ln -sf "$target" "$bundled"; fi; \
+        done; \
+    fi
