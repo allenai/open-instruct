@@ -148,9 +148,7 @@ override-dependencies = [
     # clean dependency group because vllm 0.19.1 pins torch 2.10 and is a top-level
     # dependency; vllm is unused by the olmo-core training path, so letting the
     # override break it is acceptable on this branch but NOT mergeable as-is.
-    "torch==2.11.0",
-    "torchvision==0.28.0",
-    "torchaudio==2.11.0",
+    "torch==2.11.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",

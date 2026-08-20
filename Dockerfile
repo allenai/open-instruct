@@ -89,6 +89,17 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 # runs, and the torch-binding sdist compiles against the venv's torch, so
 # --no-build-isolation with the build tools preinstalled. transformer_engine_cu13
 # itself is a prebuilt wheel; only the bindings compile here.
+# SPIKE: realign torchvision with the overridden torch. uv's override-dependencies
+# bypass [tool.uv.sources], so a "+cu130" pin is looked up on PyPI (where it does
+# not exist) and an unpinned one resolves to the PyPI build, whose compiled ops do
+# not match a +cu130 torch -- "operator torchvision::nms does not exist" at import,
+# via transformers.image_utils. Install it straight from the CUDA index instead.
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    if [ "$CUDA_VERSION" = "13" ]; then \
+        uv pip install --index-url https://download.pytorch.org/whl/cu130 \
+            --no-deps "torchvision==0.28.0+cu130"; \
+    fi
+
 # No pyproject/uv.lock mounts here: the project's extra-build-dependencies
 # config (torch, match-runtime, for flash-attn) would otherwise apply to these
 # unrelated installs and fail them. uv pip targets /stage/.venv directly.
