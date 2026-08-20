@@ -143,6 +143,14 @@ conflicts = [
 ]
 override-dependencies = [
     "transformers>=5.4.0",
+    # SPIKE: force the Torch generation the pretraining team trains OLMoE3 KDA on
+    # (their TRAIN_IMAGE is torch 2.11 / cu130). Overrides are used rather than a
+    # clean dependency group because vllm 0.19.1 pins torch 2.10 and is a top-level
+    # dependency; vllm is unused by the olmo-core training path, so letting the
+    # override break it is acceptable on this branch but NOT mergeable as-is.
+    "torch==2.11.0",
+    "torchvision==0.28.0",
+    "torchaudio==2.11.0",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
