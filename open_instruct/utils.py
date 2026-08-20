@@ -29,6 +29,7 @@ try:
 except Exception:
     pass
 # isort: on
+import atexit
 import dataclasses
 import faulthandler
 import functools
@@ -38,6 +39,7 @@ import logging
 import math
 import multiprocessing as mp
 import os
+import queue
 import random
 import re
 import shutil
@@ -1338,6 +1340,94 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
         return wrapper
 
     return decorator
+
+
+class AsyncWandbLogger:
+    """Publishes wandb metrics from a background thread so a wedged wandb SDK
+    can never block the training loop.
+
+    ``wandb.log`` hands the payload to the wandb service process over a local
+    socket and waits on a future with no timeout; when the service wedges, the
+    caller blocks indefinitely. Observed repeatedly in long GRPO runs: the main
+    thread sat inside ``wandb.log`` for 3-12 hours while every GPU idled.
+
+    ``log()`` enqueues and returns immediately; a daemon thread is the only
+    caller of ``wandb.log``, preserving FIFO (and therefore ``step``) order.
+    If the queue fills because the SDK stopped draining, new entries are
+    dropped with a warning — losing metrics is acceptable, losing training
+    time is not. ``flush()`` is registered via ``atexit`` so a healthy run's
+    final metrics still land before the process exits.
+    """
+
+    def __init__(self, maxsize: int = 64, log_timeout_warn_s: float = 60.0):
+        self._queue: queue.Queue = queue.Queue(maxsize=maxsize)
+        self._dropped = 0
+        self._enqueued = 0
+        self._published = 0  # Incremented after wandb.log returns (or fails); flush keys off this.
+        self._log_timeout_warn_s = log_timeout_warn_s
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def _ensure_thread(self) -> None:
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, daemon=True, name="async-wandb-logger")
+                self._thread.start()
+                atexit.register(self.flush)
+
+    def log(self, metrics: dict, step: int | None = None) -> None:
+        """Enqueue a wandb.log call; never blocks the caller."""
+        self._ensure_thread()
+        try:
+            self._queue.put_nowait((metrics, step))
+            self._enqueued += 1
+        except queue.Full:
+            self._dropped += 1
+            logger.warning(
+                "AsyncWandbLogger queue full (wandb service not draining?); "
+                "dropped metrics for step=%s (%d dropped so far). Training continues.",
+                step,
+                self._dropped,
+            )
+
+    def _run(self) -> None:
+        while True:
+            metrics, step = self._queue.get()
+            publish_start = time.monotonic()
+            try:
+                wandb.log(metrics, step=step)
+            except Exception:
+                logger.warning("AsyncWandbLogger: wandb.log failed for step=%s; continuing.", step, exc_info=True)
+            elapsed = time.monotonic() - publish_start
+            if elapsed > self._log_timeout_warn_s:
+                logger.warning(
+                    "AsyncWandbLogger: wandb.log for step=%s took %.0fs — the wandb service is slow or wedged. "
+                    "Training is unaffected; metrics may lag or drop.",
+                    step,
+                    elapsed,
+                )
+            self._published += 1
+
+    def flush(self, timeout_s: float = 30.0) -> bool:
+        """Best-effort wait until everything enqueued has been published.
+
+        Counts in-flight entries (dequeued but still inside ``wandb.log``),
+        not just queue emptiness. Used at process exit via ``atexit``.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            return self._published >= self._enqueued
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._published >= self._enqueued:
+                return True
+            time.sleep(0.05)
+        logger.warning("AsyncWandbLogger: flush timed out with %d entries unsent.", self._enqueued - self._published)
+        return False
+
+
+# Shared instance: wandb.log call sites in the training loop route through
+# this so telemetry can never stall training (see AsyncWandbLogger).
+async_wandb_logger = AsyncWandbLogger()
 
 
 @retry_on_exception()
