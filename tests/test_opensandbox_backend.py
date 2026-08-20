@@ -333,6 +333,35 @@ class TestStartAndClose(OpenSandboxBackendTestCase):
         self.assertEqual(sandbox.create_kwargs["image"], "ubuntu:22.04")
         backend.close()
 
+    def test_rewrite_image_for_mirror(self):
+        rewrite = OpenSandboxBackend._rewrite_image_for_mirror
+        prefix = "us-docker.pkg.dev/proj/docker-hub-remote-repository"
+        self.assertEqual(rewrite("hamishi740/swerl-tmax-v3:abc", prefix), f"{prefix}/hamishi740/swerl-tmax-v3:abc")
+        self.assertEqual(rewrite("python:3.12-slim", prefix), f"{prefix}/library/python:3.12-slim")
+        # Already registry-qualified references pass through unchanged.
+        self.assertEqual(rewrite("gcr.io/proj/img:tag", prefix), "gcr.io/proj/img:tag")
+        self.assertEqual(rewrite("localhost:5000/img:tag", prefix), "localhost:5000/img:tag")
+        self.assertEqual(rewrite("registry.example.com:8443/ns/img", prefix), "registry.example.com:8443/ns/img")
+        # No prefix -> no rewrite.
+        self.assertEqual(rewrite("python:3.12-slim", ""), "python:3.12-slim")
+
+    def test_start_routes_image_through_mirror_prefix(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SWERL_OPENSANDBOX_IMAGE_PREFIX": "us-docker.pkg.dev/proj/mirror/",  # Trailing slash tolerated.
+                "DOCKERHUB_USERNAME": "pdasigi",
+                "DOCKER_PAT": "dckr_pat_secret",
+            },
+        ):
+            backend = self._started_backend(image="hamishi740/swerl-tmax-v3:abc123")
+        [sandbox] = self.fake.sandboxes
+        # Mirror pulls use cluster credentials: plain string, no Docker Hub auth.
+        self.assertEqual(
+            sandbox.create_kwargs["image"], "us-docker.pkg.dev/proj/mirror/hamishi740/swerl-tmax-v3:abc123"
+        )
+        backend.close()
+
     def test_start_defaults_ready_timeout_for_autopilot_scaleout(self):
         backend = self._started_backend()
         [sandbox] = self.fake.sandboxes

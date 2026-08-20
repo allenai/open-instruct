@@ -36,6 +36,7 @@ uv run python mason.py \
        --env SWERL_OPENSANDBOX_PROTOCOL="${SWERL_OPENSANDBOX_PROTOCOL:-https}" \
        --env SWERL_OPENSANDBOX_LIFETIME_S=3600 \
        --env SWERL_OPENSANDBOX_START_CONCURRENCY="${SWERL_OPENSANDBOX_START_CONCURRENCY:-128}" \
+       --env SWERL_OPENSANDBOX_IMAGE_PREFIX="${SWERL_OPENSANDBOX_IMAGE_PREFIX:-us-docker.pkg.dev/ai2-skiff2-oe-rl-sandbox/docker-hub-remote-repository}" \
        --env SWERL_OPENSANDBOX_APP_NAME=swerl-tmax-opensandbox-toy \
        --env DOCKERHUB_USERNAME=pdasigi \
        --secret DOCKER_PAT=pradeepd_DOCKER_PAT \

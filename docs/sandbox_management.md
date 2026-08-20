@@ -135,6 +135,15 @@ How it's wired:
   `SWERL_OPENSANDBOX_DOMAIN` / `SWERL_OPENSANDBOX_PROTOCOL` / `OPEN_SANDBOX_API_KEY`
   (Beaker secret), with `SWERL_OPENSANDBOX_CPU`, `SWERL_OPENSANDBOX_LIFETIME_S`,
   `SWERL_OPENSANDBOX_READY_TIMEOUT_S`, and `SWERL_OPENSANDBOX_APP_NAME` tuning knobs.
+- **Task images pull through a registry mirror** when
+  `SWERL_OPENSANDBOX_IMAGE_PREFIX` is set (an Artifact Registry *remote repository*
+  caching Docker Hub, in-region with the cluster): bare Docker Hub references are
+  rewritten at create time (`user/img:tag` → `<prefix>/user/img:tag`, official images
+  gain `library/`), already-qualified references pass through. Each unique tag is
+  fetched from Docker Hub once ever; every node pull stays in-region — this removes
+  both the multi-minute cold pulls on fresh nodes and Docker Hub rate-limit exposure.
+  Mirror pulls use the cluster's own credentials, so the Docker Hub PAT is not
+  attached to rewritten references.
 - **Creates are throttled per node** (`SWERL_OPENSANDBOX_START_CONCURRENCY`, default 64)
   with the same file-slot semaphore `DockerBackend` uses: a large pool (hundreds of env
   actors) otherwise stampedes the control plane at t=0 with concurrent creates that force

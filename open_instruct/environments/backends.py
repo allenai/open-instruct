@@ -1203,6 +1203,7 @@ class OpenSandboxBackend(SandboxBackend):
         ready_timeout: int | None = None,
         registry_username: str | None = None,
         registry_password: str | None = None,
+        image_prefix: str | None = None,
     ):
         """
         Args:
@@ -1242,6 +1243,20 @@ class OpenSandboxBackend(SandboxBackend):
             registry_password: Registry password/PAT; defaults to
                 ``DOCKER_PAT``. Auth is attached only when both username and
                 password are present.
+            image_prefix: Pull-through mirror prefix (e.g. an Artifact
+                Registry remote repository like
+                ``us-docker.pkg.dev/<project>/docker-hub-remote-repository``).
+                Defaults to ``SWERL_OPENSANDBOX_IMAGE_PREFIX``. When set,
+                bare Docker Hub references are rewritten to pull through the
+                mirror (``user/img:tag`` -> ``<prefix>/user/img:tag``,
+                official images gain Docker Hub's ``library/`` namespace);
+                references already qualified with a registry host are left
+                untouched. Each unique tag is then fetched from Docker Hub
+                once ever (by the mirror) and every node pull stays
+                in-region — the mirror-side fix for slow cold pulls and Hub
+                rate limits. Rewritten pulls skip the Docker Hub
+                username/password (mirror access uses the cluster's own
+                credentials, e.g. the GKE node service account).
         """
         if OpenSandboxSync is None:
             raise RuntimeError(
@@ -1268,16 +1283,40 @@ class OpenSandboxBackend(SandboxBackend):
         )
         self._registry_username = registry_username or os.getenv("DOCKERHUB_USERNAME")
         self._registry_password = registry_password or os.getenv("DOCKER_PAT")
+        self._image_prefix = (image_prefix or os.getenv("SWERL_OPENSANDBOX_IMAGE_PREFIX", "")).rstrip("/")
         self._sandbox = None
 
+    @staticmethod
+    def _rewrite_image_for_mirror(image: str, prefix: str) -> str:
+        """Route a bare Docker Hub reference through a pull-through mirror.
+
+        References already qualified with a registry host (first path
+        component contains ``.`` or ``:``, or is ``localhost``) pass through
+        unchanged. Official images (no namespace) gain Docker Hub's implicit
+        ``library/`` namespace, which registry mirrors require explicitly.
+        """
+        if not prefix:
+            return image
+        first_component = image.split("/", 1)[0]
+        if "/" in image and ("." in first_component or ":" in first_component or first_component == "localhost"):
+            return image
+        if "/" not in image:
+            return f"{prefix}/library/{image}"
+        return f"{prefix}/{image}"
+
     def _image_spec(self):
-        """Image reference for create: authenticated spec when creds are set."""
-        if self._registry_username and self._registry_password:
+        """Image reference for create.
+
+        Mirror-rewritten references pull with the cluster's own registry
+        credentials; Docker Hub auth is attached only for direct Hub pulls.
+        """
+        effective_image = self._rewrite_image_for_mirror(self._image, self._image_prefix)
+        if effective_image == self._image and self._registry_username and self._registry_password:
             return OpenSandboxImageSpec(
                 image=self._image,
                 auth=OpenSandboxImageAuth(username=self._registry_username, password=self._registry_password),
             )
-        return self._image
+        return effective_image
 
     def _ensure_started(self) -> None:
         if self._sandbox is None:
@@ -1298,9 +1337,10 @@ class OpenSandboxBackend(SandboxBackend):
         # "close then start" pattern used in SWERLSandboxEnv._do_reset).
         if self._sandbox is not None:
             self.close()
+        effective_image = self._rewrite_image_for_mirror(self._image, self._image_prefix)
         logger.info(
             "Starting OpenSandbox sandbox (image=%s, domain=%s, app=%s, cpu=%s, memory_mib=%s, lifetime=%ss)",
-            self._image,
+            effective_image,
             self._domain,
             self._app_name,
             self._cpu,
