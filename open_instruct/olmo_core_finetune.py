@@ -50,7 +50,9 @@ from open_instruct import dataset_transformation, logger_utils, numpy_dataset_co
 logger = logger_utils.setup_logger(__name__)
 
 
-_DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
+# Must stay strictly below CheckpointConfig.checkpointing_steps (500), which olmo-core
+# requires;
+_DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
 
 _TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
 
@@ -147,7 +149,22 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         return
 
     if not _numpy_dir_is_populated(numpy_dir):
-        mixer = " ".join(args.dataset.mixer_list)
+        cache_args = [
+            f"--model_name_or_path {args.model.model_name_or_path}",
+            f"--tokenizer_name_or_path {tc.tokenizer_name_or_path}",
+            f"--max_seq_length {args.training.max_seq_length}",
+            f"--mixer_list {' '.join(args.dataset.mixer_list)}",
+            f"--mixer_list_splits {' '.join(args.dataset.mixer_list_splits)}",
+            f"--seed {args.tracking.seed}",
+        ]
+        if tc.chat_template_name is not None:
+            cache_args.append(f"--chat_template_name {tc.chat_template_name}")
+        if tc.add_bos:
+            cache_args.append("--add_bos")
+        if args.dataset.transform_fn:
+            cache_args.append(f"--transform_fn {' '.join(args.dataset.transform_fn)}")
+        cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
+        cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
             "Pre-tokenized numpy SFT dataset not found.\n"
             f"  expected: {numpy_dir}\n"
@@ -158,12 +175,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             '      --priority urgent --image "$BEAKER_IMAGE" --budget ai2/oe-adapt \\\n'
             "      --gpus 0 --num_nodes 1 --no_auto_dataset_cache \\\n"
             "      -- uv run python open_instruct/olmo_core_finetune.py \\\n"
-            f"      --model_name_or_path {args.model.model_name_or_path} \\\n"
-            f"      --tokenizer_name_or_path {tc.tokenizer_name_or_path} \\\n"
-            f"      --max_seq_length {args.training.max_seq_length} \\\n"
-            f"      --mixer_list {mixer} \\\n"
-            f"      --local_cache_dir {args.dataset.local_cache_dir} \\\n"
-            "      --cache_dataset_only\n\n"
+            f"      {cache_cmd}\n\n"
             "Re-launch training once the tokenization job has completed."
         )
 
@@ -224,6 +236,12 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.max_train_steps if args.training.max_train_steps is not None else num_training_steps
     )
     logger.info(f"Total training steps: {effective_steps} (epochs={args.training.num_epochs})")
+    if effective_steps < 1:
+        raise ValueError(
+            f"Computed {effective_steps} training steps from {len(np_dataset)} packed instances "
+            f"// global batch {global_batch_size_seqs} * {args.training.num_epochs} epochs. "
+            "Use more data, or lower --gradient_accumulation_steps / --per_device_train_batch_size."
+        )
     scheduler = olmo_core_utils.build_scheduler(
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
     )
