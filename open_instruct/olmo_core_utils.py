@@ -3,11 +3,13 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import accelerate
+import safetensors
 import torch
 import torch.distributed as dist
 import transformers
@@ -249,10 +251,13 @@ def build_checkpointer_callback(
 
     ``max_checkpoints`` accepts the open-instruct convention where ``-1`` means
     unlimited.  Negative values are mapped to ``None`` (keep all).
+
+    ``ephemeral_save_interval`` follows the same convention: a non-positive value
+    disables ephemeral checkpoints.
     """
     return CheckpointerCallback(
         save_interval=checkpointing_steps,
-        ephemeral_save_interval=ephemeral_save_interval,
+        ephemeral_save_interval=ephemeral_save_interval if (ephemeral_save_interval or 0) > 0 else None,
         save_async=save_async,
         max_checkpoints=max_checkpoints if max_checkpoints is not None and max_checkpoints >= 0 else None,
     )
@@ -529,6 +534,11 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     )
 
 
+#: Model types whose released checkpoints use transformers' in-memory weight naming, so
+#: save_pretrained must not apply its conversion_mapping in reverse on the way out.
+_MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}
+
+
 def save_state_dict_as_hf(
     state_dict: dict[str, torch.Tensor],
     save_dir: str,
@@ -551,8 +561,27 @@ def save_state_dict_as_hf(
     hf_model.load_state_dict(converted, assign=True)
 
     os.makedirs(save_dir, exist_ok=True)
-    hf_model.save_pretrained(save_dir)
+    model_type = getattr(hf_config, "model_type", None)
+    hf_model.save_pretrained(save_dir, save_original_format=model_type not in _MODERN_NAMING_MODEL_TYPES)
     tokenizer.save_pretrained(save_dir)
+
+    index_path = os.path.join(save_dir, "model.safetensors.index.json")
+    if os.path.isfile(index_path):
+        with open(index_path) as index_file:
+            saved = set(json.load(index_file)["weight_map"])
+    else:
+        # Reads only the header, not the tensors.
+        with safetensors.safe_open(os.path.join(save_dir, "model.safetensors"), framework="pt") as shard:
+            saved = set(shard.keys())
+    missing = sorted(set(converted) - saved)
+    if missing:
+        raise RuntimeError(
+            f"{len(missing)} converted tensors are absent from the saved checkpoint "
+            f"(e.g. {missing[:5]}); it will not load. Check whether transformers renamed "
+            f"them on save: the file contains {sorted(saved - set(converted))[:5]}. "
+            f"If model_type {model_type!r} publishes its checkpoints in the in-memory "
+            f"naming, add it to _MODERN_NAMING_MODEL_TYPES."
+        )
 
 
 def doc_lens_from_attention_mask(attention_mask_BS: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
