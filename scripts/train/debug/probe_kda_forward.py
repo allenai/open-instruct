@@ -52,7 +52,9 @@ def main() -> None:
     from olmo_core.nn.attention.kda import KimiDeltaAttentionConfig
 
     config = KimiDeltaAttentionConfig.from_dict({k: v for k, v in mixer_config.items() if k != "type"})
-    layer = config.build(d_model=d_model, init_device="cuda").to("cuda")
+    layer = config.build(
+        d_model=d_model, layer_idx=0, n_layers=model_section["n_layers"], init_device="cuda"
+    ).to("cuda")
     n_params = sum(p.numel() for p in layer.parameters())
     logger.info("built one KDA layer: %s params, d_model=%d", f"{n_params:,}", d_model)
 
