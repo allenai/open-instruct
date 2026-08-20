@@ -335,11 +335,20 @@ def is_hf_checkpoint(path: str) -> bool:
     """Detect whether a model path is a HuggingFace checkpoint (vs olmo-core format).
 
     Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
-    containing config.json, and paths with a '-hf' component. Returns False for
-    olmo-core distributed checkpoints.
+    whose config.json is an HF model config, and paths with a '-hf' component.
+    Returns False for olmo-core distributed checkpoints, whose config.json (the
+    experiment config) has no top-level 'model_type'.
     """
     if os.path.isdir(path):
-        return os.path.isfile(os.path.join(path, "config.json"))
+        config_path = os.path.join(path, "config.json")
+        if not os.path.isfile(config_path):
+            return False
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return False
+        return isinstance(config, dict) and "model_type" in config
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True

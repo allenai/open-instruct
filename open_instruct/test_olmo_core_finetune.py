@@ -1,5 +1,6 @@
 """Unit tests for cache-validation and checkpoint-detection helpers."""
 
+import json
 import os
 import tempfile
 import unittest
@@ -48,10 +49,25 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
 
 
 class IsHfCheckpointTest(unittest.TestCase):
-    def test_local_dir_with_config_json_is_hf(self) -> None:
+    def test_local_dir_with_hf_config_json_is_hf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            _touch(os.path.join(tmp, "config.json"))
+            with open(os.path.join(tmp, "config.json"), "w") as f:
+                json.dump({"model_type": "olmo3", "vocab_size": 100352}, f)
             self.assertTrue(olmo_core_utils.is_hf_checkpoint(tmp))
+
+    def test_local_dir_with_olmo_core_config_json_is_olmo_core(self) -> None:
+        # olmo-core checkpoints carry a config.json too (the experiment config),
+        # but it has no top-level 'model_type'.
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.json"), "w") as f:
+                json.dump({"model": {"d_model": 4096}, "dataset": {}}, f)
+            self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
+
+    def test_local_dir_with_unreadable_config_json_is_olmo_core(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.json"), "w") as f:
+                f.write("{not valid json")
+            self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
 
     def test_local_dir_without_config_json_is_olmo_core(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

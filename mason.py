@@ -301,6 +301,9 @@ def get_env_vars(
         "AZURE_API_BASE",
         "ANTHROPIC_API_KEY",
         "SLACK_WEBHOOK_URL",
+        # path to a service-account key so jobs can read gs:// paths; on-prem
+        # clusters have no GCE metadata server to fall back on
+        "GOOGLE_APPLICATION_CREDENTIALS",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
