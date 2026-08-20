@@ -97,7 +97,7 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     if [ "$CUDA_VERSION" = "13" ]; then \
         uv pip install --index-url https://download.pytorch.org/whl/cu130 \
-            --no-deps "torchvision==0.28.0+cu130"; \
+            --no-deps "torchvision==0.26.0+cu130"; \
     fi
 
 # No pyproject/uv.lock mounts here: the project's extra-build-dependencies
