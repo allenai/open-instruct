@@ -16,16 +16,22 @@
 
 import asyncio
 import functools
+import glob
+import inspect
 import itertools
+import json
+import os
 import pathlib
+import re
 import tempfile
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Any, Union
 
 import deepspeed
 import pandas as pd
+import safetensors
 import torch
 import transformers
 from accelerate import Accelerator
@@ -522,6 +528,71 @@ def get_olmo3_generation_config(tokenizer):
     )
 
 
+def _saved_checkpoint_keys(output_dir: str) -> list[str]:
+    """Tensor names in a just-written checkpoint, read from headers only (no tensor data)."""
+    index_path = os.path.join(output_dir, "model.safetensors.index.json")
+    if os.path.exists(index_path):
+        with open(index_path) as f:
+            return list(json.load(f)["weight_map"])
+
+    keys: list[str] = []
+    for shard in sorted(glob.glob(os.path.join(output_dir, "*.safetensors"))):
+        with safetensors.safe_open(shard, framework="pt") as handle:
+            keys.extend(handle.keys())
+    return keys
+
+
+def _has_mangled_keys(keys: list[str]) -> bool:
+    """True if any key repeats a path component back-to-back, e.g. `language_model.language_model`."""
+    return any(re.search(r"(?:^|\.)([^.]+)\.\1\.", key) for key in keys)
+
+
+def _resave_if_checkpoint_keys_are_mangled(
+    unwrapped_model: torch.nn.Module, output_dir: str, state_dict: Any, use_lora: bool
+) -> None:
+    """Work around transformers' broken reverse key mapping for some composite VLMs.
+
+    `save_pretrained(save_original_format=True)` (the default) rewrites keys into the historical
+    layout. For Qwen3.5 that mapping is wrong: it emits e.g.
+    `model.language_model.language_model.language_model.layers.0...` and folds the vision tower
+    under the language-model prefix, producing a checkpoint nothing can load. A repeated path
+    component is an unambiguous signal, so detect it and only then re-save in the native layout.
+    """
+    if use_lora:  # adapters are saved by peft and have their own key convention
+        return
+
+    try:
+        keys = _saved_checkpoint_keys(output_dir)
+    except Exception as exc:  # noqa: BLE001 - never fail the run over a diagnostic read
+        logger.warning(f"Could not read back saved checkpoint keys to validate them: {exc}")
+        return
+
+    if not keys or not _has_mangled_keys(keys):
+        return
+
+    sample = next(key for key in keys if re.search(r"(?:^|\.)([^.]+)\.\1\.", key))
+    if "save_original_format" not in inspect.signature(unwrapped_model.save_pretrained).parameters:
+        raise RuntimeError(
+            f"The saved checkpoint has corrupted tensor names (e.g. {sample!r}) and this transformers "
+            "version has no `save_original_format` option to bypass the reverse key mapping. The "
+            "checkpoint is not loadable; save it manually or upgrade transformers."
+        )
+
+    logger.warning(
+        f"Saved checkpoint has corrupted tensor names (e.g. {sample!r}); this is transformers' reverse "
+        "key mapping misfiring for this architecture. Re-saving in the model's native layout."
+    )
+    unwrapped_model.save_pretrained(output_dir, state_dict=state_dict, save_original_format=False)
+
+    keys = _saved_checkpoint_keys(output_dir)
+    if _has_mangled_keys(keys):
+        raise RuntimeError(
+            "Checkpoint tensor names are still corrupted after re-saving without the reverse key "
+            "mapping. Refusing to leave an unloadable checkpoint behind."
+        )
+    logger.info("Re-saved checkpoint with valid tensor names.")
+
+
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
@@ -530,6 +601,7 @@ def save_with_accelerate(
     use_lora: bool = False,
     model_attribute_to_save: str | None = None,
     chat_template_name: str = "tulu",
+    processor: Any | None = None,
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
@@ -580,7 +652,12 @@ def save_with_accelerate(
         )
 
     if accelerator.is_main_process:
+        _resave_if_checkpoint_keys_are_mangled(unwrapped_model, output_dir, state_dict, use_lora)
         tokenizer.save_pretrained(output_dir)
+        if processor is not None:
+            # Without this the checkpoint has no image-processing settings and cannot be served
+            # without pointing at the base model.
+            processor.save_pretrained(output_dir)
     # customize model card (TODO (Costa): this can be prettier)
 
 
