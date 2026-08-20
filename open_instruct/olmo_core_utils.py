@@ -358,7 +358,8 @@ def is_hf_checkpoint(path: str) -> bool:
 
     Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
     holding an HF config.json, and paths with a '-hf' component. Returns False for
-    olmo-core distributed checkpoints.
+    olmo-core distributed checkpoints, including remote URLs (e.g. gs://) without
+    an '-hf' marker.
     """
     if os.path.isdir(path):
         config_path = os.path.join(path, "config.json")
@@ -375,6 +376,10 @@ def is_hf_checkpoint(path: str) -> bool:
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True
+    # A remote URL (gs://, s3://, ...) without an '-hf' marker is an olmo-core
+    # checkpoint: transformers cannot read from it, olmo-core's io layer can.
+    if "://" in path:
+        return False
     return not os.path.isabs(path)
 
 

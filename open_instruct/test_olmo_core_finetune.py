@@ -98,6 +98,12 @@ class IsHfCheckpointTest(unittest.TestCase):
         # Path doesn't exist on disk, but contains '-hf'.
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
 
+    def test_gs_url_is_olmo_core(self) -> None:
+        self.assertFalse(olmo_core_utils.is_hf_checkpoint("gs://ai2-llm/checkpoints/olmo3/step100/model_and_optim"))
+
+    def test_gs_url_with_hf_marker_is_hf(self) -> None:
+        self.assertTrue(olmo_core_utils.is_hf_checkpoint("gs://ai2-llm/checkpoints/olmo3-hf/step100"))
+
 
 class TestCheckpointerDefaults(unittest.TestCase):
     def test_default_intervals_build_a_checkpointer(self) -> None:
