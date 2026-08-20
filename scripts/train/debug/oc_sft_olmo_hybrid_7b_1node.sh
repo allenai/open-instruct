@@ -50,10 +50,12 @@ LOCAL_CACHE_DIR=/weka/oe-adapt-default/allennlp/numpy_sft_cache
 MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-861}"
 CHECKPOINTING_STEPS="${CHECKPOINTING_STEPS:-172}"
 
-# NOTE: a hang here holds its 8 GPUs invisibly for the full 24h distributed
-# timeout -- the first attempt at this run went silent at step 580 and sat for
-# 2h40m. #1821 exposes --dist_timeout_hours and --save_async to cap that; add
-# `--dist_timeout_hours 2` here once it merges.
+# NOTE: a hang here would otherwise hold its 8 GPUs invisibly for the full 24h
+# distributed timeout -- the first attempt at this run went silent at step 580
+# and sat for 2h40m. The train job passes --dist_timeout_hours 2, which is safe
+# only because the tokenize job has already built the cache: on a cold cache the
+# other ranks wait at a barrier while rank 0 tokenizes, which takes longer than
+# that. Run the two jobs in the documented order.
 
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Mode: $MODE"
@@ -128,6 +130,7 @@ elif [[ "$MODE" == "train" ]]; then
         --checkpointing_steps $CHECKPOINTING_STEPS \
         --ephemeral_save_interval -1 \
         --keep_last_n_checkpoints -1 \
+        --dist_timeout_hours 2 \
         --with_tracking \
         --logging_steps 1 \
         --mixer_list $MIXER \
