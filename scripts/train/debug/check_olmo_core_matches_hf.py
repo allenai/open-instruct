@@ -20,6 +20,11 @@ from open_instruct import logger_utils, olmo_core_utils
 
 logger = logger_utils.setup_logger(__name__)
 
+# olmo-core attention backend -> the HF implementation running the same kernel. Comparing
+# flash against sdpa leaves a numerical difference that looks like a conversion error, and
+# can flip a near-tied argmax.
+HF_ATTN_IMPLEMENTATIONS = {"flash_2": "flash_attention_2", "flash_3": "flash_attention_3", "torch": "sdpa"}
+
 
 def block_labels(hf_config: transformers.PretrainedConfig, num_blocks: int) -> list[str]:
     """Label each block for the per-layer report, e.g. ``linear_attention`` vs ``full_attention``.
@@ -40,12 +45,24 @@ def main() -> None:
     args = parser.parse_args()
 
     device = torch.device("cuda")
-    ids = torch.tensor([[100257, 3923, 374, 279, 6864, 315, 9822, 30, 578, 6864]], device=device)
+    # Encode with the checkpoint's own tokenizer rather than hard-coding ids, which sit
+    # outside a smaller vocabulary and fail in the embedding lookup.
+    tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
+    ids = tokenizer("What is the capital of France? The capital", return_tensors="pt").input_ids.to(device)
 
-    logger.info(f"Loading HF model {args.model_name}")
-    hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-        args.model_name, dtype=torch.bfloat16, trust_remote_code=True
-    ).to(device)
+    hf_attn = HF_ATTN_IMPLEMENTATIONS.get(args.attn_implementation)
+    logger.info(f"Loading HF model {args.model_name} with attn_implementation={hf_attn}")
+    try:
+        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+            args.model_name, dtype=torch.bfloat16, trust_remote_code=True, attn_implementation=hf_attn
+        ).to(device)
+    except (ValueError, ImportError) as exc:
+        # Not every architecture implements every backend, and running under HF's own
+        # choice is far more informative than refusing to run at all.
+        logger.warning(f"HF rejected attn_implementation={hf_attn!r} ({exc}); using its default instead.")
+        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+            args.model_name, dtype=torch.bfloat16, trust_remote_code=True
+        ).to(device)
     hf_model.eval()
     with torch.no_grad():
         hf_out = hf_model(ids, output_hidden_states=True)
