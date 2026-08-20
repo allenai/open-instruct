@@ -325,11 +325,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
 
-    load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
-
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
-        load_strategy=load_strategy,
+        load_strategy=LoadStrategy.never,
         max_duration=max_duration,
         metrics_collect_interval=args.logging.logging_steps,
         callbacks=trainer_callbacks,
@@ -337,7 +335,24 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
     ).build(train_module, data_loader)
 
-    if not use_hf_ckpt:
+    # Loaded here rather than by fit(), which skips its own load once anything has
+    # been loaded: putting the base weights in first would suppress it. Precedence
+    # is fit()'s own -- an interrupted run in output_dir, then an explicit resume,
+    # then the base weights.
+    resumed = trainer.maybe_load_checkpoint(args.checkpoint.output_dir, load_trainer_state=True, load_optim_state=True)
+    if args.checkpoint.resume_from_checkpoint is not None:
+        if resumed:
+            logger.warning(
+                f"Ignoring --resume_from_checkpoint ({args.checkpoint.resume_from_checkpoint}) "
+                f"since a checkpoint was found in {args.checkpoint.output_dir}"
+            )
+        else:
+            logger.info(f"Resuming from {args.checkpoint.resume_from_checkpoint}...")
+            # Raises when the path holds no checkpoint: a typo here must not
+            # silently fall back to an expensive restart from the base weights.
+            trainer.load_checkpoint(args.checkpoint.resume_from_checkpoint)
+            resumed = True
+    if not resumed and not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
 

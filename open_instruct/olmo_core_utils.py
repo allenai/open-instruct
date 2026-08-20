@@ -238,7 +238,7 @@ class CheckpointConfig:
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
-    """If the training should continue from a checkpoint folder."""
+    """Continue from a checkpoint in a *different* directory (resuming this run needs only ``output_dir``)."""
 
 
 def build_checkpointer_callback(
