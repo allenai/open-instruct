@@ -324,7 +324,7 @@ wheels = [
 
 [[package]]
 name = "beaker-py"
-version = "2.5.7"
+version = "2.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-crc32c" },
@@ -335,9 +335,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fe/95/acee7764ac42c272d6547d8b49f8bce9463c1ba55c56c793bcd6fe68e077/beaker_py-2.5.7.tar.gz", hash = "sha256:af9982ebe969931264006b89207fd7944cead4ae27fe442a8a73faa956312013", size = 104660, upload-time = "2026-04-03T00:02:37.651Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/9a/b3458811250ca8a0cb012d86a8c1e8aacb489ede22216d43c15f53b7b1dc/beaker_py-2.7.2.tar.gz", hash = "sha256:52170b97ad4f35d9fbea913786a7becd929eca63dda186156c6533d88225706b", size = 112927, upload-time = "2026-08-11T18:10:32.267Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/4b/fadaea2947c41d6c910c01c7afd698e5f6423337c75b01920c6fd1f47359/beaker_py-2.5.7-py3-none-any.whl", hash = "sha256:0dd85d3ce81d320bd9613881124b4e65013c0d16fda9863d01bcaf232e7a9855", size = 115960, upload-time = "2026-04-03T00:02:36.314Z" },
+    { url = "https://files.pythonhosted.org/packages/04/31/b2c7077837404c694c47ee955ff6436917b0693e9741339e057d8e83dd48/beaker_py-2.7.2-py3-none-any.whl", hash = "sha256:5c07799f208c68cf7c880d670fbfa69c794eca1c34f01b9c7f61289cce592c1b", size = 123990, upload-time = "2026-08-11T18:10:30.929Z" },
 ]
 
 [[package]]
@@ -3033,7 +3033,7 @@ cuda13 = [
     { name = "vllm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.19.1", index = "https://wheels.vllm.ai/0.19.1/cu130", conflict = { package = "open-instruct", group = "cuda13" } },
 ]
 dev = [
-    { name = "beaker-py", specifier = ">=2.5.7" },
+    { name = "beaker-py", specifier = ">=2.6.0" },
     { name = "mkdocs-material", specifier = ">=9.6.8" },
     { name = "parameterized", specifier = ">=0.9.0" },
     { name = "pre-commit", specifier = ">=4.5.0" },
