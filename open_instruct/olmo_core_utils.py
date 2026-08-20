@@ -347,9 +347,10 @@ def is_hf_checkpoint(path: str) -> bool:
         # HF configs always carry a top-level "model_type"; olmo-core's never does.
         try:
             with open(config_path) as config_file:
-                return "model_type" in json.load(config_file)
+                config = json.load(config_file)
         except (OSError, ValueError):
             return False
+        return isinstance(config, dict) and "model_type" in config
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True
