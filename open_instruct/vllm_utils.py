@@ -1173,7 +1173,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             rollout.done = True
             rollout.rewards.append(0.0)
             rollout.tool_error += error_msg
-            rollout.tool_call_stats.append(ToolCallStats(tool_name="env_reset", success=False, runtime=0.0))
+            rollout.tool_call_stats.append(
+                ToolCallStats(tool_name="env_reset", success=False, runtime=0.0, failure_kind="reset")
+            )
             max_steps = 0
         else:
             add_timing("acquire_reset_pools", phase_start_time)
@@ -1258,7 +1260,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                 rollout.tool_error += feedback
                 rollout.rewards.append(0.0)
                 rollout.tool_call_stats.append(
-                    ToolCallStats(tool_name="tool_call_format_error", success=False, runtime=0.0)
+                    ToolCallStats(
+                        tool_name="tool_call_format_error", success=False, runtime=0.0, failure_kind="model"
+                    )
                 )
 
             for tc in tool_calls:
@@ -1291,11 +1295,23 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     rollout.timeout = rollout.timeout or meta.get("timeout", False)
                     rollout.tool_error += meta.get("error", "")
                     rollout.tool_runtime += meta.get("runtime", 0.0)
+                    # OOM returns done=True with no "error"/"timeout" key, so without
+                    # the explicit oom_killed check it is scored success=True and
+                    # vanishes from failure_rate. See docs/sandbox_modal_vs_podman.md.
+                    if meta.get("oom_killed", False):
+                        failure_kind = "oom"
+                    elif meta.get("timeout", False):
+                        failure_kind = "timeout"
+                    elif meta.get("error"):
+                        failure_kind = "model"
+                    else:
+                        failure_kind = None
                     rollout.tool_call_stats.append(
                         ToolCallStats(
                             tool_name=tc.name,
-                            success=not meta.get("error") and not meta.get("timeout", False),
+                            success=failure_kind is None,
                             runtime=meta.get("runtime", 0.0),
+                            failure_kind=failure_kind,
                         )
                     )
                 except asyncio.TimeoutError:
@@ -1307,7 +1323,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     rollout.timeout = True
                     rollout.rewards.append(0.0)
                     rollout.tool_call_stats.append(
-                        ToolCallStats(tool_name=tc.name, success=False, runtime=actor.tool_call_timeout)
+                        ToolCallStats(
+                            tool_name=tc.name,
+                            success=False,
+                            runtime=actor.tool_call_timeout,
+                            failure_kind="timeout",
+                        )
                     )
                 except Exception as e:
                     add_timing("tool_step", phase_start_time)
@@ -1316,7 +1337,9 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     observations.append((error_msg, "tool"))
                     rollout.tool_error += error_msg
                     rollout.rewards.append(0.0)
-                    rollout.tool_call_stats.append(ToolCallStats(tool_name=tc.name, success=False, runtime=0.0))
+                    rollout.tool_call_stats.append(
+                        ToolCallStats(tool_name=tc.name, success=False, runtime=0.0, failure_kind="infra")
+                    )
 
                 if rollout.done:
                     break
