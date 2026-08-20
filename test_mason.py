@@ -116,6 +116,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "task_name": "beaker_mason",
                     "hostname": None,
                     "preemptible": False,
+                    "min_runtime": "30m",
                     "mount_docker_socket": False,
                 },
             ),
@@ -140,6 +141,7 @@ class TestExperimentSpec(unittest.TestCase):
                     "shared_memory": "10.24gb",
                     "task_name": "beaker_mason",
                     "preemptible": True,
+                    "min_runtime": None,
                     "hostname": None,
                     "mount_docker_socket": False,
                 },
@@ -163,7 +165,8 @@ class TestExperimentSpec(unittest.TestCase):
             result=beaker.BeakerResultSpec(path="/output"),
             datasets=mason.get_datasets(args.beaker_datasets, args.cluster),
             context=beaker.BeakerTaskContext(
-                priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+                priority=beaker.BeakerJobPriority[args.priority],
+                min_runtime=args.min_runtime if args.min_runtime is not None else (0 if args.preemptible else None),
             ),
             constraints=beaker.BeakerConstraints(cluster=args.cluster)
             if args.hostname is None
@@ -192,6 +195,10 @@ class TestExperimentSpec(unittest.TestCase):
             expected_spec.host_networking = True
 
         self.assertEqual(actual_spec, expected_spec)
+        self.assertEqual(
+            actual_spec.context.to_json()["minRuntime"], 30 * 60 * 1_000_000_000 if args.min_runtime == "30m" else 0
+        )
+        self.assertNotIn("preemptible", actual_spec.context.to_json())
 
 
 if __name__ == "__main__":

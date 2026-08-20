@@ -14,7 +14,7 @@ uv run python mason.py \
        --no-host-networking \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
-       --preemptible \
+       --min_runtime 30m \
        --num_nodes 1 \
        --max_retries 0 \
        --timeout 30m \
