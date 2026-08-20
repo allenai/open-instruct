@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Expose `--save_async` and `--dist_timeout_hours` for the olmo-core SFT path; both were hardcoded, and the 24h default timeout meant a mid-training stall held its GPUs invisibly (https://github.com/allenai/open-instruct/pull/1821).
+- Harden DockerBackend with transient-exec retries and concurrency limits, and end the episode when the sandbox container is OOM-killed or otherwise lost instead of continuing against a dead container (https://github.com/allenai/open-instruct/pull/1784).
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
