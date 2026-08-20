@@ -1,40 +1,26 @@
 #!/bin/bash
 # Olmo-Hybrid-7B SFT over Dolci-Instruct-SFT, half an epoch, one 8-GPU node.
-# Derived from oc_sft_olmo3_7b_1node.sh; read that script's header first, since
-# everything it explains about the two-job split and the cache key applies here.
 #
-# RUN AS TWO JOBS:
+# The procedure -- two-job split, cache key, what a healthy run looks like, the
+# eval sweep -- is docs/algorithms/sft_running_guide.md (added in #1835). This
+# header records only where the hybrid recipe departs from it.
 #
 #   ./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_olmo_hybrid_7b_1node.sh tokenize
 #   ./scripts/train/build_image_and_launch.sh --cuda-version 13 \
 #       scripts/train/debug/oc_sft_olmo_hybrid_7b_1node.sh train
 #
-# Training runs on ai2/holmes (B300) and needs the CUDA 13 image; it hangs on H100. See
-# the note above the train branch.
+# Departures, all forced by the architecture:
 #
-# The tokenize job is normally a cache hit -- see the tokenizer note below.
+# * ai2/holmes (B300) and the CUDA 13 image; it hangs on H100 -- see the train branch.
+# * --config_name olmo3_hybrid_7B resolves through open_instruct.olmo_core_hybrid,
+#   not olmo-core, which has no preset or HF conversion for this architecture.
+# * NO --rope_scaling_factor: the model is NoPE. See olmo_core_hybrid.py.
+# * LR 2.5e-5, the rate the released Olmo Hybrid SFT used, not Olmo 3's 8e-5.
+# * --activation_checkpointing_mode selected_modules: the torch.compile partitioner
+#   cannot checkpoint through the opaque GDN `fla` kernels.
 #
-# Differences from the Olmo 3 script, all forced by the architecture:
-#
-# * --config_name olmo3_hybrid_7B resolves through
-#   open_instruct.olmo_core_hybrid, not olmo-core. olmo-core has no preset for
-#   this model and no HF -> olmo-core state conversion for model_type
-#   "olmo_hybrid"; both live in that module.
-# * NO --rope_scaling_factor. Olmo Hybrid is NoPE: config.json carries
-#   rope_parameters = {"rope_theta": null} and HF's OlmoHybrid builds no rotary
-#   embedding at all, so the full-attention layers have no positional encoding.
-#   Passing a scaling factor here would fabricate a RoPE the weights never saw.
-#   This also means the ulysses/rope conflict that shaped the Olmo 3 script does
-#   not apply, so context parallelism is available if it is ever needed.
-# * LR 2.5e-5, not 8e-5. This is the rate the released Olmo Hybrid SFT used
-#   (see scripts/train/olmo-hybrid/README.md); 8e-5 is an Olmo 3 number and is
-#   unverified at this architecture.
-# * --activation_checkpointing_mode selected_modules. Budget mode is a silent
-#   no-op unless --compile_model is true, and the torch.compile partitioner
-#   cannot checkpoint through the opaque GDN `fla` kernels even when it is.
-#
-# Half an epoch with a permanent checkpoint every tenth of an epoch, so the eval
-# curve can show where it flattens rather than giving one end-of-run number.
+# Half an epoch, permanent checkpoint every tenth, so the eval curve shows where
+# it flattens rather than giving one end-of-run number.
 
 set -euo pipefail
 
@@ -44,14 +30,10 @@ MODE="${2:-train}"
 # ---- cache-key arguments: MUST be byte-identical across both jobs ----
 MODEL=allenai/Olmo-Hybrid-7B
 CONFIG_NAME=olmo3_hybrid_7B
-# Deliberately the Olmo 3 instruct tokenizer, NOT the one shipped with
-# Olmo-Hybrid-7B. The two share an identical BPE -- same 100k merges, same
-# pre-tokenizer, so ordinary text gets identical ids -- and differ only in the
-# names of 10 special tokens at ids 100266-100275, where Olmo 3 names four of
-# them <functions>/</functions>/<function_calls>/</function_calls> and the
-# hybrid leaves all ten as <|extra_id_N|>. Using the Olmo 3 tokenizer makes this
-# run reuse the exact cache built for oc_sft_olmo3_7b_1node.sh, so the two runs
-# see the same data in the same order and the model is the only variable.
+# Deliberately the Olmo 3 instruct tokenizer, not the one shipped with
+# Olmo-Hybrid-7B: identical BPE, differing only in the names of 10 special tokens
+# at ids 100266-100275. Sharing it reuses the cache built for
+# oc_sft_olmo3_7b_1node.sh, so the model is the only variable between the runs.
 TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
 CHAT_TEMPLATE=olmo123
 MAX_SEQ_LENGTH=32768
