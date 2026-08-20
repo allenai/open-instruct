@@ -6,8 +6,17 @@ import unittest
 
 from parameterized import parameterized
 
+from open_instruct.environments.appworld_env import (
+    AppWorldEnv,
+    AppWorldEnvConfig,
+    build_prompt_messages,
+    format_supervisor_block,
+    reward_from_evaluation,
+    truncate_observation,
+)
 from open_instruct.environments.base import EnvCall, RLEnvironment, StepResult, TextRLEnvironment
 from open_instruct.environments.examples import CounterEnv, GuessNumberEnv, WordleTextEnv
+from open_instruct.environments.tools.tools import TOOL_REGISTRY
 
 
 class TestEnvironmentReset(unittest.TestCase):
@@ -32,10 +41,12 @@ class TestEnvironmentReset(unittest.TestCase):
 
 
 class TestEnvironments(unittest.TestCase):
-    @parameterized.expand([
-        (CounterEnv, {"target": 3}, {"target": "3"}),
-        (GuessNumberEnv, {"min_val": 1, "max_val": 10}, {"number": "3"}),
-    ])
+    @parameterized.expand(
+        [
+            (CounterEnv, {"target": 3}, {"target": "3"}),
+            (GuessNumberEnv, {"min_val": 1, "max_val": 10}, {"number": "3"}),
+        ]
+    )
     def test_20_random_steps(self, env_cls: type[RLEnvironment], kwargs: dict, reset_kwargs: dict):
         env = env_cls(**kwargs)
         result, tools = asyncio.run(env.reset(**reset_kwargs))
@@ -132,6 +143,79 @@ class TestWordleTextEnv(unittest.TestCase):
         self.assertEqual(m["invalid_attempts"], 0.0)
         self.assertEqual(m["solved"], 1.0)
         self.assertGreater(m["total_greens"], 0)
+
+
+class TestAppWorldEnv(unittest.TestCase):
+    """Tests for AppWorldEnv that do not require the appworld package or its data."""
+
+    SUPERVISOR = {
+        "first_name": "Jane",
+        "last_name": "Doe",
+        "email": "jane@example.com",
+        "phone_number": "555-0100",
+        "password": "hunter2",
+    }
+
+    def test_registered_in_tool_registry(self):
+        self.assertIn("appworld", TOOL_REGISTRY)
+        self.assertIs(TOOL_REGISTRY["appworld"], AppWorldEnvConfig)
+        self.assertEqual(AppWorldEnvConfig.tool_class.config_name, "appworld")
+
+    def test_tool_definition_is_execute_python(self):
+        tools = AppWorldEnv.get_tool_definitions()
+        self.assertEqual(len(tools), 1)
+        self.assertEqual(tools[0]["function"]["name"], "execute_python")
+        self.assertIn("code", tools[0]["function"]["parameters"]["properties"])
+
+    def test_build_prompt_messages_bakes_instruction_and_creds(self):
+        msgs = build_prompt_messages("Pay rent via Venmo.", self.SUPERVISOR)
+        self.assertEqual([m["role"] for m in msgs], ["system", "user"])
+        # Supervisor login details belong in the system prompt (reset obs is dropped).
+        self.assertIn("jane@example.com", msgs[0]["content"])
+        self.assertIn("hunter2", msgs[0]["content"])
+        self.assertIn("Pay rent via Venmo.", msgs[1]["content"])
+
+    def test_format_supervisor_block_from_object(self):
+        class Sup:
+            first_name = "Bob"
+            email = "bob@x.com"
+
+        block = format_supervisor_block(Sup())
+        self.assertIn("Bob", block)
+        self.assertIn("bob@x.com", block)
+
+    def test_truncate_observation(self):
+        short = "ok"
+        self.assertEqual(truncate_observation(short), short)
+        long = "A" * 20000
+        out = truncate_observation(long)
+        self.assertLess(len(out), len(long))
+        self.assertIn("chars elided", out)
+
+    def test_reset_requires_task_id(self):
+        env = AppWorldEnv()
+        env._client = object()  # skip setup()/docker client creation
+        with self.assertRaises(ValueError):
+            asyncio.run(env.reset(task_id=None))
+
+    def test_config_defaults(self):
+        cfg = AppWorldEnvConfig()
+        self.assertEqual(cfg.image, "ghcr.io/stonybrooknlp/appworld:latest")
+        self.assertEqual(cfg.in_container_root, "/run")
+        self.assertTrue(cfg.dense_reward)
+        self.assertEqual(cfg.max_interactions, 50)
+
+    def test_reward_from_evaluation(self):
+        ev = {"num_tests": 4, "passes": [1, 2, 3], "failures": [4], "success": False}
+        dense, m = reward_from_evaluation(ev, dense=True)
+        self.assertAlmostEqual(dense, 0.75)
+        self.assertEqual(m["pass_count"], 3.0)
+        binary, _ = reward_from_evaluation(ev, dense=False)
+        self.assertEqual(binary, 0.0)
+        all_pass = {"num_tests": 2, "passes": [1, 2], "failures": [], "success": True}
+        self.assertEqual(reward_from_evaluation(all_pass, dense=False)[0], 1.0)
+        # no tests -> zero, no division error
+        self.assertEqual(reward_from_evaluation({"num_tests": 0, "passes": []}, dense=True)[0], 0.0)
 
 
 def _random_env_call(tools: list[dict]) -> EnvCall:
