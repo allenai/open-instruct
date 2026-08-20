@@ -1646,7 +1646,9 @@ def one_training_step(
                 metrics_to_log[key] = wandb.Histogram(value)
             else:
                 metrics_to_log[key] = value
-        wandb.log(metrics_to_log, step=training_step)
+        # Publish off-thread: wandb.log blocks indefinitely when the wandb
+        # service wedges, which has stalled multi-hour training runs.
+        utils.async_wandb_logger.log(metrics_to_log, step=training_step)
 
     return num_step_tokens
 

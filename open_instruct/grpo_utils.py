@@ -882,7 +882,9 @@ def maybe_evaluate(
 
         if args.with_tracking:
             eval_metrics["sample_completions"] = wandb.Table(dataframe=df)
-            wandb.log(eval_metrics, step=training_step)
+            # Publish off-thread: wandb.log blocks indefinitely when the wandb
+            # service wedges, which has stalled multi-hour training runs.
+            utils.async_wandb_logger.log(eval_metrics, step=training_step)
         else:
             model_utils.print_rich_table(df.iloc[:1])
         del table
