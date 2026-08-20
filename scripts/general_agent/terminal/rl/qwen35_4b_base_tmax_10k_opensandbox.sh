@@ -4,11 +4,18 @@
 # 4 nodes x 8 GPUs (32 GPUs total)
 #
 # Same as qwen35_4b_base_tmax_10k.sh, but runs sandboxes on the self-hosted
-# OpenSandbox service on GKE Autopilot (OpenSandboxBackend) instead of on-node
-# Podman — no nested containers, no podman services, no registry mirror.
+# OpenSandbox service on GKE (OpenSandboxBackend) instead of on-node Podman —
+# no nested containers, no podman services, no on-node registry mirror.
 # Requires the pradeepd_OPEN_SANDBOX_API_KEY Beaker secret and outbound egress
 # to the endpoint (verify with scripts/opensandbox/check_opensandbox_egress.sh).
 # See docs/sandbox_management.md for trade-offs, Spot behavior, and tuning.
+#
+# Image mirror: SWERL_OPENSANDBOX_IMAGE_PREFIX routes sandbox image pulls
+# through the Artifact Registry pull-through cache of Docker Hub
+# (docker-hub-remote-repository, in-region with the sandbox cluster) — each
+# unique task-image tag is fetched from Docker Hub once ever, node pulls stay
+# in-region, and Docker Hub rate limits don't apply. Set it empty in the
+# launching shell to pull straight from Docker Hub instead.
 #
 # pool_size note: the Spot-backed server has an observed capacity ceiling of
 # ~450-520 concurrent sandboxes (2026-08-06). Requesting far beyond capacity

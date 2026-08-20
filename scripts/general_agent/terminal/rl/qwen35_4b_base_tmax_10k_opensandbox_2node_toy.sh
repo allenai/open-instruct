@@ -4,13 +4,20 @@
 # 2 nodes x 8 GPUs (16 GPUs total)
 #
 # Same as qwen35_4b_base_tmax_10k_8_podman_services_2node_toy.sh, but runs
-# sandboxes on a self-hosted OpenSandbox service on GKE Autopilot
-# (OpenSandboxBackend) instead of on-node Podman — no nested containers, no
-# podman services, no registry mirror. Requires the
-# pradeepd_OPEN_SANDBOX_API_KEY Beaker secret, SWERL_OPENSANDBOX_DOMAIN set in
-# the launching shell, and outbound egress to that endpoint (verify with
+# sandboxes on a self-hosted OpenSandbox service on GKE (OpenSandboxBackend)
+# instead of on-node Podman — no nested containers, no podman services, no
+# on-node registry mirror. Requires the pradeepd_OPEN_SANDBOX_API_KEY Beaker
+# secret, SWERL_OPENSANDBOX_DOMAIN set in the launching shell, and outbound
+# egress to that endpoint (verify with
 # scripts/opensandbox/check_opensandbox_egress.sh). See
 # docs/sandbox_management.md for the trade-offs vs Podman and Modal.
+#
+# Image mirror: SWERL_OPENSANDBOX_IMAGE_PREFIX routes sandbox image pulls
+# through the Artifact Registry pull-through cache of Docker Hub
+# (docker-hub-remote-repository, in-region with the sandbox cluster) — each
+# unique task-image tag is fetched from Docker Hub once ever, node pulls stay
+# in-region, and Docker Hub rate limits don't apply. Set it empty in the
+# launching shell to pull straight from Docker Hub instead.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
