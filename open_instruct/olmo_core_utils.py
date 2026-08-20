@@ -293,8 +293,11 @@ def load_hf_weights_into_olmo_core(
 ) -> None:
     """Load HF weights into an olmo-core state dict in place, dispatching on model type.
 
-    Picking the wrong branch is silent: olmo-core's converter has no ``olmo_hybrid``
-    case and would fall through to the llama-style key templates.
+    olmo-core's converter has no ``olmo_hybrid`` case, so the generic branch falls
+    through to the llama-style key templates. For hybrid that raises, since nothing
+    maps the GDN ``linear_attn.*`` keys, but the general failure is quiet:
+    ``load_hf_model`` writes back only the keys its converter produced, leaving
+    anything unmapped at whatever the model was initialized with.
     """
     hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
     if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
