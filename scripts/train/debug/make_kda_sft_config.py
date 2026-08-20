@@ -26,6 +26,22 @@ CHECKPOINT_FLAGS = (
     "checkpoint_second_unpermute",
 )
 
+# The full-attention layers pretrain with the TransformerEngine backend, which
+# raises "doesn't currently support intra-document masking" (01M0GJD4P8743W4T9NSS9C7B7X).
+# SFT packs several documents per sequence and masks across their boundaries, so
+# the backend has to be one that implements it.
+TE_ATTENTION_BACKEND = "te"
+SFT_ATTENTION_BACKEND = "flash_2"
+
+
+def retarget_attention_backend(section: dict, label: str) -> list[str]:
+    """Swap TE attention for a backend that supports intra-document masking."""
+    mixer = section.get("sequence_mixer") or {}
+    if mixer.get("backend") == TE_ATTENTION_BACKEND:
+        mixer["backend"] = SFT_ATTENTION_BACKEND
+        return [f"{label}: attention backend te -> {SFT_ATTENTION_BACKEND}"]
+    return []
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -49,6 +65,14 @@ def main() -> int:
 
     if not args.keep_ep and block.pop("ep", None) is not None:
         print("dropped block.ep (no expert-parallel meshes in open-instruct)")
+
+    changes = retarget_attention_backend(block, "block")
+    for name, override in (payload["model"].get("block_overrides") or {}).items():
+        changes += retarget_attention_backend(override, f"block_overrides.{name}")
+        if not args.keep_ep:
+            override.pop("ep", None)
+    for change in changes:
+        print(change)
 
     args.dest.write_text(json.dumps(payload, indent=2))
     print(f"wrote {args.dest}")
