@@ -10,12 +10,12 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
 
-EXP_NAME=swerl_qwen35_9b_dppo_prod_4node_64k_holmes
+EXP_NAME=swerl_qwen35_9b_dppo_cosine_warmup_4node
 
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; full 64-step run)" \
+       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; LR A/B: cosine decay + 3% warmup vs prod constant 1e-6)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents-holmes \
        --priority urgent \
@@ -64,8 +64,9 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --tokenizer_name_or_path $TOKENIZER \
     --temperature 1.0 \
     --learning_rate 1e-6 \
+    --warmup_ratio 0.03 \
     --total_episodes 128000 \
-    --lr_scheduler_type constant \
+    --lr_scheduler_type cosine \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
     --attn_implementation flash_4 \
@@ -94,8 +95,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --active_sampling \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1785922778_101903 \
-    --checkpoint_state_freq 5 \
+    --checkpoint_state_freq 10 \
     --inflight_updates true \
     --lm_head_fp32 true \
     --use_liger_grpo_loss \
