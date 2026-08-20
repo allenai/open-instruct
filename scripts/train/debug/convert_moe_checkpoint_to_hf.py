@@ -41,7 +41,12 @@ def main() -> None:
     parser.add_argument("-t", "--tokenizer", default="allenai/olmo-3-tokenizer-instruct-dev")
     parser.add_argument("-s", "--max-sequence-length", type=int, default=8192)
     parser.add_argument("--skip-validation", dest="validate", action="store_false")
-    parser.add_argument("--device", type=torch.device, default=torch.device("cpu"))
+    # Defaults to CUDA, not CPU: validation runs both implementations, and the
+    # KDA/fla Triton kernels reject CPU tensors ("Pointer argument (at 0) cannot be
+    # accessed from Triton"). On CPU the weights still get written, so the failure
+    # looks like a converted-but-unvalidated checkpoint -- the exact state that let
+    # a 38%-logit-error conversion through on Olmo-Hybrid-7B. Do not silence it.
+    parser.add_argument("--device", type=torch.device, default=torch.device("cuda"))
     args = parser.parse_args()
 
     payload = json.loads(pathlib.Path(args.config).read_text())
