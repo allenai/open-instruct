@@ -764,9 +764,13 @@ def get_git_commit() -> str:
     return os.environ.get("GIT_COMMIT", "unknown")
 
 
-def get_wandb_tags() -> list[str]:
-    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`)"""
-    tags = [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
+def get_wandb_tags(extra_tags: list[str] | None = None) -> list[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123,branch-main`).
+
+    `extra_tags` (e.g. the experiment name) are prepended and, like all tags, truncated to W&B's 64-char limit.
+    """
+    tags = list(extra_tags) if extra_tags else []
+    tags += [t for t in os.environ.get("WANDB_TAGS", "").split(",") if t != ""]
     if (git_commit := get_git_commit()) != "unknown":
         tags.append(f"commit: {git_commit}")
         try:
