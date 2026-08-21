@@ -13,6 +13,15 @@ scripts/train/debug/make_kda_sft_config.py).
         -i <ckpt>/step172 -o <ckpt>/hf_step172 \
         -c scripts/train/debug/kda_mt_sft.json
 
+Validation caveat: strict logit validation FAILS (~92-99% mismatch, abs diff
+~1.5) on every OLMoE3 latent-KDA 1.2B checkpoint, including Jacob's known-good
+midtrain -- the two forward implementations disagree at this scale regardless
+of checkpoint, config, or the OLMO_HF_* parity env vars (bisected 2026-08-20).
+The scaling-ladders production workload passes --skip-validation --device cpu;
+strict validation only ever passed on the 275M/480M ladder models. Use
+--skip-validation for KDA and validate functionally with an eval instead
+(CPU and CUDA conversions were verified bit-identical over the full 35 GB).
+
 Note for GDN-based MoE hybrids (not KDA): olmo-core's `is_olmo_hybrid_model`
 returns True for them and routes to the dense-hybrid exporter, which crashes on
 the missing `feed_forward` attribute. KDA is unaffected because
