@@ -3,6 +3,8 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from parameterized import parameterized
 
@@ -45,6 +47,29 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
             _touch(os.path.join(tmp, "labels_mask_part_0000.npy"))
             _touch(os.path.join(tmp, "token_ids_part_0000.csv.gz"))
             self.assertFalse(olmo_core_finetune._numpy_dir_is_populated(tmp))
+
+
+class NumpyCacheHashTest(unittest.TestCase):
+    def test_tracking_hash_does_not_change_numpy_cache_key(self) -> None:
+        tc = SimpleNamespace(tokenizer_files_hash=["first"])
+
+        def fake_compute_config_hash(_dcs, config) -> str:
+            return str(config.tokenizer_files_hash)
+
+        with patch.object(
+            olmo_core_finetune.dataset_transformation,
+            "compute_config_hash",
+            side_effect=fake_compute_config_hash,
+        ):
+            first = olmo_core_finetune._compute_numpy_sft_cache_hash([], tc)
+            self.assertEqual(tc.tokenizer_files_hash, ["first"])
+
+            tc.tokenizer_files_hash = ["second"]
+            second = olmo_core_finetune._compute_numpy_sft_cache_hash([], tc)
+            self.assertEqual(tc.tokenizer_files_hash, ["second"])
+
+        self.assertEqual(first, "None")
+        self.assertEqual(first, second)
 
 
 class IsHfCheckpointTest(unittest.TestCase):
