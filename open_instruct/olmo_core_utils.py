@@ -338,11 +338,15 @@ def build_base_callbacks(
         ),
     }
     if with_tracking and wandb_project:
+        wandb_config = dict(config_dict)
+        beaker_config = utils.maybe_get_beaker_config()
+        if beaker_config is not None:
+            wandb_config.update(vars(beaker_config))
         result["wandb"] = train_callbacks.WandBCallback(
             name=run_name,
             entity=wandb_entity,
             project=wandb_project,
-            config=config_dict,
+            config=wandb_config,
             enabled=True,
             cancel_check_interval=10,
         )
