@@ -12,7 +12,6 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-import transformers
 from olmo_core import optim as olmo_optim
 from olmo_core import train
 from olmo_core.config import DType
@@ -36,27 +35,6 @@ from open_instruct.olmo_core_callbacks import PerfCallback
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
-
-
-def export_to_hf(
-    model: torch.nn.Module,
-    tokenizer: transformers.PreTrainedTokenizerBase,
-    save_dir: str,
-    original_model_name_or_path: str,
-    is_main_process: bool,
-):
-    """Export an FSDP-wrapped model to HuggingFace format.
-
-    All ranks must call this function as state_dict() and full_tensor() are collective operations.
-    Only the main process saves to disk.
-    """
-    logger.info("Gathering FSDP state dict...")
-    state_dict = model.state_dict()
-    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
-
-    if is_main_process:
-        logger.info(f"Exporting model to HuggingFace format at {save_dir}")
-        olmo_core_utils.save_state_dict_as_hf(state_dict, save_dir, original_model_name_or_path, tokenizer)
 
 
 def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
@@ -96,7 +74,7 @@ def _handle_post_training(
 ):
     """Save HF model, copy to beaker, launch evals, push to hub."""
     hf_model_path = os.path.join(args.output_dir, "hf_model")
-    export_to_hf(model, tokenizer, hf_model_path, args.model_name_or_path, is_main_process)
+    olmo_core_utils.export_to_hf(model, tokenizer, hf_model_path, args.model_name_or_path, is_main_process)
 
     if distributed_utils.is_distributed():
         dist.barrier()

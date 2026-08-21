@@ -575,6 +575,27 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     )
 
 
+def export_to_hf(
+    model: torch.nn.Module,
+    tokenizer: transformers.PreTrainedTokenizerBase,
+    save_dir: str,
+    original_model_name_or_path: str,
+    is_main_process: bool,
+) -> None:
+    """Export an FSDP-wrapped model to HuggingFace format.
+
+    All ranks must call this function as state_dict() and full_tensor() are collective operations.
+    Only the main process saves to disk.
+    """
+    logger.info("Gathering FSDP state dict...")
+    state_dict = model.state_dict()
+    state_dict = {k: v.full_tensor().cpu() if hasattr(v, "full_tensor") else v.cpu() for k, v in state_dict.items()}
+
+    if is_main_process:
+        logger.info(f"Exporting model to HuggingFace format at {save_dir}")
+        save_state_dict_as_hf(state_dict, save_dir, original_model_name_or_path, tokenizer)
+
+
 #: Model types whose released checkpoints use transformers' in-memory weight naming, so
 #: save_pretrained must not apply its conversion_mapping in reverse on the way out.
 _MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}

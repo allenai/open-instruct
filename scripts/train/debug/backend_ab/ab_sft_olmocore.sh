@@ -46,4 +46,4 @@ uv run python mason.py \
     --seed 42 \
     --compile_model true \
     --with_tracking \
-    --output_dir \$CHECKPOINT_OUTPUT_DIR
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/ab_sft_olmocore
