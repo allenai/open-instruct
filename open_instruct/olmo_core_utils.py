@@ -31,7 +31,7 @@ from olmo_core.train.train_module.transformer import (
 )
 from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
 
-from open_instruct import logger_utils, model_utils, olmo_core_callbacks, utils
+from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_core_hybrid, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
@@ -238,7 +238,7 @@ class CheckpointConfig:
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
-    """If the training should continue from a checkpoint folder."""
+    """Continue from a checkpoint in a *different* directory (resuming this run needs only ``output_dir``)."""
 
 
 def build_checkpointer_callback(
@@ -288,6 +288,24 @@ def build_scheduler(lr_scheduler_type: str, warmup_ratio: float, num_training_st
     raise ValueError(f"Unknown lr_scheduler_type: {lr_scheduler_type!r}")
 
 
+def load_hf_weights_into_olmo_core(
+    model_state_dict: dict[str, Any], model_name_or_path: str, work_dir: str | None = None
+) -> None:
+    """Load HF weights into an olmo-core state dict in place, dispatching on model type.
+
+    olmo-core's converter has no ``olmo_hybrid`` case, so the generic branch falls
+    through to the llama-style key templates. For hybrid that raises, since nothing
+    maps the GDN ``linear_attn.*`` keys, but the general failure is quiet:
+    ``load_hf_model`` writes back only the keys its converter produced, leaving
+    anything unmapped at whatever the model was initialized with.
+    """
+    hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
+    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
+        olmo_core_hybrid.load_hf_hybrid_model(model_name_or_path, model_state_dict)
+    else:
+        load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
+
+
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
     """Reload HF weights into a parallelized train_module.
 
@@ -296,7 +314,7 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     """
     logger.info("Reloading HuggingFace weights after parallelization...")
     sd = train_module.model.state_dict()
-    load_hf_model(model_name_or_path, sd, work_dir=work_dir)
+    load_hf_weights_into_olmo_core(sd, model_name_or_path, work_dir=work_dir)
     train_module.model.load_state_dict(sd)
 
 
@@ -352,6 +370,9 @@ OLMO_MODEL_CONFIG_MAP: dict[str, str] = {
     "allenai/OLMo-2-1124-13B": "olmo2_13B",
     "allenai/OLMo-2-0325-32B": "olmo2_32B",
     "allenai/Olmo-3-1025-7B": "olmo3_7B",
+    "allenai/Olmo-Hybrid-7B": "olmo3_hybrid_7B",
+    "allenai/Olmo-Hybrid-Instruct-SFT-7B": "olmo3_hybrid_7B",
+    "allenai/Olmo-Hybrid-Think-SFT-7B": "olmo3_hybrid_7B",
     "allenai/OLMoE-1B-7B-0924": "olmoe_1B_7B",
     "Qwen/Qwen3-0.6B": "qwen3_0_6B",
     "Qwen/Qwen3-0.6B-Base": "qwen3_0_6B",
@@ -382,11 +403,16 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     if config_name is None:
         config_name = model_name_or_config
 
+    local_config = olmo_core_hybrid.LOCAL_TRANSFORMER_CONFIGS.get(config_name)
+    if local_config is not None:
+        return local_config(vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend))
+
     if not hasattr(TransformerConfig, config_name):
         available_models = ", ".join(OLMO_MODEL_CONFIG_MAP.keys())
         available_configs = [
             name for name in dir(TransformerConfig) if name.startswith(("olmo", "qwen")) and not name.startswith("_")
         ]
+        available_configs += olmo_core_hybrid.LOCAL_TRANSFORMER_CONFIGS
         raise ValueError(
             f"Model/config '{model_name_or_config}' not found. "
             f"Available models: {available_models}. "
@@ -502,6 +528,21 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
+def convert_olmo_core_state_to_hf(hf_config: transformers.PretrainedConfig, state_dict: dict[str, Any]) -> dict:
+    """Convert an olmo-core state dict to HF format, dispatching on model type.
+
+    Both the pre-training export check and the actual save go through here, so they
+    cannot disagree about which converter a model needs. olmo-core's converter has
+    no ``olmo_hybrid`` case and falls through to the llama-style key templates,
+    where it raises on every GDN parameter.
+    """
+    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
+        return olmo_core_hybrid.convert_hybrid_state_to_hf(
+            state_dict, olmo_core_hybrid.layer_types_from_hf_config(hf_config)
+        )
+    return olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+
+
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -513,7 +554,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
+    converted = convert_olmo_core_state_to_hf(hf_config, olmo_core_state)
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
@@ -553,7 +594,7 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+    converted = convert_olmo_core_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
