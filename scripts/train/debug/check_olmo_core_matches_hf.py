@@ -20,10 +20,18 @@ from open_instruct import logger_utils, olmo_core_utils
 
 logger = logger_utils.setup_logger(__name__)
 
-# olmo-core attention backend -> the HF implementation running the same kernel. Comparing
-# flash against sdpa leaves a numerical difference that looks like a conversion error, and
-# can flip a near-tied argmax.
+# olmo-core attention backend -> the HF implementation running the same kernel. Both
+# models must run the same one: comparing flash against sdpa leaves a numerical
+# difference that looks like a conversion error, and can flip a near-tied argmax.
 HF_ATTN_IMPLEMENTATIONS = {"flash_2": "flash_attention_2", "flash_3": "flash_attention_3", "torch": "sdpa"}
+FALLBACK_ATTN_BACKEND = "torch"
+
+
+def load_hf_reference(model_name: str, hf_attn: str, device: torch.device) -> transformers.PreTrainedModel:
+    model = transformers.AutoModelForCausalLM.from_pretrained(
+        model_name, dtype=torch.bfloat16, trust_remote_code=True, attn_implementation=hf_attn
+    ).to(device)
+    return model.eval()
 
 
 def block_labels(hf_config: transformers.PretrainedConfig, num_blocks: int) -> list[str]:
@@ -40,7 +48,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-name", required=True)
     parser.add_argument("--config-name", required=True)
-    parser.add_argument("--attn-implementation", default="flash_2")
+    # Restricted to the backends with an HF counterpart: olmo-core's flash_4 and te have
+    # none, and running the two models on different kernels makes the comparison meaningless.
+    parser.add_argument("--attn-implementation", default="flash_2", choices=sorted(HF_ATTN_IMPLEMENTATIONS))
     parser.add_argument("--tolerance", type=float, default=0.02, help="Max abs diff as a fraction of the logit range.")
     args = parser.parse_args()
 
@@ -50,20 +60,22 @@ def main() -> None:
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
     ids = tokenizer("What is the capital of France? The capital", return_tensors="pt").input_ids.to(device)
 
-    hf_attn = HF_ATTN_IMPLEMENTATIONS.get(args.attn_implementation)
-    logger.info(f"Loading HF model {args.model_name} with attn_implementation={hf_attn}")
+    attn_backend = args.attn_implementation
+    logger.info(f"Loading HF model {args.model_name} with attn_implementation={HF_ATTN_IMPLEMENTATIONS[attn_backend]}")
     try:
-        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-            args.model_name, dtype=torch.bfloat16, trust_remote_code=True, attn_implementation=hf_attn
-        ).to(device)
+        hf_model = load_hf_reference(args.model_name, HF_ATTN_IMPLEMENTATIONS[attn_backend], device)
     except (ValueError, ImportError) as exc:
-        # Not every architecture implements every backend, and running under HF's own
-        # choice is far more informative than refusing to run at all.
-        logger.warning(f"HF rejected attn_implementation={hf_attn!r} ({exc}); using its default instead.")
-        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-            args.model_name, dtype=torch.bfloat16, trust_remote_code=True
-        ).to(device)
-    hf_model.eval()
+        if attn_backend == FALLBACK_ATTN_BACKEND:
+            raise
+        # Not every architecture implements every backend. Falling back is fine only if
+        # olmo-core falls back with it, which is why attn_backend is reassigned here and
+        # read again when the olmo-core config is built.
+        logger.warning(
+            f"HF rejected {HF_ATTN_IMPLEMENTATIONS[attn_backend]!r} ({exc}); "
+            f"using {FALLBACK_ATTN_BACKEND} for both models instead."
+        )
+        attn_backend = FALLBACK_ATTN_BACKEND
+        hf_model = load_hf_reference(args.model_name, HF_ATTN_IMPLEMENTATIONS[attn_backend], device)
     with torch.no_grad():
         hf_out = hf_model(ids, output_hidden_states=True)
     hf_logits = hf_out.logits.float()
@@ -76,9 +88,7 @@ def main() -> None:
     torch.cuda.empty_cache()
 
     logger.info(f"Building olmo-core model from --config_name {args.config_name}")
-    model_config = olmo_core_utils.get_transformer_config(
-        args.config_name, hf_config.vocab_size, args.attn_implementation
-    )
+    model_config = olmo_core_utils.get_transformer_config(args.config_name, hf_config.vocab_size, attn_backend)
     model = model_config.build(init_device="meta")
     labels = block_labels(hf_config, len(model.blocks))
     # Go through the same dispatch training uses, so this checks the branch that runs
