@@ -1,8 +1,10 @@
 """Unit tests for cache-validation and checkpoint-detection helpers."""
 
+import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from parameterized import parameterized
 
@@ -45,6 +47,41 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
             _touch(os.path.join(tmp, "labels_mask_part_0000.npy"))
             _touch(os.path.join(tmp, "token_ids_part_0000.csv.gz"))
             self.assertFalse(olmo_core_finetune._numpy_dir_is_populated(tmp))
+
+
+class NumpyCacheProvenanceTest(unittest.TestCase):
+    def test_fresh_cache_records_source_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"GIT_COMMIT": "abc123"}):
+            olmo_core_finetune._record_numpy_cache_provenance(tmp)
+            with open(
+                os.path.join(tmp, olmo_core_finetune._NUMPY_CACHE_PROVENANCE_FILE),
+                encoding="utf-8",
+            ) as f:
+                self.assertEqual(json.load(f), {"git_commit": "abc123"})
+
+    def test_existing_partial_cache_is_not_relabelled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"GIT_COMMIT": "abc123"}):
+            _touch(os.path.join(tmp, "token_ids_part_0000.npy"))
+            olmo_core_finetune._record_numpy_cache_provenance(tmp)
+            self.assertFalse(os.path.exists(os.path.join(tmp, olmo_core_finetune._NUMPY_CACHE_PROVENANCE_FILE)))
+
+    def test_mismatched_source_commit_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(
+                os.path.join(tmp, olmo_core_finetune._NUMPY_CACHE_PROVENANCE_FILE),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump({"git_commit": "old123"}, f)
+            with (
+                mock.patch.dict(os.environ, {"GIT_COMMIT": "new456"}),
+                mock.patch.object(olmo_core_finetune.logger, "warning") as warning,
+            ):
+                olmo_core_finetune._warn_if_numpy_cache_provenance_mismatch(tmp)
+            warning.assert_called_once()
+            message = warning.call_args.args[0]
+            self.assertIn("old123", message)
+            self.assertIn("new456", message)
 
 
 class IsHfCheckpointTest(unittest.TestCase):
