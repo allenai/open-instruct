@@ -159,6 +159,27 @@ indistinguishable even in the degenerate regime.
 bbh identical to four decimals; every task within 2.8 points under
 temperature-1.0 rollout noise.
 
+### GRPO — seed-variance noise floor: the backend gap is seed noise
+
+Whether 2–3 point gaps mean anything depends on the same-backend noise floor,
+so the DeepSpeed GRPO run was repeated at seeds 2 and 3 (identical config
+otherwise) and evaluated on the same suite:
+
+| task | DS seed 1 | DS seed 2 | DS seed 3 | seed min–max | OLMo-core |
+|---|---|---|---|---|---|
+| bbh:cot-v1 | 0.2560 | 0.2720 | 0.2480 | 0.2480–0.2720 | 0.2560 ✓ |
+| codex_humanevalplus | 0.5756 | 0.5711 | 0.5561 | 0.5561–0.5756 | 0.5488 (−0.007 below) |
+| gsm8k | 0.1895 | 0.1243 | 0.1744 | 0.1243–0.1895 | 0.1615 ✓ |
+| ifeval | 0.1978 | 0.1774 | 0.2015 | 0.1774–0.2015 | 0.2015 ✓ |
+| minerva_math | 0.1136 | 0.1136 | 0.1007 | 0.1007–0.1136 | 0.1081 ✓ |
+| popqa | 0.1693 | 0.1695 | 0.1678 | 0.1678–0.1695 | 0.1684 ✓ |
+| **avg** | **0.2503** | **0.2380** | **0.2414** | 0.2380–0.2503 | **0.2407 ✓** |
+
+The OLMo-core average lands inside the DeepSpeed seed spread, as do five of six
+individual tasks (codex is 0.7 points below the seed minimum — small next to
+gsm8k's 6.5-point seed swing). Changing the *backend* moves scores less than
+changing the *seed*: the cross-backend gap is indistinguishable from seed noise.
+
 ### SFT — functional health check only (not matched data)
 
 The SFT pair is matched-config but not matched-data: OLMo-core packs 4096-token
@@ -177,6 +198,29 @@ with the extra data:
 | popqa | 0.2220 | 0.1871 |
 | **avg** | **0.1014** | **0.1151** |
 
+### SFT — epoch-matched: scores match
+
+To remove the packing asymmetry, the pair was re-run with `--num_epochs 1` and
+no step cap: both backends traverse the identical 60k examples exactly once
+(DeepSpeed ~1875 padded steps, OLMo-core ~224 packed steps — different step
+counts, same data). This is the genuine matched-data SFT comparison:
+
+| task | DeepSpeed ep1 | OLMo-core ep1 | Δ |
+|---|---|---|---|
+| bbh:cot-v1 | 0.0000 | 0.0000 | 0.000 |
+| codex_humanevalplus | 0.1426 | 0.1328 | −0.010 |
+| gsm8k | 0.0167 | 0.0227 | +0.006 |
+| ifeval* | 0.3771 | 0.3789 | +0.002 |
+| minerva_math | 0.0000 | 0.0000 | 0.000 |
+| popqa | 0.2000 | 0.2124 | +0.012 |
+| **avg** | **0.1227** | **0.1245** | **+0.002** |
+
+Average gap 0.2 points, max task gap 1.2 points — tighter than the DPO and GRPO
+pairs and well inside the measured seed noise floor above.
+
+*ifeval for this pair ran at eval `--max-length 4096` (see caveat below), so its
+row is comparable within the pair but not to the 150-step SFT table above.
+
 ### Eval caveats and operational notes
 
 - **Base rows are confounded; only within-pair columns are read strictly.**
@@ -192,6 +236,13 @@ with the extra data:
   `extra_special_tokens`; both crash oe-eval's older transformers at model load.
   Exports were patched in place (class → `PreTrainedTokenizerFast`; list-typed
   key removed) before evaluation. Worth tracking for the next oe-eval image bump.
+- **Eval `--max-length` must respect the model's position limit.** OLMo-2-1124-7B
+  has `max_position_embeddings: 4096`; evaluating it with `--max-length 8192`
+  intermittently kills vLLM with a device-side index assert
+  (`0 <= tmp16 < 4096`) once a generation runs past position 4096 — reliably on
+  ifeval (longest generations), occasionally on codex. The epoch-matched pair's
+  ifeval was re-run at 4096 for both backends. The 150-step SFT table above ran
+  at 8192 and survived; treat its ifeval row with that in mind.
 - **Datalake outage.** `oe-eval-datalake.allen.ai` was unreachable from Beaker
   compute nodes throughout; metrics were harvested from each experiment's Beaker
   result dataset (`metrics-all.jsonl`), and relaunches used `--no-datalake`.
@@ -202,16 +253,19 @@ with the extra data:
 
 | Stage | Verdict | Basis |
 |---|---|---|
-| SFT | **PASS (OLMo-core)** | ~7× tokens/s/GPU at matched config (packing-driven); loss sanity within ~5%; downstream evals healthy through the new HF export path |
+| SFT | **PASS (OLMo-core)** | ~7× tokens/s/GPU at matched config (packing-driven); loss sanity within ~5%. Downstream eval equivalence **confirmed** on the epoch-matched pair (same 60k examples, one epoch each): avg Δ +0.002, max task gap 1.2 points, through the new HF export path |
 | DPO | **PASS (OLMo-core)** | 3.0× tokens/s and 3.1× MFU at the packed config both backends can run; step-0 invariant holds on both. Downstream eval equivalence **confirmed** on matched data (epoch 0.640 vs 0.638): six tasks within 3.3 points, avg Δ −0.005. Finding: OC requires packing at 16k — the unpacked production config only runs on DeepSpeed |
-| GRPO | **PASS (tie)** | corrected throughput within ~10%, OC slightly faster end-to-end; rewards/losses track; downstream evals within 2.8 points on all six tasks, bbh identical |
+| GRPO | **PASS (tie)** | corrected throughput within ~10%, OC slightly faster end-to-end; rewards/losses track; downstream evals within 2.8 points on all six tasks, bbh identical — and the OLMo-core average sits **inside the measured DeepSpeed seed-variance spread** (seeds 1–3: 0.2380–0.2503; OC: 0.2407) |
 
 Per the spec's failure-branch rules, a PASS greenlights the Part 2 rename for
 that stage. The DPO PASS originally carried one follow-up — an eval-based
 equivalence check, since step-indexed loss is not comparable across the two
 packed implementations — which is now complete (see "Downstream eval
 equivalence" above): all three stages' checkpoint pairs score within task noise
-of each other.
+of each other, the seed-variance runs put a measured floor under "task noise"
+(same-backend seed changes move the average by 1.2 points; the backend change
+moves it 1.0), and the epoch-matched SFT pair closes the packing-asymmetry gap
+in the original SFT comparison.
 
 ## Reliability observations (part of the comparison)
 
