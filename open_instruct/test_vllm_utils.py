@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import unittest
+from collections import defaultdict
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -9,6 +11,119 @@ from parameterized import parameterized
 from open_instruct import vllm_utils
 from open_instruct.data_types import PromptRequest
 from open_instruct.utils import ModelDims
+
+
+class TestVllmWorkerHelpers(unittest.TestCase):
+    def test_get_kv_cache_spec_as_dict_normalizes_mapping_subclasses(self):
+        worker = MagicMock()
+        worker.get_kv_cache_spec.return_value = defaultdict(list, {"layer": "spec"})
+
+        result = vllm_utils._get_kv_cache_spec_as_dict(worker)
+
+        self.assertIs(type(result), dict)
+        self.assertEqual(result, {"layer": "spec"})
+
+    def test_kv_cache_spec_rpc_target_preserves_cuda_string_api(self):
+        with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="cuda"):
+            self.assertEqual(vllm_utils._get_kv_cache_spec_rpc_target(), "get_kv_cache_spec")
+
+    def test_kv_cache_spec_rpc_target_uses_npu_normalizer(self):
+        with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="npu"):
+            self.assertIs(vllm_utils._get_kv_cache_spec_rpc_target(), vllm_utils._get_kv_cache_spec_as_dict)
+
+    def test_vllm_worker_cls_preserves_cuda_default(self):
+        with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="cuda"):
+            self.assertEqual(vllm_utils._get_vllm_worker_cls(), "auto")
+
+    def test_vllm_worker_cls_uses_open_instruct_npu_worker(self):
+        with mock.patch("open_instruct.vllm_utils.utils.get_accelerator_type", return_value="npu"):
+            expected = (
+                f"{vllm_utils.__name__}.OpenInstructNPUWorker"
+                if vllm_utils.OpenInstructNPUWorker is not None
+                else "auto"
+            )
+            self.assertEqual(vllm_utils._get_vllm_worker_cls(), expected)
+
+    def test_update_weights_uses_complete_vllm_lifecycle(self):
+        actor = object.__new__(vllm_utils.LLMRayActor)
+        actor.inflight_updates = True
+        actor.active_tasks = {}
+        actor.current_model_step = 0
+        actor.llm_engine = MagicMock()
+        events = []
+
+        async def start_weight_update(*, is_checkpoint_format):
+            events.append(("start", is_checkpoint_format))
+
+        async def update_weights(request):
+            events.append(("update", request.update_info))
+
+        async def finish_weight_update():
+            events.append(("finish",))
+
+        actor.llm_engine.start_weight_update = start_weight_update
+        actor.llm_engine.update_weights = update_weights
+        actor.llm_engine.finish_weight_update = finish_weight_update
+        actor._run_async = asyncio.run
+        update_info = {
+            "update_info": {
+                "names": ["layer.weight"],
+                "dtype_names": ["bfloat16"],
+                "shapes": [[2, 2]],
+                "packed": False,
+            }
+        }
+
+        actor.update_weights(update_info, model_step=3)
+
+        self.assertEqual(events, [("start", True), ("update", update_info["update_info"]), ("finish",)])
+        self.assertEqual(actor.current_model_step, 3)
+
+    def test_update_weights_preserves_legacy_vllm_api(self):
+        class LegacyEngine:
+            async def update_weights(self, request):
+                events.append(("update", request.update_info))
+
+        actor = object.__new__(vllm_utils.LLMRayActor)
+        actor.inflight_updates = True
+        actor.active_tasks = {}
+        actor.current_model_step = 0
+        actor.llm_engine = LegacyEngine()
+        actor._run_async = asyncio.run
+        events = []
+        update_info = {
+            "update_info": {
+                "names": ["layer.weight"],
+                "dtype_names": ["bfloat16"],
+                "shapes": [[2, 2]],
+                "packed": False,
+            }
+        }
+
+        actor.update_weights(update_info, model_step=3)
+
+        self.assertEqual(events, [("update", update_info["update_info"])])
+        self.assertEqual(actor.current_model_step, 3)
+
+    def test_openai_loopback_client_ignores_proxy_environment(self):
+        actor = object.__new__(vllm_utils.LLMRayActor)
+        actor.server_port = 12345
+        actor.llm_engine = MagicMock()
+        actor.llm_engine.vllm_config.model_config.model = "local-model"
+        http_client = MagicMock()
+
+        with (
+            mock.patch("open_instruct.vllm_utils.httpx.AsyncClient", return_value=http_client) as client_cls,
+            mock.patch("open_instruct.vllm_utils.openai.AsyncOpenAI") as openai_cls,
+            mock.patch("open_instruct.vllm_utils._check_health", new=mock.AsyncMock()),
+        ):
+            actor._init_openai_client()
+
+        client_cls.assert_called_once_with(trust_env=False)
+        openai_cls.assert_called_once_with(
+            base_url="http://127.0.0.1:12345/v1", api_key="EMPTY", timeout=3600, http_client=http_client
+        )
+        self.assertEqual(actor.model_name, "local-model")
 
 
 class TestTruncateEnvOutputTokens(unittest.TestCase):
@@ -251,6 +366,7 @@ class TestModelDimsFromVllmConfig(unittest.TestCase):
         with (
             mock.patch("torch.cuda.get_device_name", return_value="NVIDIA H100 80GB HBM3"),
             mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("open_instruct.utils.get_accelerator_type", return_value="cuda"),
         ):
             vllm_dims = vllm_utils.model_dims_from_vllm_config(mock_vllm_config)
 
