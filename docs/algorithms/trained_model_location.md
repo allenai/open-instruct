@@ -60,7 +60,7 @@ Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://
 gs://ai2-llm/post-training//costah/output/tulu3_8b_dpo__1__1742613782
 ```
 
-![](trained_model_location/gcs.png)
+![](trained_model_location/gsc.png)
 
 To download, you can run the following command:
 
