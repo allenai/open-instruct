@@ -23,6 +23,17 @@
 # ps768 postmortem in docs/sandbox_management.md), so this script uses 512
 # instead of the podman script's 1024. Raise it only after the capacity
 # ceiling moves (quota/ComputeClass changes on the server side).
+#
+# Sandbox CPU: SWERL_OPENSANDBOX_CPU=2 (contention experiment, 2026-08-22).
+# At cpu=1, ~3 sandboxes packed per 4-vCPU e2 spot node ran the nodes at
+# 77-85% CPU and stretched rollouts ~2.4x (fat tail of 120s exec timeouts).
+# At cpu=2 only ONE sandbox fits per e2-standard-4 node, so the pool needs
+# the node autoscaler max to be >= ~520 nodes (or a larger machine type) —
+# verify before launching, or the pool will silently cap below 512.
+#
+# Checkpointing: checkpoint_state_dir is REQUIRED for checkpoint_state_freq
+# to do anything — without it the 2026-08-21 run lost 84 steps (21.5h on
+# 32 GPUs) to a single preempted Beaker node.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=Qwen/Qwen3.5-4B
@@ -51,6 +62,7 @@ uv run python mason.py \
        --env SWERL_OPENSANDBOX_PROTOCOL="${SWERL_OPENSANDBOX_PROTOCOL:-https}" \
        --env SWERL_OPENSANDBOX_LIFETIME_S=3600 \
        --env SWERL_OPENSANDBOX_START_CONCURRENCY="${SWERL_OPENSANDBOX_START_CONCURRENCY:-64}" \
+       --env SWERL_OPENSANDBOX_CPU="${SWERL_OPENSANDBOX_CPU:-2}" \
        --env SWERL_OPENSANDBOX_IMAGE_PREFIX="${SWERL_OPENSANDBOX_IMAGE_PREFIX:-us-docker.pkg.dev/ai2-skiff2-oe-rl-sandbox/docker-hub-remote-repository}" \
        --env SWERL_OPENSANDBOX_APP_NAME=swerl-tmax-opensandbox \
        --env DOCKERHUB_USERNAME=pdasigi \
@@ -103,6 +115,7 @@ uv run python mason.py \
     --active_sampling \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
+    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/swerl_qwen35_4b_base_tmax_15k_grpo_opensandbox \
     --inflight_updates true \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
