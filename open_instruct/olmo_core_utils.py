@@ -318,6 +318,23 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     train_module.model.load_state_dict(sd)
 
 
+def build_wandb_config(config_dict: dict) -> dict:
+    """Merge the Beaker runtime config into the wandb config so a run records the job that produced it.
+
+    `grpo_fast.py` and `dpo_tune_cache.py` already do this; without it an olmo-core run has no
+    reference to its Beaker experiment. Returns `config_dict` unchanged when not running on Beaker.
+
+    Only rank 0 performs the lookup: `maybe_get_beaker_config` shells out to the Beaker CLI once per
+    job result, and only rank 0 creates the wandb run.
+    """
+    if get_rank() != 0:
+        return config_dict
+    beaker_config = utils.maybe_get_beaker_config()
+    if beaker_config is None:
+        return config_dict
+    return {**config_dict, **vars(beaker_config)}
+
+
 def build_base_callbacks(
     config_dict: dict,
     run_name: str | None,
@@ -342,7 +359,7 @@ def build_base_callbacks(
             name=run_name,
             entity=wandb_entity,
             project=wandb_project,
-            config=config_dict,
+            config=build_wandb_config(config_dict),
             enabled=True,
             cancel_check_interval=10,
         )
