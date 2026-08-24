@@ -125,6 +125,17 @@ def worker_loop(args, stats: Stats, stop_event: threading.Event, worker_id: int)
             continue
         stats.record_create(ok=True, latency_s=time.perf_counter() - create_start)
 
+        # start() can spend minutes queued in the create semaphore; if the
+        # test ended meanwhile, release the sandbox instead of running a
+        # whole episode past the deadline (workers otherwise drain in waves
+        # for many minutes after --duration-s).
+        if stop_event.is_set():
+            try:
+                backend.close()
+            finally:
+                stats.record_close(died=False)
+            break
+
         died = False
         exec_gap_s = args.episode_s / max(1, args.execs_per_episode)
         try:
