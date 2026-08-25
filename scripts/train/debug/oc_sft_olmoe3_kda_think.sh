@@ -76,6 +76,10 @@ PRIORITY="${PRIORITY:-high}"
 LR="${LR:-2.5e-5}"
 ACT_MEM_BUDGET="${ACT_MEM_BUDGET:-1}"
 ACT_CKPT_MODE="${ACT_CKPT_MODE:-budget}"
+# A git worktree has no .venv of its own and `uv run` would sync a fresh one
+# (which, per the KDA runbook, also reverts the torch 2.11 companion installs).
+# mason.py is pure local orchestration, so any working interpreter will do.
+PY="${PY:-uv run python}"
 
 # Global batch 1,048,576 tokens = SEQ * ranks * GRAD_ACCUM.
 grad_accum_for() {
@@ -95,7 +99,7 @@ case "$MODE" in
         MIXER="allenai/Dolci-Think-SFT 1.0"
         DESC="Tokenize Dolci-Think-SFT full (seq $SEQ, olmo123) for the KDA MoE think baseline"
     fi
-    uv run python mason.py \
+    $PY mason.py \
         --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
         --workspace "$WORKSPACE" \
         --priority "$PRIORITY" \
@@ -125,7 +129,7 @@ case "$MODE" in
     # does NOT reproduce what the job computes, verified against the existing
     # 32768 think cache. So ask the job. It raises FileNotFoundError printing
     # the exact path it wants, before touching distributed init or a GPU.
-    uv run python mason.py \
+    $PY mason.py \
         --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
         --workspace "$WORKSPACE" \
         --priority "$PRIORITY" \
@@ -166,7 +170,7 @@ case "$MODE" in
     echo "ranks=$RANKS grad_accum=$GRAD_ACCUM -> global batch $(( SEQ * RANKS * GRAD_ACCUM )) tokens"
     # No checkpoint inside 30 steps: each one is 207 GB written synchronously
     # (the DDP train module rejects async), which the gate does not need.
-    uv run python mason.py \
+    $PY mason.py \
         --cluster "$CLUSTER" \
         --workspace "$WORKSPACE" \
         --priority "$PRIORITY" \
