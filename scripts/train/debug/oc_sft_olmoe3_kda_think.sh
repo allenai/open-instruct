@@ -141,6 +141,15 @@ MAX_RETRIES="${MAX_RETRIES:-2}"
 # no GPU is.
 CONVERT_DEVICE="${CONVERT_DEVICE:-cuda}"
 CONVERT_GPUS="${CONVERT_GPUS:-1}"
+# The cuda13 image needs a CUDA 13 driver. holmes has it; saturn/ceres/jupiter/
+# neptune are on 12.8 and every GPU conversion there dies with "The NVIDIA driver
+# on your system is too old (found version 12080)". So a CUDA conversion must run
+# on holmes, while a CPU conversion can go anywhere (but takes >2 h).
+if [[ "$CONVERT_DEVICE" == "cuda" ]]; then
+    CONVERT_CLUSTER="${CONVERT_CLUSTER:-ai2/holmes}"
+else
+    CONVERT_CLUSTER="${CONVERT_CLUSTER:-ai2/saturn ai2/neptune ai2/ceres ai2/jupiter}"
+fi
 PREEMPTIBLE="${PREEMPTIBLE:-1}"
 if [[ "$PREEMPTIBLE" == "1" ]]; then PREEMPTIBLE_FLAG="--preemptible"; else PREEMPTIBLE_FLAG=""; fi
 
@@ -320,7 +329,7 @@ case "$MODE" in
     CKPT_ROOT="${CKPT_ROOT:?set CKPT_ROOT to the deletable_checkpoint_states dir}"
     STEP="${STEP:?set STEP, e.g. step1723}"
     $PY mason.py \
-        --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
+        --cluster $CONVERT_CLUSTER \
         --workspace "$WORKSPACE" \
         --priority "$PRIORITY" \
         --image "$BEAKER_IMAGE" \
