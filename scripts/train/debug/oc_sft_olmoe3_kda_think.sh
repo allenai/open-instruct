@@ -218,7 +218,12 @@ case "$MODE" in
     if (( NNODES > 1 )); then
         RDZV_FLAGS="--node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME --master_port=29400"
     else
-        RDZV_FLAGS=""
+        # Single node still needs an explicit port: torchrun defaults to 29500,
+        # and two 1-GPU jobs scheduled onto the SAME host collide with
+        # "EADDRINUSE ... port: 29500". That failure happens during rendezvous,
+        # before any model is built, so it yields no memory information and is
+        # easy to misread as a real result. Randomised per launch.
+        RDZV_FLAGS="--master_port=${MASTER_PORT:-$(( 29500 + RANDOM % 400 ))}"
     fi
     echo "ranks=$RANKS grad_accum=$GRAD_ACCUM -> global batch $(( SEQ * RANKS * GRAD_ACCUM )) tokens"
     # Probe modes default CKPT_STEPS above STEPS so nothing is written: each
