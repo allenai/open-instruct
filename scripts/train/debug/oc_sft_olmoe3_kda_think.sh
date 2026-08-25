@@ -16,6 +16,14 @@
 #                    run expects, so an existing cache can be linked to it.
 #   tokenize_full    full Dolci-Think at SEQ, CPU-only. The ~10h long pole.
 #   smoke_2node      30 steps, 2x8, on the subset. Tests DDP + 16-rank writes.
+#   convert          CPU-only, in-image HF conversion of one checkpoint.
+#                    CKPT_ROOT=<dir> STEP=stepNNNN. Must run in-image: the KDA
+#                    modules live in olmo-core `akshitab/emo_modularity`, which
+#                    the spike branch pins. A local venv synced from main has
+#                    NO `olmo_core.nn.attention.kda` and every conversion dies
+#                    with ModuleNotFoundError. Uses /stage/.venv/bin/python
+#                    directly because `uv run` resyncs and reverts the torch
+#                    2.11 companion installs.
 #   lr_probe         300 steps, 1x8, on the subset. INSTABILITY SCREEN ONLY --
 #                    see the scheduler note below.
 #   train            the real run: STEPS steps, 2x8, full think corpus.
@@ -293,9 +301,34 @@ case "$MODE" in
         --output_dir \$CHECKPOINT_OUTPUT_DIR
     ;;
 
+  convert)
+    CKPT_ROOT="${CKPT_ROOT:?set CKPT_ROOT to the deletable_checkpoint_states dir}"
+    STEP="${STEP:?set STEP, e.g. step1723}"
+    $PY mason.py \
+        --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
+        --workspace "$WORKSPACE" \
+        --priority "$PRIORITY" \
+        --image "$BEAKER_IMAGE" \
+        --description "HF-convert KDA MoE think $STEP at seq $SEQ" \
+        --pure_docker_mode \
+        --preemptible \
+        --timeout "${JOB_TIMEOUT:-2h}" \
+        --num_nodes 1 \
+        --gpus 0 \
+        --non_resumable \
+        --no_auto_dataset_cache \
+        -- /stage/.venv/bin/python scripts/train/debug/convert_moe_checkpoint_to_hf.py \
+        -i "$CKPT_ROOT/$STEP" \
+        -o "$CKPT_ROOT/hf_$STEP" \
+        -c $CONFIG_NAME \
+        -s "$SEQ" \
+        --skip-validation \
+        --device cpu
+    ;;
+
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "Expected one of: tokenize_subset, tokenize_full, discover_cache, gate, smoke_2node, lr_probe, train" >&2
+    echo "Expected one of: tokenize_subset, tokenize_full, discover_cache, gate, smoke_2node, lr_probe, train, convert" >&2
     exit 1
     ;;
 esac
