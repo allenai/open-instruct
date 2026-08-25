@@ -82,6 +82,14 @@ TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
 CHAT_TEMPLATE=olmo123
 SEQ="${SEQ:-16384}"
 SUBSET_FRAC="${SUBSET_FRAC:-0.02}"
+# Probe modes read the full corpus by default. The 0.02 subset existed only to
+# avoid a ~10 h tokenize; that is moot now that the 32768 cache is symlinked to
+# the 16384 path (see numpy_sft/README-6d4fae1e10-f6bfdc56.md), and probing the
+# real cache also validates the symlink. Set PROBE_MIXER to the subset to go
+# back. NOTE a "0.02 subset" tokenize job is NOT 2% of the cost: load_dataset
+# materialises all 2.25M rows before update_range() samples, so the full-corpus
+# load is paid either way.
+PROBE_MIXER="${PROBE_MIXER:-allenai/Dolci-Think-SFT 1.0}"
 SEED=33333
 # The 32768 Dolci-Think cache from the dense run lives here; keeping think
 # caches together is what makes the discover_cache/link shortcut possible.
@@ -177,13 +185,13 @@ case "$MODE" in
     KEEP_LAST_N="${KEEP_LAST_N:-100}"
     case "$MODE" in
       gate)
-        NNODES=1; MIXER="allenai/Dolci-Think-SFT $SUBSET_FRAC"
+        NNODES=1; MIXER="$PROBE_MIXER"
         DESC="KDA MoE think GATE: $STEPS steps, 1x8, seq $SEQ (does $SEQ fit?)" ;;
       smoke_2node)
-        NNODES=2; MIXER="allenai/Dolci-Think-SFT $SUBSET_FRAC"
+        NNODES=2; MIXER="$PROBE_MIXER"
         DESC="KDA MoE think 2-node smoke: $STEPS steps, 2x8, seq $SEQ" ;;
       lr_probe)
-        NNODES=1; MIXER="allenai/Dolci-Think-SFT $SUBSET_FRAC"
+        NNODES=1; MIXER="$PROBE_MIXER"
         STEPS="${STEPS:-300}"
         DESC="KDA MoE think LR screen: lr=$LR, $STEPS steps, 1x8, seq $SEQ" ;;
       train)
