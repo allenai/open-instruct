@@ -71,7 +71,7 @@ otherwise.
 
 - `scripts/train/debug/grpo_fast_opd.sh` — local 2-GPU smoke test (Qwen3-0.6B student,
   Qwen3-1.7B teacher, gsm8k, full DPPO+liger production loss path).
-- `scripts/general_agent/terminal/rl/qwen35_9b_dppo_opd_4node_64k.sh` — Terminal RL:
+- `scripts/general_agent/terminal/rl/opd/qwen35_9b_dppo_opd_4node_64k.sh` — Terminal RL:
   pure-distill the DPPO-trained tmax-15k teacher (step_120) back into base Qwen3.5-9B on
   the same sandboxed terminal tasks.
 
