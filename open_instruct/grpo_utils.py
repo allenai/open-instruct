@@ -225,6 +225,16 @@ class GRPOExperimentConfig(
     ``--active_sampling``) with this flag, since reward-variance filtering
     discards groups that pure OPD can still learn from.
     """
+    opd_mask_reasoning: bool = False
+    """Exclude reasoning tokens from the distillation signal: zero the reverse-KL
+    advantage on every token inside a ``<think>…</think>`` span (tags included;
+    an unclosed span masks through the end of the rollout). Under ``opd_pure``
+    the masked positions get zero advantage; in additive mode they keep the
+    environment advantage unchanged. The KL is still computed and logged over
+    all response tokens so ``objective/opd_reverse_kl`` stays comparable across
+    runs; ``objective/opd_reasoning_masked_frac`` reports the masked share.
+    Requires ``<think>`` / ``</think>`` to be single tokens in the tokenizer.
+    """
 
     # PPO value model. When enabled, the trainer learns a scalar value function
     # and replaces group-relative advantages with GAE advantages.
@@ -396,6 +406,8 @@ class GRPOExperimentConfig(
                 )
         elif self.opd_pure:
             raise ValueError("`opd_pure=True` requires `opd_teacher_model_name_or_path` to be set.")
+        elif self.opd_mask_reasoning:
+            raise ValueError("`opd_mask_reasoning=True` requires `opd_teacher_model_name_or_path` to be set.")
         if self.use_value_model:
             if self.value_loss_coef < 0.0:
                 raise ValueError(f"`value_loss_coef` must be >= 0, got {self.value_loss_coef}.")
@@ -916,6 +928,32 @@ def compute_logprobs_tiled(
     return logprobs_BT
 
 
+def compute_reasoning_token_mask(
+    token_ids: torch.Tensor, think_start_id: int, think_end_id: int
+) -> torch.Tensor:
+    """Mark every token inside a ``<think>…</think>`` span, tags included.
+
+    An unclosed span (generation truncated mid-think) masks through the end of
+    the sequence. Spans are tracked with cumulative start/end counts, so the
+    mask is exact for well-formed nesting-free spans, which is what the Qwen3
+    template produces (one span per assistant turn).
+
+    Args:
+        token_ids: ``[B, T]`` int token ids (``query_responses`` layout).
+        think_start_id: single-token id of ``<think>``.
+        think_end_id:   single-token id of ``</think>``.
+
+    Returns:
+        ``[B, T]`` bool, True where the token belongs to a reasoning span.
+    """
+    starts = (token_ids == think_start_id).long().cumsum(dim=1)
+    is_end = (token_ids == think_end_id).long()
+    # count only ends STRICTLY BEFORE each position, so the closing tag itself
+    # still counts as inside the span
+    ends_before = torch.nn.functional.pad(is_end.cumsum(dim=1)[:, :-1], (1, 0))
+    return starts > ends_before
+
+
 def compute_opd_advantages(
     advantages: torch.Tensor,
     behavior_logprobs: torch.Tensor,
@@ -923,6 +961,7 @@ def compute_opd_advantages(
     response_mask: torch.Tensor,
     kl_coef: float,
     pure: bool,
+    reasoning_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Fold the on-policy distillation signal into the per-token advantages.
 
@@ -945,6 +984,11 @@ def compute_opd_advantages(
         kl_coef:           coefficient on the reverse-KL term.
         pure:              when True, the environment advantage is replaced by
             the distillation term instead of added to it.
+        reasoning_mask:    optional ``[B, T-1]`` bool; where True the
+            distillation term is withheld (masked positions get zero advantage
+            under ``pure`` and keep the environment advantage otherwise). The
+            returned ``reverse_kl`` is NOT masked, so the logged KL stays
+            comparable across masked and unmasked runs.
 
     Returns:
         ``(new_advantages, reverse_kl)`` where ``new_advantages`` is ``[B, T]``
@@ -954,9 +998,12 @@ def compute_opd_advantages(
     response_mask = response_mask.bool()
     reverse_kl = behavior_logprobs.float() - teacher_logprobs.float()
     reverse_kl = torch.where(response_mask, reverse_kl, torch.zeros_like(reverse_kl))
+    kl_for_adv = reverse_kl
+    if reasoning_mask is not None:
+        kl_for_adv = torch.where(reasoning_mask.bool(), torch.zeros_like(reverse_kl), reverse_kl)
     new_advantages = advantages.clone()
     base = torch.zeros_like(new_advantages[:, 1:]) if pure else new_advantages[:, 1:]
-    updated = base - kl_coef * reverse_kl.to(new_advantages.dtype)
+    updated = base - kl_coef * kl_for_adv.to(new_advantages.dtype)
     new_advantages[:, 1:] = torch.where(response_mask, updated, new_advantages[:, 1:])
     return new_advantages, reverse_kl
 

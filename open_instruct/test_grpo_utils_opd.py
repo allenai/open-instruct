@@ -133,6 +133,94 @@ class TestOPDConfigValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "use_value_model"):
             grpo_utils.GRPOExperimentConfig(**self._base_kwargs(use_value_model=True))
 
+    def test_opd_mask_reasoning_requires_teacher(self):
+        with self.assertRaisesRegex(ValueError, "opd_mask_reasoning"):
+            grpo_utils.GRPOExperimentConfig(opd_mask_reasoning=True)
+
+
+class TestReasoningTokenMask(unittest.TestCase):
+    S, E = 100, 101  # stand-in <think>/</think> ids
+
+    def _mask(self, rows):
+        ids = torch.tensor(rows, dtype=torch.long)
+        return grpo_utils.compute_reasoning_token_mask(ids, self.S, self.E)
+
+    def test_single_span_inclusive_of_tags(self):
+        m = self._mask([[1, self.S, 2, 3, self.E, 4]])
+        self.assertEqual(m.tolist(), [[False, True, True, True, True, False]])
+
+    def test_no_span(self):
+        m = self._mask([[1, 2, 3]])
+        self.assertEqual(m.tolist(), [[False, False, False]])
+
+    def test_unclosed_span_masks_to_end(self):
+        m = self._mask([[1, self.S, 2, 3]])
+        self.assertEqual(m.tolist(), [[False, True, True, True]])
+
+    def test_multiple_spans_per_row(self):
+        m = self._mask([[self.S, 2, self.E, 4, self.S, 5, self.E]])
+        self.assertEqual(m.tolist(), [[True, True, True, False, True, True, True]])
+
+    def test_batch_rows_independent(self):
+        m = self._mask([[1, self.S, self.E, 2], [self.S, 1, 2, 3]])
+        self.assertEqual(m.tolist(), [[False, True, True, False], [True, True, True, True]])
+
+
+class TestOPDReasoningMaskedAdvantages(unittest.TestCase):
+    def setUp(self):
+        # [B=1, T=5]; positions 1..4 carry logprobs
+        self.advantages = torch.tensor([[9.0, 1.0, 1.0, 1.0, 1.0]])
+        self.behavior = torch.zeros((1, 4))
+        self.teacher = torch.full((1, 4), -2.0)  # reverse_kl = +2 everywhere
+        self.response_mask = torch.tensor([[True, True, True, True]])
+        self.reasoning_mask = torch.tensor([[False, True, True, False]])
+
+    def test_pure_mode_masked_positions_get_zero_advantage(self):
+        adv, kl = grpo_utils.compute_opd_advantages(
+            advantages=self.advantages.clone(),
+            behavior_logprobs=self.behavior,
+            teacher_logprobs=self.teacher,
+            response_mask=self.response_mask,
+            kl_coef=1.0,
+            pure=True,
+            reasoning_mask=self.reasoning_mask,
+        )
+        self.assertEqual(adv[0, 1:].tolist(), [-2.0, 0.0, 0.0, -2.0])
+        # logged KL stays unmasked
+        self.assertEqual(kl[0].tolist(), [2.0, 2.0, 2.0, 2.0])
+
+    def test_additive_mode_masked_positions_keep_env_advantage(self):
+        adv, _ = grpo_utils.compute_opd_advantages(
+            advantages=self.advantages.clone(),
+            behavior_logprobs=self.behavior,
+            teacher_logprobs=self.teacher,
+            response_mask=self.response_mask,
+            kl_coef=1.0,
+            pure=False,
+            reasoning_mask=self.reasoning_mask,
+        )
+        self.assertEqual(adv[0, 1:].tolist(), [-1.0, 1.0, 1.0, -1.0])
+
+    def test_none_mask_matches_unmasked_path(self):
+        a1, _ = grpo_utils.compute_opd_advantages(
+            advantages=self.advantages.clone(),
+            behavior_logprobs=self.behavior,
+            teacher_logprobs=self.teacher,
+            response_mask=self.response_mask,
+            kl_coef=1.0,
+            pure=True,
+            reasoning_mask=None,
+        )
+        a2, _ = grpo_utils.compute_opd_advantages(
+            advantages=self.advantages.clone(),
+            behavior_logprobs=self.behavior,
+            teacher_logprobs=self.teacher,
+            response_mask=self.response_mask,
+            kl_coef=1.0,
+            pure=True,
+        )
+        torch.testing.assert_close(a1, a2)
+
 
 if __name__ == "__main__":
     unittest.main()

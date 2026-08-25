@@ -526,6 +526,27 @@ class PolicyTrainerRayProcess(RayProcess):
             register_qwen3_5_zero3_external_parameters(self.teacher_model)
             if args.lm_head_fp32:
                 patch_hf_lm_head_fp32(self.teacher_model)
+        # Locating <think> spans needs the tags to be single tokens in the flat
+        # rollout token stream. When they are, every OPD run logs the
+        # reasoning/action KL decomposition (so masked and unmasked arms are
+        # directly comparable); advantage masking itself is gated separately on
+        # `opd_mask_reasoning`.
+        self._opd_think_ids: tuple[int, int] | None = None
+        if args.opd_teacher_model_name_or_path is not None:
+            start_ids = self.tokenizer.encode("<think>", add_special_tokens=False)
+            end_ids = self.tokenizer.encode("</think>", add_special_tokens=False)
+            if len(start_ids) == 1 and len(end_ids) == 1:
+                self._opd_think_ids = (start_ids[0], end_ids[0])
+            elif args.opd_mask_reasoning:
+                raise ValueError(
+                    f"opd_mask_reasoning requires single-token <think>/</think> "
+                    f"(got {start_ids} / {end_ids} for this tokenizer)."
+                )
+            else:
+                logger.warning(
+                    "OPD: <think>/</think> are not single tokens for this tokenizer; "
+                    "skipping the reasoning/action KL decomposition metrics."
+                )
         # A teacher whose attention geometry differs from the policy cannot run
         # on SP-split sequence shards (the shared Ulysses wrapper and FLA CP
         # contexts are sized for the policy), so it scores the full pre-split
@@ -1104,9 +1125,16 @@ class PolicyTrainerRayProcess(RayProcess):
                 opd_kl_sum = torch.zeros((), device=self.device)
                 opd_teacher_logprob_sum = torch.zeros((), device=self.device)
                 opd_token_count = torch.zeros((), device=self.device)
+                opd_masked_count = torch.zeros((), device=self.device)
+                opd_kl_reasoning_sum = torch.zeros((), device=self.device)
                 for i in range(len(data_BT.query_responses)):
                     opd_response_mask = data_BT.response_masks[i][:, 1:].bool()
                     behavior_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], opd_response_mask)
+                    reasoning_mask = None
+                    if self._opd_think_ids is not None:
+                        reasoning_mask = grpo_utils.compute_reasoning_token_mask(
+                            data_BT.query_responses[i], *self._opd_think_ids
+                        )[:, 1:]
                     data_BT.advantages[i], reverse_kl = grpo_utils.compute_opd_advantages(
                         advantages=data_BT.advantages[i],
                         behavior_logprobs=behavior_logprobs,
@@ -1114,17 +1142,39 @@ class PolicyTrainerRayProcess(RayProcess):
                         response_mask=opd_response_mask,
                         kl_coef=self.args.opd_kl_coef,
                         pure=self.args.opd_pure,
+                        reasoning_mask=reasoning_mask if self.args.opd_mask_reasoning else None,
                     )
                     opd_kl_sum += reverse_kl.sum()
                     opd_teacher_logprob_sum += torch.where(
                         opd_response_mask, teacher_logprobs_BT[i].float(), torch.zeros_like(reverse_kl)
                     ).sum()
                     opd_token_count += opd_response_mask.sum()
+                    if reasoning_mask is not None:
+                        reasoning_active = reasoning_mask & opd_response_mask
+                        opd_masked_count += reasoning_active.sum()
+                        # reverse_kl is already zeroed outside opd_response_mask
+                        opd_kl_reasoning_sum += torch.where(
+                            reasoning_active, reverse_kl, torch.zeros_like(reverse_kl)
+                        ).sum()
                 opd_token_count = opd_token_count.clamp(min=1)
                 self.local_metrics["objective/opd_reverse_kl"] = (opd_kl_sum / opd_token_count).item()
                 self.local_metrics["objective/opd_teacher_logprob"] = (
                     opd_teacher_logprob_sum / opd_token_count
                 ).item()
+                if self._opd_think_ids is not None:
+                    # Decompose the all-token KL into the masked (reasoning) part
+                    # and the part the masked arm actually trains on (action /
+                    # tool-call / answer tokens).
+                    action_count = (opd_token_count - opd_masked_count).clamp(min=1)
+                    self.local_metrics["objective/opd_reasoning_masked_frac"] = (
+                        opd_masked_count / opd_token_count
+                    ).item()
+                    self.local_metrics["objective/opd_reverse_kl_reasoning"] = (
+                        opd_kl_reasoning_sum / opd_masked_count.clamp(min=1)
+                    ).item()
+                    self.local_metrics["objective/opd_reverse_kl_action"] = (
+                        (opd_kl_sum - opd_kl_reasoning_sum) / action_count
+                    ).item()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
