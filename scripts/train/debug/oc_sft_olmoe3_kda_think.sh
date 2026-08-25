@@ -127,6 +127,12 @@ PY="${PY:-uv run python}"
 # preempted. Always cap probe jobs. mason: "--timeout ... If not specified, no
 # timeout is set."
 JOB_TIMEOUT="${JOB_TIMEOUT:-45m}"
+# mason's --max_retries defaults to 0. Multi-node jobs need EVERY replica up
+# within 10 min ("timed out after waiting 10m0s for synchronized replica start"),
+# so one bad node kills the whole group -- we lost a 2x8 smoke to a node that got
+# cordoned mid-start by an unrelated stuck container. With no retries that is a
+# hard failure, which for a multi-hour 2x8 run is a real exposure.
+MAX_RETRIES="${MAX_RETRIES:-2}"
 PREEMPTIBLE="${PREEMPTIBLE:-1}"
 if [[ "$PREEMPTIBLE" == "1" ]]; then PREEMPTIBLE_FLAG="--preemptible"; else PREEMPTIBLE_FLAG=""; fi
 
@@ -261,6 +267,7 @@ case "$MODE" in
         --pure_docker_mode \
         $PREEMPTIBLE_FLAG \
         --timeout "$JOB_TIMEOUT" \
+        --max_retries "$MAX_RETRIES" \
         --num_nodes $NNODES \
         --gpus $NPROC \
         --non_resumable \
