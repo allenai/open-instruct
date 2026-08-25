@@ -212,6 +212,14 @@ case "$MODE" in
         echo "Error: SEQ=$SEQ x ranks=$RANKS exceeds the 1,048,576-token global batch." >&2
         exit 1
     fi
+    # Beaker only sets BEAKER_LEADER_REPLICA_HOSTNAME for multi-node replica
+    # sets. Passing --master_addr on a 1-node job yields the endpoint ":29400"
+    # and torchrun dies in parse_rendezvous_endpoint before any model is built.
+    if (( NNODES > 1 )); then
+        RDZV_FLAGS="--node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME --master_port=29400"
+    else
+        RDZV_FLAGS=""
+    fi
     echo "ranks=$RANKS grad_accum=$GRAD_ACCUM -> global batch $(( SEQ * RANKS * GRAD_ACCUM )) tokens"
     # Probe modes default CKPT_STEPS above STEPS so nothing is written: each
     # checkpoint is 207 GB written synchronously (the DDP train module rejects
@@ -231,9 +239,7 @@ case "$MODE" in
         --env OLMO_SHARED_FS=1 \
         -- torchrun \
         --nnodes=$NNODES \
-        --node_rank=\$BEAKER_REPLICA_RANK \
-        --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
-        --master_port=29400 \
+        $RDZV_FLAGS \
         --nproc_per_node=$NPROC \
         open_instruct/olmo_core_finetune.py \
         --model_name_or_path "$MODEL" \
