@@ -114,6 +114,11 @@ PY="${PY:-uv run python}"
 # "67 nodes do not have enough slots available" at priority high.
 # PREEMPTIBLE=0 drops the flag so the job is allocated and draws on the
 # workspace's holmes allocation instead of scavenging idle capacity.
+# An ALLOCATED job on holmes gets an 8 h min-runtime shield by default and, with
+# no --timeout, no lifetime cap at all -- so a hang holds 8 B300s and cannot be
+# preempted. Always cap probe jobs. mason: "--timeout ... If not specified, no
+# timeout is set."
+JOB_TIMEOUT="${JOB_TIMEOUT:-45m}"
 PREEMPTIBLE="${PREEMPTIBLE:-1}"
 if [[ "$PREEMPTIBLE" == "1" ]]; then PREEMPTIBLE_FLAG="--preemptible"; else PREEMPTIBLE_FLAG=""; fi
 
@@ -247,6 +252,7 @@ case "$MODE" in
         --description "$DESC" \
         --pure_docker_mode \
         $PREEMPTIBLE_FLAG \
+        --timeout "$JOB_TIMEOUT" \
         --num_nodes $NNODES \
         --gpus $NPROC \
         --non_resumable \
