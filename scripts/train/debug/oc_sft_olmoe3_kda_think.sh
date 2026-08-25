@@ -106,6 +106,16 @@ ACT_CKPT_MODE="${ACT_CKPT_MODE:-budget}"
 # (which, per the KDA runbook, also reverts the torch 2.11 companion installs).
 # mason.py is pure local orchestration, so any working interpreter will do.
 PY="${PY:-uv run python}"
+# Holmes uses Strict Priority with Unallocated-Only Backfill (beaker-docs
+# compute/clusters.md, scheduling/management.md). Per concept/allocations.md a
+# job is "unallocated" when minRuntime is 0/omitted -- which is what mason's
+# --preemptible produces -- and unallocated jobs are backfill ONLY. On a full
+# holmes that means never scheduling, which is exactly what we saw: repeated
+# "67 nodes do not have enough slots available" at priority high.
+# PREEMPTIBLE=0 drops the flag so the job is allocated and draws on the
+# workspace's holmes allocation instead of scavenging idle capacity.
+PREEMPTIBLE="${PREEMPTIBLE:-1}"
+if [[ "$PREEMPTIBLE" == "1" ]]; then PREEMPTIBLE_FLAG="--preemptible"; else PREEMPTIBLE_FLAG=""; fi
 
 # Global batch 1,048,576 tokens = SEQ * ranks * GRAD_ACCUM.
 grad_accum_for() {
@@ -132,7 +142,7 @@ case "$MODE" in
         --image "$BEAKER_IMAGE" \
         --description "$DESC" \
         --pure_docker_mode \
-        --preemptible \
+        $PREEMPTIBLE_FLAG \
         --num_nodes 1 \
         --gpus 0 \
         --non_resumable \
@@ -162,7 +172,7 @@ case "$MODE" in
         --image "$BEAKER_IMAGE" \
         --description "Discover the numpy cache dir for full Dolci-Think at seq $SEQ" \
         --pure_docker_mode \
-        --preemptible \
+        $PREEMPTIBLE_FLAG \
         --num_nodes 1 \
         --gpus 0 \
         --non_resumable \
@@ -236,7 +246,7 @@ case "$MODE" in
         --image "$BEAKER_IMAGE" \
         --description "$DESC" \
         --pure_docker_mode \
-        --preemptible \
+        $PREEMPTIBLE_FLAG \
         --num_nodes $NNODES \
         --gpus $NPROC \
         --non_resumable \
