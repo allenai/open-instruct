@@ -16,6 +16,9 @@
 #                    run expects, so an existing cache can be linked to it.
 #   tokenize_full    full Dolci-Think at SEQ, CPU-only. The ~10h long pole.
 #   smoke_2node      30 steps, 2x8, on the subset. Tests DDP + 16-rank writes.
+#   lr_probe         300 steps, 1x8, on the subset. INSTABILITY SCREEN ONLY --
+#                    see the scheduler note below.
+#   train            the real run: STEPS steps, 2x8, full think corpus.
 #
 # Why the settings are what they are (beyond the instruct script's reasons):
 #
@@ -51,6 +54,21 @@
 # * Global batch is held at 1,048,576 tokens, as in every run in this series,
 #   so runs stay comparable by tokens rather than by steps. GRAD_ACCUM is
 #   derived from SEQ and the rank count to keep that invariant.
+#
+# * lr_probe is a SCREEN, not a selector. build_scheduler derives warmup from
+#   num_training_steps and LinearWithWarmup anneals over it, so a 300-step probe
+#   warms up in 9 steps and fully anneals inside the window while the real run
+#   anneals over thousands. That systematically favours the larger LR and hides
+#   the late-run instability that usually disqualifies it. Judge on grad-norm
+#   spikes, loss divergence and load-imbalance climb -- not on final CE. To make
+#   it select, set STEPS to the anchor length in both arms and stop early so the
+#   schedule shape matches.
+#
+# * KEEP_LAST_N defaults to keeping every permanent checkpoint, because the
+#   0.1-epoch grid IS the deliverable. That is deliberate but expensive: each is
+#   207 GB, written synchronously. Convert to HF and delete each DCP dir as it
+#   lands rather than at the end of the run. Note -1 does NOT mean "keep a few":
+#   olmo_core_utils maps it to None and olmo-core then prunes nothing at all.
 
 set -euo pipefail
 
@@ -153,14 +171,25 @@ case "$MODE" in
         --output_dir /tmp/discover
     ;;
 
-  gate|smoke_2node)
-    if [[ "$MODE" == "gate" ]]; then
+  gate|smoke_2node|lr_probe|train)
+    STEPS="${STEPS:-30}"
+    CKPT_STEPS="${CKPT_STEPS:-1000000}"
+    KEEP_LAST_N="${KEEP_LAST_N:-100}"
+    case "$MODE" in
+      gate)
         NNODES=1; MIXER="allenai/Dolci-Think-SFT $SUBSET_FRAC"
-        DESC="KDA MoE think GATE: 30 steps, 1x8, seq $SEQ (does 16384 fit?)"
-    else
+        DESC="KDA MoE think GATE: $STEPS steps, 1x8, seq $SEQ (does $SEQ fit?)" ;;
+      smoke_2node)
         NNODES=2; MIXER="allenai/Dolci-Think-SFT $SUBSET_FRAC"
-        DESC="KDA MoE think 2-node smoke: 30 steps, 2x8, seq $SEQ"
-    fi
+        DESC="KDA MoE think 2-node smoke: $STEPS steps, 2x8, seq $SEQ" ;;
+      lr_probe)
+        NNODES=1; MIXER="allenai/Dolci-Think-SFT $SUBSET_FRAC"
+        STEPS="${STEPS:-300}"
+        DESC="KDA MoE think LR screen: lr=$LR, $STEPS steps, 1x8, seq $SEQ" ;;
+      train)
+        NNODES=2; MIXER="allenai/Dolci-Think-SFT 1.0"
+        DESC="KDA MoE + Dolci-Think SFT: $STEPS steps, 2x8, seq $SEQ, lr=$LR" ;;
+    esac
     RANKS=$(( NNODES * 8 ))
     GRAD_ACCUM=$(grad_accum_for $RANKS)
     if (( GRAD_ACCUM < 1 )); then
@@ -168,8 +197,9 @@ case "$MODE" in
         exit 1
     fi
     echo "ranks=$RANKS grad_accum=$GRAD_ACCUM -> global batch $(( SEQ * RANKS * GRAD_ACCUM )) tokens"
-    # No checkpoint inside 30 steps: each one is 207 GB written synchronously
-    # (the DDP train module rejects async), which the gate does not need.
+    # Probe modes default CKPT_STEPS above STEPS so nothing is written: each
+    # checkpoint is 207 GB written synchronously (the DDP train module rejects
+    # async), which a memory or LR screen does not need.
     $PY mason.py \
         --cluster "$CLUSTER" \
         --workspace "$WORKSPACE" \
@@ -202,14 +232,14 @@ case "$MODE" in
         --weight_decay 0.0 \
         --max_grad_norm 1.0 \
         --num_epochs 1 \
-        --max_train_steps 30 \
+        --max_train_steps "$STEPS" \
         --attn_implementation flash_2 \
         --activation_checkpointing_mode "$ACT_CKPT_MODE" \
         --activation_memory_budget "$ACT_MEM_BUDGET" \
-        --checkpointing_steps 1000000 \
+        --checkpointing_steps "$CKPT_STEPS" \
         --ephemeral_save_interval -1 \
-        --keep_last_n_checkpoints 2 \
-        --dist_timeout_hours 2 \
+        --keep_last_n_checkpoints "$KEEP_LAST_N" \
+        --dist_timeout_hours "${DIST_TIMEOUT_HOURS:-2}" \
         --no_save_async \
         --with_tracking \
         --logging_steps 1 \
@@ -222,7 +252,7 @@ case "$MODE" in
 
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "Expected one of: tokenize_subset, tokenize_full, discover_cache, gate, smoke_2node" >&2
+    echo "Expected one of: tokenize_subset, tokenize_full, discover_cache, gate, smoke_2node, lr_probe, train" >&2
     exit 1
     ;;
 esac
