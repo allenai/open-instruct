@@ -133,6 +133,14 @@ JOB_TIMEOUT="${JOB_TIMEOUT:-45m}"
 # cordoned mid-start by an unrelated stuck container. With no retries that is a
 # hard failure, which for a multi-hour 2x8 run is a real exposure.
 MAX_RETRIES="${MAX_RETRIES:-2}"
+# CPU conversion of a 207 GB MoE checkpoint does NOT finish in 2 h -- measured:
+# it reached "Loading checkpoint" and was still going 114 min later. CUDA is the
+# converter's own default (its KDA/fla Triton kernels reject CPU tensors) and the
+# runbook records CPU and CUDA output as bit-identical over 35 GB, so with a GPU
+# free there is no reason to take the slow path. CPU remains available for when
+# no GPU is.
+CONVERT_DEVICE="${CONVERT_DEVICE:-cuda}"
+CONVERT_GPUS="${CONVERT_GPUS:-1}"
 PREEMPTIBLE="${PREEMPTIBLE:-1}"
 if [[ "$PREEMPTIBLE" == "1" ]]; then PREEMPTIBLE_FLAG="--preemptible"; else PREEMPTIBLE_FLAG=""; fi
 
@@ -321,7 +329,7 @@ case "$MODE" in
         --preemptible \
         --timeout "${JOB_TIMEOUT:-2h}" \
         --num_nodes 1 \
-        --gpus 0 \
+        --gpus "$CONVERT_GPUS" \
         --non_resumable \
         --no_auto_dataset_cache \
         -- /stage/.venv/bin/python scripts/train/debug/convert_moe_checkpoint_to_hf.py \
@@ -330,7 +338,7 @@ case "$MODE" in
         -c $CONFIG_NAME \
         -s "$SEQ" \
         --skip-validation \
-        --device cpu
+        --device "$CONVERT_DEVICE"
     ;;
 
   *)
