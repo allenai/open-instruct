@@ -19,6 +19,15 @@
 #     need ~683 e2-standard-4 spot nodes ≈ 2,732 vCPU of the 3,000 CPU quota.
 #   - kubectl get batchsandbox -n opensandbox --no-headers | wc -l   # want 0
 # Cost: roughly $50-60 of Spot for the hour.
+#
+# Reading the verdict at THIS (quota-saturated) scale: the default 30s
+# create-p95 criterion WILL fail even when the service is healthy — with no
+# warm-node headroom, every Spot death forces replacement creates onto
+# freshly provisioned nodes (~2-3 min GCE boot), so p95 measures VM
+# provisioning, not the control plane (2026-08-25 run: p50 5.2s, p95 ~140s,
+# failure rate 0.7-0.8%, zero server restarts). Judge on failure rate and
+# p50, or pass a realistic threshold via the runner if a hard gate is
+# wanted. Within-capacity tests (nodes mostly warm) should keep the 30s bar.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
