@@ -198,7 +198,15 @@ case "$MODE" in
         NNODES=2; MIXER="allenai/Dolci-Think-SFT 1.0"
         DESC="KDA MoE + Dolci-Think SFT: $STEPS steps, 2x8, seq $SEQ, lr=$LR" ;;
     esac
-    RANKS=$(( NNODES * 8 ))
+    # NPROC exists for the gate specifically. The gate asks a per-rank memory
+    # question, and this is DDP: every rank holds a full replica of the 18.5B
+    # params plus its optimizer state, and the microbatch is
+    # per_device_train_batch_size * max_seq_length regardless of world size. So
+    # one rank answers the same question as eight, and schedules when holmes is
+    # full. It does NOT cover DDP comm buffers at 16 ranks -- that is what
+    # smoke_2node is for.
+    NPROC="${NPROC:-8}"
+    RANKS=$(( NNODES * NPROC ))
     GRAD_ACCUM=$(grad_accum_for $RANKS)
     if (( GRAD_ACCUM < 1 )); then
         echo "Error: SEQ=$SEQ x ranks=$RANKS exceeds the 1,048,576-token global batch." >&2
@@ -217,7 +225,7 @@ case "$MODE" in
         --pure_docker_mode \
         --preemptible \
         --num_nodes $NNODES \
-        --gpus 8 \
+        --gpus $NPROC \
         --non_resumable \
         --no_auto_dataset_cache \
         --env OLMO_SHARED_FS=1 \
@@ -226,7 +234,7 @@ case "$MODE" in
         --node_rank=\$BEAKER_REPLICA_RANK \
         --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
         --master_port=29400 \
-        --nproc_per_node=8 \
+        --nproc_per_node=$NPROC \
         open_instruct/olmo_core_finetune.py \
         --model_name_or_path "$MODEL" \
         --config_name $CONFIG_NAME \
