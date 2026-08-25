@@ -1514,10 +1514,6 @@
       "use_reduce_scatter": false,
       "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerDataParallelConfig"
     },
-    "ep_config": {
-      "degree": 8,
-      "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerExpertParallelConfig"
-    },
     "z_loss_multiplier": 1e-05,
     "reset_optimizer_states_on_load": true,
     "reset_optimizer_states_on_resume": false,
