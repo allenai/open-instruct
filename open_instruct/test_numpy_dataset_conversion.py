@@ -59,6 +59,20 @@ class TestSelectTokenDtype(unittest.TestCase):
         with self.assertRaises(ValueError):
             numpy_dataset_conversion._select_token_dtype(2**64 + 1)
 
+    def test_tokenizer_id_space_includes_added_and_special_tokens(self):
+        tokenizer = unittest.mock.MagicMock()
+        tokenizer.vocab_size = 128
+        tokenizer.__len__.return_value = 256
+        tokenizer.bos_token_id = None
+        tokenizer.eos_token_id = 256
+        tokenizer.pad_token_id = 300
+
+        id_space_size = numpy_dataset_conversion._tokenizer_id_space_size(tokenizer)
+
+        self.assertEqual(numpy_dataset_conversion._select_token_dtype(tokenizer.vocab_size), np.uint8)
+        self.assertEqual(id_space_size, 301)
+        self.assertEqual(numpy_dataset_conversion._select_token_dtype(id_space_size), np.uint16)
+
 
 class TestWriteMemmapChunked(unittest.TestCase):
     def setUp(self):

@@ -39,6 +39,16 @@ def _select_token_dtype(vocab_size: int):
     raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
 
+def _tokenizer_id_space_size(tokenizer) -> int:
+    """Return an exclusive upper bound for IDs the tokenizer can emit."""
+    upper_bounds = [len(tokenizer)]
+    for attribute in ("bos_token_id", "eos_token_id", "pad_token_id"):
+        token_id = getattr(tokenizer, attribute, None)
+        if token_id is not None:
+            upper_bounds.append(token_id + 1)
+    return max(upper_bounds)
+
+
 def _flush_partial_files(tokens_fh, labels_fh, boundaries_fh) -> None:
     for fh in (tokens_fh, labels_fh, boundaries_fh):
         fh.flush()
@@ -265,10 +275,12 @@ def convert_hf_to_numpy_sft(
         logger.info(f"Selecting {num_examples} examples for debugging")
         train_dataset = train_dataset.select(range(num_examples))
 
-    vocab_size = tc.tokenizer.vocab_size
-    token_dtype = _select_token_dtype(vocab_size)
+    token_id_space_size = _tokenizer_id_space_size(tc.tokenizer)
+    token_dtype = _select_token_dtype(token_id_space_size)
     token_item_size = np.dtype(token_dtype).itemsize
-    logger.info(f"Using dtype '{np.dtype(token_dtype).name}' for token_ids based on vocab size {vocab_size}")
+    logger.info(
+        f"Using dtype '{np.dtype(token_dtype).name}' for token_ids based on tokenizer ID space {token_id_space_size}"
+    )
 
     tokens_path = output_dir / "_tokens.partial.bin"
     labels_path = output_dir / "_labels.partial.bin"

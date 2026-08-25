@@ -82,6 +82,15 @@ def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
     return hashlib.sha256(f"{seed}:{max_seq_length}".encode()).hexdigest()[:8]
 
 
+def _build_data_collator(tokenizer_config: oc_data.TokenizerConfig, model_vocab_size: int) -> oc_data.DataCollator:
+    return oc_data.DataCollator(
+        pad_token_id=tokenizer_config.pad_token_id,
+        # Hugging Face's tokenizer.vocab_size excludes added tokens. Validate
+        # against the embedding rows selected by the effective model config.
+        vocab_size=model_vocab_size,
+    )
+
+
 def _tokenize_to_numpy_dir(
     numpy_dir: str,
     args: "SFTArguments",
@@ -291,9 +300,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     )
     data_loader = data_loader_config.build(
         np_dataset,
-        collator=oc_data.DataCollator(
-            pad_token_id=oc_tokenizer_config.pad_token_id, vocab_size=oc_tokenizer_config.padded_vocab_size()
-        ),
+        collator=_build_data_collator(oc_tokenizer_config, model_config.vocab_size),
         dp_process_group=train_module.dp_process_group,
     )
     data_loader.reshuffle(epoch=1)
