@@ -210,7 +210,7 @@ case "$MODE" in
         STEPS="${STEPS:-300}"
         DESC="KDA MoE think LR screen: lr=$LR, $STEPS steps, 1x8, seq $SEQ" ;;
       train)
-        NNODES=2; MIXER="allenai/Dolci-Think-SFT 1.0"
+        NNODES="${NNODES:-2}"; MIXER="allenai/Dolci-Think-SFT 1.0"
         DESC="KDA MoE + Dolci-Think SFT: $STEPS steps, 2x8, seq $SEQ, lr=$LR" ;;
     esac
     # NPROC exists for the gate specifically. The gate asks a per-rank memory
