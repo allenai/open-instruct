@@ -33,8 +33,18 @@ else
   echo "Creating new beaker image for commit $git_hash..."
   CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
 
+  if ! docker buildx version >/dev/null 2>&1; then
+    # Older Docker without the buildx plugin (e.g. 20.10 on cluster hosts)
+    # surfaces this as a confusing "unknown flag: --platform". Fall back to
+    # the built-in BuildKit builder; registry cache-to/from is buildx-only,
+    # so the fallback builds without the shared cache.
+    echo "docker buildx not available; using legacy BuildKit build (no registry cache)."
+    DOCKER_BUILDKIT=1 docker build \
+      --build-arg GIT_COMMIT="$git_hash" \
+      --build-arg GIT_BRANCH="$git_branch" \
+      . -t "$image_name"
   # Try to build with cache push first, fall back to cache-from only if push fails
-  if docker buildx build --platform=linux/amd64 \
+  elif docker buildx build --platform=linux/amd64 \
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
     --cache-from "type=registry,ref=$CACHE_REPO" \
