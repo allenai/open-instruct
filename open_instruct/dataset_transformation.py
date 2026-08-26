@@ -2080,9 +2080,17 @@ class DatasetTransformationCache:
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def load_or_transform_dataset(
-        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self,
+        dcs: list[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
+        keep_in_memory: bool | None = None,
     ) -> tuple[Dataset, dict[str, Any]]:
-        """Load dataset from cache if it exists, otherwise transform and cache it."""
+        """Load dataset from cache if it exists, otherwise transform and cache it.
+
+        keep_in_memory=None keeps the hub default (memory-mapped Arrow); True forces the
+        table into RAM; False forces memory-mapping.
+        """
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
         # NOTE: the cached dataset is always train split
@@ -2100,6 +2108,7 @@ class DatasetTransformationCache:
                     split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
                     revision=self.config_hash,
                     num_proc=max_num_processes(),
+                    keep_in_memory=keep_in_memory,
                 )
                 assert isinstance(loaded_dataset, Dataset)
                 if "index" not in loaded_dataset.column_names:
@@ -2193,15 +2202,26 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: list[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self,
+        dcs: list[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
+        keep_in_memory: bool | None = None,
     ) -> tuple[Dataset, dict[str, Any]]:
-        """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
+        """Load dataset from local cache if it exists, otherwise transform and cache it locally.
+
+        keep_in_memory=None preserves this cache's historical default (True: the full Arrow
+        table is materialized in RAM). Pass False to memory-map instead — required when many
+        ranks on one host load a large mix, e.g. the multimodal SFT text source.
+        """
+        if keep_in_memory is None:
+            keep_in_memory = True
         cache_path = self.get_cache_path()
 
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
-            dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            dataset = Dataset.load_from_disk(cache_path, keep_in_memory=keep_in_memory)
             if "index" not in dataset.column_names:
                 dataset = dataset.add_column("index", range(len(dataset)))
             # Load statistics from cache if available
@@ -2287,7 +2307,7 @@ class LocalDatasetTransformationCache:
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
 
-        loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+        loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=keep_in_memory)
         return loaded_dataset, all_statistics
 
 
@@ -2394,6 +2414,7 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    dataset_keep_in_memory: bool | None = None,
 ) -> tuple[Dataset, dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
@@ -2414,7 +2435,9 @@ def get_cached_dataset_tulu_with_statistics(
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
 
-    dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+    dataset, statistics = cache.load_or_transform_dataset(
+        dcs, tc, dataset_skip_cache=dataset_skip_cache, keep_in_memory=dataset_keep_in_memory
+    )
 
     if drop_dataset_source:
         dataset = remove_dataset_source_field(dataset)
