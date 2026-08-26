@@ -84,11 +84,18 @@ BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 MODE="${2:-gate}"
 
 # ---- cache-key arguments: MUST be byte-identical across tokenize and train ----
-MODEL=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/midtraining/mt-1p2b-kda-ev2-neg-nope-gated-latentmoe-l2-paper-cx8-samebatch-lr1p6e-4-r1/step63802
-CONFIG_NAME=scripts/train/debug/kda_mt_sft.json
+# LC arm (#1854): the long-context (65536-native) base, not the midtrain one.
+# CONFIG_NAME must be regenerated from THIS checkpoint's config.json -- the
+# midtrain-derived kda_mt_sft.json has recompute_each_block=False and an
+# unfused loss head, the two levers that make long sequences fit.
+MODEL=/weka/oe-training-default/ai2-llm/checkpoints/jacobm/olmoe3/olmo-ddp/long_context/legacy-cx8-v2/latent-kda-l2/1.2B/cx8-samebatch/step63802
+CONFIG_NAME=scripts/train/debug/kda_lc_sft.json
 TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
 CHAT_TEMPLATE=olmo123
-SEQ="${SEQ:-16384}"
+# 32768 is the cache's native tokenisation length (no re-tokenize) and cuts
+# mid-trace truncation to 1.95%; 16384 would show the LC base the same data as
+# the midtrain base.
+SEQ="${SEQ:-32768}"
 SUBSET_FRAC="${SUBSET_FRAC:-0.02}"
 # Probe modes read the full corpus by default. The 0.02 subset existed only to
 # avoid a ~10 h tokenize; that is moot now that the 32768 cache is symlinked to
@@ -242,7 +249,7 @@ case "$MODE" in
         DESC="KDA MoE think LR screen: lr=$LR, $STEPS steps, 1x8, seq $SEQ" ;;
       train)
         NNODES="${NNODES:-2}"; MIXER="allenai/Dolci-Think-SFT 1.0"
-        DESC="KDA MoE + Dolci-Think SFT: $STEPS steps, 2x8, seq $SEQ, lr=$LR" ;;
+        DESC="KDA MoE LC + Dolci-Think SFT: $STEPS steps, ${NNODES}x8, seq $SEQ, lr=$LR" ;;
     esac
     # NPROC exists for the gate specifically. The gate asks a per-rank memory
     # question, and this is DDP: every rank holds a full replica of the 18.5B
