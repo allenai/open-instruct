@@ -53,7 +53,7 @@ It defines the text half of the merged stage:
 ## 3. Architecture
 
 ```
-open_instruct/olmo_core_multimodal_finetune.py   (entry point)
+open_instruct/olmo_core_mixture_finetune.py   (entry point)
         │
         ├── MultimodalLMConfig.build()  +  molmo2_loader (HF init)      [OLMo-core]
         ├── MultimodalTransformerTrainModuleConfig.build(model)        [OLMo-core, unmodified]
@@ -71,12 +71,12 @@ open_instruct/olmo_core_multimodal_finetune.py   (entry point)
 | File | Purpose |
 |---|---|
 | `open_instruct/olmo_core_multimodal_utils.py` | Dataclasses + builder functions. **All** `olmo_core.nn.vision` / `olmo_core.data.multimodal` imports live here and in the entry point, inside functions (lazy) — both to keep the text SFT/DPO paths importable if the pin ever moves, and because `data/multimodal/paths.py` freezes `MOLMO_DATA_DIR` at import time. |
-| `open_instruct/olmo_core_multimodal_finetune.py` | Entry point, mirrors `olmo_core_finetune.py`'s structure. |
+| `open_instruct/olmo_core_mixture_finetune.py` | Entry point, mirrors `olmo_core_finetune.py`'s structure. |
 | `open_instruct/sft_mixture.py` | The generic mixture layer: `MixtureSource` protocol, `SourceSpec`, `SOURCE_REGISTRY`, `build_mixture` (§4). Deliberately not multimodal-named — any SFT source type registers here. |
 | `open_instruct/sft_text_dataset.py` | The first source adapter: `OpenInstructTextDataset` + `OpenInstructTextDatasetConfig` (§5). |
 | `scripts/train/debug/mm_sft.sh` | 1-GPU Beaker smoke: `--mixture debug`, 10 steps, compile off. |
 | `scripts/train/vision/molmo2_stage2.sh` | Production 8-GPU stage-2 parity run. |
-| `open_instruct/test_olmo_core_multimodal_utils.py`, `open_instruct/test_olmo_core_multimodal_finetune_gpu.py`, `open_instruct/test_sft_mixture.py`, `open_instruct/test_sft_text_dataset.py` | Tests (§8). |
+| `open_instruct/test_olmo_core_multimodal_utils.py`, `open_instruct/test_olmo_core_mixture_finetune_gpu.py`, `open_instruct/test_sft_mixture.py`, `open_instruct/test_sft_text_dataset.py` | Tests (§8). |
 
 ### 3.2 Configuration
 

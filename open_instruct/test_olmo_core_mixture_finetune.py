@@ -1,12 +1,6 @@
 """CPU tests for the multimodal SFT entry point's argument surface."""
 
-from open_instruct import (
-    olmo_core_multimodal_finetune,
-    olmo_core_multimodal_utils,
-    olmo_core_utils,
-    sft_mixture,
-    utils,
-)
+from open_instruct import olmo_core_mixture_finetune, olmo_core_multimodal_utils, olmo_core_utils, sft_mixture, utils
 
 
 def _parser() -> utils.ArgumentParserPlus:
@@ -22,7 +16,7 @@ def _parser() -> utils.ArgumentParserPlus:
     )
     parser.set_defaults(
         exp_name="mm_sft",
-        ephemeral_save_interval=olmo_core_multimodal_finetune._DEFAULT_EPHEMERAL_SAVE_INTERVAL,
+        ephemeral_save_interval=olmo_core_mixture_finetune._DEFAULT_EPHEMERAL_SAVE_INTERVAL,
         checkpointing_steps=2000,
     )
     return parser

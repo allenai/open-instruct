@@ -28,7 +28,7 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO2_FLEX_ATTN=1 \
     --env VIT_CROP_MICROBATCH=16 \
-    -- torchrun --nproc_per_node=1 open_instruct/olmo_core_multimodal_finetune.py \
+    -- torchrun --nproc_per_node=1 open_instruct/olmo_core_mixture_finetune.py \
     --exp_name mm_sft_debug \
     --mixture debug \
     --max_train_steps 10 \

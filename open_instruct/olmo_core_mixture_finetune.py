@@ -25,13 +25,13 @@ assembled by ``sft_mixture`` so the nlp group can be open-instruct's own SFT mix
 import time by ``olmo_core.data.multimodal.paths``.
 
 Usage (1-GPU smoke, debug mixture):
-    torchrun --nproc_per_node=1 open_instruct/olmo_core_multimodal_finetune.py \
+    torchrun --nproc_per_node=1 open_instruct/olmo_core_mixture_finetune.py \
         --mixture debug --max_train_steps 10 \
         --global_batch_instances 1 --rank_microbatch_instances 1 \
         --compile_model false --compile_vision false --compile_connector false
 
 The merged single stage (image mixture + open-instruct text mix):
-    torchrun --nproc_per_node=8 open_instruct/olmo_core_multimodal_finetune.py \
+    torchrun --nproc_per_node=8 open_instruct/olmo_core_mixture_finetune.py \
         --mixture image-only-v9 --nlp_source open_instruct \
         --mixer_list allenai/Dolci-Instruct-SFT 1.0
 """
