@@ -35,15 +35,14 @@ uv run python mason.py \
     --max_train_steps 10 \
     --global_batch_instances 2 \
     --rank_microbatch_instances 1 \
-    --compile_model false \
-    --compile_vision false \
-    --compile_connector false \
     --checkpointing_steps 5 \
     --ephemeral_save_interval -1 \
     --keep_last_n_checkpoints 1 \
     --logging_steps 1 \
     --seed 123 \
     --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/mm_sft_debug"
+# Compile stays ON (Stage2 production parity): FlexAttention without torch.compile
+# runs in eager mode, which materializes enough intermediates at seq 16384 to OOM.
 # 2 GPUs, not 1: Molmo2-4B's static training state (fp32 master params + fp32
 # grads + bf16 compute copies) alone nearly fills one 80GB H100 — the trainer's
 # dry-run batch OOMs regardless of sequence length. Two FSDP ranks shard it.
