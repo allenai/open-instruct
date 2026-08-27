@@ -120,6 +120,19 @@ class MixtureConfig:
 
     mixer_list_splits: list[str] = dataclasses.field(default_factory=lambda: ["train"])
 
+    text_chat_template_name: str | None = None
+    """Chat template for the ``open_instruct`` nlp source. None (or an unregistered
+    name) falls through to the run tokenizer's own built-in template, which keeps the
+    text half template-consistent with the image data (design doc §5.2)."""
+
+    text_local_cache_dir: str = "local_dataset_cache"
+    """dataset_transformation cache directory for the ``open_instruct`` nlp source."""
+
+    text_base_vocab_size: int | None = None
+    """LM base vocab size for the ``open_instruct`` nlp source's target-id guard
+    (``SplitVocabEmbedding``'s extra block is inputs-only). The entry point fills this
+    from the model config; None skips the guard."""
+
     pack_sequences: bool = True
     pack_max_crops: int = 125
     """Per-pack crop capacity for the 2D-knapsack packer (Stage2: 5 * (1 + 24))."""
@@ -146,7 +159,13 @@ class MixtureConfig:
                     type=OPEN_INSTRUCT_SFT_TYPE,
                     group=NLP_GROUP,
                     rate=self.nlp_rate,
-                    args={"mixer_list": self.mixer_list, "mixer_list_splits": self.mixer_list_splits},
+                    args={
+                        "mixer_list": self.mixer_list,
+                        "mixer_list_splits": self.mixer_list_splits,
+                        "chat_template_name": self.text_chat_template_name,
+                        "local_cache_dir": self.text_local_cache_dir,
+                        "base_vocab_size": self.text_base_vocab_size,
+                    },
                 )
             )
         elif self.nlp_rate is not None and not any(s.group == NLP_GROUP for s in specs):

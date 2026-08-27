@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add the multimodal SFT training path (`docs/design/multimodal_sft.md` §3, §5): `open_instruct/olmo_core_multimodal_finetune.py` (thin entry point over OLMo-core's `MultimodalTransformerTrainModule` + `MixtureDataLoader`, HF or stage-1 checkpoint init, OLMo-core-native callbacks), `open_instruct/sft_text_dataset.py` (the `open_instruct_sft` mixture source: open-instruct-tokenized text mixes mapped to the vision-branch example schema with shifted labels, `root_tokens` loss weighting, zero-crop image tensors, and a base-vocab target guard), and `scripts/train/debug/mm_sft.sh` (1-GPU Beaker smoke on the debug mixture) (PR TBD).
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
 - Drop stale async rollout results whose generating policy is more than `async_steps` behind the trainer (`max_result_age_steps`), replenishing a fresh prompt and logging a `stale_results_dropped` metric (https://github.com/allenai/open-instruct/pull/1738).
 
