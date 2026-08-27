@@ -28,12 +28,15 @@ uv run python mason.py \
     --no_auto_dataset_cache \
     --env OLMO2_FLEX_ATTN=1 \
     --env VIT_CROP_MICROBATCH=16 \
+    --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     -- torchrun --nproc_per_node=1 open_instruct/olmo_core_mixture_finetune.py \
     --exp_name mm_sft_debug \
     --mixture debug \
     --max_train_steps 10 \
     --global_batch_instances 1 \
     --rank_microbatch_instances 1 \
+    --max_seq_length 8192 \
+    --ac_block_interval 1 \
     --compile_model false \
     --compile_vision false \
     --compile_connector false \
@@ -43,5 +46,9 @@ uv run python mason.py \
     --logging_steps 1 \
     --seed 123 \
     --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/mm_sft_debug"
+# Smoke-only sizing: Molmo2-4B on ONE 80GB H100 cannot hold the fp32+bf16 model
+# copies, grads, and a full 16k-token forward (the trainer's dry-run batch OOMs at
+# Stage2-parity settings), so the smoke runs seq 8192 with per-block LM activation
+# checkpointing. Real runs use 8 GPUs at the 16384 defaults.
 # No --with_tracking: wandb needs a per-user WANDB_API_KEY beaker secret
 # (<user>_WANDB_API_KEY in the workspace), which a smoke test shouldn't require.
