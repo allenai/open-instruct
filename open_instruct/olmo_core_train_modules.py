@@ -56,6 +56,8 @@ class DPOLMHead(LMHead):
         loss_div_factor: torch.Tensor | float | None = None,
         return_logits: bool | None = None,
         logits_to_keep: int | torch.Tensor = 0,
+        response_logits_only: bool = False,
+        response_mask: torch.Tensor | None = None,
     ) -> torch.Tensor | LMOutputWithLoss:
         if labels is None:
             return super().forward(
@@ -66,7 +68,11 @@ class DPOLMHead(LMHead):
                 loss_div_factor=loss_div_factor,
                 return_logits=return_logits,
                 logits_to_keep=logits_to_keep,
+                response_logits_only=response_logits_only,
+                response_mask=response_mask,
             )
+        if response_logits_only:
+            raise NotImplementedError("response_logits_only is not supported by DPOLMHead")
 
         h = self.norm(x) if self.norm is not None else x
         logits = self.w_out(h)

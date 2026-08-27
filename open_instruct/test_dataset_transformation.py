@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 import torch
+from datasets import Dataset
 from parameterized import parameterized
 from transformers import AutoTokenizer
 
@@ -958,6 +959,34 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         if masks and isinstance(masks[0], list):
             masks = masks[0]
         self.assertEqual(sum(masks), 0)
+
+
+class TestLocalCacheKeepInMemory(unittest.TestCase):
+    """The keep_in_memory plumb-through (multimodal SFT text source, design doc §5.4)."""
+
+    def _cached_dataset(self, cache_dir: str):
+        cache = open_instruct.dataset_transformation.LocalDatasetTransformationCache(
+            config_hash="testhash", dataset_local_cache_dir=cache_dir
+        )
+        Dataset.from_dict({"input_ids": [[1, 2], [3, 4]], "labels": [[1, 2], [3, 4]]}).save_to_disk(
+            cache.get_cache_path()
+        )
+        return cache
+
+    def test_keep_in_memory_false_memory_maps(self):
+        with tempfile.TemporaryDirectory() as cache_dir:
+            cache = self._cached_dataset(cache_dir)
+            dataset, _ = cache.load_or_transform_dataset([], None, keep_in_memory=False)
+            self.assertEqual(len(dataset), 2)
+            self.assertIsNotNone(dataset.cache_files)
+            self.assertGreater(len(dataset.cache_files), 0, "expected a memory-mapped (on-disk) dataset")
+
+    def test_default_keeps_in_memory(self):
+        with tempfile.TemporaryDirectory() as cache_dir:
+            cache = self._cached_dataset(cache_dir)
+            dataset, _ = cache.load_or_transform_dataset([], None)
+            self.assertEqual(len(dataset), 2)
+            self.assertEqual(len(dataset.cache_files), 0, "historical default is fully in-memory")
 
 
 if __name__ == "__main__":
