@@ -27,7 +27,7 @@ uv run python mason.py \
     --no-host-networking \
     --no_auto_dataset_cache \
     --env OLMO2_FLEX_ATTN=1 \
-    --env VIT_CROP_MICROBATCH=16 \
+    --env VIT_CROP_MICROBATCH=8 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     -- torchrun --nproc_per_node=2 open_instruct/olmo_core_mixture_finetune.py \
     --exp_name mm_sft_debug \
@@ -35,6 +35,7 @@ uv run python mason.py \
     --max_train_steps 10 \
     --global_batch_instances 2 \
     --rank_microbatch_instances 1 \
+    --ac_block_interval 1 \
     --checkpointing_steps 5 \
     --ephemeral_save_interval -1 \
     --keep_last_n_checkpoints 1 \
@@ -43,6 +44,10 @@ uv run python mason.py \
     --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/mm_sft_debug"
 # Compile stays ON (Stage2 production parity): FlexAttention without torch.compile
 # runs in eager mode, which materializes enough intermediates at seq 16384 to OOM.
+# Headroom knobs (VIT_CROP_MICROBATCH=8, per-block LM AC): this config peaks at
+# ~81.1 GiB/rank at Stage2-parity settings — a hair over what jupiter's H100s
+# expose (81,090 MiB) and a hair under other H100 hosts. Shave a few GiB so the
+# smoke isn't a coin flip on GPU SKU.
 # 2 GPUs, not 1: Molmo2-4B's static training state (fp32 master params + fp32
 # grads + bf16 compute copies) alone nearly fills one 80GB H100 — the trainer's
 # dry-run batch OOMs regardless of sequence length. Two FSDP ranks shard it.
