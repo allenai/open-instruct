@@ -42,5 +42,6 @@ uv run python mason.py \
     --keep_last_n_checkpoints 1 \
     --logging_steps 1 \
     --seed 123 \
-    --with_tracking \
     --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/mm_sft_debug"
+# No --with_tracking: wandb needs a per-user WANDB_API_KEY beaker secret
+# (<user>_WANDB_API_KEY in the workspace), which a smoke test shouldn't require.
