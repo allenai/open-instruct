@@ -61,3 +61,10 @@ def test_merged_stage_cli_round_trip():
     specs = mixture.source_specs()
     assert specs[0].type == sft_mixture.OPEN_INSTRUCT_SFT_TYPE
     assert specs[0].args["mixer_list"] == ["allenai/Dolci-Instruct-SFT", "1.0"]
+
+
+def test_checkpointer_skips_pre_train_save():
+    callback = olmo_core_utils.build_checkpointer_callback(2000, -1, save_async=False, pre_train_checkpoint=False)
+    assert callback.pre_train_checkpoint is False
+    assert callback.save_async is False
+    assert callback.ephemeral_save_interval is None

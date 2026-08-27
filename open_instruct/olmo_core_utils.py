@@ -244,6 +244,7 @@ def build_checkpointer_callback(
     ephemeral_save_interval: int | None,
     save_async: bool = True,
     max_checkpoints: int | None = 3,
+    pre_train_checkpoint: bool | None = None,
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults.
 
@@ -252,12 +253,18 @@ def build_checkpointer_callback(
 
     ``ephemeral_save_interval`` follows the same convention: a non-positive value
     disables ephemeral checkpoints.
+
+    ``pre_train_checkpoint=None`` keeps olmo-core's default (save at step 0 unless a
+    checkpoint was loaded). Pass ``False`` when the initial weights are reproducible
+    without a checkpoint (e.g. straight from an HF repo) — the step-0 save also forces
+    full optimizer-state allocation before training, which can OOM small-world runs.
     """
     return CheckpointerCallback(
         save_interval=checkpointing_steps,
         ephemeral_save_interval=ephemeral_save_interval if (ephemeral_save_interval or 0) > 0 else None,
         save_async=save_async,
         max_checkpoints=max_checkpoints if max_checkpoints is not None and max_checkpoints >= 0 else None,
+        pre_train_checkpoint=pre_train_checkpoint,
     )
 
 

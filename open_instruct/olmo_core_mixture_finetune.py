@@ -146,6 +146,10 @@ def main(args: MultimodalSFTArguments) -> None:
                 # Async save with the multimodal train module is unproven; Stage2 uses sync too.
                 save_async=False,
                 max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
+                # HF-init weights are reproducible from the hub, and the step-0 save
+                # force-allocates full fp32 Adam states before training — which OOMs
+                # the 1-GPU smoke (~34 GB for Molmo2-4B on top of the model copies).
+                pre_train_checkpoint=False,
             ),
         )
         .with_callback(
