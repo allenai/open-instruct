@@ -248,6 +248,8 @@ open-instruct's only coupling to all of this: a small backbone map (preset name,
 | `qwen3_layout` hardwired in upstream datasets | Upstream layout knob is an explicit Olmo 3-workstream requirement (§7.4) |
 | datasets 5.x compat shim (`dataset_compat`) is process-global | Bridge avoids `load_from_disk_compat`; keep `datasets < 6` behaviorally |
 
+Findings from the first smoke runs (attempts 1–8, all root-caused): OLMo-core's `beaker` callback needs `beaker-gantry` (§3); the step-0 pre-train checkpoint force-allocates full fp32 Adam states via torch DCP's `_init_optim_state` and OOMs HF-init runs (skipped via `pre_train_checkpoint=False`); FlexAttention in eager mode (compile off) OOMs at seq 16384 — the smoke must run compiled like Stage2 production; and Molmo2-4B at Stage2-parity settings on 2×H100 peaks at ~81.1 GiB on the image-heavy rank — over jupiter H100s' 81,090 MiB but under some other hosts' 81,559 MiB — so the smoke runs `VIT_CROP_MICROBATCH=8` + per-block LM AC for headroom. Upstream `Molmo2-Stage2.py`'s documented 1-GPU smoke recipe hits the same pre-train-checkpoint and eager-flex issues and appears to be untested; worth reporting upstream.
+
 Deferred (post-V1): HF export (`multimodal_lm_state_dict_to_hf` wiring into a convert script — note the text-model converter `scripts/train/convert_olmo_core_to_hf.py` was fixed by #1809; the multimodal variant still needs its own key mappings), in-loop eval (the `VALIDATION_MIXTURES` bisect ladder), multi-node HSDP validation, inline mixture specs, non-weka data roots.
 
 ## 10. Milestones
