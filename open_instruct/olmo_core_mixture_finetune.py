@@ -44,7 +44,6 @@ from olmo_core.data.multimodal import MixtureDataLoader, paths
 from olmo_core.distributed import utils as dist_utils
 from olmo_core.train import Duration, TrainerConfig, teardown_training_environment
 from olmo_core.train.callbacks import (
-    BeakerCallback,
     ConfigSaverCallback,
     GarbageCollectorCallback,
     GPUMemoryMonitorCallback,
@@ -55,6 +54,7 @@ from transformers import AutoTokenizer
 
 from open_instruct import (
     logger_utils,
+    olmo_core_callbacks,
     olmo_core_multimodal_utils,
     olmo_core_utils,
     sft_mixture,
@@ -161,7 +161,10 @@ def main(args: MultimodalSFTArguments) -> None:
         )
         .with_callback("config_saver", ConfigSaverCallback())
         .with_callback("garbage_collector", GarbageCollectorCallback())
-        .with_callback("beaker", BeakerCallback())
+        # Not OLMo-core's BeakerCallback: that one imports olmo_core.launch.beaker at
+        # attach time, whose module top requires beaker-gantry — not shipped in this
+        # image. BeakerCallbackV2 is open-instruct's beaker-py 2.x equivalent.
+        .with_callback("beaker", olmo_core_callbacks.BeakerCallbackV2(config=dataclasses.asdict(args)))
     )
 
     # Initial weights / resume (design doc §3.3 step 8):
