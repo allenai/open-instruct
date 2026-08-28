@@ -47,6 +47,7 @@ DEGENERATE_REPETITION_PATTERNS = (
 TOKENIZER_ARTIFACT = re.compile(r"(?:Ġ|Ċ|▁)")
 RAW_CHAT_SENTINEL = re.compile(r"<\|[^|>]+\|>")
 ALPHABETIC_TOKEN = re.compile(r"[^\W\d_]+", re.UNICODE)
+TOOL_EXIT_CODE = re.compile(r"\(exit_code=(\d+)\)")
 FILE_NAME = re.compile(r"^(?P<run>.+?)_(?P<filtered>filtered_)?rollouts_(?P<shard>\d+)\.jsonl$")
 # Terminations that make the judge return zero without ever scoring the answer.
 INCOMPLETE_TERMINATIONS = frozenset(
@@ -549,6 +550,11 @@ def verifier_policy_from_dataset(line: bytes, configured_policy: str) -> str:
     if isinstance(datasets, str):
         datasets = [datasets]
     names = {str(item).casefold() for item in datasets}
+    # Terminal/agentic env runs log dataset=["passthrough"]: the binary reward
+    # comes from the sandboxed environment, no text verifier ever runs, and no
+    # terminal model text is persisted in the shard.
+    if "passthrough" in names:
+        return "terminal"
     if "re_search_llm" in names:
         return "llm"
     if "re_search" in names:
@@ -730,8 +736,18 @@ def summarize_line(
     capped = termination_reason != "generation_failure" and (finish_reason != "stop" or token_count >= response_limit)
     missing = not bool(prose)
     verifier_policy = verifier_policy_from_dataset(line, verifier_policy)
-    format_error_reason, inspected_response = verifier_visible_response(terminal, verifier_policy)
-    ground_truth_mentioned = contains_reference_answer(inspected_response, ground_truths)
+    if verifier_policy == "terminal":
+        # Env-verified terminal runs: the split that matters is solved vs
+        # truncated (budget-bound) vs stopped-but-wrong (genuine failure).
+        # ground_truth holds a task id and no terminal text is stored, so the
+        # browsecomp text screens (answer declarations, gibberish, reference
+        # containment) do not apply.
+        unjudged_reason = "token_budget" if capped and reward <= 0 else None
+        format_error_reason, inspected_response = None, ""
+        ground_truth_mentioned = False
+    else:
+        format_error_reason, inspected_response = verifier_visible_response(terminal, verifier_policy)
+        ground_truth_mentioned = contains_reference_answer(inspected_response, ground_truths)
     verifier_reached = unjudged_reason is None and format_error_reason is None
 
     categories: list[str] = []
@@ -775,22 +791,66 @@ def summarize_line(
         flag("format_error", f"Verifier format check failed: {format_error_reason}", 5)
     if num_calls == 0:
         flag("no_tool_calls", "Trajectory made no tool calls", 3)
-    if gibberish.hard_corruption:
-        flag("hard_corruption", f"Hard corruption: {', '.join(gibberish.hard_corruption)}", 0)
-    if gibberish.localized_corruption:
-        flag("localized_corruption", f"Localized corruption: {', '.join(gibberish.localized_corruption)}", 0)
-    if gibberish.token_salad:
-        flag("token_salad", f"Token salad: {', '.join(gibberish.token_salad)}", 0)
-    if gibberish.reasons:
-        flag("gibberish", f"Gibberish screen: {', '.join(gibberish.reasons)}", 5)
-    if missing:
-        flag("no_final_answer", "No terminal model turn was captured", 5)
+    if verifier_policy != "terminal":
+        if gibberish.hard_corruption:
+            flag("hard_corruption", f"Hard corruption: {', '.join(gibberish.hard_corruption)}", 0)
+        if gibberish.localized_corruption:
+            flag("localized_corruption", f"Localized corruption: {', '.join(gibberish.localized_corruption)}", 0)
+        if gibberish.token_salad:
+            flag("token_salad", f"Token salad: {', '.join(gibberish.token_salad)}", 0)
+        if gibberish.reasons:
+            flag("gibberish", f"Gibberish screen: {', '.join(gibberish.reasons)}", 5)
+        if missing:
+            flag("no_final_answer", "No terminal model turn was captured", 5)
     if timeouts:
         flag("timeouts", f"Observed {timeouts} tool timeouts", 2)
-    if verifier_reached and reward <= 0 and ground_truth_mentioned:
-        flag("judge_negative_has_answer", "Verifier rejected a response containing an exact reference answer", 5)
-    if verifier_reached and reward > 0 and not ground_truth_mentioned:
-        flag("judge_positive_no_answer", "Verifier rewarded a response without an exact reference answer", 5)
+    if verifier_policy != "terminal":
+        if verifier_reached and reward <= 0 and ground_truth_mentioned:
+            flag("judge_negative_has_answer", "Verifier rejected a response containing an exact reference answer", 5)
+        if verifier_reached and reward > 0 and not ground_truth_mentioned:
+            flag("judge_positive_no_answer", "Verifier rewarded a response without an exact reference answer", 5)
+    if verifier_policy == "terminal":
+        if verifier_reached and reward <= 0:
+            flag("stopped_wrong", "Stopped cleanly but the environment verifier scored 0 (genuine failure)", 0)
+        if unjudged_reason == "token_budget":
+            flag("truncated", "Ran out of token budget before finishing the task", 0)
+        # Failure patterns specific to sandboxed terminal rollouts, mined from
+        # the concatenated env tool output. Escaped quotes inside JSON strings
+        # keep the raw-byte key scans from matching text embedded in outputs.
+        tool_output_blob = str(extract_json_value(line, "tool_output", "") or "")
+        bash_timeouts = tool_output_blob.count("Command timed out after")
+        if bash_timeouts:
+            flag("bash_timeout", f"{bash_timeouts} command(s) hit the bash timeout", 0)
+        exit_codes = TOOL_EXIT_CODE.findall(tool_output_blob)
+        failed_commands = sum(1 for code in exit_codes if code != "0")
+        if len(exit_codes) >= 3 and failed_commands * 2 > len(exit_codes):
+            flag(
+                "mostly_failing_commands",
+                f"{failed_commands}/{len(exit_codes)} commands exited nonzero",
+                2,
+            )
+        env_done = extract_json_value(line, "done")
+        if env_done is False:
+            flag("env_not_done", "Environment cut the episode off (max env steps or reset)", 0)
+        if verifier_reached and reward <= 0 and num_calls <= 2:
+            flag("gave_up_early", f"Gave up after only {num_calls} tool call(s) with no reward", 3)
+        chunks = [chunk.strip() for chunk in tool_output_blob.split("(exit_code=") if len(chunk.strip()) > 20]
+        longest_repeat = 1
+        current_repeat = 1
+        for previous, current in zip(chunks, chunks[1:]):
+            current_repeat = current_repeat + 1 if previous == current else 1
+            longest_repeat = max(longest_repeat, current_repeat)
+        if longest_repeat >= 3:
+            flag("repetitive_commands", f"Same command output repeated {longest_repeat}x in a row", 2)
+        tool_error_blob = str(extract_json_value(line, "tool_error", "") or "")
+        if "reset" in tool_error_blob.casefold():
+            flag("reset_failure", "Sandbox reset failure (zero reward is infra, not the model)", 3)
+        slowest = max(
+            (item.get("runtime", 0.0) for item in tool_stats if isinstance(item, dict)),
+            default=0.0,
+        )
+        if slowest > 60.0:
+            flag("slow_commands", f"Slowest tool call took {slowest:.0f}s", 0)
     if suspicion_score == 0:
         categories.append("healthy_looking")
 
@@ -810,6 +870,8 @@ def summarize_line(
         "token_count": token_count,
         "prompt_token_count": json_array_length(line, "prompt_tokens"),
         "num_calls": num_calls,
+        "env_steps": extract_json_value(line, "step_count"),
+        "bash_timeouts": tool_output_blob.count("Command timed out after") if verifier_policy == "terminal" else 0,
         "successful_tool_calls": successful_tool_calls,
         "timeouts": timeouts,
         "tool_error_count": len([item for item in tool_errors.splitlines() if item.strip()]),

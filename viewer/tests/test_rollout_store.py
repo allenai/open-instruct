@@ -155,6 +155,127 @@ def record(
     return value
 
 
+def terminal_record(
+    step: int,
+    sample: int,
+    *,
+    reward: float,
+    finish_reason: str,
+    response_size: int = 8,
+    calls: int = 3,
+    tool_output: str = "(exit_code=0)ok",
+    tool_error: str = "",
+    done: bool = True,
+) -> dict:
+    """A swerl/terminal env shard row: dataset=passthrough, task-id ground truth, no terminal text."""
+    return {
+        "step": step,
+        "sample_idx": sample,
+        "prompt_idx": sample // 2,
+        "prompt_tokens": [1, 2, 3],
+        "response_tokens": list(range(response_size)),
+        "reward": reward,
+        "advantage": reward - 0.5,
+        "finish_reason": finish_reason,
+        "dataset": ["passthrough"],
+        "ground_truth": ["task_000123_abcd"],
+        "request_info": {
+            "num_calls": calls,
+            "timeouts": False,
+            "tool_errors": "",
+            "tool_call_stats": [{"tool_name": "bash", "success": True, "runtime": 0.1} for _ in range(calls)],
+            "rollout_state": {
+                "rewards": [0.0, reward],
+                "step_count": 2,
+                "done": done,
+                "tool_output": tool_output,
+                "tool_error": tool_error,
+            },
+        },
+        "logprobs": [-0.1] * response_size,
+    }
+
+
+class TerminalPolicyTest(unittest.TestCase):
+    """Env-verified terminal runs classify by reward + truncation, not by answer text."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.run = "swerl_experiment__42__123"
+        rows = [
+            terminal_record(0, 0, reward=1.0, finish_reason="stop"),
+            terminal_record(0, 1, reward=0.0, finish_reason="stop"),
+            terminal_record(0, 2, reward=0.0, finish_reason="length", response_size=64),
+            terminal_record(
+                0,
+                3,
+                reward=0.0,
+                finish_reason="stop",
+                calls=1,
+                done=False,
+                tool_error="podman reset failed",
+                tool_output=(
+                    "(exit_code=0)Command timed out after 120 seconds"
+                    + "(exit_code=1)same failing output" * 3
+                    + "(exit_code=1)other"
+                ),
+            ),
+        ]
+        with (self.root / f"{self.run}_rollouts_000000.jsonl").open("w") as handle:
+            for row in rows:
+                handle.write(json.dumps(row) + "\n")
+        self.store = RolloutStore(self.root, response_limit=64)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def query_records(self) -> list[dict]:
+        return self.store.query(run=self.run, step=0, page_size=10, category="all")["records"]
+
+    def test_reward_and_truncation_drive_outcomes(self) -> None:
+        by_sample = {record["sample_idx"]: record for record in self.query_records()}
+        self.assertEqual(by_sample[0]["outcome"], "judged_correct")
+        self.assertEqual(by_sample[1]["outcome"], "judged_incorrect")
+        self.assertIn("stopped_wrong", by_sample[1]["categories"])
+        self.assertEqual(by_sample[2]["outcome"], "incomplete")
+        self.assertEqual(by_sample[2]["incomplete_reason"], "token_budget")
+        self.assertIn("truncated", by_sample[2]["categories"])
+        for record in by_sample.values():
+            self.assertEqual(record["verifier_policy"], "terminal")
+
+    def test_text_screens_do_not_fire_without_terminal_text(self) -> None:
+        for record in self.query_records():
+            self.assertNotIn("no_final_answer", record["categories"])
+            self.assertNotIn("judge_positive_no_answer", record["categories"])
+            self.assertNotIn("judge_negative_has_answer", record["categories"])
+            self.assertNotIn("gibberish", record["categories"])
+
+    def test_env_steps_are_exposed(self) -> None:
+        self.assertEqual({record["env_steps"] for record in self.query_records()}, {2})
+
+    def test_terminal_failure_patterns_are_flagged(self) -> None:
+        by_sample = {record["sample_idx"]: record for record in self.query_records()}
+        sick = by_sample[3]
+        self.assertIn("bash_timeout", sick["categories"])
+        self.assertEqual(sick["bash_timeouts"], 1)
+        self.assertIn("mostly_failing_commands", sick["categories"])
+        self.assertIn("env_not_done", sick["categories"])
+        self.assertIn("gave_up_early", sick["categories"])
+        self.assertIn("repetitive_commands", sick["categories"])
+        self.assertIn("reset_failure", sick["categories"])
+        healthy = by_sample[0]
+        for category in (
+            "bash_timeout",
+            "mostly_failing_commands",
+            "env_not_done",
+            "gave_up_early",
+            "repetitive_commands",
+            "reset_failure",
+        ):
+            self.assertNotIn(category, healthy["categories"])
+
+
 class RolloutStoreTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

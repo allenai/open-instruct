@@ -184,6 +184,7 @@ class BestEvaluation:
     total: int
     checkpoint: CheckpointReference | None = None
     inference_artifact: InferenceArtifact | None = None
+    beaker_experiment: str | None = None
 
     @property
     def id(self) -> str:
@@ -204,6 +205,8 @@ class BestEvaluation:
             "score": self.score,
             "checkpoint": self.checkpoint.public() if self.checkpoint else None,
             "inference_artifact": (self.inference_artifact.public(repo_root) if self.inference_artifact else None),
+            "beaker_experiment": self.beaker_experiment,
+            "beaker_url": f"https://beaker.org/ex/{self.beaker_experiment}" if self.beaker_experiment else None,
         }
 
 
@@ -554,6 +557,10 @@ class TrainingRegistry:
         inference_artifact = self._parse_inference_artifact(
             row.get("inference_artifact"), f"{context}.inference_artifact"
         )
+        beaker_experiment = _string(row.get("beaker_experiment"), f"{context}.beaker_experiment", required=False)
+        if beaker_experiment:
+            # Accept a full URL in the registry but store the bare experiment id.
+            beaker_experiment = beaker_experiment.rstrip("/").rsplit("/", 1)[-1]
         return BestEvaluation(
             benchmark=_string(row.get("benchmark"), f"{context}.benchmark") or "",
             step=step,
@@ -561,6 +568,7 @@ class TrainingRegistry:
             total=total,
             checkpoint=checkpoint,
             inference_artifact=inference_artifact,
+            beaker_experiment=beaker_experiment or None,
         )
 
     def _parse_inference_artifact(self, value: Any, context: str) -> InferenceArtifact | None:

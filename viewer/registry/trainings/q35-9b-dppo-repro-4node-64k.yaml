@@ -79,7 +79,7 @@ artifacts:
     step: 120
     correct: 102
     total: 445
-    note: "https://beaker.org/ex/01KXH18R73AXTC7NHDCQ3Q94T8"
+    beaker_experiment: 01KXH18R73AXTC7NHDCQ3Q94T8
     checkpoint:
       step: 120
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_120
@@ -87,7 +87,7 @@ artifacts:
     step: 140
     correct: 107
     total: 445
-    note: "https://beaker.org/ex/01KXH18X19ZD9B36KE1NNDTWVS"
+    beaker_experiment: 01KXH18X19ZD9B36KE1NNDTWVS
     checkpoint:
       step: 140
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_140
@@ -95,7 +95,7 @@ artifacts:
     step: 160
     correct: 110
     total: 445
-    note: "https://beaker.org/ex/01KXKWB75GHZ8JFW0Q81D8QBEN"
+    beaker_experiment: 01KXKWB75GHZ8JFW0Q81D8QBEN
     checkpoint:
       step: 160
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784004270_checkpoints/step_160
@@ -103,7 +103,7 @@ artifacts:
     step: 180
     correct: 115
     total: 445
-    note: "https://beaker.org/ex/01KXKWBCD2HDJKQ6VW38J3HW8C"
+    beaker_experiment: 01KXKWBCD2HDJKQ6VW38J3HW8C
     checkpoint:
       step: 180
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784004270_checkpoints/step_180
@@ -111,7 +111,7 @@ artifacts:
     step: 200
     correct: 109
     total: 445
-    note: "https://beaker.org/ex/01KXQGRG82KFAKC31BSDJ5ERCZ"
+    beaker_experiment: 01KXQGRG82KFAKC31BSDJ5ERCZ
     checkpoint:
       step: 200
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784036179_checkpoints/step_200
@@ -119,7 +119,7 @@ artifacts:
     step: 240
     correct: 111
     total: 445
-    note: "https://beaker.org/ex/01KXQGRNP4MFS79ETX4AXAF729"
+    beaker_experiment: 01KXQGRNP4MFS79ETX4AXAF729
     checkpoint:
       step: 240
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784087150_checkpoints/step_240
@@ -127,7 +127,7 @@ artifacts:
     step: 280
     correct: 112
     total: 445
-    note: "https://beaker.org/ex/01KXKWBH98RZGQMPDQ8GKQK1H8"
+    beaker_experiment: 01KXKWBH98RZGQMPDQ8GKQK1H8
     checkpoint:
       step: 280
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784103326_checkpoints/step_280
@@ -135,7 +135,7 @@ artifacts:
     step: 300
     correct: 121
     total: 445
-    note: "https://beaker.org/ex/01KXQGRTEXB5KY64JVNMW4CS3W"
+    beaker_experiment: 01KXQGRTEXB5KY64JVNMW4CS3W
     checkpoint:
       step: 300
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784142944_checkpoints/step_300
@@ -143,7 +143,7 @@ artifacts:
     step: 320
     correct: 112
     total: 445
-    note: "https://beaker.org/ex/01KXQGRYT7QEXR96XNXGW8YWR9"
+    beaker_experiment: 01KXQGRYT7QEXR96XNXGW8YWR9
     checkpoint:
       step: 320
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_320
@@ -151,7 +151,7 @@ artifacts:
     step: 340
     correct: 125
     total: 445
-    note: "https://beaker.org/ex/01KXQGS33XFS041681DM4VEBP0"
+    beaker_experiment: 01KXQGS33XFS041681DM4VEBP0
     checkpoint:
       step: 340
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_340
@@ -159,7 +159,7 @@ artifacts:
     step: 360
     correct: 134
     total: 445
-    note: "https://beaker.org/ex/01KXRY5WSTQ2EE5TWZEHMT6086"
+    beaker_experiment: 01KXRY5WSTQ2EE5TWZEHMT6086
     checkpoint:
       step: 360
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360
@@ -167,7 +167,7 @@ artifacts:
     step: 380
     correct: 109
     total: 445
-    note: "https://beaker.org/ex/01KY8C50BPWTPY4KGB04BMSMJH"
+    beaker_experiment: 01KY8C50BPWTPY4KGB04BMSMJH
     checkpoint:
       step: 380
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784695925_checkpoints/step_380
@@ -175,7 +175,7 @@ artifacts:
     step: 400
     correct: 101
     total: 445
-    note: "https://beaker.org/ex/01KY8C544JK88AKH9SS7S5TC3C"
+    beaker_experiment: 01KY8C544JK88AKH9SS7S5TC3C
     checkpoint:
       step: 400
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_400
@@ -183,7 +183,7 @@ artifacts:
     step: 420
     correct: 101
     total: 445
-    note: "https://beaker.org/ex/01KY8C57R5EWBAC83B5XYRPCHV"
+    beaker_experiment: 01KY8C57R5EWBAC83B5XYRPCHV
     checkpoint:
       step: 420
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_420
@@ -191,7 +191,7 @@ artifacts:
     step: 440
     correct: 104
     total: 445
-    note: "https://beaker.org/ex/01KY8C5BAZJZJ5HFDJY4QFBZ5T"
+    beaker_experiment: 01KY8C5BAZJZJ5HFDJY4QFBZ5T
     checkpoint:
       step: 440
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_440
@@ -199,7 +199,7 @@ artifacts:
     step: 460
     correct: 112
     total: 445
-    note: "https://beaker.org/ex/01KY9PYMHEFZWPCAJWA06AYTNX"
+    beaker_experiment: 01KY9PYMHEFZWPCAJWA06AYTNX
     checkpoint:
       step: 460
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283_checkpoints/step_460
@@ -207,7 +207,7 @@ artifacts:
     step: 480
     correct: 103
     total: 445
-    note: "https://beaker.org/ex/01KYAKV2GC1FAKFTS3668B8X3Q"
+    beaker_experiment: 01KYAKV2GC1FAKFTS3668B8X3Q
     checkpoint:
       step: 480
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283_checkpoints/step_480
@@ -215,7 +215,7 @@ artifacts:
     step: 500
     correct: 102
     total: 445
-    note: "https://beaker.org/ex/01KYAQ5V7E6Z5G654TNV6EVMPH"
+    beaker_experiment: 01KYAQ5V7E6Z5G654TNV6EVMPH
     checkpoint:
       step: 500
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924_checkpoints/step_500
@@ -223,7 +223,7 @@ artifacts:
     step: 120
     correct: 262
     total: 500
-    note: "https://beaker.org/ex/01KYJQ0R6MED63VZ1Y51PNQ1C3"
+    beaker_experiment: 01KYJQ0R6MED63VZ1Y51PNQ1C3
     checkpoint:
       step: 120
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_120
@@ -231,7 +231,7 @@ artifacts:
     step: 240
     correct: 287
     total: 500
-    note: "https://beaker.org/ex/01KYJQ0VQDQ96ZFB9TWX1SD349"
+    beaker_experiment: 01KYJQ0VQDQ96ZFB9TWX1SD349
     checkpoint:
       step: 240
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784087150_checkpoints/step_240
@@ -239,7 +239,7 @@ artifacts:
     step: 360
     correct: 291
     total: 500
-    note: "https://beaker.org/ex/01KYJQ0Z9RK57V56TG766ZKWT3"
+    beaker_experiment: 01KYJQ0Z9RK57V56TG766ZKWT3
     checkpoint:
       step: 360
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360
@@ -247,7 +247,7 @@ artifacts:
     step: 440
     correct: 300
     total: 500
-    note: "https://beaker.org/ex/01KYJQ12ZEMRM09ZYGMJD72HVD"
+    beaker_experiment: 01KYJQ12ZEMRM09ZYGMJD72HVD
     checkpoint:
       step: 440
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_440
@@ -255,7 +255,7 @@ artifacts:
     step: 500
     correct: 258
     total: 500
-    note: "https://beaker.org/ex/01KYJQ16E3DNZYPNF8KQZ69Z43"
+    beaker_experiment: 01KYJQ16E3DNZYPNF8KQZ69Z43
     checkpoint:
       step: 500
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924_checkpoints/step_500

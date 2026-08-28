@@ -321,7 +321,7 @@ function evaluationColumn(title, description, evaluations, trainingId) {
     return `<${tag} class="full-evaluation-row${inspectable ? " inspectable" : ""}"${href}>
       <div class="full-evaluation-step"><span>Step</span><strong>${formatNumber(item.step)}</strong></div>
       <div class="full-evaluation-score"><strong>${formatPercent(item.score)}</strong><span>${formatNumber(item.correct)}/${formatNumber(item.total)} correct</span></div>
-      <div class="full-evaluation-source"><code title="${escapeHtml(item.benchmark)}">${escapeHtml(item.benchmark)}</code><span>${isBest ? '<b class="evaluation-best">Best</b>' : ""}${item.checkpoint ? `<i class="status-dot ${checkpoint.available ? "ready" : "missing"}" title="Checkpoint ${checkpoint.available ? "available" : "missing"}"></i>` : ""}${inspectable ? '<b class="evaluation-inspect">Inspect →</b>' : '<b class="evaluation-aggregate">Aggregate only</b>'}</span></div>
+      <div class="full-evaluation-source"><code title="${escapeHtml(item.benchmark)}">${escapeHtml(item.benchmark)}</code><span>${isBest ? '<b class="evaluation-best">Best</b>' : ""}${item.checkpoint ? `<i class="status-dot ${checkpoint.available ? "ready" : "missing"}" title="Checkpoint ${checkpoint.available ? "available" : "missing"}"></i>` : ""}${inspectable ? '<b class="evaluation-inspect">Inspect →</b>' : '<b class="evaluation-aggregate">Aggregate only</b>'}${item.beaker_url ? `<a class="evaluation-beaker" href="${escapeHtml(item.beaker_url)}" target="_blank" rel="noopener" title="Open the eval experiment on Beaker" onclick="event.stopPropagation()">Beaker ↗</a>` : ""}</span></div>
     </${tag}>`;
   }).join("");
   return `<article class="full-evaluation-column">
@@ -915,14 +915,14 @@ function renderTrainingCharts(training, payload = null) {
       unit: "count",
     }),
     chartMarkup({
-      title: "Search failure rate",
+      title: "Primary tool failure rate",
       subtitle: series.search_failure_rate?.metric || "tools/search/failure_rate",
       points: series.search_failure_rate?.points,
       color: "#e11d48",
       unit: "rate",
     }),
     chartMarkup({
-      title: "Visit failure rate",
+      title: "Aggregate tool failure rate",
       subtitle: series.visit_failure_rate?.metric || "tools/visit/failure_rate",
       points: series.visit_failure_rate?.points,
       color: "#c026d3",

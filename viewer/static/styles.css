@@ -648,3 +648,16 @@ select:focus, input:focus { border-color: var(--acid); box-shadow: 0 0 0 3px rgb
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+.evaluation-beaker {
+  margin-left: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #2563eb;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.evaluation-beaker:hover {
+  text-decoration: underline;
+}
