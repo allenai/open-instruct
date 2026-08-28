@@ -101,62 +101,23 @@ def split_batch_dpo(batch: dict[str, Any], num_microbatch_instances: int) -> lis
     ]
 
 
-class DPOTrainModule(TransformerTrainModule):
-    """Training module for DPO with OLMo-core's Trainer.
+class DPOObjectiveMixin:
+    """The DPO objective, independent of which olmo-core train module runs it.
 
-    Subclasses TransformerTrainModule to inherit:
-    - optim_step with proper gradient clipping and scheduler support
-    - zero_grads
-    - eval_batch and eval_batch_spec
-    - num_flops_per_token
-    - state_dict/load_state_dict via dist_cp_sd
-    - _train_microbatch_context for FSDP/DDP sync control
+    Two train modules need this: ``DPOTrainModule`` on ``TransformerTrainModule`` for
+    dense models, and ``MoEDDPDPOTrainModule`` on ``OLMoDDPTrainModule`` for MoE models
+    that refuse FSDP2. They differ only in how a batch is stepped (``model`` vs
+    ``model_parts``, gradient reduction, dry-run handling), so the loss, the metrics and
+    the reduction live here and exist exactly once. If they were copied instead, the two
+    could drift and a discrepancy would look like an architecture effect.
+
+    Requires from the host class: ``model``, ``trainer``, ``scheduler``, ``optim``,
+    ``record_metric`` and ``_train_microbatch_context``.
     """
 
-    def __init__(
-        self,
-        model: Transformer,
-        optim: OptimConfig,
-        sample_microbatch_size: int,
-        max_sequence_length: int,
-        dpo_config: dpo_utils.DPOExperimentConfig,
-        attn_implementation: AttentionBackendName,
-        dp_config: transformer_config.TransformerDataParallelConfig | None = None,
-        tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
-        cp_config: transformer_config.TransformerContextParallelConfig | None = None,
-        ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
-        compile_model: bool = True,
-        max_grad_norm: float | None = None,
-        scheduler: Scheduler | None = None,
-        device: torch.device | None = None,
-        state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
-        state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
+    def _init_dpo_objective(
+        self, dpo_config: dpo_utils.DPOExperimentConfig, sample_microbatch_size: int, device: torch.device | None
     ) -> None:
-        if dpo_config.packing:
-            assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
-                f"DPOTrainModule with packing requires a flash attention backend for intra-document "
-                f"masking via doc_lens/max_doc_lens; got {attn_implementation}."
-            )
-        # TODO(finbarrtimbers): Remove this hack once Transformer supports configuring the LM head.
-        model.lm_head.__class__ = DPOLMHead
-        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
-        super().__init__(
-            model=model,
-            optim=optim,
-            rank_microbatch_size=rank_microbatch_size_tokens,
-            max_sequence_length=max_sequence_length,
-            dp_config=dp_config,
-            tp_config=tp_config,
-            cp_config=cp_config,
-            ac_config=ac_config,
-            compile_model=compile_model,
-            max_grad_norm=max_grad_norm,
-            scheduler=scheduler,
-            device=device,
-            state_dict_save_opts=state_dict_save_opts,
-            state_dict_load_opts=state_dict_load_opts,
-        )
-
         self.sample_microbatch_size = sample_microbatch_size
         self.dpo_config = dpo_config
         self.reference_cache: model_utils.TensorCache | None = None
@@ -175,6 +136,14 @@ class DPOTrainModule(TransformerTrainModule):
         self._forward_kwargs: dict[str, Any] = {}
         if dpo_config.packing:
             self._forward_kwargs["packing"] = True
+
+    @staticmethod
+    def _assert_packing_backend(dpo_config: dpo_utils.DPOExperimentConfig, attn_implementation: AttentionBackendName):
+        if dpo_config.packing:
+            assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
+                f"DPO with packing requires a flash attention backend for intra-document "
+                f"masking via doc_lens/max_doc_lens; got {attn_implementation}."
+            )
 
     def pre_train(self):
         pass
@@ -221,9 +190,8 @@ class DPOTrainModule(TransformerTrainModule):
 
         return loss, step_metrics
 
-    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
-        self.model.train()
-
+    def _accumulate_dpo_microbatches(self, batch: dict[str, Any]) -> tuple[int, torch.device]:
+        """Run forward/backward over the batch's micro-batches, accumulating token-weighted metrics."""
         micro_batches = split_batch_dpo(batch, self.sample_microbatch_size)
         num_micro_batches = len(micro_batches)
         device = batch["chosen_input_ids"].device
@@ -242,79 +210,137 @@ class DPOTrainModule(TransformerTrainModule):
                     self._metrics[k] += v.detach() * micro_tokens
                 (loss * weight).backward()
 
+        return total_tokens, device
+
+    def _record_dpo_metrics(self, batch: dict[str, Any], total_tokens: int, device: torch.device) -> None:
+        local_padded_tokens = padding_free_collator.get_num_padded_tokens(batch)
+        local_num_sequences = padding_free_collator.get_num_sequences(batch)
+
+        token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
+        assert token_count is not None
+        self.record_metric("train/token_count", token_count, reduce_type=None)
+
+        weighted_sums = {
+            "train_loss": self._metrics["loss"],
+            "logps/chosen": self._metrics["chosen_logps"],
+            "logps/rejected": self._metrics["rejected_logps"],
+        }
+        if self.dpo_config.loss_type.computes_reward_metrics:
+            chosen_rewards = self._metrics["chosen_rewards"]
+            rejected_rewards = self._metrics["rejected_rewards"]
+            weighted_sums["rewards/chosen"] = chosen_rewards
+            weighted_sums["rewards/rejected"] = rejected_rewards
+            weighted_sums["rewards/average"] = (chosen_rewards + rejected_rewards) / 2
+            weighted_sums["rewards/accuracy"] = self._metrics["accuracy"]
+            weighted_sums["rewards/margin"] = chosen_rewards - rejected_rewards
+        if "aux_loss" in self._metrics:
+            weighted_sums["aux_loss"] = self._metrics["aux_loss"]
+
+        # DPO token-weighted metrics are ratios sum_ranks(sum_mb(metric*tokens)) / sum_ranks(tokens).
+        # Stack the shared denominators (real and padded token counts) with the numerators and
+        # reduce them in one all-reduce over the DP group, then divide. TP/CP duplicate ranks share
+        # a batch, so reducing over dp_process_group (not the whole world) avoids double-counting.
+        metric_names = list(weighted_sums.keys())
+        local_sums = torch.stack(
+            [
+                torch.tensor(float(total_tokens), device=device),
+                torch.tensor(float(local_padded_tokens), device=device),
+                *[weighted_sums[name] for name in metric_names],
+            ]
+        )
+        dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+        global_tokens, global_padded = local_sums[0], local_sums[1]
+        for i, name in enumerate(metric_names):
+            self.record_metric(name, (local_sums[i + 2] / global_tokens).item(), reduce_type=None)
+        self.record_metric("train/padding_fraction", (1.0 - global_tokens / global_padded).item(), reduce_type=None)
+
+        local_num_sequences_f = local_num_sequences.to(device=device, dtype=torch.float32)
+        # Use mean rather than sum: the reduction runs over the whole world, but all non-DP
+        # ranks (TP, CP) in a DP shard process the same batch. mean divides the world-group sum
+        # by world_size, yielding the average per-rank sequence count without double-counting
+        # the duplicated ranks.
+        self.record_metric("train/sequences_per_rank", local_num_sequences_f, reduce_type=ReduceType.mean)
+        # Global per-step total across DP shards. ReduceType.sum reduces over the whole world, so
+        # pre-divide by the TP/CP duplication factor (world_size / dp_world_size) to count each
+        # DP shard's sequences once.
+        dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
+        sequence_dup_factor = dist.get_world_size() // dp_world_size
+        self.record_metric(
+            "train/global_sequences_per_step", local_num_sequences_f / sequence_dup_factor, reduce_type=ReduceType.sum
+        )
+
+        self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
+        assert self.trainer.steps_per_epoch is not None
+        self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
+        if self.scheduler is not None and self.trainer.max_steps is not None:
+            lr = self.scheduler.get_lr(
+                self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
+                self.trainer.global_step,
+                self.trainer.max_steps,
+            )
+            self.record_metric("learning_rate", float(lr), reduce_type=None)
+
+
+class DPOTrainModule(DPOObjectiveMixin, TransformerTrainModule):
+    """Training module for DPO with OLMo-core's Trainer.
+
+    Subclasses TransformerTrainModule to inherit:
+    - optim_step with proper gradient clipping and scheduler support
+    - zero_grads
+    - eval_batch and eval_batch_spec
+    - num_flops_per_token
+    - state_dict/load_state_dict via dist_cp_sd
+    - _train_microbatch_context for FSDP/DDP sync control
+    """
+
+    def __init__(
+        self,
+        model: Transformer,
+        optim: OptimConfig,
+        sample_microbatch_size: int,
+        max_sequence_length: int,
+        dpo_config: dpo_utils.DPOExperimentConfig,
+        attn_implementation: AttentionBackendName,
+        dp_config: transformer_config.TransformerDataParallelConfig | None = None,
+        tp_config: transformer_config.TransformerTensorParallelConfig | None = None,
+        cp_config: transformer_config.TransformerContextParallelConfig | None = None,
+        ac_config: transformer_config.TransformerActivationCheckpointingConfig | None = None,
+        compile_model: bool = True,
+        max_grad_norm: float | None = None,
+        scheduler: Scheduler | None = None,
+        device: torch.device | None = None,
+        state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
+        state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
+    ) -> None:
+        self._assert_packing_backend(dpo_config, attn_implementation)
+        # TODO(finbarrtimbers): Remove this hack once Transformer supports configuring the LM head.
+        model.lm_head.__class__ = DPOLMHead
+        rank_microbatch_size_tokens = sample_microbatch_size * max_sequence_length * 2
+        super().__init__(
+            model=model,
+            optim=optim,
+            rank_microbatch_size=rank_microbatch_size_tokens,
+            max_sequence_length=max_sequence_length,
+            dp_config=dp_config,
+            tp_config=tp_config,
+            cp_config=cp_config,
+            ac_config=ac_config,
+            compile_model=compile_model,
+            max_grad_norm=max_grad_norm,
+            scheduler=scheduler,
+            device=device,
+            state_dict_save_opts=state_dict_save_opts,
+            state_dict_load_opts=state_dict_load_opts,
+        )
+
+        self._init_dpo_objective(dpo_config, sample_microbatch_size, device)
+
+    def train_batch(self, batch: dict[str, Any], dry_run: bool = False) -> None:
+        self.model.train()
+        total_tokens, device = self._accumulate_dpo_microbatches(batch)
         self.model.post_batch(dry_run=dry_run)
-
         if not dry_run:
-            local_padded_tokens = padding_free_collator.get_num_padded_tokens(batch)
-            local_num_sequences = padding_free_collator.get_num_sequences(batch)
-
-            token_count = self.trainer.data_loader.global_num_tokens_in_batch(batch)
-            assert token_count is not None
-            self.record_metric("train/token_count", token_count, reduce_type=None)
-
-            weighted_sums = {
-                "train_loss": self._metrics["loss"],
-                "logps/chosen": self._metrics["chosen_logps"],
-                "logps/rejected": self._metrics["rejected_logps"],
-            }
-            if self.dpo_config.loss_type.computes_reward_metrics:
-                chosen_rewards = self._metrics["chosen_rewards"]
-                rejected_rewards = self._metrics["rejected_rewards"]
-                weighted_sums["rewards/chosen"] = chosen_rewards
-                weighted_sums["rewards/rejected"] = rejected_rewards
-                weighted_sums["rewards/average"] = (chosen_rewards + rejected_rewards) / 2
-                weighted_sums["rewards/accuracy"] = self._metrics["accuracy"]
-                weighted_sums["rewards/margin"] = chosen_rewards - rejected_rewards
-            if "aux_loss" in self._metrics:
-                weighted_sums["aux_loss"] = self._metrics["aux_loss"]
-
-            # DPO token-weighted metrics are ratios sum_ranks(sum_mb(metric*tokens)) / sum_ranks(tokens).
-            # Stack the shared denominators (real and padded token counts) with the numerators and
-            # reduce them in one all-reduce over the DP group, then divide. TP/CP duplicate ranks share
-            # a batch, so reducing over dp_process_group (not the whole world) avoids double-counting.
-            metric_names = list(weighted_sums.keys())
-            local_sums = torch.stack(
-                [
-                    torch.tensor(float(total_tokens), device=device),
-                    torch.tensor(float(local_padded_tokens), device=device),
-                    *[weighted_sums[name] for name in metric_names],
-                ]
-            )
-            dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
-            global_tokens, global_padded = local_sums[0], local_sums[1]
-            for i, name in enumerate(metric_names):
-                self.record_metric(name, (local_sums[i + 2] / global_tokens).item(), reduce_type=None)
-            self.record_metric(
-                "train/padding_fraction", (1.0 - global_tokens / global_padded).item(), reduce_type=None
-            )
-
-            local_num_sequences_f = local_num_sequences.to(device=device, dtype=torch.float32)
-            # Use mean rather than sum: the reduction runs over the whole world, but all non-DP
-            # ranks (TP, CP) in a DP shard process the same batch. mean divides the world-group sum
-            # by world_size, yielding the average per-rank sequence count without double-counting
-            # the duplicated ranks.
-            self.record_metric("train/sequences_per_rank", local_num_sequences_f, reduce_type=ReduceType.mean)
-            # Global per-step total across DP shards. ReduceType.sum reduces over the whole world, so
-            # pre-divide by the TP/CP duplication factor (world_size / dp_world_size) to count each
-            # DP shard's sequences once.
-            dp_world_size = dist.get_world_size(self.trainer.dp_process_group) if self.trainer.dp_process_group else 1
-            sequence_dup_factor = dist.get_world_size() // dp_world_size
-            self.record_metric(
-                "train/global_sequences_per_step",
-                local_num_sequences_f / sequence_dup_factor,
-                reduce_type=ReduceType.sum,
-            )
-
-            self.record_metric("training_step", float(self.trainer.global_step), reduce_type=None)
-            assert self.trainer.steps_per_epoch is not None
-            self.record_metric("epoch", self.trainer.global_step / self.trainer.steps_per_epoch, reduce_type=None)
-            if self.scheduler is not None and self.trainer.max_steps is not None:
-                lr = self.scheduler.get_lr(
-                    self.optim.param_groups[0].get("initial_lr", self.optim.param_groups[0]["lr"]),
-                    self.trainer.global_step,
-                    self.trainer.max_steps,
-                )
-                self.record_metric("learning_rate", float(lr), reduce_type=None)
+            self._record_dpo_metrics(batch, total_tokens, device)
 
 
 class GRPOTrainModule(TransformerTrainModule):
