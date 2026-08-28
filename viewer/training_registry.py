@@ -110,6 +110,35 @@ class LaunchReference:
     wandb: WandbReference | None
     rollouts: tuple[RolloutBinding, ...]
     note: str | None = None
+    checkpoint_state_dir: Path | None = None
+
+    def _checkpoint_state_public(self) -> dict[str, Any] | None:
+        """Live status of the DeepSpeed resume-state directory, if registered.
+
+        These are the opaque <timestamp>_<pid> directories under
+        deletable_checkpoint_states; the `latest` file names the resumable
+        global step and each global_step<N>/ subdirectory is a resume point.
+        """
+        if self.checkpoint_state_dir is None:
+            return None
+        directory = self.checkpoint_state_dir
+        exists = directory.is_dir()
+        latest = None
+        steps: list[int] = []
+        if exists:
+            try:
+                latest = (directory / "latest").read_text(encoding="utf-8").strip() or None
+            except OSError:
+                latest = None
+            try:
+                steps = sorted(
+                    int(entry.name[len("global_step") :])
+                    for entry in directory.iterdir()
+                    if entry.name.startswith("global_step") and entry.name[len("global_step") :].isdigit()
+                )
+            except OSError:
+                steps = []
+        return {"path": str(directory), "exists": exists, "latest": latest, "resumable_steps": steps}
 
     def public(self, repo_root: Path) -> dict[str, Any]:
         script_path = _resolve_path(repo_root, self.script)
@@ -132,6 +161,7 @@ class LaunchReference:
             "wandb": self.wandb.public() if self.wandb else None,
             "rollouts": [rollout.public(repo_root) for rollout in self.rollouts],
             "note": self.note,
+            "checkpoint_state": self._checkpoint_state_public(),
         }
 
 
@@ -224,6 +254,7 @@ class TrainingDefinition:
     evaluations: tuple[BestEvaluation, ...]
     latest_checkpoint: CheckpointReference | None
     note: str | None = None
+    checkpoints: tuple[CheckpointReference, ...] = ()
 
     @property
     def rollout_attempts(self) -> tuple[str, ...]:
@@ -263,6 +294,7 @@ class TrainingDefinition:
             "best_evaluation": self.best_evaluation.public(repo_root) if self.best_evaluation else None,
             "evaluations": [evaluation.public(repo_root) for evaluation in self.evaluations],
             "latest_checkpoint": self.latest_checkpoint.public() if self.latest_checkpoint else None,
+            "checkpoints": [checkpoint.public() for checkpoint in self.checkpoints],
             "note": self.note,
         }
 
@@ -419,6 +451,18 @@ class TrainingRegistry:
         if best is None and evaluations:
             best = max(evaluations, key=lambda item: (item.score, item.step))
         latest = self._parse_checkpoint(artifacts.get("latest_checkpoint"), f"{training_id}.latest_checkpoint")
+        checkpoint_rows = artifacts.get("checkpoints") or []
+        if not isinstance(checkpoint_rows, list):
+            raise TrainingRegistryError(f"{training_id}.checkpoints must be a list")
+        checkpoints = tuple(
+            sorted(
+                (
+                    self._parse_checkpoint(item, f"{training_id}.checkpoints[{index}]")
+                    for index, item in enumerate(checkpoint_rows)
+                ),
+                key=lambda checkpoint: checkpoint.step,
+            )
+        )
         furthest = artifacts.get("furthest_step")
         if furthest is not None and (not isinstance(furthest, int) or furthest < 0):
             raise TrainingRegistryError(f"{training_id}.furthest_step must be a non-negative integer")
@@ -436,6 +480,7 @@ class TrainingRegistry:
             evaluations=evaluations,
             latest_checkpoint=latest,
             note=_string(row.get("note"), f"{training_id}.note", required=False),
+            checkpoints=checkpoints,
         )
 
     def _parse_wandb(
@@ -528,6 +573,12 @@ class TrainingRegistry:
                 )
             ),
             rollouts=tuple(rollouts),
+            checkpoint_state_dir=_resolve_path(
+                self.repo_root,
+                _string(
+                    row.get("checkpoint_state_dir"), f"{training_id}.{launch_id}.checkpoint_state_dir", required=False
+                ),
+            ),
             note=_string(row.get("note"), f"{training_id}.{launch_id}.note", required=False),
         )
 

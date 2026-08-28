@@ -24,8 +24,46 @@ launches:
     - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780890175
     - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780960713
     - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1780501031_405439
 artifacts:
   furthest_step: 368
   latest_checkpoint:
     step: 360
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033_checkpoints/step_360
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780501305_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780501305_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780526080_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780526080_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780526080_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780526080_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780526080_checkpoints/step_140
+  - step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780890175_checkpoints/step_160
+  - step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780890175_checkpoints/step_180
+  - step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780960713_checkpoints/step_200
+  - step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780960713_checkpoints/step_220
+  - step: 240
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780960713_checkpoints/step_240
+  - step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780960713_checkpoints/step_260
+  - step: 280
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033_checkpoints/step_280
+  - step: 300
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033_checkpoints/step_300
+  - step: 320
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033_checkpoints/step_320
+  - step: 340
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033_checkpoints/step_340
+  - step: 360
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033_checkpoints/step_360

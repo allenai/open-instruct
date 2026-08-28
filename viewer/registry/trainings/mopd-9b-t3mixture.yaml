@@ -21,6 +21,7 @@ launches:
     - swerl_mopd_t3mixture_9b_4node_64k__42__1786762109
     - swerl_mopd_t3mixture_9b_4node_64k__42__1786766818
     - swerl_mopd_t3mixture_9b_4node_64k__42__1786858931
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786761738_453633
 - id: resume-1
   relation: resume
   beaker_experiment: 01M04PEVCERMH11SDKXP5X0GAZ
@@ -31,6 +32,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_mopd_t3mixture_9b_4node_64k__42__1786873818
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786761738_453633
 - id: resume-2
   relation: resume
   beaker_experiment: 01M06NNWXAPYRQQ63Z742V2HFW
@@ -41,8 +43,26 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_mopd_t3mixture_9b_4node_64k__42__1786942906
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786761738_453633
 artifacts:
   furthest_step: 160
   latest_checkpoint:
     step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786942906_checkpoints/step_160
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786766818_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786766818_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786766818_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786766818_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786766818_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786873818_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786942906_checkpoints/step_140
+  - step: 160
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786942906_checkpoints/step_160

@@ -23,8 +23,28 @@ launches:
     - swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783707410
     - swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783718619
     - swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783652100_590468
 artifacts:
   furthest_step: 187
   latest_checkpoint:
     step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_180
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783652323_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783718619_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783718619_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_140
+  - step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_160
+  - step: 180
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_180

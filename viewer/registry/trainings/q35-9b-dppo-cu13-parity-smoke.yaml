@@ -20,6 +20,7 @@ launches:
     attempts:
     - swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1784793466
     - swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1784809635
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1784793054_576971
 - id: resume-1
   relation: resume
   beaker_experiment: 01KYKPCTPGMRQTMAVHYBV05VNC
@@ -30,8 +31,12 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1785221672
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1785219934_473478
 artifacts:
   furthest_step: 25
   latest_checkpoint:
     step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1785221672_checkpoints/step_20
+  checkpoints:
+  - step: 20
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1785221672_checkpoints/step_20

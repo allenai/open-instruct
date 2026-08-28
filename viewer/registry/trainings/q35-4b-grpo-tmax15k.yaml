@@ -23,8 +23,18 @@ launches:
     - swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780465737
     - swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780490558
     - swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780499488
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1780454581_13232
 artifacts:
   furthest_step: 90
   latest_checkpoint:
     step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780490558_checkpoints/step_80
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780454848_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780465737_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780465737_checkpoints/step_60
+  - step: 80
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780490558_checkpoints/step_80

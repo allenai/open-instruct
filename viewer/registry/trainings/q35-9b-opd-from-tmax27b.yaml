@@ -22,6 +22,7 @@ launches:
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786753958
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786767543
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786769457
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786749760_218381
 - id: resume-1
   relation: resume
   script: scripts/general_agent/terminal/rl/opd/qwen35_9b_opd_from_tmax27b_4node_64k.sh
@@ -35,6 +36,7 @@ launches:
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786785794
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786820232
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786845919
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786749760_218381
 - id: resume-2
   relation: resume
   script: scripts/general_agent/terminal/rl/opd/qwen35_9b_opd_from_tmax27b_4node_64k.sh
@@ -48,6 +50,7 @@ launches:
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786864221
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786872195
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786945175
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786749760_218381
 - id: resume-3
   relation: resume
   script: scripts/general_agent/terminal/rl/opd/qwen35_9b_opd_from_tmax27b_4node_64k.sh
@@ -59,6 +62,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1787050804
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786749760_218381
 artifacts:
   furthest_step: 260
   evaluations:
@@ -278,4 +282,31 @@ artifacts:
     checkpoint: *id001
   latest_checkpoint:
     step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1787050804_checkpoints/step_260
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786785794_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786785794_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786872195_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786872195_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786872195_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786872195_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786945175_checkpoints/step_140
+  - step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786945175_checkpoints/step_160
+  - step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1786945175_checkpoints/step_180
+  - step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1787050804_checkpoints/step_200
+  - step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1787050804_checkpoints/step_220
+  - step: 240
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1787050804_checkpoints/step_240
+  - step: 260
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_4node_64k__42__1787050804_checkpoints/step_260

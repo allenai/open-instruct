@@ -24,6 +24,7 @@ launches:
     - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786260866
     - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786269374
     - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786277517
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786094512_394571
 artifacts:
   furthest_step: 277
   latest_checkpoint:
@@ -84,3 +85,30 @@ artifacts:
     correct: 25
     total: 89
     checkpoint: *id001
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535_checkpoints/step_140
+  - step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535_checkpoints/step_160
+  - step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535_checkpoints/step_180
+  - step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535_checkpoints/step_200
+  - step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786206663_checkpoints/step_220
+  - step: 240
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786206663_checkpoints/step_240
+  - step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786206663_checkpoints/step_260

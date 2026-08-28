@@ -21,8 +21,42 @@ launches:
     attempts:
     - swerl_qwen35_9b_from_step280_beta002__42__1783806470
     - swerl_qwen35_9b_from_step280_beta002__42__1783896418
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783806245_599016
 artifacts:
   furthest_step: 325
   latest_checkpoint:
     step: 320
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783896418_checkpoints/step_320
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_140
+  - step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_160
+  - step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_180
+  - step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_200
+  - step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_220
+  - step: 240
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_240
+  - step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783806470_checkpoints/step_260
+  - step: 280
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783896418_checkpoints/step_280
+  - step: 300
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783896418_checkpoints/step_300
+  - step: 320
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783896418_checkpoints/step_320

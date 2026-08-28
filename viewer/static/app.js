@@ -548,6 +548,7 @@ function artifactSection(training) {
       training.latest_checkpoint?.path,
       { exists: training.latest_checkpoint?.complete ?? training.latest_checkpoint?.exists ?? false, url: training.latest_checkpoint?.path_url || training.latest_checkpoint?.url || training.latest_checkpoint?.link },
     ) || '<p class="metric-empty">No latest checkpoint recorded.</p>'}
+    ${(training.checkpoints || []).length ? `<div class="checkpoint-inventory"><p class="eyebrow">All retained checkpoints · ${training.checkpoints.length}</p><div class="checkpoint-chips">${training.checkpoints.map((checkpoint) => `<span class="checkpoint-chip ${checkpoint.complete ? "ready" : "missing"}" title="${escapeHtml(checkpoint.path)}${checkpoint.complete ? "" : " (missing or incomplete)"}">${formatNumber(checkpoint.step)}</span>`).join("")}</div></div>` : ""}
   </section>`;
 }
 
@@ -567,6 +568,11 @@ function launchCard(launch) {
   ].filter(Boolean).join("");
   const scriptPath = launch.script_path || launch.script || launch.historical_script;
   const scriptLink = launch.script_url || launch.path_url || launch.script_link;
+  const state = launch.checkpoint_state;
+  const stateLabel = state
+    ? `Checkpoint state · ${state.latest || "no latest"}${(state.resumable_steps || []).length ? ` · ${state.resumable_steps.length} resumable` : ""}`
+    : "";
+  const stateRow = state ? pathRow(stateLabel, state.path, { exists: state.exists }) : "";
   const rolloutRows = (launch.rollouts || []).map((rollout, index) => pathRow(
     `Rollouts${launch.rollouts.length > 1 ? ` ${index + 1}` : ""} · ${(rollout.present_attempts || []).length}/${(rollout.attempts || []).length} attempts present`,
     rollout.path,
@@ -579,6 +585,7 @@ function launchCard(launch) {
       url: scriptLink,
     })}
     ${rolloutRows || '<p class="metric-empty">No persistent rollout path recorded.</p>'}
+    ${stateRow}
     ${launch.note ? `<p class="launch-note">${escapeHtml(launch.note)}</p>` : ""}
   </article>`;
 }

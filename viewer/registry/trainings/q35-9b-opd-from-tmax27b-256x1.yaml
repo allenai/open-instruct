@@ -25,8 +25,16 @@ launches:
     - swerl_qwen35_9b_opd_from_tmax27b_256x1_4node_64k__42__1787844401
     - swerl_qwen35_9b_opd_from_tmax27b_256x1_4node_64k__42__1787855626
     - swerl_qwen35_9b_opd_from_tmax27b_256x1_4node_64k__42__1787885372
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1787645893_318524
 artifacts:
   furthest_step: 65
   latest_checkpoint:
     step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_256x1_4node_64k__42__1787672565_checkpoints/step_60
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_256x1_4node_64k__42__1787672565_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_256x1_4node_64k__42__1787672565_checkpoints/step_40
+  - step: 60
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_opd_from_tmax27b_256x1_4node_64k__42__1787672565_checkpoints/step_60

@@ -26,6 +26,7 @@ launches:
     - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787348881
     - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787354291
     - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787367967
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1787186425_743788
 artifacts:
   furthest_step: 90
   evaluations:
@@ -101,4 +102,13 @@ artifacts:
     checkpoint: *id001
   latest_checkpoint:
     step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_80
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787196293_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787196293_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_60
+  - step: 80
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_80

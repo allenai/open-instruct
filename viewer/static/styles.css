@@ -661,3 +661,32 @@ select:focus, input:focus { border-color: var(--acid); box-shadow: 0 0 0 3px rgb
 .evaluation-beaker:hover {
   text-decoration: underline;
 }
+
+.checkpoint-inventory {
+  margin-top: 0.75rem;
+}
+
+.checkpoint-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.checkpoint-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+  cursor: default;
+}
+
+.checkpoint-chip.missing {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}

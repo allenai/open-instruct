@@ -1,7 +1,7 @@
 schema_version: 1
 kind: training
 id: q35-9b-dppo-repro-8node-64k
-title: "Qwen3.5-9B · tmax-15k · DPPO repro · 8 nodes · 64k"
+title: Qwen3.5-9B · tmax-15k · DPPO repro · 8 nodes · 64k
 classification: evaluated
 visibility: default
 tags:
@@ -10,8 +10,9 @@ tags:
   tools: bash sandbox (swerl_vanillux)
   verifier: env binary reward
   loss: DPPO (tv 0.1)
-  geometry: "8 nodes · 8×32 · 64k"
-note: "Repro of released tmax DPPO 9B. Died at step ~236 after repeated Ray/OOM instability (exit-143 storms are beaker SIGTERM on sibling nodes, not preemption)."
+  geometry: 8 nodes · 8×32 · 64k
+note: Repro of released tmax DPPO 9B. Died at step ~236 after repeated Ray/OOM instability (exit-143 storms are beaker SIGTERM
+  on sibling nodes, not preemption).
 wandb:
   run_id: udddnfud
 launches:
@@ -28,6 +29,7 @@ launches:
     - swerl_qwen35_9b_dppo_repro__42__1783938717
     - swerl_qwen35_9b_dppo_repro__42__1784028087
     - swerl_qwen35_9b_dppo_repro__42__1784051570
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783921282_244270
 - id: resume-236
   relation: resume
   script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_resume.sh
@@ -42,7 +44,8 @@ launches:
     - swerl_qwen35_9b_dppo_repro__42__1784061356
     - swerl_qwen35_9b_dppo_repro__42__1784064864
     - swerl_qwen35_9b_dppo_repro__42__1784070439
-  note: "Resumed from global_step233 state (state dir 1783921282_244270) after max_retries exhausted."
+  note: Resumed from global_step233 state (state dir 1783921282_244270) after max_retries exhausted.
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783921282_244270
 - id: resume-236-b
   relation: resume
   script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_resume.sh
@@ -55,7 +58,8 @@ launches:
     attempts:
     - swerl_qwen35_9b_dppo_repro__42__1784142738
     - swerl_qwen35_9b_dppo_repro__42__1784146550
-  note: "Second resume attempt; crashed at ~step 234."
+  note: Second resume attempt; crashed at ~step 234.
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783921282_244270
 artifacts:
   furthest_step: 220
   evaluations:
@@ -83,4 +87,27 @@ artifacts:
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_120
   latest_checkpoint:
     step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1784028087_checkpoints/step_220
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783921807_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_140
+  - step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_160
+  - step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_180
+  - step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_200
+  - step: 220
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1784028087_checkpoints/step_220

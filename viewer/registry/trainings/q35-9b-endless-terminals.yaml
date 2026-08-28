@@ -19,6 +19,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_qwen35_9b_endless_terminals_4node_64k__42__1786701000
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786692766_704602
 - id: resume-1
   relation: resume
   beaker_experiment: 01M0067HMHQWGKPGWSRWBAY890
@@ -29,8 +30,18 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786712932_90217
 artifacts:
   furthest_step: 90
   latest_checkpoint:
     step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489_checkpoints/step_80
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489_checkpoints/step_60
+  - step: 80
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489_checkpoints/step_80

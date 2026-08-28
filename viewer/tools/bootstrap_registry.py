@@ -83,6 +83,7 @@ def wandb_launches(project_path: str, exp_name: str) -> list[dict]:
                 "started": int(run.name.rsplit("__", 1)[1]),
                 "state": run.state,
                 "beaker": str(config.get("beaker_workload_id") or "") or None,
+                "checkpoint_state_dir": str(config.get("checkpoint_state_dir") or "") or None,
                 "training_step": (run.summary or {}).get("training_step"),
             }
         )
@@ -228,6 +229,8 @@ def build_entry(args: argparse.Namespace) -> dict:
             row["script"] = script
         if launch["beaker"]:
             row["beaker_experiment"] = launch["beaker"]
+        if launch.get("checkpoint_state_dir"):
+            row["checkpoint_state_dir"] = launch["checkpoint_state_dir"]
         if index > 0:
             row["wandb"] = {"run_id": launch["wandb_id"]}
         binding: dict = {"path": f"rl_rollouts/{args.id}", "source": args.rollout_source}
@@ -244,6 +247,8 @@ def build_entry(args: argparse.Namespace) -> dict:
     progress_steps = [int(l["training_step"]) for l in launches if isinstance(l["training_step"], (int, float))]
     furthest = max([*progress_steps, *checkpoints.keys()], default=0)
     artifacts["furthest_step"] = furthest
+    if checkpoints:
+        artifacts["checkpoints"] = [{"step": step, "path": checkpoints[step]} for step in sorted(checkpoints)]
     if evaluations:
         for row in evaluations:
             if row["step"] in checkpoints:

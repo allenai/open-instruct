@@ -1,7 +1,7 @@
 schema_version: 1
 kind: training
 id: q35-9b-dppo-repro-4node-64k
-title: "Qwen3.5-9B · tmax-15k · DPPO repro · 4 nodes · 64k"
+title: Qwen3.5-9B · tmax-15k · DPPO repro · 4 nodes · 64k
 classification: evaluated
 visibility: default
 tags:
@@ -10,8 +10,9 @@ tags:
   tools: bash sandbox (swerl_vanillux)
   verifier: env binary reward
   loss: DPPO (tv 0.1)
-  geometry: "4 nodes · 8×32 · 64k"
-note: "The 4-node 64k throughput probe that became the main DPPO 9B run (trained to step 500). Best TB2.1: pass@1 0.301 @ step 360."
+  geometry: 4 nodes · 8×32 · 64k
+note: 'The 4-node 64k throughput probe that became the main DPPO 9B run (trained to step 500). Best TB2.1: pass@1 0.301 @
+  step 360.'
 wandb:
   run_id: ut64ii7s
 launches:
@@ -29,6 +30,7 @@ launches:
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784071391
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784087150
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784103326
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783922052_346310
 - id: resume-282
   relation: resume
   script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_64k_resume.sh
@@ -42,7 +44,8 @@ launches:
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784142944
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784293663
-  note: "Resume after node 'missing heartbeats' death at step 282."
+  note: Resume after node 'missing heartbeats' death at step 282.
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783922052_346310
 - id: resume-366
   relation: resume
   script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_64k_resume.sh
@@ -57,7 +60,8 @@ launches:
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784695925
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784737909
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450
-  note: "Resume from step ~366."
+  note: Resume from step ~366.
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783922052_346310
 - id: resume-440
   relation: resume
   script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_64k_resume.sh
@@ -71,7 +75,8 @@ launches:
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784880260
     - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924
-  note: "Resume from step ~440; finished at step 500."
+  note: Resume from step ~440; finished at step 500.
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1783922052_346310
 artifacts:
   furthest_step: 500
   evaluations:
@@ -269,4 +274,55 @@ artifacts:
       path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360
   latest_checkpoint:
     step: 500
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924_checkpoints/step_500
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_100
+  - step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_120
+  - step: 140
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_140
+  - step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784004270_checkpoints/step_160
+  - step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784004270_checkpoints/step_180
+  - step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784036179_checkpoints/step_200
+  - step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784036179_checkpoints/step_220
+  - step: 240
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784087150_checkpoints/step_240
+  - step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784103326_checkpoints/step_260
+  - step: 280
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784103326_checkpoints/step_280
+  - step: 300
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784142944_checkpoints/step_300
+  - step: 320
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_320
+  - step: 340
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_340
+  - step: 360
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360
+  - step: 380
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784695925_checkpoints/step_380
+  - step: 400
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_400
+  - step: 420
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_420
+  - step: 440
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_440
+  - step: 460
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283_checkpoints/step_460
+  - step: 480
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283_checkpoints/step_480
+  - step: 500
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924_checkpoints/step_500

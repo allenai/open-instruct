@@ -19,6 +19,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_mopd_t3balanced_9b_4node_64k__42__1786755581
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786755412_857707
 - id: resume-1
   relation: resume
   beaker_experiment: 01M01MRA1FH8SRKD1VPFRZ306Y
@@ -29,6 +30,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     configured_only: true
     attempts: []
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786761717_277583
 - id: resume-2
   relation: resume
   beaker_experiment: 01M01Z907FGCF2TGP7V88G3H00
@@ -39,6 +41,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_mopd_t3balanced_9b_4node_64k__42__1786776743
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786772750_419455
 - id: resume-3
   relation: resume
   beaker_experiment: 01M02NEMD084S3H9J6KZK3A7DG
@@ -51,6 +54,7 @@ launches:
     - swerl_mopd_t3balanced_9b_4node_64k__42__1786798847
     - swerl_mopd_t3balanced_9b_4node_64k__42__1786859569
     - swerl_mopd_t3balanced_9b_4node_64k__42__1786875110
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786796003_217901
 - id: resume-4
   relation: resume
   beaker_experiment: 01M05QZC66V0MZK1KSRVXYRPZS
@@ -61,6 +65,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     configured_only: true
     attempts: []
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786796003_217901
 - id: resume-5
   relation: resume
   beaker_experiment: 01M062WERFD4KZ3QWSCX57MMSJ
@@ -73,6 +78,7 @@ launches:
     - swerl_mopd_t3balanced_9b_4node_64k__42__1786923467
     - swerl_mopd_t3balanced_9b_4node_64k__42__1786945798
     - swerl_mopd_t3balanced_9b_4node_64k__42__1787010812
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786796003_217901
 - id: resume-6
   relation: resume
   beaker_experiment: 01M0APBE45VWPK2Q9RG38NR940
@@ -83,6 +89,7 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_mopd_t3balanced_9b_4node_64k__42__1787065892
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786796003_217901
 - id: resume-7
   relation: resume
   beaker_experiment: 01M0BSA3D53SWC731W6T7FFMK9
@@ -94,8 +101,22 @@ launches:
     attempts:
     - swerl_mopd_t3balanced_9b_4node_64k__42__1787109752
     - swerl_mopd_t3balanced_9b_4node_64k__42__1787122891
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786796003_217901
 artifacts:
   furthest_step: 120
   latest_checkpoint:
     step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3balanced_9b_4node_64k__42__1787122891_checkpoints/step_120
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3balanced_9b_4node_64k__42__1786798847_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3balanced_9b_4node_64k__42__1786798847_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3balanced_9b_4node_64k__42__1786923467_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3balanced_9b_4node_64k__42__1786945798_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3balanced_9b_4node_64k__42__1787109752_checkpoints/step_100
+  - step: 120
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3balanced_9b_4node_64k__42__1787122891_checkpoints/step_120

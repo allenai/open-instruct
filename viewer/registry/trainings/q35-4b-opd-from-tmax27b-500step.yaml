@@ -21,5 +21,6 @@ launches:
     - swerl_qwen35_4b_opd_from_tmax27b_4node_64k_500step__42__1787184575
     - swerl_qwen35_4b_opd_from_tmax27b_4node_64k_500step__42__1787193906
     - swerl_qwen35_4b_opd_from_tmax27b_4node_64k_500step__42__1787196187
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/kevinfarhat/1787181804_798703
 artifacts:
   furthest_step: 26

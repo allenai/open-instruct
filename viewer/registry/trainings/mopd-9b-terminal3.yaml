@@ -19,8 +19,22 @@ launches:
     source: /weka/oe-adapt-default/allennlp/deletable_rollouts
     attempts:
     - swerl_mopd_terminal3_9b_4node_64k__42__1786702720
+  checkpoint_state_dir: /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1786697254_147859
 artifacts:
   furthest_step: 120
   latest_checkpoint:
     step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_120
+  checkpoints:
+  - step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_20
+  - step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_40
+  - step: 60
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_60
+  - step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_80
+  - step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_100
+  - step: 120
     path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_120
