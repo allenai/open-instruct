@@ -157,15 +157,6 @@ class TrainingConfig:
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
-    dist_timeout_hours: float = 24
-    """Timeout for distributed collectives, in hours.
-
-    The default is long because rank 0 may tokenize the dataset for hours while the other
-    ranks wait at a barrier. It then applies for the rest of the run, so a mid-training
-    hang also gets that long to do nothing -- one such stall burned 8 GPUs for 2h40m
-    before anyone noticed. When the cache is pre-built (the two-job workflow), drop this
-    to an hour or so and a hang becomes a prompt, diagnosable crash.
-    """
 
 
 def build_ac_config(
@@ -252,15 +243,7 @@ class CheckpointConfig:
     keep_last_n_checkpoints: int = 3
     """How many checkpoints to keep in the output directory. -1 for all."""
     resume_from_checkpoint: str | None = None
-    """If the training should continue from a checkpoint folder."""
-    save_async: bool = True
-    """Whether olmo-core saves checkpoints asynchronously.
-
-    Async saving keeps training moving while a ~100 GB checkpoint is written, but it also
-    puts the write on a background thread whose failures are harder to attribute: a
-    1-node Olmo-Hybrid-7B run went silent at step 580, roughly 15 minutes after an async
-    save, with no traceback. Set false to make saves synchronous when diagnosing a stall.
-    """
+    """Continue from a checkpoint in a *different* directory (resuming this run needs only ``output_dir``)."""
 
 
 def build_checkpointer_callback(
@@ -315,11 +298,11 @@ def load_hf_weights_into_olmo_core(
 ) -> None:
     """Load HF weights into an olmo-core state dict in place, dispatching on model type.
 
-    Kept as one function so the offline check in
-    ``scripts/train/debug/check_olmo_core_matches_hf.py`` exercises the same dispatch
-    training uses. Verifying the converter directly would leave this branch untested,
-    and picking the wrong branch is silent: olmo-core's converter has no ``olmo_hybrid``
-    case and would fall through to the llama-style key templates.
+    olmo-core's converter has no ``olmo_hybrid`` case, so the generic branch falls
+    through to the llama-style key templates. For hybrid that raises, since nothing
+    maps the GDN ``linear_attn.*`` keys, but the general failure is quiet:
+    ``load_hf_model`` writes back only the keys its converter produced, leaving
+    anything unmapped at whatever the model was initialized with.
     """
     hf_config = transformers.AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)
     if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
@@ -618,6 +601,21 @@ def to_oc_tokenizer_config(tc: TokenizerConfig) -> OLMoCoreTokenizerConfig:
     )
 
 
+def convert_olmo_core_state_to_hf(hf_config: transformers.PretrainedConfig, state_dict: dict[str, Any]) -> dict:
+    """Convert an olmo-core state dict to HF format, dispatching on model type.
+
+    Both the pre-training export check and the actual save go through here, so they
+    cannot disagree about which converter a model needs. olmo-core's converter has
+    no ``olmo_hybrid`` case and falls through to the llama-style key templates,
+    where it raises on every GDN parameter.
+    """
+    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
+        return olmo_core_hybrid.convert_hybrid_state_to_hf(
+            state_dict, olmo_core_hybrid.layer_types_from_hf_config(hf_config)
+        )
+    return olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+
+
 def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_or_path: str) -> None:
     """Fail fast if the run cannot later be exported to HF format.
 
@@ -629,7 +627,7 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     olmo_core_model = model_config.build(init_device="meta")
     olmo_core_state = olmo_core_model.state_dict()
 
-    converted = olmo_hf_convert.convert_state_to_hf(hf_config, olmo_core_state)
+    converted = convert_olmo_core_state_to_hf(hf_config, olmo_core_state)
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
@@ -650,12 +648,8 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
     )
 
 
-#: Model types whose released checkpoints are published in transformers' *in-memory*
-#: weight naming rather than the "legacy" naming its conversion_mapping expects on disk.
-#: For these, save_pretrained must be told not to apply the reverse rename. Everything
-#: else keeps transformers' default, which reproduces the layout its released checkpoints
-#: use. If an export trips the key check in save_state_dict_as_hf, this set is the first
-#: thing to look at.
+#: Model types whose released checkpoints use transformers' in-memory weight naming, so
+#: save_pretrained must not apply its conversion_mapping in reverse on the way out.
 _MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}
 
 
@@ -673,12 +667,7 @@ def save_state_dict_as_hf(
     ``save_dir``.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
-    if getattr(hf_config, "model_type", None) == olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE:
-        converted = olmo_core_hybrid.convert_hybrid_state_to_hf(
-            state_dict, olmo_core_hybrid.layer_types_from_hf_config(hf_config)
-        )
-    else:
-        converted = olmo_hf_convert.convert_state_to_hf(hf_config, state_dict)
+    converted = convert_olmo_core_state_to_hf(hf_config, state_dict)
     converted = {k: v.contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
@@ -686,24 +675,10 @@ def save_state_dict_as_hf(
     hf_model.load_state_dict(converted, assign=True)
 
     os.makedirs(save_dir, exist_ok=True)
-    # transformers' conversion_mapping declares a "legacy" on-disk naming for ~30 model
-    # types and renames it to the in-memory naming on load; save_pretrained applies that
-    # in reverse by default (save_original_format=True). Which value is correct depends
-    # on what the *released* checkpoint of this model actually uses, and it differs:
-    #
-    #   olmoe / mixtral / qwen2_moe   released in the legacy per-expert layout -> True
-    #   olmo_hybrid                   released in the in-memory naming         -> False
-    #
-    # Getting it wrong is silent here and only fails in whatever loads the checkpoint
-    # (vLLM reads the file directly, so olmo-eval rejects it), which is what the
-    # verification below is for.
     model_type = getattr(hf_config, "model_type", None)
     hf_model.save_pretrained(save_dir, save_original_format=model_type not in _MODERN_NAMING_MODEL_TYPES)
     tokenizer.save_pretrained(save_dir)
 
-    # Verify every converted tensor actually reached the file. Without this the failure
-    # is silent: save_pretrained returns cleanly and the checkpoint only breaks later,
-    # in whatever tries to load it.
     index_path = os.path.join(save_dir, "model.safetensors.index.json")
     if os.path.isfile(index_path):
         with open(index_path) as index_file:
