@@ -123,7 +123,9 @@ class BeakerCallbackV2(Callback):
 class PerfCallback(Callback):
     """Calculates MFU and tokens_per_second using same formula as dpo_tune_cache.py."""
 
-    model_dims: utils.ModelDims
+    model_dims: utils.ModelDims | None
+    """None when the model has no HF config to derive dimensions from (olmo-core
+    checkpoints), in which case MFU is not reported. Throughput still is."""
     gradient_accumulation_steps: int
     dp_world_size: int
     tensor_parallel_degree: int = 1
@@ -184,20 +186,19 @@ class PerfCallback(Callback):
         logging_steps = self.trainer.metrics_collect_interval
         avg_sequence_length = total_tokens_step / int(self._interval_num_sequences)
 
-        mfu_result = self.model_dims.approximate_learner_utilization(
-            total_tokens=total_tokens_step,
-            avg_sequence_length=avg_sequence_length,
-            training_time=training_time,
-            num_training_gpus=self.dp_world_size * self.tensor_parallel_degree,
-        )
-
-        self._mfu_sum += mfu_result["mfu"]
-        mfu_avg = self._mfu_sum / (self.step // logging_steps)
-
         seconds_per_step = interval_end - self._step_start_time
 
-        self.trainer.record_metric("perf/mfu_step", mfu_result["mfu"], reduce_type=None)
-        self.trainer.record_metric("perf/mfu_avg", mfu_avg, reduce_type=None)
+        if self.model_dims is not None:
+            mfu_result = self.model_dims.approximate_learner_utilization(
+                total_tokens=total_tokens_step,
+                avg_sequence_length=avg_sequence_length,
+                training_time=training_time,
+                num_training_gpus=self.dp_world_size * self.tensor_parallel_degree,
+            )
+            self._mfu_sum += mfu_result["mfu"]
+            mfu_avg = self._mfu_sum / (self.step // logging_steps)
+            self.trainer.record_metric("perf/mfu_step", mfu_result["mfu"], reduce_type=None)
+            self.trainer.record_metric("perf/mfu_avg", mfu_avg, reduce_type=None)
         self.trainer.record_metric("perf/seconds_per_step", seconds_per_step, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_step", tokens_per_second, reduce_type=None)
         self.trainer.record_metric("perf/tokens_per_second_avg", tokens_per_second_avg, reduce_type=None)

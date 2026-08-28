@@ -18,6 +18,7 @@ from olmo_core import train
 from olmo_core.config import DType
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.distributed.parallel import DataParallelType
+from olmo_core.nn.ddp import model as ddp_model_lib
 from olmo_core.train import callbacks
 from olmo_core.train.callbacks import ProfilerCallback
 from olmo_core.train.train_module.transformer import config as transformer_config
@@ -28,6 +29,7 @@ from open_instruct import (
     dpo_utils,
     logger_utils,
     model_utils,
+    olmo_core_moe_dpo,
     olmo_core_train_modules,
     olmo_core_utils,
     utils,
@@ -36,6 +38,19 @@ from open_instruct.olmo_core_callbacks import PerfCallback
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def _model_dims_or_none(model_name_or_path: str) -> utils.ModelDims | None:
+    """ModelDims for MFU reporting, or None when the path is not an HF checkpoint.
+
+    An olmo-core checkpoint directory also holds a ``config.json``, but it is the
+    experiment config rather than an HF model config, so ``AutoConfig`` cannot read it.
+    MFU is reporting only, so losing it is preferable to refusing to train.
+    """
+    if not olmo_core_utils.is_hf_checkpoint(model_name_or_path):
+        logger.info(f"{model_name_or_path} is an olmo-core checkpoint; MFU will not be reported.")
+        return None
+    return utils.ModelDims.from_hf_config(model_name_or_path)
 
 
 def export_to_hf(
@@ -77,7 +92,7 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if args.send_slack_alerts and slack_webhook_url:
         trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(name=run_name, webhook_url=slack_webhook_url)
-    model_dims = utils.ModelDims.from_hf_config(args.model_name_or_path)
+    model_dims = _model_dims_or_none(args.model_name_or_path)
     trainer_callbacks["perf"] = PerfCallback(
         model_dims=model_dims,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -186,8 +201,17 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_config = olmo_core_utils.setup_model(args)
-    if is_main_process:
+    # An olmo-core checkpoint carries no HF config, which rules out the startup check, the
+    # post-training export and MFU reporting. Those checkpoints are exported with
+    # scripts/train/debug/convert_moe_checkpoint_to_hf.py instead.
+    use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model_name_or_path)
+    # An olmo-core checkpoint needs tc to derive the padded vocab size, and must be built
+    # on meta: the weights arrive from the checkpoint rather than from this allocation, and
+    # materializing an 18.5B-parameter MoE per rank would need ~37 GB of host RAM each.
+    # The HF path keeps building on CPU, since reload_hf_checkpoint_after_parallelization
+    # overwrites those tensors anyway.
+    model, model_config = olmo_core_utils.setup_model(args, tc, init_device="cpu" if use_hf_ckpt else "meta")
+    if is_main_process and use_hf_ckpt:
         olmo_core_utils.verify_can_save_as_hf(model_config, args.model_name_or_path)
 
     if args.packing:
@@ -248,7 +272,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         device=device,
         cache_path=reference_cache_path,
         is_main_process=is_main_process,
-        model_dims=utils.ModelDims.from_hf_config(args.model_name_or_path),
+        model_dims=_model_dims_or_none(args.model_name_or_path),
         use_lora=False,
         disable_adapter_context=None,
     )
@@ -282,29 +306,48 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         args.activation_checkpointing_modules,
     )
 
-    train_module = olmo_core_train_modules.DPOTrainModule(
-        model=model,
-        optim=optim_config,
-        sample_microbatch_size=args.per_device_train_batch_size,
-        max_sequence_length=args.max_seq_length,
-        dpo_config=args,
-        attn_implementation=args.attn_implementation,
-        dp_config=dp_config,
-        # Passing degree=1 is functionally correct but adds DTensor overhead with no benefit,
-        # as apply_tp would wrap all layers unnecessarily. Pass None to skip TP entirely.
-        tp_config=(
-            transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
-            if args.tensor_parallel_degree > 1
-            else None
-        ),
-        ac_config=ac_config,
-        compile_model=args.compile_model,
-        max_grad_norm=args.max_grad_norm,
-        scheduler=scheduler,
-        device=device,
-    )
+    if isinstance(model, ddp_model_lib.OLMoDDPModel):
+        # MoE models that refuse FSDP2. Their optimizer and data-parallel config come from
+        # the checkpoint, so the dp_config and optim built above do not apply.
+        train_module = olmo_core_moe_dpo.build_moe_ddp_dpo_train_module(
+            model=model,
+            args=args,
+            scheduler=scheduler,
+            ac_config=ac_config,
+            max_grad_norm=args.max_grad_norm,
+            device=device,
+        )
+    else:
+        train_module = olmo_core_train_modules.DPOTrainModule(
+            model=model,
+            optim=optim_config,
+            sample_microbatch_size=args.per_device_train_batch_size,
+            max_sequence_length=args.max_seq_length,
+            dpo_config=args,
+            attn_implementation=args.attn_implementation,
+            dp_config=dp_config,
+            # Passing degree=1 is functionally correct but adds DTensor overhead with no benefit,
+            # as apply_tp would wrap all layers unnecessarily. Pass None to skip TP entirely.
+            tp_config=(
+                transformer_config.TransformerTensorParallelConfig(degree=args.tensor_parallel_degree)
+                if args.tensor_parallel_degree > 1
+                else None
+            ),
+            ac_config=ac_config,
+            compile_model=args.compile_model,
+            max_grad_norm=args.max_grad_norm,
+            scheduler=scheduler,
+            device=device,
+        )
 
-    olmo_core_utils.reload_hf_checkpoint_after_parallelization(train_module, args.model_name_or_path, args.output_dir)
+    if use_hf_ckpt:
+        olmo_core_utils.reload_hf_checkpoint_after_parallelization(
+            train_module, args.model_name_or_path, args.output_dir
+        )
+    else:
+        # Weights must be in place before the reference log-probability cache is built
+        # below, which is well before the Trainer that would otherwise load them exists.
+        olmo_core_moe_dpo.load_olmo_core_base_weights(train_module, args.model_name_or_path, args.output_dir)
 
     logger.info("Caching reference logprobs...")
     train_module.reference_cache = dpo_utils.build_reference_logprobs_cache(model=train_module.model, **cache_kwargs)
@@ -337,7 +380,14 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
     trainer.fit()
     logger.info("Training complete.")
 
-    _handle_post_training(args, train_module.model, tokenizer, trainer_callbacks, beaker_config, is_main_process)
+    if use_hf_ckpt:
+        _handle_post_training(args, train_module.model, tokenizer, trainer_callbacks, beaker_config, is_main_process)
+    else:
+        logger.info(
+            f"Skipping the HF export: {args.model_name_or_path} is an olmo-core checkpoint with no HF config to "
+            f"convert against. Export the checkpoint in {args.output_dir} with "
+            "scripts/train/debug/convert_moe_checkpoint_to_hf.py."
+        )
 
     train.teardown_training_environment()
 

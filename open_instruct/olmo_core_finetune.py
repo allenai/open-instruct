@@ -46,7 +46,14 @@ from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, te
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
 
-from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct import (
+    dataset_transformation,
+    logger_utils,
+    numpy_dataset_conversion,
+    olmo_core_ddp,
+    olmo_core_utils,
+    utils,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -271,7 +278,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             "OLMoDDPModel requires --config_name pointing at the (migrated) checkpoint config json"
         )
         assert cp_config is None, "context parallelism is not wired for the DDP train module"
-        train_module_config = olmo_core_utils.build_ddp_train_module_config(
+        train_module_config = olmo_core_ddp.build_ddp_train_module_config(
             args.model.config_name,
             rank_microbatch_size=rank_microbatch_size,
             max_sequence_length=args.training.max_seq_length,

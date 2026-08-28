@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Support DPO on olmo-core MoE checkpoints that train under `OLMoDDPModel` (the OLMoE3 latent-KDA models, which refuse FSDP2): a `MoEDDPDPOTrainModule` on olmo-core's DDP train module, model and optimizer configs built from the checkpoint's own config json, and loading olmo-core weights before the reference log-probability cache is built. The DPO objective is factored into a `DPOObjectiveMixin` shared verbatim with the dense `DPOTrainModule`, so the two cannot drift. MFU reporting is now optional, since an olmo-core checkpoint has no HF config to derive model dimensions from (PR_URL).
 - Support SFT of `allenai/Olmo-Hybrid-7B` on the olmo-core path: an `olmo3_hybrid_7B` config and HF <-> olmo-core state conversion for `model_type: olmo_hybrid`, neither of which olmo-core provides (https://github.com/allenai/open-instruct/pull/1822).
 - Expose `--save_async` and `--dist_timeout_hours` for the olmo-core SFT path; both were hardcoded, and the 24h default timeout meant a mid-training stall held its GPUs invisibly (https://github.com/allenai/open-instruct/pull/1821).
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).

@@ -411,7 +411,7 @@ def build_reference_logprobs_cache(
     device: torch.device,
     cache_path: pathlib.Path,
     is_main_process: bool,
-    model_dims: utils.ModelDims,
+    model_dims: utils.ModelDims | None,
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
     forward_kwargs: dict | None = None,
@@ -479,14 +479,15 @@ def build_reference_logprobs_cache(
             batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
             total_tokens += batch_tokens
             total_examples += batch_size
-            pbar.set_postfix(
-                {
-                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
-                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
-                    "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
-                }
-            )
+            postfix = {
+                "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
+                "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
+            }
+            if model_dims is not None:
+                elapsed = time.perf_counter() - batch_start
+                postfix["MFU%"] = f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, elapsed):.1f}"
+            pbar.set_postfix(postfix)
 
     dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
     dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
