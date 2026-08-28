@@ -11,11 +11,15 @@ keeps attempts separate instead of risking an incorrect merge.
 from __future__ import annotations
 
 import datetime
+import json
 import math
+import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from numbers import Real
+from pathlib import Path
 from typing import Any
 
 from open_instruct import logger_utils
@@ -59,6 +63,10 @@ REJECTED_GROUP_METRICS = {
     "accepted": "batch/total_prompts",
 }
 REJECTED_GROUP_SERIES = ("rejected_group_rate", "rejected_all_zero_rate", "rejected_all_one_rate")
+# W&B run states whose scalar history can no longer change; only these are
+# served from the on-disk cache. A running/unknown run is always refetched.
+TERMINAL_RUN_STATES = frozenset({"finished", "failed", "crashed", "killed"})
+
 RUN_NAME = re.compile(r"^(?P<base>.+)__+(?P<seed>\d+)__+(?P<started>\d+)$")
 
 
@@ -89,12 +97,22 @@ def _timestamp(value: Any) -> float | None:
 class WandbEvalIndex:
     """Resolve physical rollout attempts to W&B runs and validation results."""
 
-    def __init__(self, path: str, overrides: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, path: str, overrides: dict[str, str] | None = None, cache_dir: str | Path | None = None
+    ) -> None:
         self.path = path
         # Maps an attempt name or rollout directory name to a W&B run id.
         self.overrides = dict(overrides or {})
         self._lock = threading.RLock()
+        # One Api (and its HTTP session) per thread: the fetch pool below runs
+        # scan_history calls concurrently and requests sessions are not
+        # guaranteed thread-safe.
+        self._thread_state = threading.local()
+        # Test/injection override: when set, every thread uses this client.
         self._api: Any = None
+        self._fetch_pool = ThreadPoolExecutor(max_workers=12, thread_name_prefix="wandb-fetch")
+        self._cache_dir = Path(cache_dir).expanduser() if cache_dir else None
+        self._disk_entries: dict[str, dict[str, Any]] = {}
         self._catalog: list[dict[str, Any]] | None = None
         self._evaluations_cache: dict[tuple[str, str | None, int], list[dict[str, Any]]] = {}
         self._training_metrics_cache: dict[str, dict[str, Any]] = {}
@@ -104,10 +122,86 @@ class WandbEvalIndex:
         self._validation_fetched_at: dict[str, str] = {}
 
     def _get_api(self) -> Any:
-        with self._lock:
-            if self._api is None:
-                self._api = import_module("wandb").Api()
+        if self._api is not None:
             return self._api
+        api = getattr(self._thread_state, "api", None)
+        if api is None:
+            # Api construction reads settings/netrc, which races when several
+            # fetch-pool threads initialize at once and can come up keyless.
+            # Only construction is serialized; requests stay concurrent.
+            with self._lock:
+                api = import_module("wandb").Api()
+            self._thread_state.api = api
+        return api
+
+    def _run_handle(self, run_id: str) -> Any:
+        return self._get_api().run(f"{self.path}/{run_id}")
+
+    # ------------------------------------------------------------------
+    # On-disk cache. A finished/crashed/failed run's scalar history is
+    # immutable, so it is stored once under <cache_dir>/<run_id>.json and
+    # every later server start reads it back instead of re-crawling W&B.
+    # ------------------------------------------------------------------
+
+    def _disk_file(self, run_id: str) -> Path:
+        return self._cache_dir / f"{run_id}.json"
+
+    def _disk_entry(self, run_id: str) -> dict[str, Any]:
+        if self._cache_dir is None:
+            return {}
+        with self._lock:
+            cached = self._disk_entries.get(run_id)
+        if cached is not None:
+            return cached
+        entry: dict[str, Any] = {}
+        try:
+            entry = json.loads(self._disk_file(run_id).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            entry = {}
+        with self._lock:
+            self._disk_entries[run_id] = entry
+        return entry
+
+    def _disk_get(self, run_id: str, section: str, key: str) -> Any:
+        entry = self._disk_entry(run_id)
+        if entry.get("run_state") not in TERMINAL_RUN_STATES:
+            return None
+        return (entry.get(section) or {}).get(key)
+
+    def _disk_put(self, run_id: str, run_state: Any, section: str, key: str, payload: Any) -> None:
+        """Persist one fetched section, but only once the run can no longer change."""
+        if self._cache_dir is None or str(run_state) not in TERMINAL_RUN_STATES:
+            return
+        self._disk_entry(run_id)  # ensure any existing file is loaded before merging
+        with self._lock:
+            entry = dict(self._disk_entries.get(run_id) or {})
+            section_map = dict(entry.get(section) or {})
+            section_map[key] = payload
+            entry[section] = section_map
+            entry["run_state"] = str(run_state)
+            entry["saved_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+            self._disk_entries[run_id] = entry
+            try:
+                self._cache_dir.mkdir(parents=True, exist_ok=True)
+                scratch = self._disk_file(run_id).with_suffix(".tmp")
+                scratch.write_text(json.dumps(entry), encoding="utf-8")
+                os.replace(scratch, self._disk_file(run_id))
+            except OSError as error:
+                logger.warning("W&B disk cache write failed for %s: %s", run_id, error)
+
+    def _disk_drop(self, run_id: str | None = None) -> None:
+        if self._cache_dir is None:
+            return
+        with self._lock:
+            run_ids = [run_id] if run_id else list(self._disk_entries)
+            if run_id is None and self._cache_dir.is_dir():
+                run_ids = list({*run_ids, *(f.stem for f in self._cache_dir.glob("*.json"))})
+            for target in run_ids:
+                self._disk_entries.pop(target, None)
+                try:
+                    self._disk_file(target).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _get_catalog(self) -> list[dict[str, Any]]:
         """List the project once, retaining fields used for lineage matching."""
@@ -217,6 +311,14 @@ class WandbEvalIndex:
                 cached = self._evaluations_cache.get(cache_key)
             if cached is not None:
                 return [dict(item) for item in cached]
+            disk_key = f"{metric or ''}|{artifact_step_offset}"
+            stored = self._disk_get(resolved_id, "evaluations", disk_key)
+            if stored is not None:
+                with self._lock:
+                    self._evaluations_cache[cache_key] = stored
+                    self._validation_errors.pop(resolved_id, None)
+                    self._validation_fetched_at[resolved_id] = self._disk_entry(resolved_id).get("saved_at")
+                return [dict(item) for item in stored]
             run = self._get_api().run(f"{self.path}/{resolved_id}")
             selected_metric = metric or self._pick_metric(run)
             values: dict[int, dict[str, Any]] = {}
@@ -246,6 +348,7 @@ class WandbEvalIndex:
                 self._evaluations_cache[cache_key] = result
                 self._validation_errors.pop(resolved_id, None)
                 self._validation_fetched_at[resolved_id] = datetime.datetime.now(datetime.UTC).isoformat()
+            self._disk_put(resolved_id, getattr(run, "state", None), "evaluations", disk_key, result)
             return [dict(item) for item in result]
         except Exception as error:
             if "resolved_id" in locals() and resolved_id:
@@ -257,6 +360,16 @@ class WandbEvalIndex:
 
     def invalidate(self, run_id: str | None = None, *, include_training_metrics: bool = True) -> None:
         """Discard cached validation state and optionally the chart histories."""
+        # A terminal run's W&B history is immutable, so a targeted (per-run)
+        # invalidation — including the startup force-refresh — keeps its disk
+        # entry and only clears the in-memory caches, which repopulate from
+        # disk. The full invalidation (the Refresh button, run_id=None) drops
+        # the disk cache too, as the escape hatch for e.g. a run resumed under
+        # the same W&B id after being cached as crashed.
+        if run_id is None:
+            self._disk_drop(None)
+        elif self._disk_entry(run_id).get("run_state") not in TERMINAL_RUN_STATES:
+            self._disk_drop(run_id)
         with self._lock:
             if run_id is None:
                 self._evaluations_cache.clear()
@@ -303,49 +416,73 @@ class WandbEvalIndex:
                 cached = self._training_metrics_cache.get(run_id)
             if cached is not None:
                 return self._copy_training_metrics(cached)
+            stored = self._disk_get(run_id, "training_metrics", "series")
+            if stored is not None:
+                result = {"series": stored}
+                with self._lock:
+                    self._training_metrics_cache[run_id] = result
+                return self._copy_training_metrics(result)
             return self._fetch_training_metrics(run_id)
+
+    def _fetch_series(self, run_id: str, key: str, preferences: tuple[str, ...]) -> tuple[str, dict[str, Any]]:
+        """Resolve one chart series on the fetch pool with a thread-local client."""
+        run = self._run_handle(run_id)
+        selected = None
+        values: dict[int, float] = {}
+        # Shared/resumed W&B runs can retain metric history without
+        # exposing that metric in run.summary. Probe the known metric
+        # names directly instead of using summary as an availability
+        # index. W&B also drops every row when any requested key is
+        # absent, so fall back to its internal step for older runs that
+        # predate the explicit training_step field.
+        for metric in preferences:
+            rows = list(run.scan_history(keys=["_step", "training_step", metric]))
+            if not rows:
+                rows = list(run.scan_history(keys=["_step", metric]))
+            for row in rows:
+                logged_step = row.get("training_step", row.get("_step"))
+                raw_value = row.get(metric)
+                if (
+                    logged_step is None
+                    or raw_value is None
+                    or not isinstance(raw_value, Real)
+                    or not math.isfinite(float(raw_value))
+                ):
+                    continue
+                values[int(logged_step)] = float(raw_value)
+            if values:
+                selected = metric
+                break
+        return key, {
+            "metric": selected,
+            "points": [{"optimizer_step": step, "value": value} for step, value in sorted(values.items())]
+            if selected
+            else [],
+        }
+
+    def _fetch_rejected_series(self, run_id: str) -> dict[str, dict[str, Any]]:
+        return self._rejected_group_series(self._run_handle(run_id))
 
     def _fetch_training_metrics(self, run_id: str) -> dict[str, Any]:
         try:
             run = self._get_api().run(f"{self.path}/{run_id}")
+            run_state = getattr(run, "state", None)
+            # Every series is an independent scan_history crawl; running them
+            # sequentially made the first chart load take minutes per run.
+            futures = [
+                self._fetch_pool.submit(self._fetch_series, run_id, key, preferences)
+                for key, preferences in TRAINING_METRIC_PREFERENCE.items()
+            ]
+            rejected_future = self._fetch_pool.submit(self._fetch_rejected_series, run_id)
             series: dict[str, dict[str, Any]] = {}
-            for key, preferences in TRAINING_METRIC_PREFERENCE.items():
-                selected = None
-                values: dict[int, float] = {}
-                # Shared/resumed W&B runs can retain metric history without
-                # exposing that metric in run.summary. Probe the known metric
-                # names directly instead of using summary as an availability
-                # index. W&B also drops every row when any requested key is
-                # absent, so fall back to its internal step for older runs that
-                # predate the explicit training_step field.
-                for metric in preferences:
-                    rows = list(run.scan_history(keys=["_step", "training_step", metric]))
-                    if not rows:
-                        rows = list(run.scan_history(keys=["_step", metric]))
-                    for row in rows:
-                        logged_step = row.get("training_step", row.get("_step"))
-                        raw_value = row.get(metric)
-                        if (
-                            logged_step is None
-                            or raw_value is None
-                            or not isinstance(raw_value, Real)
-                            or not math.isfinite(float(raw_value))
-                        ):
-                            continue
-                        values[int(logged_step)] = float(raw_value)
-                    if values:
-                        selected = metric
-                        break
-                series[key] = {
-                    "metric": selected,
-                    "points": [{"optimizer_step": step, "value": value} for step, value in sorted(values.items())]
-                    if selected
-                    else [],
-                }
-            series.update(self._rejected_group_series(run))
+            for future in futures:
+                key, value = future.result()
+                series[key] = value
+            series.update(rejected_future.result())
             result = {"series": series}
             with self._lock:
                 self._training_metrics_cache[run_id] = result
+            self._disk_put(run_id, run_state, "training_metrics", "series", series)
             return self._copy_training_metrics(result)
         except Exception as error:
             logger.warning("W&B training-metric lookup failed for %s: %s", run_id, error)
@@ -426,6 +563,11 @@ class WandbEvalIndex:
             cached = self._progress_cache.get(run_id)
         if cached is not None:
             return dict(cached)
+        stored = self._disk_get(run_id, "progress", "latest")
+        if stored is not None:
+            with self._lock:
+                self._progress_cache[run_id] = stored
+            return dict(stored)
 
         try:
             run = self._get_api().run(f"{self.path}/{run_id}")
@@ -435,6 +577,7 @@ class WandbEvalIndex:
             result = {"optimizer_step": optimizer_step, "run_state": getattr(run, "state", None)}
             with self._lock:
                 self._progress_cache[run_id] = result
+            self._disk_put(run_id, result["run_state"], "progress", "latest", result)
             return dict(result)
         except Exception as error:
             logger.warning("W&B progress lookup failed for %s: %s", run_id, error)

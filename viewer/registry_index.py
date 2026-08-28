@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,8 @@ class RegistryIndex:
 
     def __init__(self, registry: TrainingRegistry) -> None:
         self.registry = registry
+        # Immutable-history W&B responses persist here across server restarts.
+        self._wandb_cache_root = registry.repo_root / ".viewer_cache" / "wandb"
         self._lock = threading.RLock()
         self._wandb: dict[str, WandbEvalIndex] = {}
         self._attempts: dict[str, tuple[TrainingDefinition, Path, int, WandbReference | None]] = {}
@@ -95,14 +99,17 @@ class RegistryIndex:
         if training is None:
             return []
         values: dict[int, dict[str, Any]] = {}
-        for reference in training.wandb_runs:
-            rows = self._wandb_index(reference.project_path).evaluations(
+        rows_per_reference = self._map_references(
+            training.wandb_runs,
+            lambda reference: self._wandb_index(reference.project_path).evaluations(
                 run_name,
                 directory,
                 run_id=reference.run_id,
                 metric=reference.validation_metric,
                 artifact_step_offset=reference.rollout_artifact_offset,
-            )
+            ),
+        )
+        for rows in rows_per_reference:
             values.update((int(row["optimizer_step"]), row) for row in rows)
         return [values[step] for step in sorted(values)]
 
@@ -110,10 +117,13 @@ class RegistryIndex:
         training = self.training(training_id)
         if training is None or not training.wandb_runs:
             return {"state": "unconfigured", "fetched_at": None, "error": None}
-        statuses = [
-            {"wandb_run_id": reference.run_id, **self._wandb_index(reference.project_path).status(reference.run_id)}
-            for reference in training.wandb_runs
-        ]
+        statuses = self._map_references(
+            training.wandb_runs,
+            lambda reference: {
+                "wandb_run_id": reference.run_id,
+                **self._wandb_index(reference.project_path).status(reference.run_id),
+            },
+        )
         failed = [status for status in statuses if status["state"] == "error"]
         errors = [f"{status['wandb_run_id']}: {status.get('error') or 'unknown error'}" for status in failed]
         return {
@@ -128,8 +138,11 @@ class RegistryIndex:
         if training is None:
             return {"series": {}}
         merged: dict[str, dict[str, Any]] = {}
-        for reference in training.wandb_runs:
-            payload = self._wandb_index(reference.project_path).training_metrics(reference.run_id)
+        payloads = self._map_references(
+            training.wandb_runs,
+            lambda reference: self._wandb_index(reference.project_path).training_metrics(reference.run_id),
+        )
+        for payload in payloads:
             for key, value in payload["series"].items():
                 current = merged.setdefault(key, {"metric": None, "points": []})
                 points = {int(point["optimizer_step"]): dict(point) for point in current["points"]}
@@ -142,10 +155,13 @@ class RegistryIndex:
         training = self.training(training_id)
         if training is None or not training.wandb_runs:
             return {"optimizer_step": None, "run_state": None}
-        progress = [
-            {"wandb_run_id": reference.run_id, **self._wandb_index(reference.project_path).progress(reference.run_id)}
-            for reference in training.wandb_runs
-        ]
+        progress = self._map_references(
+            training.wandb_runs,
+            lambda reference: {
+                "wandb_run_id": reference.run_id,
+                **self._wandb_index(reference.project_path).progress(reference.run_id),
+            },
+        )
         steps = [item["optimizer_step"] for item in progress if item["optimizer_step"] is not None]
         return {**progress[-1], "optimizer_step": max(steps) if steps else None, "runs": progress}
 
@@ -167,6 +183,19 @@ class RegistryIndex:
         with self._lock:
             index = self._wandb.get(path)
             if index is None:
-                index = WandbEvalIndex(path)
+                cache_dir = self._wandb_cache_root / re.sub(r"[^A-Za-z0-9_.-]+", "__", path)
+                index = WandbEvalIndex(path, cache_dir=cache_dir)
                 self._wandb[path] = index
             return index
+
+    @staticmethod
+    def _map_references(references: tuple, task) -> list:
+        """Fetch per-wandb-run payloads concurrently, preserving registry order.
+
+        Resumed trainings register several W&B runs; fetching them one at a
+        time serialized multi-minute scan_history crawls.
+        """
+        if len(references) <= 1:
+            return [task(reference) for reference in references]
+        with ThreadPoolExecutor(max_workers=min(8, len(references))) as pool:
+            return list(pool.map(task, references))

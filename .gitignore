@@ -163,3 +163,4 @@ scratch/
 .claude/worktrees/
 .claude/
 rl_rollouts/
+.viewer_cache/

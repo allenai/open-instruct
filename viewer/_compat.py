@@ -8,7 +8,8 @@ no format gating. Terminal-specific outcome classification will replace the
 BrowseComp logic over time.
 """
 
-from open_instruct.ground_truth_utils import normalize_answer
+import re
+import string
 
 __all__ = [
     "BROWSECOMP_CORRECTNESS_JUDGE_PROMPT",
@@ -35,3 +36,23 @@ def apply_re_search_format_gates(terminal: str) -> tuple[str | None, str]:
 
 def format_reference_answer(value: object) -> str:
     return str(value)
+
+
+def normalize_answer(s: str) -> str:
+    """Lowercase, strip punctuation/articles/extra whitespace (SQuAD-style).
+
+    Copied from open_instruct.ground_truth_utils.normalize_answer: importing
+    that module pulls in the full training stack (~50 s), which would dominate
+    viewer startup for one small pure function.
+    """
+
+    def remove_articles(text: str) -> str:
+        return re.sub(r"\b(a|an|the)\b", " ", text)
+
+    def white_space_fix(text: str) -> str:
+        return " ".join(text.split())
+
+    def remove_punc(text: str) -> str:
+        return "".join(ch for ch in text if ch not in set(string.punctuation))
+
+    return white_space_fix(remove_articles(remove_punc(s.lower())))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -79,7 +80,8 @@ class ExperimentService:
         if force:
             for training in targets:
                 self.registry_index.invalidate(training.id, include_training_metrics=False)
-        for training in targets:
+
+        def refresh_one(training: TrainingDefinition) -> None:
             previous = self._validation_snapshot(training.id)
             evaluations = self.registry_index.validation_evaluations(training.id)
             progress = self.registry_index.training_progress(training.id)
@@ -93,6 +95,11 @@ class ExperimentService:
             with self._lock:
                 self._validations[training.id] = payload
                 self._refresh_state["completed"] += 1
+
+        # Each training's refresh is dominated by W&B round-trips; a serial
+        # walk left later catalog rows unpopulated for minutes.
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="validation-refresh") as pool:
+            list(pool.map(refresh_one, targets))
         with self._lock:
             self._refresh_state["state"] = "complete"
             self._refresh_state["finished_at"] = datetime.datetime.now(datetime.UTC).isoformat()
