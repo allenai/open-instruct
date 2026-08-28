@@ -15,11 +15,19 @@
 > - Catalog/eval columns are relabeled TB2.1 / TBlite (`terminal-bench*`/`tb2*` and `tblite*`
 >   benchmark names map onto the two catalog slots).
 >
-> Serve it from the repo root (first import takes ~45 s — open_instruct pulls the training stack):
+> Run it as a detached daemon that survives SSH/Claude sessions (no systemd in the
+> dev containers):
 >
 > ```bash
-> uv run --no-sync python -m viewer.server \
->   --rollouts-dir rl_rollouts --tokenizer hamishivi/Qwen3.5-9B --port 8090
+> ./viewer/serve.sh start        # stop | restart | status; log in .viewer_cache/server.log
+> ```
+>
+> Defaults: 127.0.0.1:8090 (SSH-tunnel with `ssh -L 8090:127.0.0.1:8090 <vm>`); override
+> with HOST/PORT/TOKENIZER. From a git worktree without a synced venv, point ENV_REPO at
+> the main clone whose uv env is synced:
+>
+> ```bash
+> ENV_REPO=/weka/nora-default/shashankg/code/open-instruct ./viewer/serve.sh start
 > ```
 
 The Training Observatory brings four kinds of
