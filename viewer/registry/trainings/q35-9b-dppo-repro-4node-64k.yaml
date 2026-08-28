@@ -1,0 +1,272 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-repro-4node-64k
+title: "Qwen3.5-9B · tmax-15k · DPPO repro · 4 nodes · 64k"
+classification: evaluated
+visibility: default
+tags:
+  model: Qwen3.5-9B (hamishivi)
+  dataset: tmax-15k
+  tools: bash sandbox (swerl_vanillux)
+  verifier: env binary reward
+  loss: DPPO (tv 0.1)
+  geometry: "4 nodes · 8×32 · 64k"
+note: "The 4-node 64k throughput probe that became the main DPPO 9B run (trained to step 500). Best TB2.1: pass@1 0.301 @ step 360."
+wandb:
+  run_id: ut64ii7s
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_64k.sh
+  beaker_experiment: 01KXD0MKSJ3STAX6CJQT6YRAEC
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-4node-64k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784004270
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784036179
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784071391
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784087150
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784103326
+- id: resume-282
+  relation: resume
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_64k_resume.sh
+  beaker_experiment: 01KXKJSQMC36KCT26YTMGK90DD
+  wandb:
+    run_id: gyw0z542
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-4node-64k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784142944
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784293663
+  note: "Resume after node 'missing heartbeats' death at step 282."
+- id: resume-366
+  relation: resume
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_64k_resume.sh
+  beaker_experiment: 01KY3HSGXM590X5J8BM8EJHJ0X
+  wandb:
+    run_id: be3l7oy4
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-4node-64k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784679469
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784695925
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784737909
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450
+  note: "Resume from step ~366."
+- id: resume-440
+  relation: resume
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_64k_resume.sh
+  beaker_experiment: 01KY8C2P2FN6GS7SQFXNQHSEJ0
+  wandb:
+    run_id: 7kfqfqw9
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-4node-64k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784880260
+    - swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924
+  note: "Resume from step ~440; finished at step 500."
+artifacts:
+  furthest_step: 500
+  evaluations:
+  - benchmark: terminal-bench-2.1
+    step: 120
+    correct: 102
+    total: 445
+    note: "https://beaker.org/ex/01KXH18R73AXTC7NHDCQ3Q94T8"
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_120
+  - benchmark: terminal-bench-2.1
+    step: 140
+    correct: 107
+    total: 445
+    note: "https://beaker.org/ex/01KXH18X19ZD9B36KE1NNDTWVS"
+    checkpoint:
+      step: 140
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_140
+  - benchmark: terminal-bench-2.1
+    step: 160
+    correct: 110
+    total: 445
+    note: "https://beaker.org/ex/01KXKWB75GHZ8JFW0Q81D8QBEN"
+    checkpoint:
+      step: 160
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784004270_checkpoints/step_160
+  - benchmark: terminal-bench-2.1
+    step: 180
+    correct: 115
+    total: 445
+    note: "https://beaker.org/ex/01KXKWBCD2HDJKQ6VW38J3HW8C"
+    checkpoint:
+      step: 180
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784004270_checkpoints/step_180
+  - benchmark: terminal-bench-2.1
+    step: 200
+    correct: 109
+    total: 445
+    note: "https://beaker.org/ex/01KXQGRG82KFAKC31BSDJ5ERCZ"
+    checkpoint:
+      step: 200
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784036179_checkpoints/step_200
+  - benchmark: terminal-bench-2.1
+    step: 240
+    correct: 111
+    total: 445
+    note: "https://beaker.org/ex/01KXQGRNP4MFS79ETX4AXAF729"
+    checkpoint:
+      step: 240
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784087150_checkpoints/step_240
+  - benchmark: terminal-bench-2.1
+    step: 280
+    correct: 112
+    total: 445
+    note: "https://beaker.org/ex/01KXKWBH98RZGQMPDQ8GKQK1H8"
+    checkpoint:
+      step: 280
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784103326_checkpoints/step_280
+  - benchmark: terminal-bench-2.1
+    step: 300
+    correct: 121
+    total: 445
+    note: "https://beaker.org/ex/01KXQGRTEXB5KY64JVNMW4CS3W"
+    checkpoint:
+      step: 300
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784142944_checkpoints/step_300
+  - benchmark: terminal-bench-2.1
+    step: 320
+    correct: 112
+    total: 445
+    note: "https://beaker.org/ex/01KXQGRYT7QEXR96XNXGW8YWR9"
+    checkpoint:
+      step: 320
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_320
+  - benchmark: terminal-bench-2.1
+    step: 340
+    correct: 125
+    total: 445
+    note: "https://beaker.org/ex/01KXQGS33XFS041681DM4VEBP0"
+    checkpoint:
+      step: 340
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_340
+  - benchmark: terminal-bench-2.1
+    step: 360
+    correct: 134
+    total: 445
+    note: "https://beaker.org/ex/01KXRY5WSTQ2EE5TWZEHMT6086"
+    checkpoint:
+      step: 360
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360
+  - benchmark: terminal-bench-2.1
+    step: 380
+    correct: 109
+    total: 445
+    note: "https://beaker.org/ex/01KY8C50BPWTPY4KGB04BMSMJH"
+    checkpoint:
+      step: 380
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784695925_checkpoints/step_380
+  - benchmark: terminal-bench-2.1
+    step: 400
+    correct: 101
+    total: 445
+    note: "https://beaker.org/ex/01KY8C544JK88AKH9SS7S5TC3C"
+    checkpoint:
+      step: 400
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_400
+  - benchmark: terminal-bench-2.1
+    step: 420
+    correct: 101
+    total: 445
+    note: "https://beaker.org/ex/01KY8C57R5EWBAC83B5XYRPCHV"
+    checkpoint:
+      step: 420
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_420
+  - benchmark: terminal-bench-2.1
+    step: 440
+    correct: 104
+    total: 445
+    note: "https://beaker.org/ex/01KY8C5BAZJZJ5HFDJY4QFBZ5T"
+    checkpoint:
+      step: 440
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_440
+  - benchmark: terminal-bench-2.1
+    step: 460
+    correct: 112
+    total: 445
+    note: "https://beaker.org/ex/01KY9PYMHEFZWPCAJWA06AYTNX"
+    checkpoint:
+      step: 460
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283_checkpoints/step_460
+  - benchmark: terminal-bench-2.1
+    step: 480
+    correct: 103
+    total: 445
+    note: "https://beaker.org/ex/01KYAKV2GC1FAKFTS3668B8X3Q"
+    checkpoint:
+      step: 480
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784840283_checkpoints/step_480
+  - benchmark: terminal-bench-2.1
+    step: 500
+    correct: 102
+    total: 445
+    note: "https://beaker.org/ex/01KYAQ5V7E6Z5G654TNV6EVMPH"
+    checkpoint:
+      step: 500
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924_checkpoints/step_500
+  - benchmark: tblite-2.0
+    step: 120
+    correct: 262
+    total: 500
+    note: "https://beaker.org/ex/01KYJQ0R6MED63VZ1Y51PNQ1C3"
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1783922286_checkpoints/step_120
+  - benchmark: tblite-2.0
+    step: 240
+    correct: 287
+    total: 500
+    note: "https://beaker.org/ex/01KYJQ0VQDQ96ZFB9TWX1SD349"
+    checkpoint:
+      step: 240
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784087150_checkpoints/step_240
+  - benchmark: tblite-2.0
+    step: 360
+    correct: 291
+    total: 500
+    note: "https://beaker.org/ex/01KYJQ0Z9RK57V56TG766ZKWT3"
+    checkpoint:
+      step: 360
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360
+  - benchmark: tblite-2.0
+    step: 440
+    correct: 300
+    total: 500
+    note: "https://beaker.org/ex/01KYJQ12ZEMRM09ZYGMJD72HVD"
+    checkpoint:
+      step: 440
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784755450_checkpoints/step_440
+  - benchmark: tblite-2.0
+    step: 500
+    correct: 258
+    total: 500
+    note: "https://beaker.org/ex/01KYJQ16E3DNZYPNF8KQZ69Z43"
+    checkpoint:
+      step: 500
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924_checkpoints/step_500
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 360
+    correct: 134
+    total: 445
+    checkpoint:
+      step: 360
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784235838_checkpoints/step_360
+  latest_checkpoint:
+    step: 500
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k__42__1784896924_checkpoints/step_500

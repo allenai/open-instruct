@@ -1,0 +1,49 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-repro-4node-32k
+title: "Qwen3.5-9B · tmax-15k · DPPO repro · 4 nodes · 32k"
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B (hamishivi)
+  dataset: tmax-15k
+  tools: bash sandbox (swerl_vanillux)
+  verifier: env binary reward
+  loss: DPPO (tv 0.1)
+  geometry: "4 nodes · 8×32 · 32k"
+note: "32k throughput probe. Learned identically to 64k (~0.70) but slower wall-clock (podman reset-timeout starvation). Superseded by the 64k run."
+wandb:
+  run_id: gpd9qgyc
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_32k.sh
+  beaker_experiment: 01KXD0N92JWG7SXZ6F86GNCPWD
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-4node-32k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1783922295
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1784023750
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1784098441
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1784106427
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1784110264
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1784113818
+- id: resume-277
+  relation: resume
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_4node_32k_resume.sh
+  beaker_experiment: 01KXKJT5A0WR84VWRAGYVDXKMZ
+  wandb:
+    run_id: lf0elfyw
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-4node-32k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1784143240
+    - swerl_qwen35_9b_dppo_repro_4node_32k__42__1784145797
+  note: "Resume after GCS loss/OOMs at ~step 277."
+artifacts:
+  furthest_step: 260
+  latest_checkpoint:
+    step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_32k__42__1784023750_checkpoints/step_260

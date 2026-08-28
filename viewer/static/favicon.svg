@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Training Observatory">
+  <rect width="64" height="64" rx="15" fill="#f8fafc"/>
+  <rect x="13" y="31" width="9" height="20" rx="4.5" fill="#0f766e"/>
+  <rect x="28" y="19" width="9" height="32" rx="4.5" fill="#2563eb"/>
+  <rect x="43" y="10" width="9" height="41" rx="4.5" fill="#60a5fa"/>
+</svg>

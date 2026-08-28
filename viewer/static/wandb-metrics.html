@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>W&amp;B metric guide · Training Observatory</title>
+    <style>
+      :root {
+        --ink: #172033;
+        --muted: #667085;
+        --dim: #98a2b3;
+        --canvas: #f5f7fa;
+        --panel: #ffffff;
+        --panel-alt: #f8fafc;
+        --line: #e3e8ef;
+        --line-strong: #cbd5e1;
+        --blue: #2563eb;
+        --teal: #0f766e;
+        --purple: #7c3aed;
+        --purple-soft: #f4f3ff;
+        --amber: #b45309;
+        --amber-soft: #fffaeb;
+        --green: #067647;
+        --green-soft: #ecfdf3;
+        --red: #b42318;
+        --selected-bg: #2563eb;
+        --selected-fg: #ffffff;
+        --radius: 12px;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; color: var(--ink); background: var(--canvas); }
+      button, select { font: inherit; }
+      a { color: inherit; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .page { width: min(1500px, 100%); margin: 0 auto; padding: 28px clamp(18px, 4vw, 64px) 72px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 38px; }
+      .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+      .mark { display: grid; grid-template-columns: repeat(3, 5px); align-items: end; gap: 3px; height: 20px; }
+      .mark i { display: block; width: 5px; border-radius: 4px; background: var(--blue); }
+      .mark i:nth-child(1) { height: 10px; }
+      .mark i:nth-child(2) { height: 20px; }
+      .mark i:nth-child(3) { height: 14px; }
+      .brand span:last-child { display: grid; gap: 1px; }
+      .eyebrow { color: var(--blue); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+      .brand strong { font-size: 16px; font-weight: 650; }
+      .back { padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); font-size: 12px; text-decoration: none; }
+      .hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 34px; align-items: end; }
+      h1 { max-width: 850px; margin: 7px 0 12px; font-size: clamp(34px, 4.5vw, 60px); line-height: 1.02; letter-spacing: -.045em; font-weight: 620; }
+      .hero p { max-width: 810px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+      .warning { padding: 16px 18px; border-left: 4px solid var(--amber); border-radius: 8px; color: #7a2e0e; background: var(--amber-soft); font-size: 12px; line-height: 1.55; }
+      .warning strong { display: block; margin-bottom: 4px; }
+      .section { margin-top: 38px; }
+      .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 22px; margin-bottom: 12px; }
+      .section-heading h2 { margin: 0 0 4px; font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
+      .section-heading p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+      .curve-shell { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: 0 1px 3px rgba(15, 23, 42, .05); }
+      .series-controls { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+      .series-controls button, .group-button { border: 1px solid var(--line); border-radius: 7px; color: #475467; background: var(--panel-alt); cursor: pointer; }
+      .series-controls button { padding: 7px 10px; font-size: 11px; }
+      .series-controls button[aria-pressed="true"] { color: var(--selected-fg); border-color: var(--selected-bg); background: var(--selected-bg); }
+      .curve-meta { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 8px; }
+      .curve-meta h3 { margin: 0 0 3px; font-size: 15px; font-weight: 650; }
+      .curve-meta p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+      .curve-stats { display: flex; flex-wrap: wrap; justify-content: end; gap: 14px; color: var(--muted); font-size: 10px; }
+      .curve-stats b { display: block; color: var(--ink); font-size: 16px; font-weight: 630; }
+      .chart-wrap { position: relative; }
+      #metric-chart { display: block; width: 100%; height: auto; overflow: visible; }
+      .chart-frame { fill: var(--panel); stroke: var(--line-strong); }
+      .grid-line { stroke: var(--line); stroke-width: 1; }
+      .axis-text, .axis-title { fill: var(--muted); font-size: 11px; }
+      .axis-title { font-weight: 600; }
+      .curve-line { fill: none; stroke: var(--blue); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+      .curve-point { fill: var(--panel); stroke: var(--blue); stroke-width: 2.5; cursor: pointer; }
+      .curve-point:focus { outline: none; stroke-width: 5; }
+      .tooltip { position: absolute; z-index: 3; min-width: 132px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--panel); box-shadow: 0 10px 26px rgba(15, 23, 42, .14); font-size: 10px; pointer-events: none; transform: translate(-50%, calc(-100% - 11px)); }
+      .tooltip b { display: block; color: var(--blue); font-size: 14px; }
+      .tooltip[hidden] { display: none; }
+      .coverage { margin: 9px 0 0; padding: 10px 12px; border-radius: 7px; color: #7a2e0e; background: var(--amber-soft); font-size: 10px; line-height: 1.5; }
+      .guide-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); align-items: start; gap: 14px; }
+      .group-nav { position: sticky; top: 14px; display: grid; gap: 6px; }
+      .group-button { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; padding: 10px; text-align: left; }
+      .group-button .group-index { color: var(--dim); font-variant-numeric: tabular-nums; }
+      .group-button strong { font-size: 11px; font-weight: 620; }
+      .group-button small { color: var(--dim); font-size: 9px; }
+      .group-button[aria-pressed="true"] { color: var(--selected-fg); border-color: var(--selected-bg); background: var(--selected-bg); }
+      .group-button[aria-pressed="true"] .group-index, .group-button[aria-pressed="true"] small { color: var(--selected-fg); }
+      .group-detail { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+      .group-header { padding: 18px 20px; border-bottom: 1px solid var(--line); background: var(--panel-alt); }
+      .group-header h3 { margin: 0 0 5px; font-size: 18px; font-weight: 650; }
+      .group-header p { max-width: 920px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      th { padding: 10px 13px; color: var(--muted); background: #fbfcfe; font-size: 9px; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
+      th:nth-child(1) { width: 28%; }
+      th:nth-child(2) { width: 32%; }
+      th:nth-child(3) { width: 24%; }
+      th:nth-child(4) { width: 16%; }
+      td { padding: 13px; border-top: 1px solid var(--line); vertical-align: top; font-size: 10px; line-height: 1.48; overflow-wrap: anywhere; }
+      td code { color: #344054; font-size: 9px; }
+      td p { margin: 0; }
+      td p + p { margin-top: 5px; color: var(--muted); }
+      tr.introduced { background: linear-gradient(90deg, var(--purple-soft), transparent 70%); }
+      tr.introduced td:first-child { box-shadow: inset 4px 0 var(--purple); }
+      .badge { display: inline-flex; margin-top: 6px; padding: 3px 6px; border-radius: 99px; color: #6941c6; background: #ebe9fe; font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+      .badge.optional { color: #475467; background: #eef2f6; }
+      .badge.next { color: var(--green); background: var(--green-soft); }
+      .source { color: var(--muted); }
+      .legend { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+      .legend i { width: 13px; height: 13px; border-left: 4px solid var(--purple); background: var(--purple-soft); }
+      .footer { margin-top: 34px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+      .footer a { color: var(--blue); }
+      @media (max-width: 900px) {
+        .hero { grid-template-columns: 1fr; }
+        .guide-layout { grid-template-columns: 1fr; }
+        .group-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .curve-meta { display: grid; }
+        .curve-stats { justify-content: start; }
+      }
+      @media (max-width: 580px) {
+        .page { padding-inline: 12px; }
+        .topbar { align-items: start; }
+        .group-nav { grid-template-columns: 1fr; }
+        th:nth-child(1) { width: 190px; }
+        th:nth-child(2) { width: 260px; }
+        th:nth-child(3) { width: 220px; }
+        th:nth-child(4) { width: 150px; }
+        table { min-width: 820px; }
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #ecf0f7; --muted: #a8b2c3; --dim: #768197; --canvas: #0d1320; --panel: #151d2c;
+          --panel-alt: #1a2434; --line: #2a3548; --line-strong: #3b4961; --blue: #77a7ff;
+          --purple-soft: #2a2140; --amber-soft: #342714; --green: #6ce9a6; --green-soft: #143327;
+          --selected-bg: #315ea8; --selected-fg: #ffffff;
+        }
+        .warning, .coverage { color: #f4c27a; }
+        th { background: #182131; }
+        td code { color: #d4dbea; }
+        .series-controls button, .group-button { color: #c8d0df; }
+        tr.introduced { background: linear-gradient(90deg, var(--purple-soft), transparent 70%); }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <a class="brand" href="/">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span><span class="eyebrow">Deep research training</span><strong>W&amp;B metric guide</strong></span>
+        </a>
+        <a class="back" href="/">← Training Observatory</a>
+      </header>
+
+      <section class="hero">
+        <div>
+          <span class="eyebrow">Metric semantics, provenance, and failure modes</span>
+          <h1>Know what every curve is actually measuring.</h1>
+          <p>
+            Training metrics are grouped by the system that emits them. Select a group to inspect exact keys,
+            aggregation semantics, interpretation, and source code. Purple-highlighted rows are metrics introduced
+            in the recent search-agent instrumentation work.
+          </p>
+        </div>
+        <aside class="warning">
+          <strong><code>val/*</code> is mostly not validation.</strong>
+          It is a legacy namespace for training-rollout health and optimizer ratios. Held-out evaluation lives under
+          <code>eval/*</code> or <code>eval/local_bm25/*</code>. Also, <code>scores</code> describes retained active-sampling
+          groups and is selection-biased.
+        </aside>
+      </section>
+
+      <section class="section" aria-labelledby="curve-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="curve-title">Real curve · latest training lineage</h2>
+            <p>
+              Qwen3.5-9B BC-v2 Serper/Jina, W&amp;B run
+              <a href="https://wandb.ai/stevenchenzijian-university-of-waterloo/tmax/runs/rgjoc15m">rgjoc15m</a>.
+            </p>
+          </div>
+        </div>
+        <div class="curve-shell">
+          <div id="series-controls" class="series-controls" aria-label="Choose curve"></div>
+          <div class="curve-meta">
+            <div>
+              <h3 id="curve-name"></h3>
+              <p id="curve-description"></p>
+            </div>
+            <div id="curve-stats" class="curve-stats" aria-label="Curve summary"></div>
+          </div>
+          <div id="chart-wrap" class="chart-wrap">
+            <svg id="metric-chart" viewBox="0 0 960 340" role="img" aria-labelledby="chart-svg-title chart-svg-desc">
+              <title id="chart-svg-title">Selected W&amp;B metric over training steps</title>
+              <desc id="chart-svg-desc">An interactive line chart sourced from W&amp;B run rgjoc15m.</desc>
+            </svg>
+            <div id="chart-tooltip" class="tooltip" role="tooltip" hidden></div>
+          </div>
+          <p id="coverage-note" class="coverage"></p>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="guide-title">
+        <div class="section-heading">
+          <div>
+            <h2 id="guide-title">Metric dictionary</h2>
+            <p>Select a group. Metric patterns cover dynamic verifier, environment, GPU-index, and status suffixes.</p>
+          </div>
+          <div class="legend"><i aria-hidden="true"></i> recently introduced in our search-agent work</div>
+        </div>
+        <div class="guide-layout">
+          <nav id="group-nav" class="group-nav" aria-label="Metric groups"></nav>
+          <article id="group-detail" class="group-detail" aria-live="polite"></article>
+        </div>
+      </section>
+
+      <footer class="footer">
+        Source of example data: W&amp;B public API, read 2026-08-14 UTC. Training history exists for steps 1–10;
+        registry/checkpoints establish completion through step 60, and six external validation rows were backfilled at
+        steps 10–60. Metric definitions are based on the current working tree rather than only the historical image.
+      </footer>
+    </main>
+
+    <script>
+      const trainingRows = [
+        {step:1,reward:.4609375,truncated:.1796875,cache:.2587218285,zero:3,solved:1},
+        {step:2,reward:.4453125,truncated:.1953125,cache:.2689819038,zero:7,solved:1},
+        {step:3,reward:.328125,truncated:.2734375,cache:.3674016297,zero:7,solved:0},
+        {step:4,reward:.21484375,truncated:.3125,cache:.3714924157,zero:7,solved:1},
+        {step:5,reward:.390625,truncated:.2109375,cache:.2468715012,zero:5,solved:0},
+        {step:6,reward:.48828125,truncated:.203125,cache:.2462579757,zero:2,solved:0},
+        {step:7,reward:.38671875,truncated:.12890625,cache:.1843215972,zero:13,solved:0},
+        {step:8,reward:.28515625,truncated:.12890625,cache:.1898999214,zero:5,solved:1},
+        {step:9,reward:.484375,truncated:.06640625,cache:.1213195994,zero:3,solved:0},
+        {step:10,reward:.50390625,truncated:.05078125,cache:.084913142,zero:2,solved:0}
+      ];
+      const validationRows = [
+        {step:10,value:.3},{step:20,value:.3},{step:30,value:11/30},
+        {step:40,value:11/30},{step:50,value:.3},{step:60,value:8/30}
+      ];
+      const curveSeries = [
+        {id:"reward",label:"Training reward",unit:"ratio",data:trainingRows.map(d=>({step:d.step,value:d.reward})),description:"scores · mean raw reward among the 256 retained trajectories. Active-sampling selection makes it unsuitable as an unbiased population solve rate.",coverage:"W&B retained training rows only for steps 1–10 of this resumed lineage; do not extrapolate this as a continuous 60-step curve."},
+        {id:"truncated",label:"Token-capped fraction",unit:"percent",data:trainingRows.map(d=>({step:d.step,value:d.truncated})),description:"val/truncated_completion_fraction · canonical pre-filter share with a non-stop finish or total stored response length at the response limit.",coverage:"This is total trajectory length, including assistant tokens and tool observations. It is not the max-tool-call rate."},
+        {id:"cache",label:"Search cache hit rate",unit:"percent",data:trainingRows.map(d=>({step:d.step,value:d.cache})),description:"env/search/cache_hit_rate · mean retained-rollout cache hit rate. Useful behaviorally, but not authoritative API-cost accounting.",coverage:"Historical env/* cache metrics exclude discarded, stale, crashed, and in-flight work. New api/serper/ledger/* metrics fix that on future runs."},
+        {id:"zero",label:"All-zero groups rejected",unit:"count",data:trainingRows.map(d=>({step:d.step,value:d.zero})),description:"batch/filtered_prompts_zero · prompt groups discarded because every rollout had zero reward.",coverage:"Counts are per optimizer batch and depend on how many candidate groups active sampling needed before finding the retained groups."},
+        {id:"validation",label:"Local-BM25 validation",unit:"percent",data:validationRows,description:"eval/local_bm25/accuracy · 30-question BrowseComp-Plus local-BM25 evaluation judged by Qwen3.6-35B.",coverage:"The six points were backfilled together after training. Their x-values are checkpoint steps; W&B timestamps are backfill time, not evaluation runtime."}
+      ];
+
+      const groups = [
+        {
+          id:"progress", title:"Progress & utilization", summary:"Optimizer progress, sampled work, packing, throughput, and hardware utilization emitted once per completed learner step.",
+          metrics:[
+            ["training_step","Authoritative optimizer-update number and default x-axis for application metrics.","Use this for step X/Y. It is not max tool calls and not W&B _step.","open_instruct/grpo_fast.py · setup_experiment_tracking / one_training_step"],
+            ["episode · global_step","Cumulative sampled trajectories. With active sampling this includes candidates from rejected prompt groups.","Both keys currently carry the same value; neither is the optimizer step.","grpo_fast.py · _count_sampled_episodes_for_step"],
+            ["epoch","Sampled episodes divided by samples-per-prompt and training-set size.","An environment/data exposure estimate; active-sampling resampling makes it different from a conventional dataloader epoch.","grpo_fast.py · one_training_step"],
+            ["scores","Mean raw reward among retained training trajectories.","Selection-biased under active sampling. Compare with pre-filter group performance and held-out eval.","data_loader.py · prepare batch"],
+            ["real_batch_size_ratio · unsolved_batch_size_ratio · packed_ratio","Actual/expected retained batch size, zero-reward share, and packed-sequence count per response.","Watch for padding/packing changes and hard-batch composition.","data_loader.py"],
+            ["val/num_step_tokens · val/num_total_tokens","Total stored prompt + response tokens in this step and cumulatively.","Response tokens include tool observations, not only assistant output.","grpo_fast.py"],
+            ["learner_tokens_per_second_{step,overall}","Learner-side stored tokens processed per wall-clock second.","Overall includes end-to-end elapsed time; step is the current-step rate.","grpo_fast.py"],
+            ["actor_mfu · actor_mbu · learner_mfu","Estimated rollout model FLOP/bandwidth utilization and learner model FLOP utilization.","Use for topology tuning; model/hardware estimates, not direct nvidia-smi utilization.","utils.py · calculate_utilization_metrics"],
+            ["model_step_{min,max,mean} · stale_results_dropped","Policy-version provenance of trajectories and stale results rejected by async training.","A widening model-step range indicates greater policy lag.","data_loader.py / grpo_fast.py"]
+          ]
+        },
+        {
+          id:"reward", title:"Reward & verification", summary:"Task reward components and verifier outcomes. Dynamic verifier names are inserted into objective/{verifier}/*.",
+          metrics:[
+            ["objective/verifiable_reward","Mean weighted verification reward after reward-component aggregation.","This is a reward component, while scores is the retained raw total score.","ground_truth_utils.py · RewardConfig"],
+            ["objective/verifiable_correct_rate","Fraction considered correct by verifiable reward components.","For binary BC-v2 reward this usually tracks judge correctness.","ground_truth_utils.py"],
+            ["objective/{verifier}_reward","Mean reward from a named verifier, e.g. objective/re_search_llm_reward.","Use the concrete verifier name to separate exact and LLM judging.","ground_truth_utils.py"],
+            ["objective/{verifier}_correct_rate","Correct fraction from that named verifier.","Distinguish this accepted-batch rate from held-out eval accuracy.","ground_truth_utils.py"],
+            ["val/format_scores","Optional response-format reward/score.","Only appears when format scoring is configured.","ground_truth_utils.py","optional"],
+            ["sample_completions · example_rubrics_table","W&B tables containing sampled completions or evolving-rubric examples.","Large media/table values, not scalar curves.","grpo_fast.py / rubrics","optional"]
+          ]
+        },
+        {
+          id:"sampling", title:"Active sampling", summary:"How many prompt groups were retained or discarded before forming the optimizer batch. These are essential for understanding rollout waste.",
+          metrics:[
+            ["batch/prompt_lengths · batch/response_lengths","Histograms of stored prompt and response token counts for the retained batch.","Response length includes tool observations.","data_loader.py · BatchStatistics"],
+            ["batch/filtered_prompts","Total zero-variance prompt groups discarded by active sampling.","Sum of all-zero, all-max/all-one, and other zero-std categories.","data_loader.py"],
+            ["batch/filtered_prompts_zero","Groups where every sampled trajectory had zero reward.","High values indicate prompts beyond the policy/verifier frontier.","data_loader.py"],
+            ["batch/filtered_prompts_solved","Groups where every trajectory achieved the maximum score.","High values indicate prompts that are too easy for useful group-relative advantages.","data_loader.py"],
+            ["batch/filtered_prompts_nonzero","Other zero-standard-deviation groups with shaped nonzero reward.","Relevant when rewards are not strictly binary.","data_loader.py"],
+            ["batch/percent_solved_{mean,hist}","Unweighted per-prompt solve-rate mean and histogram among retained mixed-outcome groups.","This is the exact retained-group pass-rate curve. It deliberately excludes uniform rejected groups.","data_loader.py"],
+            ["batch/no_resampled_prompts · batch/total_prompts","Groups completed without replacement and retained groups in the delivered batch.","Use with filtered_prompts to reconstruct candidate demand.","data_loader.py"],
+            ["val/avg_group_performance_{pre_filter,post_filter}","Reconstructed performance across retained groups plus active-sampling-rejected all-zero/all-max groups, before versus after trajectory-level masking changes the retained contribution.","These are both all-candidate aggregates; post_filter is not retained-only. Their gap measures trajectory masking, not active-sampling selection bias.","data_loader.py"],
+            ["val/total_reward_groups","Number of retained prompt groups contributing reward/advantages.","Normally num_unique_prompts_rollout for a full batch.","data_loader.py"]
+          ]
+        },
+        {
+          id:"rollouts", title:"Training-rollout health", summary:"Legacy val/* diagnostics for trajectories used to prepare training. These are not held-out validation metrics.",
+          metrics:[
+            ["val/sequence_lengths{,_min,_max}","Mean/min/max total stored response length across retained trajectories.","Includes assistant output and tool observations.","data_loader.py"],
+            ["val/terminal_turn_lengths","Mean generated-token length of non-empty raw terminal assistant turns across retained trajectories.","Includes terminal reasoning and the final answer; excludes earlier assistant turns and tool observations.","vllm_utils.py · data_loader.py","introduced"],
+            ["val/sequence_lengths_{solved,unsolved}{,_hist}","Length split by raw task correctness, with optional histograms.","A widening unsolved-vs-solved gap often reveals runaway failed searches.","data_loader.py"],
+            ["val/stop_rate","Share whose generation finish reason is stop.","Does not alone prove a semantically complete answer.","data_loader.py"],
+            ["val/truncated_completion_{count,fraction,correct_count}","Pre-filter canonical count/fraction of token- or non-stop-capped trajectories, plus how many were rewarded.","Token capped means response/context length, not max tool calls.","data_loader.py","introduced"],
+            ["val/truncated_completion_length_{mean,max}","Stored length of trajectories classified as truncated.","Useful for separating near-limit from early non-stop failures.","data_loader.py","introduced"],
+            ["val/non_submitting_completion_{count,fraction}","Pre-filter trajectories classified as non-submitting by the configured terminal-submission gate.","Definition is prompt/tool protocol dependent; question_only may intentionally not require answer tags.","data_loader.py","introduced"],
+            ["val/non_submitting_completion_unmasked_{count,fraction}","Non-submitting trajectories that remain in the retained training batch.","A nonzero value means reward/masking policy still allowed them through.","data_loader.py","introduced"],
+            ["format/{incomplete,terminal_format,trajectory_format}_pre_filtering","Fraction of all candidate rollouts classified into each mutually exclusive format-error category before active-sampling selection.","Incomplete takes precedence over terminal-format, which takes precedence over trajectory-format.","data_loader.py · ground_truth_utils.py","introduced"],
+            ["format/{incomplete,terminal_format,trajectory_format}_post_filtering","Fraction of rollouts in retained prompt groups classified into each mutually exclusive format-error category.","Compare with pre_filtering to see which failure modes active sampling preferentially retains or removes.","data_loader.py · ground_truth_utils.py","introduced"],
+            ["val/advantages_{mean,min,max,hist}","Group-relative advantage distribution.","Centered advantages have mean ~0 by construction; spread and extrema carry the signal.","data_loader.py"],
+            ["val/solve_rate_hist","Histogram of per-prompt solve rates for the retained training batch.","Unlike batch/percent_solved_hist, this is logged with the rollout-health payload and should not be mistaken for held-out validation.","data_loader.py"],
+            ["val/actor_tokens_per_second","Rollout prompt+response token throughput over generation time.","Measures model/tool-loop production, not learner throughput.","data_loader.py"]
+          ]
+        },
+        {
+          id:"optimization", title:"Optimization & divergence", summary:"Policy loss, importance ratios, clipping, gradients, reference-policy KL, and vLLM/HF consistency.",
+          metrics:[
+            ["loss/policy_avg · loss/total_avg","Token-weighted policy and total optimization loss.","Signs/scales depend on the configured GRPO-family loss.","grpo_utils.py / grpo_fast.py"],
+            ["loss/kl_avg","KL penalty contribution (selected KL estimator × beta).","It remains zero when beta=0 or no reference policy is loaded.","grpo_utils.py"],
+            ["objective/kl{0,1,2,3}_avg","Four diagnostic KL estimators against a loaded reference policy.","Only meaningful when load_ref_policy is enabled; not equivalent to vLLM/HF drift.","model_utils.py / grpo_utils.py","optional"],
+            ["policy/clipfrac_avg · policy/entropy_avg","Fraction of policy tokens clipped and optional token entropy.","Clip fraction near zero means trust-region clipping is inactive.","grpo_utils.py","optional"],
+            ["val/ratio · val/ratio_var","Token-weighted new/old policy probability ratio and variance.","Another legacy val/* namespace collision; these are optimizer metrics.","grpo_utils.py"],
+            ["val/tis_ratio · val/tis_clipfrac","Truncated importance-sampling ratio and clipping fraction.","Only when TIS is enabled.","grpo_utils.py","optional"],
+            ["debug/{tis,dppo,tvpo}_mask_frac_kept","Fraction of response tokens kept by each policy-update mask.","A sudden drop means updates are being discarded for divergence/staleness.","grpo_fast.py","optional"],
+            ["debug/vllm_vs_local_logprob_diff_{mean,max,std}","Absolute log-probability mismatch between rollout vLLM and learner HF forward passes.","Useful for numerical/backend drift and stale-weight diagnosis.","grpo_fast.py"],
+            ["debug/vllm_local_reverse_kl","Reverse-KL-like diagnostic between vLLM and local learner logprobs.","This is backend consistency, not the optional reference-policy KL penalty.","grpo_fast.py"],
+            ["optim/grad_norm · lr","Mean optimizer-boundary gradient norm and current scheduler learning rate.","Check finite gradients and update scale.","grpo_fast.py"],
+            ["actor/ppo_tv","Token-weighted prompt TV divergence used by TVPO.","Only when TVPO masking is enabled.","grpo_fast.py","optional"],
+            ["value/* · loss/value_avg","Returns, predictions, explained variance, value clipping, loss, and gradient norm.","Only for actor-critic/value-model configurations; absent in current DPPO runs.","grpo_fast.py","optional"]
+          ]
+        },
+        {
+          id:"timing", title:"Timing & bottlenecks", summary:"Wall-clock decomposition and synchronization latency. Compare waits to decide whether learners, rollout engines, or launch/storage dominate.",
+          metrics:[
+            ["time/total","Wall-clock duration for one completed optimizer step.","Includes learner work, waiting, saves, and orchestration.","grpo_fast.py"],
+            ["time/training","Learner forward/backward/optimizer wall time.","Compare with rollout wait to choose learner-vs-generator topology.","grpo_fast.py"],
+            ["time/getting_response","Aggregate rollout generation time for the prepared batch.","Includes multi-turn model/tool activity tracked by the rollout producer.","data_loader.py"],
+            ["time/trainer_idle_waiting_for_inference","Learner-side wait for a prepared rollout batch.","High values mean rollout-bound training.","data_loader.py"],
+            ["time/generation_idle_waiting_for_trainer","Rollout producer wait because the async pipeline/trainer cannot accept more work.","High values mean learner/backpressure bound.","data_loader.py"],
+            ["time/weight_sync{,_mean,_min,_max,_median}","Total and per-engine learner→vLLM weight synchronization latency.","Large max-minus-median indicates stragglers.","grpo_fast.py"],
+            ["time/saving · time/health_check","Checkpoint export and distributed-health-check wall time.","Spikes often point to Weka or Ray control-plane issues.","grpo_fast.py"]
+          ]
+        },
+        {
+          id:"tools", title:"Tools & cache", summary:"Tool-call behavior and environment-specific metrics. Generic env/* values are arithmetic means over retained rollout states.",
+          metrics:[
+            ["tools/{tool}/avg_calls_per_rollout","Mean call count for search, visit, bash, or another configured tool.","Use per tool to see strategy changes.","environments/tools/utils.py"],
+            ["tools/{tool}/failure_rate · avg_runtime","Tool-call error fraction and mean runtime in seconds.","Failure semantics come from StepResult metadata.","environments/tools/utils.py"],
+            ["tools/aggregate/{avg_calls_per_rollout,failure_rate,avg_runtime}","All-tool aggregates across retained rollouts.","Can hide one pathological tool; always inspect per-tool series too.","environments/tools/utils.py"],
+            ["env/{search,visit}/cache_{memory,disk,coalesced}_hits","Cache hits by source, averaged over retained rollout states.","Coalesced hits are concurrent callers sharing one in-flight external fetch.","open_instruct/environments/tools/tools.py","introduced"],
+            ["env/{search,visit}/cache_{misses,external_fetches,writes}","Miss/fetch/write activity for exact persistent request caching.","Historical retained-only accounting; not enough to price web API usage.","open_instruct/environments/tools/tools.py","introduced"],
+            ["env/{search,visit}/cache_{avoided_external_calls,hit_rate}","Requests served without a new external call and derived hit fraction.","Behavioral cache metric; candidate discards are omitted in old runs.","open_instruct/environments/tools/tools.py","introduced"],
+            ["env/{search,visit}/cache_{wait_seconds,stale_lease_takeovers,memory_entries}","Coalescing wait, abandoned lease recovery, and process-local memory-cache size.","Diagnoses contention and cache coordination.","open_instruct/environments/tools/tools.py","introduced"],
+            ["env/{environment}/{dynamic_metric}","Any metric exposed by a rollout environment, averaged over retained states.","Not a total and not a complete API cost source.","data_loader.py · _aggregate_env_metrics"]
+          ]
+        },
+        {
+          id:"serper", title:"Serper API accounting", summary:"New request-bound accounting that includes active-sampling waste and a durable W&B-run-scoped ledger. These keys first appear on runs launched with the current code.",
+          metrics:[
+            ["api/serper/{accepted,filtered_all_zero,filtered_all_one,filtered_other,stale}/*","Per-step sums split by the final fate of each returned candidate group.","Use the filtered categories to price active-sampling waste.","open_instruct/data_loader.py · _serper_category_metrics","introduced,next"],
+            ["api/serper/active_sampling_discarded/*","Sum of all three filtered categories.","Direct answer to how many calls/credits were discarded by active sampling.","data_loader.py","introduced,next"],
+            ["api/serper/all_candidates/*","Accepted + filtered + stale returned work for the step.","Still excludes calls that crash or never return; use the ledger for full accounting.","data_loader.py","introduced,next"],
+            ["…/{logical_calls,http_attempts,retry_attempts}","Logical search requests, physical HTTP attempts, and attempts after the first.","Retries can make HTTP attempts exceed logical calls.","tools.py / utils.py","introduced,next"],
+            ["…/{reported_credits,unknown_credit_attempts,errors}","Provider-reported Serper credits, finished attempts without a credit field, and non-success attempts.","Reported credits are a known lower bound; unknown-credit attempts must be shown beside them.","tools.py","introduced,next"],
+            ["…/{ledger_write_failures,ledger_available,ledger_setup_failed}","Durability health counters/gauges.","Any setup/write failure invalidates claims of complete request accounting.","tools.py","introduced,next"],
+            ["…/cache_{memory_hits,disk_hits,coalesced_hits,misses,external_fetches,writes,wait_seconds,stale_lease_takeovers,avoided_external_calls}","Additive cache activity split by candidate fate.","External fetches are not a substitute for credits; one call can retry or report multiple credits.","data_loader.py","introduced,next"],
+            ["api/serper/ledger/{logical_calls,invalid_calls,cache_hits}_cumulative","Durable totals read from append-only process ledgers scoped by W&B run ID.","Includes accepted, discarded, stale, and serialized request-time events.","open_instruct/environments/tools/api_usage.py","introduced,next"],
+            ["api/serper/ledger/external_attempts_{started,finished,unfinished}_cumulative","Physical attempt lifecycle totals.","Unfinished is the crash/in-flight visibility missing from rollout artifacts.","open_instruct/environments/tools/api_usage.py","introduced,next"],
+            ["api/serper/ledger/{retry_attempts,provider_reported_credits,unknown_credit_attempts,malformed_lines}_cumulative","Authoritative cumulative cost/retry/durability summary.","Use provider_reported_credits + unknown_credit_attempts for cost dashboards.","open_instruct/environments/tools/api_usage.py","introduced,next"],
+            ["api/serper/ledger/cache_{memory,disk,coalesced}_hits_cumulative · cache_hit_rate_cumulative","Cross-process/run-lineage cache savings.","Unlike env/*, these are request-time cumulative totals.","open_instruct/environments/tools/api_usage.py","introduced,next"],
+            ["api/serper/ledger/outcome_{outcome}_cumulative · http_status_{code}_cumulative","Dynamic outcome and HTTP-status counts.","Useful for quota, 429, timeout, auth, and provider outage diagnosis.","open_instruct/environments/tools/api_usage.py","introduced,next"]
+          ]
+        },
+        {
+          id:"validation", title:"Held-out validation", summary:"Actual evaluation metrics. In-process eval uses the training actors; external local-BM25 eval launches a separate Beaker job after an HF export.",
+          metrics:[
+            ["eval/scores","Mean held-out score from in-process evaluation.","For local-BM25 training this is the default automatic validation path.","grpo_fast.py · maybe_evaluate"],
+            ["eval/sequence_lengths{,_min,_max} · eval/stop_rate","Held-out response length distribution and stop share.","Separate from val/* training-rollout health.","grpo_fast.py"],
+            ["eval/actor_tokens_per_second","In-process held-out rollout throughput.","Includes prompt + response tokens over eval generation time.","grpo_fast.py"],
+            ["eval/pass_at_{k} · eval/pass_at_{k}_unbiased","Pass@k metrics when multiple eval completions are configured.","Dynamic k; distinguish empirical and unbiased estimator.","grpo_utils.py","optional"],
+            ["eval/objective/* · eval/model_step_{min,max,mean} · eval/stale_results_dropped","Prefixed verifier and policy-version provenance for eval trajectories.","Confirms which rollout policy version was actually evaluated.","grpo_fast.py"],
+            ["eval/local_bm25/{accuracy,correct,total}","Externally scored local-BM25 BrowseComp-Plus result logged back to the training run.","Accuracy uses the external Qwen3.6 answer-equivalence judge.","scripts/search/inference/score_local_bm25_validation.py","introduced"],
+            ["eval/local_bm25/{complete_rate,judge_invocation_rate,judge_failure_rate}","Completion gate coverage, share sent to the judge, and judge-call failure fraction.","Judge failures fail closed and should stay near zero.","scripts/search/inference/score_local_bm25_validation.py","introduced"],
+            ["eval/local_bm25/{token_capped,tool_capped}","External-eval counts ending at response/context limit versus max_steps.","These two termination ceilings are intentionally separate.","scripts/search/inference/score_local_bm25_validation.py","introduced"]
+          ]
+        },
+        {
+          id:"system", title:"W&B & system telemetry", summary:"Automatically emitted W&B runtime and host/device telemetry. Repeated GPU indices and shared-writer labels are represented as patterns.",
+          metrics:[
+            ["_step · _timestamp · _runtime","W&B row index, Unix timestamp, and run-relative seconds.","_step is not training_step; resume/backfill writers can make them diverge.","W&B SDK"],
+            ["system/gpu.{i}.gpu · memory · memoryAllocated{,Bytes}","Per-device utilization and memory telemetry.","The .gpu value is percent utilization; memory fields differ by W&B SDK semantics/version.","W&B system monitor"],
+            ["system/gpu.{i}.{powerWatts,powerPercent,enforcedPowerLimitWatts,temp}","Per-GPU power draw/limit and temperature.","Use for throttling and idle-allocation diagnosis.","W&B system monitor"],
+            ["system/gpu.{i}.{smClock,memoryClock,correctedMemoryErrors,uncorrectedMemoryErrors}","Clock rates and ECC error counters.","Any uncorrected error is a hardware-health alert.","W&B system monitor"],
+            ["system/{cpu,memory_percent} · system/proc.*","Host CPU, memory, trainer-process threads, RSS, percent, and available memory.","Useful for tokenizer/tool-server bottlenecks.","W&B system monitor"],
+            ["system/disk.* · system/network.{sent,recv}","Filesystem usage/I/O and network byte rates.","Correlate Weka checkpoint stalls, model downloads, and Ray traffic.","W&B system monitor"],
+            ["…/l:{writer_label}","Shared-mode telemetry from a named resume/trainer writer.","Same base metric, namespaced by W&B shared-run label.","W&B shared mode"],
+            ["concave_length_penalty/*","Optional solved/unsolved length penalties and group gap diagnostics.","Only appears when concave length shaping is enabled.","data_loader.py","optional"],
+            ["evolving_rubrics/*","Optional evolving/persistent rubric rewards, counts, rates, and active/inactive totals.","Unused in the current BC-v2 recipe unless rubric evolution is enabled.","rubrics/metrics.py","optional"]
+          ]
+        }
+      ];
+
+      const escapeHtml = value => String(value).replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[ch]);
+      const formatValue = (value, unit) => {
+        if (unit === "percent") return `${(value * 100).toFixed(1)}%`;
+        if (unit === "count") return value.toFixed(0);
+        return value.toFixed(3);
+      };
+
+      let selectedSeries = curveSeries[0];
+      const controls = document.getElementById("series-controls");
+      curveSeries.forEach(series => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = series.label;
+        button.setAttribute("aria-pressed", series === selectedSeries ? "true" : "false");
+        button.addEventListener("click", () => {
+          selectedSeries = series;
+          [...controls.children].forEach((child, index) => child.setAttribute("aria-pressed", curveSeries[index] === series ? "true" : "false"));
+          drawChart();
+        });
+        controls.appendChild(button);
+      });
+
+      function drawChart() {
+        const svg = document.getElementById("metric-chart");
+        const tooltip = document.getElementById("chart-tooltip");
+        const chartWrap = document.getElementById("chart-wrap");
+        const width = Math.max(280, Math.round(chartWrap.getBoundingClientRect().width || 960));
+        const compact = width < 600;
+        const height = compact ? 290 : 340;
+        const left = compact ? 62 : 72, right = compact ? 12 : 24, top = 18, bottom = 55;
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        const innerW = width - left - right, innerH = height - top - bottom;
+        const data = selectedSeries.data;
+        const xs = data.map(d => d.step), ys = data.map(d => d.value);
+        const xMin = Math.min(...xs), xMax = Math.max(...xs);
+        let yMin = Math.min(...ys), yMax = Math.max(...ys);
+        const yPad = Math.max((yMax - yMin) * .18, selectedSeries.unit === "count" ? 1 : .025);
+        yMin = selectedSeries.unit === "count" ? Math.max(0, Math.floor(yMin - yPad)) : Math.max(0, yMin - yPad);
+        yMax = selectedSeries.unit === "count" ? Math.ceil(yMax + yPad) : Math.min(1, yMax + yPad);
+        if (yMax === yMin) yMax = yMin + 1;
+        const x = value => left + ((value - xMin) / Math.max(1, xMax - xMin)) * innerW;
+        const y = value => top + (1 - (value - yMin) / (yMax - yMin)) * innerH;
+        const uniqueXTicks = [...new Set(data.map(d => d.step))];
+        const maxXTicks = width < 480 ? 4 : width < 760 ? 6 : 9;
+        const xTickStride = Math.max(1, Math.ceil((uniqueXTicks.length - 1) / Math.max(1, maxXTicks - 1)));
+        const xTicks = uniqueXTicks.filter((_, i, a) => i === 0 || i === a.length - 1 || i % xTickStride === 0);
+        const yTicks = Array.from({length:5}, (_, i) => yMin + (yMax - yMin) * i / 4);
+        const path = data.map((d, i) => `${i ? "L" : "M"}${x(d.step).toFixed(2)},${y(d.value).toFixed(2)}`).join(" ");
+        svg.innerHTML = `
+          <title id="chart-svg-title">${escapeHtml(selectedSeries.label)} over training steps</title>
+          <desc id="chart-svg-desc">${escapeHtml(selectedSeries.description)}</desc>
+          <rect class="chart-frame" x="${left}" y="${top}" width="${innerW}" height="${innerH}" />
+          ${yTicks.map(t => `<line class="grid-line" x1="${left}" x2="${width-right}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${left-10}" y="${y(t)+4}" text-anchor="end">${formatValue(t, selectedSeries.unit)}</text>`).join("")}
+          ${xTicks.map(t => `<text class="axis-text" x="${x(t)}" y="${height-bottom+24}" text-anchor="middle">${t}</text>`).join("")}
+          <text class="axis-title" x="${left+innerW/2}" y="${height-8}" text-anchor="middle">optimizer step</text>
+          <text class="axis-title" transform="translate(17 ${top+innerH/2}) rotate(-90)" text-anchor="middle">${selectedSeries.unit === "percent" ? "percent" : selectedSeries.unit}</text>
+          <path class="curve-line" d="${path}" />
+          ${data.map((d, i) => `<circle class="curve-point" data-index="${i}" tabindex="0" cx="${x(d.step)}" cy="${y(d.value)}" r="5"><title>Step ${d.step}: ${formatValue(d.value, selectedSeries.unit)}</title></circle>`).join("")}`;
+        const mean = ys.reduce((a,b)=>a+b,0)/ys.length;
+        document.getElementById("curve-name").textContent = selectedSeries.label;
+        document.getElementById("curve-description").textContent = selectedSeries.description;
+        document.getElementById("curve-stats").innerHTML = [
+          ["latest", data[data.length-1].value], ["mean", mean], ["min", Math.min(...ys)], ["max", Math.max(...ys)]
+        ].map(([label,value]) => `<span><b>${formatValue(value, selectedSeries.unit)}</b>${label}</span>`).join("");
+        document.getElementById("coverage-note").textContent = selectedSeries.coverage;
+        const showTip = (event, d) => {
+          const wrap = chartWrap.getBoundingClientRect();
+          const point = event.currentTarget.getBoundingClientRect();
+          tooltip.innerHTML = `<b>${formatValue(d.value, selectedSeries.unit)}</b><span>optimizer step ${d.step}</span>`;
+          tooltip.style.left = `${point.left - wrap.left + point.width/2}px`;
+          tooltip.style.top = `${point.top - wrap.top + point.height/2}px`;
+          tooltip.hidden = false;
+        };
+        svg.querySelectorAll(".curve-point").forEach(node => {
+          const d = data[Number(node.dataset.index)];
+          node.addEventListener("mouseenter", event => showTip(event,d));
+          node.addEventListener("focus", event => showTip(event,d));
+          node.addEventListener("mouseleave", () => tooltip.hidden = true);
+          node.addEventListener("blur", () => tooltip.hidden = true);
+        });
+      }
+
+      const groupNav = document.getElementById("group-nav");
+      const detail = document.getElementById("group-detail");
+      function renderGroup(group) {
+        [...groupNav.children].forEach((button, index) => button.setAttribute("aria-pressed", groups[index].id === group.id ? "true" : "false"));
+        const rows = group.metrics.map(metric => {
+          const [name, meaning, reading, source, flag] = metric;
+          const introduced = flag === "introduced" || flag === "introduced,next";
+          const optional = flag === "optional";
+          const next = flag === "introduced,next";
+          const badges = [
+            introduced ? `<span class="badge">our addition</span>` : "",
+            optional ? `<span class="badge optional">optional</span>` : "",
+            next ? `<span class="badge next">next run</span>` : ""
+          ].join(" ");
+          return `<tr class="${introduced ? "introduced" : ""}">
+            <td><code>${escapeHtml(name)}</code><br>${badges}</td>
+            <td><p>${escapeHtml(meaning)}</p></td>
+            <td><p>${escapeHtml(reading)}</p></td>
+            <td class="source">${escapeHtml(source)}</td>
+          </tr>`;
+        }).join("");
+        detail.innerHTML = `<header class="group-header"><h3>${escapeHtml(group.title)}</h3><p>${escapeHtml(group.summary)}</p></header>
+          <div class="table-wrap"><table><thead><tr><th>Metric</th><th>What it measures</th><th>How to read it</th><th>Code source</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+        history.replaceState(null, "", `#${group.id}`);
+      }
+      groups.forEach((group, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "group-button";
+        button.setAttribute("aria-pressed", "false");
+        button.innerHTML = `<span class="group-index">${String(index+1).padStart(2,"0")}</span><strong>${escapeHtml(group.title)}</strong><small>${group.metrics.length}</small>`;
+        button.addEventListener("click", () => renderGroup(group));
+        groupNav.appendChild(button);
+      });
+
+      drawChart();
+      renderGroup(groups.find(group => `#${group.id}` === location.hash) || groups[0]);
+      if ("ResizeObserver" in window) {
+        let lastChartWidth = 0;
+        new ResizeObserver(entries => {
+          const nextWidth = Math.round(entries[0].contentRect.width);
+          if (nextWidth && nextWidth !== lastChartWidth) {
+            lastChartWidth = nextWidth;
+            drawChart();
+          }
+        }).observe(document.getElementById("chart-wrap"));
+      }
+    </script>
+  </body>
+</html>

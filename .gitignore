@@ -162,3 +162,4 @@ local_dataset_cache/
 scratch/
 .claude/worktrees/
 .claude/
+rl_rollouts/

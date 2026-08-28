@@ -1,0 +1,8 @@
+schema_version: 1
+kind: training_registry
+repo_root: ../..
+defaults:
+  wandb:
+    entity: ai2-llm
+    project: oe-general-agents
+    validation_metric: val/avg_group_performance_pre_filter

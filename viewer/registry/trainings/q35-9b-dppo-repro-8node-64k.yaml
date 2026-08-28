@@ -1,0 +1,86 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-repro-8node-64k
+title: "Qwen3.5-9B · tmax-15k · DPPO repro · 8 nodes · 64k"
+classification: evaluated
+visibility: default
+tags:
+  model: Qwen3.5-9B (hamishivi)
+  dataset: tmax-15k
+  tools: bash sandbox (swerl_vanillux)
+  verifier: env binary reward
+  loss: DPPO (tv 0.1)
+  geometry: "8 nodes · 8×32 · 64k"
+note: "Repro of released tmax DPPO 9B. Died at step ~236 after repeated Ray/OOM instability (exit-143 storms are beaker SIGTERM on sibling nodes, not preemption)."
+wandb:
+  run_id: udddnfud
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro.sh
+  beaker_experiment: 01KXCZX3P87KAP40P6497836H6
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-8node-64k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro__42__1783921807
+    - swerl_qwen35_9b_dppo_repro__42__1783935658
+    - swerl_qwen35_9b_dppo_repro__42__1783938717
+    - swerl_qwen35_9b_dppo_repro__42__1784028087
+    - swerl_qwen35_9b_dppo_repro__42__1784051570
+- id: resume-236
+  relation: resume
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_resume.sh
+  beaker_experiment: 01KXH0Z1ND013QHG2ZBEDV75S2
+  wandb:
+    run_id: 56o9dj4t
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-8node-64k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro__42__1784056735
+    - swerl_qwen35_9b_dppo_repro__42__1784061356
+    - swerl_qwen35_9b_dppo_repro__42__1784064864
+    - swerl_qwen35_9b_dppo_repro__42__1784070439
+  note: "Resumed from global_step233 state (state dir 1783921282_244270) after max_retries exhausted."
+- id: resume-236-b
+  relation: resume
+  script: scripts/general_agent/terminal/rl/qwen35_9b_dppo_repro_resume.sh
+  beaker_experiment: 01KXKJS8KBZGZG10T5QX78W5J7
+  wandb:
+    run_id: 6535111n
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-repro-8node-64k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro__42__1784142738
+    - swerl_qwen35_9b_dppo_repro__42__1784146550
+  note: "Second resume attempt; crashed at ~step 234."
+artifacts:
+  furthest_step: 220
+  evaluations:
+  - benchmark: terminal-bench-2.1
+    step: 120
+    correct: 108
+    total: 445
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_120
+  - benchmark: terminal-bench-2.1
+    step: 160
+    correct: 100
+    total: 445
+    checkpoint:
+      step: 160
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_160
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 120
+    correct: 108
+    total: 445
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1783938717_checkpoints/step_120
+  latest_checkpoint:
+    step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro__42__1784028087_checkpoints/step_220

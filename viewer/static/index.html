@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Training Observatory</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section id="catalog-view" class="catalog-view" aria-label="Training experiments">
+      <header class="catalog-header">
+        <a class="catalog-brand" href="#/" aria-label="Training Observatory home">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>
+            <span class="eyebrow">Deep research training</span>
+            <strong>Training Observatory</strong>
+          </span>
+        </a>
+        <div class="catalog-actions">
+          <span id="catalog-refreshed" class="muted"></span>
+          <a class="primary-link secondary-link" href="/wandb-metrics.html">Metric guide</a>
+          <button id="catalog-refresh" class="secondary-button">Refresh live data</button>
+        </div>
+      </header>
+
+      <main id="overview-panel" class="catalog-main">
+        <section class="catalog-hero">
+          <div>
+            <p class="eyebrow">Experiment registry</p>
+            <h1>Training runs, clearly observed.</h1>
+            <p>Compare progress, open retained checkpoints, and inspect the trajectories behind every score.</p>
+          </div>
+          <div id="catalog-summary" class="catalog-summary" aria-label="Registry summary"></div>
+        </section>
+
+        <section class="catalog-toolbar" aria-label="Experiment filters">
+          <label class="catalog-search">
+            <span>Search experiments</span>
+            <input id="catalog-search" type="search" placeholder="Model, corpus, verifier, run ID…" />
+          </label>
+          <label>
+            <span>Classification</span>
+            <select id="catalog-classification">
+              <option value="primary">Primary runs</option>
+              <option value="evaluated">Evaluated</option>
+              <option value="substantive">Substantive</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort by</span>
+            <select id="catalog-sort">
+              <option value="recent">Most recent</option>
+              <option value="oldest">Oldest activity</option>
+              <option value="validation">Best validation</option>
+              <option value="step">Furthest step</option>
+              <option value="name">Name</option>
+            </select>
+          </label>
+          <label class="check-filter"><input id="catalog-archived" type="checkbox" /> <span>Include archived</span></label>
+          <label class="check-filter"><input id="catalog-smoke" type="checkbox" /> <span>Include smoke / hidden</span></label>
+        </section>
+
+        <section class="catalog-results" aria-live="polite">
+          <div class="catalog-results-heading">
+            <div>
+              <h2>Training runs</h2>
+              <p id="catalog-count" class="muted">Loading registry…</p>
+            </div>
+            <div class="catalog-legend" aria-label="Availability legend">
+              <span><i class="status-dot ready"></i>available</span>
+              <span><i class="status-dot missing"></i>missing</span>
+            </div>
+          </div>
+          <div id="training-table" class="training-table-wrap"></div>
+          <div id="catalog-empty" class="empty-state" hidden>
+            <div class="empty-orbit">○</div>
+            <h3>No matching experiments</h3>
+            <p>Try clearing the search or including archived and smoke runs.</p>
+          </div>
+        </section>
+      </main>
+
+      <main id="training-panel" class="catalog-main training-panel" hidden>
+        <nav class="breadcrumbs" aria-label="Breadcrumb">
+          <a href="#/">Experiments</a><span>/</span><span id="training-breadcrumb">Training</span>
+        </nav>
+        <div id="training-detail"></div>
+        <section id="rollout-empty" class="workspace-empty" hidden>
+          <div class="empty-orbit">○</div>
+          <h2>No rollout artifacts are indexed</h2>
+          <p>The run overview remains available above. Add a retained rollout path to inspect trajectories here.</p>
+        </section>
+
+        <div id="rollout-view" class="app-shell workspace-inspector" hidden>
+          <aside class="sidebar">
+            <a id="inspector-back" class="inspector-back" href="#/">← All training runs</a>
+            <div class="brand">
+              <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div>
+                <p class="eyebrow">Trajectory review</p>
+                <h1>Rollout Inspector</h1>
+              </div>
+            </div>
+
+        <section class="control-section">
+          <label for="run-select">Experiment</label>
+          <select id="run-select"></select>
+          <div id="run-meta" class="run-meta"></div>
+          <p id="root-path" class="path-note" title=""></p>
+        </section>
+
+        <section class="control-section">
+          <div class="section-heading">
+            <label for="step-slider">Artifact step</label>
+            <span id="step-range" class="muted"></span>
+          </div>
+          <div class="step-control">
+            <button id="previous-step" class="icon-button" aria-label="Previous step">←</button>
+            <input id="step-input" type="number" min="0" aria-label="Artifact step number" />
+            <button id="next-step" class="icon-button" aria-label="Next step">→</button>
+          </div>
+          <input
+            id="step-slider"
+            class="step-slider"
+            type="range"
+            min="0"
+            max="0"
+            step="1"
+            aria-label="Scrub through artifact steps"
+          />
+          <div class="step-legend">
+            <span id="step-caption" class="muted"></span>
+            <button id="step-latest" class="link-button">Latest</button>
+          </div>
+        </section>
+
+        <section class="control-section">
+          <label>Inspect by</label>
+          <div class="segmented view-mode-control" id="view-mode-control">
+            <button data-mode="trajectories" class="active" aria-pressed="true">Trajectories</button>
+            <button data-mode="groups" aria-pressed="false">Groups</button>
+          </div>
+          <p id="view-mode-help" class="control-help">Review individual sampled trajectories.</p>
+        </section>
+
+        <section class="control-section">
+          <label>Source</label>
+          <div class="segmented" id="source-control">
+            <button data-source="accepted" class="active" aria-pressed="true">Learner batch</button>
+            <button data-source="filtered" aria-pressed="false">Discarded</button>
+            <button data-source="both" aria-pressed="false">Both</button>
+          </div>
+          <p id="source-help" class="control-help">Learner batch contains retained prompt groups, including reward-0 trajectories.</p>
+        </section>
+
+        <section class="category-section">
+          <div class="section-heading">
+            <label>Review queues</label>
+            <span class="muted">multi-label</span>
+          </div>
+          <nav id="category-list" class="category-list" aria-label="Trajectory categories"></nav>
+        </section>
+
+        <div class="sidebar-footer">
+          <button id="refresh-button" class="secondary-button">↻ Refresh files</button>
+          <span id="last-refresh" class="muted"></span>
+        </div>
+          </aside>
+
+          <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Lazy, targeted inspection</p>
+            <h2 id="view-title">Suspicious trajectories</h2>
+            <p id="view-subtitle" class="subtitle">Choose a step and review queue.</p>
+          </div>
+          <div class="topbar-controls">
+            <label class="search-box">
+              <span>⌕</span>
+              <input id="search-input" type="search" placeholder="Search reference, response, prompt ID…" />
+            </label>
+            <label class="sort-box">
+              <span>Sort</span>
+              <select id="sort-select">
+                <option value="suspicion">Most suspicious</option>
+                <option value="tokens">Longest</option>
+                <option value="calls">Most tool calls</option>
+                <option value="sample">Prompt / sample</option>
+                <option value="reward">Zero reward first</option>
+              </select>
+            </label>
+          </div>
+        </header>
+
+        <section id="stats" class="stats-grid" aria-label="Step summary">
+          <article class="stat-card"><span id="stat-records-label">Rollouts scanned</span><strong id="stat-records">—</strong></article>
+          <article class="stat-card"><span id="stat-reward-label">Reward rate</span><strong id="stat-reward">—</strong></article>
+          <article class="stat-card"><span>Average length</span><strong id="stat-tokens">—</strong></article>
+          <article class="stat-card"><span>Validation</span><strong id="stat-validation">—</strong></article>
+          <article class="stat-card warning"><span>Flagged</span><strong id="stat-flagged">—</strong></article>
+        </section>
+
+        <section class="results-section">
+          <div class="results-heading">
+            <div>
+              <span id="result-count" class="result-count">— trajectories</span>
+              <span class="muted">Only summaries are transferred until a card is opened.</span>
+            </div>
+            <div id="loading-label" class="loading-label" hidden><i></i> Seeking requested step…</div>
+          </div>
+          <div id="empty-state" class="empty-state" hidden>
+            <div class="empty-orbit">○</div>
+            <h3>No trajectories in this queue</h3>
+            <p>Try another review category, source, or artifact step.</p>
+          </div>
+          <div id="record-grid" class="record-grid"></div>
+          <div id="load-sentinel" class="load-sentinel" aria-hidden="true"></div>
+          <button id="load-more" class="secondary-button load-more" hidden>Load next page</button>
+        </section>
+          </main>
+        </div>
+      </main>
+
+      <main id="evaluation-panel" class="catalog-main evaluation-panel" hidden>
+        <nav class="breadcrumbs" aria-label="Breadcrumb">
+          <a href="#/">Experiments</a><span>/</span><a id="evaluation-training-link" href="#/">Training</a><span>/</span><span id="evaluation-breadcrumb">Evaluation</span>
+        </nav>
+        <header id="evaluation-header" class="evaluation-header"></header>
+        <section id="evaluation-stats" class="evaluation-stats" aria-label="Evaluation summary"></section>
+        <section class="evaluation-toolbar" aria-label="Evaluation filters">
+          <label class="evaluation-search"><span>Search questions</span><input id="evaluation-search" type="search" placeholder="Question, answer, query ID…" /></label>
+          <label><span>Outcome</span><select id="evaluation-outcome"><option value="all">All results</option><option value="judged_correct">Judged correct</option><option value="judged_incorrect">Judged incorrect</option><option value="incomplete">Incomplete</option></select></label>
+          <label><span>Sort by</span><select id="evaluation-sort"><option value="id">Query ID</option><option value="correctness">Incorrect first</option><option value="tools">Most tool calls</option><option value="steps">Most steps</option></select></label>
+        </section>
+        <div class="evaluation-workspace">
+          <aside class="evaluation-results-rail">
+            <div class="evaluation-results-heading"><strong id="evaluation-result-count">Loading results…</strong><span id="evaluation-result-caption" class="muted"></span></div>
+            <div id="evaluation-records" class="evaluation-records"></div>
+            <button id="evaluation-load-more" class="secondary-button evaluation-load-more" hidden>Load more</button>
+          </aside>
+          <article id="evaluation-detail" class="evaluation-detail"><div class="catalog-loading"><i></i><span>Loading evaluated trajectory…</span></div></article>
+        </div>
+      </main>
+    </section>
+
+    <div id="group-modal-backdrop" class="group-modal-backdrop" hidden></div>
+    <section id="group-modal" class="group-modal" role="dialog" aria-modal="true" aria-labelledby="group-modal-title" aria-hidden="true">
+      <header class="group-modal-header">
+        <div>
+          <p id="group-modal-kicker" class="eyebrow">Prompt group</p>
+          <h2 id="group-modal-title">Loading group…</h2>
+        </div>
+        <button id="group-modal-close" class="icon-button close-button" aria-label="Close group">×</button>
+      </header>
+      <div id="group-modal-summary" class="group-modal-summary"></div>
+      <div id="group-modal-body" class="group-modal-body"></div>
+    </section>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside id="detail-drawer" class="detail-drawer" aria-label="Trajectory detail" aria-hidden="true">
+      <header class="drawer-header">
+        <div>
+          <p id="detail-kicker" class="eyebrow">Trajectory</p>
+          <h2 id="detail-title">Loading…</h2>
+        </div>
+        <div class="drawer-header-actions">
+          <button id="detail-copy-locator" class="secondary-button rollout-locator-button" type="button" hidden>Copy rollout locator</button>
+          <button id="drawer-close" class="icon-button close-button" aria-label="Close detail">×</button>
+        </div>
+      </header>
+      <div id="detail-body" class="drawer-body"></div>
+    </aside>
+
+    <div id="full-document-backdrop" class="full-document-backdrop" hidden></div>
+    <aside id="full-document-pane" class="full-document-pane" role="dialog" aria-modal="true" aria-labelledby="full-document-title" aria-hidden="true">
+      <header class="full-document-header">
+        <div>
+          <p class="eyebrow">Complete visit response</p>
+          <h2 id="full-document-title">Visit document</h2>
+          <a id="full-document-source" target="_blank" rel="noopener noreferrer" hidden></a>
+        </div>
+        <button id="full-document-close" class="icon-button close-button" aria-label="Close full document">×</button>
+      </header>
+      <div id="full-document-toolbar" class="full-document-toolbar"></div>
+      <div id="full-document-body" class="full-document-body"><div class="detail-loading">Loading complete document…</div></div>
+    </aside>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
