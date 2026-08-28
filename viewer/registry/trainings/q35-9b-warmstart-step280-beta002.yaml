@@ -1,0 +1,28 @@
+schema_version: 1
+kind: training
+id: q35-9b-warmstart-step280-beta002
+title: Qwen3.5-9B · DPPO warm-start from step 280 · β=0.02
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO
+  ablation: warm-start beta 0.02
+wandb:
+  run_id: lzdqp09f
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_9b_from_step280_beta002.sh
+  beaker_experiment: 01KX9J6EP8DBVG900W5DVNG1DC
+  rollouts:
+  - path: rl_rollouts/q35-9b-warmstart-step280-beta002
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_from_step280_beta002__42__1783806470
+    - swerl_qwen35_9b_from_step280_beta002__42__1783896418
+artifacts:
+  furthest_step: 325
+  latest_checkpoint:
+    step: 320
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step280_beta002__42__1783896418_checkpoints/step_320

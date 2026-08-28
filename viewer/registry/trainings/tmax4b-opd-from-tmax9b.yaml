@@ -1,0 +1,164 @@
+schema_version: 1
+kind: training
+id: tmax4b-opd-from-tmax9b
+title: OPD · tmax-4b ← tmax-9b
+classification: evaluated
+visibility: default
+tags:
+  model: tmax-4b
+  method: OPD
+  teacher: tmax-9b
+wandb:
+  run_id: v6scz2v2
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/opd/tmax4b_opd_from_tmax9b_4node_64k.sh
+  beaker_experiment: 01KZ7NVE4N4CJ1QX948933FX4F
+  rollouts:
+  - path: rl_rollouts/tmax4b-opd-from-tmax9b
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1785993994
+    - swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685
+    - swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786084330
+artifacts:
+  furthest_step: 167
+  evaluations:
+  - benchmark: tblite-2.0
+    step: 20
+    correct: 205
+    total: 500
+    beaker_experiment: 01KZB6M3N2Q6XKY0MXD8676H17
+    checkpoint:
+      step: 20
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1785993994_checkpoints/step_20
+  - benchmark: tblite-2.0
+    step: 40
+    correct: 220
+    total: 500
+    beaker_experiment: 01KZB6MP5A155WSJCKEH9F1G7C
+    checkpoint:
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1785993994_checkpoints/step_40
+  - benchmark: tblite-2.0
+    step: 60
+    correct: 200
+    total: 500
+    beaker_experiment: 01KZCHXHR5VST2EM2KYC520P0T
+    checkpoint:
+      step: 60
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1785993994_checkpoints/step_60
+  - benchmark: tblite-2.0
+    step: 80
+    correct: 245
+    total: 500
+    beaker_experiment: 01KZCHY2VMWEGBR6EQZP2AAAX1
+    checkpoint:
+      step: 80
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_80
+  - benchmark: tblite-2.0
+    step: 100
+    correct: 215
+    total: 500
+    beaker_experiment: 01KZCXDV2AR409C7RSWWCGNDYE
+    checkpoint:
+      step: 100
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_100
+  - benchmark: tblite-2.0
+    step: 120
+    correct: 245
+    total: 500
+    beaker_experiment: 01KZCXEC2ZYRED2Q6J41RE38S1
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_120
+  - benchmark: tblite-2.0
+    step: 140
+    correct: 240
+    total: 500
+    beaker_experiment: 01KZDPNQMETMSHC2R1RJKX4547
+    checkpoint:
+      step: 140
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_140
+  - benchmark: tblite-2.0
+    step: 160
+    correct: 225
+    total: 500
+    beaker_experiment: 01KZDPPAYCR1BQGQM53ZJVNG16
+    checkpoint:
+      step: 160
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786084330_checkpoints/step_160
+  - benchmark: terminal-bench-2.1
+    step: 20
+    correct: 70
+    total: 445
+    beaker_experiment: 01KZB6KSVNBHKVHKXGRNCGDDPW
+    checkpoint:
+      step: 20
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1785993994_checkpoints/step_20
+  - benchmark: terminal-bench-2.1
+    step: 40
+    correct: 80
+    total: 445
+    beaker_experiment: 01KZB6MCWY9J00J17ESAGD4YST
+    checkpoint:
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1785993994_checkpoints/step_40
+  - benchmark: terminal-bench-2.1
+    step: 60
+    correct: 60
+    total: 445
+    beaker_experiment: 01KZCHX985JGQ2ZMY5Y2SCSVQS
+    checkpoint:
+      step: 60
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1785993994_checkpoints/step_60
+  - benchmark: terminal-bench-2.1
+    step: 80
+    correct: 85
+    total: 445
+    beaker_experiment: 01KZCHXT6ZGW2CNMTMREKZRCVK
+    checkpoint:
+      step: 80
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_80
+  - benchmark: terminal-bench-2.1
+    step: 100
+    correct: 75
+    total: 445
+    beaker_experiment: 01KZCXDJNWNYV20GNJH8BG6QM6
+    checkpoint:
+      step: 100
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_100
+  - benchmark: terminal-bench-2.1
+    step: 120
+    correct: 80
+    total: 445
+    beaker_experiment: 01KZCXE3N2EAJ7YYYV6WV8SFHG
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_120
+  - benchmark: terminal-bench-2.1
+    step: 140
+    correct: 90
+    total: 445
+    beaker_experiment: 01KZDPNCX85MB233ZF749MF3R2
+    checkpoint: &id001
+      step: 140
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786033685_checkpoints/step_140
+  - benchmark: terminal-bench-2.1
+    step: 160
+    correct: 80
+    total: 445
+    beaker_experiment: 01KZDPP2842E52RCF9767TN2EE
+    checkpoint:
+      step: 160
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786084330_checkpoints/step_160
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 140
+    correct: 90
+    total: 445
+    checkpoint: *id001
+  latest_checkpoint:
+    step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_tmax4b_opd_from_tmax9b_4node_64k__42__1786084330_checkpoints/step_160

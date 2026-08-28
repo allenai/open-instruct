@@ -1,0 +1,46 @@
+schema_version: 1
+kind: training
+id: q35-27b-dppo-holmes
+title: Qwen3.5-27B · DPPO · Holmes cu13 · 4n 64k
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-27B
+  method: DPPO
+  infra: Holmes B300 cu13
+wandb:
+  run_id: 3opap75c
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01M0V56Y6CFPAM2TMMMAC3FC2X
+  rollouts:
+  - path: rl_rollouts/q35-27b-dppo-holmes
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_27b_dppo_4node_64k_holmes__42__1787618658
+- id: resume-1
+  relation: resume
+  beaker_experiment: 01M10C0NR99HTGSHQF04YQNY6J
+  wandb:
+    run_id: khf7n8bw
+  rollouts:
+  - path: rl_rollouts/q35-27b-dppo-holmes
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    configured_only: true
+    attempts: []
+- id: resume-2
+  relation: resume
+  beaker_experiment: 01M123P2PJMT6PAT7GS4Q14NE7
+  wandb:
+    run_id: t68pnsrn
+  rollouts:
+  - path: rl_rollouts/q35-27b-dppo-holmes
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_27b_dppo_4node_64k_holmes__42__1787851486
+artifacts:
+  furthest_step: 205
+  latest_checkpoint:
+    step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_27b_dppo_4node_64k_holmes__42__1787851486_checkpoints/step_200

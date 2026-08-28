@@ -1,0 +1,28 @@
+schema_version: 1
+kind: training
+id: q35-9b-opd-from-tmax9b-v2
+title: OPD · 9B-base ← tmax-9b · v2
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: OPD
+  teacher: tmax-9b
+wandb:
+  run_id: gdtn1w3c
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/opd/qwen35_9b_dppo_opd_v2_4node_64k.sh
+  beaker_experiment: 01KZ50M0AXW2DRD3ZXB5PCCTVB
+  rollouts:
+  - path: rl_rollouts/q35-9b-opd-from-tmax9b-v2
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_opd_v2_4node_64k__42__1785801344
+    - swerl_qwen35_9b_dppo_opd_v2_4node_64k__42__1785828173
+artifacts:
+  furthest_step: 200
+  latest_checkpoint:
+    step: 200
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_opd_v2_4node_64k__42__1785828173_checkpoints/step_200

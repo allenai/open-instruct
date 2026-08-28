@@ -1,0 +1,37 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-cu13-parity-smoke
+title: Qwen3.5-9B · DPPO · CUDA13/B300 parity smoke
+classification: smoke
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO
+  infra: Holmes B300 cu13
+wandb:
+  run_id: remrynnr
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01KY6Z9FFTG86BR1W3C6YEECGF
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-cu13-parity-smoke
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1784793466
+    - swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1784809635
+- id: resume-1
+  relation: resume
+  beaker_experiment: 01KYKPCTPGMRQTMAVHYBV05VNC
+  wandb:
+    run_id: 9ayyxxq5
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-cu13-parity-smoke
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1785221672
+artifacts:
+  furthest_step: 25
+  latest_checkpoint:
+    step: 20
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_holmes_cu13__42__1785221672_checkpoints/step_20

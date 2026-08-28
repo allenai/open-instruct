@@ -1,0 +1,147 @@
+schema_version: 1
+kind: training
+id: q35-4b-opd-from-tmax9b
+title: OPD · 4B-base ← tmax-9b
+classification: evaluated
+visibility: default
+tags:
+  model: Qwen3.5-4B
+  method: OPD
+  teacher: tmax-9b
+wandb:
+  run_id: vjgol9zb
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/opd/qwen35_4b_opd_from_tmax9b_4node_64k.sh
+  beaker_experiment: 01KZ7NG1T4WR7NJMTVDYBBDZBN
+  rollouts:
+  - path: rl_rollouts/q35-4b-opd-from-tmax9b
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453
+    - swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1786036760
+artifacts:
+  furthest_step: 275
+  evaluations:
+  - benchmark: tblite-2.0
+    step: 20
+    correct: 205
+    total: 500
+    beaker_experiment: 01KZ9RBV7DVB3VP83BNC6SY6KN
+    checkpoint:
+      step: 20
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_20
+  - benchmark: tblite-2.0
+    step: 40
+    correct: 235
+    total: 500
+    beaker_experiment: 01KZ9QEH1DQS3R0S9F4JB8439A
+    checkpoint:
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_40
+  - benchmark: tblite-2.0
+    step: 60
+    correct: 245
+    total: 500
+    beaker_experiment: 01KZ9RCE03RVF8T0NY78S5YWX1
+    checkpoint:
+      step: 60
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_60
+  - benchmark: tblite-2.0
+    step: 80
+    correct: 215
+    total: 500
+    beaker_experiment: 01KZ9QF8H3CHY5KTPJD2FGQNZS
+    checkpoint:
+      step: 80
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_80
+  - benchmark: tblite-2.0
+    step: 120
+    correct: 230
+    total: 500
+    beaker_experiment: 01KZB7BAVHC91R5E1C5RH0PGM2
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_120
+  - benchmark: tblite-2.0
+    step: 160
+    correct: 230
+    total: 500
+    beaker_experiment: 01KZB7BXMM97E7HB6W9D2Z2934
+    checkpoint:
+      step: 160
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_160
+  - benchmark: tblite-2.0
+    step: 220
+    correct: 215
+    total: 500
+    beaker_experiment: 01KZB7CHATGNCRBJ3F8Q1J87V3
+    checkpoint:
+      step: 220
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_220
+  - benchmark: terminal-bench-2.1
+    step: 20
+    correct: 80
+    total: 445
+    beaker_experiment: 01KZ9RBHQ8X3N8PTDTVE9NWM3Q
+    checkpoint:
+      step: 20
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_20
+  - benchmark: terminal-bench-2.1
+    step: 40
+    correct: 90
+    total: 445
+    beaker_experiment: 01KZ9QE7JS5DR556ZP3J0M1WYW
+    checkpoint: &id001
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_40
+  - benchmark: terminal-bench-2.1
+    step: 60
+    correct: 85
+    total: 445
+    beaker_experiment: 01KZ9RC4JZQYMTNP4KC1N21CHR
+    checkpoint:
+      step: 60
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_60
+  - benchmark: terminal-bench-2.1
+    step: 80
+    correct: 70
+    total: 445
+    beaker_experiment: 01KZ9QETCVFEMT1HXKD5Q8Y7RF
+    checkpoint:
+      step: 80
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_80
+  - benchmark: terminal-bench-2.1
+    step: 120
+    correct: 60
+    total: 445
+    beaker_experiment: 01KZB7B1JNTQFDTKWB7DD4EV2P
+    checkpoint:
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_120
+  - benchmark: terminal-bench-2.1
+    step: 160
+    correct: 80
+    total: 445
+    beaker_experiment: 01KZB7BM7DR6Q2780AK52QC5PW
+    checkpoint:
+      step: 160
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_160
+  - benchmark: terminal-bench-2.1
+    step: 220
+    correct: 80
+    total: 445
+    beaker_experiment: 01KZB7C7H1YX2Y036MBS0ZBBSS
+    checkpoint:
+      step: 220
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1785918453_checkpoints/step_220
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 40
+    correct: 90
+    total: 445
+    checkpoint: *id001
+  latest_checkpoint:
+    step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_4node_64k__42__1786036760_checkpoints/step_260

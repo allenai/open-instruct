@@ -1,0 +1,86 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-cosine-warmup
+title: Qwen3.5-9B · DPPO · cosine-warmup LR A/B (null)
+classification: evaluated
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO
+  ablation: cosine warmup LR
+wandb:
+  run_id: thx8l1gd
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01KZDRETEABZJBFKFVVG956AFW
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-cosine-warmup
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960
+    - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535
+    - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786206663
+    - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786260866
+    - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786269374
+    - swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786277517
+artifacts:
+  furthest_step: 277
+  latest_checkpoint:
+    step: 260
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786206663_checkpoints/step_260
+  evaluations:
+  - benchmark: terminal-bench-2.1
+    step: 60
+    correct: 24
+    total: 89
+    beaker_experiment: 01KZQSQ5P9P77WNHZEM9AGE36J
+    checkpoint:
+      step: 60
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960_checkpoints/step_60
+  - benchmark: terminal-bench-2.1
+    step: 100
+    correct: 18
+    total: 89
+    beaker_experiment: 01KZQSQ9B2HG1E4573AMK0TDDF
+    checkpoint:
+      step: 100
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786094960_checkpoints/step_100
+  - benchmark: terminal-bench-2.1
+    step: 140
+    correct: 22
+    total: 89
+    beaker_experiment: 01KZQSQDKQTFXXQYTRCWNWDC4B
+    checkpoint:
+      step: 140
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535_checkpoints/step_140
+  - benchmark: terminal-bench-2.1
+    step: 180
+    correct: 19
+    total: 89
+    beaker_experiment: 01KZQSV80F9Y1YRFPCVN5P3PSP
+    checkpoint:
+      step: 180
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786147535_checkpoints/step_180
+  - benchmark: terminal-bench-2.1
+    step: 220
+    correct: 25
+    total: 89
+    beaker_experiment: 01KZQSVCHCQKN2YAX83KKQ7XZH
+    checkpoint: &id001
+      step: 220
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786206663_checkpoints/step_220
+  - benchmark: terminal-bench-2.1
+    step: 260
+    correct: 25
+    total: 89
+    beaker_experiment: 01KZQSVG8W8PMQT68EXRXSFAC4
+    checkpoint:
+      step: 260
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_cosine_warmup_4node__42__1786206663_checkpoints/step_260
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 220
+    correct: 25
+    total: 89
+    checkpoint: *id001

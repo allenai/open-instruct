@@ -1,0 +1,25 @@
+schema_version: 1
+kind: training
+id: q35-4b-opd-from-tmax27b-500step
+title: OPD · 4B-base ← tmax-27b · 500-step
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-4B
+  method: OPD
+  teacher: tmax-27b
+wandb:
+  run_id: sujdbrvr
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01M0E5CC8DF5BKV0NEBK91WTME
+  rollouts:
+  - path: rl_rollouts/q35-4b-opd-from-tmax27b-500step
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_4b_opd_from_tmax27b_4node_64k_500step__42__1787184575
+    - swerl_qwen35_4b_opd_from_tmax27b_4node_64k_500step__42__1787193906
+    - swerl_qwen35_4b_opd_from_tmax27b_4node_64k_500step__42__1787196187
+artifacts:
+  furthest_step: 26

@@ -1,0 +1,94 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-prod-holmes-cu13
+title: Qwen3.5-9B · DPPO prod · Holmes cu13
+classification: evaluated
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO
+  infra: Holmes B300 cu13
+wandb:
+  run_id: 55s5tflb
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01KZ8MNY2B22FZ8N0XZMWJHBWD
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-prod-holmes-cu13
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1785936389
+- id: resume-1
+  relation: resume
+  beaker_experiment: 01KZAN4Y1VMJ6D6Z5W2AWFJQVV
+  wandb:
+    run_id: 6n082qfj
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-prod-holmes-cu13
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1785990878
+- id: resume-2
+  relation: resume
+  beaker_experiment: 01KZB8CHMYMZKAZT6158YBX61F
+  wandb:
+    run_id: pack8fhg
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-prod-holmes-cu13
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786011000
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786032159
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786051909
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786083023
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786090442
+- id: resume-3
+  relation: resume
+  beaker_experiment: 01KZEN2R79DW8SPWZ5F67RZCEE
+  wandb:
+    run_id: g55rr33t
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-prod-holmes-cu13
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786125033
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786129662
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786138060
+    - swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786144264
+artifacts:
+  furthest_step: 236
+  latest_checkpoint:
+    step: 220
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786051909_checkpoints/step_220
+  evaluations:
+  - benchmark: terminal-bench-2.1
+    step: 120
+    correct: 24
+    total: 89
+    beaker_experiment: 01KZRD51J3GE2SPNG1GSPWPADV
+    checkpoint: &id001
+      step: 120
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1785990878_checkpoints/step_120
+  - benchmark: terminal-bench-2.1
+    step: 160
+    correct: 24
+    total: 89
+    beaker_experiment: 01KZR70AGYHHEG0WJ2QGKVB2SA
+    checkpoint:
+      step: 160
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786032159_checkpoints/step_160
+  - benchmark: terminal-bench-2.1
+    step: 200
+    correct: 109
+    total: 445
+    beaker_experiment: 01KZR0AG8F8TYPCTZP72XSZSAY
+    checkpoint:
+      step: 200
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_prod_4node_64k_holmes__42__1786051909_checkpoints/step_200
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 120
+    correct: 24
+    total: 89
+    checkpoint: *id001

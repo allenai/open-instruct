@@ -1,0 +1,27 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-striptrace
+title: Qwen3.5-9B · DPPO · striptrace seed-replica control
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO
+  ablation: striptrace (no-op control)
+wandb:
+  run_id: potct802
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01M0E2ARA871X59Y4SR42BVS32
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-striptrace
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_striptrace_4node_64k_holmes__42__1787179269
+    - swerl_qwen35_9b_dppo_striptrace_4node_64k_holmes__42__1787202734
+artifacts:
+  furthest_step: 198
+  latest_checkpoint:
+    step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_striptrace_4node_64k_holmes__42__1787202734_checkpoints/step_180

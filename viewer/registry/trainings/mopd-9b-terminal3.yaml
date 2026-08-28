@@ -1,0 +1,26 @@
+schema_version: 1
+kind: training
+id: mopd-9b-terminal3
+title: MOPD · 9B · 3 terminal teachers (route)
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: MOPD
+  teacher: terminal3
+wandb:
+  run_id: uyn1bgsi
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01KZZQ91MJHB4NJV9F0VNDKCWH
+  rollouts:
+  - path: rl_rollouts/mopd-9b-terminal3
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_mopd_terminal3_9b_4node_64k__42__1786702720
+artifacts:
+  furthest_step: 120
+  latest_checkpoint:
+    step: 120
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_terminal3_9b_4node_64k__42__1786702720_checkpoints/step_120

@@ -1,0 +1,30 @@
+schema_version: 1
+kind: training
+id: q35-4b-grpo-tmax15k
+title: Qwen3.5-4B · GRPO · tmax-15k
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-4B
+  method: GRPO
+  dataset: tmax-15k
+wandb:
+  run_id: y0bbxcws
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_4b_base_tmax_10k.sh
+  beaker_experiment: 01KT5NSSA6H6JMP40KS9PVRCNX
+  rollouts:
+  - path: rl_rollouts/q35-4b-grpo-tmax15k
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780454848
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780465737
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780490558
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780499488
+artifacts:
+  furthest_step: 90
+  latest_checkpoint:
+    step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo__42__1780490558_checkpoints/step_80

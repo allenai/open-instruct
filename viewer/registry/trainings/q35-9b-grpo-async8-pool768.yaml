@@ -1,0 +1,30 @@
+schema_version: 1
+kind: training
+id: q35-9b-grpo-async8-pool768
+title: Qwen3.5-9B · GRPO · async8 pool768
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: GRPO
+  ablation: async8 pool768
+wandb:
+  run_id: lin8q38c
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_9b_base_tmax_10k_async8_pool768.sh
+  beaker_experiment: 01KX4Z6A8MDSNATMX5V0AR7TWF
+  rollouts:
+  - path: rl_rollouts/q35-9b-grpo-async8-pool768
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783652323
+    - swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783707410
+    - swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783718619
+    - swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736
+artifacts:
+  furthest_step: 187
+  latest_checkpoint:
+    step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_base_tmax_15k_verified_grpo_async8_pool768__42__1783736736_checkpoints/step_180

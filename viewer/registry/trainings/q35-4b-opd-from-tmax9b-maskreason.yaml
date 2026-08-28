@@ -1,0 +1,104 @@
+schema_version: 1
+kind: training
+id: q35-4b-opd-from-tmax9b-maskreason
+title: OPD · 4B-base ← tmax-9b · reasoning-KL masked
+classification: evaluated
+visibility: default
+tags:
+  model: Qwen3.5-4B
+  method: OPD
+  teacher: tmax-9b
+  ablation: mask reasoning KL
+wandb:
+  run_id: fe8zi0f8
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/opd/qwen35_4b_opd_from_tmax9b_maskreason_4node_64k.sh
+  beaker_experiment: 01M0E9SBG4Q9YGXBBY97AE31KM
+  rollouts:
+  - path: rl_rollouts/q35-4b-opd-from-tmax9b-maskreason
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787193938
+    - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787196293
+    - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200
+    - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787348881
+    - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787354291
+    - swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787367967
+artifacts:
+  furthest_step: 90
+  evaluations:
+  - benchmark: tblite-2.0
+    step: 20
+    correct: 225
+    total: 500
+    beaker_experiment: 01M0GY2R6RJ2S3M6E1MDPCVQ7T
+    checkpoint:
+      step: 20
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787196293_checkpoints/step_20
+  - benchmark: tblite-2.0
+    step: 40
+    correct: 230
+    total: 500
+    beaker_experiment: 01M0GY50JFBNJ0QW5P5N7SR3B5
+    checkpoint:
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787196293_checkpoints/step_40
+  - benchmark: tblite-2.0
+    step: 60
+    correct: 205
+    total: 500
+    beaker_experiment: 01M0K2XX4VMZHYBNK85E3HQGSV
+    checkpoint:
+      step: 60
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_60
+  - benchmark: tblite-2.0
+    step: 80
+    correct: 220
+    total: 500
+    beaker_experiment: 01M0K300ASN0G6WFRG42QXZ92V
+    checkpoint:
+      step: 80
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_80
+  - benchmark: terminal-bench-2.1
+    step: 20
+    correct: 17
+    total: 89
+    beaker_experiment: 01M0GY2H3PMZQ9J1BXBK3XVY6E
+    checkpoint:
+      step: 20
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787196293_checkpoints/step_20
+  - benchmark: terminal-bench-2.1
+    step: 40
+    correct: 16
+    total: 89
+    beaker_experiment: 01M0GY4QDA407P75V1B1EBSJCC
+    checkpoint:
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787196293_checkpoints/step_40
+  - benchmark: terminal-bench-2.1
+    step: 60
+    correct: 20
+    total: 89
+    beaker_experiment: 01M0K2XQPAQWT4FB0KQEWMVS8Z
+    checkpoint: &id001
+      step: 60
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_60
+  - benchmark: terminal-bench-2.1
+    step: 80
+    correct: 95
+    total: 445
+    beaker_experiment: 01M0K2ZTB585TNMV2D8Y6K92SR
+    checkpoint:
+      step: 80
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_80
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 60
+    correct: 20
+    total: 89
+    checkpoint: *id001
+  latest_checkpoint:
+    step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax9b_maskreason_4node_64k__42__1787270200_checkpoints/step_80

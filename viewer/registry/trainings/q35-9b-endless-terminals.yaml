@@ -1,0 +1,36 @@
+schema_version: 1
+kind: training
+id: q35-9b-endless-terminals
+title: Qwen3.5-9B · DPPO · endless-terminals env
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO
+  dataset: endless-terminals
+wandb:
+  run_id: pp5ocy9c
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01KZZK147H498PHVHK6ESXDX22
+  rollouts:
+  - path: rl_rollouts/q35-9b-endless-terminals
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_endless_terminals_4node_64k__42__1786701000
+- id: resume-1
+  relation: resume
+  beaker_experiment: 01M0067HMHQWGKPGWSRWBAY890
+  wandb:
+    run_id: mrl20831
+  rollouts:
+  - path: rl_rollouts/q35-9b-endless-terminals
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489
+artifacts:
+  furthest_step: 90
+  latest_checkpoint:
+    step: 80
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_endless_terminals_4node_64k__42__1786713489_checkpoints/step_80

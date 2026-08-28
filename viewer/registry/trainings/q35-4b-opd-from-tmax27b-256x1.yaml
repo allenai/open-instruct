@@ -1,0 +1,31 @@
+schema_version: 1
+kind: training
+id: q35-4b-opd-from-tmax27b-256x1
+title: OPD · 4B-base ← tmax-27b · 256×1
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-4B
+  method: OPD
+  teacher: tmax-27b
+  geometry: 256×1
+wandb:
+  run_id: m2i9ny20
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/opd/qwen35_4b_opd_from_tmax27b_256x1_4node_64k.sh
+  beaker_experiment: 01M0WX70PN493ENMBJ9H7QHVGR
+  rollouts:
+  - path: rl_rollouts/q35-4b-opd-from-tmax27b-256x1
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_4b_opd_from_tmax27b_256x1_4node_64k__42__1787677026
+    - swerl_qwen35_4b_opd_from_tmax27b_256x1_4node_64k__42__1787760611
+    - swerl_qwen35_4b_opd_from_tmax27b_256x1_4node_64k__42__1787857477
+    - swerl_qwen35_4b_opd_from_tmax27b_256x1_4node_64k__42__1787879015
+artifacts:
+  furthest_step: 57
+  latest_checkpoint:
+    step: 40
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_opd_from_tmax27b_256x1_4node_64k__42__1787760611_checkpoints/step_40

@@ -1,0 +1,48 @@
+schema_version: 1
+kind: training
+id: mopd-9b-t3mixture
+title: MOPD · 9B · 3 teachers · mixture
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: MOPD mixture
+  teacher: terminal3
+wandb:
+  run_id: lqlgki4t
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01M01MRYK43NTC6KCF58PYQ197
+  rollouts:
+  - path: rl_rollouts/mopd-9b-t3mixture
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_mopd_t3mixture_9b_4node_64k__42__1786762109
+    - swerl_mopd_t3mixture_9b_4node_64k__42__1786766818
+    - swerl_mopd_t3mixture_9b_4node_64k__42__1786858931
+- id: resume-1
+  relation: resume
+  beaker_experiment: 01M04PEVCERMH11SDKXP5X0GAZ
+  wandb:
+    run_id: yjxx615p
+  rollouts:
+  - path: rl_rollouts/mopd-9b-t3mixture
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_mopd_t3mixture_9b_4node_64k__42__1786873818
+- id: resume-2
+  relation: resume
+  beaker_experiment: 01M06NNWXAPYRQQ63Z742V2HFW
+  wandb:
+    run_id: 2xuxsig2
+  rollouts:
+  - path: rl_rollouts/mopd-9b-t3mixture
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_mopd_t3mixture_9b_4node_64k__42__1786942906
+artifacts:
+  furthest_step: 160
+  latest_checkpoint:
+    step: 160
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_mopd_t3mixture_9b_4node_64k__42__1786942906_checkpoints/step_160

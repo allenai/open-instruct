@@ -1,0 +1,31 @@
+schema_version: 1
+kind: training
+id: q35-4b-grpo-noprev-reasoning
+title: Qwen3.5-4B · GRPO · strips prev-turn reasoning
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-4B
+  method: GRPO
+  ablation: chat template strips reasoning
+wandb:
+  run_id: 9ou3i1in
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_4b_base_tmax_10k.sh
+  beaker_experiment: 01KT723AJFH2N8BX7S2MRTZY69
+  rollouts:
+  - path: rl_rollouts/q35-4b-grpo-noprev-reasoning
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780501305
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780526080
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780890175
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1780960713
+    - swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033
+artifacts:
+  furthest_step: 368
+  latest_checkpoint:
+    step: 360
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_4b_base_tmax_15k_verified_grpo_no_prev_reasoning__42__1781038033_checkpoints/step_360

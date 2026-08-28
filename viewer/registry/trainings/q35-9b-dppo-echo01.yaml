@@ -1,0 +1,65 @@
+schema_version: 1
+kind: training
+id: q35-9b-dppo-echo01
+title: Qwen3.5-9B · DPPO + ECHO α=0.1 · 4n 64k
+classification: evaluated
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO + ECHO 0.1
+  dataset: tmax-15k
+wandb:
+  run_id: tnklz723
+launches:
+- id: initial
+  relation: initial
+  beaker_experiment: 01KZ6PT827SCGHBSMT1X2TKSZX
+  rollouts:
+  - path: rl_rollouts/q35-9b-dppo-echo01
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_dppo_repro_4node_64k_echo01__42__1785864576
+artifacts:
+  furthest_step: 117
+  evaluations:
+  - benchmark: tblite-2.0
+    step: 40
+    correct: 195
+    total: 500
+    beaker_experiment: 01KZ84P7WVSWAP8N8AH93BYFFZ
+    checkpoint:
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_echo01__42__1785864576_checkpoints/step_40
+  - benchmark: tblite-2.0
+    step: 100
+    correct: 200
+    total: 500
+    beaker_experiment: 01KZQ3ACBMM5BX8J26PA24TGHP
+    checkpoint:
+      step: 100
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_echo01__42__1785864576_checkpoints/step_100
+  - benchmark: terminal-bench-2.1
+    step: 40
+    correct: 13
+    total: 89
+    beaker_experiment: 01KZ84NZ0GQSQFRAH6V1TN3PCW
+    checkpoint:
+      step: 40
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_echo01__42__1785864576_checkpoints/step_40
+  - benchmark: terminal-bench-2.1
+    step: 100
+    correct: 15
+    total: 89
+    beaker_experiment: 01KZQ3A15M4Q1BKV84BQJ3R8HK
+    checkpoint: &id001
+      step: 100
+      path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_echo01__42__1785864576_checkpoints/step_100
+  best_evaluation:
+    benchmark: terminal-bench-2.1
+    step: 100
+    correct: 15
+    total: 89
+    checkpoint: *id001
+  latest_checkpoint:
+    step: 100
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_dppo_repro_4node_64k_echo01__42__1785864576_checkpoints/step_100

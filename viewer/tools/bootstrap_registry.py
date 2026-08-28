@@ -170,7 +170,11 @@ def csv_evaluations(csv_paths: list[str], model_name: str) -> list[dict]:
                     row = {"benchmark": benchmark, "step": step, "correct": correct, "total": total}
                     if url:
                         row["beaker_experiment"] = url.rstrip("/").rsplit("/", 1)[-1]
-                    rows.setdefault((benchmark, step), row)
+                    key = (benchmark, step)
+                    # Some sheets carry both k=1 and k=5 rows for one step;
+                    # keep the higher-trial protocol.
+                    if key not in rows or rows[key]["total"] < total:
+                        rows[key] = row
     return sorted(rows.values(), key=lambda row: (row["benchmark"], row["step"]))
 
 

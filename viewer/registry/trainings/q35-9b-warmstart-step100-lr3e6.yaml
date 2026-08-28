@@ -1,0 +1,27 @@
+schema_version: 1
+kind: training
+id: q35-9b-warmstart-step100-lr3e6
+title: Qwen3.5-9B · DPPO warm-start from step 100 · lr 3e-6
+classification: substantive
+visibility: default
+tags:
+  model: Qwen3.5-9B
+  method: DPPO
+  ablation: warm-start lr 3e-6
+wandb:
+  run_id: lpu0dt6l
+launches:
+- id: initial
+  relation: initial
+  script: scripts/general_agent/terminal/rl/qwen35_9b_from_step100_lr3e6.sh
+  beaker_experiment: 01KX98RB2308HDKW72C93ZDAPX
+  rollouts:
+  - path: rl_rollouts/q35-9b-warmstart-step100-lr3e6
+    source: /weka/oe-adapt-default/allennlp/deletable_rollouts
+    attempts:
+    - swerl_qwen35_9b_from_step100_lr3e6__42__1783798472
+artifacts:
+  furthest_step: 190
+  latest_checkpoint:
+    step: 180
+    path: /weka/oe-adapt-default/allennlp/deletable_checkpoint/shashankg/swerl_qwen35_9b_from_step100_lr3e6__42__1783798472_checkpoints/step_180
