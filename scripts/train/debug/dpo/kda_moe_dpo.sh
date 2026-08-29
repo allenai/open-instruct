@@ -15,6 +15,15 @@
 #                   in memory -- which is what makes DPO fit here at all.
 #   smoke           30 steps, 1x8. The memory gate (see below).
 #   train           1 epoch over the full mix.
+#   dense_control   The same code on a dense model that DPO is known to work on.
+#                   Run this BEFORE reading any MoE result. DPO has not reproduced
+#                   strong gains on the hybrid models trained so far, so a flat MoE
+#                   result is a live possibility -- and without a reference curve
+#                   from a model where DPO does work, "our code is wrong" and "DPO
+#                   does not move this architecture" are indistinguishable. It goes
+#                   through DPOTrainModule, which shares its objective with the MoE
+#                   module via DPOObjectiveMixin, so a rising margin here clears the
+#                   loss, the metrics and their reduction in one run.
 #
 # Why the settings are what they are:
 #
@@ -164,8 +173,40 @@ case "$MODE" in
             -- torchrun --nnodes="$NNODES" $RDZV_FLAGS --nproc_per_node="$NPROC" \
             open_instruct/dpo.py "${common_args[@]}" "${EXTRA[@]}"
         ;;
+    dense_control)
+        # Settings follow scripts/train/debug/dpo/single_gpu.sh (the known-good dense
+        # path) rather than this script's: OLMo-2-0425-1B, its LR and chat template,
+        # its preference mix. Only the sample count is raised, because 100 pairs is a
+        # smoke test rather than a curve, and the cluster is holmes -- the cuda13 image
+        # this branch builds needs a CUDA 13 driver, which saturn/jupiter do not have.
+        DESC="Dense DPO control for the KDA MoE arm"
+        $PY mason.py \
+            --cluster ai2/holmes \
+            --workspace "$WORKSPACE" --priority "$PRIORITY" \
+            --image "$BEAKER_IMAGE" --description "$DESC" --pure_docker_mode \
+            --timeout "${JOB_TIMEOUT:-2h}" --max_retries "$MAX_RETRIES" \
+            --num_nodes 1 --gpus 1 --non_resumable --no_auto_dataset_cache \
+            -- torchrun --nproc_per_node=1 --master_port="${MASTER_PORT:-$(( 29500 + RANDOM % 400 ))}" \
+            open_instruct/dpo.py \
+            --exp_name "dense-dpo-control-$(date +%s)" \
+            --model_name_or_path allenai/OLMo-2-0425-1B \
+            --tokenizer_name_or_path allenai/OLMo-2-0425-1B \
+            --chat_template_name olmo \
+            --mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b "${CONTROL_SAMPLES:-20000}" \
+            --max_seq_length "${CONTROL_SEQ:-2048}" \
+            --loss_type "$LOSS_TYPE" --beta "$BETA" \
+            --learning_rate "${CONTROL_LR:-5e-7}" \
+            --per_device_train_batch_size 2 \
+            --gradient_accumulation_steps 8 \
+            --lr_scheduler_type linear --warmup_ratio 0.1 --weight_decay 0.0 \
+            --num_epochs 1 \
+            --output_dir "$OUTPUT_DIR-dense-control" \
+            --logging_steps 1 --seed 123 \
+            --push_to_hub false --try_launch_beaker_eval_jobs false --try_auto_save_to_beaker false \
+            --with_tracking
+        ;;
     *)
-        echo "Unknown mode: $MODE (expected cache_dataset, cache_logprobs, smoke or train)" >&2
+        echo "Unknown mode: $MODE (expected cache_dataset, cache_logprobs, smoke, train or dense_control)" >&2
         exit 1
         ;;
 esac
