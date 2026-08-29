@@ -1,132 +1,62 @@
-import random
+"""
+Convert agentica-org/DeepScaleR-Preview-Dataset to the OpenInstruct RLVR format.
 
-from datasets import Dataset, load_dataset
-from tqdm import tqdm
+Usage:
+
+python scripts/data/create_deepscaler_data.py
+python scripts/data/create_deepscaler_data.py --push_to_hub
+python scripts/data/create_deepscaler_data.py --push_to_hub --repo_id mnoukhov/deepscaler_openinstruct
+"""
+
+from dataclasses import dataclass
+
+import datasets
+from huggingface_hub import HfApi
+from transformers import HfArgumentParser
 
 import open_instruct.utils as open_instruct_utils
 
-random_gen = random.Random(42)
+SOURCE_DATASET = "agentica-org/DeepScaleR-Preview-Dataset"
+DEFAULT_REPO_ID = "mnoukhov/deepscaler_openinstruct"
 
-dataset = load_dataset(
-    "agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=open_instruct_utils.max_num_processes()
-)
 
-# reqular dataset
-new_data = []
-for sample in tqdm(dataset):
-    new_data.append(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": sample["problem"].strip()
-                    + " Let's think step by step and output the final answer within \\boxed{}.",
-                }
-            ],
-            "ground_truth": sample["answer"],
-            "dataset": "math",
-        }
+@dataclass
+class Args:
+    push_to_hub: bool = False
+    repo_id: str = DEFAULT_REPO_ID
+
+
+def process(example: dict) -> dict:
+    return {
+        "messages": [{"role": "user", "content": example["problem"]}],
+        "ground_truth": example["answer"],
+        "dataset": "math_deepscaler",
+    }
+
+
+def main(args: Args) -> None:
+    dataset = datasets.load_dataset(SOURCE_DATASET, num_proc=open_instruct_utils.max_num_processes())
+    dataset = dataset.map(
+        process,
+        remove_columns=dataset["train"].column_names,
+        num_proc=open_instruct_utils.max_num_processes(),
+        desc="Converting DeepScaleR to OpenInstruct format",
     )
-random_gen.shuffle(new_data)
-dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/deepscaler-gt")
 
-dataset = load_dataset(
-    "agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=open_instruct_utils.max_num_processes()
-)
-# 4k length only
-new_data = []
-for sample in tqdm(dataset):
-    sampled_length = random_gen.sample(range(100, 4096), 1)[0]
-    new_data.append(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": sample["problem"].strip()
-                    + " Let's think step by step and output the final answer within \\boxed{}. "
-                    + f"Think for {sampled_length} tokens.",
-                }
-            ],
-            "ground_truth": str(sampled_length),
-            "dataset": "max_length",
-        }
-    )
-random_gen.shuffle(new_data)
-dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/deepscaler_gt_random_max_length_only")
+    for split in dataset:
+        dataset[split] = dataset[split].select_columns(["messages", "ground_truth", "dataset"])
 
-dataset = load_dataset(
-    "agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=open_instruct_utils.max_num_processes()
-)
-# 4k length and solution
-new_data = []
-for sample in tqdm(dataset):
-    sampled_length = random_gen.sample(range(100, 4096), 1)[0]
-    new_data.append(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": sample["problem"].strip()
-                    + " Let's think step by step and output the final answer within \\boxed{}. "
-                    + f"Think for {sampled_length} tokens.",
-                }
-            ],
-            "ground_truth": [sample["answer"], str(sampled_length)],
-            "dataset": ["math", "max_length"],
-        }
-    )
-random_gen.shuffle(new_data)
-dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/deepscaler_gt_with_random_max_length")
+    if args.push_to_hub:
+        print(f"Pushing dataset to Hub: {args.repo_id}")
+        dataset.push_to_hub(args.repo_id)
+        HfApi().upload_file(
+            path_or_fileobj=__file__, path_in_repo="create_dataset.py", repo_type="dataset", repo_id=args.repo_id
+        )
+    else:
+        print(dataset)
+        print(dataset["train"][0])
 
-dataset = load_dataset(
-    "agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=open_instruct_utils.max_num_processes()
-)
-# 8k length only
-new_data = []
-for sample in tqdm(dataset):
-    sampled_length = random_gen.sample(range(100, 8192), 1)[0]
-    new_data.append(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": sample["problem"].strip()
-                    + " Let's think step by step and output the final answer within \\boxed{}. "
-                    + f"Think for {sampled_length} tokens.",
-                }
-            ],
-            "ground_truth": str(sampled_length),
-            "dataset": "max_length",
-        }
-    )
-random_gen.shuffle(new_data)
-dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/deepscaler_gt_random_max_length_only_8192")
 
-dataset = load_dataset(
-    "agentica-org/DeepScaleR-Preview-Dataset", split="train", num_proc=open_instruct_utils.max_num_processes()
-)
-# 8k length and solution
-new_data = []
-for sample in tqdm(dataset):
-    sampled_length = random_gen.sample(range(100, 8192), 1)[0]
-    new_data.append(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": sample["problem"].strip()
-                    + " Let's think step by step and output the final answer within \\boxed{}. "
-                    + f"Think for {sampled_length} tokens.",
-                }
-            ],
-            "ground_truth": [sample["answer"], str(sampled_length)],
-            "dataset": ["math", "max_length"],
-        }
-    )
-random_gen.shuffle(new_data)
-dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/deepscaler_gt_with_random_max_length_8192")
+if __name__ == "__main__":
+    parser = HfArgumentParser(Args)
+    main(*parser.parse_args_into_dataclasses())

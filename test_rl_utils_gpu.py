@@ -20,7 +20,7 @@ import torch
 from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 
-from open_instruct import data_loader, rl_utils
+from open_instruct import data_loader, data_types, rl_utils
 from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
@@ -120,7 +120,9 @@ class TestRlUtilsGPU(TestGrpoFastBase):
                 tool_names=[],
                 run_name=run_name,
                 model_name=tokenizer_name,
+                base_env_config=data_types.EnvConfig(),
             )
+            ray.get(_actor.start.remote())
 
             loader = data_loader.StreamingDataLoader(
                 data_prep_actor_name="test_rollout_save",

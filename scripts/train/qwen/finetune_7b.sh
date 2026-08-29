@@ -32,5 +32,6 @@ python mason.py \
     --gradient_checkpointing \
     --report_to wandb \
     --with_tracking \
+    --send_slack_alerts \
     --logging_steps 1 \
     --seed 8

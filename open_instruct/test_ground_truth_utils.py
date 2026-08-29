@@ -3,11 +3,33 @@
 Test script for verifier functionality in Python
 """
 
+import asyncio
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
+import numpy as np
 from parameterized import parameterized
 
-from open_instruct.ground_truth_utils import F1Verifier, GSM8KVerifier, PuzzleMatcherVerifier
+from open_instruct.data_types import RequestInfo
+from open_instruct.ground_truth_utils import (
+    BallsimVerifier,
+    BallsimVerifierConfig,
+    F1Verifier,
+    GSM8KVerifier,
+    LLMJudgeFallbackVerifier,
+    LMJudgeVerifier,
+    LMJudgeVerifierConfig,
+    ManufactoriaVerifier,
+    ManufactoriaVerifierConfig,
+    PuzzleMatcherVerifier,
+    RewardConfig,
+    VerificationResult,
+    apply_verifiable_reward,
+    build_all_verifiers,
+    cleanup_all_llm_judge_clients,
+)
+from open_instruct.judge_utils import extract_score_compass_verifier
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):
@@ -143,6 +165,205 @@ class TestF1Verifier(unittest.TestCase):
         )
 
 
+class TestBallsimVerifier(unittest.IsolatedAsyncioTestCase):
+    async def test_pass_rate_scoring(self):
+        verifier = BallsimVerifier(
+            BallsimVerifierConfig(
+                ballsim_api_url="http://localhost:2345/test_program",
+                ballsim_max_execution_time=1.0,
+                ballsim_scoring_mode="pass_rate",
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"results": [1, 0, 1], "runtimes": [0.1, 0.2, 0.1]}
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(BallsimVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call([], "```python\npass\n```", ["assert True"], None)
+
+        self.assertAlmostEqual(result.score, 2 / 3)
+
+    async def test_pass_rate_scoring_all_pass_bonus(self):
+        verifier = BallsimVerifier(
+            BallsimVerifierConfig(
+                ballsim_api_url="http://localhost:2345/test_program",
+                ballsim_max_execution_time=1.0,
+                ballsim_scoring_mode="pass_rate",
+                pass_rate_all_pass_bonus=0.25,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"results": [1, 1, 1], "runtimes": [0.1, 0.2, 0.1]}
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(BallsimVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call([], "```python\npass\n```", ["assert True"], None)
+
+        self.assertAlmostEqual(result.score, 1.0)
+
+    async def test_all_pass_scoring(self):
+        verifier = BallsimVerifier(
+            BallsimVerifierConfig(
+                ballsim_api_url="http://localhost:2345/test_program",
+                ballsim_max_execution_time=1.0,
+                ballsim_scoring_mode="all_pass",
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {"results": [1, 0, 1], "runtimes": [0.1, 0.2, 0.1]}
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(BallsimVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call([], "```python\npass\n```", ["assert True"], None)
+
+        self.assertEqual(result.score, 0.0)
+
+
+class TestManufactoriaVerifier(unittest.IsolatedAsyncioTestCase):
+    async def test_pass_rate_scoring(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="pass_rate",
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": False,
+            "results": [{"passed": True}, {"passed": False}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        self.assertAlmostEqual(result.score, 2 / 3)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
+        self.assertEqual(result.metadata["all_pass_score"], 0.0)
+
+    async def test_pass_rate_scoring_all_pass_bonus(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="pass_rate",
+                pass_rate_all_pass_bonus=0.5,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": True,
+            "results": [{"passed": True}, {"passed": True}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        # Half the raw score from pass rate, half from all-pass; max stays 1.0.
+        self.assertAlmostEqual(result.score, 1.0)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 1.0)
+        self.assertEqual(result.metadata["all_pass_score"], 1.0)
+
+    async def test_pass_rate_scoring_partial_with_bonus(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="pass_rate",
+                pass_rate_all_pass_bonus=0.5,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": False,
+            "results": [{"passed": True}, {"passed": False}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        self.assertAlmostEqual(result.score, (2 / 3) * 0.5)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
+        self.assertEqual(result.metadata["all_pass_score"], 0.0)
+
+    async def test_all_pass_scoring(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="all_pass",
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": False,
+            "results": [{"passed": True}, {"passed": False}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        self.assertEqual(result.score, 0.0)
+        self.assertAlmostEqual(result.metadata["pass_rate_score"], 2 / 3)
+        self.assertEqual(result.metadata["all_pass_score"], 0.0)
+
+    async def test_all_pass_mode_ignores_pass_rate_bonus(self):
+        verifier = ManufactoriaVerifier(
+            ManufactoriaVerifierConfig(
+                manufactoria_api_url="http://localhost:1235/test_solution",
+                manufactoria_max_execution_time=1.0,
+                manufactoria_scoring_mode="all_pass",
+                pass_rate_all_pass_bonus=0.99,
+            )
+        )
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "valid": True,
+            "all_passed": True,
+            "results": [{"passed": True}, {"passed": True}],
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_session.post.return_value = mock_response
+
+        with patch.object(ManufactoriaVerifier, "_get_session", return_value=mock_session):
+            result = await verifier.async_call(
+                [], "```manufactoria\nSTART start:\n    NEXT end\nEND end\n```", [{}], None
+            )
+
+        self.assertEqual(result.score, 1.0)
+
+
 class TestGSM8KVerifier(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -153,13 +374,321 @@ class TestGSM8KVerifier(unittest.TestCase):
             ("negative_integer", "Therefore the answer is -3", "-3", 1.0),
             ("positive_integer", "Therefore the answer is +7", "+7", 1.0),
             ("negative_decimal", "Final answer: -3.5", "-3.5", 1.0),
-            ("boxed_negative_integer", r"The result is \\boxed{-3}", "-3", 1.0),
+            ("boxed_negative_integer", r"The result is \boxed{-3}", "-3", 1.0),
             ("wrong_sign", "Therefore the answer is 3", "-3", 0.0),
         ]
     )
     def test_signed_number_extraction(self, _name, prediction, label, expected_score):
         result = self.verifier([], prediction, label)
         self.assertEqual(result.score, expected_score)
+
+
+class TestRewardConfig(unittest.TestCase):
+    def test_spurious_reward_mode_outputs_zero_or_verification_reward(self):
+        verification_reward = 10
+        reward_fn = RewardConfig(
+            apply_r1_style_format_reward=False,
+            apply_verifiable_reward=False,
+            non_stop_penalty=False,
+            spurious_reward_mode=True,
+            verification_reward=verification_reward,
+        ).build()
+        n = 64
+        scores, metrics = asyncio.run(
+            reward_fn(
+                responses=[[1, 2, 3] for _ in range(n)],
+                decoded_responses=["x"] * n,
+                ground_truths=["y"] * n,
+                datasets=["gsm8k"] * n,
+                finish_reasons=["stop"] * n,
+                infos=RequestInfo(
+                    num_calls=[0] * n,
+                    timeouts=[0] * n,
+                    tool_errors=[""] * n,
+                    tool_outputs=[""] * n,
+                    tool_runtimes=[0.0] * n,
+                    tool_calleds=[False] * n,
+                ),
+                queries=["q"] * n,
+            )
+        )
+        self.assertEqual(len(scores), n)
+        self.assertTrue(all(score in {0.0, float(verification_reward)} for score in scores))
+        self.assertIn("objective/spurious_reward", metrics)
+        self.assertIn("objective/spurious_correct_rate", metrics)
+
+    def test_spurious_reward_mode_logs_spurious_metrics(self):
+        verification_reward = 10
+        n = 4
+        reward_fn = RewardConfig(
+            apply_r1_style_format_reward=False,
+            apply_verifiable_reward=True,
+            non_stop_penalty=False,
+            spurious_reward_mode=True,
+            verification_reward=verification_reward,
+            verifier_functions={},
+        ).build()
+
+        with (
+            patch(
+                "open_instruct.ground_truth_utils.apply_verifiable_reward",
+                return_value=([0.0, 10.0, 10.0, 0.0], [{}, {}, {}, {}]),
+            ),
+            patch("open_instruct.ground_truth_utils.np.random.randint", return_value=np.array([1, 0, 1, 0])),
+        ):
+            scores, metrics = asyncio.run(
+                reward_fn(
+                    responses=[[1, 2, 3] for _ in range(n)],
+                    decoded_responses=["x"] * n,
+                    ground_truths=["y"] * n,
+                    datasets=["gsm8k"] * n,
+                    finish_reasons=["stop"] * n,
+                    infos=RequestInfo(
+                        num_calls=[0] * n,
+                        timeouts=[0] * n,
+                        tool_errors=[""] * n,
+                        tool_outputs=[""] * n,
+                        tool_runtimes=[0.0] * n,
+                        tool_calleds=[False] * n,
+                    ),
+                    queries=["q"] * n,
+                )
+            )
+
+        self.assertEqual(scores, [10.0, 0.0, 10.0, 0.0])
+        self.assertNotIn("objective/true_objective_reward", metrics)
+        self.assertNotIn("objective/true_objective_correct_rate", metrics)
+        self.assertEqual(metrics["objective/spurious_reward"], 5.0)
+        self.assertEqual(metrics["objective/spurious_correct_rate"], 0.5)
+
+
+class TestApplyVerifiableRewardDatasetAliases(unittest.TestCase):
+    class _DummyVerifier:
+        def __init__(self, name: str, score: float = 1.0):
+            self.name = name
+            self.weight = 1.0
+            self._score = score
+
+        async def async_call(self, **kwargs):
+            return SimpleNamespace(score=self._score)
+
+    def test_math_prefixed_dataset_uses_math_verifier(self):
+        verifier = self._DummyVerifier(name="math", score=1.0)
+        scores, per_func_scores, extra_metrics = asyncio.run(
+            apply_verifiable_reward(
+                reward_fn_mapping={"math": verifier},
+                responses=[[1, 2, 3]],
+                decoded_responses=["dummy"],
+                ground_truths=["42"],
+                datasets=["math_hmmt_feb_2025"],
+                reward_mult=10,
+                queries=["q"],
+            )
+        )
+        self.assertEqual(scores, [10.0])
+        self.assertEqual(per_func_scores, [{"math": 10.0}])
+        self.assertEqual(extra_metrics, {})
+
+    class _StaticVerifier:
+        def __init__(self, name: str, score: float):
+            self.name = name
+            self.weight = 1.0
+            self._score = score
+
+        def __call__(self, tokenized_prediction, prediction, label, query=None):
+            return VerificationResult(score=self._score)
+
+        async def async_call(self, tokenized_prediction, prediction, label, query=None):
+            return VerificationResult(score=self._score)
+
+    def test_llm_judge_fallback_logs_when_llm_overrides_primary_failure(self):
+        primary = self._StaticVerifier(name="math", score=0.0)
+        fallback = self._StaticVerifier(name="general-compass_verifier", score=1.0)
+        fallback_wrapper = LLMJudgeFallbackVerifier(primary, fallback)
+
+        scores, per_func_scores, extra_metrics = asyncio.run(
+            apply_verifiable_reward(
+                reward_fn_mapping={"math": fallback_wrapper},
+                responses=[[1, 2, 3]],
+                decoded_responses=["dummy"],
+                ground_truths=["42"],
+                datasets=["math"],
+                reward_mult=10,
+                queries=["q"],
+            )
+        )
+
+        self.assertEqual(scores, [10.0])
+        self.assertEqual(per_func_scores, [{"math": 10.0}])
+        self.assertEqual(extra_metrics["objective/llm_judge_fallback_used_count"], 1.0)
+        self.assertEqual(extra_metrics["objective/llm_judge_correct_when_primary_wrong_count"], 1.0)
+        self.assertEqual(extra_metrics["objective/math_llm_judge_correct_when_primary_wrong_count"], 1.0)
+
+    def test_manufactoria_logs_pass_rate_and_all_pass_objectives(self):
+        class _ManufactoriaVerifier:
+            name = "manufactoria"
+            weight = 1.0
+
+            async def async_call(self, **kwargs):
+                return VerificationResult(
+                    score=1.0,
+                    metadata={"pass_rate_score": 0.75, "all_pass_score": 0.0, "per_test_passes": [1.0, 0.0, 1.0, 1.0]},
+                )
+
+        scores, per_func_scores, extra_metrics = asyncio.run(
+            apply_verifiable_reward(
+                reward_fn_mapping={"manufactoria": _ManufactoriaVerifier()},
+                responses=[[1, 2, 3]],
+                decoded_responses=["dummy"],
+                ground_truths=[[{}]],
+                datasets=["manufactoria"],
+                reward_mult=10,
+                queries=["q"],
+            )
+        )
+
+        self.assertEqual(scores, [10.0])
+        self.assertEqual(per_func_scores, [{"manufactoria": 10.0}])
+        self.assertEqual(extra_metrics["objective/pass_rate"], 0.75)
+        self.assertEqual(extra_metrics["objective/all_pass"], 0.0)
+        self.assertEqual(
+            extra_metrics["objective/manufactoria_test_pass_rows"], [(0, 1.0), (1, 0.0), (2, 1.0), (3, 1.0)]
+        )
+
+
+class TestBuildAllVerifiers(unittest.TestCase):
+    def test_llm_judge_override_verifier_replaces_gsm8k_with_compass_verifier(self):
+        args = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            code_api_url="http://localhost:1234/test_program",
+            code_max_execution_time=1.0,
+            code_pass_rate_reward_threshold=0.0,
+            code_apply_perf_penalty=False,
+            max_length_verifier_max_length=32768,
+        )
+        streaming_config = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_override_verifier="gsm8k",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            remap_verifier=None,
+        )
+
+        verifiers = build_all_verifiers(args, streaming_config)
+        self.assertIsInstance(verifiers["gsm8k"], LMJudgeVerifier)
+        self.assertEqual(verifiers["gsm8k"].verifier_config.llm_judge_model, "opencompass/CompassVerifier-3B")
+        self.assertEqual(verifiers["gsm8k"].judge_type, "compass_verifier")
+
+    def test_llm_judge_fallback_verifier_wraps_math_with_compass_verifier(self):
+        args = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            code_api_url="http://localhost:1234/test_program",
+            code_max_execution_time=1.0,
+            code_pass_rate_reward_threshold=0.0,
+            code_apply_perf_penalty=False,
+            max_length_verifier_max_length=32768,
+        )
+        streaming_config = SimpleNamespace(
+            llm_judge_model="opencompass/CompassVerifier-3B",
+            llm_judge_override_verifier=None,
+            llm_judge_fallback_verifier="math",
+            llm_judge_max_tokens=256,
+            llm_judge_max_context_length=8192,
+            llm_judge_temperature=0.0,
+            llm_judge_timeout=60,
+            seed=1,
+            remap_verifier=None,
+        )
+
+        verifiers = build_all_verifiers(args, streaming_config)
+        self.assertIsInstance(verifiers["math"], LLMJudgeFallbackVerifier)
+        self.assertEqual(verifiers["math"].fallback_verifier.judge_type, "compass_verifier")
+
+
+class TestCompassVerifierExtractor(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("plain_a", "A", 1.0),
+            ("plain_b", "B", 0.0),
+            ("plain_c", "C", 0.0),
+            ("boxed", r"Final Judgment: \\boxed{A} - CORRECT", 1.0),
+            ("incorrect_word", "INCORRECT", 0.0),
+            ("invalid_word", "INVALID", 0.0),
+        ]
+    )
+    def test_extract_score_compass_verifier(self, _name, text, expected_score):
+        _, score = extract_score_compass_verifier(text)
+        self.assertEqual(score, expected_score)
+
+
+def _make_litellm_response(content: str, prompt_tokens: int = 10, completion_tokens: int = 5):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+    )
+
+
+class TestLMJudgeVerifier(unittest.TestCase):
+    def setUp(self):
+        self.verifier = LMJudgeVerifier(
+            "quality",
+            LMJudgeVerifierConfig(
+                llm_judge_model="azure/gpt-4o-mini-standard",
+                llm_judge_max_tokens=256,
+                llm_judge_max_context_length=4096,
+                llm_judge_temperature=0.0,
+                llm_judge_timeout=30,
+                seed=17,
+            ),
+        )
+
+    def test_async_call_uses_shared_helper_and_preserves_retry_and_cost(self):
+        response = _make_litellm_response('{"REASONING":"clear","SCORE":7}', prompt_tokens=10, completion_tokens=5)
+        raw_helper = AsyncMock(side_effect=[RuntimeError("temporary"), response])
+        sleep_mock = AsyncMock()
+
+        with (
+            patch("open_instruct.ground_truth_utils.run_litellm_async_raw", raw_helper),
+            patch(
+                "open_instruct.ground_truth_utils.context_window_checker.check_context_window_limit", return_value=True
+            ),
+            patch("open_instruct.ground_truth_utils.asyncio.sleep", sleep_mock),
+        ):
+            result = asyncio.run(
+                self.verifier.async_call(
+                    tokenized_prediction=[],
+                    prediction="<answer>final answer</answer>",
+                    label="reference",
+                    query="What is the answer?",
+                )
+            )
+
+        self.assertAlmostEqual(result.score, 0.7)
+        self.assertEqual(result.reasoning, "clear")
+        self.assertAlmostEqual(result.cost, 0.0000045)
+        self.assertEqual(raw_helper.await_count, 2)
+        self.assertEqual(sleep_mock.await_count, 1)
+        self.assertEqual(raw_helper.await_args_list[-1].kwargs["model_name"], "azure/gpt-4o-mini-standard")
+        self.assertEqual(raw_helper.await_args_list[-1].kwargs["max_completion_tokens"], 256)
+        self.assertNotIn("num_retries", raw_helper.await_args_list[-1].kwargs)
+        self.assertNotIn("fallbacks", raw_helper.await_args_list[-1].kwargs)
+
+    def test_cleanup_helpers_are_safe_noops(self):
+        self.assertIsNone(asyncio.run(LMJudgeVerifier.cleanup_all_clients()))
+        self.assertIsNone(asyncio.run(cleanup_all_llm_judge_clients()))
 
 
 if __name__ == "__main__":

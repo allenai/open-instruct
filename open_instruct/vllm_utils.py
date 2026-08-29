@@ -127,6 +127,7 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
 class SamplingConfig:
     temperature: float = 0.7
     top_p: float = 1.0
+    top_k: int | None = None
     max_tokens: int = 256
     min_tokens: int = 0
     n: int = 1
@@ -422,12 +423,36 @@ async def _check_health(port: int) -> None:
 
 
 def _prefetch_worker(actor: "LLMRayActor") -> None:
+    poll_timeout_s = 0.1
     while True:
+        has_pending_eval = actor.eval_prompt_queue is not None and actor.eval_prompt_queue.qsize() > 0
+
+        # Strict eval priority: when eval work is pending, stop admitting new train requests
+        # and wait for in-flight requests to drain so eval doesn't starve behind train backlog.
+        if has_pending_eval and len(actor.active_tasks) > 0:
+            time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
+            continue
+
         if actor._should_stop() or len(actor.active_tasks) >= actor.inference_batch_size:
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
             continue
 
-        request = actor.prompt_queue.get()
+        # Prioritize eval requests so local evals don't starve behind train backlog.
+        # Use timed gets so this worker doesn't block forever on train queue when eval
+        # items arrive later (e.g., final-step eval after training prompts are drained).
+        request = None
+        if has_pending_eval and actor.eval_prompt_queue is not None:
+            try:
+                request = actor.eval_prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            try:
+                request = actor.prompt_queue.get(block=True, timeout=poll_timeout_s)
+            except queue.Empty:
+                request = None
+        if request is None:
+            continue
         add_request(actor, request)
 
 
@@ -555,6 +580,7 @@ class LLMRayActor:
         pools: dict[str, ray.actor.ActorHandle] | None = None,
         bundle_indices: list[int] | None = None,
         prompt_queue: ray_queue.Queue,
+        eval_prompt_queue: ray_queue.Queue | None = None,
         results_queue: ray_queue.Queue,
         eval_results_queue: ray_queue.Queue,
         actor_manager: ray.actor.ActorHandle,
@@ -578,7 +604,7 @@ class LLMRayActor:
             train_dataset,
             eval_dataset,
         )
-        self._init_queues(prompt_queue, results_queue, eval_results_queue, actor_manager)
+        self._init_queues(prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager)
 
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         distributed_executor_backend = kwargs.get("distributed_executor_backend")
@@ -624,9 +650,10 @@ class LLMRayActor:
         self.reward_fn = reward_config.build() if reward_config else None
         self.tool_parser: ToolParser  # Set in _init_tool_parser
 
-    def _init_queues(self, prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
+    def _init_queues(self, prompt_queue, eval_prompt_queue, results_queue, eval_results_queue, actor_manager) -> None:
         self.completion_queue = queue.Queue()
         self.prompt_queue = prompt_queue
+        self.eval_prompt_queue = eval_prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.actor_manager = actor_manager
@@ -781,15 +808,39 @@ class LLMRayActor:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
     def update_weights(
-        self, names: list[str], dtype_names: list[str], shapes: list[list[int]], packed: bool = True
+        self,
+        names: list[str] | dict[str, Any],
+        dtype_names: list[str] | None = None,
+        shapes: list[list[int]] | None = None,
+        packed: bool = True,
+        model_step: int = 0,
     ) -> None:
+        """Apply a weight update from the trainer.
+
+        vLLM's ``IPCWeightTransferEngine`` (single-GPU / IPC path) calls
+        ``update_weights.remote({"update_info": ...})`` with IPC handles inside
+        ``update_info``. The NCCL path passes ``names``, ``dtype_names``, and
+        ``shapes`` as separate arguments.
+        """
+        if isinstance(names, dict):
+            if "update_info" not in names:
+                raise TypeError(
+                    "update_weights dict payload must contain 'update_info' (vLLM IPC weight transfer format)."
+                )
+            request = WeightTransferUpdateRequest(update_info=names["update_info"])
+            ret = self._run_async(self.llm_engine.update_weights(request))
+            self.current_model_step = model_step
+            return ret
+
+        if dtype_names is None or shapes is None:
+            raise TypeError("update_weights requires dtype_names and shapes when names is a list (NCCL format).")
+
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        request = WeightTransferUpdateRequest(
-            update_info={"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
-        )
-        return self._run_async(self.llm_engine.update_weights(request))
+        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": packed}
+        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(update_info=update_info)))
+        self.current_model_step = model_step
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -996,17 +1047,18 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             current_sampling_params = dataclasses.replace(sampling_params, max_tokens=current_max_tokens)
             params_dict = dataclasses.asdict(current_sampling_params)
             min_tokens = params_dict.pop("min_tokens", 0)
+            top_k = params_dict.pop("top_k", None)
+            extra_body: dict[str, Any] = {
+                "return_token_ids": True,
+                "cache_salt": base_request_id,
+                "include_stop_str_in_output": True,
+                "skip_special_tokens": False,
+                "min_tokens": min_tokens,
+            }
+            if top_k is not None:
+                extra_body["top_k"] = top_k
             api_response = await actor.client.completions.create(
-                model=actor.model_name,
-                prompt=current_prompt,
-                extra_body={
-                    "return_token_ids": True,
-                    "cache_salt": base_request_id,
-                    "include_stop_str_in_output": True,
-                    "skip_special_tokens": False,
-                    "min_tokens": min_tokens,
-                },
-                **params_dict,
+                model=actor.model_name, prompt=current_prompt, extra_body=extra_body, **params_dict
             )
 
             output = api_response.choices[0]
@@ -1196,6 +1248,7 @@ def create_vllm_engines(
     mask_tool_use: bool = True,
     pools: dict[str, ray.actor.ActorHandle] | None = None,
     prompt_queue=None,
+    eval_prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
     actor_manager=None,
@@ -1275,6 +1328,7 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 noset_visible_devices=ray_noset_visible_devices(),
                 prompt_queue=prompt_queue,
+                eval_prompt_queue=eval_prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
                 actor_manager=actor_manager,
@@ -1366,6 +1420,7 @@ def _broadcast_weights_ipc(
     vllm_engines: list[ray.actor.ActorHandle],
     name_mapper: Callable[[str], str] | None,
     gather_whole_model: bool,
+    model_step: int,
 ) -> list[ray.ObjectRef]:
     """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
     is_rank_0 = torch.distributed.get_rank() == 0
@@ -1383,6 +1438,7 @@ def _broadcast_weights_ipc(
             for engine in vllm_engines:
                 trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+            return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
 
 
@@ -1390,6 +1446,7 @@ def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
     model_update_group: Any | None,
+    model_step: int,
     name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
@@ -1400,6 +1457,9 @@ def broadcast_weights_to_vllm(
 
     When model_update_group is None, uses IPC backend (single GPU mode).
     Otherwise uses NCCL backend.
+
+    `model_step` is stamped onto each vLLM engine as part of the weight-update RPC,
+    so no separate `set_model_step` call is needed.
     """
     if isinstance(model, FSDP) and not gather_whole_model:
         raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
@@ -1409,14 +1469,16 @@ def broadcast_weights_to_vllm(
         ray.get([engine.sleep.remote() for engine in vllm_engines])
 
     if model_update_group is None:
-        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model)
+        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
 
     fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
     names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper, fsdp_submodules=fsdp_submodules)
     use_packed = False
 
     if is_rank_0:
-        refs = [engine.update_weights.remote(names, dtype_names, shapes, packed=use_packed) for engine in vllm_engines]
+        refs = [
+            engine.update_weights.remote(names, dtype_names, shapes, use_packed, model_step) for engine in vllm_engines
+        ]
     else:
         refs = []
 
@@ -1458,4 +1520,5 @@ def broadcast_weights_to_vllm(
             if is_rank_0:
                 mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
                 NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
+
     return refs

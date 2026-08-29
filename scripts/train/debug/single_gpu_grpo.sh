@@ -9,7 +9,6 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 uv run python mason.py \
        --cluster ai2/jupiter \
        --cluster ai2/saturn \
-       --cluster ai2/ceres \
        --image "$BEAKER_IMAGE" \
        --description "Single GPU OLMo-core GRPO test script." \
        --pure_docker_mode \
@@ -22,6 +21,7 @@ uv run python mason.py \
        --budget ai2/oe-adapt \
        --gpus 1 \
        --no_auto_dataset_cache \
+       --artifact_ttl 1d \
 	   -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
@@ -58,4 +58,5 @@ uv run python mason.py \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --push_to_hub false \
+    --async_steps 1 \
     --single_gpu_mode

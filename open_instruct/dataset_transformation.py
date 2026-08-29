@@ -116,6 +116,36 @@ APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU = 400
 FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 
 
+def _log_prompt_filter_statistics(statistics: dict[str, Any]) -> None:
+    per_dataset_stats = statistics.get("per_dataset_stats", [])
+    total_initial = sum(stat.get("initial_instances", 0) for stat in per_dataset_stats)
+    total_filtered = sum(stat.get("instances_filtered", 0) for stat in per_dataset_stats)
+    if total_initial == 0:
+        logger.info("Prompt length filtering: no input prompts to summarize.")
+        return
+
+    logger.info(
+        "Prompt length filtering: filtered %s/%s prompts (%.2f%%).",
+        total_filtered,
+        total_initial,
+        100 * total_filtered / total_initial,
+    )
+    for stat in per_dataset_stats:
+        filtered = stat.get("instances_filtered", 0)
+        if filtered == 0:
+            continue
+        initial = stat.get("initial_instances", 0)
+        split = stat.get("dataset_split", "unknown")
+        logger.info(
+            "Prompt length filtering detail: %s[%s] filtered %s/%s prompts (%.2f%%).",
+            stat.get("dataset_name", "unknown"),
+            split,
+            filtered,
+            initial,
+            100 * filtered / initial if initial else 0.0,
+        )
+
+
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
     return min(num_required_cpus, num_available_cpus, dataset_len)
@@ -1467,6 +1497,7 @@ def rlvr_tokenize_v3(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     verifier_source_key: str = VERIFIER_SOURCE_KEY,
     system_prompt_override: str | None = None,
+    user_prompt_transform: str | None = None,
     tool_definitions: list[dict[str, Any]] | None = None,
     pass_tools_to_chat_template: bool = True,
 ):
@@ -1475,13 +1506,20 @@ def rlvr_tokenize_v3(
     # if the prompt has multiple messages, make sure we don't end in an assistant message.
     if len(prompt) > 1 and prompt[-1]["role"] == "assistant":
         prompt = prompt[:-1]
-    # override the system prompt if we have a new one provided.
     if system_prompt_override:
         if prompt[0]["role"] == "system":
             del prompt[0]
         prompt = [{"role": "system", "content": system_prompt_override}] + prompt
 
     tools_for_template = _resolve_tools_for_sample(row, tool_definitions, pass_tools_to_chat_template)
+
+    if user_prompt_transform:
+        for message in reversed(prompt):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content") or ""
+            message["content"] = user_prompt_transform.format(prompt=content)
+            break
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
@@ -1491,10 +1529,6 @@ def rlvr_tokenize_v3(
     )
     if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
         row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
-    # Get the raw values from the source keys
-    ground_truths_val = row[ground_truths_key]
-    verifier_source_val = row[verifier_source_key]
-
     # Get the raw values from the source keys
     ground_truths_val = row[ground_truths_key]
     verifier_source_val = row[verifier_source_key]
@@ -1652,8 +1686,11 @@ class DatasetConfig:
         self.is_upsampled = dataset_range > original_size
 
     def select_samples(self, target_size: int):
-        """Upsample dataset to target_size by repeating samples."""
+        """Select samples deterministically for downsampling and repeat for upsampling."""
         original_size = len(self.dataset)
+
+        if target_size <= original_size:
+            return self.dataset.select(range(target_size))
 
         # Calculate how many full repeats and how many extra samples
         full_repeats = target_size // original_size
@@ -1730,8 +1767,8 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         # HuggingFace's internal .map() cache when transformation logic changes significantly
         new_fingerprint = hashlib.sha256(
             (
-                f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:{tc_json}"
-                f"{tc.chat_template_name}:{tc.get_tokenizer_fn}:{tokenizer_files_hash}:{chat_template_hash}"
+                f"{DATASET_CACHE_VERSION}:{fn_name}:{dataset._fingerprint}:{json.dumps(fn_args, sort_keys=True)}:"
+                f"{tc_json}:{tc.chat_template_name}:{tc.get_tokenizer_fn}:{tokenizer_files_hash}:{chat_template_hash}"
             ).encode()
         ).hexdigest()[:16]
 
@@ -2128,6 +2165,7 @@ def get_cached_dataset_tulu_with_statistics(
     drop_dataset_source: bool = True,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    log_statistics: bool = False,
 ) -> tuple[Dataset, dict[str, Any]]:
     if dataset_config_hash is None:
         dcs = load_dataset_configs(
@@ -2150,6 +2188,9 @@ def get_cached_dataset_tulu_with_statistics(
 
     dataset, statistics = cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
+    if log_statistics:
+        _log_prompt_filter_statistics(statistics)
+
     if drop_dataset_source:
         dataset = remove_dataset_source_field(dataset)
 
@@ -2170,6 +2211,7 @@ def get_cached_dataset_tulu(
     dataset_skip_cache: bool = False,
     dataset_config_seed: int = 42,
     system_prompt_override: str | None = None,
+    log_statistics: bool = False,
 ) -> Dataset:
     return get_cached_dataset_tulu_with_statistics(
         dataset_mixer_list=dataset_mixer_list,
@@ -2186,4 +2228,5 @@ def get_cached_dataset_tulu(
         drop_dataset_source=True,
         dataset_config_seed=dataset_config_seed,
         system_prompt_override=system_prompt_override,
+        log_statistics=log_statistics,
     )[0]

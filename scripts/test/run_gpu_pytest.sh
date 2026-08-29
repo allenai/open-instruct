@@ -3,8 +3,13 @@ set -eo pipefail
 
 BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
+shift || true
+PYTEST_ARGS=("$@")
 
 echo "Using Beaker image: $BEAKER_IMAGE"
+if [[ ${#PYTEST_ARGS[@]} -gt 0 ]]; then
+    echo "Pytest filter: ${PYTEST_ARGS[*]}"
+fi
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -23,4 +28,4 @@ uv run python mason.py \
        --gpus 1 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)" \
-       -- bash scripts/test/run_gpu_tests.sh
+       -- bash scripts/test/run_gpu_tests.sh "${PYTEST_ARGS[@]}"

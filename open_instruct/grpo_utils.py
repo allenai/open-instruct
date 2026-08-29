@@ -1,6 +1,7 @@
 import enum
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -20,6 +21,8 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+
+_RESUME_CHECKPOINT_TAG_RE = re.compile(r"global_step[0-9]+\Z")
 
 
 def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:
@@ -57,9 +60,53 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
     return metrics
 
 
+def compute_prompt_grad_norm_metrics(
+    prompt_indices: list[int] | np.ndarray,
+    prompt_datasets: list[str] | np.ndarray,
+    prompt_grad_norms: list[float] | np.ndarray,
+    by_index_key: str | None,
+    dataset_mean_prefix: str,
+    dataset_mean_suffix: str | None = None,
+) -> dict[str, float | list[tuple[int, float]]]:
+    metrics: dict[str, float | list[tuple[int, float]]] = {}
+    grad_norms = np.asarray(prompt_grad_norms, dtype=np.float64).ravel()
+    if grad_norms.size == 0:
+        return metrics
+
+    prompt_indices_array = np.asarray(prompt_indices, dtype=np.int64).ravel()
+    prompt_datasets_array = np.asarray(prompt_datasets, dtype=object).ravel()
+    if prompt_indices_array.size != grad_norms.size or prompt_datasets_array.size != grad_norms.size:
+        return metrics
+
+    prompt_index_to_grad_norms: dict[int, list[float]] = {}
+    for prompt_index, grad_norm in zip(prompt_indices_array, grad_norms):
+        prompt_index_to_grad_norms.setdefault(int(prompt_index), []).append(float(grad_norm))
+
+    prompt_grad_norm_by_index = [
+        (prompt_index, float(np.mean(values)))
+        for prompt_index, values in sorted(prompt_index_to_grad_norms.items(), key=lambda item: item[0])
+    ]
+    if by_index_key is not None:
+        metrics[by_index_key] = prompt_grad_norm_by_index
+
+    merged_grad_norm_by_prompt: dict[int, float] = dict(prompt_grad_norm_by_index)
+    merged_grad_norm_by_row = [merged_grad_norm_by_prompt[int(prompt_index)] for prompt_index in prompt_indices_array]
+    dataset_to_grad_norms: dict[str, list[float]] = {}
+    for dataset_name, grad_norm in zip(prompt_datasets_array, merged_grad_norm_by_row):
+        dataset_to_grad_norms.setdefault(str(dataset_name), []).append(float(grad_norm))
+    for dataset_name, values in dataset_to_grad_norms.items():
+        metric_name = f"{dataset_mean_prefix}_{dataset_name}"
+        if dataset_mean_suffix is not None:
+            metric_name = f"{metric_name}_{dataset_mean_suffix}"
+        metrics[metric_name] = float(np.mean(values))
+
+    return metrics
+
+
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"
+    tvpo = "tvpo"
 
 
 @dataclass
@@ -117,11 +164,13 @@ class GRPOExperimentConfig(
     load_ref_policy: bool = True
     """Whether to load and use a reference policy for KL penalty calculation."""
     loss_fn: GRPOLossType = GRPOLossType.dapo
-    """Whether to use DAPO or CISPO loss function."""
+    """Whether to use DAPO, CISPO, or TVPO loss function."""
     record_entropy: bool = False
     """whether to record the entropy of the policy during training. Uses extra memory."""
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
+    disable_per_example_grad_norm_logging: bool = False
+    """Disable DDP-only per-example gradient norm logging. Aggregate optimizer gradient norm logging remains enabled."""
 
     # Ray
     single_gpu_mode: bool = False
@@ -134,6 +183,8 @@ class GRPOExperimentConfig(
     sequence_parallel_size: int = 1
     """sequence parallel size - how many GPUs we will parallelize sequences across during training.
     Useful for super-long context lengths."""
+    trainer_backend: Literal["deepspeed", "ddp"] = "deepspeed"
+    """Training backend for the policy learner."""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     deepspeed_zpg: int = 8
@@ -174,6 +225,17 @@ class GRPOExperimentConfig(
     """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
     checkpoint_state_dir: str | None = None
     """Where to save the model checkpoint (if applicable)"""
+    resume_checkpoint_dir: str | None = None
+    """If set, load DeepSpeed training state (weights, optimizer, RNG, client state) from this directory
+    instead of ``checkpoint_state_dir``. Saves still go to ``checkpoint_state_dir`` when it is set."""
+    resume_checkpoint_tag: str | None = None
+    """If set, load this DeepSpeed checkpoint tag (must be ``global_step`` followed by digits, e.g.
+    ``global_step4000``) instead of the ``latest`` pointer. Requires ``checkpoint_state_dir`` or
+    ``resume_checkpoint_dir`` and DeepSpeed backend."""
+    ignore_resume_never_give_up_state: bool = False
+    """Whether to discard ``never_give_up_state`` from restored data prep actor state when resuming."""
+    warn_if_low_disk_space: bool = False
+    """Whether to warn before checkpointing when checkpoint storage is nearly full."""
     gs_checkpoint_state_dir: str | None = None
     """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
 
@@ -203,18 +265,36 @@ class GRPOExperimentConfig(
     eval_on_step_0: bool = False
     """Whether to run local evaluation at training step 0. Defaults to False."""
     eval_pass_at_k: int = 1
-    """Number of completions per eval prompt for local pass@k metrics."""
+    """Number of completions per eval prompt for pass@k metrics."""
+    eval_only: bool = False
+    """Whether to run one local evaluation round and exit without training."""
+    eval_only_set_checkpoint: int | None = None
+    """Optional checkpoint step to use as eval-only logging step."""
+    eval_temperature: float | None = None
+    """Optional eval-only temperature override. If None, uses training temperature."""
+    eval_top_p: float | None = None
+    """Optional eval-only top_p override. If None, uses training top_p."""
+    eval_top_k: int | None = None
+    """Optional eval-only top_k override. If None, uses training top_k."""
+    eval_timeout_minutes: int | None = 120
+    """Timeout in minutes for final local eval result collection. Defaults to 2 hours."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
             logger.warning(
                 "--send_slack_alerts is set but SLACK_WEBHOOK_URL is not in the environment. Slack alerts will not be sent."
             )
+        if self.local_eval_every == 0 or self.local_eval_every < -1:
+            raise ValueError(f"`local_eval_every` must be -1 or > 0, got {self.local_eval_every}")
+        if self.loss_fn == GRPOLossType.tvpo and self.truncated_importance_sampling_ratio_cap > 0.0:
+            raise ValueError("`loss_fn=tvpo` cannot be used with `truncated_importance_sampling_ratio_cap > 0`.")
         if self.use_vllm_logprobs and self.truncated_importance_sampling_ratio_cap > 0.0:
             raise ValueError(
                 "Cannot use both `use_vllm_logprobs` and `truncated_importance_sampling_ratio_cap`. "
                 "use_vllm_logprobs sets old_logprobs to vLLM logprobs, making importance sampling pointless."
             )
+        if self.loss_fn == GRPOLossType.tvpo and not self.use_vllm_logprobs:
+            raise ValueError("Must use `loss_fn=tvpo` with `use_vllm_logprobs=True`.")
         if self.loss_denominator != "token" and float(self.loss_denominator) <= 0:
             raise ValueError(
                 f"loss_denominator must be a valid float greater than 0 if not 'token', got: {self.loss_denominator}"
@@ -233,6 +313,8 @@ class GRPOExperimentConfig(
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:
             raise ValueError("`sequence_parallel_size` > 1 requires `deepspeed_stage` to be 3!")
+        if self.trainer_backend == "ddp" and self.sequence_parallel_size > 1:
+            raise ValueError("`trainer_backend=ddp` does not support `sequence_parallel_size > 1`.")
 
         total_learner_gpus = sum(self.num_learners_per_node)
         if self.fsdp_shard_degree is not None and self.fsdp_num_replicas is not None:
@@ -274,11 +356,75 @@ class GRPOExperimentConfig(
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
             if self.deepspeed_checkpoint_load_universal:
                 ensure_universal_checkpoint_exists(self.checkpoint_state_dir)
+        if self.resume_checkpoint_dir is not None:
+            if not os.path.exists(self.resume_checkpoint_dir):
+                raise ValueError(f"`resume_checkpoint_dir` does not exist: {self.resume_checkpoint_dir}")
+            calibrate_checkpoint_state_dir(self.resume_checkpoint_dir)
+            if self.deepspeed_checkpoint_load_universal:
+                ensure_universal_checkpoint_exists(self.resume_checkpoint_dir)
+        if self.resume_checkpoint_tag is not None:
+            if self.trainer_backend != "deepspeed":
+                raise ValueError(
+                    "`resume_checkpoint_tag` is only supported with `trainer_backend=deepspeed` "
+                    f"(got {self.trainer_backend!r})."
+                )
+            load_root = self.resume_checkpoint_dir or self.checkpoint_state_dir
+            if load_root is None:
+                raise ValueError("`resume_checkpoint_tag` requires `checkpoint_state_dir` or `resume_checkpoint_dir`.")
+            tag = self.resume_checkpoint_tag.strip()
+            if not _RESUME_CHECKPOINT_TAG_RE.fullmatch(tag):
+                raise ValueError(
+                    "`resume_checkpoint_tag` must look like `global_step<N>` with decimal digits only "
+                    f"(e.g. `global_step4000`), got {self.resume_checkpoint_tag!r}"
+                )
+            self.resume_checkpoint_tag = tag
+            tag_dir = os.path.join(load_root, tag)
+            if not os.path.isdir(tag_dir):
+                raise ValueError(f"`resume_checkpoint_tag` directory does not exist: {tag_dir}")
+            with open(os.path.join(load_root, "latest"), "w") as f:
+                f.write(tag)
+            if self.deepspeed_checkpoint_load_universal:
+                ensure_universal_checkpoint_exists(load_root)
         if not self.load_ref_policy and self.beta != 0.0:
             raise ValueError(
                 "When load_ref_policy=False, beta must be 0.0. "
                 f"Got beta={self.beta}. Set --beta 0.0 or --load_ref_policy to use KL penalty."
             )
+        if self.eval_temperature is not None and self.eval_temperature < 0.0:
+            raise ValueError(f"`eval_temperature` must be >= 0.0, got {self.eval_temperature}")
+        if self.eval_top_p is not None and not (0.0 < self.eval_top_p <= 1.0):
+            raise ValueError(f"`eval_top_p` must be in (0, 1], got {self.eval_top_p}")
+        if self.eval_top_k is not None and self.eval_top_k != -1 and self.eval_top_k < 1:
+            raise ValueError(f"`eval_top_k` must be -1 or >= 1, got {self.eval_top_k}")
+        if self.eval_timeout_minutes is not None and self.eval_timeout_minutes < 1:
+            raise ValueError(f"`eval_timeout_minutes` must be >= 1, got {self.eval_timeout_minutes}")
+        if self.eval_pass_at_k < 1:
+            raise ValueError(f"`eval_pass_at_k` must be >= 1, got {self.eval_pass_at_k}")
+        if self.eval_pass_at_k & (self.eval_pass_at_k - 1) != 0:
+            raise ValueError(f"`eval_pass_at_k` must be a power of 2, got {self.eval_pass_at_k}")
+        if self.eval_only_set_checkpoint is not None and self.eval_only_set_checkpoint < 1:
+            raise ValueError(
+                f"`eval_only_set_checkpoint` must be >= 1 when provided, got {self.eval_only_set_checkpoint}"
+            )
+        assert self.trainer_backend in {"deepspeed", "ddp"}
+
+
+ExperimentConfig = GRPOExperimentConfig
+
+
+def estimate_pass_at_k(num_samples: int, num_correct: int, k: int) -> float:
+    """Estimate pass@k for one prompt."""
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be >= 1, got {num_samples}.")
+    if not (0 <= num_correct <= num_samples):
+        raise ValueError(
+            f"num_correct must satisfy 0 <= num_correct <= num_samples, got {num_correct} with {num_samples}."
+        )
+    if not (1 <= k <= num_samples):
+        raise ValueError(f"k must satisfy 1 <= k <= num_samples, got {k} with {num_samples}.")
+    if num_samples - num_correct < k:
+        return 1.0
+    return 1.0 - (math.comb(num_samples - num_correct, k) / math.comb(num_samples, k))
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
@@ -339,37 +485,45 @@ def compute_grpo_loss(
     ratio: torch.Tensor,
     advantages: torch.Tensor,
     ref_logprobs: torch.Tensor | None,
+    response_mask: torch.Tensor,
     config: GRPOExperimentConfig,
     tis_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    tv_divergence: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if config.loss_fn == GRPOLossType.dapo:
         pg_losses = -advantages * ratio
-        pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        pg_losses_clipped = -advantages * torch.clamp(ratio, 1.0 - config.clip_lower, 1.0 + config.clip_higher)
+        pg_loss = torch.max(pg_losses, pg_losses_clipped)
+        clip_mask = pg_losses_clipped > pg_losses
     elif config.loss_fn == GRPOLossType.cispo:
         # cispo: directly clip ratio, no lower bound.
         # reinforce loss, so multiply by new logprobs
-        pg_losses = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
-        pg_losses2 = pg_losses
+        pg_loss = -advantages * torch.clamp(ratio.detach(), max=1.0 + config.clip_higher) * new_logprobs
+        clip_mask = torch.zeros_like(pg_loss, dtype=torch.bool)
+    elif config.loss_fn == GRPOLossType.tvpo:
+        if tv_divergence is None:
+            raise ValueError("tv_divergence is required when `loss_fn=tvpo`.")
+        clip_mask = (tv_divergence > config.clip_higher) * (((ratio.detach() - 1) * advantages) > 0)
+        clipped_ratio = torch.where(clip_mask, torch.ones_like(ratio), ratio)
+        pg_loss = -advantages * clipped_ratio
     else:
         raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
     if tis_weights is not None:
-        pg_losses = pg_losses * tis_weights
-        pg_losses2 = pg_losses2 * tis_weights
-
-    pg_loss_max = torch.max(pg_losses, pg_losses2)
+        pg_loss = pg_loss * tis_weights
 
     if ref_logprobs is not None:
         # We want the KL loss to backpropagate through the model.
         # We also clamp the KL loss to avoid numerical instability.
         # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
-        ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-40.0, 40.0)
+        ref_logprobs_diff = (new_logprobs - ref_logprobs).clamp(-10.0, 10.0)
         kl_all = model_utils.estimate_kl(ref_logprobs_diff, ratio)
         kl = kl_all[config.kl_estimator]
+        kl = torch.masked_fill(kl, ~response_mask, 0.0)
     else:
-        kl = torch.zeros_like(pg_loss_max)
+        kl = torch.zeros_like(pg_loss)
 
-    return pg_losses, pg_losses2, pg_loss_max, kl
+    return pg_loss, clip_mask, kl
 
 
 def forward_for_logprobs(
@@ -512,9 +666,8 @@ def create_loss_stats(num_samples: int, device: torch.device, record_entropy: bo
 def populate_sample_loss_stats(
     loss_stats_B: dict[str, torch.Tensor],
     sample_idx: int,
-    pg_losses: torch.Tensor,
-    pg_losses2: torch.Tensor,
     pg_loss: torch.Tensor,
+    clip_mask: torch.Tensor,
     ratio: torch.Tensor,
     loss: torch.Tensor,
     response_mask: torch.Tensor,
@@ -538,7 +691,7 @@ def populate_sample_loss_stats(
             loss_stats_B["val/tis_clipfrac"][sample_idx] = masked_mean(
                 (tis_clamped < tis_unclamped).float(), response_mask
             )
-        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean((pg_losses2 > pg_losses).float(), response_mask)
+        loss_stats_B["policy/clipfrac_avg"][sample_idx] = masked_mean(clip_mask.float(), response_mask)
         loss_stats_B["loss/policy_avg"][sample_idx] = masked_mean(pg_loss, response_mask)
         loss_stats_B["loss/total_avg"][sample_idx] = loss
         loss_stats_B["val/ratio"][sample_idx] = masked_mean(ratio, response_mask)

@@ -29,7 +29,6 @@ uv run mason.py \
     --preemptible \
     --num_nodes 9 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
-    --env VLLM_ATTENTION_BACKEND="FLASH_ATTN" \
     --gpus 8 \
     --budget ai2/oe-adapt \
     -- source configs/beaker_configs/ray_node_setup.sh \

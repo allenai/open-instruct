@@ -22,7 +22,7 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import logger_utils, utils, vllm_utils
+from open_instruct import logger_utils, vllm_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -88,24 +88,28 @@ class VLLMWeightSyncCallback(Callback):
 
         torch.cuda.empty_cache()
 
-        ray.get(self.actor_manager.set_should_stop.remote(True))
+        if self.actor_manager is not None:
+            ray.get(self.actor_manager.set_should_stop.remote(True))
 
         model = self.train_module.model
 
-        utils.ray_get_with_progress(
-            vllm_utils.broadcast_weights_to_vllm(
-                model=model,
-                vllm_engines=self.vllm_engines,
-                model_update_group=self.model_update_group,
-                name_mapper=self.name_mapper,
-            ),
-            desc="Broadcasting weights to vLLM engines",
-            enable=False,
+        try:
+            self._broadcast_weights(model)
+        finally:
+            if self.actor_manager is not None:
+                ray.get(self.actor_manager.set_should_stop.remote(False))
+
+    def _broadcast_weights(self, model: nn.Module) -> None:
+        """Broadcast weights from training model to vLLM engines."""
+        refs = vllm_utils.broadcast_weights_to_vllm(
+            model=model,
+            vllm_engines=self.vllm_engines,
+            model_update_group=self.model_update_group,
+            model_step=self.trainer.global_step,
+            name_mapper=self.name_mapper,
         )
-        utils.ray_get_with_progress(
-            [engine.wake_up.remote() for engine in self.vllm_engines], desc="Waking up vLLM engines", enable=False
-        )
-        ray.get(self.actor_manager.set_should_stop.remote(False))
+        if refs:
+            ray.get(refs)
 
 
 @dataclass
@@ -162,10 +166,12 @@ class RefPolicyUpdateCallback(Callback):
 class DataPreparationActorCheckpointCallback(Callback):
     """Callback to save and restore DataPreparationActor state during checkpointing."""
 
+    data_prep_actor_name: str = data_loader_lib.DATA_PREP_ACTOR_NAME
+
     def state_dict(self) -> dict[str, Any]:
         """Save DataPreparationActor state before checkpointing."""
         try:
-            data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+            data_prep_actor = ray.get_actor(self.data_prep_actor_name)
             return {"data_prep_state": ray.get(data_prep_actor.get_state.remote())}
         except (ray.exceptions.RayError, ValueError) as e:
             logger.warning(f"Failed to get DataPreparationActor state: {e}")
@@ -177,7 +183,7 @@ class DataPreparationActorCheckpointCallback(Callback):
             return
 
         try:
-            data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
+            data_prep_actor = ray.get_actor(self.data_prep_actor_name)
             ray.get(data_prep_actor.restore_state.remote(state_dict["data_prep_state"]))
             logger.info("Restored DataPreparationActor state from checkpoint")
         except (ray.exceptions.RayError, ValueError) as e:

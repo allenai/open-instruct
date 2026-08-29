@@ -22,12 +22,17 @@ from typing import Any, Literal
 
 import numpy as np
 import requests
-from litellm import acompletion
 
 from open_instruct import context_window_checker, logger_utils
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
+from open_instruct.judge_utils import (
+    EXTRACTOR_MAP,
+    JUDGE_PROMPT_MAP,
+    PRICE_PER_TOKEN,
+    REQUIRED_OUTPUT_SUFFIX_MAP,
+    build_messages,
+)
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,
@@ -37,7 +42,7 @@ from open_instruct.math_utils import (
     remove_boxed,
 )
 from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
-from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async
+from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
 from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
@@ -95,10 +100,35 @@ class CodeVerifierConfig(VerifierConfig):
 
 
 @dataclasses.dataclass
+class BallsimVerifierConfig(VerifierConfig):
+    ballsim_api_url: str
+    ballsim_max_execution_time: float
+    ballsim_scoring_mode: str = "all_pass"
+    # pass_rate mode: fraction in [0, 1] of raw score from all-pass; rest from pass_rate.
+    pass_rate_all_pass_bonus: float = 0.0
+
+    def __post_init__(self) -> None:
+        assert 0.0 <= self.pass_rate_all_pass_bonus <= 1.0, self.pass_rate_all_pass_bonus
+
+
+@dataclasses.dataclass
+class ManufactoriaVerifierConfig(VerifierConfig):
+    manufactoria_api_url: str
+    manufactoria_max_execution_time: float
+    manufactoria_scoring_mode: str = "all_pass"
+    # pass_rate mode: fraction in [0, 1] of raw score from all-pass; rest from pass_rate.
+    pass_rate_all_pass_bonus: float = 0.0
+
+    def __post_init__(self) -> None:
+        assert 0.0 <= self.pass_rate_all_pass_bonus <= 1.0, self.pass_rate_all_pass_bonus
+
+
+@dataclasses.dataclass
 class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
+    metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -700,13 +730,12 @@ class LMJudgeVerifier(VerifierFunction):
     Verifier that uses a language model's judgement to score a response.
     """
 
-    # Use WeakKeyDictionary to automatically clean up clients when event loops are garbage collected
-    _client_cache = weakref.WeakKeyDictionary()
-
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
+        self.judge_type = judge_type
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
         self.extractor = EXTRACTOR_MAP[judge_type]
+        self.required_output_suffix = REQUIRED_OUTPUT_SUFFIX_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
     def parse_completion(self, completion):
@@ -763,8 +792,15 @@ class LMJudgeVerifier(VerifierFunction):
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
         # client = self._get_client()
-        final_answer = extract_final_answer(prediction)
-        prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
+        judged_output = prediction if self.judge_type == "compass_verifier" else extract_final_answer(prediction)
+        prompt = self.prompt_template.format(
+            input=query,
+            output=judged_output,
+            label=label,
+            question=query,
+            gold_answer=label,
+            llm_response=judged_output,
+        )
 
         max_retries = 3  # for rate limits
         retry_delay = 1.0
@@ -789,6 +825,7 @@ class LMJudgeVerifier(VerifierFunction):
                         model_name=self.verifier_config.llm_judge_model,
                         max_context_length=self.verifier_config.llm_judge_max_context_length,
                         safety_margin=200,
+                        required_suffix=self.required_output_suffix,
                     )
 
                     # Check again after truncation
@@ -802,8 +839,8 @@ class LMJudgeVerifier(VerifierFunction):
                         logger.error("Cannot fit request within context window even after truncation.")
                         return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
                 # end of Faeze's context window check
-                response = await acompletion(
-                    model=self.verifier_config.llm_judge_model,
+                response = await run_litellm_async_raw(
+                    model_name=self.verifier_config.llm_judge_model,
                     messages=messages,
                     temperature=self.verifier_config.llm_judge_temperature,
                     max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
@@ -849,24 +886,16 @@ class LMJudgeVerifier(VerifierFunction):
                     "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
                 )
             else:
-                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
         except RuntimeError:
-            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
 
     @classmethod
     async def cleanup_all_clients(cls):
         """
-        Manually close all cached clients. Call this before shutting down to avoid cleanup warnings.
+        Judge requests use the shared LiteLLM helper and do not own per-verifier clients.
         """
-        clients_to_close = list(cls._client_cache.values())
-        cls._client_cache.clear()
-
-        for client in clients_to_close:
-            try:
-                await client.close()
-            except Exception as e:
-                logger.warning(f"Error closing OpenAI client: {e}")
-                # Suppress the error to avoid breaking shutdown
+        return None
 
     @classmethod
     def get_config_class(cls) -> type:
@@ -877,6 +906,82 @@ class LMJudgeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return LMJudgeVerifierConfig
+
+
+class LLMJudgeFallbackVerifier(VerifierFunction):
+    """Run a primary verifier first and only fall back to an LLM judge on failures."""
+
+    def __init__(self, primary_verifier: VerifierFunction, fallback_verifier: LMJudgeVerifier) -> None:
+        super().__init__(
+            primary_verifier.name,
+            weight=getattr(primary_verifier, "weight", 1.0),
+            verifier_config=getattr(primary_verifier, "verifier_config", None),
+        )
+        self.primary_verifier = primary_verifier
+        self.fallback_verifier = fallback_verifier
+
+    async def async_call(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        try:
+            primary_result = await self.primary_verifier.async_call(
+                tokenized_prediction, prediction, label, query, rollout_state
+            )
+        except TypeError:
+            primary_result = await self.primary_verifier.async_call(tokenized_prediction, prediction, label, query)
+        if primary_result.score > 0.0:
+            return primary_result
+
+        try:
+            fallback_result = await self.fallback_verifier.async_call(
+                tokenized_prediction, prediction, label, query, rollout_state
+            )
+        except TypeError:
+            fallback_result = await self.fallback_verifier.async_call(tokenized_prediction, prediction, label, query)
+        fallback_metadata = dict(fallback_result.metadata)
+        fallback_metadata.update(
+            {
+                "llm_judge_fallback_used": 1,
+                "llm_judge_fallback_primary_verifier": self.primary_verifier.name,
+                "llm_judge_correct_when_primary_wrong": int(fallback_result.score > 0.0),
+            }
+        )
+        return VerificationResult(
+            score=fallback_result.score,
+            cost=primary_result.cost + fallback_result.cost,
+            reasoning=fallback_result.reasoning,
+            metadata=fallback_metadata,
+        )
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query, rollout_state))
+
+
+def _judge_type_for_verifier(verifier_name: str) -> str:
+    verifier_name = verifier_name.lower()
+    if verifier_name in {"gsm8k", "math"}:
+        return "compass_verifier"
+    return "quality"
 
 
 class CodeVerifier(VerifierFunction):
@@ -915,13 +1020,16 @@ class CodeVerifier(VerifierFunction):
         if cls._session_pool is None:
             cls._session_pool = requests.Session()
             # Configure connection pooling
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=100,
-                pool_maxsize=100,
-                max_retries=requests.adapters.Retry(
-                    total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504]
-                ),
+            retry_config = requests.adapters.Retry(
+                total=3,
+                connect=3,
+                read=3,
+                status=3,
+                backoff_factor=0.3,
+                status_forcelist=[500, 502, 503, 504],
+                allowed_methods=None,
             )
+            adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=retry_config)
             cls._session_pool.mount("http://", adapter)
             cls._session_pool.mount("https://", adapter)
         return cls._session_pool
@@ -1024,6 +1132,276 @@ class CodeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return CodeVerifierConfig
+
+
+class BallsimVerifier(VerifierFunction):
+    """
+    Verifier that executes Python code against BounceSim test cases using an external API.
+    """
+
+    _session_pool = None
+
+    def __init__(self, verifier_config: BallsimVerifierConfig) -> None:
+        super().__init__("ballsim", verifier_config=verifier_config, weight=1.0)
+
+    @classmethod
+    def _get_session(cls):
+        if cls._session_pool is None:
+            cls._session_pool = requests.Session()
+            retry_config = requests.adapters.Retry(
+                total=3,
+                connect=3,
+                read=3,
+                status=3,
+                backoff_factor=0.3,
+                status_forcelist=[500, 502, 503, 504],
+                allowed_methods=None,
+            )
+            adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=retry_config)
+            cls._session_pool.mount("http://", adapter)
+            cls._session_pool.mount("https://", adapter)
+        return cls._session_pool
+
+    def extract_python_code(self, model_output: str) -> str:
+        pattern = r"```(?:python)?(.*?)```"
+        matches = re.findall(pattern, model_output, re.DOTALL)
+        if not matches:
+            return model_output
+        return matches[-1].strip()
+
+    async def async_call(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        python_code = self.extract_python_code(prediction)
+
+        if isinstance(label, str):
+            try:
+                tests = json.loads(label)
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse BounceSim tests as JSON; got string label")
+                return VerificationResult(score=0.0)
+        else:
+            tests = label
+
+        payload = {
+            "program": python_code,
+            "tests": tests,
+            "max_execution_time": self.verifier_config.ballsim_max_execution_time,
+        }
+
+        try:
+            session = self._get_session()
+            http_timeout = max(30, min(300, self.verifier_config.ballsim_max_execution_time * 10))
+
+            def make_request():
+                response = session.post(
+                    self.verifier_config.ballsim_api_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=http_timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+
+            result = await asyncio.to_thread(make_request)
+            passes = result["results"]
+            pass_rate = sum(passes) / len(passes) if passes else 0.0
+            all_pass_score = 1.0 if pass_rate == 1.0 else 0.0
+
+            if self.verifier_config.ballsim_scoring_mode == "pass_rate":
+                p = self.verifier_config.pass_rate_all_pass_bonus
+                score = (1.0 - p) * pass_rate + p * all_pass_score
+            else:
+                score = all_pass_score
+            return VerificationResult(score=score)
+        except Exception as e:
+            logger.warning(f"Error verifying ballsim code sample: {e}")
+            return VerificationResult(score=0.0)
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            else:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError as e:
+            if "cannot schedule new futures after interpreter shutdown" in str(e):
+                logger.warning("Skipping ballsim verification due to interpreter shutdown")
+                return VerificationResult(score=0.0, reasoning="Verification skipped due to shutdown")
+            try:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            except Exception as nested_e:
+                logger.warning(f"Error verifying ballsim sample during shutdown: {nested_e}")
+                return VerificationResult(score=0.0, reasoning=f"Verification failed: {nested_e}")
+        except Exception as e:
+            logger.warning(f"Error verifying ballsim sample: {e}")
+            return VerificationResult(score=0.0, reasoning=f"Verification failed: {e}")
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        return BallsimVerifierConfig
+
+
+class ManufactoriaVerifier(VerifierFunction):
+    """
+    Verifier that executes Manufactoria DSL code against test cases using an external API.
+    """
+
+    _session_pool = None
+
+    def __init__(self, verifier_config: ManufactoriaVerifierConfig) -> None:
+        super().__init__("manufactoria", verifier_config=verifier_config, weight=1.0)
+
+    @classmethod
+    def _get_session(cls):
+        if cls._session_pool is None:
+            cls._session_pool = requests.Session()
+            retry_config = requests.adapters.Retry(
+                total=3,
+                connect=3,
+                read=3,
+                status=3,
+                backoff_factor=0.3,
+                status_forcelist=[500, 502, 503, 504],
+                allowed_methods=None,
+            )
+            adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=retry_config)
+            cls._session_pool.mount("http://", adapter)
+            cls._session_pool.mount("https://", adapter)
+        return cls._session_pool
+
+    def extract_manufactoria_code(self, model_output: str) -> str:
+        pattern = r"```(?:manufactoria)?(.*?)```"
+        matches = re.findall(pattern, model_output, re.DOTALL)
+        if not matches:
+            return model_output
+        return matches[-1].strip()
+
+    async def async_call(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        passes: list[bool] = []
+
+        if isinstance(label, str):
+            try:
+                test_cases = json.loads(label)
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse Manufactoria tests as JSON; got string label")
+                return VerificationResult(score=0.0)
+        else:
+            test_cases = label
+
+        if not isinstance(test_cases, list) or not test_cases:
+            logger.warning("Manufactoria verifier expected a non-empty test case list")
+            return VerificationResult(score=0.0)
+
+        payload = {
+            "dsl": self.extract_manufactoria_code(prediction),
+            "test_cases": test_cases,
+            "max_execution_time": self.verifier_config.manufactoria_max_execution_time,
+        }
+
+        try:
+            session = self._get_session()
+            http_timeout = max(30, min(300, self.verifier_config.manufactoria_max_execution_time * 10))
+
+            def make_request():
+                response = session.post(
+                    self.verifier_config.manufactoria_api_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=http_timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+
+            result = await asyncio.to_thread(make_request)
+
+            if "all_passed" in result:
+                all_pass_score = 1.0 if result["all_passed"] else 0.0
+                raw_results = result.get("results", [])
+                if isinstance(raw_results, list) and raw_results:
+                    passes = [bool(test_result.get("passed", False)) for test_result in raw_results]
+                    pass_rate_score = sum(passes) / len(passes)
+                else:
+                    pass_rate_score = all_pass_score
+            elif "results" in result and isinstance(result["results"], list) and result["results"]:
+                raw_results = result["results"]
+                if isinstance(raw_results[0], dict):
+                    passes = [bool(test_result.get("passed", False)) for test_result in raw_results]
+                else:
+                    passes = [bool(value) for value in raw_results]
+                pass_rate_score = sum(passes) / len(passes)
+                all_pass_score = 1.0 if pass_rate_score == 1.0 else 0.0
+            else:
+                logger.warning(f"Unexpected Manufactoria API response format: {result}")
+                return VerificationResult(score=0.0)
+
+            if self.verifier_config.manufactoria_scoring_mode == "pass_rate":
+                p = self.verifier_config.pass_rate_all_pass_bonus
+                score = (1.0 - p) * pass_rate_score + p * all_pass_score
+            else:
+                score = all_pass_score
+            metadata = {"pass_rate_score": float(pass_rate_score), "all_pass_score": float(all_pass_score)}
+            if passes:
+                metadata["per_test_passes"] = [float(passed) for passed in passes]
+            return VerificationResult(score=score, metadata=metadata)
+        except Exception as e:
+            logger.warning(f"Error verifying Manufactoria code sample: {e}")
+            return VerificationResult(score=0.0)
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> VerificationResult:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            else:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError as e:
+            if "cannot schedule new futures after interpreter shutdown" in str(e):
+                logger.warning("Skipping Manufactoria verification due to interpreter shutdown")
+                return VerificationResult(score=0.0, reasoning="Verification skipped due to shutdown")
+            try:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+            except Exception as nested_e:
+                logger.warning(f"Error verifying Manufactoria sample during shutdown: {nested_e}")
+                return VerificationResult(score=0.0, reasoning=f"Verification failed: {nested_e}")
+        except Exception as e:
+            logger.warning(f"Error verifying Manufactoria sample: {e}")
+            return VerificationResult(score=0.0, reasoning=f"Verification failed: {e}")
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        return ManufactoriaVerifierConfig
 
 
 class PassthroughVerifier(VerifierFunction):
@@ -1207,10 +1585,13 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
     """
     verifiers: dict[str, VerifierFunction] = {}
     for subclass in VerifierFunction.__subclasses__():
-        if subclass == LMJudgeVerifier:
+        if subclass in {LMJudgeVerifier, LLMJudgeFallbackVerifier}:
             continue
 
-        verifier_config = subclass.get_config_class().from_args(args, streaming_config)
+        try:
+            verifier_config = subclass.get_config_class().from_args(args, streaming_config)
+        except TypeError:
+            continue
         instance = subclass(verifier_config)
         verifiers[instance.name.lower()] = instance
 
@@ -1225,6 +1606,40 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
     for judge_type in JUDGE_PROMPT_MAP:
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
+
+    fallback_verifier_name = (
+        getattr(streaming_config, "llm_judge_fallback_verifier", None) if streaming_config else None
+    )
+
+    if streaming_config and streaming_config.llm_judge_override_verifier:
+        override_verifier = streaming_config.llm_judge_override_verifier.lower()
+        assert override_verifier in verifiers, (
+            f"`llm_judge_override_verifier` must be one of {sorted(verifiers.keys())}, got: {override_verifier}"
+        )
+        if fallback_verifier_name and fallback_verifier_name.lower() == override_verifier:
+            raise ValueError(
+                "`llm_judge_override_verifier` and `llm_judge_fallback_verifier` cannot target the same verifier"
+            )
+        judge_type = _judge_type_for_verifier(override_verifier)
+        verifiers[override_verifier] = LMJudgeVerifier(
+            judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config)
+        )
+
+    if fallback_verifier_name:
+        fallback_verifier_name = fallback_verifier_name.lower()
+        assert fallback_verifier_name in verifiers, (
+            f"`llm_judge_fallback_verifier` must be one of {sorted(verifiers.keys())}, got: {fallback_verifier_name}"
+        )
+        primary_verifier = verifiers[fallback_verifier_name]
+        if isinstance(primary_verifier, LMJudgeVerifier):
+            raise ValueError(
+                f"`llm_judge_fallback_verifier={fallback_verifier_name}` resolved to an LLM judge; "
+                "fallback requires a non-LLM primary verifier"
+            )
+        fallback_judge = LMJudgeVerifier(
+            _judge_type_for_verifier(fallback_verifier_name), LMJudgeVerifierConfig.from_args(args, streaming_config)
+        )
+        verifiers[fallback_verifier_name] = LLMJudgeFallbackVerifier(primary_verifier, fallback_judge)
 
     # if we have remap arg, remap!
     if streaming_config and streaming_config.remap_verifier:
@@ -1275,6 +1690,17 @@ async def apply_verifiable_reward(
     async_tasks = []
     task_metadata = []
 
+    def resolve_reward_function(dataset_name: str) -> VerifierFunction | None:
+        dataset_key = dataset_name.lower()
+        reward_func = reward_fn_mapping.get(dataset_key)
+        if reward_func is not None:
+            return reward_func
+        if dataset_key.startswith("gsm8k"):
+            return reward_fn_mapping.get("gsm8k")
+        if dataset_key.startswith("math"):
+            return reward_fn_mapping.get("math")
+        return None
+
     for i, (tok_prediction, prediction, ground_truth, dataset, query, rollout_state) in enumerate(
         zip(responses, decoded_responses, ground_truths, datasets, queries, rollout_states)
     ):
@@ -1283,7 +1709,7 @@ async def apply_verifiable_reward(
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
 
         for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = reward_fn_mapping.get(ds.lower())
+            reward_func = resolve_reward_function(ds)
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
@@ -1306,6 +1732,11 @@ async def apply_verifiable_reward(
 
     response_rewards = [0] * len(responses)
     response_per_func_rewards = [{} for _ in range(len(responses))]
+    fallback_used_counts: Counter[str] = Counter()
+    fallback_correct_counts: Counter[str] = Counter()
+    manufactoria_test_pass_rows: list[tuple[int, float]] = []
+    manufactoria_pass_rate_scores: list[float] = []
+    manufactoria_all_pass_scores: list[float] = []
 
     for result, metadata in zip(reward_results, task_metadata):
         response_idx = metadata["response_idx"]
@@ -1320,7 +1751,54 @@ async def apply_verifiable_reward(
             response_per_func_rewards[response_idx].get(dataset, 0) + weighted_reward
         )
 
-    return response_rewards, response_per_func_rewards
+        result_metadata = getattr(result, "metadata", {}) or {}
+        if result_metadata.get("llm_judge_fallback_used"):
+            verifier_name = result_metadata.get("llm_judge_fallback_primary_verifier", dataset)
+            fallback_used_counts[verifier_name] += 1
+            fallback_correct_counts[verifier_name] += int(
+                result_metadata.get("llm_judge_correct_when_primary_wrong", 0)
+            )
+
+        per_test_passes = result_metadata.get("per_test_passes")
+        if dataset == "manufactoria" and isinstance(per_test_passes, list):
+            manufactoria_test_pass_rows.extend(
+                (test_offset, float(passed)) for test_offset, passed in enumerate(per_test_passes)
+            )
+        if dataset == "manufactoria":
+            pass_rate_score = result_metadata.get("pass_rate_score")
+            all_pass_score = result_metadata.get("all_pass_score")
+            if isinstance(pass_rate_score, (int, float)):
+                manufactoria_pass_rate_scores.append(float(pass_rate_score))
+            if isinstance(all_pass_score, (int, float)):
+                manufactoria_all_pass_scores.append(float(all_pass_score))
+
+    extra_metrics: dict[str, Any] = {}
+    total_fallback_uses = sum(fallback_used_counts.values())
+    total_fallback_correct = sum(fallback_correct_counts.values())
+    if total_fallback_uses > 0:
+        extra_metrics["objective/llm_judge_fallback_used_count"] = float(total_fallback_uses)
+        extra_metrics["objective/llm_judge_correct_when_primary_wrong_count"] = float(total_fallback_correct)
+        extra_metrics["objective/llm_judge_correct_when_primary_wrong_rate"] = (
+            total_fallback_correct / total_fallback_uses
+        )
+        for verifier_name, used_count in fallback_used_counts.items():
+            extra_metrics[f"objective/{verifier_name}_llm_judge_fallback_used_count"] = float(used_count)
+            correct_count = fallback_correct_counts[verifier_name]
+            extra_metrics[f"objective/{verifier_name}_llm_judge_correct_when_primary_wrong_count"] = float(
+                correct_count
+            )
+            extra_metrics[f"objective/{verifier_name}_llm_judge_correct_when_primary_wrong_rate"] = (
+                correct_count / used_count
+            )
+
+    if manufactoria_test_pass_rows:
+        extra_metrics["objective/manufactoria_test_pass_rows"] = manufactoria_test_pass_rows
+    if manufactoria_pass_rate_scores:
+        extra_metrics["objective/pass_rate"] = float(np.mean(manufactoria_pass_rate_scores))
+    if manufactoria_all_pass_scores:
+        extra_metrics["objective/all_pass"] = float(np.mean(manufactoria_all_pass_scores))
+
+    return response_rewards, response_per_func_rewards, extra_metrics
 
 
 @dataclasses.dataclass
@@ -1331,6 +1809,7 @@ class RewardConfig:
     r1_style_format_reward: float = 1.0
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
+    spurious_reward_mode: bool = False
     non_stop_penalty: bool = False
     non_stop_penalty_value: float = -10.0
     only_reward_good_outputs: bool = False
@@ -1376,7 +1855,7 @@ class RewardConfig:
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
             if self.apply_verifiable_reward:
-                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                verifiable_reward_result = await apply_verifiable_reward(
                     self.verifier_functions,
                     responses,
                     decoded_responses,
@@ -1386,6 +1865,11 @@ class RewardConfig:
                     queries=queries,
                     rollout_states=rollout_states,
                 )
+                if len(verifiable_reward_result) == 2:
+                    verifiable_rewards, per_func_rewards = verifiable_reward_result
+                    verifier_metrics = {}
+                else:
+                    verifiable_rewards, per_func_rewards, verifier_metrics = verifiable_reward_result
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
 
@@ -1419,12 +1903,21 @@ class RewardConfig:
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                metrics.update(verifier_metrics)
 
             if self.non_stop_penalty:
                 assert len(finish_reasons) == len(scores)
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = self.non_stop_penalty_value
+
+            if self.spurious_reward_mode:
+                random_binary_scores = np.random.randint(0, 2, size=len(decoded_responses)).astype(float)
+                spurious_scores = random_binary_scores * float(self.verification_reward)
+                scores = spurious_scores.tolist()
+
+                metrics["objective/spurious_reward"] = spurious_scores.mean()
+                metrics["objective/spurious_correct_rate"] = (spurious_scores > 0.0).mean()
 
             return scores, metrics
 

@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import hashlib
 import os
+import pathlib
 import random
 import re
 import secrets
@@ -39,8 +40,34 @@ CACHE_EXCLUDED_ARGS = {
     "--with_tracking": False,
     "--checkpoint_state_freq": True,
     "--checkpoint_state_dir": True,
+    "--resume_checkpoint_dir": True,
+    "--resume_checkpoint_tag": True,
     "--gs_checkpoint_state_dir": True,
 }
+
+WANDB_TAG_MAX_LENGTH = 64
+WANDB_LENGTH_CHECKED_ARGS = ("--exp_name",)
+
+
+def validate_wandb_tag_lengths(commands: list[list[str]]) -> None:
+    """Fail fast if any wandb-relevant identifier exceeds the tag length limit."""
+    for command_idx, command in enumerate(commands):
+        for idx, item in enumerate(command):
+            if item in WANDB_LENGTH_CHECKED_ARGS and idx + 1 < len(command):
+                value = command[idx + 1]
+                if len(value) > WANDB_TAG_MAX_LENGTH:
+                    raise ValueError(
+                        f"{item} value exceeds wandb's {WANDB_TAG_MAX_LENGTH}-character tag limit "
+                        f"(command {command_idx}, length={len(value)}): {value}"
+                    )
+            elif item.startswith("WANDB_TAGS="):
+                tags = [tag for tag in item.split("=", 1)[1].split(",") if tag]
+                for tag in tags:
+                    if len(tag) > WANDB_TAG_MAX_LENGTH:
+                        raise ValueError(
+                            f"WANDB_TAGS entry exceeds wandb's {WANDB_TAG_MAX_LENGTH}-character tag limit "
+                            f"(command {command_idx}, length={len(tag)}): {tag}"
+                        )
 
 
 # ----------------------------------------------------------------------
@@ -170,6 +197,13 @@ def get_args():
         help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix",
     )
     parser.add_argument(
+        "--artifact_ttl",
+        type=str,
+        default=None,
+        help="If set, append `/tmp-<ttl>` as the final dir of auto-generated "
+        "--output_dir and --checkpoint_state_dir (e.g. '1d' for 1-day retention).",
+    )
+    parser.add_argument(
         "--env",
         type=parse_env_var,
         action="append",
@@ -199,6 +233,7 @@ def get_args():
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
+    validate_wandb_tag_lengths(commands)
 
     def _commands_include_resumable_target(cmds: list[list[str]]) -> bool:
         for cmd in cmds:
@@ -471,7 +506,9 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                     raise Exception(f"Error code {return_code} when creating cached dataset")
                 console.log("✅✅✅ Finished running the caching command")
 
-        command = maybe_override_checkpoint_dir(command, args.auto_checkpoint_state_dir, whoami, is_external_user)
+        command = maybe_override_checkpoint_dir(
+            command, args.auto_checkpoint_state_dir, whoami, is_external_user, args.artifact_ttl
+        )
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -484,12 +521,14 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         need_to_override_output_dir = False
                         break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
-                    new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
+                    new_output_dir_path = pathlib.Path(args.auto_output_dir_path) / whoami
+                    if args.artifact_ttl:
+                        new_output_dir_path = new_output_dir_path / f"tmp-{args.artifact_ttl}"
                     console.log(
-                        f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`"
+                        f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir_path}/`"
                     )
                     command.append("--output_dir")
-                    command.append(new_output_dir)
+                    command.append(f"{new_output_dir_path}/")
             else:
                 no_eval_commands = [
                     ["--try_launch_beaker_eval_jobs", "False"],
@@ -629,7 +668,11 @@ def maybe_download_tokenizer_from_gs_bucket(
 
 
 def maybe_override_checkpoint_dir(
-    command: list[str], auto_checkpoint_state_dir: str, whoami: str, is_external_user: bool
+    command: list[str],
+    auto_checkpoint_state_dir: str,
+    whoami: str,
+    is_external_user: bool,
+    artifact_ttl: str | None = None,
 ):
     """if auto_checkpoint_state_dir is set and task is open_instruct resumable, set checkpoint_state_dir to the default parent_folder/whoami/time_randomint
 
@@ -655,11 +698,15 @@ def maybe_override_checkpoint_dir(
     ):
         return command
 
-    new_checkpoint_state_dir = f"{auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-    console.log(
-        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
+    new_checkpoint_state_path = (
+        pathlib.Path(auto_checkpoint_state_dir) / whoami / f"{int(time.time())}_{random.randint(0, 1000000)}"
     )
-    command.extend(["--checkpoint_state_dir", new_checkpoint_state_dir])
+    if artifact_ttl:
+        new_checkpoint_state_path = new_checkpoint_state_path / f"tmp-{artifact_ttl}"
+    console.log(
+        f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_path}`"
+    )
+    command.extend(["--checkpoint_state_dir", str(new_checkpoint_state_path)])
 
     return command
 

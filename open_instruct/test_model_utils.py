@@ -18,6 +18,7 @@ class TestBatchSlicing(unittest.TestCase):
             decoded_responses=["r1", "r2", "r3"],
             indices=[0, 1, 2],
             scores=[0.1, 0.2, 0.3],
+            model_steps=[0, 0, 0],
         )
 
         sliced = batch[[0, 2]]
@@ -35,6 +36,7 @@ class TestBatchSlicing(unittest.TestCase):
             decoded_responses=None,
             indices=None,
             scores=None,
+            model_steps=[0, 0, 0],
         )
 
         sliced = batch[[0, 2]]

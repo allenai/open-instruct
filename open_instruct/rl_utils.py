@@ -92,7 +92,7 @@ def _save_rollouts(
     batch: model_utils.Batch,
     result: data_types.GenerationResult,
     advantages: np.ndarray,
-    num_samples_per_prompt: int,
+    num_samples_per_prompt: int | list[int],
     shard_idx: int,
 ) -> None:
     shard_filename = f"{run_name}_rollouts_{shard_idx:06d}.jsonl"
@@ -101,6 +101,18 @@ def _save_rollouts(
 
     assert batch.scores is not None, "batch.scores must not be None when saving rollouts"
 
+    if isinstance(num_samples_per_prompt, int):
+        prompt_indices = [i // num_samples_per_prompt for i in range(len(batch.queries))]
+    else:
+        prompt_indices = []
+        for prompt_idx, sample_count in enumerate(num_samples_per_prompt):
+            prompt_indices.extend([prompt_idx] * sample_count)
+        if len(prompt_indices) != len(batch.queries):
+            raise ValueError(
+                "Mismatch between num_samples_per_prompt and batch size when saving rollouts: "
+                f"{len(prompt_indices)} prompt assignments for {len(batch.queries)} samples."
+            )
+
     records = []
     for i in range(len(batch.queries)):
         records.append(
@@ -108,7 +120,7 @@ def _save_rollouts(
                 RolloutRecord(
                     step=step,
                     sample_idx=i,
-                    prompt_idx=i // num_samples_per_prompt,
+                    prompt_idx=prompt_indices[i],
                     prompt_tokens=batch.queries[i],
                     response_tokens=result.responses[i],
                     reward=float(batch.scores[i]),
@@ -135,7 +147,7 @@ def save_rollouts_to_disk(
     batch: model_utils.Batch,
     result: data_types.GenerationResult,
     advantages: np.ndarray,
-    num_samples_per_prompt: int,
+    num_samples_per_prompt: int | list[int],
     total_samples_written: int,
 ) -> None:
     """Asynchronously save rollout records to disk.
@@ -150,7 +162,7 @@ def save_rollouts_to_disk(
         batch: Batch containing queries, scores, ground_truths, datasets.
         result: Generation result with responses, finish_reasons, request_info.
         advantages: Calculated advantage values per sample.
-        num_samples_per_prompt: Number of samples generated per prompt.
+        num_samples_per_prompt: Number of samples generated per prompt, or per-prompt sample counts.
         total_samples_written: Total samples written so far, used for sharding.
     """
     shard_idx = total_samples_written // ROLLOUT_SHARD_SIZE

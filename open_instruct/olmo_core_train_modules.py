@@ -450,11 +450,12 @@ class GRPOTrainModule(TransformerTrainModule):
                     old_logprob, vllm_logprobs, response_mask, self.grpo_config.truncated_importance_sampling_ratio_cap
                 )
 
-                pg_losses, pg_losses2, pg_loss, kl = grpo_utils.compute_grpo_loss(
+                pg_loss, clip_mask, kl = grpo_utils.compute_grpo_loss(
                     new_logprobs=new_logprobs,
                     ratio=ratio,
                     advantages=advantages[:, 1:],
                     ref_logprobs=ref_logprobs_BT[sample_idx] if ref_logprobs_BT is not None else None,
+                    response_mask=response_mask,
                     config=self.grpo_config,
                     tis_weights=tis_clamped,
                 )
@@ -469,9 +470,8 @@ class GRPOTrainModule(TransformerTrainModule):
                 grpo_utils.populate_sample_loss_stats(
                     loss_stats_B,
                     sample_idx,
-                    pg_losses,
-                    pg_losses2,
                     pg_loss,
+                    clip_mask,
                     ratio,
                     loss,
                     response_mask,
@@ -516,3 +516,8 @@ class GRPOTrainModule(TransformerTrainModule):
                 )
                 self.record_metric("lr", float(lr), reduce_type=None)
             self.record_metric("_token_count", global_tokens, reduce_type=None)
+
+            data_prep_metrics = batch.get("metrics") or {}
+            for metric_key, metric_value in data_prep_metrics.items():
+                if isinstance(metric_value, (int, float)):
+                    self.record_metric(metric_key, float(metric_value), reduce_type=None)

@@ -14,6 +14,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --pure_docker_mode \
     --no_auto_dataset_cache \
+    --artifact_ttl 1d \
     --timeout 60m \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \

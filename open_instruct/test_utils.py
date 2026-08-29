@@ -29,7 +29,8 @@ import torch
 from dateutil import parser
 from parameterized import parameterized
 
-from open_instruct import data_types, launch_utils, utils
+from open_instruct import data_types, grpo_utils, launch_utils, utils
+from open_instruct.finetune import FlatArguments
 
 
 def _load_mbu_test_cases():
@@ -290,14 +291,37 @@ class TestBeakerDescription(unittest.TestCase):
         self.assertEqual(wandb_count, 1, f"wandb URL should appear once, but appears {wandb_count} times in: {desc}")
         self.assertIn("Single GPU on Beaker with tool use test script.", desc)
 
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_supports_custom_progress_label(
+        self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get
+    ):
+        """Test that progress descriptions can use non-training labels."""
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        _, _, description_history = setup_beaker_mocks(mock_beaker_from_env, mock_is_beaker_job, "Eval-only job.")
+
+        utils.maybe_update_beaker_description(
+            current_step=3,
+            total_steps=8,
+            start_time=time.time(),
+            wandb_url="https://wandb.ai/team/project/runs/eval123",
+            progress_label="eval",
+            original_descriptions={},
+        )
+
+        self.assertEqual(len(description_history), 1)
+        self.assertIn("% complete (eval 3/8)", description_history[0])
+
 
 class TestSlackMessage(unittest.TestCase):
     @responses.activate
+    @mock.patch.dict(os.environ, {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/test"}, clear=True)
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
-    @mock.patch("os.environ.get")
-    def test_send_slack_message_with_beaker_url(self, mock_environ_get, mock_get_beaker_url):
-        webhook_url = "https://hooks.slack.com/services/test"
-        mock_environ_get.return_value = webhook_url
+    def test_send_slack_message_with_beaker_url(self, mock_get_beaker_url):
+        webhook_url = os.environ["SLACK_WEBHOOK_URL"]
         mock_get_beaker_url.return_value = "https://beaker.org/ex/test-456"
 
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
@@ -343,10 +367,9 @@ class TestWarnIfLowDiskSpace(unittest.TestCase):
     @responses.activate
     @mock.patch("shutil.disk_usage")
     @mock.patch("open_instruct.utils.get_beaker_experiment_url")
-    @mock.patch("os.environ.get")
-    def test_slack_alert_sent_when_enabled(self, mock_environ_get, mock_get_beaker_url, mock_disk_usage):
-        webhook_url = "https://hooks.slack.com/services/test"
-        mock_environ_get.return_value = webhook_url
+    @mock.patch.dict(os.environ, {"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/test"}, clear=True)
+    def test_slack_alert_sent_when_enabled(self, mock_get_beaker_url, mock_disk_usage):
+        webhook_url = os.environ["SLACK_WEBHOOK_URL"]
         mock_get_beaker_url.return_value = None
         mock_disk_usage.return_value = mock.Mock(total=100 * 1024**3, used=90 * 1024**3, free=10 * 1024**3)
         responses.add(responses.POST, webhook_url, json={"ok": True}, status=200)
@@ -492,6 +515,35 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(specs["memory_bandwidth"], expected_specs["memory_bandwidth"])
 
 
+class TestFlatArguments(unittest.TestCase):
+    def test_grpo_warn_if_low_disk_space_defaults_to_false(self) -> None:
+        parser = utils.ArgumentParserPlus(grpo_utils.GRPOExperimentConfig)
+        (args,) = parser.parse_args_into_dataclasses([])
+        self.assertFalse(args.warn_if_low_disk_space)
+
+    def test_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(
+            ["--additional_model_arguments", '{"int": 1, "bool": true, "float": 0.0, "float2": 5e-7}']
+        )
+        self.assertIsInstance(args.additional_model_arguments, dict)
+        self.assertIsInstance(args.additional_model_arguments["int"], int)
+        self.assertIsInstance(args.additional_model_arguments["bool"], bool)
+        self.assertIsInstance(args.additional_model_arguments["float"], float)
+        self.assertIsInstance(args.additional_model_arguments["float2"], float)
+
+    def test_no_additional_model_args(self) -> None:
+        parser = utils.ArgumentParserPlus(FlatArguments)
+        (args,) = parser.parse_args_into_dataclasses(["--exp_name", "test"])
+        self.assertIsInstance(args.additional_model_arguments, dict)
+        self.assertFalse(args.additional_model_arguments)
+
+    def test_grpo_warn_if_low_disk_space_can_be_disabled(self) -> None:
+        parser = utils.ArgumentParserPlus(grpo_utils.GRPOExperimentConfig)
+        (args,) = parser.parse_args_into_dataclasses(["--warn_if_low_disk_space", "False"])
+        self.assertFalse(args.warn_if_low_disk_space)
+
+
 class TestModelDims(unittest.TestCase):
     def test_qwen25_7b_flops_calculation(self):
         sequence_length = 34048
@@ -588,6 +640,28 @@ class TestModelDims(unittest.TestCase):
             f"{name}: Actor MBU {metrics['actor_mbu']:.2f}% exceeded 100% "
             f"(num_engines={num_engines}, num_gpus_per_engine={num_gpus_per_engine})",
         )
+        self.assertLessEqual(metrics["learner_mfu"], 100)
+
+    def test_variable_prompt_sample_counts_utilization(self):
+        model_dims = MODEL_DIMS["Qwen/Qwen2.5-7B"]
+        prompt_lengths = [256, 256]
+        response_lengths = [128, 128, 64, 64, 64]
+        prompt_sample_counts = [2, 3]
+
+        metrics = utils.calculate_utilization_metrics(
+            model_dims=model_dims,
+            prompt_lengths=prompt_lengths,
+            response_lengths=response_lengths,
+            total_generation_time=8.0,
+            samples_per_prompt=prompt_sample_counts,
+            num_engines=1,
+            num_gpus_per_engine=8,
+            training_time=4.0,
+            num_training_gpus=4,
+        )
+
+        self.assertLessEqual(metrics["actor_mfu"], 100)
+        self.assertLessEqual(metrics["actor_mbu"], 100)
         self.assertLessEqual(metrics["learner_mfu"], 100)
 
 

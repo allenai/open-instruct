@@ -1,0 +1,52 @@
+#!/bin/bash
+set -euo pipefail
+
+EXP_NAME="${EXP_NAME:-qwen25_05b_base_create_pass_dataset}"
+BEAKER_IMAGE="${BEAKER_IMAGE:-your-beaker-user/open_instruct}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-0.5B}"
+CHAT_TEMPLATE="${CHAT_TEMPLATE:-qwen_instruct_user_boxed_math}"
+SOURCE_DATASET="${SOURCE_DATASET:-mnoukhov/gsm8k-platinum-openinstruct}"
+SOURCE_SPLIT="${SOURCE_SPLIT:-test}"
+NUM_SAMPLES="${NUM_SAMPLES:-1024}"
+MAX_TOKENS="${MAX_TOKENS:-4096}"
+TOP_P="${TOP_P:-1.0}"
+NUM_GPUS="${NUM_GPUS:-8}"
+TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+PASS_DATASET_REPO="${PASS_DATASET_REPO:-mnoukhov/gsm8k-platinum-qwen2.5-0.5b-base-1024samples}"
+BUCKET_DATASET_REPO="${BUCKET_DATASET_REPO:-mnoukhov/gsm8k-platinum-qwen2.5-0.5b-base-1024samples-buckets}"
+NUM_PER_BUCKET="${NUM_PER_BUCKET:-8}"
+PASS_K="${PASS_K:-1}"
+
+uv run mason.py \
+    --task_name ${EXP_NAME} \
+    --cluster your-beaker-cluster \
+    --workspace your-beaker-workspace \
+    --priority high \
+    --pure_docker_mode \
+    --image ${BEAKER_IMAGE} \
+    --preemptible \
+    --num_nodes 1 \
+    --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    --gpus ${NUM_GPUS} \
+    --budget your-beaker-budget \
+    -- \
+uv run scripts/data/rlvr/gsm8k_pass_at_32_dataset.py \
+  --dataset ${SOURCE_DATASET} \
+  --split ${SOURCE_SPLIT} \
+  --model ${MODEL_NAME} \
+  --chat-template ${CHAT_TEMPLATE} \
+  --num-samples ${NUM_SAMPLES} \
+  --max-tokens ${MAX_TOKENS} \
+  --top-p ${TOP_P} \
+  --num_engines ${NUM_GPUS} \
+  --tensor-parallel-size ${TENSOR_PARALLEL_SIZE} \
+  --push-to-hub ${PASS_DATASET_REPO} \
+  --save-local-dir ./rollouts/ \
+\&\& uv run scripts/data/rlvr/create_gsm8k_pass_rate_buckets.py \
+  --input-dataset ${PASS_DATASET_REPO} \
+  --split test \
+  --num-per-bucket ${NUM_PER_BUCKET} \
+  --k ${PASS_K} \
+  --buckets 0% 5% 10% 25% \
+  --output-dataset ${BUCKET_DATASET_REPO} \
+  --push-layout all

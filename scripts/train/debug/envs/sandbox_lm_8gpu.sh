@@ -30,6 +30,7 @@ uv run python mason.py \
        --mount_docker_socket \
        --gpus 8 \
        --no_auto_dataset_cache \
+       --artifact_ttl 1d \
        -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list allenai/Dolci-RLZero-Math-7B 1.0 \
     --dataset_mixer_list_splits train \

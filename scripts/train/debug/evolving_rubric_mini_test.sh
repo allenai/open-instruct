@@ -42,7 +42,6 @@ exp_name="evolving-rubric-mini-test"
 
 # ---- Environment setup ----
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-export VLLM_ATTENTION_BACKEND=FLASHINFER
 export VLLM_USE_V1=0
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export RUBRIC_JUDGE_MODEL=gpt-4.1-mini
