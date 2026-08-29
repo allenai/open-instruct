@@ -92,7 +92,13 @@ LOSS_TYPE="${LOSS_TYPE:-dpo_norm}"
 GRAD_ACCUM="${GRAD_ACCUM:-4}"
 ACT_MEM_BUDGET="${ACT_MEM_BUDGET:-1}"
 ACT_CKPT_MODE="${ACT_CKPT_MODE:-budget}"
+# The smoke defaults to a subset because the reference log-probability pass is
+# forward-only over the WHOLE dataset before training starts. On the full 149,986-pair
+# mix that pass, not the 30 training steps, is what a smoke would actually pay for.
 MAX_SAMPLES="${MAX_SAMPLES:-}"
+if [[ "${2:-smoke}" == "smoke" && -z "$MAX_SAMPLES" ]]; then
+    MAX_SAMPLES=2000
+fi
 
 CLUSTER="${CLUSTER:-ai2/holmes}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"

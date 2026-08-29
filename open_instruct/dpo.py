@@ -190,6 +190,15 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
 
     dataset = olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
+    # Applied after the shuffle so a subset is a random sample rather than the head of
+    # the mix, and before the reference cache is built: that pass is forward-only over
+    # the WHOLE dataset, so on a 150k-pair mix it dominates the cost of any short run.
+    # compute_reference_cache_hash already includes max_train_samples, so honoring it
+    # here is what makes the flag and the cache key agree; dpo_tune_cache.py has always
+    # applied it.
+    if args.max_train_samples is not None and args.max_train_samples < len(dataset):
+        logger.info(f"Limiting training samples to {args.max_train_samples} from {len(dataset)}.")
+        dataset = dataset.select(range(args.max_train_samples))
     dataset.set_format(type="pt")
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
