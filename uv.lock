@@ -973,7 +973,7 @@ wheels = [
 
 [[package]]
 name = "datasets"
-version = "4.5.0"
+version = "4.8.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
@@ -991,9 +991,9 @@ dependencies = [
     { name = "tqdm", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "xxhash", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/bf/bb927bde63d649296c83e883171ae77074717c1b80fe2868b328bd0dbcbb/datasets-4.5.0.tar.gz", hash = "sha256:00c698ce1c2452e646cc5fad47fef39d3fe78dd650a8a6eb205bb45eb63cd500", size = 588384, upload-time = "2026-01-14T18:27:54.297Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/34/14cd8e76f907f7d4dca2334cfeec9f81d30fd15c25a015f99aaea694eaed/datasets-4.8.5.tar.gz", hash = "sha256:0f0c1c3d56ffff2c93b2f4c63c95bac94f3d7e8621aea2a2a576275233bba772", size = 605649, upload-time = "2026-04-27T15:43:57.384Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/d5/0d563ea3c205eee226dc8053cf7682a8ac588db8acecd0eda2b587987a0b/datasets-4.5.0-py3-none-any.whl", hash = "sha256:b5d7e08096ffa407dd69e58b1c0271c9b2506140839b8d99af07375ad31b6726", size = 515196, upload-time = "2026-01-14T18:27:52.419Z" },
+    { url = "https://files.pythonhosted.org/packages/65/99/00f3196036501b53032c4b1ab8337a0b978dee832ed276dae3815df4e8b5/datasets-4.8.5-py3-none-any.whl", hash = "sha256:5079900781719c0e063a8efdd2cd95a31ad0c63209178669cd23cf1b926149ff", size = 528973, upload-time = "2026-04-27T15:43:53.702Z" },
 ]
 
 [[package]]
@@ -3434,7 +3434,7 @@ requires-dist = [
     { name = "authlib", marker = "extra == 'dr-tulu'" },
     { name = "backoff", specifier = ">=2.2.1" },
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
-    { name = "datasets", specifier = ">=4.0.0" },
+    { name = "datasets", specifier = ">=4.8.4,<5" },
     { name = "debugpy", specifier = ">=1.8.13" },
     { name = "deepspeed", specifier = ">=0.18.3" },
     { name = "docker", specifier = ">=7.0.0" },
