@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add `never_give_up` (NGU) GRPO retry mechanism: with probability `--never_give_up`, an unsolved zero-std prompt group is requeued under a retry-suffixed prompt id instead of being filtered; its completions are buffered across accumulation calls (`--maintain_pending_ngu_age`, `--maintain_pending_ngu_completions`) until a later attempt has learning signal, at which point the attempts are merged and the group's advantage baseline is taken over the whole chain and re-anchored on the positive samples (https://github.com/allenai/open-instruct/pull/PRNUM).
 - Support SFT of `allenai/Olmo-Hybrid-7B` on the olmo-core path: an `olmo3_hybrid_7B` config and HF <-> olmo-core state conversion for `model_type: olmo_hybrid`, neither of which olmo-core provides (https://github.com/allenai/open-instruct/pull/1822).
 - Expose `--save_async` and `--dist_timeout_hours` for the olmo-core SFT path; both were hardcoded, and the 24h default timeout meant a mid-training stall held its GPUs invisibly (https://github.com/allenai/open-instruct/pull/1821).
 - Add tool-schema support to SFT tokenization: the `tools` column is parsed (JSON strings accepted) and passed to `apply_chat_template`, assistant labels are derived from offset mappings, and the tools column is consumed rather than persisted (https://github.com/allenai/open-instruct/pull/1746).
