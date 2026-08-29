@@ -12,6 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# vllm appears in this module only in three type annotations, but importing it at
+# runtime costs far more than that. It is ABI-locked to a specific torch: the KDA MoE
+# image pairs torch 2.11 with vllm 0.19.1, where `import vllm` dies with "undefined
+# symbol: _ZN3c1013MessageLoggerC1EPKciib". That made every entrypoint importing this
+# module -- dpo.py in particular -- unrunnable on that image, even though DPO uses only
+# HFDataLoader and never touches vllm. It is also why mason.py needs
+# --no_auto_dataset_cache on macOS, where vllm cannot be installed at all.
+# The annotations are quoted rather than relying on `from __future__ import
+# annotations`, which would change annotation semantics for every dataclass here.
+
 import logging
 import os
 import threading
@@ -21,17 +31,19 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from queue import Empty
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import ray
 import torch
-import vllm
 from datasets import Dataset
 from olmo_core.data import data_loader
 from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
+
+if TYPE_CHECKING:
+    import vllm
 
 from open_instruct import data_types, padding_free_collator, utils
 from open_instruct.data_types import EnvConfig, EnvConfigEntry
@@ -758,7 +770,7 @@ class Group:
 
 def process_group(
     result: data_types.GenerationResult,
-    generation_config: vllm.SamplingParams,
+    generation_config: "vllm.SamplingParams",
     tokenizer: PreTrainedTokenizer,
     dataset: Dataset,
     max_possible_score: float,
@@ -832,7 +844,7 @@ def process_group(
 
 def make_batch_from_groups(
     groups: list[Group],
-    generation_config: vllm.SamplingParams,
+    generation_config: "vllm.SamplingParams",
     training_step: int,
     actor_manager=None,
     filtered_prompts: int = 0,
@@ -1005,7 +1017,7 @@ def result_is_stale(model_step: int | None, training_step: int | None, max_resul
 
 def accumulate_inference_batches(
     inference_results_Q: ray_queue.Queue,
-    generation_config: vllm.SamplingParams,
+    generation_config: "vllm.SamplingParams",
     num_prompts: int,
     model_dims: utils.ModelDims,
     tokenizer: PreTrainedTokenizer,
