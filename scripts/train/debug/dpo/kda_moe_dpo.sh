@@ -27,10 +27,14 @@
 #
 # Why the settings are what they are:
 #
-# * The reference cache is keyed by compute_reference_cache_hash over the model,
-#   data and loss settings, so cache_logprobs and the run that consumes it must
-#   agree on all of them. Changing SEQ or the mix silently invalidates it and the
-#   training job rebuilds it on 8 GPUs.
+# * The reference cache is keyed by compute_reference_cache_hash, which covers the
+#   model, the dataset config (so SEQ and the mix), loss_type, packing,
+#   concatenated_forward and MAX_SAMPLES. It does NOT cover the learning rate or
+#   beta, so one cache serves an entire LR sweep -- but only while MAX_SAMPLES is
+#   held fixed, which is the easy way to lose it, since sweeps run on subsets. A
+#   miss is silent: the training job just rebuilds the cache on 8 GPUs.
+#   It lives on weka (REFERENCE_LOGPROBS_CACHE_PATH), so it does survive between
+#   Beaker jobs.
 #
 # * SEQ defaults to 16384, Olmo 3's think DPO length, not the SFT run's 32768.
 #   DPO packs one preference pair per sequence, so the length is set by the data,
