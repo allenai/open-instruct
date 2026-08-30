@@ -51,6 +51,22 @@
 #   SEQ=8192 first (halves both the activations and the logits), then
 #   ACT_CKPT_MODE=selected_modules.
 #
+# * SEQ 16384 IS SHORTER THAN THE BASE'S NATIVE 65536, AND THAT IS A MEASURED RISK.
+#   SFT on this family at seq 32768 destroyed length extrapolation: RULER at 65536 fell
+#   to 0.0883 against the base's 0.3751, while improving ~+28pp at every length inside
+#   the training window (#1854 / #1859). DPO at 16384 is shorter still. Nothing here
+#   fixes that, and a short-context eval battery cannot see it -- so run RULER at the
+#   native length on the DPO output, not just the in-window tasks, before calling any
+#   DPO delta a win.
+#
+# * TERMINATION IS A FIRST-CLASS METRIC ON THIS FAMILY, NOT A FOOTNOTE. ~41% of
+#   open-ended prompts run to the token cap after SFT (the base is 97%). DPO changes
+#   response-length behaviour by construction, so measure the non-termination rate and
+#   mean response length on the DPO output. Two practical consequences: an uncapped eval
+#   task blows up ~15x in GPU-hours on this family, so check max_tokens on every task
+#   before launching; and concision is a stated Olmo 3.5 goal, so a length regression is
+#   a real result rather than noise.
+#
 # * PACKING is off. The DPO train module supports it only with a flash backend
 #   for intra-document masking, and 16 of the 20 blocks here are KDA linear
 #   attention rather than flash. Turning it on without checking whether KDA
@@ -92,7 +108,18 @@ LOSS_TYPE="${LOSS_TYPE:-dpo_norm}"
 GRAD_ACCUM="${GRAD_ACCUM:-4}"
 ACT_MEM_BUDGET="${ACT_MEM_BUDGET:-1}"
 ACT_CKPT_MODE="${ACT_CKPT_MODE:-budget}"
+# 1, not dpo.py's default 4. The reference pass at 4x puts 8 sequences (131k tokens) through
+# fla's chunked KDA kernels in a single call; two separate B300 nodes took unrecoverable Xid
+# 31/43 faults ~90s in, at batch 0 of 63, and were cordoned. SFT ran for hours on the same
+# image with 1 sequence per call. Raise this only with evidence that the kernels tolerate it.
+REF_CACHE_MULT="${REF_CACHE_MULT:-1}"
+# The smoke defaults to a subset because the reference log-probability pass is
+# forward-only over the WHOLE dataset before training starts. On the full 149,986-pair
+# mix that pass, not the 30 training steps, is what a smoke would actually pay for.
 MAX_SAMPLES="${MAX_SAMPLES:-}"
+if [[ "${2:-smoke}" == "smoke" && -z "$MAX_SAMPLES" ]]; then
+    MAX_SAMPLES=2000
+fi
 
 CLUSTER="${CLUSTER:-ai2/holmes}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
@@ -129,6 +156,7 @@ common_args=(
     --attn_implementation flash_2
     --activation_checkpointing_mode "$ACT_CKPT_MODE"
     --activation_memory_budget "$ACT_MEM_BUDGET"
+    --reference_cache_batch_multiplier "$REF_CACHE_MULT"
     --output_dir "$OUTPUT_DIR"
     --logging_steps 1
     --seed 123
@@ -146,6 +174,7 @@ case "$MODE" in
             --cluster ai2/saturn ai2/neptune ai2/ceres ai2/jupiter \
             --workspace "$WORKSPACE" --priority "$PRIORITY" \
             --image "$BEAKER_IMAGE" --description "$DESC" --pure_docker_mode \
+            --timeout "${TOKENIZE_TIMEOUT:-4h}" \
             --num_nodes 1 --gpus 0 --non_resumable --no_auto_dataset_cache \
             -- uv run python open_instruct/dpo.py "${common_args[@]}" --cache_dataset_only
         ;;
