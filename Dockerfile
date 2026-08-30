@@ -46,12 +46,17 @@ RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-ho
     apt-get autoremove -y && \
     rm doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb
 
-# Install Google Cloud CLI
+# Install Google Cloud CLI.
+# The package is google-cloud-cli, NOT google-cloud-sdk: Google renamed it and has now
+# dropped the google-cloud-sdk transitional package from the repo entirely, so the old
+# name fails with "Package 'google-cloud-sdk' has no installation candidate". This only
+# surfaces on a cold build -- a cached layer keeps working, which is why it can break
+# without any change to this file.
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
         | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
     && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
         | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-sdk \
+    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-cli \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 # Taken from https://beaker.org/api/v3/release (add | jq -r '.version' if you want it programmatically).
