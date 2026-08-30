@@ -1,9 +1,11 @@
-"""Unit tests for cache-validation and checkpoint-detection helpers."""
+"""Unit tests for OLMo-core SFT helpers."""
 
 import os
 import tempfile
 import unittest
 
+import torch
+from olmo_core import data as oc_data
 from parameterized import parameterized
 
 from open_instruct import olmo_core_finetune, olmo_core_utils
@@ -92,6 +94,24 @@ class TestCheckpointerDefaults(unittest.TestCase):
             with self.subTest(interval=interval):
                 callback = olmo_core_utils.build_checkpointer_callback(345, interval)
                 self.assertIsNone(callback.ephemeral_save_interval)
+
+
+class DataCollatorVocabularyTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tokenizer_config = oc_data.TokenizerConfig(vocab_size=248064, eos_token_id=248069, pad_token_id=248077)
+        self.collator = olmo_core_finetune._build_data_collator(self.tokenizer_config, model_vocab_size=248320)
+
+    def test_accepts_added_tokens_within_model_vocabulary(self) -> None:
+        self.assertEqual(self.tokenizer_config.padded_vocab_size(), 248064)
+        self.assertEqual(self.collator.vocab_size, 248320)
+
+        batch = self.collator([torch.tensor([248068, 248069]), torch.tensor([1])])
+
+        torch.testing.assert_close(batch["input_ids"], torch.tensor([[248068, 248069], [1, 248077]]))
+
+    def test_rejects_token_at_model_vocabulary_boundary(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"248320.*\[0, 248320\)"):
+            self.collator([torch.tensor([248320])])
 
 
 if __name__ == "__main__":
