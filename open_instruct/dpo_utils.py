@@ -110,6 +110,14 @@ class DPOConfig:
     """Weight for load balancing loss if applicable."""
     concatenated_forward: bool = True
     """Whether to concatenate chosen and rejected for DPO training."""
+    reference_cache_batch_multiplier: int = 4
+    """Batch-size multiplier for the reference log-probability pass, relative to the training batch.
+
+    The pass is forward-only, so a larger batch costs no activation memory and packs more
+    efficiently -- but that argument is about memory, not about what the model's kernels can
+    take in one call. Set 1 to make the reference pass use the same per-call shape training
+    uses, which is what linear-attention models (KDA) appear to need at long sequence.
+    """
     packing: bool = False
     """Whether to use packing/padding-free collation."""
 

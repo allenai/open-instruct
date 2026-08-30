@@ -108,6 +108,11 @@ LOSS_TYPE="${LOSS_TYPE:-dpo_norm}"
 GRAD_ACCUM="${GRAD_ACCUM:-4}"
 ACT_MEM_BUDGET="${ACT_MEM_BUDGET:-1}"
 ACT_CKPT_MODE="${ACT_CKPT_MODE:-budget}"
+# 1, not dpo.py's default 4. The reference pass at 4x puts 8 sequences (131k tokens) through
+# fla's chunked KDA kernels in a single call; two separate B300 nodes took unrecoverable Xid
+# 31/43 faults ~90s in, at batch 0 of 63, and were cordoned. SFT ran for hours on the same
+# image with 1 sequence per call. Raise this only with evidence that the kernels tolerate it.
+REF_CACHE_MULT="${REF_CACHE_MULT:-1}"
 # The smoke defaults to a subset because the reference log-probability pass is
 # forward-only over the WHOLE dataset before training starts. On the full 149,986-pair
 # mix that pass, not the 30 training steps, is what a smoke would actually pay for.
@@ -151,6 +156,7 @@ common_args=(
     --attn_implementation flash_2
     --activation_checkpointing_mode "$ACT_CKPT_MODE"
     --activation_memory_budget "$ACT_MEM_BUDGET"
+    --reference_cache_batch_multiplier "$REF_CACHE_MULT"
     --output_dir "$OUTPUT_DIR"
     --logging_steps 1
     --seed 123

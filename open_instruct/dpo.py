@@ -245,13 +245,21 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         drop_last=True,
         fs_local_rank=global_rank,
     )
-    # 4x batch size: forward-only (no backward), so no activation storage needed.
+    # Default 4x batch size: forward-only (no backward), so no activation storage needed.
     # With packing, the collator's token budget controls the actual forward-pass size
     # and the overflow mechanism in HFDataLoader ensures no examples are dropped.
     # We could probably have logic to use a longer sequence length here when packing
-    # is enabled, but for simplicity we just keep the 4x increase in batch size regardless of packing.
+    # is enabled, but for simplicity we just keep the increase in batch size regardless of packing.
     # We want the batch size to be as large as possible so that we always pack efficiently.
-    cache_batch_size = int(args.per_device_train_batch_size * 4 * dp_world_size)
+    #
+    # It is configurable because "forward-only, so bigger is free" reasons about *memory*
+    # and says nothing about kernel limits. On the OLMoE3 latent-KDA MoE at seq 16384 the
+    # 4x pass puts 8 sequences (131k tokens) through fla's chunked KDA kernels in one
+    # call, and two separate B300 nodes hit unrecoverable Xid 31/43 faults ~90s in, at
+    # batch 0 of 63, before completing a single batch -- while SFT ran for hours on the
+    # same image at 1 sequence per call. Set 1 to make the reference pass use the same
+    # per-call shape as training.
+    cache_batch_size = int(args.per_device_train_batch_size * args.reference_cache_batch_multiplier * dp_world_size)
     cache_data_loader = data_loader_lib.HFDataLoader(
         dataset=dataset,
         batch_size=cache_batch_size,
