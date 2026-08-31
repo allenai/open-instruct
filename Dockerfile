@@ -54,7 +54,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
 ENV BEAKER_VERSION=v1.5.235
 RUN curl --silent \
     --connect-timeout 5 \
-    --max-time 10 \
+    --max-time 100 \
     --retry 5 \
     --retry-delay 0 \
     --retry-max-time 40 \
