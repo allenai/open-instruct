@@ -27,12 +27,19 @@ class CheckOlmoCoreCompatibleConfigTest(unittest.TestCase):
             # time (GRPOExperimentConfig.__post_init__), so set both; the guard must
             # still name sequence_parallel_size in its error.
             ("sequence_parallel_size", {"sequence_parallel_size": 4, "deepspeed_stage": 3}),
+            # consumed only by grpo_fast.py's weight sync; the OLMo-core actor
+            # always broadcasts with the default.
+            ("gather_whole_model", {"gather_whole_model": False}),
         ]
     )
     def test_deepspeed_only_flag_raises(self, flag, overrides):
         with self.assertRaisesRegex(ValueError, flag):
             args = grpo_utils.GRPOExperimentConfig(**overrides)
             grpo_utils.check_olmo_core_compatible_config(args)
+
+    def test_guard_defaults_match_config(self):
+        for name, default in grpo_utils._DEEPSPEED_ONLY_FLAG_DEFAULTS.items():
+            self.assertEqual(default, getattr(grpo_utils.GRPOExperimentConfig(), name))
 
 
 if __name__ == "__main__":

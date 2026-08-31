@@ -3,7 +3,7 @@ import itertools
 import math
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from queue import Empty
 from typing import Any, Literal
 
@@ -337,14 +337,25 @@ class GRPOExperimentConfig(
                 raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
 
 
+_DEEPSPEED_ONLY_FLAG_NAMES = frozenset(
+    {
+        "deepspeed_stage",
+        "deepspeed_zpg",
+        "deepspeed_offload_param",
+        "deepspeed_offload_optimizer",
+        "deepspeed_checkpoint_load_universal",
+        "sequence_parallel_size",
+        "gather_whole_model",
+    }
+)
+# Defaults come from GRPOExperimentConfig itself so the guard cannot drift from the config.
 _DEEPSPEED_ONLY_FLAG_DEFAULTS: dict[str, Any] = {
-    "deepspeed_stage": 0,
-    "deepspeed_zpg": 8,
-    "deepspeed_offload_param": False,
-    "deepspeed_offload_optimizer": False,
-    "deepspeed_checkpoint_load_universal": False,
-    "sequence_parallel_size": 1,
+    f.name: f.default for f in fields(GRPOExperimentConfig) if f.name in _DEEPSPEED_ONLY_FLAG_NAMES
 }
+assert set(_DEEPSPEED_ONLY_FLAG_DEFAULTS) == _DEEPSPEED_ONLY_FLAG_NAMES, (
+    f"DeepSpeed-only flags missing from GRPOExperimentConfig: "
+    f"{sorted(_DEEPSPEED_ONLY_FLAG_NAMES - set(_DEEPSPEED_ONLY_FLAG_DEFAULTS))}"
+)
 
 
 def check_olmo_core_compatible_config(args: GRPOExperimentConfig) -> None:

@@ -330,12 +330,19 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # NOTE: PerfCallback currently no-ops on this path (TransformerTrainModule never
         # records train/token_count); SpeedMonitorCallback above is the working metric source.
         # Tracked separately.
-        trainer_callbacks["perf"] = PerfCallback(
-            model_dims=utils.ModelDims.from_hf_config(args.model.model_name_or_path),
-            gradient_accumulation_steps=args.training.gradient_accumulation_steps,
-            dp_world_size=dp_world_size,
-            tensor_parallel_degree=1,
-        )
+        try:
+            model_dims = utils.ModelDims.from_hf_config(args.model.model_name_or_path)
+        except ValueError as e:
+            # ModelDims resolves the GPU name against GPU_SPECS, which does not cover
+            # every device (e.g. desktop 4090, L4, V100); MFU is undefined there anyway.
+            logger.warning(f"Skipping PerfCallback: {e}")
+        else:
+            trainer_callbacks["perf"] = PerfCallback(
+                model_dims=model_dims,
+                gradient_accumulation_steps=args.training.gradient_accumulation_steps,
+                dp_world_size=dp_world_size,
+                tensor_parallel_degree=1,
+            )
     else:
         logger.warning("Skipping PerfCallback: ModelDims requires an HF checkpoint config.")
 
