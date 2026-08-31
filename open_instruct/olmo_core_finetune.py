@@ -205,6 +205,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model, model_config = olmo_core_utils.setup_model(args.model, tc, init_device="meta")
+    if use_hf_ckpt and is_main_process:
+        olmo_core_utils.verify_can_save_as_hf(model_config, args.model.model_name_or_path)
 
     cp_config = olmo_core_utils.build_cp_config(args.training)
     cp_degree = args.training.cp_degree or 1

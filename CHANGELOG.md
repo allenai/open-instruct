@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Final HF export in `olmo_core_finetune.py` after training completes (previously runs ended with only interval checkpoints and no HF-format model), sharing a single `export_to_hf` implementation with DPO via `olmo_core_utils` (https://github.com/allenai/open-instruct/pull/1830).
+- Final HF export in `olmo_core_finetune.py` after training completes (previously runs ended with only interval checkpoints and no HF-format model), sharing a single `export_to_hf` implementation with DPO via `olmo_core_utils`; like DPO, SFT now verifies exportability via `verify_can_save_as_hf` before training starts, so unexportable model types fail in minutes instead of after days of training (https://github.com/allenai/open-instruct/pull/1830).
 - Backend A/B benchmark scripts (`scripts/train/debug/backend_ab/`) comparing DeepSpeed vs OLMo-core for SFT/DPO/GRPO, plus `PerfCallback` on OLMo-core SFT, a per-log-period TPS metric in `finetune.py`, and a guard rejecting DeepSpeed-only flags in `grpo.py` (https://github.com/allenai/open-instruct/pull/1827).
 - Support SFT of `allenai/Olmo-Hybrid-7B` on the olmo-core path: an `olmo3_hybrid_7B` config and HF <-> olmo-core state conversion for `model_type: olmo_hybrid`, neither of which olmo-core provides (https://github.com/allenai/open-instruct/pull/1822).
 - Expose `--save_async` and `--dist_timeout_hours` for the olmo-core SFT path; both were hardcoded, and the 24h default timeout meant a mid-training stall held its GPUs invisibly (https://github.com/allenai/open-instruct/pull/1821).
