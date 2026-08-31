@@ -198,6 +198,34 @@ class GRPOExperimentConfig(
     use_vllm_logprobs: bool = False
     """whether to use vLLM's logprobs for training instead of calculating them via forward pass"""
 
+    # On-policy distillation (OPD)
+    opd_teacher_model_name_or_path: str | None = None
+    """Enables on-policy distillation when set: path or HF name of a frozen teacher model.
+
+    The teacher is loaded learner-side (like the reference policy) and scores every
+    rollout token with a no-grad forward pass. The per-token sampled reverse KL
+    ``log π_student(y_t) − log π_teacher(y_t)`` (student side = the vLLM rollout
+    logprobs) is then folded into the advantages:
+    ``A_t ← A_t − opd_kl_coef · reverse_kl_t`` (see :func:`compute_opd_advantages`).
+    This is orthogonal to ``loss_fn`` and composes with DAPO/CISPO/DPPO/TVPO and
+    both the eager and tiled (liger) loss paths. The teacher must share the
+    student's tokenizer. Follows the recipe from Thinking Machines' On-Policy
+    Distillation (https://thinkingmachines.ai/blog/on-policy-distillation/), as
+    implemented in slime and the tinker cookbook.
+    """
+    opd_teacher_model_revision: str | None = None
+    """The revision of the OPD teacher model."""
+    opd_kl_coef: float = 1.0
+    """Coefficient on the per-token reverse-KL distillation advantage."""
+    opd_pure: bool = False
+    """Pure distillation: replace the environment advantages entirely with the
+    distillation term (``A_t = −opd_kl_coef · reverse_kl_t``) instead of adding
+    to them. Rewards are still computed and logged, but carry no gradient signal.
+    Consider ``--filter_zero_std_samples False`` (and dropping
+    ``--active_sampling``) with this flag, since reward-variance filtering
+    discards groups that pure OPD can still learn from.
+    """
+
     # PPO value model. When enabled, the trainer learns a scalar value function
     # and replaces group-relative advantages with GAE advantages.
     use_value_model: bool = False
@@ -358,6 +386,16 @@ class GRPOExperimentConfig(
                     "Pass `--use_vllm_logprobs True --truncated_importance_sampling_ratio_cap 0` "
                     "alongside `--loss_fn tvpo`."
                 )
+        if self.opd_teacher_model_name_or_path is not None:
+            if self.opd_kl_coef <= 0.0:
+                raise ValueError(f"OPD requires `opd_kl_coef` > 0 (got {self.opd_kl_coef}).")
+            if self.use_value_model:
+                raise ValueError(
+                    "`opd_teacher_model_name_or_path` cannot be combined with `use_value_model`: "
+                    "both replace the per-token advantages."
+                )
+        elif self.opd_pure:
+            raise ValueError("`opd_pure=True` requires `opd_teacher_model_name_or_path` to be set.")
         if self.use_value_model:
             if self.value_loss_coef < 0.0:
                 raise ValueError(f"`value_loss_coef` must be >= 0, got {self.value_loss_coef}.")
@@ -824,6 +862,103 @@ def compute_tvpo_mask(
             keep = (prompt_within_budget | token_safe) & response_mask
             mask = keep.to(new_logprobs.dtype)
     return mask, prompt_tv_per_token
+
+
+def compute_logprobs_tiled(
+    model: torch.nn.Module,
+    data_BT: data_types.CollatedBatchData,
+    pad_token_id: int,
+    temperature: float,
+    shards: int,
+    lm_head_fp32: bool = False,
+    cp_contexts: list[Any] | None = None,
+) -> list[torch.Tensor]:
+    """Per-token logprobs without materializing the full ``[T, vocab]`` logits.
+
+    Runs the backbone for hidden states, then pushes them through the lm head
+    in ``shards`` tiles (gather + logsumexp per tile) — the same trick as the
+    tiled GRPO loss. With a 248k vocab this cuts the transient logits memory by
+    ``shards``x versus :func:`compute_logprobs`, which matters for large frozen
+    scorers (e.g. an OPD teacher) and full-length (unsplit) sequences.
+
+    Always no-grad. Returns one ``[B, T-1]`` tensor per sample, masked via
+    :func:`mask_logprobs` like :func:`compute_logprobs`.
+    """
+    logprobs_BT: list[torch.Tensor] = []
+    with torch.no_grad():
+        for i in range(len(data_BT.query_responses)):
+            cp_context = cp_contexts[i] if cp_contexts is not None else None
+            hidden = forward_for_liger_hidden_states(
+                model, data_BT.query_responses[i], None, data_BT.position_ids[i], cp_context=cp_context
+            )
+            if lm_head_fp32:
+                hidden = hidden.float()
+            _, lm_head = get_causal_lm_backbone_and_lm_head(model)
+            batch_size, seq_len, hidden_size = hidden.shape
+            flat_hidden = hidden.reshape(-1, hidden_size)
+            labels = data_BT.query_responses[i][:, 1:].reshape(-1).clone()
+            labels[labels == pad_token_id] = 0
+            num_tokens = flat_hidden.shape[0]
+            tile_count = max(1, min(shards, num_tokens))
+            logprob_tiles = []
+            for hidden_tile, label_tile in zip(
+                torch.chunk(flat_hidden, chunks=tile_count, dim=0),
+                torch.chunk(labels, chunks=tile_count, dim=0),
+                strict=True,
+            ):
+                logits = lm_head(hidden_tile)
+                if temperature != 1.0:
+                    logits = logits / temperature
+                logprob_tiles.append(model_utils.log_softmax_and_gather(logits, label_tile))
+            logprobs = torch.cat(logprob_tiles, dim=0).reshape(batch_size, seq_len)
+            logprobs = mask_logprobs(logprobs, data_BT.response_masks[i][:, 1:].bool())
+            logprobs_BT.append(logprobs)
+    return logprobs_BT
+
+
+def compute_opd_advantages(
+    advantages: torch.Tensor,
+    behavior_logprobs: torch.Tensor,
+    teacher_logprobs: torch.Tensor,
+    response_mask: torch.Tensor,
+    kl_coef: float,
+    pure: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fold the on-policy distillation signal into the per-token advantages.
+
+    Computes the sampled per-token reverse KL ``log π_student(y_t) − log
+    π_teacher(y_t)`` at the rollout tokens and subtracts ``kl_coef`` times it
+    from the advantages (Thinking Machines' On-Policy Distillation recipe; the
+    same additive form as slime's ``apply_opd_kl_to_advantages``). The student
+    side is the behavior policy that generated the rollout (vLLM logprobs), so
+    the whole term is constant w.r.t. the trainer policy — gradients flow only
+    through the surrounding surrogate loss, exactly as for reward advantages.
+
+    Args:
+        advantages:        ``[B, T]`` per-token advantages, aligned with
+            ``query_responses`` (column 0 precedes the first shifted position).
+        behavior_logprobs: ``[B, T-1]`` log μ(y_t) from the rollout engine,
+            already masked via :func:`mask_logprobs`.
+        teacher_logprobs:  ``[B, T-1]`` log π_teacher(y_t) from the frozen
+            teacher's forward pass, already masked.
+        response_mask:     ``[B, T-1]`` bool mask of valid response positions.
+        kl_coef:           coefficient on the reverse-KL term.
+        pure:              when True, the environment advantage is replaced by
+            the distillation term instead of added to it.
+
+    Returns:
+        ``(new_advantages, reverse_kl)`` where ``new_advantages`` is ``[B, T]``
+        (same dtype as ``advantages``) and ``reverse_kl`` is ``[B, T-1]``
+        float32, zeroed outside ``response_mask`` (for logging).
+    """
+    response_mask = response_mask.bool()
+    reverse_kl = behavior_logprobs.float() - teacher_logprobs.float()
+    reverse_kl = torch.where(response_mask, reverse_kl, torch.zeros_like(reverse_kl))
+    new_advantages = advantages.clone()
+    base = torch.zeros_like(new_advantages[:, 1:]) if pure else new_advantages[:, 1:]
+    updated = base - kl_coef * reverse_kl.to(new_advantages.dtype)
+    new_advantages[:, 1:] = torch.where(response_mask, updated, new_advantages[:, 1:])
+    return new_advantages, reverse_kl
 
 
 def compute_grpo_loss(
