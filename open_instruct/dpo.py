@@ -175,6 +175,11 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
 
     dataset = olmo_core_utils.load_dataset_distributed(args, tc, transform_fn_args, is_main_process)
     dataset = dataset.shuffle(seed=args.seed)
+    # After the shuffle so a subset is a random sample, and before the reference-logprob
+    # pass, whose cache hash already includes max_train_samples.
+    if args.max_train_samples is not None and args.max_train_samples < len(dataset):
+        logger.info(f"Limiting training samples to {args.max_train_samples} from {len(dataset)}.")
+        dataset = dataset.select(range(args.max_train_samples))
     dataset.set_format(type="pt")
 
     beaker_config = utils.setup_experiment_paths(args, is_main_process)
