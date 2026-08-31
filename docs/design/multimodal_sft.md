@@ -1,6 +1,6 @@
 # Design: Multimodal SFT (Molmo stage 2) in open-instruct
 
-**Status:** proposed
+**Status:** V1 implemented on the `vision` branch (foundation #1834, training path #1856, parity below)
 **Branch:** `vision` (open-instruct), depends on `vision` (OLMo-core)
 **Scope:** V1 = stage-2 training parity with OLMo-core's `src/scripts/train/Molmo2-Stage2.py`; HF export and in-loop eval deferred.
 
@@ -232,7 +232,7 @@ open-instruct's only coupling to all of this: a small backbone map (preset name,
 
 **Beaker validation:**
 1. `mm_sft.sh` 10-step smoke green (HF init) + a stage-1 `--model_name_or_path` smoke.
-2. **Parity run:** 50 steps, `--mixture debug`, same seeds, this entry point vs upstream `Molmo2-Stage2.py` — same data order expected (shared seeds and loader); loss curves within ~1e-3 after step 1.
+2. **Parity run (done):** 50 steps, single-source mixture `pixmo_count_train`, seeds 6198/50189, this entry point vs upstream `Molmo2-Stage2.py` on the same 2×H100 — step-1 CE identical to 4 decimals (0.4734), max |diff| 0.0032 / mean 0.0011 across common steps (accumulated bf16 nondeterminism). Note: strict per-step parity requires a single-source mixture — upstream renormalizes subset weights over the full group membership while `build_mixture` prunes groups first, so multi-source subsets like `debug` have identical within-group ratios but different group-vs-group weights (the full `image-only-v9` mixture is identical on both sides).
 
 ## 9. Risks
 
