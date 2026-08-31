@@ -53,7 +53,7 @@ It defines the text half of the merged stage:
 ## 3. Architecture
 
 ```
-open_instruct/olmo_core_multimodal_finetune.py   (entry point)
+open_instruct/olmo_core_mixture_finetune.py   (entry point)
         │
         ├── MultimodalLMConfig.build()  +  molmo2_loader (HF init)      [OLMo-core]
         ├── MultimodalTransformerTrainModuleConfig.build(model)        [OLMo-core, unmodified]
@@ -64,19 +64,19 @@ open_instruct/olmo_core_multimodal_finetune.py   (entry point)
         └── TrainerConfig + OLMo-core native callbacks (config_saver, gc, gpu_monitor, wandb, checkpointer, beaker)
 ```
 
-**No train-module subclass, and no callback wrappers.** `DPOTrainModule` exists because DPO needed a different loss. Stage-2 SFT needs nothing `MultimodalTransformerTrainModuleConfig` doesn't already expose (per-group LR/scheduler, freezing, `response_logits_only`, weighted CE, compile/AC flags). Trainer-side, the run mirrors `Molmo2-Stage2.py`'s OLMo-core-native setup: `TrainerConfig` + `CheckpointerConfig` and OLMo-core's own callbacks (`ConfigSaverCallback`, `GarbageCollectorCallback`, `GPUMemoryMonitorCallback`, `WandBCallback`, checkpointer, and OLMo-core's `beaker` callback). open-instruct's `BeakerCallbackV2` and `PerfCallback` are **not** used by default — add them only if the team wants open-instruct's Beaker-description/MFU conventions on these runs, as an additive opt-in. If a future need appears (e.g. logging per-group LRs), prefer an OLMo-core callback over any subclass.
+**No train-module subclass, and no callback wrappers.** `DPOTrainModule` exists because DPO needed a different loss. Stage-2 SFT needs nothing `MultimodalTransformerTrainModuleConfig` doesn't already expose (per-group LR/scheduler, freezing, `response_logits_only`, weighted CE, compile/AC flags). Trainer-side, the run mirrors `Molmo2-Stage2.py`'s OLMo-core-native setup: `TrainerConfig` + `CheckpointerConfig` and OLMo-core's own callbacks (`ConfigSaverCallback`, `GarbageCollectorCallback`, `GPUMemoryMonitorCallback`, `WandBCallback`, and the checkpointer). One exception, found in the first smoke run: OLMo-core's `beaker` callback requires `beaker-gantry` (its attach path imports `olmo_core.launch.beaker`, whose module top imports gantry), which open-instruct's image does not ship — so the Beaker-description role uses open-instruct's beaker-py-2.x `BeakerCallbackV2` instead. `PerfCallback` is **not** used by default — add them only if the team wants open-instruct's Beaker-description/MFU conventions on these runs, as an additive opt-in. If a future need appears (e.g. logging per-group LRs), prefer an OLMo-core callback over any subclass.
 
 ### 3.1 New files
 
 | File | Purpose |
 |---|---|
 | `open_instruct/olmo_core_multimodal_utils.py` | Dataclasses + builder functions. **All** `olmo_core.nn.vision` / `olmo_core.data.multimodal` imports live here and in the entry point, inside functions (lazy) — both to keep the text SFT/DPO paths importable if the pin ever moves, and because `data/multimodal/paths.py` freezes `MOLMO_DATA_DIR` at import time. |
-| `open_instruct/olmo_core_multimodal_finetune.py` | Entry point, mirrors `olmo_core_finetune.py`'s structure. |
+| `open_instruct/olmo_core_mixture_finetune.py` | Entry point, mirrors `olmo_core_finetune.py`'s structure. |
 | `open_instruct/sft_mixture.py` | The generic mixture layer: `MixtureSource` protocol, `SourceSpec`, `SOURCE_REGISTRY`, `build_mixture` (§4). Deliberately not multimodal-named — any SFT source type registers here. |
 | `open_instruct/sft_text_dataset.py` | The first source adapter: `OpenInstructTextDataset` + `OpenInstructTextDatasetConfig` (§5). |
 | `scripts/train/debug/mm_sft.sh` | 1-GPU Beaker smoke: `--mixture debug`, 10 steps, compile off. |
 | `scripts/train/vision/molmo2_stage2.sh` | Production 8-GPU stage-2 parity run. |
-| `open_instruct/test_olmo_core_multimodal_utils.py`, `open_instruct/test_olmo_core_multimodal_finetune_gpu.py`, `open_instruct/test_sft_mixture.py`, `open_instruct/test_sft_text_dataset.py` | Tests (§8). |
+| `open_instruct/test_olmo_core_multimodal_utils.py`, `open_instruct/test_olmo_core_mixture_finetune_gpu.py`, `open_instruct/test_sft_mixture.py`, `open_instruct/test_sft_text_dataset.py` | Tests (§8). |
 
 ### 3.2 Configuration
 
@@ -99,7 +99,7 @@ Not included: `dataset_transformation.TokenizerConfig` at the top level — the 
 4. `build_multimodal_train_module_config(...)` — a direct transcription of Stage2's optimizer/scheduler/parallelism block (AdamW with `OptimGroupOverride` for `connector.*` and `vision.*`, `PerGroupScheduler`, `rank_microbatch_size = instances × seq_len`, bf16 FSDP/HSDP with fp32 reduce, selected-blocks AC) — then `.build(model)`.
 5. `MultimodalCollatorConfig(pad_token_id=<from tokenizer, assert non-None>, label_ignore_index=-100, pad_sequence_length=max_seq_length).build()`.
 6. Build the bridge dataset if `nlp_source == "open_instruct"`; `build_mixture(...)` (§4); `MixtureDataLoader` with `global_batch_size = global_batch_instances × max_seq_length`, packing knobs, seed.
-7. Callbacks: OLMo-core's own set, mirroring `Molmo2-Stage2.py` — `ConfigSaverCallback`, `GarbageCollectorCallback`, `GPUMemoryMonitorCallback`, `WandBCallback`, the checkpointer callback, and OLMo-core's `beaker` callback. No open-instruct callback wrappers by default (`BeakerCallbackV2`/`PerfCallback` are opt-in additions if open-instruct's Beaker-description/MFU conventions are wanted). Checkpointer with `save_async=False` for V1 (Stage2 does the same; async save with the multimodal module is unproven). Checkpoint-retention defaults follow the validated text recipe's lore (§2.1): production scripts pass `--ephemeral_save_interval -1 --keep_last_n_checkpoints -1` — olmo-core deleting a ~100 GB checkpoint tree on weka overruns a 30 s timeout and kills the job.
+7. Callbacks: OLMo-core's own set, mirroring `Molmo2-Stage2.py` — `ConfigSaverCallback`, `GarbageCollectorCallback`, `GPUMemoryMonitorCallback`, `WandBCallback`, and the checkpointer callback — plus open-instruct's `BeakerCallbackV2` for Beaker description updates (OLMo-core's `beaker` callback needs `beaker-gantry`, absent from the image; §3). `PerfCallback` remains an opt-in addition. Checkpointer with `save_async=False` for V1 (Stage2 does the same; async save with the multimodal module is unproven). Checkpoint-retention defaults follow the validated text recipe's lore (§2.1): production scripts pass `--ephemeral_save_interval -1 --keep_last_n_checkpoints -1` — olmo-core deleting a ~100 GB checkpoint tree on weka overruns a 30 s timeout and kills the job.
 8. `TrainerConfig(save_folder=output_dir, max_duration=Duration.steps(max_train_steps), ...)`. Init/resume cases:
    - **HF init**: weights already loaded; `load_strategy=if_available` so preempted runs resume from `save_folder`.
    - **Stage-1 init**: `load_path=model_name_or_path`, `load_trainer_state=False`, `load_optim_state=False`. The trainer prefers a checkpoint in `save_folder` over `load_path` when one exists, giving preemption resume for free (verify on the pinned SHA — risk §9).
@@ -247,6 +247,10 @@ open-instruct's only coupling to all of this: a small backbone map (preset name,
 | Bridge emitting ids ≥ base vocab as targets (`SplitVocabEmbedding` extra block is inputs-only) | Per-example assert |
 | `qwen3_layout` hardwired in upstream datasets | Upstream layout knob is an explicit Olmo 3-workstream requirement (§7.4) |
 | datasets 5.x compat shim (`dataset_compat`) is process-global | Bridge avoids `load_from_disk_compat`; keep `datasets < 6` behaviorally |
+
+Findings from the first smoke runs (attempts 1–8, all root-caused): OLMo-core's `beaker` callback needs `beaker-gantry` (§3); the step-0 pre-train checkpoint force-allocates full fp32 Adam states via torch DCP's `_init_optim_state` and OOMs HF-init runs (skipped via `pre_train_checkpoint=False`); FlexAttention in eager mode (compile off) OOMs at seq 16384 — the smoke must run compiled like Stage2 production; and Molmo2-4B at Stage2-parity settings on 2×H100 peaks at ~81.1 GiB on the image-heavy rank — over jupiter H100s' 81,090 MiB but under some other hosts' 81,559 MiB — so the smoke runs `VIT_CROP_MICROBATCH=8` + per-block LM AC for headroom. Upstream `Molmo2-Stage2.py`'s documented 1-GPU smoke recipe hits the same pre-train-checkpoint and eager-flex issues and appears to be untested; worth reporting upstream.
+
+Findings from the first merged-mixture run (image sources 0.1 / Dolci 0.9 via the `open_instruct_sft` adapter, 5 steps green): (1) the Molmo2 tokenizer's built-in chat template rejects system turns ("roles must alternate user/assistant") — real SFT mixes need `--text_chat_template_name olmo` (near-identical ChatML on the Qwen vocab, system-capable) or mm_olmo-style system flattening; (2) `compile_vision`/`compile_connector` hit an inductor saved-tensor stride assertion in backward when crop counts swing hard between batches (a text-heavy mixture alternates zero-crop and image packs) — vision and connector run eager until fixed upstream; the compile-for-memory requirement only concerns the LM's FlexAttention.
 
 Deferred (post-V1): HF export (`multimodal_lm_state_dict_to_hf` wiring into a convert script — note the text-model converter `scripts/train/convert_olmo_core_to_hf.py` was fixed by #1809; the multimodal variant still needs its own key mappings), in-loop eval (the `VALIDATION_MIXTURES` bisect ladder), multi-node HSDP validation, inline mixture specs, non-weka data roots.
 
