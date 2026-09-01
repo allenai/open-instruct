@@ -121,6 +121,9 @@ class SFTConfig:
     """Timeout for distributed collectives, in hours."""
     save_async: bool = True
     """Whether olmo-core saves checkpoints asynchronously."""
+    tracking_url: str | None = None
+    """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
+    directory's provenance README so any copy of a checkpoint traces back to it."""
 
 
 @dataclasses.dataclass
@@ -310,6 +313,16 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
 
     run_name = args.tracking.run_name or f"sft-{os.path.basename(args.model.model_name_or_path)}"
     config_dict = dataclasses.asdict(args)
+
+    if is_main_process:
+        olmo_core_utils.write_provenance_readme(
+            output_dir=args.checkpoint.output_dir,
+            run_name=run_name,
+            model_name_or_path=args.model.model_name_or_path,
+            tracking_url=args.sft.tracking_url,
+            wandb_project=args.logging.wandb_project if args.logging.with_tracking else None,
+            wandb_entity=args.logging.wandb_entity,
+        )
 
     trainer_callbacks: dict[str, Any] = olmo_core_utils.build_base_callbacks(
         config_dict=config_dict,
