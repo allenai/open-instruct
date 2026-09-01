@@ -5,6 +5,7 @@ OLMo-core utility functions, shared training configurations, and model configura
 import datetime
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -667,3 +668,44 @@ def doc_lens_from_cu_seq_lens(cu_seq_lens_k_D1: torch.Tensor, seq_len: int) -> t
     doc_lens_BD = seq_lens_D.unsqueeze(0)
     max_doc_lens_B = [int(doc_lens_BD.max().item())]
     return doc_lens_BD, max_doc_lens_B
+
+
+def write_provenance_readme(
+    output_dir: str,
+    run_name: str,
+    model_name_or_path: str,
+    tracking_url: str | None,
+    wandb_project: str | None = None,
+    wandb_entity: str | None = None,
+) -> None:
+    """Drop a README.md into output_dir so any copy of the checkpoint traces back to its run.
+
+    Never overwrites an existing README (a resume must not clobber notes added
+    by hand) and never raises: provenance is not worth killing a run over.
+    """
+    path = os.path.join(output_dir, "README.md")
+    if os.path.exists(path):
+        return
+    try:
+        lines = [f"# {run_name}", ""]
+        if tracking_url:
+            lines.append(f"Tracking: {tracking_url}")
+        beaker_url = utils.get_beaker_experiment_url()
+        if beaker_url:
+            lines.append(f"Beaker experiment: {beaker_url}")
+        if wandb_project:
+            lines.append(f"W&B: {wandb_entity or 'ai2-llm'}/{wandb_project}, run name {run_name}")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+        lines += [
+            f"Base model: {model_name_or_path}",
+            f"Written at {timestamp}",
+            "",
+            "Command:",
+            "```",
+            " ".join(sys.argv),
+            "```",
+        ]
+        with open(path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception:
+        logger.warning(f"Could not write provenance README to {output_dir}", exc_info=True)
