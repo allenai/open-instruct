@@ -1397,7 +1397,7 @@ def _broadcast_weights_ipc(
         if is_rank_0:
             mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
             for engine in vllm_engines:
-                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+                trainer_args = IPCTrainerSendWeightsArgs(send_mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
