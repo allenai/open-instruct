@@ -820,7 +820,14 @@ class LLMRayActor:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        # vllm 0.26 requires the start/finish bracket around update_weights. Every
+        # sync here sends all weights in one call (packed=False), so bracketing per
+        # call is equivalent to bracketing per sync.
+        self._run_async(self.llm_engine.start_weight_update())
+        try:
+            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        finally:
+            self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
 
