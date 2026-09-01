@@ -209,5 +209,29 @@ class TestComputeReferenceCacheHash(unittest.TestCase):
         self.assertNotEqual(hash1, hash2)
 
 
+class TestGradientCheckpointingDeprecation(unittest.TestCase):
+    """Tests for deprecated gradient_checkpointing flag."""
+
+    def test_gradient_checkpointing_flag_parses(self):
+        """Test that --gradient_checkpointing is accepted by the argument parser."""
+        args = make_test_args(gradient_checkpointing=True)
+        self.assertTrue(args.gradient_checkpointing)
+
+    def test_gradient_checkpointing_enables_activation_budget(self):
+        """Test that gradient_checkpointing=True sets activation_memory_budget to 0.5."""
+        args = make_test_args(gradient_checkpointing=True)
+        self.assertEqual(args.activation_memory_budget, 0.5)
+
+    def test_gradient_checkpointing_respects_existing_budget(self):
+        """Test that gradient_checkpointing=True does not override existing activation_memory_budget < 1.0."""
+        args = make_test_args(gradient_checkpointing=True, activation_memory_budget=0.3)
+        self.assertEqual(args.activation_memory_budget, 0.3)
+
+    def test_gradient_checkpointing_false_does_not_change_budget(self):
+        """Test that gradient_checkpointing=False leaves activation_memory_budget at default 1.0."""
+        args = make_test_args(gradient_checkpointing=False)
+        self.assertEqual(args.activation_memory_budget, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
