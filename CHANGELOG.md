@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Changed
+- Bump vllm to >=0.26.0, moving the whole tree to torch 2.11 (the version the OLMoE3 KDA MoE requires, so training stacks unify). Fallout handled in the same change: transformers moves to 5.16.1, torchcodec (a new vllm dependency with no cu128 builds past 0.14) resolves to the +cpu build on the cuda12 stack and +cu130 on cuda13, flash-attn-4 moves to beta19 (the newest build compatible with vllm's exact nvidia-cutlass-dsl and apache-tvm-ffi pins), openai moves to 3.x (vllm's tool parsers need it), and flash-attn 2 / FA3 stay on their torch2.10-built wheels because no torch 2.11 builds exist anywhere (PR pending).
+
 ### Added
 - Support SFT of `allenai/Olmo-Hybrid-7B` on the olmo-core path: an `olmo3_hybrid_7B` config and HF <-> olmo-core state conversion for `model_type: olmo_hybrid`, neither of which olmo-core provides (https://github.com/allenai/open-instruct/pull/1822).
 - Expose `--save_async` and `--dist_timeout_hours` for the olmo-core SFT path; both were hardcoded, and the 24h default timeout meant a mid-training stall held its GPUs invisibly (https://github.com/allenai/open-instruct/pull/1821).

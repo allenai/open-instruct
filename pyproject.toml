@@ -38,7 +38,10 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
+    # beta19 is the newest fa4 whose declared ranges admit vllm 0.26's exact pins
+    # (nvidia-cutlass-dsl==4.6.0, apache-tvm-ffi==0.1.10). beta14 and older target
+    # the removed cutlass 4.4 API; beta20+ pin cutlass 4.6.0.dev0 or tvm-ffi>=0.1.12.
+    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta19/flash_attn_4-4.0.0b19-py3-none-any.whl ; platform_system != 'Darwin'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",

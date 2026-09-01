@@ -1636,8 +1636,8 @@ requires-dist = [
 
 [[package]]
 name = "flash-attn-4"
-version = "4.0.0b5"
-source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl" }
+version = "4.0.0b19"
+source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta19/flash_attn_4-4.0.0b19-py3-none-any.whl" }
 dependencies = [
     { name = "apache-tvm-ffi", version = "0.1.10", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "apache-tvm-ffi", version = "0.1.11", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda12' and extra != 'group-13-open-instruct-cuda13') or (extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
@@ -1652,22 +1652,24 @@ dependencies = [
     { name = "typing-extensions", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 wheels = [
-    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl", hash = "sha256:28d58341980b61224bacd0dcf2c1be3a30e6f73d911a76c5fb83f0c4bf61412b" },
+    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta19/flash_attn_4-4.0.0b19-py3-none-any.whl", hash = "sha256:bc3856e018fa32e2b833726566641e51d02d45f2d444849937276a46c01653a2" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "apache-tvm-ffi", specifier = ">=0.1.5,<0.2" },
     { name = "einops" },
-    { name = "nvidia-cutlass-dsl", specifier = ">=4.4.2" },
+    { name = "nvidia-cutlass-dsl", specifier = ">=4.5.2" },
+    { name = "nvidia-cutlass-dsl", extras = ["cu13"], marker = "extra == 'cu13'", specifier = ">=4.5.2" },
     { name = "pytest", marker = "extra == 'dev'" },
-    { name = "quack-kernels", specifier = ">=0.3.3" },
+    { name = "pytest-xdist", marker = "extra == 'dev'" },
+    { name = "quack-kernels", specifier = ">=0.5.0" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "torch" },
     { name = "torch-c-dlpack-ext" },
     { name = "typing-extensions" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["cu13", "dev"]
 
 [[package]]
 name = "flash-linear-attention"
@@ -3710,7 +3712,7 @@ requires-dist = [
     { name = "dr-agent", marker = "extra == 'dr-tulu'" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "flash-attn", marker = "platform_machine != 'aarch64' and sys_platform != 'darwin'", specifier = ">=2.8.3" },
-    { name = "flash-attn-4", marker = "sys_platform != 'darwin'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl" },
+    { name = "flash-attn-4", marker = "sys_platform != 'darwin'", url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta19/flash_attn_4-4.0.0b19-py3-none-any.whl" },
     { name = "flash-linear-attention", specifier = ">=0.5.0" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
