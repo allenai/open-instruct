@@ -109,11 +109,19 @@ torchcodec = [
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
 ]
 
-# vLLM wheels on PyPI are built against CUDA 12.8 on x86_64. The +cu130 builds
-# are only published on the version-specific vLLM wheel index.
+# From 0.26 vLLM's PyPI wheels are built against CUDA 13 (they need
+# libcudart.so.13 and die on the cu128 stack), and no cu128 build exists. The
+# cuda12 group takes the +cu129 build from the version-specific index: CUDA 12.x
+# minor-version compatibility runs it on the fleet's 12.8 drivers.
 vllm = [
+  { index = "vllm-cu129", group = "cuda12" },
   { index = "vllm-cu130", group = "cuda13" },
 ]
+
+[[tool.uv.index]]
+name = "vllm-cu129"
+url = "https://wheels.vllm.ai/0.26.0/cu129"
+explicit = true
 
 [[tool.uv.index]]
 name = "vllm-cu130"
