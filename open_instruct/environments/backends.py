@@ -1,22 +1,26 @@
 """Sandbox backend abstraction for code/command execution."""
 
 import atexit
+import base64
 import contextlib
 import errno
 import fcntl
 import io
 import os
+import posixpath
 import random
 import shlex
 import shutil
 import subprocess
 import tarfile
+import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import docker as docker_sdk
+import requests
 
 from open_instruct import logger_utils
 
@@ -770,18 +774,529 @@ class ApptainerBackend(SandboxBackend):
             )
 
 
+# ---------------------------------------------------------------------------
+# LiteRegistry Podman gateway
+# ---------------------------------------------------------------------------
+
+
+# Server-side contract (literegistry PodmanRequest / PodmanAffinityConfig).
+_SERVER_EXEC_TIMEOUT_CAP_S = 60.0
+_SERVER_STDIN_LIMIT_BYTES = 1024 * 1024
+# Base64 inflates by 4/3; keep a healthy margin below the stdin limit.
+_UPLOAD_CHUNK_BYTES = 512 * 1024
+# Stay well below the replica's 1MB stdout / 256KB stderr caps: exceeding them
+# does not truncate, it aborts the exec (and the gateway then retries it).
+_MAX_STDOUT_BYTES = 512 * 1024
+_MAX_STDERR_BYTES = 128 * 1024
+_READ_CHUNK_BYTES = 384 * 1024
+
+# One wait-exec blocks inside the container until the command finishes or the
+# in-container wait budget expires, so completed commands return in one round
+# trip and long commands cost one cheap request per ~45s.
+_WAIT_EXEC_TIMEOUT_S = 55.0
+_IN_CONTAINER_WAIT_S = 45
+_DONE_MARKER = "__SWERL_GATEWAY_DONE__"
+_PENDING_MARKER = "__SWERL_GATEWAY_PENDING__"
+
+_WORK_DIR = "/tmp/.swerl_gateway"
+
+
+class GatewayBackendError(RuntimeError):
+    """A gateway request failed or returned an invalid response."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class GatewaySessionLostError(GatewayBackendError):
+    """The affinity binding or container no longer exists on the gateway."""
+
+
+class GatewayBackend(SandboxBackend):
+    """Run sandbox commands in a remote Podman container via a LiteRegistry gateway."""
+
+    _HANDSHAKE_ATTEMPTS = 5
+    _HANDSHAKE_TIMEOUT_S = 240.0
+    _REQUEST_ATTEMPTS = 4
+    _RETRY_BASE_DELAY_S = 0.5
+    _RETRY_MAX_DELAY_S = 8.0
+    _TIMING_LOGS = _env_flag("SWERL_SANDBOX_TIMING_LOGS", False)
+    _TIMING_LOG_THRESHOLD_S = _env_float("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", 1.0)
+
+    def __init__(
+        self,
+        image: str = "python:3.12-slim",
+        timeout: int = 1800,
+        mem_limit: str | None = None,
+        gateway_url: str = "",
+        service: str = "podman",
+        client_id: str | None = None,
+        keepalive_interval_s: float | None = None,
+    ):
+        """
+        Args:
+            image: OCI image for the session container (pulled by the replica,
+                normally through the gateway's own docker.io mirror).
+            timeout: Default per-command timeout in seconds.
+            mem_limit: Ignored. The LiteRegistry Podman replicas do not expose
+                per-container memory limits yet; kept for kwarg symmetry with
+                ``DockerBackend``.
+            gateway_url: Base URL of the LiteRegistry gateway, e.g.
+                ``http://host:8080``. Falls back to ``$SWERL_GATEWAY_URL``.
+            service: Affinity service name registered in the gateway.
+            client_id: Optional identifier sent with the handshake (shows up in
+                replica logs); defaults to a per-backend UUID.
+            keepalive_interval_s: Seconds between keepalive execs that refresh
+                the gateway's affinity TTL while the container sits idle
+                between agent turns (generation can outlast the binding TTL).
+                Defaults to ``$SWERL_GATEWAY_KEEPALIVE_S`` or 300; ``0``
+                disables the keepalive thread.
+        """
+        resolved_url = (gateway_url or os.getenv("SWERL_GATEWAY_URL", "")).rstrip("/")
+        if not resolved_url:
+            raise ValueError(
+                "GatewayBackend requires a gateway URL. Set env_config.gateway_url or $SWERL_GATEWAY_URL."
+            )
+        self._gateway_url = resolved_url
+        self._image = image
+        self._timeout = timeout
+        if mem_limit:
+            logger.debug("GatewayBackend ignores mem_limit=%s (not supported by the Podman replicas)", mem_limit)
+        self._service = service
+        self._client_id = client_id or f"open-instruct-{uuid.uuid4().hex[:12]}"
+        if keepalive_interval_s is None:
+            keepalive_interval_s = _env_float("SWERL_GATEWAY_KEEPALIVE_S", 300.0)
+        self._keepalive_interval_s = keepalive_interval_s
+        self._affinity_id: str | None = None
+        self._instance_id: str | None = None
+        self._session = requests.Session()
+        self._exec_lock = threading.Lock()
+        self._last_request_monotonic = time.monotonic()
+        self._keepalive_stop: threading.Event | None = None
+        self._keepalive_thread: threading.Thread | None = None
+
+    # ------------------------------------------------------------------ HTTP
+
+    def _post(
+        self,
+        endpoint: str,
+        payload: dict,
+        request_timeout: float,
+        attempts: int | None = None,
+        http_session: requests.Session | None = None,
+    ) -> dict:
+        """POST one JSON payload to the gateway with bounded retries.
+
+        Retries cover connection errors, request timeouts, and 500/502/503/504
+        (replica connection dropped mid-request / temporarily unreachable /
+        gateway rediscovering) — safe because every exec this backend issues is
+        idempotent. 404 maps to :class:`GatewaySessionLostError` so callers can
+        re-handshake.
+        """
+        url = f"{self._gateway_url}/{endpoint.lstrip('/')}"
+        max_attempts = attempts or self._REQUEST_ATTEMPTS
+        session = http_session or self._session
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            self._last_request_monotonic = time.monotonic()
+            try:
+                response = session.post(url, json=payload, timeout=request_timeout)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_error = GatewayBackendError(f"Gateway request to {endpoint} failed: {e}")
+            else:
+                if response.status_code == 404:
+                    raise GatewaySessionLostError(
+                        f"Gateway affinity session lost ({endpoint}): {response.text[:500]}", status_code=404
+                    )
+                if response.status_code in (500, 502, 503, 504, 408):
+                    last_error = GatewayBackendError(
+                        f"Gateway returned HTTP {response.status_code} for {endpoint}: {response.text[:500]}",
+                        status_code=response.status_code,
+                    )
+                elif response.status_code >= 400:
+                    raise GatewayBackendError(
+                        f"Gateway returned HTTP {response.status_code} for {endpoint}: {response.text[:500]}",
+                        status_code=response.status_code,
+                    )
+                else:
+                    try:
+                        result = response.json()
+                    except ValueError as e:
+                        raise GatewayBackendError(f"Gateway returned non-JSON for {endpoint}: {e}") from e
+                    if not isinstance(result, dict):
+                        raise GatewayBackendError(f"Gateway returned a non-object response for {endpoint}")
+                    return result
+            if attempt < max_attempts:
+                delay = min(self._RETRY_BASE_DELAY_S * (2 ** (attempt - 1)), self._RETRY_MAX_DELAY_S)
+                delay += random.uniform(0.0, 0.5)
+                logger.warning(
+                    "Gateway request %s attempt %s/%s failed (%s); retrying in %.2fs",
+                    endpoint,
+                    attempt,
+                    max_attempts,
+                    last_error,
+                    delay,
+                )
+                time.sleep(delay)
+        assert last_error is not None
+        raise last_error
+
+    def _exec(
+        self,
+        command: str,
+        stdin: str = "",
+        exec_timeout: float = 30.0,
+        workdir: str = "/",
+        http_session: requests.Session | None = None,
+    ) -> dict:
+        """Run one bounded exec in the session container via the gateway."""
+        if self._affinity_id is None:
+            raise GatewayBackendError("Container not started. Call start() first.")
+        exec_timeout = min(exec_timeout, _SERVER_EXEC_TIMEOUT_CAP_S - 1.0)
+        return self._post(
+            "affinity/podman",
+            {
+                "service": self._service,
+                "affinity_id": self._affinity_id,
+                "command": command,
+                "stdin": stdin,
+                "timeout": exec_timeout,
+                "workdir": workdir,
+            },
+            # The replica itself allows exec_timeout + 5s; leave headroom for
+            # gateway queueing before giving up on the HTTP request.
+            request_timeout=exec_timeout + 20.0,
+            http_session=http_session,
+        )
+
+    # ------------------------------------------------------------- lifecycle
+
+    def start(self) -> None:
+        previous = self._affinity_id
+        if previous is not None:
+            self.close()
+        start_time = time.perf_counter()
+        result = self._post(
+            "affinity/handshake",
+            {"service": self._service, "image": self._image, "client_id": self._client_id},
+            request_timeout=self._HANDSHAKE_TIMEOUT_S,
+            attempts=self._HANDSHAKE_ATTEMPTS,
+        )
+        affinity_id = result.get("affinity_id")
+        if not isinstance(affinity_id, str) or not affinity_id:
+            raise GatewayBackendError(f"Gateway handshake returned no affinity_id: {result}")
+        self._affinity_id = affinity_id
+        self._instance_id = result.get("instance_id")
+        elapsed_s = time.perf_counter() - start_time
+        if self._TIMING_LOGS and elapsed_s >= self._TIMING_LOG_THRESHOLD_S:
+            logger.info(
+                "GatewayBackend.start timing image=%s container=%s instance=%s total=%.3fs",
+                self._image,
+                affinity_id[:12],
+                self._instance_id,
+                elapsed_s,
+            )
+        logger.info(
+            "Gateway container started: %s (image=%s, instance=%s, previous=%s)",
+            affinity_id[:12],
+            self._image,
+            self._instance_id,
+            previous[:12] if previous else None,
+        )
+        self._start_keepalive()
+
+    def close(self) -> None:
+        self._stop_keepalive()
+        if self._affinity_id is None:
+            return
+        affinity_id = self._affinity_id
+        self._affinity_id = None
+        self._instance_id = None
+        try:
+            self._post(
+                "affinity/close",
+                {"service": self._service, "affinity_id": affinity_id},
+                request_timeout=60.0,
+                attempts=2,
+            )
+            logger.info("Closed gateway container: %s", affinity_id[:12])
+        except GatewaySessionLostError:
+            logger.info("Gateway container already gone at close: %s", affinity_id[:12])
+        except GatewayBackendError as e:
+            # The replica reaps leftover containers on restart; do not fail
+            # the episode over a close error.
+            logger.warning("Failed to close gateway container %s: %s", affinity_id[:12], e)
+
+    # -------------------------------------------------------------- commands
+
+    def run_command(self, command: str, timeout: int | None = None) -> ExecutionResult:
+        if self._affinity_id is None:
+            raise GatewayBackendError("Container not started. Call start() first.")
+        effective_timeout = self._timeout if timeout is None else timeout
+        with self._exec_lock:
+            start_time = time.perf_counter()
+            try:
+                result = self._run_command_once(command, effective_timeout)
+            except GatewaySessionLostError as e:
+                # Mirrors DockerBackend's restart-and-retry-once semantics when
+                # the container disappears mid-episode.
+                logger.warning(
+                    "Gateway container disappeared before exec (%s). Restarting and retrying command once.", e
+                )
+                self._affinity_id = None
+                self.start()
+                result = self._run_command_once(command, effective_timeout)
+            elapsed_s = time.perf_counter() - start_time
+            if self._TIMING_LOGS and elapsed_s >= self._TIMING_LOG_THRESHOLD_S:
+                logger.info(
+                    "GatewayBackend.exec timing image=%s container=%s total=%.3fs",
+                    self._image,
+                    (self._affinity_id or "?")[:12],
+                    elapsed_s,
+                )
+            return result
+
+    def _run_command_once(self, command: str, effective_timeout: float) -> ExecutionResult:
+        token = uuid.uuid4().hex[:16]
+        job_dir = f"{_WORK_DIR}/{token}"
+        quoted_dir = shlex.quote(job_dir)
+        # Launch the command detached. The bare `mkdir` acts as a lock: if the
+        # gateway retries this exec after the first attempt actually ran, the
+        # second attempt exits without launching a duplicate.
+        # `{ ... & }` groups the background operator with just the setsid
+        # command; otherwise `&` would background the whole `&&` chain and
+        # `cat` would read /dev/null instead of the request stdin. If the job
+        # dir already exists, a previous attempt of this same request already
+        # launched the command (the gateway retried a request whose response
+        # was lost), so skip straight to waiting instead of double-launching.
+        detached = shlex.quote(
+            f"timeout --signal=TERM --kill-after=10 {shlex.quote(str(effective_timeout))} "
+            f"bash {job_dir}/cmd.sh > {job_dir}/out 2> {job_dir}/err < /dev/null; "
+            f"echo $? > {job_dir}/rc.tmp && mv {job_dir}/rc.tmp {job_dir}/rc"
+        )
+        launcher = (
+            f"mkdir -p {shlex.quote(_WORK_DIR)} && "
+            f"if mkdir {quoted_dir} 2> /dev/null; then "
+            f"cat > {quoted_dir}/cmd.sh && "
+            "{ setsid nohup bash -c " + detached + " > /dev/null 2>&1 < /dev/null & } && echo LAUNCHED; "
+            "else echo LAUNCHED; fi"
+        )
+        launch = self._exec(launcher, stdin=command, exec_timeout=30.0)
+        if "LAUNCHED" not in launch.get("stdout", ""):
+            raise GatewayBackendError(
+                f"Gateway command launcher failed (exit={launch.get('exit_code')}): {launch.get('stderr', '')[:500]}"
+            )
+
+        # Wait for the rc file, then emit bounded output in the same exec.
+        waiter = (
+            f"if timeout {_IN_CONTAINER_WAIT_S} bash -c 'until [ -f {job_dir}/rc ]; do sleep 0.1; done'; then "
+            f'echo {_DONE_MARKER}; echo "RC=$(cat {quoted_dir}/rc)"; '
+            f"head -c {_MAX_STDOUT_BYTES} {quoted_dir}/out; "
+            f"head -c {_MAX_STDERR_BYTES} {quoted_dir}/err >&2; "
+            f"else echo {_PENDING_MARKER}; fi"
+        )
+        # Budget: command timeout, plus TERM->KILL grace, plus slack for the
+        # detached launcher and filesystem latency.
+        deadline = time.monotonic() + effective_timeout + 60.0
+        while True:
+            response = self._exec(waiter, exec_timeout=_WAIT_EXEC_TIMEOUT_S, workdir="/")
+            stdout = response.get("stdout", "")
+            if _DONE_MARKER in stdout:
+                break
+            if _PENDING_MARKER not in stdout:
+                raise GatewayBackendError(
+                    f"Gateway wait exec returned no marker (exit={response.get('exit_code')}): "
+                    f"stdout={stdout[:200]!r} stderr={response.get('stderr', '')[:200]!r}"
+                )
+            if time.monotonic() > deadline:
+                self._exec(f"rm -rf {quoted_dir}", exec_timeout=15.0)
+                raise GatewayBackendError(
+                    f"Gateway command did not finish within {effective_timeout}s plus grace; giving up."
+                )
+
+        payload = stdout.split(_DONE_MARKER, 1)[1].lstrip("\n")
+        rc_line, _, out = payload.partition("\n")
+        try:
+            exit_code = int(rc_line.removeprefix("RC=").strip())
+        except ValueError:
+            raise GatewayBackendError(f"Gateway wait exec returned an invalid rc line: {rc_line!r}") from None
+        stderr = response.get("stderr", "")
+        self._exec(f"rm -rf {quoted_dir}", exec_timeout=15.0)
+        if exit_code == 124:
+            stderr = f"Command timed out after {effective_timeout}s.\n" + stderr
+        return ExecutionResult(stdout=out, stderr=stderr, exit_code=exit_code)
+
+    # ------------------------------------------------------------- keepalive
+
+    def _start_keepalive(self) -> None:
+        if self._keepalive_interval_s <= 0 or self._keepalive_thread is not None:
+            return
+        self._keepalive_stop = threading.Event()
+        self._keepalive_thread = threading.Thread(
+            target=self._keepalive_loop, name="gateway-backend-keepalive", daemon=True
+        )
+        self._keepalive_thread.start()
+
+    def _stop_keepalive(self) -> None:
+        if self._keepalive_stop is not None:
+            self._keepalive_stop.set()
+        self._keepalive_thread = None
+        self._keepalive_stop = None
+
+    def _keepalive_loop(self) -> None:
+        """Refresh the affinity TTL while the container idles between turns.
+
+        The binding TTL (15 minutes by default) only refreshes on traffic; a
+        long generation pause between agent turns would otherwise let it
+        expire mid-episode. Uses its own HTTP session (requests.Session is not
+        thread-safe) and skips ticks when a command exec is in flight.
+        """
+        stop = self._keepalive_stop
+        session = requests.Session()
+        assert stop is not None
+        while not stop.wait(self._keepalive_interval_s):
+            affinity_id = self._affinity_id
+            if affinity_id is None:
+                continue
+            if time.monotonic() - self._last_request_monotonic < self._keepalive_interval_s / 2:
+                continue
+            if not self._exec_lock.acquire(blocking=False):
+                continue  # A real command is in flight; it refreshes the TTL.
+            try:
+                self._exec("true", exec_timeout=15.0, http_session=session)
+            except Exception as e:
+                logger.warning("Gateway keepalive failed for %s: %s", affinity_id[:12], e)
+            finally:
+                self._exec_lock.release()
+        session.close()
+
+    # --------------------------------------------------------------- file IO
+
+    def write_file(self, path: str, content: str | bytes) -> None:
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        quoted = shlex.quote(path)
+        parent = shlex.quote(posixpath.dirname(path) or "/")
+        with self._exec_lock:
+            if len(content) <= _UPLOAD_CHUNK_BYTES:
+                result = self._exec(
+                    f"mkdir -p {parent} && base64 -d > {quoted}",
+                    stdin=base64.b64encode(content).decode(),
+                    exec_timeout=30.0,
+                )
+                if result.get("exit_code") != 0:
+                    raise GatewayBackendError(f"write_file failed for {path!r}: {result.get('stderr', '')[:500]}")
+                return
+            self._upload_chunked(content, target_command=f"cat > {quoted}", parent_dir=parent, label=path)
+
+    def put_archive(self, root: str, tar_bytes: bytes) -> None:
+        quoted_root = shlex.quote(root)
+        with self._exec_lock:
+            start_time = time.perf_counter()
+            if len(tar_bytes) <= _UPLOAD_CHUNK_BYTES:
+                result = self._exec(
+                    f"mkdir -p {quoted_root} && base64 -d | tar -xf - -C {quoted_root}",
+                    stdin=base64.b64encode(tar_bytes).decode(),
+                    exec_timeout=45.0,
+                )
+                if result.get("exit_code") != 0:
+                    raise GatewayBackendError(f"put_archive failed at root={root!r}: {result.get('stderr', '')[:500]}")
+            else:
+                self._upload_chunked(
+                    tar_bytes, target_command=f"tar -xf - -C {quoted_root}", parent_dir=quoted_root, label=root
+                )
+            elapsed_s = time.perf_counter() - start_time
+            if self._TIMING_LOGS and elapsed_s >= self._TIMING_LOG_THRESHOLD_S:
+                logger.info(
+                    "GatewayBackend.put_archive timing image=%s root=%s bytes=%s total=%.3fs",
+                    self._image,
+                    root,
+                    len(tar_bytes),
+                    elapsed_s,
+                )
+
+    def _upload_chunked(self, data: bytes, target_command: str, parent_dir: str, label: str) -> None:
+        """Upload ``data`` in idempotent base64 chunk files, then assemble.
+
+        Each chunk exec overwrites its own part file, so a gateway-level retry
+        of any single request cannot corrupt the payload.
+        """
+        token = uuid.uuid4().hex[:16]
+        stage_dir = f"{_WORK_DIR}/upload_{token}"
+        quoted_stage = shlex.quote(stage_dir)
+        chunks = [data[i : i + _UPLOAD_CHUNK_BYTES] for i in range(0, len(data), _UPLOAD_CHUNK_BYTES)]
+        result = self._exec(f"mkdir -p {quoted_stage}", exec_timeout=15.0)
+        if result.get("exit_code") != 0:
+            raise GatewayBackendError(f"upload staging failed for {label!r}: {result.get('stderr', '')[:500]}")
+        for index, chunk in enumerate(chunks):
+            result = self._exec(
+                f"base64 -d > {quoted_stage}/part.{index:06d}",
+                stdin=base64.b64encode(chunk).decode(),
+                exec_timeout=30.0,
+            )
+            if result.get("exit_code") != 0:
+                raise GatewayBackendError(
+                    f"upload chunk {index} failed for {label!r}: {result.get('stderr', '')[:500]}"
+                )
+        result = self._exec(
+            f"mkdir -p {parent_dir} && cat {quoted_stage}/part.* | {target_command} && rm -rf {quoted_stage}",
+            exec_timeout=_WAIT_EXEC_TIMEOUT_S,
+        )
+        if result.get("exit_code") != 0:
+            raise GatewayBackendError(f"upload assembly failed for {label!r}: {result.get('stderr', '')[:500]}")
+
+    def read_file(self, path: str, binary: bool = False) -> str | bytes:
+        quoted = shlex.quote(path)
+        with self._exec_lock:
+            probe = self._exec(
+                f"if [ ! -e {quoted} ]; then exit 40; elif [ -d {quoted} ]; then exit 41; fi; wc -c < {quoted}",
+                exec_timeout=15.0,
+            )
+            exit_code = probe.get("exit_code")
+            if exit_code == 40:
+                raise FileNotFoundError(f"File not found in container: '{path}'")
+            if exit_code == 41:
+                raise IsADirectoryError(f"Path '{path}' is a directory, not a file.")
+            if exit_code != 0:
+                raise GatewayBackendError(f"read_file probe failed for {path!r}: {probe.get('stderr', '')[:500]}")
+            try:
+                size = int(probe.get("stdout", "").strip())
+            except ValueError:
+                raise GatewayBackendError(
+                    f"read_file probe returned an invalid size for {path!r}: {probe.get('stdout', '')!r}"
+                ) from None
+
+            parts: list[bytes] = []
+            for offset in range(0, max(size, 1), _READ_CHUNK_BYTES):
+                result = self._exec(
+                    f"tail -c +{offset + 1} {quoted} | head -c {_READ_CHUNK_BYTES} | base64 -w0", exec_timeout=30.0
+                )
+                if result.get("exit_code") != 0:
+                    raise GatewayBackendError(f"read_file failed for {path!r}: {result.get('stderr', '')[:500]}")
+                parts.append(base64.b64decode(result.get("stdout", "").strip()))
+        content = b"".join(parts)
+        if binary:
+            return content
+        return content.decode("utf-8", errors="replace")
+
+
 def create_backend(backend_type: str, **kwargs) -> SandboxBackend:
     """Factory function to create a sandbox backend.
 
     Args:
-        backend_type: ``"docker"`` or ``"apptainer"``.
+        backend_type: ``"docker"``, ``"apptainer"``, or ``"gateway"``.
         **kwargs: Backend-specific arguments.
 
     Returns:
         SandboxBackend instance (not yet started).
     """
+    if backend_type != "gateway":
+        kwargs.pop("gateway_url", None)
     if backend_type == "docker":
         return DockerBackend(**kwargs)
     if backend_type == "apptainer":
         return ApptainerBackend(**kwargs)
-    raise ValueError(f"Unknown backend type: {backend_type}. Supported: 'docker', 'apptainer'.")
+    if backend_type == "gateway":
+        return GatewayBackend(**kwargs)
+    raise ValueError(f"Unknown backend type: {backend_type}. Supported: 'docker', 'apptainer', 'gateway'.")
