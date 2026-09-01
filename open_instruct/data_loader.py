@@ -32,10 +32,6 @@ from ray.util import queue as ray_queue
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
-# vllm is only used in type annotations here; importing it at runtime is ABI-locked to
-# a specific torch build and breaks entrypoints (e.g. dpo.py) that never touch vllm.
-# Annotations are quoted rather than using `from __future__ import annotations`, which
-# would change annotation semantics for every dataclass in this module.
 if TYPE_CHECKING:
     import vllm
 
