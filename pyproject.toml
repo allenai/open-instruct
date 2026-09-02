@@ -9,7 +9,11 @@ dependencies = [
     "antlr4-python3-runtime==4.11",
     "backoff>=2.2.1",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
-    "datasets>=4.0.0",
+    # torchvision 0.28 removed torchvision.io.VideoReader; datasets guarded that
+    # import with try/except in 4.8.4, so anything older explodes in the torch
+    # formatter whenever torchvision is importable. Held below 5.x so the major
+    # bump lands as its own change.
+    "datasets>=4.8.4,<5",
     "debugpy>=1.8.13",
     "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
@@ -50,6 +54,7 @@ dependencies = [
     # b20-b26 pin cutlass==4.6.0.dev0; and b27+, which do work with 4.6.2, require
     # apache-tvm-ffi>=0.1.12. OLMo-core degrades to FA3/FA2 without it. Restore this
     # once vLLM relaxes its apache-tvm-ffi pin.
+
     # FA3 ships one wheel per (CUDA, torch) pair; this is the cu130 + torch 2.13 build.
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.08.17-542a34a/flash_attn_3-3.0.0%2B20260817.cu130torch2130cxx11abitrue.25110-cp310-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
