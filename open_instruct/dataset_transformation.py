@@ -48,7 +48,7 @@ import hashlib
 import json
 import multiprocessing
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from typing import Any, Literal
@@ -1440,7 +1440,7 @@ def sft_tokenize_fn_args(max_seq_length: int | None, over_length_strategy: str) 
     return fn_args
 
 
-def _was_truncated(offsets: list[tuple[int, int]], rendered: str, n_tokens: int, max_seq_length: int | None) -> bool:
+def _was_truncated(offsets: Sequence[Sequence[int]], rendered: str, n_tokens: int, max_seq_length: int | None) -> bool:
     """Whether `max_seq_length` truncation dropped part of `rendered`.
 
     Both conditions are needed. Sitting at the cap is necessary but not sufficient: a
