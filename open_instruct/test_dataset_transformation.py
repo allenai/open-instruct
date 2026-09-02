@@ -1022,21 +1022,48 @@ class TestOverLengthStrategy(unittest.TestCase):
             self.assertEqual(out[key].tolist(), baseline[key].tolist(), key)
         self.assertTrue(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
 
-    def test_a_row_ending_at_the_limit_on_eos_is_not_truncated(self):
-        """A row that happens to be exactly `max_seq_length` and already ends in EOS was not
-        cut, so `terminate` must not overwrite its last real token."""
-        keep = self._tokenize(64, "keep")
-        input_ids = keep[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
-        exact = len(input_ids)
-        with mock.patch.object(
-            open_instruct.dataset_transformation, "_tokenize_tulu_sft_with_assistant_labels"
-        ) as patched:
-            ids = torch.tensor([input_ids[:-1] + [self.tokenizer.eos_token_id]])
-            patched.return_value = (ids, torch.ones_like(ids), ids.clone())
-            out = self._tokenize(exact, "terminate")
-        got = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
-        self.assertEqual(got[-1], self.tokenizer.eos_token_id)
-        self.assertEqual(got[-2], input_ids[-2])
+    def test_exact_length_row_that_covers_its_render_is_not_treated_as_truncated(self):
+        """Sitting at `max_seq_length` does not prove truncation: a conversation can render to
+        exactly that many tokens. `drop` must not discard it and `terminate` must not rewrite
+        its last token."""
+        offsets = [(0, 3), (3, 7)]
+        rendered = "abcdefg"
+        self.assertFalse(
+            open_instruct.dataset_transformation._was_truncated(offsets, rendered, n_tokens=2, max_seq_length=2)
+        )
+
+    def test_over_length_render_cut_on_an_eos_is_still_truncated(self):
+        """The converse: a multi-turn render cut exactly on some earlier turn's EOS ends in EOS
+        but did lose characters, so inferring from the final token would miss it."""
+        offsets = [(0, 3), (3, 7)]
+        rendered = "abcdefg and a great deal more text"
+        self.assertTrue(
+            open_instruct.dataset_transformation._was_truncated(offsets, rendered, n_tokens=2, max_seq_length=2)
+        )
+
+    def test_terminate_leaves_a_cut_in_a_masked_span_alone(self):
+        """When truncation lands in a later user/system/tool turn the final label is masked, so
+        nothing is trained on those positions and there is no unterminated supervision to
+        repair. Writing a trainable EOS there would teach the model to stop partway through its
+        own input."""
+        input_ids = torch.tensor([[10, 11, 12]])
+        labels = torch.tensor([[-100, 11, -100]])  # earlier trainable token, masked tail
+        out_ids, out_labels = open_instruct.dataset_transformation._apply_over_length_strategy(
+            input_ids.clone(), labels.clone(), self.tokenizer, truncated=True, over_length_strategy="terminate"
+        )
+        self.assertEqual(out_ids.tolist(), input_ids.tolist())
+        self.assertEqual(out_labels.tolist(), labels.tolist())
+
+    def test_terminate_rewrites_a_cut_inside_a_trainable_span(self):
+        """The case the fix is for: the cut landed mid-assistant-turn, so the trainable tail has
+        no terminator."""
+        input_ids = torch.tensor([[10, 11, 12]])
+        labels = torch.tensor([[-100, 11, 12]])
+        out_ids, out_labels = open_instruct.dataset_transformation._apply_over_length_strategy(
+            input_ids.clone(), labels.clone(), self.tokenizer, truncated=True, over_length_strategy="terminate"
+        )
+        self.assertEqual(out_ids[0, -1].item(), self.tokenizer.eos_token_id)
+        self.assertEqual(out_labels[0, -1].item(), self.tokenizer.eos_token_id)
 
     def test_terminate_does_not_rescue_an_all_masked_row(self):
         """`_tokenize_row_or_mask_out` masks out rows whose assistant spans could not be

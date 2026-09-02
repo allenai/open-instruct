@@ -1320,7 +1320,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
     tools: list | None,
     max_seq_length: int | None,
     last_turn_only: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool]:
     # Assistant label spans are derived from `return_offsets_mapping`, which slow
     # (Python) tokenizers do not support. Fail with a clear message instead of the
     # opaque ValueError/NotImplementedError the tokenizer would raise.
@@ -1346,6 +1346,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
     input_ids = tokenized[INPUT_IDS_KEY]
     attention_mask = tokenized[ATTENTION_MASK_KEY]
     offsets = tokenized["offset_mapping"][0].tolist()
+    truncated = _was_truncated(offsets, rendered, input_ids.shape[-1], max_seq_length)
     labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
 
     trainable_indices = _trainable_assistant_indices(messages, last_turn_only)
@@ -1406,7 +1407,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
             if start < end:
                 labels[0, start:end] = input_ids[0, start:end]
         _verify_assistant_spans_cover_content(messages, tokenizer, input_ids, rendered, token_spans)
-        return input_ids, attention_mask, labels
+        return input_ids, attention_mask, labels, truncated
 
     for token_idx, (token_start, token_end) in enumerate(offsets):
         if token_start == token_end:
@@ -1417,7 +1418,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
         if any(token_start < span_end and span_start < token_end for span_start, span_end in trainable_char_spans):
             labels[0, token_idx] = input_ids[0, token_idx]
 
-    return input_ids, attention_mask, labels
+    return input_ids, attention_mask, labels, truncated
 
 
 DEFAULT_OVER_LENGTH_STRATEGY = "keep"
@@ -1439,43 +1440,58 @@ def sft_tokenize_fn_args(max_seq_length: int | None, over_length_strategy: str) 
     return fn_args
 
 
+def _was_truncated(offsets: list[tuple[int, int]], rendered: str, n_tokens: int, max_seq_length: int | None) -> bool:
+    """Whether `max_seq_length` truncation dropped part of `rendered`.
+
+    Both conditions are needed. Sitting at the cap is necessary but not sufficient: a
+    conversation can render to exactly `max_seq_length` tokens on its own. And the last token not
+    being EOS is neither — a template may not end in EOS, while an over-length render can be cut
+    exactly on some earlier turn's EOS. Offsets settle it directly: if no token reaches the end of
+    the rendered string, characters were dropped.
+    """
+    if max_seq_length is None or n_tokens < max_seq_length:
+        return False
+    if not offsets:
+        return False
+    return max(end for _, end in offsets) < len(rendered)
+
+
 def _apply_over_length_strategy(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     tokenizer: PreTrainedTokenizer,
-    max_seq_length: int | None,
+    truncated: bool,
     over_length_strategy: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Handle a conversation that `max_seq_length` truncation cut short.
 
     `truncation_side` is `right`, so a conversation longer than `max_seq_length` loses its
-    trailing EOS along with the excess. What remains is a sequence with no terminator anywhere
-    in it, i.e. supervision to keep generating forever, and the cut lands mid-turn so the
-    trainable tail is a partial answer. Measured on the Dolci-Think 32768 cache: 2.02% of rows
-    end on a non-EOS token and 2.00% have that final token trainable.
+    trailing EOS along with the excess. When the cut lands inside an assistant turn what remains
+    is trainable text with no terminator anywhere in it, i.e. supervision to keep generating
+    forever. Measured on the Dolci-Think 32768 cache: 2.02% of rows end on a non-EOS token and
+    2.00% have that final token trainable.
 
-    Returns the tensors unchanged unless the row was actually truncated.
+    Returns the tensors unchanged unless the row was truncated in a way that matters.
     """
     if over_length_strategy not in OVER_LENGTH_STRATEGIES:
         raise ValueError(f"over_length_strategy must be one of {OVER_LENGTH_STRATEGIES}, got {over_length_strategy!r}")
-    if over_length_strategy == "keep" or max_seq_length is None:
+    if over_length_strategy == DEFAULT_OVER_LENGTH_STRATEGY or not truncated:
         return input_ids, labels
+    if over_length_strategy == "drop":
+        # `sft_tulu_filter_v1` removes rows whose labels are entirely masked.
+        return input_ids, torch.full_like(labels, MASKED_TOKEN_VALUE)
     eos_token_id = tokenizer.eos_token_id
     if eos_token_id is None:
         raise ValueError(
             f"over_length_strategy={over_length_strategy!r} needs an EOS token, but "
             f"{type(tokenizer).__name__} has eos_token_id=None."
         )
-    # A row sitting exactly at the limit and already ending in EOS was not cut, so leave it be.
-    if input_ids.shape[-1] < max_seq_length or input_ids[0, -1].item() == eos_token_id:
-        return input_ids, labels
-    if over_length_strategy == "drop":
-        # `sft_tulu_filter_v1` removes rows whose labels are entirely masked.
-        return input_ids, torch.full_like(labels, MASKED_TOKEN_VALUE)
-    # An all-masked row is one `_tokenize_row_or_mask_out` gave up on, and the filter is about to
-    # drop it. Making the EOS trainable would leave one unmasked label, so the row would survive
-    # the filter and be trained on despite its labels being unverified.
-    if not bool((labels != MASKED_TOKEN_VALUE).any()):
+    # The cut landed in a masked span (a later user/system/tool turn, or a row
+    # `_tokenize_row_or_mask_out` gave up on and masked entirely). Nothing is trained on those
+    # positions, so there is no unterminated *supervision* to repair -- and writing a trainable
+    # EOS there would teach the model to stop partway through its own input, or would leave one
+    # unmasked label on a row the filter is about to drop and so smuggle it into training.
+    if labels[0, -1].item() == MASKED_TOKEN_VALUE:
         return input_ids, labels
     input_ids[0, -1] = eos_token_id
     labels[0, -1] = eos_token_id
@@ -1501,7 +1517,7 @@ def _tokenize_row_or_mask_out(
         raise ValueError("messages field is empty.")
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     try:
-        input_ids, attention_mask, labels = _tokenize_tulu_sft_with_assistant_labels(
+        input_ids, attention_mask, labels, truncated = _tokenize_tulu_sft_with_assistant_labels(
             messages, tokenizer, tools, max_seq_length, last_turn_only=last_turn_only
         )
     except AssistantSpanDerivationError as exc:
@@ -1509,9 +1525,11 @@ def _tokenize_row_or_mask_out(
             f"Dropping a conversation whose assistant label spans could not be derived "
             f"({[m['role'] for m in messages]}): {exc}"
         )
+        rendered = tokenizer.apply_chat_template(conversation=messages, tools=tools, tokenize=False)
         tokenized = tokenizer(
-            tokenizer.apply_chat_template(conversation=messages, tools=tools, tokenize=False),
+            rendered,
             add_special_tokens=False,
+            return_offsets_mapping=True,
             return_tensors="pt",
             padding=False,
             truncation=max_seq_length is not None,
@@ -1520,7 +1538,10 @@ def _tokenize_row_or_mask_out(
         input_ids = tokenized[INPUT_IDS_KEY]
         attention_mask = tokenized[ATTENTION_MASK_KEY]
         labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
-    input_ids, labels = _apply_over_length_strategy(input_ids, labels, tokenizer, max_seq_length, over_length_strategy)
+        truncated = _was_truncated(
+            tokenized["offset_mapping"][0].tolist(), rendered, input_ids.shape[-1], max_seq_length
+        )
+    input_ids, labels = _apply_over_length_strategy(input_ids, labels, tokenizer, truncated, over_length_strategy)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
