@@ -960,5 +960,118 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         self.assertEqual(sum(masks), 0)
 
 
+class TestOverLengthStrategy(unittest.TestCase):
+    """A conversation cut by `max_seq_length` loses its trailing EOS, leaving supervision
+    with no terminator anywhere in it. Measured on the Dolci-Think 32768 cache: 2.02% of
+    rows end on a non-EOS token, 2.00% of them trainable."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+
+    def _tokenize(self, max_seq_length, over_length_strategy):
+        row = {
+            "messages": [
+                {"role": "user", "content": "Count upward for a while."},
+                {"role": "assistant", "content": " ".join(str(i) for i in range(400))},
+            ]
+        }
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=max_seq_length, over_length_strategy=over_length_strategy
+        )
+
+    def _short_row(self, over_length_strategy):
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096, over_length_strategy=over_length_strategy
+        )
+
+    def test_keep_leaves_a_truncated_row_unterminated(self):
+        """The bug, pinned: this is the historical default and stays the default."""
+        out = self._tokenize(64, "keep")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertNotEqual(input_ids[-1], self.tokenizer.eos_token_id)
+
+    def test_terminate_ends_a_truncated_row_with_a_trainable_eos(self):
+        out = self._tokenize(64, "terminate")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertEqual(input_ids[-1], self.tokenizer.eos_token_id)
+        # Trainable, so the model actually learns to stop rather than just being delimited.
+        self.assertEqual(labels[-1], self.tokenizer.eos_token_id)
+
+    def test_drop_masks_a_truncated_row_so_the_filter_removes_it(self):
+        out = self._tokenize(64, "drop")
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+        self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    @parameterized.expand([("keep",), ("terminate",), ("drop",)])
+    def test_rows_that_fit_are_untouched(self, over_length_strategy):
+        """Only truncated rows may be modified; a row that fits must be byte-identical
+        across strategies, which is what keeps existing caches valid."""
+        baseline = self._short_row("keep")
+        out = self._short_row(over_length_strategy)
+        for key in (
+            open_instruct.dataset_transformation.INPUT_IDS_KEY,
+            open_instruct.dataset_transformation.LABELS_KEY,
+            open_instruct.dataset_transformation.ATTENTION_MASK_KEY,
+        ):
+            self.assertEqual(out[key].tolist(), baseline[key].tolist(), key)
+        self.assertTrue(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    def test_a_row_ending_at_the_limit_on_eos_is_not_truncated(self):
+        """A row that happens to be exactly `max_seq_length` and already ends in EOS was not
+        cut, so `terminate` must not overwrite its last real token."""
+        keep = self._tokenize(64, "keep")
+        input_ids = keep[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        exact = len(input_ids)
+        with mock.patch.object(
+            open_instruct.dataset_transformation, "_tokenize_tulu_sft_with_assistant_labels"
+        ) as patched:
+            ids = torch.tensor([input_ids[:-1] + [self.tokenizer.eos_token_id]])
+            patched.return_value = (ids, torch.ones_like(ids), ids.clone())
+            out = self._tokenize(exact, "terminate")
+        got = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        self.assertEqual(got[-1], self.tokenizer.eos_token_id)
+        self.assertEqual(got[-2], input_ids[-2])
+
+    def test_terminate_does_not_rescue_an_all_masked_row(self):
+        """`_tokenize_row_or_mask_out` masks out rows whose assistant spans could not be
+        derived so the filter drops them. Making the EOS trainable would leave one unmasked
+        label and smuggle such a row back into training."""
+        with mock.patch.object(
+            open_instruct.dataset_transformation,
+            "_tokenize_tulu_sft_with_assistant_labels",
+            side_effect=open_instruct.dataset_transformation.AssistantSpanDerivationError("forced"),
+        ):
+            out = self._tokenize(64, "terminate")
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+        self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    def test_default_is_omitted_from_the_tokenize_args(self):
+        """`compute_config_hash` JSON-encodes these args, so including the key at its default
+        would change the hash of every existing dataset cache and force a re-tokenization."""
+        self.assertEqual(
+            open_instruct.dataset_transformation.sft_tokenize_fn_args(4096, "keep"), {"max_seq_length": 4096}
+        )
+
+    @parameterized.expand([("terminate",), ("drop",)])
+    def test_opting_in_is_recorded_in_the_tokenize_args(self, over_length_strategy):
+        """An opted-in run must get a distinct hash, so it can never be served a cache that was
+        tokenized under a different strategy."""
+        self.assertEqual(
+            open_instruct.dataset_transformation.sft_tokenize_fn_args(4096, over_length_strategy),
+            {"max_seq_length": 4096, "over_length_strategy": over_length_strategy},
+        )
+
+    def test_unknown_strategy_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._tokenize(64, "truncate-harder")
+
+
 if __name__ == "__main__":
     unittest.main()

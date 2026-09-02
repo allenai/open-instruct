@@ -1420,8 +1420,74 @@ def _tokenize_tulu_sft_with_assistant_labels(
     return input_ids, attention_mask, labels
 
 
+DEFAULT_OVER_LENGTH_STRATEGY = "keep"
+OVER_LENGTH_STRATEGIES = (DEFAULT_OVER_LENGTH_STRATEGY, "terminate", "drop")
+
+
+def sft_tokenize_fn_args(max_seq_length: int | None, over_length_strategy: str) -> dict[str, Any]:
+    """Build the `transform_fn_args` entry for the SFT tokenizer.
+
+    `over_length_strategy` is omitted at its default because `compute_config_hash` JSON-encodes
+    these args: including the key unconditionally would change the hash of every existing dataset
+    cache and force each to be re-tokenized. Omitting it keeps default runs on their current
+    caches, while an opted-in run still gets a distinct hash and so can never be served a cache
+    tokenized under a different strategy.
+    """
+    fn_args: dict[str, Any] = {"max_seq_length": max_seq_length}
+    if over_length_strategy != DEFAULT_OVER_LENGTH_STRATEGY:
+        fn_args["over_length_strategy"] = over_length_strategy
+    return fn_args
+
+
+def _apply_over_length_strategy(
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int | None,
+    over_length_strategy: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Handle a conversation that `max_seq_length` truncation cut short.
+
+    `truncation_side` is `right`, so a conversation longer than `max_seq_length` loses its
+    trailing EOS along with the excess. What remains is a sequence with no terminator anywhere
+    in it, i.e. supervision to keep generating forever, and the cut lands mid-turn so the
+    trainable tail is a partial answer. Measured on the Dolci-Think 32768 cache: 2.02% of rows
+    end on a non-EOS token and 2.00% have that final token trainable.
+
+    Returns the tensors unchanged unless the row was actually truncated.
+    """
+    if over_length_strategy not in OVER_LENGTH_STRATEGIES:
+        raise ValueError(f"over_length_strategy must be one of {OVER_LENGTH_STRATEGIES}, got {over_length_strategy!r}")
+    if over_length_strategy == "keep" or max_seq_length is None:
+        return input_ids, labels
+    eos_token_id = tokenizer.eos_token_id
+    if eos_token_id is None:
+        raise ValueError(
+            f"over_length_strategy={over_length_strategy!r} needs an EOS token, but "
+            f"{type(tokenizer).__name__} has eos_token_id=None."
+        )
+    # A row sitting exactly at the limit and already ending in EOS was not cut, so leave it be.
+    if input_ids.shape[-1] < max_seq_length or input_ids[0, -1].item() == eos_token_id:
+        return input_ids, labels
+    if over_length_strategy == "drop":
+        # `sft_tulu_filter_v1` removes rows whose labels are entirely masked.
+        return input_ids, torch.full_like(labels, MASKED_TOKEN_VALUE)
+    # An all-masked row is one `_tokenize_row_or_mask_out` gave up on, and the filter is about to
+    # drop it. Making the EOS trainable would leave one unmasked label, so the row would survive
+    # the filter and be trained on despite its labels being unverified.
+    if not bool((labels != MASKED_TOKEN_VALUE).any()):
+        return input_ids, labels
+    input_ids[0, -1] = eos_token_id
+    labels[0, -1] = eos_token_id
+    return input_ids, labels
+
+
 def _tokenize_row_or_mask_out(
-    row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None, last_turn_only: bool = False
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int | None,
+    last_turn_only: bool = False,
+    over_length_strategy: str = "keep",
 ) -> dict[str, Any]:
     """Tokenize one conversation, masking the whole row out if its labels are underivable.
 
@@ -1454,32 +1520,48 @@ def _tokenize_row_or_mask_out(
         input_ids = tokenized[INPUT_IDS_KEY]
         attention_mask = tokenized[ATTENTION_MASK_KEY]
         labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
+    input_ids, labels = _apply_over_length_strategy(input_ids, labels, tokenizer, max_seq_length, over_length_strategy)
     row[INPUT_IDS_KEY] = input_ids.flatten()
     row[LABELS_KEY] = labels.flatten()
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
     return row
 
 
-def _sft_tulu_tokenize(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None):
+def _sft_tulu_tokenize(
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int | None, over_length_strategy: str = "keep"
+):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
-    return _tokenize_row_or_mask_out(row, tokenizer, max_seq_length)
+    return _tokenize_row_or_mask_out(row, tokenizer, max_seq_length, over_length_strategy=over_length_strategy)
 
 
 def sft_tulu_tokenize_without_truncation_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
     return _sft_tulu_tokenize(row, tokenizer, max_seq_length=None)
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
-    return _sft_tulu_tokenize(row, tokenizer, max_seq_length=max_seq_length)
+def sft_tulu_tokenize_and_truncate_v1(
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int, over_length_strategy: str = "keep"
+):
+    """Tokenize a conversation, truncating it to ``max_seq_length``.
+
+    ``over_length_strategy`` decides what happens to a conversation that truncation cut short:
+    ``keep`` leaves it unterminated (the historical behavior), ``terminate`` replaces its final
+    token with a trainable EOS, and ``drop`` removes the row. See
+    :func:`_apply_over_length_strategy`.
+    """
+    return _sft_tulu_tokenize(row, tokenizer, max_seq_length=max_seq_length, over_length_strategy=over_length_strategy)
 
 
-def last_turn_tulu_tokenize_and_truncate_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def last_turn_tulu_tokenize_and_truncate_v1(
+    row: dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int, over_length_strategy: str = "keep"
+):
     """Tokenize a conversation, training only on the final assistant turn.
 
     Reuses the offset-based assistant-label derivation (which forwards the tools
     column to the chat template) rather than the legacy mask_labels path.
     """
-    return _tokenize_row_or_mask_out(row, tokenizer, max_seq_length, last_turn_only=True)
+    return _tokenize_row_or_mask_out(
+        row, tokenizer, max_seq_length, last_turn_only=True, over_length_strategy=over_length_strategy
+    )
 
 
 def sft_tulu_filter_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
