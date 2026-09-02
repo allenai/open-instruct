@@ -27,18 +27,21 @@ dependencies = [
     "ray[default]>=2.49.2",
     "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.10.0",
+    "torch>=2.13.0",
     # torchvision/torchaudio are only needed transitively (via vllm), but they must
-    # remain direct dependencies so the CUDA-group source pins apply to them.
-    "torchvision>=0.25.0; platform_system == 'Linux'",
-    "torchaudio>=2.10.0; platform_system == 'Linux'",
-    "transformers>=5.4.0",
-    "vllm>=0.19.1; platform_system != 'Darwin'",
+    # remain direct dependencies so the cu130 index pins apply to them.
+    "torchvision>=0.28.0; platform_system == 'Linux'",
+    # torchaudio's last release is 2.11.0; vLLM pins exactly that alongside torch 2.13.
+    "torchaudio>=2.11.0; platform_system == 'Linux'",
+    "transformers>=5.15.0",
+    "vllm>=0.28.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
     "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
+    # FA3 ships one wheel per (CUDA, torch) pair; this is the cu130 + torch 2.13 build.
+    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.08.17-542a34a/flash_attn_3-3.0.0%2B20260817.cu130torch2130cxx11abitrue.25110-cp310-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
@@ -71,47 +74,32 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "fa6c5014c9f6e9ee789da2d9c20d5126fee8df0d" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "92870a33c3fee060d57c3faec52b0b369ece85a6" }
+# PyTorch 2.12 dropped the cu128 build, and no prebuilt flash-attn exists for
+# cu129 + torch 2.13, so CUDA 13.0 is the only version every dependency in this
+# graph publishes for. It covers x86_64 and aarch64 alike, which is why the
+# cuda12/cuda13 dependency-group split is gone.
 flash-attn = [
-  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda12" },
-  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda13" },
+  { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.47/flash_attn-2.8.3%2Bcu130torch2.13-cp312-cp312-linux_x86_64.whl", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
 
-torch = [
-  { index = "pytorch-cu128", group = "cuda12" },
-  { index = "pytorch-cu130", group = "cuda13" },
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
-]
-torchvision = [
-  { index = "pytorch-cu128", group = "cuda12" },
-  { index = "pytorch-cu130", group = "cuda13" },
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
-]
-torchaudio = [
-  { index = "pytorch-cu128", group = "cuda12" },
-  { index = "pytorch-cu130", group = "cuda13" },
-  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
-]
+# Linux-only: macOS falls through to the PyPI (CPU/MPS) build.
+torch = [{ index = "pytorch-cu130", marker = "platform_system == 'Linux'" }]
+torchvision = [{ index = "pytorch-cu130", marker = "platform_system == 'Linux'" }]
+torchaudio = [{ index = "pytorch-cu130", marker = "platform_system == 'Linux'" }]
 
-# vLLM wheels on PyPI are built against CUDA 12.8 on x86_64. The +cu130 builds
-# are only published on the version-specific vLLM wheel index.
-vllm = [
-  { index = "vllm-cu130", group = "cuda13" },
-]
+# vLLM's PyPI wheels track its own default CUDA; the +cu130 builds live on the
+# version-specific wheel index.
+vllm = [{ index = "vllm-cu130", marker = "platform_system == 'Linux'" }]
 
 [[tool.uv.index]]
 name = "vllm-cu130"
-url = "https://wheels.vllm.ai/0.19.1/cu130"
+url = "https://wheels.vllm.ai/0.28.0/cu130"
 explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
@@ -134,15 +122,11 @@ dr-tulu = [
 preview = true
 python-preference = "only-managed"
 link-mode = "hardlink"
-default-groups = ["dev", "cuda12"]
-conflicts = [
-    [
-        { group = "cuda12" },
-        { group = "cuda13" },
-    ],
-]
+default-groups = ["dev"]
 override-dependencies = [
-    "transformers>=5.4.0",
+    # vLLM 0.28 requires >=5.5.3 and is tested against 5.15; without a floor here
+    # this override would let the lock keep an older transformers than vLLM supports.
+    "transformers>=5.15.0",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -151,23 +135,6 @@ environments = [
 ]
 
 [dependency-groups]
-cuda12 = [
-    "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    # The flat FA3 index can publish a newer aarch64-only build than the latest x86_64 build.
-    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
-]
-cuda13 = [
-    "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
-]
 dev = [
     "beaker-py>=2.5.7",
     "mkdocs-material>=9.6.8",

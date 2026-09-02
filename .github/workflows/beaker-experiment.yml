@@ -169,7 +169,7 @@ jobs:
 
           GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           SANITIZED_BRANCH=$(echo "$GIT_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-          INTEGRATION_IMAGE="open-instruct-integration-test-${SANITIZED_BRANCH}-cuda12"
+          INTEGRATION_IMAGE="open-instruct-integration-test-${SANITIZED_BRANCH}"
           echo "Integration image tag: ${INTEGRATION_IMAGE}"
 
           if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
@@ -294,7 +294,10 @@ jobs:
           }
 
           publish_image open_instruct_auto
-          publish_image open_instruct_auto_cuda12
+          # The one image is CUDA 13.0 now; the alias is kept so consumers that
+          # already reference it keep resolving. open_instruct_auto_cuda12 is
+          # retired: torch 2.13 has no cu128 build to produce it from.
+          publish_image open_instruct_auto_cuda13
 
       - name: Summary
         if: always()
@@ -387,94 +390,3 @@ jobs:
               ]
             }
 
-  publish-cuda13-image:
-    name: Publish CUDA 13 image
-    needs: launch-experiment
-    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash -euo pipefail {0}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Checkout oe-eval-internal
-        uses: actions/checkout@v4
-        with:
-          repository: allenai/oe-eval-internal
-          path: './oe-eval-internal'
-          ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
-          fetch-depth: 1
-          filter: 'blob:none'
-
-      - name: Setup Beaker
-        uses: allenai/setup-beaker@v2
-        with:
-          token: ${{ secrets.BEAKER_TOKEN }}
-          workspace: ai2/open-instruct-dev
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build CUDA 13 image
-        id: build
-        run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          IMAGE="open-instruct-auto-cuda13:${SHORT_SHA}"
-          CACHE_REPO="ghcr.io/allenai/open-instruct:buildcache-cuda13"
-
-          if docker buildx build --platform=linux/amd64 \
-            --build-arg GIT_COMMIT="$SHORT_SHA" \
-            --build-arg GIT_BRANCH="${GITHUB_REF_NAME}" \
-            --build-arg CUDA_VERSION=13 \
-            --cache-from "type=registry,ref=${CACHE_REPO}" \
-            --cache-to "type=registry,ref=${CACHE_REPO},mode=max" \
-            --load \
-            --tag "$IMAGE" \
-            .; then
-            echo "CUDA 13 build succeeded with cache push."
-          else
-            echo "Warning: CUDA 13 build with cache push failed. Retrying without cache push."
-            docker buildx build --platform=linux/amd64 \
-              --build-arg GIT_COMMIT="$SHORT_SHA" \
-              --build-arg GIT_BRANCH="${GITHUB_REF_NAME}" \
-              --build-arg CUDA_VERSION=13 \
-              --cache-from "type=registry,ref=${CACHE_REPO}" \
-              --load \
-              --tag "$IMAGE" \
-              .
-          fi
-
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-
-      - name: Check image
-        env:
-          IMAGE: ${{ steps.build.outputs.image }}
-        run: docker run --rm "$IMAGE"
-
-      - name: Push image to Beaker
-        env:
-          SOURCE_IMAGE: ${{ steps.build.outputs.image }}
-          TARGET_IMAGE: open_instruct_auto_cuda13
-        run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          DESCRIPTION="Created from commit: ${SHORT_SHA}; CUDA: 13 (GitHub run ${GITHUB_RUN_ID})"
-          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-
-          echo "Renaming ${BEAKER_USER}/${TARGET_IMAGE} to release prior alias (if present)."
-          beaker image rename "${BEAKER_USER}/${TARGET_IMAGE}" "" || true
-
-          echo "Publishing ${TARGET_IMAGE} with updated image and description."
-          beaker image create --name "$TARGET_IMAGE" --description "$DESCRIPTION" "$SOURCE_IMAGE"
-
-      - name: Summary
-        run: echo "CUDA 13 image published as \`open_instruct_auto_cuda13\`." >> "$GITHUB_STEP_SUMMARY"

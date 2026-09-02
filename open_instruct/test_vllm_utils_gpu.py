@@ -14,8 +14,6 @@ from olmo_core.nn.transformer import TransformerConfig
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
 from transformers import AutoTokenizer
-from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
-from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import logger_utils, utils, vllm_utils
 from open_instruct.ground_truth_utils import RewardConfig
@@ -83,37 +81,30 @@ class TestFSDP2BroadcastWithVLLM(TestGrpoFastBase):
         )
         ray.get(engines[0].ready.remote())
 
-        weight_transfer_port = utils.find_free_port()
-
-        world_size = 2
-        ray.get(
-            engines[0].init_weight_transfer_engine.remote(
-                WeightTransferInitRequest(
-                    init_info={
-                        "master_address": master_address,
-                        "master_port": weight_transfer_port,
-                        "rank_offset": 1,
-                        "world_size": world_size,
-                    }
-                )
-            )
+        # broadcast_weights_to_vllm drives both sides of the rendezvous: it builds
+        # the trainer engine on first use, which calls init_weight_transfer_engine
+        # on each vLLM actor.
+        rendezvous = vllm_utils.WeightSyncRendezvous(
+            backend="nccl",
+            rank=0,
+            tensor_parallel_size=1,
+            master_address=master_address,
+            master_port=utils.find_free_port(),
+            world_size=2,
         )
 
-        model_update_group = NCCLWeightTransferEngine.trainer_init(
-            {"master_address": master_address, "master_port": weight_transfer_port, "world_size": world_size}
-        )
-
-        refs = vllm_utils.broadcast_weights_to_vllm(
+        vllm_utils.broadcast_weights_to_vllm(
             model=model,
             vllm_engines=engines,
-            model_update_group=model_update_group,
-            model_step=0,
+            model_update_group=rendezvous,
+            model_step=7,
             name_mapper=None,
             gather_whole_model=True,
         )
 
-        self.assertGreater(len(refs), 0)
-        ray.get(refs)
+        # send_weights drives the engine-side RPCs to completion, so by the time it
+        # returns the step stamp is already visible on the engine.
+        self.assertEqual(ray.get(engines[0].get_model_step.remote()), 7)
 
         torch.distributed.destroy_process_group()
 
