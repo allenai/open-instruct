@@ -1526,6 +1526,7 @@ def _tokenize_row_or_mask_out(
             f"({[m['role'] for m in messages]}): {exc}"
         )
         rendered = tokenizer.apply_chat_template(conversation=messages, tools=tools, tokenize=False)
+        assert isinstance(rendered, str)
         tokenized = tokenizer(
             rendered,
             add_special_tokens=False,
