@@ -1303,23 +1303,6 @@ wheels = [
 ]
 
 [[package]]
-name = "flash-attn-4"
-version = "4.0.0b5"
-source = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl" }
-dependencies = [
-    { name = "apache-tvm-ffi" },
-    { name = "einops" },
-    { name = "nvidia-cutlass-dsl" },
-    { name = "quack-kernels" },
-    { name = "torch", version = "2.13.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" } },
-    { name = "torch-c-dlpack-ext" },
-    { name = "typing-extensions" },
-]
-wheels = [
-    { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl", hash = "sha256:28d58341980b61224bacd0dcf2c1be3a30e6f73d911a76c5fb83f0c4bf61412b" },
-]
-
-[[package]]
 name = "flash-linear-attention"
 version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2866,7 +2849,6 @@ dependencies = [
     { name = "fastapi", version = "0.136.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "flash-attn-3", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "flash-attn-4", marker = "sys_platform == 'linux'" },
     { name = "flash-linear-attention" },
     { name = "hf-transfer" },
     { name = "immutabledict" },

@@ -40,12 +40,12 @@ RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-ho
     apt-get autoremove -y && \
     rm doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb
 
-# Install Google Cloud CLI
+# Install Google Cloud CLI (the apt package was renamed google-cloud-sdk -> google-cloud-cli)
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
         | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
     && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
         | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-sdk \
+    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-cli \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 # Taken from https://beaker.org/api/v3/release (add | jq -r '.version' if you want it programmatically).
