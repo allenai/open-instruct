@@ -61,7 +61,9 @@ RUN curl --silent \
     && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
     && rm beaker.tar.gz
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
+# Must understand uv.lock revision 4, which uv 0.8.6 does not; reading a
+# newer-revision lock there surfaces as "Group `dev` is not defined".
+COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /uvx /bin/
 
 WORKDIR /stage/
 

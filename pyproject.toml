@@ -20,6 +20,10 @@ dependencies = [
     "numpy>=2",
     "ai2-olmo-core",
     "nvitop>=1.4.2",
+    # vLLM 0.28's tool parsers import NamespaceTool from openai.types.responses,
+    # added in openai 2.25.0; vLLM's own floor (>=2.0.0) is too loose to express it.
+    # Held below 3.x so an SDK major bump is its own change, not a rider on this one.
+    "openai>=2.25.0,<3",
     "packaging>=24.2",
     "peft>=0.13.2",
     "pyarrow>=20.0.0",
