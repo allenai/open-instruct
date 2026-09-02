@@ -174,12 +174,9 @@ class FlatArguments:
         default="keep",
         metadata={
             "help": (
-                "What to do with a conversation that max_seq_length truncation cut short. "
-                "Truncation is right-sided, so such a conversation loses its trailing EOS with "
-                "the excess and becomes supervision with no terminator anywhere in it. "
-                "'keep' is the historical behavior, 'terminate' ends the row with a trainable "
-                "EOS, 'drop' discards the row. Only passed through to tokenization when not "
-                "'keep', so the default leaves existing dataset cache hashes untouched."
+                "What to do with a conversation that max_seq_length truncation cut short: 'keep' "
+                "leaves it unterminated, 'terminate' ends it with a trainable EOS, 'drop' "
+                "discards it. The default leaves existing dataset cache hashes untouched."
             )
         },
     )

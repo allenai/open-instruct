@@ -103,13 +103,9 @@ class TrainingConfig:
     max_seq_length: int = 4096
     """The maximum total input sequence length after tokenization."""
     over_length_strategy: str = "keep"
-    """What to do with a conversation that `max_seq_length` truncation cut short.
-
-    Truncation is right-sided, so an over-length conversation loses its trailing EOS with the
-    excess and becomes supervision with no terminator anywhere in it. `keep` is the historical
-    behavior, `terminate` ends the row with a trainable EOS, `drop` discards the row. Only passed
-    through to tokenization when it is not `keep`, so the default leaves existing dataset cache
-    hashes untouched."""
+    """What to do with a conversation that `max_seq_length` truncation cut short: `keep` leaves it
+    unterminated, `terminate` ends it with a trainable EOS, `drop` discards it. The default leaves
+    existing dataset cache hashes untouched."""
     lr_scheduler_type: str = "linear"
     """The scheduler type to use for learning rate adjustment."""
     max_train_steps: int | None = None

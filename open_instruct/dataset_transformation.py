@@ -1428,11 +1428,8 @@ OVER_LENGTH_STRATEGIES = (DEFAULT_OVER_LENGTH_STRATEGY, "terminate", "drop")
 def sft_tokenize_fn_args(max_seq_length: int | None, over_length_strategy: str) -> dict[str, Any]:
     """Build the `transform_fn_args` entry for the SFT tokenizer.
 
-    `over_length_strategy` is omitted at its default because `compute_config_hash` JSON-encodes
-    these args: including the key unconditionally would change the hash of every existing dataset
-    cache and force each to be re-tokenized. Omitting it keeps default runs on their current
-    caches, while an opted-in run still gets a distinct hash and so can never be served a cache
-    tokenized under a different strategy.
+    `over_length_strategy` is omitted at its default so existing dataset cache hashes (a JSON
+    encoding of these args) are unchanged; opting in still yields a distinct hash.
     """
     fn_args: dict[str, Any] = {"max_seq_length": max_seq_length}
     if over_length_strategy != DEFAULT_OVER_LENGTH_STRATEGY:
@@ -1443,11 +1440,9 @@ def sft_tokenize_fn_args(max_seq_length: int | None, over_length_strategy: str) 
 def _was_truncated(offsets: Sequence[Sequence[int]], rendered: str, n_tokens: int, max_seq_length: int | None) -> bool:
     """Whether `max_seq_length` truncation dropped part of `rendered`.
 
-    Both conditions are needed. Sitting at the cap is necessary but not sufficient: a
-    conversation can render to exactly `max_seq_length` tokens on its own. And the last token not
-    being EOS is neither — a template may not end in EOS, while an over-length render can be cut
-    exactly on some earlier turn's EOS. Offsets settle it directly: if no token reaches the end of
-    the rendered string, characters were dropped.
+    Sitting at the cap is not sufficient (a render can be exactly that long) and the final token
+    not being EOS is neither necessary nor sufficient, so check whether any token reaches the end
+    of the rendered string.
     """
     if max_seq_length is None or n_tokens < max_seq_length:
         return False
@@ -1465,20 +1460,15 @@ def _apply_over_length_strategy(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Handle a conversation that `max_seq_length` truncation cut short.
 
-    `truncation_side` is `right`, so a conversation longer than `max_seq_length` loses its
-    trailing EOS along with the excess. When the cut lands inside an assistant turn what remains
-    is trainable text with no terminator anywhere in it, i.e. supervision to keep generating
-    forever. Measured on the Dolci-Think 32768 cache: 2.02% of rows end on a non-EOS token and
-    2.00% have that final token trainable.
-
-    Returns the tensors unchanged unless the row was truncated in a way that matters.
+    Right-sided truncation drops the trailing EOS, so a cut inside an assistant turn leaves
+    trainable text with no terminator. `keep` leaves the row as is, `terminate` replaces its
+    final token with a trainable EOS, `drop` masks it out so `sft_tulu_filter_v1` removes it.
     """
     if over_length_strategy not in OVER_LENGTH_STRATEGIES:
         raise ValueError(f"over_length_strategy must be one of {OVER_LENGTH_STRATEGIES}, got {over_length_strategy!r}")
     if over_length_strategy == DEFAULT_OVER_LENGTH_STRATEGY or not truncated:
         return input_ids, labels
     if over_length_strategy == "drop":
-        # `sft_tulu_filter_v1` removes rows whose labels are entirely masked.
         return input_ids, torch.full_like(labels, MASKED_TOKEN_VALUE)
     eos_token_id = tokenizer.eos_token_id
     if eos_token_id is None:
@@ -1486,11 +1476,9 @@ def _apply_over_length_strategy(
             f"over_length_strategy={over_length_strategy!r} needs an EOS token, but "
             f"{type(tokenizer).__name__} has eos_token_id=None."
         )
-    # The cut landed in a masked span (a later user/system/tool turn, or a row
-    # `_tokenize_row_or_mask_out` gave up on and masked entirely). Nothing is trained on those
-    # positions, so there is no unterminated *supervision* to repair -- and writing a trainable
-    # EOS there would teach the model to stop partway through its own input, or would leave one
-    # unmasked label on a row the filter is about to drop and so smuggle it into training.
+    # A cut in a masked span (a non-assistant turn, or a row masked out entirely) has no
+    # unterminated supervision to repair; a trainable EOS there would be wrong or would rescue
+    # a row the filter should drop.
     if labels[0, -1].item() == MASKED_TOKEN_VALUE:
         return input_ids, labels
     input_ids[0, -1] = eos_token_id
@@ -1565,10 +1553,8 @@ def sft_tulu_tokenize_and_truncate_v1(
 ):
     """Tokenize a conversation, truncating it to ``max_seq_length``.
 
-    ``over_length_strategy`` decides what happens to a conversation that truncation cut short:
-    ``keep`` leaves it unterminated (the historical behavior), ``terminate`` replaces its final
-    token with a trainable EOS, and ``drop`` removes the row. See
-    :func:`_apply_over_length_strategy`.
+    ``over_length_strategy`` (``keep``, ``terminate``, ``drop``) decides what happens to a
+    conversation that truncation cut short; see :func:`_apply_over_length_strategy`.
     """
     return _sft_tulu_tokenize(row, tokenizer, max_seq_length=max_seq_length, over_length_strategy=over_length_strategy)
 
