@@ -1035,6 +1035,29 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
                 messages, tokenizer, None, 4096
             )
 
+    def test_generation_blocks_are_detected_in_selected_tool_use_template(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = {
+            "default": "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}\n{% endfor %}",
+            "tool_use": (
+                "{% for m in messages %}"
+                "{% if m['role'] == 'assistant' %}"
+                "assistant: {% generation %}{{ m['content'] + eos_token }}{% endgeneration %}"
+                "{% else %}{{ m['role'] }}: {{ m['content'] }}\n{% endif %}"
+                "{% endfor %}"
+            ),
+        }
+        messages = [{"role": "user", "content": "USERQUERY"}, {"role": "assistant", "content": "ANSWERONE"}]
+        tools = [{"type": "function", "function": {"name": "bash", "parameters": {"type": "object"}}}]
+        input_ids, _, labels = open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+            messages, tokenizer, tools, 4096
+        )
+        trained_text = tokenizer.decode(
+            [token for token, label in zip(input_ids[0].tolist(), labels[0].tolist()) if label != -100]
+        )
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("USERQUERY", trained_text)
+
 
 class TestOverLengthStrategy(unittest.TestCase):
     @classmethod
