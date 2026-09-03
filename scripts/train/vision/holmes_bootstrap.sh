@@ -14,6 +14,10 @@ set -euo pipefail
 GIT_REF="${1:?usage: holmes_bootstrap.sh <git-ref> <torchrun args...>}"
 shift
 
+# The bootstrap image may set PYTHONPATH to its own packages (olmo-miles ships an
+# older olmo_core without data.multimodal that would shadow our venv's).
+unset PYTHONPATH
+
 export UV_CACHE_DIR=/weka/oe-adapt-default/allennlp/deletable_uv_cache_cuda13
 export HF_HOME=/weka/oe-adapt-default/allennlp/deletable_hf_cache
 mkdir -p "$UV_CACHE_DIR" "$HF_HOME"
