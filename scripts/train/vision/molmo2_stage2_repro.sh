@@ -13,6 +13,10 @@
 #   bash scripts/train/vision/molmo2_stage2_repro.sh <beaker-image> [STAGE1_CHECKPOINT_RUN_DIR]
 #
 # The checkpoint arg accepts an OLMo-core run dir (latest step is used) or a step dir.
+#
+# Runs on ALLOCATED capacity (non-preemptible, normal priority) across the CUDA-12
+# weka clusters. ai2/holmes (B300) needs a CUDA-13 image of this branch — build with
+# ./scripts/train/build_image_and_launch.sh --cuda-version 13 before adding it here.
 set -euo pipefail
 
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
@@ -21,11 +25,11 @@ echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Stage-1 checkpoint: $STAGE1_CKPT"
 
 uv run python mason.py \
-    --cluster ai2/jupiter \
+    --cluster ai2/jupiter ai2/saturn ai2/ceres \
     --workspace ai2/open-instruct-dev \
-    --priority urgent \
+    --priority normal \
     --image "$BEAKER_IMAGE" \
-    --description "Molmo2-4B stage-2 reproduction (image-only-v9, stage-1 init, upstream recipe)." \
+    --description "open-instruct-multimodal: Molmo2-4B stage-2 reproduction (image-only-v9, stage-1 init, upstream recipe)." \
     --pure_docker_mode \
     --num_nodes 1 \
     --gpus 8 \
