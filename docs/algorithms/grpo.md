@@ -72,7 +72,7 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | | `--vllm_gpu_memory_utilization` | GPU memory utilization ratio | `0.9` |
 | **Model** | `--model_name_or_path` | Model checkpoint for weight initialization | — |
 | | `--gradient_checkpointing` | Use gradient checkpointing | `False` |
-| | `--chat_template_name` | Chat template to use | `None` |
+| | `--chat_template_name` | `CHAT_TEMPLATES` key, or `tokenizer_default` for the tokenizer's own template. Unknown names raise. | `None` |
 | **Saving** | `--output_dir` | Output directory for checkpoints | `output` |
 | | `--save_freq` | Save every N train steps | `200` |
 | | `--with_tracking` | Track experiment with Weights and Biases | `False` |

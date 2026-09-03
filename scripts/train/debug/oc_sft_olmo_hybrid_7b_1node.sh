@@ -35,7 +35,7 @@ CONFIG_NAME=olmo3_hybrid_7B
 # at ids 100266-100275. Sharing it reuses the cache built for
 # oc_sft_olmo3_7b_1node.sh, so the model is the only variable between the runs.
 TOKENIZER=allenai/olmo-3-tokenizer-instruct-dev
-CHAT_TEMPLATE=olmo123
+CHAT_TEMPLATE=tokenizer_default
 MAX_SEQ_LENGTH=32768
 MIXER="allenai/Dolci-Instruct-SFT 1.0"
 SEED=33333
@@ -66,7 +66,7 @@ if [[ "$MODE" == "tokenize" ]]; then
         --workspace ai2/open-instruct-dev \
         --priority urgent \
         --image "$BEAKER_IMAGE" \
-        --description "Tokenize Dolci-Instruct-SFT for Olmo-Hybrid-7B SFT (seq 32768, olmo123)" \
+        --description "Tokenize Dolci-Instruct-SFT for Olmo-Hybrid-7B SFT (seq 32768, tokenizer_default)" \
         --pure_docker_mode \
         --preemptible \
         --num_nodes 1 \

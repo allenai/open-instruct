@@ -299,6 +299,9 @@ class TestConvertHfToNumpySft(_NumpySftTestBase):
             stats = json.load(f)
         self.assertEqual(stats["overall_statistics"]["total_instances"], 2)
         self.assertGreater(stats["overall_statistics"]["total_tokens"], 0)
+        self.assertEqual(stats["configuration"]["chat_template"], "tulu")
+        self.assertEqual(stats["configuration"]["chat_template_source"], "registry:tulu")
+        self.assertEqual(len(stats["configuration"]["chat_template_hash"]), 64)
 
 
 class TestResumeEquivalence(_NumpySftTestBase):

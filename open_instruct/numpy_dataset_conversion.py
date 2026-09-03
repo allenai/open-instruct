@@ -418,7 +418,7 @@ def convert_hf_to_numpy_sft(
         num_samples_skipped=stats["num_samples_skipped"],
         tokenizer_name=tc.tokenizer_name_or_path,
         max_seq_length=max_seq_length,
-        chat_template_name=tc.chat_template_name,
+        **dataset_transformation.describe_chat_template_resolution(tc),
         per_dataset_counts=stats["per_dataset_counts"],
         per_dataset_tokens=stats["per_dataset_tokens"],
         per_dataset_trainable_tokens=stats["per_dataset_trainable_tokens"],
@@ -440,6 +440,8 @@ def write_dataset_statistics(
     per_dataset_tokens: dict[str, int],
     per_dataset_trainable_tokens: dict[str, int],
     per_dataset_filtered: dict[str, int],
+    chat_template_source: str | None = None,
+    chat_template_hash: str | None = None,
 ) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -481,6 +483,8 @@ def write_dataset_statistics(
             "tokenizer": tokenizer_name,
             "max_sequence_length": max_seq_length,
             "chat_template": chat_template_name,
+            "chat_template_source": chat_template_source,
+            "chat_template_hash": chat_template_hash,
         },
         "per_dataset_statistics": merged_stats,
         "overall_statistics": {
@@ -510,7 +514,9 @@ def write_dataset_statistics(
         f.write("-" * 40 + "\n")
         f.write(f"- Tokenizer: {tokenizer_name}\n")
         f.write(f"- Max Sequence Length: {max_seq_length}\n")
-        f.write(f"- Chat Template: {chat_template_name}\n\n")
+        f.write(f"- Chat Template: {chat_template_name}\n")
+        f.write(f"- Chat Template Source: {chat_template_source}\n")
+        f.write(f"- Chat Template Hash: {chat_template_hash}\n\n")
 
         f.write("Per-Dataset Statistics:\n")
         f.write("=" * 80 + "\n")

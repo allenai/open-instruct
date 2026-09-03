@@ -100,7 +100,7 @@ This implementation has the following key features:
 | | `--seed` | Random seed | `42` |
 | **Data** | `--dataset_mixer_list` | List of datasets (local or HF) to sample from | — |
 | | `--dataset_mixer_list_splits` | Dataset splits for training | `["train"]` |
-| | `--chat_template_name` | Chat template to use | `None` |
+| | `--chat_template_name` | `CHAT_TEMPLATES` key, or `tokenizer_default` for the tokenizer's own template. Unknown names raise. | `None` |
 | | `--packing` | Use packing/padding-free collation | `False` |
 | **Parallelism** | `--sequence_parallel_size` | Ulysses sequence parallelism degree | `1` |
 | **LoRA** | `--use_lora` | Use LoRA for parameter-efficient training | `False` |
