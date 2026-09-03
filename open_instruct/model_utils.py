@@ -532,9 +532,16 @@ def uses_olmo3_generation_config(
     """
     if chat_template_name and "olmo" in chat_template_name.lower():
         return True
-    model_config = getattr(model, "config", None)
-    if model_config is None:
-        model_config = getattr(getattr(model, "module", None), "config", None)
+    model_config = None
+    wrapped_model = model
+    seen_model_ids: set[int] = set()
+    while wrapped_model is not None and id(wrapped_model) not in seen_model_ids:
+        seen_model_ids.add(id(wrapped_model))
+        candidate_config = getattr(wrapped_model, "config", None)
+        if getattr(candidate_config, "model_type", None):
+            model_config = candidate_config
+            break
+        wrapped_model = getattr(wrapped_model, "module", None)
     model_type = str(getattr(model_config, "model_type", "") or "").lower()
     if model_type == "olmo_hybrid":
         return True

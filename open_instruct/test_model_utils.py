@@ -150,10 +150,12 @@ class TestUsesOlmo3GenerationConfig(unittest.TestCase):
         model = SimpleNamespace(config=SimpleNamespace(model_type="qwen2"))
         self.assertFalse(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
 
-    def test_wrapped_olmo_hybrid_model_is_detected(self):
+    def test_deepspeed_wrapped_olmo_hybrid_model_is_detected(self):
         tokenizer = MagicMock()
         tokenizer.chat_template = None
-        model = SimpleNamespace(module=SimpleNamespace(config=SimpleNamespace(model_type="olmo_hybrid")))
+        model = SimpleNamespace(
+            config={"train_batch_size": 8}, module=SimpleNamespace(config=SimpleNamespace(model_type="olmo_hybrid"))
+        )
         self.assertTrue(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
 
     def test_non_olmo_template_without_im_end(self):
