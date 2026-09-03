@@ -580,6 +580,11 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
 _MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}
 
 
+def _set_hf_export_generation_config(hf_model, tokenizer: transformers.PreTrainedTokenizerBase) -> None:
+    if model_utils.uses_olmo3_generation_config(None, tokenizer, hf_model):
+        hf_model.generation_config = model_utils.get_olmo3_generation_config(tokenizer)
+
+
 def save_state_dict_as_hf(
     state_dict: dict[str, torch.Tensor],
     save_dir: str,
@@ -600,6 +605,7 @@ def save_state_dict_as_hf(
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
     hf_model.load_state_dict(converted, assign=True)
+    _set_hf_export_generation_config(hf_model, tokenizer)
 
     os.makedirs(save_dir, exist_ok=True)
     model_type = getattr(hf_config, "model_type", None)
