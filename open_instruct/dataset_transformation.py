@@ -48,6 +48,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
@@ -61,6 +62,7 @@ from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
 from transformers import AutoTokenizer, GPTNeoXTokenizerFast, LlamaTokenizer, LlamaTokenizerFast, PreTrainedTokenizer
+from transformers.utils import chat_template_utils
 from transformers.utils.hub import extract_commit_hash
 
 from open_instruct import launch_utils, logger_utils
@@ -173,7 +175,7 @@ CHAT_TEMPLATES = {
         "{% if message['role'] == 'assistant' %}"
         "{{ message['role'].capitalize() + ': ' }}"
         "{% generation %}"
-        "{{ message['content'] }}"
+        "{{ '' + message['content'] }}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
         "{% endgeneration %}"
         "{% else %}"
@@ -1375,62 +1377,60 @@ def _tokenize_tulu_sft_with_assistant_labels(
             f"`return_offsets_mapping` to derive assistant label spans, but got a slow tokenizer "
             f"({type(tokenizer).__name__}). Load the tokenizer with `use_fast=True`."
         )
-    # Templates that declare `{% generation %}` blocks give a 1:1 assistant mask.
-    # Hugging Face returns an all-zero mask (no raise) when the tags are missing, so
-    # only take this path when the template actually has them; otherwise fall through
-    # to prefix derivation, which is what published Qwen/Olmo templates still need.
+    # Render generation ranges directly instead of using Transformers' flattened
+    # assistant mask. The flattened mask loses block boundaries and, with left
+    # truncation, stops after the first range whose start was truncated away.
     template = tokenizer.get_chat_template(tools=tools)
-    if isinstance(template, str) and ("{% generation" in template or "{%- generation" in template):
-        tokenized = tokenizer.apply_chat_template(
-            conversation=messages,
+    has_generation_blocks = isinstance(template, str) and re.search(r"\{\%[-+]?\s*generation\s*[-+]?\%\}", template)
+    is_registered_template = template in CHAT_TEMPLATES.values()
+    if has_generation_blocks and (not last_turn_only or is_registered_template):
+        template_kwargs = cast(dict[str, Any], tokenizer.special_tokens_map)
+        rendered_chats, generation_indices = chat_template_utils.render_jinja_template(
+            conversations=[messages],
             tools=tools,
-            tokenize=True,
-            return_dict=True,
+            chat_template=template,
             return_assistant_tokens_mask=True,
+            add_generation_prompt=False,
+            **template_kwargs,
+        )
+        tokenized = tokenizer(
+            rendered_chats[0],
+            add_special_tokens=False,
+            return_offsets_mapping=True,
             return_tensors="pt",
             padding=False,
-            # Select the true final assistant block before truncating. Otherwise, if
-            # that block starts past max_seq_length, last_turn_only trains the previous one.
-            truncation=max_seq_length is not None and not last_turn_only,
+            truncation=max_seq_length is not None,
             max_length=max_seq_length,
-            add_generation_prompt=False,
         )
-        if isinstance(tokenized, (str, list)):
-            raise TypeError(
-                f"apply_chat_template(..., return_dict=True) returned {type(tokenized).__name__}, expected a mapping."
-            )
-        tokenized = cast(dict[str, Any], tokenized)
         input_ids = tokenized[INPUT_IDS_KEY]
         attention_mask = tokenized[ATTENTION_MASK_KEY]
-        assistant_masks = tokenized["assistant_masks"]
-        assert isinstance(input_ids, torch.Tensor)
-        assert isinstance(attention_mask, torch.Tensor)
-        assert isinstance(assistant_masks, torch.Tensor)
-        if assistant_masks.dim() == 1:
-            assistant_masks = assistant_masks.unsqueeze(0)
-        if not assistant_masks.any():
-            if any(message.get("role") == "assistant" for message in messages):
-                raise AssistantSpanDerivationError(
-                    "Chat template contains {% generation %} blocks but apply_chat_template "
-                    "returned an all-zero assistant mask, so labels would train on nothing."
-                )
-            labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
-            return input_ids, attention_mask, labels
+        offsets = tokenized["offset_mapping"][0].tolist()
+        truncated = _was_truncated(offsets, rendered_chats[0], input_ids.shape[-1], max_seq_length)
+        labels = torch.full_like(input_ids, MASKED_TOKEN_VALUE)
+        assistant_turn_count = sum(message.get("role") == "assistant" for message in messages)
+        ranges = generation_indices[0]
+        if assistant_turn_count == 0:
+            return input_ids, attention_mask, labels, truncated
+        if not any(start < end for start, end in ranges):
+            raise AssistantSpanDerivationError(
+                "Chat template contains {% generation %} blocks but rendered no non-empty assistant spans, "
+                "so labels would train on nothing."
+            )
         if last_turn_only:
-            ones = assistant_masks[0].nonzero(as_tuple=True)[0]
-            end = int(ones[-1]) + 1
-            start = end - 1
-            while start > 0 and assistant_masks[0, start - 1]:
-                start -= 1
-            trimmed = torch.zeros_like(assistant_masks)
-            trimmed[0, start:end] = 1
-            assistant_masks = trimmed
-        labels = torch.where(assistant_masks.bool(), input_ids, MASKED_TOKEN_VALUE)
-        if max_seq_length is not None and last_turn_only:
-            input_ids = input_ids[:, :max_seq_length]
-            attention_mask = attention_mask[:, :max_seq_length]
-            labels = labels[:, :max_seq_length]
-        return input_ids, attention_mask, labels
+            if len(ranges) != assistant_turn_count:
+                raise AssistantSpanDerivationError(
+                    "Registered SFT templates must render exactly one {% generation %} span per assistant turn, "
+                    f"but found {len(ranges)} spans for {assistant_turn_count} assistant turns."
+                )
+            ranges = ranges[-1:]
+        for start_char, end_char in ranges:
+            for token_index, (token_start, token_end) in enumerate(offsets):
+                if token_end > start_char and token_start < end_char:
+                    labels[0, token_index] = input_ids[0, token_index]
+        return input_ids, attention_mask, labels, truncated
+    # An arbitrary external template may emit multiple generation blocks per turn,
+    # but Transformers does not expose which message owns each block. For
+    # last_turn_only, use the verified prefix path below rather than guessing.
     rendered = tokenizer.apply_chat_template(
         conversation=messages, tools=tools, tokenize=False, add_generation_prompt=False
     )

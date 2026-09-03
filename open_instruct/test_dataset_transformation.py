@@ -863,6 +863,80 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         self.assertIn("ASSISTTWO", trained_text)
         self.assertNotIn("ASSISTONE", trained_text)
 
+    def test_last_turn_only_preserves_contiguous_generation_block_boundaries(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}|{% endgeneration %}"
+            "{% else %}{{ m['content'] }}|{% endif %}"
+            "{% endfor %}"
+        )
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "ASSISTONE"},
+            {"role": "assistant", "content": "ASSISTTWO"},
+        ]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertEqual(trained_text, "ASSISTTWO|")
+
+    def test_compact_generation_tag_uses_assistant_mask(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{%generation%}{{ m['content'] }}{%endgeneration%}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [{"role": "user", "content": "USERQUERY"}, {"role": "assistant", "content": "ASSISTONE"}]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertEqual(trained_text, "ASSISTONE")
+
+    def test_last_turn_only_supports_multiple_generation_spans_per_turn(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' %}"
+            "{% generation %}{{ m['content'] }}{% endgeneration %}"
+            "{% generation %}{{ eos_token }}{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [{"role": "user", "content": "USERQUERY"}, {"role": "assistant", "content": "ASSISTONE"}]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertEqual(trained_text, f"ASSISTONE{tokenizer.eos_token}")
+
+    def test_last_turn_only_never_uses_an_earlier_turns_generation_spans(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{% if m['role'] == 'assistant' and m['content'] %}"
+            "{% generation %}{{ m['content'] }}{% endgeneration %}"
+            "{% generation %}{{ eos_token }}{% endgeneration %}"
+            "{% else %}{{ m['content'] }}{% endif %}{% endfor %}"
+        )
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "ASSISTONE"},
+            {"role": "assistant", "content": ""},
+        ]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+
     def test_last_turn_only_does_not_train_an_earlier_turn_when_final_turn_is_truncated(self):
         tokenizer = self._tokenizer_for("tulu", None)
         messages = [
@@ -876,6 +950,33 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         )
         labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
         self.assertTrue(all(label == -100 for label in labels))
+
+    def test_left_truncation_keeps_visible_later_assistant_labels(self):
+        tokenizer = self._tokenizer_for("tulu", None)
+        tokenizer.truncation_side = "left"
+        messages = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "OLDANSWER"},
+            {"role": "user", "content": "filler " * 200},
+            {"role": "assistant", "content": "VISIBLEANSWER"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=32
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("VISIBLEANSWER", trained_text)
+        self.assertNotIn("OLDANSWER", trained_text)
+
+    def test_simple_chat_rejects_non_string_assistant_content(self):
+        tokenizer = self._tokenizer_for("simple_chat", None)
+        for content in (None, {"text": "answer"}, ["answer"]):
+            with self.subTest(content=content), self.assertRaises(TypeError):
+                tokenizer.apply_chat_template(
+                    [{"role": "user", "content": "question"}, {"role": "assistant", "content": content}],
+                    tokenize=False,
+                )
 
     def test_generation_mask_preserves_nonfinal_separator_masking(self):
         tokenizer = self._tokenizer_for("tulu", None)
@@ -1029,7 +1130,7 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         )
         messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
         with self.assertRaisesRegex(
-            open_instruct.dataset_transformation.AssistantSpanDerivationError, "all-zero assistant mask"
+            open_instruct.dataset_transformation.AssistantSpanDerivationError, "no non-empty assistant spans"
         ):
             open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
                 messages, tokenizer, None, 4096
@@ -1049,7 +1150,7 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         }
         messages = [{"role": "user", "content": "USERQUERY"}, {"role": "assistant", "content": "ANSWERONE"}]
         tools = [{"type": "function", "function": {"name": "bash", "parameters": {"type": "object"}}}]
-        input_ids, _, labels = open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+        input_ids, _, labels, _ = open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
             messages, tokenizer, tools, 4096
         )
         trained_text = tokenizer.decode(
