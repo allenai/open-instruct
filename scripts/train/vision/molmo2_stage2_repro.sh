@@ -14,6 +14,10 @@
 #
 # The checkpoint arg accepts an OLMo-core run dir (latest step is used) or a step dir.
 #
+# rank_microbatch_instances=1 (Stage2 uses 2): with vision/connector eager
+# (OLMo-core#848), two packed 16k instances per rank OOM an 80GB H100. Global
+# batch is unchanged — olmo-core runs twice the accumulation microbatches.
+#
 # Runs on ALLOCATED capacity (non-preemptible, urgent priority) across the CUDA-12
 # weka clusters. ai2/holmes (B300) needs a CUDA-13 image of this branch — build with
 # ./scripts/train/build_image_and_launch.sh --cuda-version 13 before adding it here.
@@ -42,6 +46,7 @@ uv run python mason.py \
     --exp_name molmo2_stage2_repro_4b \
     --mixture image-only-v9 \
     --model_name_or_path "$STAGE1_CKPT" \
+    --rank_microbatch_instances 1 \
     --compile_vision false \
     --compile_connector false \
     --max_train_steps 20000 \
