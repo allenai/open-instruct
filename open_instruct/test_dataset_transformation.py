@@ -1280,6 +1280,40 @@ class TestOverLengthStrategy(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._tokenize(64, "truncate-harder")
 
+    def _thinker_tokenize(self, max_seq_length, over_length_strategy):
+        # `olmo_thinker` declares `{% generation %}` blocks, so this drives the
+        # generation-block labeling path rather than prefix derivation. It is the
+        # intersection of over_length_strategy (#1876) and generation-block labels
+        # (#1879): the strategy only applies here if `truncated` is threaded through
+        # that path, so these two tests guard that seam.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"]
+        row = {
+            "messages": [
+                {"role": "user", "content": "Count upward for a while."},
+                {"role": "assistant", "content": "<think>" + " ".join(str(i) for i in range(400)) + "</think>done"},
+            ]
+        }
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=max_seq_length, over_length_strategy=over_length_strategy
+        )
+        return tokenizer, out
+
+    def test_generation_block_template_keep_leaves_a_truncated_row_unterminated(self):
+        tokenizer, out = self._thinker_tokenize(64, "keep")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertNotEqual(input_ids[-1], tokenizer.eos_token_id)
+
+    def test_generation_block_template_terminate_ends_with_a_trainable_eos(self):
+        tokenizer, out = self._thinker_tokenize(64, "terminate")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertEqual(input_ids[-1], tokenizer.eos_token_id)
+        # Trainable, so a generation-block-labeled row also learns to stop when cut.
+        self.assertEqual(labels[-1], tokenizer.eos_token_id)
+
 
 if __name__ == "__main__":
     unittest.main()
