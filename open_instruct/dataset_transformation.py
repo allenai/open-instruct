@@ -2229,14 +2229,9 @@ class LocalDatasetTransformationCache:
             if os.path.exists(stats_path):
                 with open(stats_path) as f:
                     statistics = json.load(f)
-                missing_metadata = False
                 for key in ("chat_template_name", "chat_template_source", "chat_template_hash"):
                     if key not in statistics:
                         statistics[key] = None
-                        missing_metadata = True
-                if missing_metadata:
-                    with open(stats_path, "w") as f:
-                        json.dump(statistics, f, indent=2)
                 return dataset, statistics
             else:
                 # Return empty statistics if not cached

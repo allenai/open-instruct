@@ -751,8 +751,9 @@ class TestChatTemplateResolution(unittest.TestCase):
         cache_path = cache.get_cache_path()
         open_instruct.dataset_transformation.Dataset.from_dict({"value": [1]}).save_to_disk(cache_path)
         stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        legacy_statistics = {"per_dataset_stats": [], "dataset_order": []}
         with open(stats_path, "w") as f:
-            json.dump({"per_dataset_stats": [], "dataset_order": []}, f)
+            json.dump(legacy_statistics, f)
 
         _, statistics = cache.load_or_transform_dataset([], self._tc("tulu"))
 
@@ -760,7 +761,7 @@ class TestChatTemplateResolution(unittest.TestCase):
         self.assertIsNone(statistics["chat_template_source"])
         self.assertIsNone(statistics["chat_template_hash"])
         with open(stats_path) as f:
-            self.assertEqual(json.load(f), statistics)
+            self.assertEqual(json.load(f), legacy_statistics)
 
     def test_cached_template_metadata_is_not_overwritten_by_the_callers_tokenizer(self):
         cache_dir = tempfile.mkdtemp()
