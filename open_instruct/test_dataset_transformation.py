@@ -10,7 +10,7 @@ from unittest import mock
 
 import torch
 from parameterized import parameterized
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, GPTNeoXTokenizerFast
 
 import open_instruct.dataset_transformation
 
@@ -631,6 +631,160 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertIn("SECONDANSWER", trained_text)
         self.assertNotIn("FIRSTANSWER", trained_text)
         self.assertNotIn("trailing user message", trained_text)
+
+
+class TestChatTemplateResolution(unittest.TestCase):
+    def _tc(self, chat_template_name):
+        return open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH,
+            tokenizer_revision="main",
+            use_fast=True,
+            chat_template_name=chat_template_name,
+            add_bos=False,
+        )
+
+    def test_registry_name_applies_chat_templates_entry(self):
+        tokenizer = self._tc("simple_chat").tokenizer
+        self.assertEqual(tokenizer.chat_template, open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_chat"])
+
+    def test_none_and_tokenizer_default_use_the_same_tokenizer_template(self):
+        none_template = self._tc(None).tokenizer.chat_template
+        default_template = self._tc("tokenizer_default").tokenizer.chat_template
+        self.assertEqual(none_template, default_template)
+        self.assertNotEqual(default_template, open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_chat"])
+
+    @mock.patch("open_instruct.dataset_transformation.AutoTokenizer.from_pretrained")
+    def test_tokenizer_default_and_none_do_not_require_add_bos_for_olmo_gpt_neox(self, from_pretrained):
+        for chat_template_name in (None, "tokenizer_default"):
+            with self.subTest(chat_template_name=chat_template_name):
+                tokenizer = mock.MagicMock(spec=GPTNeoXTokenizerFast)
+                tokenizer.pad_token_id = None
+                tokenizer.eos_token_id = 1
+                tokenizer.bos_token = None
+                tokenizer.eos_token = "<|endoftext|>"
+                tokenizer.chat_template = "{{ messages }}"
+                from_pretrained.return_value = tokenizer
+                config = open_instruct.dataset_transformation.TokenizerConfig(
+                    tokenizer_name_or_path="allenai/Olmo-test", chat_template_name=chat_template_name, add_bos=False
+                )
+
+                result = open_instruct.dataset_transformation.get_tokenizer_tulu_v2_2(config)
+
+                self.assertIs(result, tokenizer)
+        self.assertEqual(from_pretrained.call_count, 2)
+
+    def test_tokenizer_default_requires_a_published_template(self):
+        tokenizer = mock.MagicMock()
+        tokenizer.chat_template = None
+        with self.assertRaisesRegex(ValueError, "does not define a chat template"):
+            open_instruct.dataset_transformation._set_chat_template(self._tc("tokenizer_default"), tokenizer)
+
+    def test_unknown_name_raises_with_available_keys_and_suggestion(self):
+        with self.assertRaises(ValueError) as ctx:
+            _ = self._tc("olmo123").tokenizer
+        message = str(ctx.exception)
+        self.assertIn("Unknown chat template name 'olmo123'", message)
+        self.assertIn("tokenizer_default", message)
+        self.assertIn("Did you mean", message)
+        self.assertIn("'olmo'", message)
+
+    def test_unknown_name_that_looks_like_a_registry_key_suggests_it(self):
+        with self.assertRaises(ValueError) as ctx:
+            _ = self._tc("olmo_thinker_no_think_final").tokenizer
+        message = str(ctx.exception)
+        self.assertIn("Unknown chat template name 'olmo_thinker_no_think_final'", message)
+        self.assertIn("Did you mean", message)
+        self.assertTrue(
+            "olmo_thinker_no_think_7b" in message or "olmo_thinker_no_think_sft_tokenization" in message, message
+        )
+
+    def test_unknown_name_is_validated_before_olmo_bos_checks(self):
+        config = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path="allenai/Olmo-test", chat_template_name="tuluu", add_bos=False
+        )
+        with self.assertRaisesRegex(ValueError, "Unknown chat template name 'tuluu'"):
+            open_instruct.dataset_transformation.get_tokenizer_tulu_v2_2(config)
+
+    def test_all_tokenizer_functions_validate_names_before_loading(self):
+        config = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path="/does/not/exist", chat_template_name="tuluu"
+        )
+        for function in open_instruct.dataset_transformation.GET_TOKENIZER_FN.values():
+            with (
+                self.subTest(function=function.__name__),
+                self.assertRaisesRegex(ValueError, "Unknown chat template name 'tuluu'"),
+            ):
+                function(config)
+
+    def test_dataset_statistics_record_resolved_template(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        _, stats = open_instruct.dataset_transformation.get_cached_dataset_tulu_with_statistics(
+            [os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
+            ["train"],
+            self._tc("tulu"),
+            ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            [{"max_seq_length": 4096}, {}],
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=cache_dir,
+        )
+        self.assertEqual(stats["chat_template_name"], "tulu")
+        self.assertEqual(stats["chat_template_source"], "registry:tulu")
+        self.assertEqual(len(stats["chat_template_hash"]), 64)
+
+        _, default_stats = open_instruct.dataset_transformation.get_cached_dataset_tulu_with_statistics(
+            [os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
+            ["train"],
+            self._tc("tokenizer_default"),
+            ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            [{"max_seq_length": 4096}, {}],
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=cache_dir,
+        )
+        self.assertEqual(default_stats["chat_template_source"], f"tokenizer:{TOKENIZER_PATH}")
+        self.assertEqual(len(default_stats["chat_template_hash"]), 64)
+
+    def test_legacy_cached_statistics_mark_template_metadata_unknown(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        cache = open_instruct.dataset_transformation.LocalDatasetTransformationCache("legacy", cache_dir)
+        cache_path = cache.get_cache_path()
+        open_instruct.dataset_transformation.Dataset.from_dict({"value": [1]}).save_to_disk(cache_path)
+        stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        legacy_statistics = {"per_dataset_stats": [], "dataset_order": []}
+        with open(stats_path, "w") as f:
+            json.dump(legacy_statistics, f)
+
+        _, statistics = cache.load_or_transform_dataset([], self._tc("tulu"))
+
+        self.assertIsNone(statistics["chat_template_name"])
+        self.assertIsNone(statistics["chat_template_source"])
+        self.assertIsNone(statistics["chat_template_hash"])
+        with open(stats_path) as f:
+            self.assertEqual(json.load(f), legacy_statistics)
+
+    def test_cached_template_metadata_is_not_overwritten_by_the_callers_tokenizer(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        cache = open_instruct.dataset_transformation.LocalDatasetTransformationCache("explicit-hash", cache_dir)
+        cache_path = cache.get_cache_path()
+        open_instruct.dataset_transformation.Dataset.from_dict({"value": [1]}).save_to_disk(cache_path)
+        stored_statistics = {
+            "per_dataset_stats": [],
+            "dataset_order": [],
+            "chat_template_name": "original",
+            "chat_template_source": "tokenizer:original",
+            "chat_template_hash": "original-hash",
+        }
+        stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        with open(stats_path, "w") as f:
+            json.dump(stored_statistics, f)
+
+        _, statistics = cache.load_or_transform_dataset([], self._tc("tulu"))
+
+        self.assertEqual(statistics, stored_statistics)
+        with open(stats_path) as f:
+            self.assertEqual(json.load(f), stored_statistics)
 
 
 # Templates from CHAT_TEMPLATES that are used for SFT (as opposed to the RL/inference-only

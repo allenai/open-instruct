@@ -37,7 +37,7 @@ uv run python mason.py \
         --response_length 16384 \
         --pack_length 19456 \
         --model_name_or_path ${model_path} \
-        --chat_template_name olmo123 \
+        --chat_template_name tokenizer_default \
         --non_stop_penalty False \
         --mask_truncated_completions False \
         --temperature 1.0 \

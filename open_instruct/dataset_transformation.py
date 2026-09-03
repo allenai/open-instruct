@@ -44,6 +44,7 @@ The main things we are looking for are:
 """
 
 import copy
+import difflib
 import hashlib
 import json
 import multiprocessing
@@ -641,17 +642,41 @@ CHAT_TEMPLATES = {
 }
 
 
+def _validate_chat_template_name(name: str | None) -> None:
+    if name is None or name == "tokenizer_default" or name in CHAT_TEMPLATES:
+        return
+    suggestions = difflib.get_close_matches(name, CHAT_TEMPLATES, n=3, cutoff=0.4)
+    hint = f" Did you mean {', '.join(repr(s) for s in suggestions)}?" if suggestions else ""
+    raise ValueError(
+        f"Unknown chat template name {name!r}. Use one of {sorted(CHAT_TEMPLATES)} or 'tokenizer_default'.{hint}"
+    )
+
+
+def _set_chat_template(tc: "TokenizerConfig", tokenizer: PreTrainedTokenizer) -> None:
+    name = tc.chat_template_name
+    _validate_chat_template_name(name)
+    if name is None or name == "tokenizer_default":
+        if tokenizer.chat_template is None:
+            raise ValueError(f"Tokenizer {tc.tokenizer_name_or_path!r} does not define a chat template.")
+    else:
+        tokenizer.chat_template = CHAT_TEMPLATES[name]
+
+
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
+    _validate_chat_template_name(tc.chat_template_name)
     tokenizer = AutoTokenizer.from_pretrained(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
         use_fast=tc.use_fast,
     )
+    if tc.chat_template_name is not None:
+        _set_chat_template(tc, tokenizer)
     return tokenizer
 
 
 def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
+    _validate_chat_template_name(tc.chat_template_name)
     tokenizer = AutoTokenizer.from_pretrained(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
@@ -689,15 +714,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
-        try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
-            ).chat_template
-        except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -713,6 +730,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
+    _validate_chat_template_name(tc.chat_template_name)
     tokenizer = AutoTokenizer.from_pretrained(
         tc.tokenizer_name_or_path,
         revision=tc.tokenizer_revision,
@@ -755,17 +773,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name is None:
-        try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
-            ).chat_template
-        except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
-    elif tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
-        raise ValueError(f"Could not find chat template for {tc.chat_template_name}.")
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -781,9 +789,10 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
+    _validate_chat_template_name(tc.chat_template_name)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in str(tc.tokenizer_name_or_path).lower():
-        if tc.chat_template_name is None:
+        if tc.chat_template_name is None or tc.chat_template_name == "tokenizer_default":
             pass  # just assume the user knows what they're doing
         elif "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
@@ -810,7 +819,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                if tc.chat_template_name is None or "olmo" not in tc.chat_template_name:
+                if tc.chat_template_name not in (None, "tokenizer_default") and "olmo" not in tc.chat_template_name:
                     assert tc.add_bos, (
                         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence "
                         "if using an older chat template."
@@ -835,15 +844,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    if tc.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
-        try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(
-                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
-            ).chat_template
-        except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -877,7 +878,9 @@ class TokenizerConfig:
     tokenizer_revision: str | None = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str | None = None  # default to using the tokenizer chat template
+    chat_template_name: str | None = (
+        None  # CHAT_TEMPLATES key, or tokenizer_default / None for the tokenizer's own. Unknown names raise.
+    )
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
@@ -2050,6 +2053,23 @@ def _get_serializable_dataset_config_dict(dc: DatasetConfig, exclude_none: bool 
     return d
 
 
+def _get_chat_template_metadata(tc: TokenizerConfig) -> dict[str, str | None]:
+    name = tc.chat_template_name
+    template = getattr(tc.tokenizer, "chat_template", None)
+    try:
+        template_str = json.dumps(template, sort_keys=True)
+    except TypeError:
+        template_str = str(template)
+    source = (
+        f"tokenizer:{tc.tokenizer_name_or_path}" if name is None or name == "tokenizer_default" else f"registry:{name}"
+    )
+    return {
+        "chat_template_name": name,
+        "chat_template_source": source,
+        "chat_template_hash": hashlib.sha256(template_str.encode()).hexdigest(),
+    }
+
+
 def compute_config_hash(dcs: list[DatasetConfig], tc: TokenizerConfig) -> str:
     """Compute a deterministic hash of both configs for caching.
 
@@ -2209,6 +2229,9 @@ class LocalDatasetTransformationCache:
             if os.path.exists(stats_path):
                 with open(stats_path) as f:
                     statistics = json.load(f)
+                for key in ("chat_template_name", "chat_template_source", "chat_template_hash"):
+                    if key not in statistics:
+                        statistics[key] = None
                 return dataset, statistics
             else:
                 # Return empty statistics if not cached
@@ -2269,8 +2292,11 @@ class LocalDatasetTransformationCache:
             combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
-        # Prepare return statistics
-        all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
+        all_statistics = {
+            "per_dataset_stats": dataset_statistics,
+            "dataset_order": dataset_order,
+            **_get_chat_template_metadata(tc),
+        }
 
         if dataset_skip_cache:
             return combined_dataset, all_statistics

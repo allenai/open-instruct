@@ -299,6 +299,46 @@ class TestConvertHfToNumpySft(_NumpySftTestBase):
             stats = json.load(f)
         self.assertEqual(stats["overall_statistics"]["total_instances"], 2)
         self.assertGreater(stats["overall_statistics"]["total_tokens"], 0)
+        self.assertEqual(stats["configuration"]["chat_template"], "tulu")
+        self.assertEqual(stats["configuration"]["chat_template_source"], "registry:tulu")
+        self.assertEqual(len(stats["configuration"]["chat_template_hash"]), 64)
+
+    @unittest.mock.patch("open_instruct.dataset_transformation.get_cached_dataset_tulu_with_statistics")
+    def test_statistics_preserve_cached_template_provenance(self, get_cached_dataset):
+        get_cached_dataset.return_value = (
+            dataset_transformation.Dataset.from_dict(
+                {
+                    dataset_transformation.INPUT_IDS_KEY: [[1, 2]],
+                    dataset_transformation.ATTENTION_MASK_KEY: [[1, 1]],
+                    dataset_transformation.LABELS_KEY: [[-100, 2]],
+                    dataset_transformation.DATASET_ORIGIN_KEY: ["cached"],
+                }
+            ),
+            {
+                "per_dataset_stats": [],
+                "chat_template_name": "original",
+                "chat_template_source": "tokenizer:original",
+                "chat_template_hash": "original-hash",
+            },
+        )
+        output_dir = pathlib.Path(self.temp_dir.name) / "cached_provenance"
+
+        numpy_dataset_conversion.convert_hf_to_numpy_sft(
+            output_dir=output_dir,
+            dataset_mixer_list=[],
+            dataset_mixer_list_splits=[],
+            tc=self._make_tc(),
+            dataset_transform_fn=[],
+            transform_fn_args=[],
+            dataset_target_columns=dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
+            dataset_config_hash="explicit-hash",
+        )
+
+        with open(output_dir / "dataset_statistics.json") as f:
+            configuration = json.load(f)["configuration"]
+        self.assertEqual(configuration["chat_template"], "original")
+        self.assertEqual(configuration["chat_template_source"], "tokenizer:original")
+        self.assertEqual(configuration["chat_template_hash"], "original-hash")
 
 
 class TestResumeEquivalence(_NumpySftTestBase):

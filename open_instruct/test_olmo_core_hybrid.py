@@ -2,6 +2,7 @@
 
 import types
 import unittest
+from unittest import mock
 
 import torch
 
@@ -105,6 +106,18 @@ class TestHybridStateConversion(unittest.TestCase):
         self.assertEqual(
             set(converted), {"model.layers.0.linear_attn.A_log", "model.layers.1.self_attn.q_proj.weight"}
         )
+
+    def test_hf_export_sets_dual_eos_for_hybrid_models(self) -> None:
+        model = types.SimpleNamespace(
+            config=types.SimpleNamespace(model_type=olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE), generation_config=None
+        )
+        tokenizer = mock.MagicMock()
+        tokenizer.chat_template = None
+        tokenizer.convert_tokens_to_ids.side_effect = [100, 101]
+
+        olmo_core_utils._set_hf_export_generation_config(model, tokenizer)
+
+        self.assertEqual(model.generation_config.eos_token_id, [100, 101])
 
     def test_unmapped_key_raises(self) -> None:
         """A silently dropped weight would leave randomly initialised parameters behind."""
