@@ -36,6 +36,13 @@ You can run `python scripts/data/finetune_dataset_transformation.py` to see the 
 ![dataset](dataset/sft.png)
 
 
+`--chat_template_name` must be a `CHAT_TEMPLATES` key, or the sentinel
+`tokenizer_default` to use the tokenizer's own published template. Omitting the
+flag (`None`) is the same as `tokenizer_default`. An unrecognised name raises
+instead of silently falling back, and `dataset_statistics.json` records the
+resolved source (`registry:<name>` vs `tokenizer:<path>`) plus the applied
+template hash.
+
 You can also use a different `chat_template_name`. For example,
 
 ```python
