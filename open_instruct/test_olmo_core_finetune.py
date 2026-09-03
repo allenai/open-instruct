@@ -1,5 +1,6 @@
 """Unit tests for cache-validation and checkpoint-detection helpers."""
 
+import json
 import os
 import tempfile
 import unittest
@@ -13,6 +14,12 @@ def _touch(path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w"):
         pass
+
+
+def _write(path: str, contents: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as handle:
+        handle.write(contents)
 
 
 class NumpyDirIsPopulatedTest(unittest.TestCase):
@@ -48,10 +55,23 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
 
 
 class IsHfCheckpointTest(unittest.TestCase):
-    def test_local_dir_with_config_json_is_hf(self) -> None:
+    def test_local_dir_with_hf_config_json_is_hf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            _touch(os.path.join(tmp, "config.json"))
+            _write(os.path.join(tmp, "config.json"), json.dumps({"model_type": "olmo3"}))
             self.assertTrue(olmo_core_utils.is_hf_checkpoint(tmp))
+
+    def test_local_dir_with_olmo_core_config_json_is_olmo_core(self) -> None:
+        # An olmo-core checkpoint directory also has a config.json (the experiment
+        # config), so presence alone must not mark it as HF.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "config.json"), json.dumps({"model": {"d_model": 4096}}))
+            os.makedirs(os.path.join(tmp, "model_and_optim"))
+            self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
+
+    def test_local_dir_with_unreadable_config_json_is_olmo_core(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "config.json"), "not json{")
+            self.assertFalse(olmo_core_utils.is_hf_checkpoint(tmp))
 
     def test_local_dir_without_config_json_is_olmo_core(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,6 +97,12 @@ class IsHfCheckpointTest(unittest.TestCase):
     def test_hf_marker_in_absolute_path(self) -> None:
         # Path doesn't exist on disk, but contains '-hf'.
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
+
+    def test_gs_url_is_olmo_core(self) -> None:
+        self.assertFalse(olmo_core_utils.is_hf_checkpoint("gs://ai2-llm/checkpoints/olmo3/step100/model_and_optim"))
+
+    def test_gs_url_with_hf_marker_is_hf(self) -> None:
+        self.assertTrue(olmo_core_utils.is_hf_checkpoint("gs://ai2-llm/checkpoints/olmo3-hf/step100"))
 
 
 class TestCheckpointerDefaults(unittest.TestCase):
