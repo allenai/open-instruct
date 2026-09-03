@@ -1,6 +1,7 @@
 #!/bin/bash
 # Backend A/B: SFT on OLMo-core (olmo_core_finetune.py). Pair: ab_sft_deepspeed.sh.
 # Requires ab_sft_olmocore_cache.sh to have completed first (numpy dataset cache).
+BEAKER_USER="${BEAKER_USER:-$(beaker account whoami --format json | jq -r '.[0].name')}"
 BEAKER_IMAGE="${1:-${BEAKER_USER}/open-instruct-integration-test}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
@@ -46,4 +47,4 @@ uv run python mason.py \
     --seed 42 \
     --compile_model true \
     --with_tracking \
-    --output_dir \$CHECKPOINT_OUTPUT_DIR
+    --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/ab_sft_olmocore"

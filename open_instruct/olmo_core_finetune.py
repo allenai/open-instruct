@@ -211,6 +211,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model, model_config = olmo_core_utils.setup_model(args.model, tc, init_device="meta")
+    if use_hf_ckpt and is_main_process:
+        olmo_core_utils.verify_can_save_as_hf(model_config, args.model.model_name_or_path)
 
     cp_config = olmo_core_utils.build_cp_config(args.training)
     cp_degree = args.training.cp_degree or 1
@@ -386,6 +388,14 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     logger.info("Starting training...")
     trainer.fit()
     logger.info("Training complete.")
+
+    if use_hf_ckpt:
+        hf_model_path = os.path.join(args.checkpoint.output_dir, "hf_model")
+        olmo_core_utils.export_to_hf(
+            train_module.model, tc.tokenizer, hf_model_path, args.model.model_name_or_path, is_main_process
+        )
+    else:
+        logger.warning("Skipping final HF export: model was not loaded from an HF checkpoint.")
 
     teardown_training_environment()
 
