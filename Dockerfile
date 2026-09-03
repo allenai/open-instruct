@@ -1,6 +1,10 @@
 ARG CUDA_VERSION=12
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS cuda12
-FROM nvidia/cuda:13.0.3-devel-ubuntu22.04 AS cuda13
+# SPIKE: 13.3.1 rather than 13.0.3, and the -cudnn- variant. transformer-engine's
+# prebuilt cu13 wheel needs cublasLtGroupedMatrixLayoutInit_internal, absent from
+# 13.0.3's libcublasLt (13.1.1.3), and its bindings need cudnn.h, absent from the
+# plain devel image. Revert both if TE is ever dropped.
+FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS cuda13
 FROM cuda${CUDA_VERSION}
 
 ARG CUDA_VERSION
@@ -42,12 +46,17 @@ RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-ho
     apt-get autoremove -y && \
     rm doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb
 
-# Install Google Cloud CLI
+# Install Google Cloud CLI.
+# The package is google-cloud-cli, NOT google-cloud-sdk: Google renamed it and has now
+# dropped the google-cloud-sdk transitional package from the repo entirely, so the old
+# name fails with "Package 'google-cloud-sdk' has no installation candidate". This only
+# surfaces on a cold build -- a cached layer keeps working, which is why it can break
+# without any change to this file.
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
         | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
     && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
         | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-sdk \
+    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-cli \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 # Taken from https://beaker.org/api/v3/release (add | jq -r '.version' if you want it programmatically).
@@ -79,6 +88,37 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
 
+# MoE v2's token permutation hard-requires transformer_engine's kernels
+# (olmo_core/nn/moe/utils.py guards the import, olmo_core/nn/moe/v2/no_ep.py calls
+# them unconditionally). Only the CUDA 13 image gets it: that's where the MoE spike
+# runs, and the torch-binding sdist compiles against the venv's torch, so
+# --no-build-isolation with the build tools preinstalled. transformer_engine_cu13
+# itself is a prebuilt wheel; only the bindings compile here.
+# SPIKE: realign torchvision with the overridden torch. uv's override-dependencies
+# bypass [tool.uv.sources], so a "+cu130" pin is looked up on PyPI (where it does
+# not exist) and an unpinned one resolves to the PyPI build, whose compiled ops do
+# not match a +cu130 torch -- "operator torchvision::nms does not exist" at import,
+# via transformers.image_utils. Install it straight from the CUDA index instead.
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    if [ "$CUDA_VERSION" = "13" ]; then \
+        uv pip install --index-url https://download.pytorch.org/whl/cu130 \
+            --no-deps "torchvision==0.26.0+cu130"; \
+    fi
+
+# No pyproject/uv.lock mounts here: the project's extra-build-dependencies
+# config (torch, match-runtime, for flash-attn) would otherwise apply to these
+# unrelated installs and fail them. uv pip targets /stage/.venv directly.
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    if [ "$CUDA_VERSION" = "13" ]; then \
+        uv pip install cmake ninja pybind11 setuptools wheel && \
+        CUDNN_DIR=$(/stage/.venv/bin/python -c "import nvidia.cudnn; print(list(nvidia.cudnn.__path__)[0])") && \
+        CUDNN_PATH="$CUDNN_DIR" \
+        CPLUS_INCLUDE_PATH="$CUDNN_DIR/include" \
+        C_INCLUDE_PATH="$CUDNN_DIR/include" \
+        LIBRARY_PATH="$CUDNN_DIR/lib" \
+        MAX_JOBS=8 uv pip install --no-build-isolation "transformer-engine[pytorch]==2.16.1"; \
+    fi
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts
@@ -92,3 +132,18 @@ ARG GIT_COMMIT="" \
 ENV GIT_COMMIT=${GIT_COMMIT} \
     GIT_BRANCH=${GIT_BRANCH} \
     PATH=/stage/.venv/bin:$PATH
+
+# SPIKE: torch 2.11 ships its own cuBLAS under site-packages/nvidia/cu13/lib, and
+# that copy lacks cublasLtGroupedMatrixLayoutInit_internal, which
+# transformer-engine's prebuilt wheel needs -- so TE fails to load with "undefined
+# symbol" (01M0GHTACW41HX078H0474A7Y1) even though the CUDA 13.3 base image's
+# 13.6.0.2 exports it. LD_LIBRARY_PATH does not help: torch dlopens its bundled
+# copy at import, so the soname is already resolved before TE loads. Point the
+# bundled path at the system library instead. Drop this with the torch override.
+RUN if [ "$CUDA_VERSION" = "13" ]; then \
+        for lib in libcublasLt libcublas; do \
+            target=$(ls /usr/local/cuda/lib64/${lib}.so.13.* 2>/dev/null | head -1); \
+            bundled=/stage/.venv/lib/python3.12/site-packages/nvidia/cu13/lib/${lib}.so.13; \
+            if [ -n "$target" ] && [ -e "$bundled" ]; then ln -sf "$target" "$bundled"; fi; \
+        done; \
+    fi

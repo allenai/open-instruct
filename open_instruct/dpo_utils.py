@@ -110,6 +110,14 @@ class DPOConfig:
     """Weight for load balancing loss if applicable."""
     concatenated_forward: bool = True
     """Whether to concatenate chosen and rejected for DPO training."""
+    reference_cache_batch_multiplier: int = 4
+    """Batch-size multiplier for the reference log-probability pass, relative to the training batch.
+
+    The pass is forward-only, so a larger batch costs no activation memory and packs more
+    efficiently -- but that argument is about memory, not about what the model's kernels can
+    take in one call. Set 1 to make the reference pass use the same per-call shape training
+    uses, which is what linear-attention models (KDA) appear to need at long sequence.
+    """
     packing: bool = False
     """Whether to use packing/padding-free collation."""
 
@@ -411,7 +419,7 @@ def build_reference_logprobs_cache(
     device: torch.device,
     cache_path: pathlib.Path,
     is_main_process: bool,
-    model_dims: utils.ModelDims,
+    model_dims: utils.ModelDims | None,
     use_lora: bool = False,
     disable_adapter_context: Callable[[], contextlib.AbstractContextManager] | None = None,
     forward_kwargs: dict | None = None,
@@ -479,14 +487,15 @@ def build_reference_logprobs_cache(
             batch_tokens, batch_size, chosen_lengths, rejected_lengths = _get_batch_stats(batch)
             total_tokens += batch_tokens
             total_examples += batch_size
-            pbar.set_postfix(
-                {
-                    "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
-                    "MFU%": f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, time.perf_counter() - batch_start):.1f}",
-                    "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
-                    "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
-                }
-            )
+            postfix = {
+                "avg_tok/ex": f"{total_tokens / total_examples:.0f}",
+                "mem_GB": f"{torch.cuda.max_memory_allocated() / 1e9:.1f}",
+                "mem%": f"{torch.cuda.max_memory_allocated() / torch.cuda.get_device_properties(0).total_memory * 100:.0f}",
+            }
+            if model_dims is not None:
+                elapsed = time.perf_counter() - batch_start
+                postfix["MFU%"] = f"{model_dims.calculate_mfu(chosen_lengths + rejected_lengths, elapsed):.1f}"
+            pbar.set_postfix(postfix)
 
     dist.all_reduce(chosen_tensor, op=dist.ReduceOp.MAX)
     dist.all_reduce(rejected_tensor, op=dist.ReduceOp.MAX)
