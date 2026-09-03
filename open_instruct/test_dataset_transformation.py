@@ -10,7 +10,7 @@ from unittest import mock
 
 import torch
 from parameterized import parameterized
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, GPTNeoXTokenizerFast
 
 import open_instruct.dataset_transformation
 
@@ -652,6 +652,23 @@ class TestChatTemplateResolution(unittest.TestCase):
         default_template = self._tc("tokenizer_default").tokenizer.chat_template
         self.assertEqual(none_template, default_template)
         self.assertNotEqual(default_template, open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_chat"])
+
+    @mock.patch("open_instruct.dataset_transformation.AutoTokenizer.from_pretrained")
+    def test_tokenizer_default_does_not_require_add_bos_for_olmo_gpt_neox(self, from_pretrained):
+        tokenizer = mock.MagicMock(spec=GPTNeoXTokenizerFast)
+        tokenizer.pad_token_id = None
+        tokenizer.eos_token_id = 1
+        tokenizer.bos_token = None
+        tokenizer.eos_token = "<|endoftext|>"
+        tokenizer.chat_template = "{{ messages }}"
+        from_pretrained.return_value = tokenizer
+        config = open_instruct.dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path="allenai/Olmo-test", chat_template_name="tokenizer_default", add_bos=False
+        )
+
+        result = open_instruct.dataset_transformation.get_tokenizer_tulu_v2_2(config)
+
+        self.assertIs(result, tokenizer)
 
     def test_unknown_name_raises_with_available_keys_and_suggestion(self):
         with self.assertRaises(ValueError) as ctx:

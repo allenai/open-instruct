@@ -812,10 +812,8 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                if (
-                    tc.chat_template_name is None
-                    or tc.chat_template_name == "tokenizer_default"
-                    or "olmo" not in tc.chat_template_name
+                if tc.chat_template_name is None or (
+                    tc.chat_template_name != "tokenizer_default" and "olmo" not in tc.chat_template_name
                 ):
                     assert tc.add_bos, (
                         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence "
