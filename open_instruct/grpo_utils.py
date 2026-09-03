@@ -3,7 +3,7 @@ import itertools
 import math
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from queue import Empty
 from typing import Any, Literal
 
@@ -335,6 +335,48 @@ class GRPOExperimentConfig(
                 )
             if self.rho_clamp_upper_bound > 0.0 and self.rho_clamp_upper_bound <= 1.0:
                 raise ValueError(f"rho_clamp_upper_bound must be > 1 when set, got {self.rho_clamp_upper_bound}.")
+
+
+_DEEPSPEED_ONLY_FLAG_NAMES = frozenset(
+    {
+        "deepspeed_stage",
+        "deepspeed_zpg",
+        "deepspeed_offload_param",
+        "deepspeed_offload_optimizer",
+        "deepspeed_checkpoint_load_universal",
+        "sequence_parallel_size",
+        "gather_whole_model",
+    }
+)
+# Defaults come from GRPOExperimentConfig itself so the guard cannot drift from the config.
+_DEEPSPEED_ONLY_FLAG_DEFAULTS: dict[str, Any] = {
+    f.name: f.default for f in fields(GRPOExperimentConfig) if f.name in _DEEPSPEED_ONLY_FLAG_NAMES
+}
+assert set(_DEEPSPEED_ONLY_FLAG_DEFAULTS) == _DEEPSPEED_ONLY_FLAG_NAMES, (
+    f"DeepSpeed-only flags missing from GRPOExperimentConfig: "
+    f"{sorted(_DEEPSPEED_ONLY_FLAG_NAMES - set(_DEEPSPEED_ONLY_FLAG_DEFAULTS))}"
+)
+
+
+def check_olmo_core_compatible_config(args: GRPOExperimentConfig) -> None:
+    """Reject DeepSpeed-only flags on the OLMo-core GRPO path.
+
+    grpo.py (OLMo-core) shares GRPOExperimentConfig with grpo_fast.py (DeepSpeed)
+    but never reads these flags, so setting them there silently produces a
+    differently-configured run. Raise instead.
+    """
+    violations = [
+        f"--{name}={getattr(args, name)!r} (default: {default!r})"
+        for name, default in _DEEPSPEED_ONLY_FLAG_DEFAULTS.items()
+        if getattr(args, name) != default
+    ]
+    if violations:
+        raise ValueError(
+            "These flags are only supported by the DeepSpeed trainer (grpo_fast.py) "
+            "and are ignored by the OLMo-core trainer (grpo.py):\n  "
+            + "\n  ".join(violations)
+            + "\nRemove them, or use open_instruct/grpo_fast.py."
+        )
 
 
 def mask_logprobs(vllm_logprobs: torch.Tensor, response_mask: torch.Tensor) -> torch.Tensor:
