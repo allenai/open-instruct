@@ -136,10 +136,24 @@ class TestUsesOlmo3GenerationConfig(unittest.TestCase):
         model = SimpleNamespace(config=SimpleNamespace(model_type="olmo_hybrid"))
         self.assertTrue(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
 
-    def test_resolved_template_contains_im_end(self):
+    def test_olmo_tokenizer_with_resolved_im_end_template(self):
         tokenizer = MagicMock()
+        tokenizer.name_or_path = "allenai/olmo-3-tokenizer-instruct-dev"
         tokenizer.chat_template = "<|im_start|>assistant\n{{ content }}<|im_end|>"
         model = SimpleNamespace(config=SimpleNamespace(model_type="llama", _name_or_path="/weka/HYBRID_INSTRUCT_SFT"))
+        self.assertTrue(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
+
+    def test_non_olmo_chatml_template_does_not_use_olmo_generation_config(self):
+        tokenizer = MagicMock()
+        tokenizer.name_or_path = "Qwen/Qwen2.5-7B-Instruct"
+        tokenizer.chat_template = "<|im_start|>assistant\n{{ content }}<|im_end|>"
+        model = SimpleNamespace(config=SimpleNamespace(model_type="qwen2"))
+        self.assertFalse(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
+
+    def test_wrapped_olmo_hybrid_model_is_detected(self):
+        tokenizer = MagicMock()
+        tokenizer.chat_template = None
+        model = SimpleNamespace(module=SimpleNamespace(config=SimpleNamespace(model_type="olmo_hybrid")))
         self.assertTrue(uses_olmo3_generation_config("tokenizer_default", tokenizer, model))
 
     def test_non_olmo_template_without_im_end(self):
