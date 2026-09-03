@@ -675,40 +675,14 @@ CONVERSATION_SHAPES = {
     ],
 }
 
-# (template, eos_variant, shape) combinations whose assistant spans can be derived, and which
-# must therefore produce correct labels. Everything not listed here is expected to be detected
-# as underivable and masked out (the row is then dropped by `sft_tulu_filter_v1`).
-#
-# The two categories together are the specification: a combination either trains exactly the
-# assistant content, or trains nothing at all. Producing *wrong* labels is the failure this
-# sweep exists to catch, and no combination is allowed to do it.
-#
-# Growing this set is the goal of the P1 work in
-# https://github.com/allenai/open-instruct/issues/1800: templates that rewrite assistant
-# content as they render (`*_thinker*` inject or split on <think>) cannot be located by either
-# the char-offset or the token-count derivation, and need `{% generation %}` markers instead.
-# Consecutive assistant turns are underivable for the same underlying reason -- every
-# derivation must render a prefix ending in an assistant turn, which templates that
-# special-case the final turn render differently from the full conversation.
+# In-repo SFT templates declare `{% generation %}` blocks, so every (template, eos, shape)
+# combination must train exactly the assistant content. Templates this repo does not own
+# (and the dedicated underivable-template tests below) still go through prefix derivation.
 DERIVABLE_COMBINATIONS = {
-    ("tulu", "native_eos", "alternating"),
-    ("tulu", "im_end_eos", "alternating"),
-    ("olmo", "native_eos", "alternating"),
-    ("olmo", "im_end_eos", "alternating"),
-    ("olmo", "im_end_eos", "consecutive_assistant"),
-    ("olmo_old", "native_eos", "alternating"),
-    ("olmo_old", "im_end_eos", "alternating"),
-    ("olmo_old", "im_end_eos", "consecutive_assistant"),
-    ("olmo_thinker_no_think_7b", "native_eos", "alternating"),
-    ("olmo_thinker_no_think_7b", "im_end_eos", "alternating"),
-    ("olmo_thinker_no_think_7b", "im_end_eos", "consecutive_assistant"),
-    ("olmo_thinker_no_think_sft_tokenization", "native_eos", "alternating"),
-    ("olmo_thinker_no_think_sft_tokenization", "im_end_eos", "alternating"),
-    ("olmo_thinker_no_think_sft_tokenization", "im_end_eos", "consecutive_assistant"),
-    ("zephyr", "native_eos", "alternating"),
-    ("zephyr", "native_eos", "consecutive_assistant"),
-    ("zephyr", "im_end_eos", "alternating"),
-    ("zephyr", "im_end_eos", "consecutive_assistant"),
+    (template_name, eos_name, shape_name)
+    for template_name in SFT_CHAT_TEMPLATE_NAMES
+    for eos_name, _ in EOS_VARIANTS
+    for shape_name in CONVERSATION_SHAPES
 }
 
 
@@ -721,7 +695,6 @@ def _sweep_cases():
 
 
 WORKING_SWEEP_CASES = [c for c in _sweep_cases() if c[4] in DERIVABLE_COMBINATIONS]
-BROKEN_SWEEP_CASES = [c for c in _sweep_cases() if c[4] not in DERIVABLE_COMBINATIONS]
 
 
 class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
@@ -760,13 +733,15 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
             elif message["content"]:
                 self.assertNotIn(message["content"], trained_text, f"{message['role']} content leaked into loss")
 
-    @parameterized.expand([(c[0], c[1], c[2], c[3]) for c in BROKEN_SWEEP_CASES])
-    def test_underivable_spans_are_masked_out_not_mislabelled(self, _name, template_name, eos_token, shape_name):
-        # Detection, not silence: the span can't be located, so the row trains on nothing and
-        # `sft_tulu_filter_v1` drops it. Training on a misaligned span is the failure mode this
-        # whole area guards against, so "no labels" is the correct outcome, not "some labels".
-        messages = CONVERSATION_SHAPES[shape_name]
-        tokenizer = self._tokenizer_for(template_name, eos_token)
+    def test_underivable_spans_are_masked_out_not_mislabelled(self):
+        # Detection, not silence: a template with no `{% generation %}` blocks whose
+        # prefixes cannot be located still trains on nothing and is dropped.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}"
+            "{% if loop.last %}{{ eos_token }}{% endif %}\n{% endfor %}"
+        )
+        messages = CONVERSATION_SHAPES["alternating"]
         row = {"messages": [dict(m) for m in messages]}
         out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
             dict(row), tokenizer, max_seq_length=4096
@@ -777,30 +752,90 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
             open_instruct.dataset_transformation.sft_tulu_filter_v1(out, tokenizer),
             "an all-masked row must be dropped by the filter",
         )
-        # The underlying derivation must still report *why*, so the drop is diagnosable.
-        tools = None
         with self.assertRaises(open_instruct.dataset_transformation.AssistantSpanDerivationError):
             open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
-                messages, tokenizer, tools, 4096
+                messages, tokenizer, None, 4096
             )
 
     def test_one_bad_row_does_not_abort_a_dataset_map(self):
-        # The rung-5 failure mode: a single underivable conversation used to raise inside
-        # `dataset.map` and kill the whole tokenization job. Good rows must survive alongside it.
+        # A single underivable conversation used to raise inside `dataset.map` and kill
+        # the whole tokenization job. Good rows must survive alongside it.
         tokenizer = self._tokenizer_for("tulu", None)
         good = {"messages": [dict(m) for m in CONVERSATION_SHAPES["alternating"]]}
-        bad = {"messages": [dict(m) for m in CONVERSATION_SHAPES["consecutive_assistant"]]}
+        broken = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        broken.chat_template = (
+            "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}"
+            "{% if loop.last %}{{ eos_token }}{% endif %}\n{% endfor %}"
+        )
+        bad = {"messages": [dict(m) for m in CONVERSATION_SHAPES["alternating"]]}
         rows = [
-            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(dict(r), tokenizer, 4096)
-            for r in (good, bad, good)
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(dict(good), tokenizer, 4096),
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(dict(bad), broken, 4096),
+            open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(dict(good), tokenizer, 4096),
         ]
         kept = [r for r in rows if open_instruct.dataset_transformation.sft_tulu_filter_v1(r, tokenizer)]
         self.assertEqual(len(kept), 2, "the two derivable rows must survive the undecidable one")
 
+    def test_olmo_thinker_trains_think_tags(self):
+        # Prefix derivation used to drop or mis-mask thinking turns so `<think>` never
+        # entered the loss. The generation-block mask must keep the opener.
+        tokenizer = self._tokenizer_for("olmo_thinker", None)
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "<think>THINKONE</think>ANSWERONE"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("<think>", trained_text)
+        self.assertIn("THINKONE", trained_text)
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("USERQUERY", trained_text)
+
+    def test_tulu_thinker_r1_style_trains_the_stripped_answer(self):
+        # This template rewrites assistant content (split on `</think>`). The mask must
+        # follow the rewrite: the answer is trained, the dropped thinking is not.
+        tokenizer = self._tokenizer_for("tulu_thinker_r1_style", None)
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "<think>THINKONE</think>ANSWERONE"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("THINKONE", trained_text)
+        self.assertNotIn("USERQUERY", trained_text)
+
+    def test_remove_intermediate_thinking_keeps_only_the_final_think_block(self):
+        tokenizer = self._tokenizer_for("olmo_thinker_remove_intermediate_thinking", None)
+        messages = [
+            {"role": "user", "content": "USERQUERY"},
+            {"role": "assistant", "content": "<think>THINKONE</think>ANSWERONE"},
+            {"role": "user", "content": "USER2"},
+            {"role": "assistant", "content": "<think>THINKTWO</think>ANSWERTWO"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertIn("ANSWERONE", trained_text)
+        self.assertNotIn("THINKONE", trained_text)
+        self.assertIn("<think>", trained_text)
+        self.assertIn("THINKTWO", trained_text)
+        self.assertIn("ANSWERTWO", trained_text)
+
     def test_prefix_unstable_template_falls_back_instead_of_raising(self):
-        # `olmo` swaps <|im_end|> for eos_token on the final assistant turn, so the rendered
-        # prefixes are not literal prefixes of the full render. That used to raise; it must now
-        # fall back to token-count derivation and produce correct labels.
+        # `olmo` swaps <|im_end|> for eos_token on the final assistant turn. Generation
+        # blocks (or the token-count fallback) must still produce correct labels.
         messages = CONVERSATION_SHAPES["alternating"]
         tokenizer = self._tokenizer_for("olmo", None)
         out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
@@ -815,8 +850,8 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         self.assertNotIn("USERTWO", trained_text)
 
     def test_last_turn_only_still_trains_only_the_final_turn_after_fallback(self):
-        # The fallback derives a span per assistant turn; `last_turn_only` must still restrict
-        # to the final one rather than training every turn.
+        # Multi-turn `olmo` labels every assistant generation block; `last_turn_only`
+        # must still restrict to the final one rather than training every turn.
         messages = CONVERSATION_SHAPES["alternating"]
         tokenizer = self._tokenizer_for("olmo", None)
         out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
@@ -827,6 +862,31 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
         self.assertIn("ASSISTTWO", trained_text)
         self.assertNotIn("ASSISTONE", trained_text)
+
+    def test_last_turn_only_does_not_train_an_earlier_turn_when_final_turn_is_truncated(self):
+        tokenizer = self._tokenizer_for("tulu", None)
+        messages = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "FIRSTANSWER"},
+            {"role": "user", "content": "filler " * 200},
+            {"role": "assistant", "content": "FINALANSWER"},
+        ]
+        out = open_instruct.dataset_transformation.last_turn_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=64
+        )
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+
+    def test_generation_mask_preserves_nonfinal_separator_masking(self):
+        tokenizer = self._tokenizer_for("tulu", None)
+        messages = CONVERSATION_SHAPES["alternating"]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+        self.assertNotIn(f"{tokenizer.eos_token}\n", trained_text)
 
     def test_span_running_past_the_turn_is_rejected(self):
         # Guards the over-wide direction directly: a span that starts correctly but runs on
@@ -942,11 +1002,11 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
             )
 
     def test_generation_blocks_yield_an_all_zero_mask_without_raising(self):
-        # Constraint on the intended fix: `return_assistant_tokens_mask=True` on a template with
-        # no {% generation %} block does not raise -- it warns and returns an all-zero mask. A
-        # migration to that API must assert the mask is non-empty, or a template that was simply
-        # not migrated will silently train on nothing, which is worse than today's loud error.
-        tokenizer = self._tokenizer_for("tulu", None)
+        # Hugging Face does not raise on a template with no `{% generation %}` block -- it
+        # warns and returns an all-zero mask. The tokenize path must not treat that as a
+        # successful mask, or an unmigrated template would silently train on nothing.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = open_instruct.dataset_transformation.CHAT_TEMPLATES["simple_concat_with_space"]
         out = tokenizer.apply_chat_template(
             CONVERSATION_SHAPES["alternating"],
             tokenize=True,
@@ -958,6 +1018,22 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         if masks and isinstance(masks[0], list):
             masks = masks[0]
         self.assertEqual(sum(masks), 0)
+
+    def test_empty_generation_mask_on_assistant_turns_is_underivable(self):
+        # The template string has `{% generation %}` so we take the mask path, but the
+        # block never emits tokens. That must be a loud miss, not an all-zero train.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}{{ m['content'] }}{% endfor %}"
+            "{% if false %}{% generation %}x{% endgeneration %}{% endif %}"
+        )
+        messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+        with self.assertRaisesRegex(
+            open_instruct.dataset_transformation.AssistantSpanDerivationError, "all-zero assistant mask"
+        ):
+            open_instruct.dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+                messages, tokenizer, None, 4096
+            )
 
 
 class TestOverLengthStrategy(unittest.TestCase):
