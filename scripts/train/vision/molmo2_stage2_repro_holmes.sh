@@ -43,7 +43,7 @@ uv run python mason.py \
     cd /stage/oi '&&' \
     bash scripts/train/vision/holmes_bootstrap.sh "$GIT_REF" \
     --nproc_per_node=8 open_instruct/olmo_core_mixture_finetune.py \
-    --exp_name molmo2_stage2_repro_4b_holmes \
+    --exp_name "molmo2_stage2_repro_4b_holmes_${MAX_STEPS}" \
     --mixture image-only-v9 \
     --model_name_or_path "$STAGE1_CKPT" \
     --compile_vision false \
@@ -55,4 +55,6 @@ uv run python mason.py \
     --logging_steps 5 \
     --seed 6198 \
     --data_loader_seed 50189 \
-    --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/molmo2_stage2_repro_4b_holmes"
+    --with_tracking \
+    --wandb_project molmo2-stage2 \
+    --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/molmo2_stage2_repro_4b_holmes_${MAX_STEPS}"
