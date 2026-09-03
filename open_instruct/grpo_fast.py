@@ -188,8 +188,9 @@ def _build_vlm_name_mapper(model_name: str, model_type: str | None = None):
     warm-start paths like .../swerl_qwen35_9b_..._cg) drop the dot, and missing the
     mapper makes the trainer->vLLM weight sync fail with 'no module named model'.
     Prefer the config's model_type when given: derived checkpoints (e.g. allenai/tmax-2b)
-    carry none of these spellings in their name."""
-    if model_type is not None and model_type.lower() in ("qwen3_5", "qwen3_6"):
+    carry none of these spellings in their name. The trainer's text-only class reports
+    the text sub-config's type ("qwen3_5_text"), hence the prefix match."""
+    if model_type is not None and model_type.lower().startswith(("qwen3_5", "qwen3_6")):
         return lambda weight_name: f"language_model.{weight_name}"
     name = model_name.lower()
     if any(v in name for v in ("qwen3.5", "qwen3.6", "qwen35", "qwen36", "qwen3_5", "qwen3_6")):
