@@ -53,6 +53,18 @@ its true length is only a lower bound, so the reported mean is a lower bound too
 The summary always prints the truncation rate alongside a completed-traces-only mean.
 If that rate is more than a few percent, raise `--max-tokens` before believing the mean.
 
+A completion can also hit the cap *after* closing its thinking block, cutting off
+only the final answer. That leaves the trace length exact, so it is reported
+separately (`answer cut, trace ok`) rather than counted as censoring — but it is a
+warning that the cap is close to binding.
+
+These defaults were set from measurement, not guesswork. The first real run put
+Qwen3-8B at a mean of ~9.6K thinking tokens with a maximum of 30,560 against a
+30,720 cap, so the cap moved to 39,000 within a 40,960 context. 40,960 is Qwen3-8B's
+native `max_position_embeddings` and the binding limit across the pair
+(R1-Distill-Llama-8B allows 131,072); both models get the same budget on purpose,
+since extra room to think on one side would confound the comparison.
+
 **The two chat templates differ, deliberately.** Qwen3 lets the model emit its own
 `<think>`; DeepSeek-R1-Distill prefills `<think>\n` in the assistant prefix, so its
 completions begin *inside* the trace with no opening tag. The parser keys off the

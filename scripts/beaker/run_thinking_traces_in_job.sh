@@ -26,7 +26,8 @@
 #   TP_SIZE / DP_SIZE    parallelism (default: TP=1, DP=GPU_COUNT -- 8B models
 #                        fit on one GPU, so N independent engines beat one
 #                        sharded engine, especially on NVLink-less L40S)
-#   MAX_MODEL_LEN        --max-model-len (default: 32768)
+#   MAX_MODEL_LEN        --max-model-len (default: 40960, Qwen3-8B's native
+#                        limit and the binding one across the pair)
 #   VLLM_GPU_UTIL        --gpu-memory-utilization (default: vllm's default)
 #   VLLM_MAX_NUM_SEQS    --max-num-seqs (default: 64)
 #   VLLM_EXTRA_ARGS      free-form extra args appended to vllm serve
@@ -39,7 +40,7 @@
 #   NUM_SAMPLES          completions per prompt (default: 4)
 #   TEMPERATURE          default 0.6  (both vendors' recommended thinking temp)
 #   TOP_P                default 0.95
-#   MAX_TOKENS           per-completion cap (default: 30720). Traces that hit
+#   MAX_TOKENS           per-completion cap (default: 39000). Traces that hit
 #                        this are censored, so the script reports the rate.
 #   MAX_PROMPT_TOKENS    skip prompts longer than this (default: 1536)
 #   SEED                 sampling seed (default: 1234). Identical across models,
@@ -63,7 +64,7 @@ log() { printf '\n=== [%s] %s ===\n' "$(date -u +%H:%M:%S)" "$*"; }
 : "${GPU_COUNT:=8}"
 : "${TP_SIZE:=1}"
 : "${DP_SIZE:=$(( GPU_COUNT / TP_SIZE ))}"
-: "${MAX_MODEL_LEN:=32768}"
+: "${MAX_MODEL_LEN:=40960}"
 : "${VLLM_MAX_NUM_SEQS:=64}"
 : "${VLLM_READY_TIMEOUT:=1800}"
 : "${DATASET:=allenai/Dolci-Think-SFT-7B}"
@@ -71,7 +72,7 @@ log() { printf '\n=== [%s] %s ===\n' "$(date -u +%H:%M:%S)" "$*"; }
 : "${NUM_SAMPLES:=4}"
 : "${TEMPERATURE:=0.6}"
 : "${TOP_P:=0.95}"
-: "${MAX_TOKENS:=30720}"
+: "${MAX_TOKENS:=39000}"
 : "${MAX_PROMPT_TOKENS:=1536}"
 : "${SEED:=1234}"
 : "${CONCURRENCY:=64}"

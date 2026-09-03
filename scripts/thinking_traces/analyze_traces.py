@@ -32,6 +32,11 @@ from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
+# Mirrors generate_traces.KIND_CLOSED. Duplicated rather than imported so this
+# module stays numpy-only: fetch_and_compare.sh runs it locally, without the
+# generator's datasets/transformers/openai stack.
+KIND_CLOSED = "closed"
+
 BOOTSTRAP_ROUNDS = 10_000
 
 
@@ -125,6 +130,10 @@ def summarize(label: str, records: list[dict], args: argparse.Namespace) -> dict
     lengths = np.array([r["thinking_tokens"] for r in records], dtype=float)
     truncated = np.array([bool(r.get("truncated")) for r in records])
     no_block = np.array([r.get("kind") == "no_block" for r in records])
+    # A completion can hit the token cap *after* closing its thinking block: the
+    # trace length is then exact and only the final answer is cut off. That does
+    # not censor this metric, but it is a signal the cap is close to binding.
+    answer_cut = np.array([r.get("finish_reason") == "length" and r.get("kind") == KIND_CLOSED for r in records])
     completed = lengths[~truncated]
 
     summary = {
@@ -135,6 +144,7 @@ def summarize(label: str, records: list[dict], args: argparse.Namespace) -> dict
         "n_truncated": int(truncated.sum()),
         "truncation_rate": float(truncated.mean()),
         "n_no_thinking_block": int(no_block.sum()),
+        "n_answer_truncated_after_complete_trace": int(answer_cut.sum()),
         "mean": float(lengths.mean()),
         "variance": float(lengths.var(ddof=1)),
         "sd": float(lengths.std(ddof=1)),
@@ -241,6 +251,8 @@ def render(summaries: list[dict], comparison: dict | None) -> str:
             f"  min / max           {s['min']:10.0f} / {s['max']:.0f}",
             f"  truncated at cap    {s['n_truncated']:10d}  ({s['truncation_rate'] * 100:.1f}%)",
             f"  no thinking block   {s['n_no_thinking_block']:10d}",
+            f"  answer cut, trace ok{s['n_answer_truncated_after_complete_trace']:10d}"
+            "  (trace length still exact; cap is close to binding)",
         ]
         if s.get("between_prompt_var") is not None:
             lines += [

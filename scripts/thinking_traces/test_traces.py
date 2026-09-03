@@ -96,6 +96,29 @@ def test_summarize_reports_truncation_and_moments():
     assert summary["mean_ci95"][0] <= summary["mean"] <= summary["mean_ci95"][1]
 
 
+def test_analyze_kind_constant_stays_in_sync_with_generator():
+    """analyze_traces duplicates this constant to stay numpy-only; keep them equal."""
+    assert analyze_traces.KIND_CLOSED == generate_traces.KIND_CLOSED
+
+
+def test_summarize_separates_answer_truncation_from_trace_truncation():
+    """Hitting the cap after </think> leaves the trace length exact."""
+    records = _records([[100, 200], [300, 400]])
+    for record in records:
+        record.update({"model": "m", "kind": "closed", "truncated": False, "finish_reason": "stop"})
+    # Closed trace, but the completion ran out of budget while writing the answer.
+    records[1].update({"finish_reason": "length"})
+    # Genuinely censored trace: no closing tag before the cap.
+    records[2].update({"finish_reason": "length", "kind": "truncated", "truncated": True})
+
+    args = analyze_traces.argparse.Namespace(min_per_source=1, seed=0)
+    summary = analyze_traces.summarize("m", records, args)
+
+    assert summary["n_answer_truncated_after_complete_trace"] == 1
+    assert summary["n_truncated"] == 1
+    assert summary["completed_only"]["n"] == 3
+
+
 def test_compare_detects_a_real_shift_and_verifies_prompt_identity():
     base = _records([[100, 110], [200, 210], [300, 310], [400, 410]])
     longer = [dict(r, thinking_tokens=r["thinking_tokens"] * 2) for r in base]

@@ -53,7 +53,14 @@ CLUSTER="ai2/neptune"
 GPU_COUNT=8
 TP_SIZE=1
 DP_SIZE=""
-MAX_MODEL_LEN=32768
+# 40960 is Qwen3-8B's native max_position_embeddings and the binding limit of
+# the pair (R1-Distill-Llama-8B allows 131072). Matched on purpose: giving one
+# model more room to think would confound the length comparison.
+#
+# Raised from 32768 after the first real run: Qwen3-8B averaged ~9.6K thinking
+# tokens with a max of 30560 against a 30720 cap. Censored traces are lower
+# bounds, so a binding cap silently biases the mean downward.
+MAX_MODEL_LEN=40960
 VLLM_GPU_UTIL=""
 VLLM_MAX_NUM_SEQS=64
 VLLM_EXTRA_ARGS=""
@@ -62,7 +69,7 @@ NUM_PROMPTS=200
 NUM_SAMPLES=4
 TEMPERATURE=0.6
 TOP_P=0.95
-MAX_TOKENS=30720
+MAX_TOKENS=39000
 MAX_PROMPT_TOKENS=1536
 SEED=1234
 CONCURRENCY=64
