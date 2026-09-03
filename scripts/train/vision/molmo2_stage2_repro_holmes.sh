@@ -17,11 +17,12 @@ set -euo pipefail
 MAX_STEPS="${1:-100}"
 STAGE1_CKPT="${2:-/weka/oe-training-default/ai2-llm/checkpoints/jasonr/molmo2-stage1-4b-lossw-20260828}"
 GIT_REF="${3:-vision-pr4}"
+NUM_NODES="${4:-1}"
 # A CUDA-13 environment image known to run on holmes in this workspace (olmo-miles);
 # used only as the base OS/CUDA environment — code and python env are bootstrapped.
 BOOTSTRAP_IMAGE="robertb/olmo-miles-v0-1-20260901"
 
-echo "holmes validation: ${MAX_STEPS} steps, ref ${GIT_REF}, ckpt ${STAGE1_CKPT}"
+echo "holmes run: ${MAX_STEPS} steps, ${NUM_NODES} node(s), ref ${GIT_REF}, ckpt ${STAGE1_CKPT}"
 
 uv run python mason.py \
     --cluster ai2/holmes \
@@ -30,20 +31,22 @@ uv run python mason.py \
     --image "$BOOTSTRAP_IMAGE" \
     --description "open-instruct-multimodal: Molmo2-4B stage-2 repro on holmes (bootstrap, ${MAX_STEPS} steps)." \
     --pure_docker_mode \
-    --num_nodes 1 \
+    --num_nodes "$NUM_NODES" \
     --gpus 8 \
     --no-host-networking \
     --no_auto_dataset_cache \
     --env OLMO2_FLEX_ATTN=1 \
-    --env VIT_CROP_MICROBATCH=8 \
+    --env VIT_CROP_MICROBATCH=16 \
+    --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     -- \
     rm -rf /stage/oi '&&' \
     git clone --depth 1 -b "$GIT_REF" https://github.com/allenai/open-instruct.git /stage/oi '&&' \
     cd /stage/oi '&&' \
     bash scripts/train/vision/holmes_bootstrap.sh "$GIT_REF" \
+    --nnodes="$NUM_NODES" '--node_rank=$BEAKER_REPLICA_RANK' '--master_addr=$BEAKER_LEADER_REPLICA_HOSTNAME' --master_port=29400 \
     --nproc_per_node=8 open_instruct/olmo_core_mixture_finetune.py \
-    --exp_name "molmo2_stage2_repro_4b_holmes_${MAX_STEPS}" \
+    --exp_name "molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}" \
     --mixture image-only-v9 \
     --model_name_or_path "$STAGE1_CKPT" \
     --compile_vision false \
@@ -53,8 +56,9 @@ uv run python mason.py \
     --ephemeral_save_interval -1 \
     --keep_last_n_checkpoints -1 \
     --logging_steps 5 \
+    --prefetch_workers 8 \
     --seed 6198 \
     --data_loader_seed 50189 \
     --with_tracking \
     --wandb_project molmo2-stage2 \
-    --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/molmo2_stage2_repro_4b_holmes_${MAX_STEPS}"
+    --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}"
