@@ -71,7 +71,7 @@ We support Direct Preference Optimization (DPO) training on a variety of dataset
 | | `--fsdp_num_replicas` | Number of FSDP replicas (`None` = auto) | `None` |
 | **Data** | `--mixer_list` | List of datasets (local or HF) to sample from | — |
 | | `--mixer_list_splits` | Dataset splits for training | `["train"]` |
-| | `--chat_template_name` | `CHAT_TEMPLATES` key, or `tokenizer_default` for the tokenizer's own template. Unknown names raise. | `None` |
+| | `--chat_template_name` | Chat template to use | `None` |
 | | `--transform_fn` | List of transform functions to apply to the dataset | — |
 | | `--cache_dataset_only` | Exit after caching the dataset | `False` |
 | | `--skip_cache` | Skip dataset caching | `False` |

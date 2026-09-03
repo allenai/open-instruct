@@ -9,6 +9,7 @@ The output layout for each `output_dir` is:
 """
 
 import gzip
+import hashlib
 import json
 import os
 import pathlib
@@ -409,6 +410,16 @@ def convert_hf_to_numpy_sft(
 
     logger.info("Data conversion completed successfully!")
 
+    template = getattr(tc.tokenizer, "chat_template", None)
+    try:
+        template_str = json.dumps(template, sort_keys=True)
+    except TypeError:
+        template_str = str(template)
+    if tc.chat_template_name is None or tc.chat_template_name == "tokenizer_default":
+        chat_template_source = f"tokenizer:{tc.tokenizer_name_or_path}"
+    else:
+        chat_template_source = f"registry:{tc.chat_template_name}"
+
     write_dataset_statistics(
         output_dir=output_dir,
         dataset_statistics=dataset_statistics,
@@ -418,7 +429,9 @@ def convert_hf_to_numpy_sft(
         num_samples_skipped=stats["num_samples_skipped"],
         tokenizer_name=tc.tokenizer_name_or_path,
         max_seq_length=max_seq_length,
-        **dataset_transformation.describe_chat_template_resolution(tc),
+        chat_template_name=tc.chat_template_name,
+        chat_template_source=chat_template_source,
+        chat_template_hash=hashlib.sha256(template_str.encode()).hexdigest(),
         per_dataset_counts=stats["per_dataset_counts"],
         per_dataset_tokens=stats["per_dataset_tokens"],
         per_dataset_trainable_tokens=stats["per_dataset_trainable_tokens"],
