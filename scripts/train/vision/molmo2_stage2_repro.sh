@@ -14,7 +14,7 @@
 #
 # The checkpoint arg accepts an OLMo-core run dir (latest step is used) or a step dir.
 #
-# Runs on ALLOCATED capacity (non-preemptible, normal priority) across the CUDA-12
+# Runs on ALLOCATED capacity (non-preemptible, urgent priority) across the CUDA-12
 # weka clusters. ai2/holmes (B300) needs a CUDA-13 image of this branch — build with
 # ./scripts/train/build_image_and_launch.sh --cuda-version 13 before adding it here.
 set -euo pipefail
