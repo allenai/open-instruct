@@ -108,8 +108,10 @@ VLLM_CMD=( uvx "vllm==${VLLM_VERSION}" serve "$VLLM_MODEL"
            --tensor-parallel-size "$TP_SIZE"
            --max-model-len "$MAX_MODEL_LEN"
            --max-num-seqs "$VLLM_MAX_NUM_SEQS"
-           --enable-prefix-caching
-           --disable-log-requests )
+           --enable-prefix-caching )
+# NOTE: no request-logging flag. vLLM 0.23 renamed it to --enable-log-requests
+# and defaults it off; the older --disable-log-requests is gone, and passing it
+# aborts `vllm serve` with "unrecognized arguments".
 if [ "$DP_SIZE" -gt 1 ]; then
     VLLM_CMD+=( --data-parallel-size "$DP_SIZE" )
 fi
