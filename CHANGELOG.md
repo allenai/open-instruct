@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Changed
+- Bump vllm to >=0.26.0, moving the whole tree to torch 2.11 (the version the OLMoE3 KDA MoE requires, so training stacks unify). Fallout handled in the same change: transformers moves to 5.16.1, torchcodec (a new vllm dependency with no cu128 builds past 0.14) resolves to the +cpu build on the cuda12 stack and +cu130 on cuda13, flash-attn-4 moves to beta19 (the newest build compatible with vllm's exact nvidia-cutlass-dsl and apache-tvm-ffi pins), openai moves to 3.x (vllm's tool parsers need it), and flash-attn 2 / FA3 stay on their torch2.10-built wheels because no torch 2.11 builds exist anywhere (https://github.com/allenai/open-instruct/pull/1874).
+
 ### Added
 - Add `over_length_strategy` to SFT tokenization, for conversations that `max_seq_length` truncation cuts short. `truncation_side` is `right`, so an over-length conversation loses its trailing EOS with the excess and becomes supervision with no terminator anywhere in it — i.e. supervision to never stop — with a trainable partial answer at the cut. Measured on the Dolci-Think 32768 cache: 2.02% of rows end on a non-EOS token and 2.00% have that final token trainable. `terminate` ends such a row with a trainable EOS, `drop` removes it, and the default `keep` preserves today's behavior so existing dataset caches stay valid (https://github.com/allenai/open-instruct/pull/1876).
 - Support SFT of `allenai/Olmo-Hybrid-7B` on the olmo-core path: an `olmo3_hybrid_7B` config and HF <-> olmo-core state conversion for `model_type: olmo_hybrid`, neither of which olmo-core provides (https://github.com/allenai/open-instruct/pull/1822).

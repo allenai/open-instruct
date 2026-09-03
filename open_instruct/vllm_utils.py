@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import dataclasses
+import importlib
 import os
 import queue
 import sys
@@ -42,6 +43,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.utils import _config_module
 from vllm.config import WeightTransferConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest, WeightTransferUpdateRequest
 from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
@@ -89,6 +91,27 @@ logger = logger_utils.setup_logger(__name__)
 # ---------------------------------------------------------------------------
 MambaSpec.__dataclass_fields__["dtypes"].type = tuple[torch.dtype, ...]
 MambaSpec.__annotations__["dtypes"] = tuple[torch.dtype, ...]
+
+
+# ---------------------------------------------------------------------------
+# Monkey-patch: make torch config modules picklable for Ray actor export
+#
+# torch 2.11 wraps config modules (torch.distributed.config, torch._dynamo.config,
+# ...) in per-module ConfigModuleInstance subclasses of ModuleType. cloudpickle
+# only pickles modules by reference when type(obj) is exactly types.ModuleType,
+# so these fall through to the default pickler, which raises
+# "cannot pickle 'ConfigModuleInstance' object". Ray hits this while exporting
+# our actor classes (torch.distributed.config is reachable from their pickled
+# state), killing every GRPO run at ModelGroup creation.
+#
+# A __reduce__ on the shared ConfigModule base pickles every config module by
+# import path, which is also what pickling-by-reference would have done.
+# ---------------------------------------------------------------------------
+def _reduce_config_module(self: _config_module.ConfigModule) -> tuple[Any, tuple[str]]:
+    return (importlib.import_module, (self.__name__,))
+
+
+_config_module.ConfigModule.__reduce__ = _reduce_config_module
 
 NUM_PREFETCH_WORKERS = 2
 DRAIN_ACTIVE_TASKS_SLEEP_S = 1
@@ -797,7 +820,14 @@ class LLMRayActor:
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        # vllm 0.26 requires the start/finish bracket around update_weights. Every
+        # sync here sends all weights in one call (packed=False), so bracketing per
+        # call is equivalent to bracketing per sync.
+        self._run_async(self.llm_engine.start_weight_update())
+        try:
+            self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
+        finally:
+            self._run_async(self.llm_engine.finish_weight_update())
         if model_step is not None:
             self.current_model_step = model_step
 
@@ -1374,7 +1404,7 @@ def _broadcast_weights_ipc(
         if is_rank_0:
             mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
             for engine in vllm_engines:
-                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
+                trainer_args = IPCTrainerSendWeightsArgs(send_mode="ray", llm_handle=engine)
                 IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
             return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
     return []
