@@ -14,6 +14,7 @@ uv run python mason.py \
        --pure_docker_mode \
        --workspace ai2/open-instruct-dev \
        --priority urgent \
+       --min_runtime 30m \
        --num_nodes 1 \
        --max_retries 0 \
        --timeout 15m \
