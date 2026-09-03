@@ -522,6 +522,24 @@ def get_olmo3_generation_config(tokenizer):
     )
 
 
+def uses_olmo3_generation_config(
+    chat_template_name: str | None, tokenizer: transformers.PreTrainedTokenizer, model: torch.nn.Module | None = None
+) -> bool:
+    """True when saved checkpoints should stop on both <|im_end|> and <|endoftext|>.
+
+    Do not key this only off path substrings: local Hybrid checkpoints live under
+    `/weka/.../HYBRID...` and `--chat_template_name tokenizer_default` contains no "olmo".
+    """
+    if chat_template_name and "olmo" in chat_template_name.lower():
+        return True
+    if model is not None:
+        model_type = getattr(getattr(model, "config", None), "model_type", None)
+        if model_type == "olmo_hybrid":
+            return True
+    template = getattr(tokenizer, "chat_template", None) or ""
+    return "<|im_end|>" in str(template)
+
+
 def save_with_accelerate(
     accelerator: Accelerator,
     model: torch.nn.Module,
@@ -535,7 +553,7 @@ def save_with_accelerate(
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    if chat_template_name and "olmo" in chat_template_name:
+    if uses_olmo3_generation_config(chat_template_name, tokenizer, model):
         # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
         logger.info(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
         model.generation_config = get_olmo3_generation_config(tokenizer)
