@@ -744,7 +744,7 @@ class TestChatTemplateResolution(unittest.TestCase):
         self.assertEqual(default_stats["chat_template_source"], f"tokenizer:{TOKENIZER_PATH}")
         self.assertEqual(len(default_stats["chat_template_hash"]), 64)
 
-    def test_legacy_cached_statistics_are_enriched_with_template_metadata(self):
+    def test_legacy_cached_statistics_mark_template_metadata_unknown(self):
         cache_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
         cache = open_instruct.dataset_transformation.LocalDatasetTransformationCache("legacy", cache_dir)
@@ -756,11 +756,34 @@ class TestChatTemplateResolution(unittest.TestCase):
 
         _, statistics = cache.load_or_transform_dataset([], self._tc("tulu"))
 
-        self.assertEqual(statistics["chat_template_name"], "tulu")
-        self.assertEqual(statistics["chat_template_source"], "registry:tulu")
-        self.assertEqual(len(statistics["chat_template_hash"]), 64)
+        self.assertIsNone(statistics["chat_template_name"])
+        self.assertIsNone(statistics["chat_template_source"])
+        self.assertIsNone(statistics["chat_template_hash"])
         with open(stats_path) as f:
             self.assertEqual(json.load(f), statistics)
+
+    def test_cached_template_metadata_is_not_overwritten_by_the_callers_tokenizer(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        cache = open_instruct.dataset_transformation.LocalDatasetTransformationCache("explicit-hash", cache_dir)
+        cache_path = cache.get_cache_path()
+        open_instruct.dataset_transformation.Dataset.from_dict({"value": [1]}).save_to_disk(cache_path)
+        stored_statistics = {
+            "per_dataset_stats": [],
+            "dataset_order": [],
+            "chat_template_name": "original",
+            "chat_template_source": "tokenizer:original",
+            "chat_template_hash": "original-hash",
+        }
+        stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        with open(stats_path, "w") as f:
+            json.dump(stored_statistics, f)
+
+        _, statistics = cache.load_or_transform_dataset([], self._tc("tulu"))
+
+        self.assertEqual(statistics, stored_statistics)
+        with open(stats_path) as f:
+            self.assertEqual(json.load(f), stored_statistics)
 
 
 # Templates from CHAT_TEMPLATES that are used for SFT (as opposed to the RL/inference-only
