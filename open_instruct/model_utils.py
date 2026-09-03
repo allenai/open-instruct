@@ -82,9 +82,9 @@ def detect_attn_implementation() -> AttentionBackendName:
     elif transformers.utils.is_flash_attn_3_available() and _gpu_compute_major() == 9:
         # OLMo-core's has_flash_attn_3() only supports (9, 0) <= capability < (10, 0),
         # so a `>= 9` bound here hands Blackwell a backend olmo-core then refuses with
-        # "'FlashAttention3Backend' ... is not supported on this platform". That was
-        # masked while flash-attn-4 was installed, because the branch above caught
-        # Blackwell first.
+        # "'FlashAttention3Backend' ... is not supported on this platform". The
+        # flash-attn-4 branch above normally catches Blackwell first, so this only
+        # bites when FA4 is unavailable -- but the bound is wrong either way.
         result = AttentionBackendName.flash_3
     elif transformers.utils.is_flash_attn_2_available():
         result = AttentionBackendName.flash_2

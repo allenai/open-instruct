@@ -13,7 +13,10 @@ supported-markers = [
 ]
 
 [manifest]
-overrides = [{ name = "transformers", specifier = ">=5.15.0" }]
+overrides = [
+    { name = "apache-tvm-ffi", specifier = "==0.1.11" },
+    { name = "transformers", specifier = ">=5.15.0" },
+]
 
 [[package]]
 name = "absl-py"
@@ -1300,6 +1303,24 @@ dependencies = [
 ]
 wheels = [
     { url = "https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.08.17-542a34a/flash_attn_3-3.0.0%2B20260817.cu130torch2130cxx11abitrue.25110-cp310-abi3-linux_x86_64.whl", hash = "sha256:87221c524df3ed3a95cf1a13b603ac555a22b1556d9da3e59b52b36e7d309e14" },
+]
+
+[[package]]
+name = "flash-attn-4"
+version = "4.0.0b28"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "apache-tvm-ffi" },
+    { name = "einops" },
+    { name = "nvidia-cutlass-dsl" },
+    { name = "quack-kernels" },
+    { name = "torch", version = "2.13.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" } },
+    { name = "torch-c-dlpack-ext" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/86/de2a7e2744c231bd96e723b592265c0ec4ba19468277968670447b2574a5/flash_attn_4-4.0.0b28.tar.gz", hash = "sha256:feda044eacd29e1c26f673ca98b25b12e7eb95df8dbe3e3f1f3fa9dc58165ce5", size = 377693, upload-time = "2026-08-26T08:47:48.138Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/aa/3fbbf512a901b8174f840fa35fcc5eaed03dd3dba9879c16c435f6e62092/flash_attn_4-4.0.0b28-py3-none-any.whl", hash = "sha256:b6fc43864488b97becee5c123536bc7d0de98bfac0754973aa6c00521eced9cf", size = 402718, upload-time = "2026-08-26T08:47:46.577Z" },
 ]
 
 [[package]]
@@ -2849,6 +2870,7 @@ dependencies = [
     { name = "fastapi", version = "0.136.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "flash-attn-3", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "flash-attn-4", marker = "sys_platform == 'linux'" },
     { name = "flash-linear-attention" },
     { name = "hf-transfer" },
     { name = "immutabledict" },

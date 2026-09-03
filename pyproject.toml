@@ -47,13 +47,12 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    # flash-attn-4 is intentionally absent: vLLM 0.28 pins nvidia-cutlass-dsl==4.6.2
-    # and apache-tvm-ffi==0.1.11, and no FA4 release satisfies both. FA4 <=b19 resolves
-    # against cutlass 4.6.2 but calls cute.core.ThrMma, which 4.6.2 removed (an
-    # AttributeError at import, which OLMo-core's ImportError guard does not catch);
-    # b20-b26 pin cutlass==4.6.0.dev0; and b27+, which do work with 4.6.2, require
-    # apache-tvm-ffi>=0.1.12. OLMo-core degrades to FA3/FA2 without it. Restore this
-    # once vLLM relaxes its apache-tvm-ffi pin.
+    # b28 is the first FA4 that works with the cutlass 4.6.2 vLLM 0.28 pins: <=b19 call
+    # cute.core.ThrMma, which moved to cute.atom in 4.6.x, and b20-b26 pin
+    # cutlass==4.6.0.dev0. b28 declares apache-tvm-ffi>=0.1.12 while vLLM pins ==0.1.11,
+    # so that floor is overridden below rather than raising vLLM's pin -- see the
+    # override-dependencies comment for why that direction is the safe one.
+    "flash-attn-4==4.0.0b28; platform_system != 'Darwin'",
 
     # FA3 ships one wheel per (CUDA, torch) pair; this is the cu130 + torch 2.13 build.
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.08.17-542a34a/flash_attn_3-3.0.0%2B20260817.cu130torch2130cxx11abitrue.25110-cp310-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
@@ -142,6 +141,14 @@ override-dependencies = [
     # vLLM 0.28 requires >=5.5.3 and is tested against 5.15; without a floor here
     # this override would let the lock keep an older transformers than vLLM supports.
     "transformers>=5.15.0",
+    # Hold apache-tvm-ffi at exactly what vLLM 0.28 pins, overriding flash-attn-4
+    # b28's >=0.1.12 floor rather than raising vLLM's pin. vLLM ships compiled
+    # extensions linked against tvm-ffi -- and tvm-ffi stopped abi3-tagging its core
+    # wheels at 0.1.13 -- so a mismatch there is silent. flash-attn-4 is a pure-Python
+    # wheel that JITs, and its entire tvm-ffi surface is `Function` (present in 0.1.11)
+    # plus `__version__`, used only as a JIT cache key. nvidia-cutlass-dsl declares no
+    # tvm-ffi requirement, so nothing else pulls this up.
+    "apache-tvm-ffi==0.1.11",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
