@@ -1379,9 +1379,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
     # Hugging Face returns an all-zero mask (no raise) when the tags are missing, so
     # only take this path when the template actually has them; otherwise fall through
     # to prefix derivation, which is what published Qwen/Olmo templates still need.
-    template = tokenizer.chat_template
-    if isinstance(template, dict):
-        template = template.get("default") or ""
+    template = tokenizer.get_chat_template(tools=tools)
     if isinstance(template, str) and ("{% generation" in template or "{%- generation" in template):
         tokenized = tokenizer.apply_chat_template(
             conversation=messages,
