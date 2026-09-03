@@ -409,8 +409,6 @@ def convert_hf_to_numpy_sft(
 
     logger.info("Data conversion completed successfully!")
 
-    chat_template_metadata = dataset_transformation._get_chat_template_metadata(tc)
-
     write_dataset_statistics(
         output_dir=output_dir,
         dataset_statistics=dataset_statistics,
@@ -420,9 +418,9 @@ def convert_hf_to_numpy_sft(
         num_samples_skipped=stats["num_samples_skipped"],
         tokenizer_name=tc.tokenizer_name_or_path,
         max_seq_length=max_seq_length,
-        chat_template_name=tc.chat_template_name,
-        chat_template_source=chat_template_metadata["chat_template_source"],
-        chat_template_hash=chat_template_metadata["chat_template_hash"],
+        chat_template_name=dataset_statistics.get("chat_template_name"),
+        chat_template_source=dataset_statistics.get("chat_template_source"),
+        chat_template_hash=dataset_statistics.get("chat_template_hash"),
         per_dataset_counts=stats["per_dataset_counts"],
         per_dataset_tokens=stats["per_dataset_tokens"],
         per_dataset_trainable_tokens=stats["per_dataset_trainable_tokens"],
