@@ -60,6 +60,12 @@ completions begin *inside* the trace with no opening tag. The parser keys off th
 No `--reasoning-parser` is passed to vLLM, so the literal tags survive into the
 response and one parser handles both.
 
+**vLLM version is pinned to a CUDA 12 build.** vLLM 0.20+ pins torch 2.11, built
+against CUDA 13, which needs driver >= 580. `ai2/neptune` and `ai2/jupiter` run
+570.x (CUDA 12.8) and fail at engine start with *"The NVIDIA driver on your system
+is too old (found version 12080)"*. 0.19.1 is the newest release still on torch
+2.10 / CUDA 12. Raise `--vllm-version` only for a cluster with a new enough driver.
+
 **Samples within a prompt are correlated**, so the bootstrap resamples whole prompts.
 Per-trace CIs would be too narrow. The reported ICC says how much of the total
 variance is "which question was asked" versus "how long this particular rollout ran".

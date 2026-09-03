@@ -39,7 +39,13 @@ LAUNCH_BOTH=0
 VLLM_MODEL="Qwen/Qwen3-8B"
 MODEL_B="deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 SERVED_MODEL_NAME=""
-VLLM_VERSION="0.23.0"
+# vLLM 0.20+ pins torch 2.11, which is built against CUDA 13 and needs driver
+# >= 580. ai2/neptune and ai2/jupiter run 570.x (CUDA 12.8), where it dies with
+# "The NVIDIA driver on your system is too old (found version 12080)". 0.19.1 is
+# the newest release still on torch 2.10 / CUDA 12 -- the same pairing as the
+# ai2/cuda12.8-*-torch2.10.0 Beaker image. Only raise this for a cluster whose
+# driver is new enough (e.g. the CUDA 13 B300 nodes).
+VLLM_VERSION="0.19.1"
 VLLM_PORT=8008
 CLUSTER="ai2/neptune"
 GPU_COUNT=8

@@ -14,7 +14,9 @@
 #   -- vLLM serving --
 #   VLLM_MODEL           HF repo to serve (required, e.g. Qwen/Qwen3-8B)
 #   SERVED_MODEL_NAME    --served-model-name (required, e.g. qwen3-8b)
-#   VLLM_VERSION         vLLM version for uvx (default: 0.23.0)
+#   VLLM_VERSION         vLLM version for uvx (default: 0.19.1 -- see the
+#                        CUDA note in the launcher; newer vLLM needs a newer
+#                        driver than the L40S/H100 clusters have)
 #   VLLM_PORT            port for vLLM (default: 8008)
 #   GPU_COUNT            GPUs allocated to the job (default: 8)
 #   TP_SIZE / DP_SIZE    parallelism (default: TP=1, DP=GPU_COUNT -- 8B models
@@ -52,7 +54,7 @@ log() { printf '\n=== [%s] %s ===\n' "$(date -u +%H:%M:%S)" "$*"; }
 
 : "${VLLM_MODEL:?set VLLM_MODEL}"
 : "${SERVED_MODEL_NAME:?set SERVED_MODEL_NAME}"
-: "${VLLM_VERSION:=0.23.0}"
+: "${VLLM_VERSION:=0.19.1}"
 : "${VLLM_PORT:=8008}"
 : "${GPU_COUNT:=8}"
 : "${TP_SIZE:=1}"
