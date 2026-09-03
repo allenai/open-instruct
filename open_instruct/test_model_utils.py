@@ -7,8 +7,7 @@ from unittest.mock import MagicMock
 import torch
 
 import open_instruct.model_utils
-from open_instruct.model_utils import Batch, TensorCache
-from open_instruct.model_utils import uses_olmo3_generation_config
+from open_instruct.model_utils import Batch, TensorCache, uses_olmo3_generation_config
 
 
 class TestBatchSlicing(unittest.TestCase):
