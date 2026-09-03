@@ -3,13 +3,15 @@
 # Local 4-GPU terminal RL through the LiteRegistry gateway backend — no Beaker/mason.py,
 # and no podman anywhere on this machine: every sandbox container runs on the remote
 # replica fleet behind $GATEWAY_URL.
-# Layout: 2 learner GPUs (ZeRO-3 + liger loss) + 2 vLLM engine GPUs. Sized for 4x L40S 46GB.
+# Layout: 2 learner GPUs (ZeRO-3 + liger loss) + 2 vLLM engine GPUs. Sized for 4x L40S 46GB
+# (Qwen3.5-4B OOMs in the ZeRO-3 dummy optimizer step on 44GB cards even with 3 learners;
+# allenai/tmax-2b keeps the Qwen3.5 tokenizer/tool format and fits).
 # Same training args as qwen35_4b_gateway_smoke.sh with a short response length so a
 # handful of steps finishes quickly; this validates the plumbing, not model quality.
 
 export GATEWAY_URL="${GATEWAY_URL:-http://jupiter-cs-aus-148.reviz.ai2.in:45216}"
-MODEL=Qwen/Qwen3.5-4B
-EXP_NAME="${EXP_NAME:-qwen35_4b_gateway_local_4gpu}"
+MODEL=allenai/tmax-2b
+EXP_NAME="${EXP_NAME:-tmax_2b_gateway_local_4gpu}"
 
 export VLLM_ALLOW_INSECURE_SERIALIZATION=1
 export VLLM_DISABLE_COMPILE_CACHE=1

@@ -146,6 +146,19 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     uv run --frozen --no-default-groups --group dev --group cuda${OI_CUDA_GROUP} \
         python -m nltk.downloader punkt punkt_tab words
 
+# causal-conv1d is an sdist that compiles against whatever torch/CUDA its isolated
+# build env happens to get. On the cu13 group that build env has ended up with the
+# PyPI (cu128) torch, producing a libcudart.so.12-linked extension that fails to
+# import on the cu130 stack (transformers' qwen3_5 modeling imports it). Rebuild it
+# explicitly against the venv's own torch and /usr/local/cuda, and fail the build
+# here rather than at job start if it still cannot be imported.
+RUN if [ "${OI_CUDA_GROUP}" = "13" ]; then \
+        uv pip install setuptools wheel ninja packaging && \
+        CAUSAL_CONV1D_FORCE_BUILD=TRUE MAX_JOBS=8 \
+            uv pip install --no-cache --no-build-isolation --no-deps --reinstall causal-conv1d==1.6.1 && \
+        .venv/bin/python -c "import torch, causal_conv1d_cuda; print('causal_conv1d_cuda OK, torch', torch.__version__)"; \
+    fi
+
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
 COPY scripts scripts

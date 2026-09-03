@@ -181,12 +181,16 @@ WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
-def _build_vlm_name_mapper(model_name: str):
+def _build_vlm_name_mapper(model_name: str, model_type: str | None = None):
     """Sometimes we have different weight names btw vLLM and HF, so we build
     a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF.
     Match the "qwen35"/"qwen3_5" spellings too — local checkpoint dirs (e.g.
     warm-start paths like .../swerl_qwen35_9b_..._cg) drop the dot, and missing the
-    mapper makes the trainer->vLLM weight sync fail with 'no module named model'."""
+    mapper makes the trainer->vLLM weight sync fail with 'no module named model'.
+    Prefer the config's model_type when given: derived checkpoints (e.g. allenai/tmax-2b)
+    carry none of these spellings in their name."""
+    if model_type is not None and model_type.lower() in ("qwen3_5", "qwen3_6"):
+        return lambda weight_name: f"language_model.{weight_name}"
     name = model_name.lower()
     if any(v in name for v in ("qwen3.5", "qwen3.6", "qwen35", "qwen36", "qwen3_5", "qwen3_6")):
         return lambda weight_name: f"language_model.{weight_name}"
@@ -715,7 +719,9 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
+            name_mapper=_build_vlm_name_mapper(
+                self._model_name_or_path, getattr(self.model.module.config, "model_type", None)
+            ),
         )
 
     def update_ref_policy(self):
