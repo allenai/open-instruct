@@ -27,7 +27,6 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --description "Molmo2-4B stage-2 reproduction (image-only-v9, stage-1 init, upstream recipe)." \
     --pure_docker_mode \
-    --preemptible \
     --num_nodes 1 \
     --gpus 8 \
     --no-host-networking \
