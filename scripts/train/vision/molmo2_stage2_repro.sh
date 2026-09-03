@@ -27,7 +27,7 @@ echo "Stage-1 checkpoint: $STAGE1_CKPT"
 uv run python mason.py \
     --cluster ai2/jupiter ai2/saturn ai2/ceres \
     --workspace ai2/open-instruct-dev \
-    --priority normal \
+    --priority urgent \
     --image "$BEAKER_IMAGE" \
     --description "open-instruct-multimodal: Molmo2-4B stage-2 reproduction (image-only-v9, stage-1 init, upstream recipe)." \
     --pure_docker_mode \
