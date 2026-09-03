@@ -532,12 +532,17 @@ def uses_olmo3_generation_config(
     """
     if chat_template_name and "olmo" in chat_template_name.lower():
         return True
-    if model is not None:
-        model_type = getattr(getattr(model, "config", None), "model_type", None)
-        if model_type == "olmo_hybrid":
-            return True
+    model_config = getattr(model, "config", None)
+    if model_config is None:
+        model_config = getattr(getattr(model, "module", None), "config", None)
+    model_type = str(getattr(model_config, "model_type", "") or "").lower()
+    if model_type == "olmo_hybrid":
+        return True
+    model_name = str(getattr(model_config, "_name_or_path", "") or "").lower()
+    tokenizer_name = str(getattr(tokenizer, "name_or_path", "") or "").lower()
+    is_olmo = model_type.startswith("olmo") or "olmo" in model_name or "olmo" in tokenizer_name
     template = getattr(tokenizer, "chat_template", None) or ""
-    return "<|im_end|>" in str(template)
+    return is_olmo and "<|im_end|>" in str(template)
 
 
 def save_with_accelerate(
