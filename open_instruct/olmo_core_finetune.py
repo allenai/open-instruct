@@ -50,9 +50,9 @@ from open_instruct import dataset_transformation, logger_utils, numpy_dataset_co
 logger = logger_utils.setup_logger(__name__)
 
 
-_DEFAULT_EPHEMERAL_SAVE_INTERVAL = 500
-
-_TOKENIZE_BARRIER_TIMEOUT_HOURS = 24
+# Must stay strictly below CheckpointConfig.checkpointing_steps (500), which olmo-core
+# requires;
+_DEFAULT_EPHEMERAL_SAVE_INTERVAL = 250
 
 _NUMPY_SFT_SUBDIR = "numpy_sft"
 
@@ -110,6 +110,20 @@ def _tokenize_to_numpy_dir(
 
 
 @dataclasses.dataclass
+class SFTConfig:
+    """Settings read only by this script.
+
+    They stay out of the shared configs because DPO and GRPO inherit those and
+    would advertise flags neither trainer reads.
+    """
+
+    dist_timeout_hours: float = 24
+    """Timeout for distributed collectives, in hours."""
+    save_async: bool = True
+    """Whether olmo-core saves checkpoints asynchronously."""
+
+
+@dataclasses.dataclass
 class SFTArguments:
     tracking: olmo_core_utils.ExperimentConfig
     model: olmo_core_utils.ModelConfig
@@ -117,6 +131,7 @@ class SFTArguments:
     dataset: olmo_core_utils.DatasetConfig
     logging: olmo_core_utils.LoggingConfig
     checkpoint: olmo_core_utils.CheckpointConfig
+    sft: SFTConfig
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
@@ -147,7 +162,22 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         return
 
     if not _numpy_dir_is_populated(numpy_dir):
-        mixer = " ".join(args.dataset.mixer_list)
+        cache_args = [
+            f"--model_name_or_path {args.model.model_name_or_path}",
+            f"--tokenizer_name_or_path {tc.tokenizer_name_or_path}",
+            f"--max_seq_length {args.training.max_seq_length}",
+            f"--mixer_list {' '.join(args.dataset.mixer_list)}",
+            f"--mixer_list_splits {' '.join(args.dataset.mixer_list_splits)}",
+            f"--seed {args.tracking.seed}",
+        ]
+        if tc.chat_template_name is not None:
+            cache_args.append(f"--chat_template_name {tc.chat_template_name}")
+        if tc.add_bos:
+            cache_args.append("--add_bos")
+        if args.dataset.transform_fn:
+            cache_args.append(f"--transform_fn {' '.join(args.dataset.transform_fn)}")
+        cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
+        cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
             "Pre-tokenized numpy SFT dataset not found.\n"
             f"  expected: {numpy_dir}\n"
@@ -158,17 +188,12 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             '      --priority urgent --image "$BEAKER_IMAGE" --budget ai2/oe-adapt \\\n'
             "      --gpus 0 --num_nodes 1 --no_auto_dataset_cache \\\n"
             "      -- uv run python open_instruct/olmo_core_finetune.py \\\n"
-            f"      --model_name_or_path {args.model.model_name_or_path} \\\n"
-            f"      --tokenizer_name_or_path {tc.tokenizer_name_or_path} \\\n"
-            f"      --max_seq_length {args.training.max_seq_length} \\\n"
-            f"      --mixer_list {mixer} \\\n"
-            f"      --local_cache_dir {args.dataset.local_cache_dir} \\\n"
-            "      --cache_dataset_only\n\n"
+            f"      {cache_cmd}\n\n"
             "Re-launch training once the tokenization job has completed."
         )
 
     global_rank, world_size, is_main_process = olmo_core_utils.setup_distributed_env(
-        seed=args.tracking.seed, timeout=datetime.timedelta(hours=_TOKENIZE_BARRIER_TIMEOUT_HOURS)
+        seed=args.tracking.seed, timeout=datetime.timedelta(hours=args.sft.dist_timeout_hours)
     )
 
     if is_main_process:
@@ -295,15 +320,14 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
         max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
+        save_async=args.sft.save_async,
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
 
-    load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
-
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
-        load_strategy=load_strategy,
+        load_strategy=LoadStrategy.never,
         max_duration=max_duration,
         metrics_collect_interval=args.logging.logging_steps,
         callbacks=trainer_callbacks,
@@ -311,7 +335,24 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
     ).build(train_module, data_loader)
 
-    if not use_hf_ckpt:
+    # Loaded here rather than by fit(), which skips its own load once anything has
+    # been loaded: putting the base weights in first would suppress it. Precedence
+    # is fit()'s own -- an interrupted run in output_dir, then an explicit resume,
+    # then the base weights.
+    resumed = trainer.maybe_load_checkpoint(args.checkpoint.output_dir, load_trainer_state=True, load_optim_state=True)
+    if args.checkpoint.resume_from_checkpoint is not None:
+        if resumed:
+            logger.warning(
+                f"Ignoring --resume_from_checkpoint ({args.checkpoint.resume_from_checkpoint}) "
+                f"since a checkpoint was found in {args.checkpoint.output_dir}"
+            )
+        else:
+            logger.info(f"Resuming from {args.checkpoint.resume_from_checkpoint}...")
+            # Raises when the path holds no checkpoint: a typo here must not
+            # silently fall back to an expensive restart from the base weights.
+            trainer.load_checkpoint(args.checkpoint.resume_from_checkpoint)
+            resumed = True
+    if not resumed and not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
 
@@ -331,6 +372,7 @@ if __name__ == "__main__":
             olmo_core_utils.DatasetConfig,
             olmo_core_utils.LoggingConfig,
             olmo_core_utils.CheckpointConfig,
+            SFTConfig,
             dataset_transformation.TokenizerConfig,
         )
     )
@@ -344,8 +386,14 @@ if __name__ == "__main__":
         transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
         target_columns=list(dataset_transformation.TOKENIZED_SFT_DATASET_KEYS),
     )
-    tracking, model, training, dataset, logging_cfg, checkpoint, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
+    tracking, model, training, dataset, logging_cfg, checkpoint, sft, tc = parser.parse()  # ty: ignore[invalid-assignment, not-iterable]
     args = SFTArguments(
-        tracking=tracking, model=model, training=training, dataset=dataset, logging=logging_cfg, checkpoint=checkpoint
+        tracking=tracking,
+        model=model,
+        training=training,
+        dataset=dataset,
+        logging=logging_cfg,
+        checkpoint=checkpoint,
+        sft=sft,
     )
     main(args, tc)
