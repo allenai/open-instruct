@@ -46,7 +46,9 @@ SERVED_MODEL_NAME=""
 # ai2/cuda12.8-*-torch2.10.0 Beaker image. Only raise this for a cluster whose
 # driver is new enough (e.g. the CUDA 13 B300 nodes).
 VLLM_VERSION="0.19.1"
-VLLM_PORT=8008
+# NOT named VLLM_PORT: vLLM reserves that name as the base of its internal
+# port range, and exporting it collides every data-parallel rank on one port.
+SERVE_PORT=8008
 CLUSTER="ai2/neptune"
 GPU_COUNT=8
 TP_SIZE=1
@@ -215,7 +217,7 @@ EOF
         --env "VLLM_MODEL=${model}"
         --env "SERVED_MODEL_NAME=${served}"
         --env "VLLM_VERSION=${VLLM_VERSION}"
-        --env "VLLM_PORT=${VLLM_PORT}"
+        --env "SERVE_PORT=${SERVE_PORT}"
         --env "GPU_COUNT=${GPU_COUNT}"
         --env "TP_SIZE=${TP_SIZE}"
         --env "DP_SIZE=${dp}"
