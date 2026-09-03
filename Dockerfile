@@ -67,7 +67,13 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /uvx /bin/
 
 WORKDIR /stage/
 
-ENV UV_CACHE_DIR=/root/.cache/uv \
+# `preview = true` makes uv >=0.12 place the project environment inside
+# UV_CACHE_DIR and leave .venv as a symlink to it. UV_CACHE_DIR is a build cache
+# mount, so that environment never lands in the image and /stage/.venv ends up
+# dangling -- the image builds fine and then dies with "python: command not
+# found". Pinning an explicit path keeps the environment in the layer.
+ENV UV_PROJECT_ENVIRONMENT=/stage/.venv \
+    UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0 \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+docker
