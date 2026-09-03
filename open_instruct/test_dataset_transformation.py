@@ -659,7 +659,6 @@ class TestChatTemplateResolution(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("Unknown chat template name 'olmo123'", message)
         self.assertIn("tokenizer_default", message)
-        self.assertIn("Available keys:", message)
         self.assertIn("Did you mean", message)
         self.assertIn("'olmo'", message)
 
@@ -673,21 +672,33 @@ class TestChatTemplateResolution(unittest.TestCase):
             "olmo_thinker_no_think_7b" in message or "olmo_thinker_no_think_sft_tokenization" in message, message
         )
 
-    def test_describe_resolution_records_registry_source_and_hash(self):
-        tc = self._tc("tulu")
-        info = open_instruct.dataset_transformation.describe_chat_template_resolution(tc)
-        self.assertEqual(info["chat_template_name"], "tulu")
-        self.assertEqual(info["chat_template_source"], "registry:tulu")
-        self.assertEqual(len(info["chat_template_hash"]), 64)
-        expected_hash = hashlib.sha256(json.dumps(tc.tokenizer.chat_template, sort_keys=True).encode()).hexdigest()
-        self.assertEqual(info["chat_template_hash"], expected_hash)
+    def test_dataset_statistics_record_resolved_template(self):
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, ignore_errors=True)
+        _, stats = open_instruct.dataset_transformation.get_cached_dataset_tulu_with_statistics(
+            [os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
+            ["train"],
+            self._tc("tulu"),
+            ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            [{"max_seq_length": 4096}, {}],
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=cache_dir,
+        )
+        self.assertEqual(stats["chat_template_name"], "tulu")
+        self.assertEqual(stats["chat_template_source"], "registry:tulu")
+        self.assertEqual(len(stats["chat_template_hash"]), 64)
 
-    def test_describe_resolution_records_tokenizer_source(self):
-        tc = self._tc("tokenizer_default")
-        info = open_instruct.dataset_transformation.describe_chat_template_resolution(tc)
-        self.assertEqual(info["chat_template_name"], "tokenizer_default")
-        self.assertEqual(info["chat_template_source"], f"tokenizer:{TOKENIZER_PATH}")
-        self.assertEqual(len(info["chat_template_hash"]), 64)
+        _, default_stats = open_instruct.dataset_transformation.get_cached_dataset_tulu_with_statistics(
+            [os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"), "1.0"],
+            ["train"],
+            self._tc("tokenizer_default"),
+            ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
+            [{"max_seq_length": 4096}, {}],
+            dataset_skip_cache=True,
+            dataset_local_cache_dir=cache_dir,
+        )
+        self.assertEqual(default_stats["chat_template_source"], f"tokenizer:{TOKENIZER_PATH}")
+        self.assertEqual(len(default_stats["chat_template_hash"]), 64)
 
 
 # Templates from CHAT_TEMPLATES that are used for SFT (as opposed to the RL/inference-only

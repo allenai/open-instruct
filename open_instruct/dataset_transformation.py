@@ -641,74 +641,24 @@ CHAT_TEMPLATES = {
     ),
 }
 
-# Sentinel for "use the tokenizer's published chat template" rather than a registry key.
-# `None` means the same thing (the historical default); any other unknown name raises.
-TOKENIZER_DEFAULT_CHAT_TEMPLATE_NAME = "tokenizer_default"
 
-
-def uses_tokenizer_chat_template(chat_template_name: str | None) -> bool:
-    return chat_template_name is None or chat_template_name == TOKENIZER_DEFAULT_CHAT_TEMPLATE_NAME
-
-
-def _unknown_chat_template_error(name: str) -> ValueError:
-    available = sorted(CHAT_TEMPLATES)
-    suggestions = difflib.get_close_matches(name, available, n=3, cutoff=0.4)
-    msg = (
-        f"Unknown chat template name {name!r}. "
-        f"Use a CHAT_TEMPLATES key or {TOKENIZER_DEFAULT_CHAT_TEMPLATE_NAME!r} "
-        f"to use the tokenizer's own template. "
-        f"Available keys: {', '.join(available)}."
-    )
-    if suggestions:
-        msg += f" Did you mean {', '.join(repr(s) for s in suggestions)}?"
-    return ValueError(msg)
-
-
-def _load_tokenizer_chat_template(tc: "TokenizerConfig"):
-    try:
-        return AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
-    except Exception:
-        raise ValueError(
-            f"Could not load the tokenizer's own chat template from {tc.tokenizer_name_or_path!r}. "
-            f"Pass --chat_template_name with one of: {', '.join(sorted(CHAT_TEMPLATES))}."
-        ) from None
-
-
-def apply_configured_chat_template(tc: "TokenizerConfig", tokenizer: PreTrainedTokenizer) -> None:
-    """Set tokenizer.chat_template from a registry key or the tokenizer default.
-
-    Unrecognised names raise. `None` and `tokenizer_default` use the tokenizer's
-    published template.
-    """
+def _set_chat_template(tc: "TokenizerConfig", tokenizer: PreTrainedTokenizer) -> None:
     name = tc.chat_template_name
-    if uses_tokenizer_chat_template(name):
-        tokenizer.chat_template = _load_tokenizer_chat_template(tc)
-        return
-    if name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[name]
-        return
-    raise _unknown_chat_template_error(name)
-
-
-def describe_chat_template_resolution(tc: "TokenizerConfig") -> dict[str, str | None]:
-    """Record which template was actually applied, not just the requested name."""
-    name = tc.chat_template_name
-    chat_template = getattr(tc.tokenizer, "chat_template", None)
-    try:
-        chat_template_str = json.dumps(chat_template, sort_keys=True)
-    except TypeError:
-        chat_template_str = str(chat_template)
-    if uses_tokenizer_chat_template(name):
-        source = f"tokenizer:{tc.tokenizer_name_or_path}"
+    if name is None or name == "tokenizer_default":
+        try:
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(
+                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+            ).chat_template
+        except Exception:
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.") from None
     elif name in CHAT_TEMPLATES:
-        source = f"registry:{name}"
+        tokenizer.chat_template = CHAT_TEMPLATES[name]
     else:
-        source = f"tokenizer:{tc.tokenizer_name_or_path}"
-    return {
-        "chat_template_name": name,
-        "chat_template_source": source,
-        "chat_template_hash": hashlib.sha256(chat_template_str.encode()).hexdigest(),
-    }
+        suggestions = difflib.get_close_matches(name, CHAT_TEMPLATES, n=3, cutoff=0.4)
+        hint = f" Did you mean {', '.join(repr(s) for s in suggestions)}?" if suggestions else ""
+        raise ValueError(
+            f"Unknown chat template name {name!r}. Use one of {sorted(CHAT_TEMPLATES)} or 'tokenizer_default'.{hint}"
+        )
 
 
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
@@ -759,7 +709,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    apply_configured_chat_template(tc, tokenizer)
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -817,7 +767,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    apply_configured_chat_template(tc, tokenizer)
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -835,7 +785,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in str(tc.tokenizer_name_or_path).lower():
-        if uses_tokenizer_chat_template(tc.chat_template_name):
+        if tc.chat_template_name is None or tc.chat_template_name == "tokenizer_default":
             pass  # just assume the user knows what they're doing
         elif "olmo" in tc.chat_template_name:
             assert not tc.add_bos, "For newer OLMo chat templates, you must *not* run with `--add_bos`."
@@ -862,7 +812,11 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                if uses_tokenizer_chat_template(tc.chat_template_name) or "olmo" not in tc.chat_template_name:
+                if (
+                    tc.chat_template_name is None
+                    or tc.chat_template_name == "tokenizer_default"
+                    or "olmo" not in tc.chat_template_name
+                ):
                     assert tc.add_bos, (
                         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence "
                         "if using an older chat template."
@@ -887,7 +841,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
-    apply_configured_chat_template(tc, tokenizer)
+    _set_chat_template(tc, tokenizer)
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -922,7 +876,7 @@ class TokenizerConfig:
     trust_remote_code: bool = False
     use_fast: bool = True
     chat_template_name: str | None = (
-        None  # CHAT_TEMPLATES key, tokenizer_default, or None (tokenizer's own). Unknown names raise.
+        None  # CHAT_TEMPLATES key, or tokenizer_default / None for the tokenizer's own. Unknown names raise.
     )
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
@@ -2315,12 +2269,22 @@ class LocalDatasetTransformationCache:
             combined_dataset = combined_dataset.remove_columns("index")
         combined_dataset = combined_dataset.add_column("index", range(len(combined_dataset)))
 
-        # Prepare return statistics. Record the resolved template so a dataset
-        # documents what it was actually built with, not just the requested name.
+        name = tc.chat_template_name
+        template = getattr(tc.tokenizer, "chat_template", None)
+        try:
+            template_str = json.dumps(template, sort_keys=True)
+        except TypeError:
+            template_str = str(template)
+        if name is None or name == "tokenizer_default":
+            source = f"tokenizer:{tc.tokenizer_name_or_path}"
+        else:
+            source = f"registry:{name}"
         all_statistics = {
             "per_dataset_stats": dataset_statistics,
             "dataset_order": dataset_order,
-            **describe_chat_template_resolution(tc),
+            "chat_template_name": name,
+            "chat_template_source": source,
+            "chat_template_hash": hashlib.sha256(template_str.encode()).hexdigest(),
         }
 
         if dataset_skip_cache:
