@@ -279,6 +279,18 @@ case "$MODE" in
         RDZV_FLAGS="--master_port=${MASTER_PORT:-$(( 29500 + RANDOM % 400 ))}"
     fi
     echo "ranks=$RANKS grad_accum=$GRAD_ACCUM -> global batch $(( SEQ * RANKS * GRAD_ACCUM )) tokens"
+    # Preemption recovery. An allocated holmes job is only shielded for its 8 h
+    # minRuntime; after that an urgent job can preempt it (observed 2026-09-03 at
+    # exactly 8h00m, #1875, losing 4,770 steps back to the last permanent save).
+    # Beaker does not auto-resume it (mason sets autoResume false), so recovery is
+    # a manual relaunch with RESUME_FROM=<dir>/stepNNNN. mason mints a fresh
+    # CHECKPOINT_OUTPUT_DIR per launch, so the previous run's dir must be named
+    # explicitly; olmo-core restores step, optimizer state and data order, and the
+    # LR schedule is a pure function of step, so the trajectory is preserved.
+    # EPHEMERAL_STEPS bounds the loss: olmo-core keeps only the latest ephemeral
+    # checkpoint (207 GB, ~95 s to write from 16 ranks), so 2000 costs ~2% wall
+    # and caps a preemption at ~75 min of lost work.
+    RESUME_FLAGS="${RESUME_FROM:+--resume_from_checkpoint $RESUME_FROM}"
     # Probe modes default CKPT_STEPS above STEPS so nothing is written: each
     # checkpoint is 207 GB written synchronously (the DDP train module rejects
     # async), which a memory or LR screen does not need.
@@ -319,7 +331,8 @@ case "$MODE" in
         --activation_checkpointing_mode "$ACT_CKPT_MODE" \
         --activation_memory_budget "$ACT_MEM_BUDGET" \
         --checkpointing_steps "$CKPT_STEPS" \
-        --ephemeral_save_interval -1 \
+        --ephemeral_save_interval "${EPHEMERAL_STEPS:--1}" \
+        $RESUME_FLAGS \
         --keep_last_n_checkpoints "$KEEP_LAST_N" \
         --dist_timeout_hours "${DIST_TIMEOUT_HOURS:-2}" \
         --no_save_async \
