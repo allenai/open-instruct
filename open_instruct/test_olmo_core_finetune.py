@@ -79,6 +79,15 @@ class IsHfCheckpointTest(unittest.TestCase):
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("/weka/checkpoints/some-model-hf/step1"))
 
 
+class SupportedOlmoCoreModelsTest(unittest.TestCase):
+    def test_legacy_olmoe_hf_model_id_is_not_supported(self) -> None:
+        model_id = "allenai/OLMoE-1B-7B-0924"
+
+        self.assertNotIn(model_id, olmo_core_utils.OLMO_MODEL_CONFIG_MAP)
+        with self.assertRaisesRegex(ValueError, f"Model/config '{model_id}' not found"):
+            olmo_core_utils.get_transformer_config(model_id, vocab_size=50304, attn_backend="torch")
+
+
 class TestCheckpointerDefaults(unittest.TestCase):
     def test_default_intervals_build_a_checkpointer(self) -> None:
         """The two defaults must not collide: olmo-core requires ephemeral < save_interval."""

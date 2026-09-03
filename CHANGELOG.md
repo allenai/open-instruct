@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 ### Deprecated
 
 ### Removed
+- Remove legacy OLMoE-1B-7B from the OLMo-core SFT support list (https://github.com/allenai/open-instruct/pull/1846).
 
 ### Fixed
 - SFT's default checkpoint intervals collided: `olmo_core_finetune.py` forced `ephemeral_save_interval=500` through `parser.set_defaults` while `checkpointing_steps` also defaults to 500, and olmo-core requires the former to be strictly smaller, so any run that did not override one of them was rejected at startup. The forced default is now 250, and a non-positive `--ephemeral_save_interval` disables ephemeral checkpoints entirely, matching the existing `-1` convention for `max_checkpoints` (https://github.com/allenai/open-instruct/pull/1810).
