@@ -151,8 +151,13 @@ log "pre-resolving client deps"
 DEPS_PID=$!
 
 # --- 4. Wait for vLLM ---------------------------------------------------------
+# vLLM's own output goes to $VLLM_LOG, so without this heartbeat the job log
+# shows nothing at all between "launching vllm" and either readiness or a
+# timeout 30 minutes later -- during which a slow wheel download and a wedged
+# server look identical. Echo the tail periodically so progress is visible.
 log "waiting for vllm on :$VLLM_PORT (up to ${VLLM_READY_TIMEOUT}s)"
 _deadline=$(( SECONDS + VLLM_READY_TIMEOUT ))
+_ticks=0
 until curl -sf "http://localhost:$VLLM_PORT/v1/models" >/dev/null 2>&1; do
     if ! kill -0 "$VLLM_PID" 2>/dev/null; then
         log "vllm process died — tail of $VLLM_LOG:"
@@ -164,9 +169,14 @@ until curl -sf "http://localhost:$VLLM_PORT/v1/models" >/dev/null 2>&1; do
         tail -n "$VLLM_LOG_TAIL_LINES" "$VLLM_LOG" || true
         exit 1
     fi
+    _ticks=$(( _ticks + 1 ))
+    if [ $(( _ticks % 6 )) = 0 ]; then
+        log "still waiting for vllm (${SECONDS}s elapsed); last lines of $VLLM_LOG:"
+        tail -n 5 "$VLLM_LOG" 2>/dev/null || echo "(no output yet)"
+    fi
     sleep 10
 done
-log "vllm ready"
+log "vllm ready after ${SECONDS}s"
 curl -s "http://localhost:$VLLM_PORT/v1/models" | head -c 600; echo
 
 wait "$DEPS_PID" || { log "client dependency resolution failed"; exit 1; }
