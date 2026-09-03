@@ -33,7 +33,7 @@ uv run python mason.py \
     --pure_docker_mode \
     --num_nodes "$NUM_NODES" \
     --gpus 8 \
-    --no-host-networking \
+    $([ "$NUM_NODES" -eq 1 ] && echo --no-host-networking) \
     --no_auto_dataset_cache \
     --env OLMO2_FLEX_ATTN=1 \
     --env VIT_CROP_MICROBATCH=16 \
