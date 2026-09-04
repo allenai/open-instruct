@@ -10,6 +10,13 @@ shift
 CHECKPOINT_ROOT="/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/qwen35_2b_opd_from_qwen35_9b_math_4node__42__1788510641"
 PRIORITY="${PRIORITY:-urgent}"
 MODEL_FILTER="${MODEL_FILTER:-.*}"
+EVAL_CODE_DATASET="${EVAL_CODE_DATASET:-}"
+EVAL_SCRIPT="scripts/eval/math_vllm.py"
+MASON_DATASET_ARGS=()
+if [[ -n "$EVAL_CODE_DATASET" ]]; then
+    EVAL_SCRIPT="/eval/math_vllm.py"
+    MASON_DATASET_ARGS=(--beaker_datasets "/eval:$EVAL_CODE_DATASET")
+fi
 
 MODEL_LABELS=(base step_1 step_20 step_40 step_60 step_80 step_99)
 MODEL_PATHS=(
@@ -45,9 +52,10 @@ for index in "${!MODEL_LABELS[@]}"; do
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env VLLM_DISABLE_COMPILE_CACHE=1 \
         --env VLLM_USE_V1=1 \
+        "${MASON_DATASET_ARGS[@]}" \
         --no_auto_dataset_cache \
         -- \
-    uv run python scripts/eval/math_vllm.py \
+    uv run python "$EVAL_SCRIPT" \
         --model "$model" \
         --model-label "$label" \
         --datasets \
