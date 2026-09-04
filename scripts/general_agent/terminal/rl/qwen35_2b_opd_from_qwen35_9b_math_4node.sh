@@ -105,7 +105,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
     --with_tracking \
-    --wandb_entity kevinfarhat \
+    --wandb_entity allenai-team1 \
     --wandb_project opd \
     --seed 42 \
     --push_to_hub false \
