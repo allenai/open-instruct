@@ -577,6 +577,67 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
         self.assertNotIn("Assistant", trained_text)
         self.assertNotIn("hi", trained_text)
 
+    def test_generation_prompt_suffix_that_repeats_content_is_trainable(self):
+        # Think-oriented Hub tokenizers append ``<think>`` to the generation prompt while
+        # training examples already begin the assistant content with the same marker.  The
+        # marker belongs to the target, not the masked prompt header.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'user' %}User: {{ m['content'] }}\\n"
+            "{% elif m['role'] == 'assistant' %}Assistant: {{ m['content'] }}{{ eos_token }}{% endif %}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}Assistant: <think>{% endif %}"
+        )
+        row = {
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "<think>reason</think>answer"},
+            ]
+        }
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode(
+            [tid for tid, lab in zip(input_ids, labels) if lab != -100], clean_up_tokenization_spaces=False
+        )
+        self.assertIn("<think>reason</think>answer", trained_text)
+        self.assertNotIn("User", trained_text)
+        self.assertNotIn("Assistant", trained_text)
+
+    def test_generation_prompt_overlap_survives_prefix_count_fallback(self):
+        # A final-turn-only EOS makes the prefixes unstable and selects the token-count
+        # fallback.  The same duplicated generation suffix must be corrected there too.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'user' %}User: {{ m['content'] }}\\n"
+            "{% elif m['role'] == 'assistant' %}Assistant: {{ m['content'] }}"
+            "{% if loop.last %}{{ eos_token }}{% endif %}\\n{% endif %}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}Assistant: <think>{% endif %}"
+        )
+        messages = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "<think>one</think>answer"},
+            {"role": "user", "content": "second"},
+            {"role": "assistant", "content": "<think>two</think>answer"},
+        ]
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": messages}, tokenizer, max_seq_length=4096
+        )
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        trained_text = tokenizer.decode(
+            [tid for tid, lab in zip(input_ids, labels) if lab != -100], clean_up_tokenization_spaces=False
+        )
+        self.assertIn("<think>one</think>answer", trained_text)
+        self.assertIn("<think>two</think>answer", trained_text)
+        self.assertNotIn("first", trained_text)
+        self.assertNotIn("second", trained_text)
+
     def test_slow_tokenizer_raises_clear_error(self):
         slow_tokenizer = mock.MagicMock()
         slow_tokenizer.is_fast = False

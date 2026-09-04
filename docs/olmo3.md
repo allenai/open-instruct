@@ -25,7 +25,7 @@ This document is a reference for the settings used for Olmo 3, based on the best
 
 **Olmo 3.2+ models (also used for Olmo Hybrid):**
 
-- **Think SFT data** is tokenized with the Instruct chat template [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev). This template does not include `<think>`, which prevents `<think>` from being masked out during tokenization so the model learns to generate it. (We plan to fix the underlying masking bug so this workaround is no longer needed.)
+- **Think SFT data** can be tokenized with either [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) or [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev). They render the training conversation identically; the tokenization code keeps a repeated `<think>` generation suffix in the assistant loss instead of masking it.
 - **Think evaluation** should use [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev), which is the instruct chat template plus `<think>` in `add_generation_prompt` (new models should combine tool use abilities from the instruct template with `<think>` for reasoning). Named `3.2` to distinguish from the original Olmo 3 think tokenizers, which did not include function calling.
 - **Think release models** should use [`allenai/olmo-3.2-tokenizer-think-release`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-release), which is the same as the think-dev template but with the Olmo identity system prompt.
 - **Instruct release models** should use [`allenai/olmo-3-tokenizer-instruct-release`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-release), which is the same as `instruct-dev` but with the Olmo identity system prompt. This is analogous to how `think-release` differs from `think-dev`.
@@ -36,13 +36,13 @@ This document is a reference for the settings used for Olmo 3, based on the best
 
 ---
 
-There are two main issues that lead to all the floating chat templates: one, the <think> token chopping in the tokenization script where our code incorrectly masks the first <think> token as part of the prompt, and two, the identity issue which means we should train and release with different system prompts.
+There are two main issues that lead to all the floating chat templates: one, the identity issue which means we should train and release with different system prompts, and two, making sure reasoning markers emitted by a generation prompt remain part of the assistant loss.
 
 **TLDR until these two issues are resolved:**
 
--  [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) is the primary chat template for tokenizing both instruct and think models that have tool use abilities.
+-  [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) and [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev) are equivalent for SFT tokenization of instruct and think models that have tool use abilities.
 - For Instruct evaluation/training, use [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev). For release, use [`allenai/olmo-3-tokenizer-instruct-release`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-release) (adds Olmo identity).
-- For Think SFT tokenization, use [`allenai/olmo-3-tokenizer-instruct-dev`](https://huggingface.co/allenai/olmo-3-tokenizer-instruct-dev) (avoids the `<think>` masking bug). For Think evaluation and post-SFT stages (DPO, RL), use [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev) (adds `<think>` to `add_generation_prompt`). For release, use [`allenai/olmo-3.2-tokenizer-think-release`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-release) (adds Olmo identity).
+- For Think SFT tokenization, either the Instruct or Think development tokenizer is suitable. For Think evaluation and post-SFT stages (DPO, RL), use [`allenai/olmo-3.2-tokenizer-think-dev`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-dev) (adds `<think>` to `add_generation_prompt`). For release, use [`allenai/olmo-3.2-tokenizer-think-release`](https://huggingface.co/allenai/olmo-3.2-tokenizer-think-release) (adds Olmo identity).
 
 To verify that two tokenizer repos differ only where expected, use the diff tool:
 
