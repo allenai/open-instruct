@@ -792,9 +792,16 @@ _READ_CHUNK_BYTES = 384 * 1024
 
 # One wait-exec blocks inside the container until the command finishes or the
 # in-container wait budget expires, so completed commands return in one round
-# trip and long commands cost one cheap request per ~45s.
+# trip and long commands cost one cheap request per ~30s. The gap between the
+# two budgets is headroom for `podman exec` spawn/teardown on a loaded replica
+# (observed >20s under fleet-wide load); the replica 408s the whole exec if the
+# in-container wait plus that overhead exceeds its own budget.
 _WAIT_EXEC_TIMEOUT_S = 55.0
-_IN_CONTAINER_WAIT_S = 45
+_IN_CONTAINER_WAIT_S = 30
+# A wait exec that returns neither marker was itself cut short (e.g. its bash
+# reaped by the session's cgroup OOM killer alongside the command); the command
+# state lives in files, so re-issuing the same exec is safe.
+_MAX_MARKERLESS_WAITS = 3
 _DONE_MARKER = "__SWERL_GATEWAY_DONE__"
 _PENDING_MARKER = "__SWERL_GATEWAY_PENDING__"
 
@@ -1099,18 +1106,28 @@ class GatewayBackend(SandboxBackend):
         # Budget: command timeout, plus TERM->KILL grace, plus slack for the
         # detached launcher and filesystem latency.
         deadline = time.monotonic() + effective_timeout + 60.0
+        markerless_waits = 0
         while True:
             response = self._exec(waiter, exec_timeout=_WAIT_EXEC_TIMEOUT_S, workdir="/")
             stdout = response.get("stdout", "")
             if _DONE_MARKER in stdout:
                 break
             if _PENDING_MARKER not in stdout:
-                raise GatewayBackendError(
-                    f"Gateway wait exec returned no marker (exit={response.get('exit_code')}): "
-                    f"stdout={stdout[:200]!r} stderr={response.get('stderr', '')[:200]!r}"
+                markerless_waits += 1
+                if markerless_waits >= _MAX_MARKERLESS_WAITS:
+                    raise GatewayBackendError(
+                        f"Gateway wait exec returned no marker {markerless_waits}x in a row "
+                        f"(exit={response.get('exit_code')}): "
+                        f"stdout={stdout[:200]!r} stderr={response.get('stderr', '')[:200]!r}"
+                    )
+                logger.warning(
+                    "Gateway wait exec returned no marker (exit=%s); retrying (%s/%s)",
+                    response.get("exit_code"),
+                    markerless_waits,
+                    _MAX_MARKERLESS_WAITS,
                 )
             if time.monotonic() > deadline:
-                self._exec(f"rm -rf {quoted_dir}", exec_timeout=15.0)
+                self._cleanup_job_dir(quoted_dir)
                 raise GatewayBackendError(
                     f"Gateway command did not finish within {effective_timeout}s plus grace; giving up."
                 )
@@ -1122,10 +1139,23 @@ class GatewayBackend(SandboxBackend):
         except ValueError:
             raise GatewayBackendError(f"Gateway wait exec returned an invalid rc line: {rc_line!r}") from None
         stderr = response.get("stderr", "")
-        self._exec(f"rm -rf {quoted_dir}", exec_timeout=15.0)
+        self._cleanup_job_dir(quoted_dir)
         if exit_code == 124:
             stderr = f"Command timed out after {effective_timeout}s.\n" + stderr
         return ExecutionResult(stdout=out, stderr=stderr, exit_code=exit_code)
+
+    def _cleanup_job_dir(self, quoted_dir: str) -> None:
+        """Best-effort removal of a finished command's scratch dir.
+
+        The command's result is already in hand by the time this runs, so a
+        failure here (typically a 408 from `podman exec` latency on a loaded
+        replica) must never turn a completed command into a tool error. The
+        dir is tiny and dies with the session container anyway.
+        """
+        try:
+            self._exec(f"rm -rf {quoted_dir}", exec_timeout=15.0)
+        except GatewayBackendError as e:
+            logger.warning("Gateway job-dir cleanup failed (ignored): %s", str(e)[:200])
 
     # ------------------------------------------------------------- keepalive
 
