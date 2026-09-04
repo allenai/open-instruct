@@ -645,6 +645,7 @@ class StreamingDataLoaderConfig:
     apply_verifiable_reward: bool = True
     verification_reward: float = 10.0
     remap_verifier: str | None = None
+    """Comma-separated verifier aliases in the form ``old_name=new_name``."""
 
     # Reward aggregation
     reward_aggregator: Literal["last", "sum"] = "last"

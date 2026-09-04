@@ -4,10 +4,52 @@ Test script for verifier functionality in Python
 """
 
 import unittest
+from types import SimpleNamespace
 
 from parameterized import parameterized
 
-from open_instruct.ground_truth_utils import F1Verifier, GSM8KVerifier, PuzzleMatcherVerifier
+from open_instruct.ground_truth_utils import (
+    F1Verifier,
+    GSM8KVerifier,
+    MathVerifier,
+    PuzzleMatcherVerifier,
+    build_all_verifiers,
+)
+
+
+def verifier_args(**overrides):
+    values = {
+        "code_api_url": "http://localhost/test_program",
+        "code_apply_perf_penalty": False,
+        "code_max_execution_time": 1.0,
+        "code_pass_rate_reward_threshold": 1.0,
+        "llm_judge_max_context_length": 2048,
+        "llm_judge_max_tokens": 128,
+        "llm_judge_model": "test-model",
+        "llm_judge_temperature": 0.0,
+        "llm_judge_timeout": 1,
+        "seed": 42,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+class TestVerifierRemapping(unittest.TestCase):
+    def test_multiple_verifier_aliases(self):
+        streaming_config = SimpleNamespace(remap_verifier="math_aime_2025=math, math_brumo_2025 = math")
+
+        verifiers = build_all_verifiers(verifier_args(), streaming_config)
+
+        self.assertIsInstance(verifiers["math_aime_2025"], MathVerifier)
+        self.assertIs(verifiers["math_aime_2025"], verifiers["math"])
+        self.assertIs(verifiers["math_aime_2025"], verifiers["math_brumo_2025"])
+
+    @parameterized.expand([("missing_equals", "math_aime_2025"), ("missing_alias", "=math")])
+    def test_invalid_verifier_aliases(self, _name, remap_verifier):
+        streaming_config = SimpleNamespace(remap_verifier=remap_verifier)
+
+        with self.assertRaisesRegex(AssertionError, "comma-separated list"):
+            build_all_verifiers(verifier_args(), streaming_config)
 
 
 class TestPuzzleMatcherVerifier(unittest.TestCase):

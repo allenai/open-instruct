@@ -68,6 +68,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --filter_zero_std_samples false \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
+    --remap_verifier math_aime_2025=math,math_brumo_2025=math \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --lr_scheduler_type constant \

@@ -1219,14 +1219,18 @@ def build_all_verifiers(args, streaming_config=None) -> dict[str, VerifierFuncti
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args, streaming_config))
         verifiers[instance.name.lower()] = instance
 
-    # if we have remap arg, remap!
+    # If we have verifier remaps, register each comma-separated alias.
     if streaming_config and streaming_config.remap_verifier:
-        remap = streaming_config.remap_verifier.split("=")
-        assert len(remap) == 2, "Remap must be in the format old_name=new_name"
-        old_name, new_name = remap
-        # map so that the old name calls the new verifier
-        assert new_name.lower() in verifiers, f"{new_name} not found in verifiers during remapping"
-        verifiers[old_name.lower()] = verifiers[new_name.lower()]
+        for remap_spec in streaming_config.remap_verifier.split(","):
+            remap = remap_spec.strip().split("=", maxsplit=1)
+            assert len(remap) == 2 and all(remap), (
+                "Remap must be a comma-separated list in the format old_name=new_name"
+            )
+            old_name, new_name = (name.strip() for name in remap)
+            assert old_name and new_name, "Verifier remap names must not be empty"
+            # Map so that the old name calls the new verifier.
+            assert new_name.lower() in verifiers, f"{new_name} not found in verifiers during remapping"
+            verifiers[old_name.lower()] = verifiers[new_name.lower()]
 
     return verifiers
 
