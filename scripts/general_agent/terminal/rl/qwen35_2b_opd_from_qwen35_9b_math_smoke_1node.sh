@@ -37,6 +37,7 @@ uv run python mason.py \
     --max_retries 1 \
     --timeout 2h \
     --gpus 8 \
+    --auto_checkpoint_state_dir "" \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --env VLLM_DISABLE_COMPILE_CACHE=1 \
