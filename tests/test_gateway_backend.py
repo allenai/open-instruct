@@ -180,6 +180,45 @@ def test_run_command_retries_transient_503(backend_and_gateway):
     assert result.exit_code == 0
 
 
+def test_run_command_retries_single_owner_unregistered_503(backend_and_gateway):
+    # One roster miss is absorbed by the normal retry: the binding stays bound
+    # to the same container, no re-handshake.
+    backend, fake = backend_and_gateway
+    first_container = backend._affinity_id
+    fake.fail_next_posts.append((503, "strict affinity server is no longer registered"))
+    fake.scripted_results.append((0, "ok\n", ""))
+    result = backend.run_command("echo ok")
+    assert result.exit_code == 0
+    assert fake.handshakes == 1
+    assert backend._affinity_id == first_container
+
+
+def test_run_command_rehandshakes_on_repeated_owner_unregistered_503(backend_and_gateway):
+    # A replica that died/rescheduled stays off the roster until the binding
+    # TTL expires (~15 min); a repeated "no longer registered" 503 must be
+    # treated like a lost session (re-handshake + retry once), not retried
+    # to exhaustion.
+    backend, fake = backend_and_gateway
+    first_container = backend._affinity_id
+    fake.fail_next_posts.extend([(503, "strict affinity server is no longer registered")] * 2)
+    fake.scripted_results.append((0, "recovered\n", ""))
+    result = backend.run_command("echo recovered")
+    assert result.stdout == "recovered\n"
+    assert fake.handshakes == 2
+    assert backend._affinity_id != first_container
+    # The dead binding saw exactly the launcher exec and its single quick retry.
+    dead_binding_posts = [payload for _, payload in fake.requests if payload.get("affinity_id") == first_container]
+    assert len(dead_binding_posts) == 2
+
+
+def test_close_tolerates_owner_unregistered_503(backend_and_gateway):
+    backend, fake = backend_and_gateway
+    fake.fail_next_posts.extend([(503, "strict affinity server is no longer registered")] * 2)
+    backend.close()  # must not raise; container is gone with its replica
+    assert backend._affinity_id is None
+    assert fake.closed == []
+
+
 def test_run_command_cleanup_failure_does_not_fail_command(backend_and_gateway, monkeypatch):
     # The post-completion `rm -rf` is best-effort: a replica that 408s it under
     # load (podman exec latency) must not turn a finished command into an error.
