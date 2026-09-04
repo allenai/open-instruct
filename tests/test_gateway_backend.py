@@ -32,6 +32,8 @@ class FakeGateway:
         self.closed = []
         self.container_counter = 0
         self.fail_next_posts: list[tuple[int, str]] = []  # (status_code, body)
+        self.markerless_rounds = 0  # how many wait execs return neither marker (e.g. killed, exit 137)
+        self.fail_cleanup_posts: list[tuple[int, str]] = []  # (status_code, body) for rm -rf execs only
 
     def response(self, status_code, payload):
         response = MagicMock()
@@ -65,6 +67,11 @@ class FakeGateway:
                 200, {"stdout": "LAUNCHED\n", "stderr": "", "exit_code": 0, "success": True, "timed_out": False}
             )
         if _DONE_MARKER in command:
+            if self.markerless_rounds > 0:
+                self.markerless_rounds -= 1
+                return self.response(
+                    200, {"stdout": "", "stderr": "", "exit_code": 137, "success": False, "timed_out": True}
+                )
             if self.pending_rounds > 0:
                 self.pending_rounds -= 1
                 return self.response(
@@ -89,6 +96,9 @@ class FakeGateway:
                 },
             )
         if "rm -rf" in command:
+            if self.fail_cleanup_posts:
+                status, body = self.fail_cleanup_posts.pop(0)
+                return self.response(status, body)
             return self.response(
                 200, {"stdout": "", "stderr": "", "exit_code": 0, "success": True, "timed_out": False}
             )
@@ -168,6 +178,35 @@ def test_run_command_retries_transient_503(backend_and_gateway):
     fake.scripted_results.append((0, "ok\n", ""))
     result = backend.run_command("echo ok")
     assert result.exit_code == 0
+
+
+def test_run_command_cleanup_failure_does_not_fail_command(backend_and_gateway, monkeypatch):
+    # The post-completion `rm -rf` is best-effort: a replica that 408s it under
+    # load (podman exec latency) must not turn a finished command into an error.
+    backend, fake = backend_and_gateway
+    monkeypatch.setattr(GatewayBackend, "_RETRY_BASE_DELAY_S", 0.0)
+    fake.fail_cleanup_posts.extend([(408, '{"detail":"command timed out"}')] * 4)
+    fake.scripted_results.append((0, "done\n", ""))
+    result = backend.run_command("echo done")
+    assert (result.stdout, result.exit_code) == ("done\n", 0)
+    assert not fake.fail_cleanup_posts
+
+
+def test_run_command_retries_markerless_wait(backend_and_gateway):
+    # A wait exec cut short (exit 137, no marker) is re-issued; the command's
+    # state lives in files so the retry picks up the real result.
+    backend, fake = backend_and_gateway
+    fake.markerless_rounds = 2
+    fake.scripted_results.append((0, "survived\n", ""))
+    result = backend.run_command("echo survived")
+    assert result.stdout == "survived\n"
+
+
+def test_run_command_persistent_markerless_wait_raises(backend_and_gateway):
+    backend, fake = backend_and_gateway
+    fake.markerless_rounds = 10
+    with pytest.raises(GatewayBackendError, match="no marker"):
+        backend.run_command("echo doomed")
 
 
 def test_non_retryable_http_error_raises(backend_and_gateway):
