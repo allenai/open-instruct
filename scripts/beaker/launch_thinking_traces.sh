@@ -76,7 +76,14 @@ CONCURRENCY=64
 JOB_NAME=""
 JOB_SUFFIX=""
 PRIORITY="normal"
-PREEMPTIBLE=0
+# Preemption protection comes from a guaranteed minimum runtime, NOT from
+# priority: these clusters are strict-priority with unallocated-only backfill,
+# so an unprotected normal-priority job runs as backfill and can lose its nodes
+# mid-run. --min-runtime tells the scheduler it may not be preempted for that
+# window. The older --preemptible/--not-preemptible switch is deprecated;
+# gantry itself points at --min-runtime / --no-auto-resume instead.
+MIN_RUNTIME="6h"
+NO_AUTO_RESUME=0
 TASK_TIMEOUT="6h"
 BUDGET="ai2/oe-other"
 BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/chrisg-onboarding}"
@@ -117,9 +124,14 @@ Options:
   --concurrency N        in-flight requests (default: ${CONCURRENCY})
   --job-name NAME        beaker experiment name (default: think-len-<served-name>)
   --job-suffix S         appended to the default job name (e.g. -smoke)
-  --priority PRI         beaker priority (default: ${PRIORITY})
-  --preemptible          run preemptible (minRuntime 0, autoResume); default is
-                         a protected, non-resumable job
+  --priority PRI         beaker priority (default: ${PRIORITY}); keep this at
+                         normal and use --min-runtime for preemption safety
+  --min-runtime DUR      guaranteed runtime before the job may be preempted,
+                         e.g. '6h', '30m' (default: ${MIN_RUNTIME}). '0' is the
+                         server default and means preemptible at any time. Set
+                         this to at least the expected run length.
+  --no-auto-resume       do not auto-restart after a preemption (default: let
+                         the server default apply, i.e. auto-resume on)
   --task-timeout DUR     beaker job timeout (default: ${TASK_TIMEOUT})
   --budget BUDGET        default: ${BUDGET}
   --workspace WS         default: ${BEAKER_WORKSPACE}
@@ -160,7 +172,8 @@ while [ $# -gt 0 ]; do
         --job-name)          JOB_NAME="$2"; shift 2 ;;
         --job-suffix)        JOB_SUFFIX="$2"; shift 2 ;;
         --priority)          PRIORITY="$2"; shift 2 ;;
-        --preemptible)       PREEMPTIBLE=1; shift ;;
+        --min-runtime)       MIN_RUNTIME="$2"; shift 2 ;;
+        --no-auto-resume)    NO_AUTO_RESUME=1; shift ;;
         --task-timeout)      TASK_TIMEOUT="$2"; shift 2 ;;
         --budget)            BUDGET="$2"; shift 2 ;;
         --workspace)         BEAKER_WORKSPACE="$2"; shift 2 ;;
@@ -202,7 +215,7 @@ submit_one() {
   Prompts:    ${DATASET} -> ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples (seed ${SEED})
   Sampling:   temperature=${TEMPERATURE} top_p=${TOP_P}
   Job:        ${name}  workspace=${BEAKER_WORKSPACE}  priority=${PRIORITY}
-              preemptible=${PREEMPTIBLE}  task_timeout=${TASK_TIMEOUT}
+              min_runtime=${MIN_RUNTIME}  auto_resume=$([ "$NO_AUTO_RESUME" = 1 ] && echo off || echo on)  task_timeout=${TASK_TIMEOUT}
   Repo ref:   ${REPO_GIT_REF}
 EOF
 
@@ -244,10 +257,11 @@ EOF
         --propagate-failure
         --no-python
     )
-    if [ "$PREEMPTIBLE" = "1" ]; then
-        cmd+=(--preemptible)
-    else
-        cmd+=(--not-preemptible)
+    if [ -n "$MIN_RUNTIME" ]; then
+        cmd+=(--min-runtime "$MIN_RUNTIME")
+    fi
+    if [ "$NO_AUTO_RESUME" = "1" ]; then
+        cmd+=(--no-auto-resume)
     fi
     if [ "$WEKA_MOUNT" != "none" ]; then
         cmd+=(--weka "$WEKA_MOUNT")

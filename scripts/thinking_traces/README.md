@@ -72,6 +72,15 @@ completions begin *inside* the trace with no opening tag. The parser keys off th
 No `--reasoning-parser` is passed to vLLM, so the literal tags survive into the
 response and one parser handles both.
 
+**Preemption safety comes from `--min-runtime`, not from priority.** These
+clusters use strict priority with unallocated-only backfill, so a normal-priority
+job with no guaranteed runtime runs as backfill and can lose its nodes partway
+through. `--min-runtime 8h` tells the scheduler the job may not be preempted for
+that window, while the job stays at normal priority. Set it to at least the
+expected run length. The older `--preemptible` / `--not-preemptible` switch is
+deprecated and gantry warns on it; `--no-auto-resume` is the companion flag when
+a restart-from-scratch would be worse than stopping.
+
 **vLLM version is pinned to a CUDA 12 build.** vLLM 0.20+ pins torch 2.11, built
 against CUDA 13, which needs driver >= 580. `ai2/neptune` and `ai2/jupiter` run
 570.x (CUDA 12.8) and fail at engine start with *"The NVIDIA driver on your system
