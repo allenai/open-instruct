@@ -37,7 +37,7 @@ logger = logger_utils.setup_logger(__name__)
 # generator's datasets/transformers/openai stack.
 KIND_CLOSED = "closed"
 
-BOOTSTRAP_ROUNDS = 10_000
+BOOTSTRAP_ROUNDS = 4_000
 
 
 def parse_args() -> argparse.Namespace:
@@ -201,18 +201,38 @@ def compare(label_a: str, recs_a: list[dict], label_b: str, recs_b: list[dict], 
         logger.warning("only %d shared prompts; skipping paired comparison", len(shared))
         return result
 
-    means_a = np.array([np.mean(by_prompt_a[s]) for s in shared])
-    means_b = np.array([np.mean(by_prompt_b[s]) for s in shared])
+    arrays_a = [np.asarray(by_prompt_a[s], dtype=float) for s in shared]
+    arrays_b = [np.asarray(by_prompt_b[s], dtype=float) for s in shared]
+    means_a = np.array([a.mean() for a in arrays_a])
+    means_b = np.array([b.mean() for b in arrays_b])
+    # Per-prompt sample variance: how much the SAME prompt's length moves between
+    # rollouts. This, not the spread of prompt means, is what "is one model's
+    # trace length more variable" is asking, so it gets its own interval.
+    wvars_a = np.array([a.var(ddof=1) if a.size > 1 else np.nan for a in arrays_a])
+    wvars_b = np.array([b.var(ddof=1) if b.size > 1 else np.nan for b in arrays_b])
     diff = means_b - means_a
 
     rng = np.random.default_rng(seed)
     boot_diff = np.empty(BOOTSTRAP_ROUNDS)
     boot_ratio = np.empty(BOOTSTRAP_ROUNDS)
+    boot_within = np.empty(BOOTSTRAP_ROUNDS)
+    boot_median = np.empty(BOOTSTRAP_ROUNDS)
     for i in range(BOOTSTRAP_ROUNDS):
         picks = rng.integers(0, len(shared), len(shared))
         sa, sb = means_a[picks], means_b[picks]
         boot_diff[i] = sb.mean() - sa.mean()
         boot_ratio[i] = sb.var(ddof=1) / sa.var(ddof=1) if sa.var(ddof=1) > 0 else np.nan
+        wa, wb = np.nanmean(wvars_a[picks]), np.nanmean(wvars_b[picks])
+        boot_within[i] = wb / wa if wa > 0 else np.nan
+        # Medians are computed on the pooled draws because, unlike the mean, the
+        # median is unaffected by traces censored at the token cap.
+        boot_median[i] = np.median(np.concatenate([arrays_b[p] for p in picks])) - np.median(
+            np.concatenate([arrays_a[p] for p in picks])
+        )
+
+    pooled_a = np.concatenate(arrays_a)
+    pooled_b = np.concatenate(arrays_b)
+    within_a, within_b = np.nanmean(wvars_a), np.nanmean(wvars_b)
 
     result.update(
         {
@@ -227,6 +247,20 @@ def compare(label_a: str, recs_a: list[dict], label_b: str, recs_b: list[dict], 
                 float(np.nanpercentile(boot_ratio, 97.5)),
             ],
             "share_of_prompts_where_b_longer": float((diff > 0).mean()),
+            "median_a": float(np.median(pooled_a)),
+            "median_b": float(np.median(pooled_b)),
+            "median_difference_b_minus_a": float(np.median(pooled_b) - np.median(pooled_a)),
+            "median_difference_ci95": [
+                float(np.percentile(boot_median, 2.5)),
+                float(np.percentile(boot_median, 97.5)),
+            ],
+            "within_prompt_sd_a": float(np.sqrt(within_a)),
+            "within_prompt_sd_b": float(np.sqrt(within_b)),
+            "within_prompt_variance_ratio_b_over_a": float(within_b / within_a),
+            "within_prompt_variance_ratio_ci95": [
+                float(np.nanpercentile(boot_within, 2.5)),
+                float(np.nanpercentile(boot_within, 97.5)),
+            ],
         }
     )
     return result
@@ -270,6 +304,8 @@ def render(summaries: list[dict], comparison: dict | None) -> str:
     if comparison and "mean_difference_b_minus_a" in comparison:
         lo, hi = comparison["mean_difference_ci95"]
         vlo, vhi = comparison["prompt_mean_variance_ratio_ci95"]
+        wlo, whi = comparison["within_prompt_variance_ratio_ci95"]
+        mlo, mhi = comparison["median_difference_ci95"]
         lines += [
             "",
             "=" * 78,
@@ -280,13 +316,27 @@ def render(summaries: list[dict], comparison: dict | None) -> str:
             f"  mean difference              {comparison['mean_difference_b_minus_a']:+.1f} tokens"
             f"  [95% CI {lo:+.0f}, {hi:+.0f}]",
             f"  ratio of means               {comparison['ratio_b_over_a']:.2f}x",
-            f"  variance ratio (prompt means){comparison['prompt_mean_variance_ratio_b_over_a']:9.2f}x"
-            f"  [95% CI {vlo:.2f}, {vhi:.2f}]",
             f"  prompts where B is longer    {comparison['share_of_prompts_where_b_longer'] * 100:.0f}%",
             "",
-            "  The CI excludes zero, so the difference is real."
+            f"  median difference            {comparison['median_difference_b_minus_a']:+.0f} tokens"
+            f"  [95% CI {mlo:+.0f}, {mhi:+.0f}]   ({comparison['median_a']:.0f} -> {comparison['median_b']:.0f})",
+            "  (medians are unaffected by traces censored at the token cap)",
+            "",
+            f"  run-to-run SD, same prompt   A {comparison['within_prompt_sd_a']:.0f}"
+            f"  vs B {comparison['within_prompt_sd_b']:.0f} tokens",
+            f"  within-prompt variance ratio {comparison['within_prompt_variance_ratio_b_over_a']:.2f}x"
+            f"  [95% CI {wlo:.2f}, {whi:.2f}]",
+            f"  variance ratio (prompt means){comparison['prompt_mean_variance_ratio_b_over_a']:9.2f}x"
+            f"  [95% CI {vlo:.2f}, {vhi:.2f}]",
+            "",
+            "  Mean: the CI excludes zero, so the difference is real."
             if lo > 0 or hi < 0
-            else "  The CI spans zero, so the difference is not resolved at this sample size.",
+            else "  Mean: the CI spans zero, so the difference is not resolved at this sample size.",
+            "  Variance: the within-prompt ratio's CI excludes 1, so one model's length"
+            "\n            is genuinely more variable run-to-run."
+            if wlo > 1 or whi < 1
+            else "  Variance: the within-prompt ratio's CI spans 1, so the models are not"
+            "\n            distinguishable on run-to-run variability.",
         ]
     lines.append("")
     return "\n".join(line for line in lines if line != "")

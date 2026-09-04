@@ -88,3 +88,15 @@ explicitly unsets `VLLM_PORT` in case one leaks in from the environment.
 **Samples within a prompt are correlated**, so the bootstrap resamples whole prompts.
 Per-trace CIs would be too narrow. The reported ICC says how much of the total
 variance is "which question was asked" versus "how long this particular rollout ran".
+
+**"Which variance?" is the whole question.** Total variance across a mixed prompt
+set is dominated by the prompt mix -- a math proof and a safety refusal differ by
+20x -- so it mostly measures the dataset, not the model. The comparison therefore
+reports the **within-prompt** variance ratio: re-ask the *same* prompt and see how
+much the length moves. That is the model property. The spread of prompt *means* is
+reported too, but it largely reflects the corpus.
+
+**Compare medians when censoring is asymmetric.** If one model hits the token cap
+far more often than the other, their means are lower bounds by different amounts and
+the mean difference is confounded. The median is unaffected at any censoring rate
+below 50%, so it is reported with its own interval.
