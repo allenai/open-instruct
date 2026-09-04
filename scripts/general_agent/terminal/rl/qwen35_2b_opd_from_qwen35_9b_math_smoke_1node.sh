@@ -14,6 +14,7 @@
 set -euo pipefail
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
+shift
 
 MODEL="${MODEL:-Qwen/Qwen3.5-2B}"
 TOKENIZER="${TOKENIZER:-$MODEL}"
@@ -35,7 +36,6 @@ uv run python mason.py \
     --max_retries 1 \
     --timeout 2h \
     --gpus 8 \
-    --budget ai2/oe-adapt \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --env VLLM_DISABLE_COMPILE_CACHE=1 \
