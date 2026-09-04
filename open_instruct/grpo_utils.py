@@ -58,6 +58,62 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
     return metrics
 
 
+def compute_per_dataset_eval_metrics(
+    scores: np.ndarray,
+    response_lengths: np.ndarray,
+    finish_reasons: list[str],
+    dataset_names: list[str],
+    eval_k: int,
+    max_possible_score: float,
+) -> dict[str, float]:
+    """Compute task-specific eval metrics while preserving the aggregate metrics."""
+    if not (len(scores) == len(response_lengths) == len(finish_reasons) == len(dataset_names)):
+        logger.warning(
+            "Cannot compute per-dataset eval metrics because result lengths differ: "
+            "scores=%s, response_lengths=%s, finish_reasons=%s, datasets=%s",
+            len(scores),
+            len(response_lengths),
+            len(finish_reasons),
+            len(dataset_names),
+        )
+        return {}
+
+    metrics: dict[str, float] = {}
+    dataset_names_array = np.asarray(dataset_names, dtype=object)
+    for dataset_name in dict.fromkeys(dataset_names):
+        indices = np.flatnonzero(dataset_names_array == dataset_name)
+        dataset_scores = scores[indices]
+        dataset_response_lengths = response_lengths[indices]
+        dataset_finish_reasons = [finish_reasons[index] for index in indices]
+        prefix = f"eval/{dataset_name}"
+        metrics.update(
+            {
+                f"{prefix}/scores": float(dataset_scores.mean()),
+                f"{prefix}/sequence_lengths": float(dataset_response_lengths.mean()),
+                f"{prefix}/sequence_lengths_min": float(dataset_response_lengths.min()),
+                f"{prefix}/sequence_lengths_max": float(dataset_response_lengths.max()),
+                f"{prefix}/stop_rate": float(
+                    np.mean([finish_reason == "stop" for finish_reason in dataset_finish_reasons])
+                ),
+            }
+        )
+
+        if dataset_scores.size % eval_k != 0:
+            logger.warning(
+                "Eval scores size %s for dataset %s is not divisible by eval_k %s; skipping per-dataset pass@k metrics.",
+                dataset_scores.size,
+                dataset_name,
+                eval_k,
+            )
+            continue
+
+        correct_per_prompt = (dataset_scores >= max_possible_score - 1e-8).reshape(-1, eval_k)
+        for metric_name, value in compute_pass_at_k_metrics(correct_per_prompt).items():
+            metrics[f"{prefix}/{metric_name.removeprefix('eval/')}"] = value
+
+    return metrics
+
+
 class GRPOLossType(enum.StrEnum):
     dapo = "dapo"
     cispo = "cispo"

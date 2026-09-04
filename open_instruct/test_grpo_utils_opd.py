@@ -2,6 +2,7 @@
 
 import unittest
 
+import numpy as np
 import torch
 from transformers import Qwen2Config, Qwen2ForCausalLM
 
@@ -15,6 +16,41 @@ def _make_inputs():
     teacher_logprobs = torch.tensor([[-1.5, -1.0, -0.5, -2.0], [-0.1, -0.7, -0.1, -0.9]])
     response_mask = torch.tensor([[True, True, True, False], [False, True, True, True]])
     return advantages, behavior_logprobs, teacher_logprobs, response_mask
+
+
+class TestComputePerDatasetEvalMetrics(unittest.TestCase):
+    def test_separates_tasks_and_preserves_pass_at_k_semantics(self):
+        metrics = grpo_utils.compute_per_dataset_eval_metrics(
+            scores=np.array([1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0]),
+            response_lengths=np.array([1, 2, 1, 3, 1, 1, 2, 2]),
+            finish_reasons=["stop", "length", "stop", "stop", "length", "length", "stop", "length"],
+            dataset_names=["math_aime_2025"] * 4 + ["math_brumo_2025"] * 4,
+            eval_k=2,
+            max_possible_score=1.0,
+        )
+
+        self.assertEqual(metrics["eval/math_aime_2025/scores"], 0.75)
+        self.assertEqual(metrics["eval/math_aime_2025/pass_at_1"], 0.75)
+        self.assertEqual(metrics["eval/math_aime_2025/pass_at_2"], 1.0)
+        self.assertEqual(metrics["eval/math_aime_2025/sequence_lengths"], 1.75)
+        self.assertEqual(metrics["eval/math_aime_2025/stop_rate"], 0.75)
+        self.assertEqual(metrics["eval/math_brumo_2025/scores"], 0.25)
+        self.assertEqual(metrics["eval/math_brumo_2025/pass_at_1"], 0.25)
+        self.assertEqual(metrics["eval/math_brumo_2025/pass_at_2"], 0.5)
+        self.assertEqual(metrics["eval/math_brumo_2025/sequence_lengths"], 1.5)
+        self.assertEqual(metrics["eval/math_brumo_2025/stop_rate"], 0.25)
+
+    def test_returns_no_metrics_when_result_lengths_differ(self):
+        metrics = grpo_utils.compute_per_dataset_eval_metrics(
+            scores=np.array([1.0]),
+            response_lengths=np.array([1]),
+            finish_reasons=["stop"],
+            dataset_names=["math_aime_2025", "math_brumo_2025"],
+            eval_k=1,
+            max_possible_score=1.0,
+        )
+
+        self.assertEqual(metrics, {})
 
 
 class TestComputeOPDAdvantages(unittest.TestCase):

@@ -234,6 +234,63 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/pass_at_1_unbiased"], 0.5)
         self.assertEqual(logged["eval/pass_at_2_unbiased"], 1.0)
 
+    def test_records_per_dataset_metrics_in_wandb(self):
+        args = SimpleNamespace(num_training_steps=200, with_tracking=True)
+        eval_dataset = self._build_eval_dataset(num_prompts=4)
+        eval_queue = _QueueWithSize(size=4)
+        eval_generation_config = SimpleNamespace(n=2)
+        tokenizer = Mock()
+        tokenizer.batch_decode.return_value = ["prompt"] * 8
+        tokenizer.pad_token = "<pad>"
+
+        eval_result = SimpleNamespace(
+            responses=[[1], [1, 2], [1], [1, 2, 3], [1], [1], [1, 2], [1, 2]],
+            finish_reasons=["stop", "length", "stop", "stop", "length", "length", "stop", "length"],
+            token_statistics=SimpleNamespace(num_prompt_tokens=20, num_response_tokens=13, generation_time=2.0),
+        )
+        eval_batch = SimpleNamespace(
+            scores=[1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0],
+            queries=[[1, 2, 3]] * 8,
+            decoded_responses=[f"resp_{index}" for index in range(8)],
+            ground_truths=["42"] * 8,
+            datasets=["math_aime_2025"] * 4 + ["math_brumo_2025"] * 4,
+            active_tools=None,
+        )
+
+        with (
+            patch(
+                "open_instruct.grpo_fast.accumulate_inference_batches",
+                return_value=(eval_result, eval_batch, {}, None),
+            ),
+            patch("open_instruct.grpo_fast.print_rich_single_line_metrics"),
+            patch("open_instruct.grpo_fast.wandb.Table"),
+            patch("open_instruct.grpo_fast.wandb.log") as mock_wandb_log,
+        ):
+            maybe_evaluate(
+                args=args,
+                training_step=100,
+                evaluation_inference_results_Q=eval_queue,
+                tokenizer=tokenizer,
+                episode=0,
+                eval_dataset=eval_dataset,
+                eval_generation_config=eval_generation_config,
+                model_dims=Mock(),
+                base_env_config=EnvConfig(),
+                max_possible_score=1.0,
+            )
+
+        logged = mock_wandb_log.call_args.args[0]
+        self.assertEqual(logged["eval/scores"], 0.5)
+        self.assertEqual(logged["eval/math_aime_2025/scores"], 0.75)
+        self.assertEqual(logged["eval/math_aime_2025/pass_at_1"], 0.75)
+        self.assertEqual(logged["eval/math_aime_2025/pass_at_2"], 1.0)
+        self.assertEqual(logged["eval/math_aime_2025/stop_rate"], 0.75)
+        self.assertEqual(logged["eval/math_brumo_2025/scores"], 0.25)
+        self.assertEqual(logged["eval/math_brumo_2025/pass_at_1"], 0.25)
+        self.assertEqual(logged["eval/math_brumo_2025/pass_at_2"], 0.5)
+        self.assertEqual(logged["eval/math_brumo_2025/stop_rate"], 0.25)
+        self.assertEqual(mock_wandb_log.call_args.kwargs["step"], 100)
+
 
 class TestComputePassAtKMetrics(unittest.TestCase):
     def test_formula_matches_one_minus_comb_ratio_single_prompt(self):

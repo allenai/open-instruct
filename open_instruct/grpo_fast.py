@@ -2986,6 +2986,18 @@ def maybe_evaluate(
             **eval_reward_metrics,
             **eval_pass_at_k_metrics,
         }
+        eval_dataset_names = getattr(eval_batch, "datasets", None)
+        if eval_dataset_names:
+            eval_metrics.update(
+                grpo_utils.compute_per_dataset_eval_metrics(
+                    scores=scores,
+                    response_lengths=eval_sequence_lengths,
+                    finish_reasons=eval_result.finish_reasons,
+                    dataset_names=eval_dataset_names,
+                    eval_k=eval_k,
+                    max_possible_score=max_possible_score,
+                )
+            )
 
         total_tokens = (
             eval_result.token_statistics.num_prompt_tokens + eval_result.token_statistics.num_response_tokens
@@ -3000,6 +3012,7 @@ def maybe_evaluate(
         table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
         table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
+        table["dataset"] = eval_dataset_names or []
         if eval_batch.active_tools is not None:
             table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)
