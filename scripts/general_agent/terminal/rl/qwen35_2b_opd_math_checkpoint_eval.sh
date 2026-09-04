@@ -11,10 +11,11 @@ CHECKPOINT_ROOT="/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarha
 PRIORITY="${PRIORITY:-urgent}"
 MODEL_FILTER="${MODEL_FILTER:-.*}"
 EVAL_CODE_DATASET="${EVAL_CODE_DATASET:-}"
-EVAL_SCRIPT="scripts/eval/math_vllm.py"
+EVAL_RUNNER="scripts/eval/run_math_vllm.sh"
+EVAL_VLLM_WHEEL_URL="${EVAL_VLLM_WHEEL_URL:-https://wheels.vllm.ai/6e448d0ea9bf3d88d898b65449ca6dc2aec170ac/vllm-0.27.1%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl}"
 MASON_DATASET_ARGS=()
 if [[ -n "$EVAL_CODE_DATASET" ]]; then
-    EVAL_SCRIPT="/eval/math_vllm.py"
+    EVAL_RUNNER="/eval/run_math_vllm.sh"
     MASON_DATASET_ARGS=(--beaker_datasets "/eval:$EVAL_CODE_DATASET")
 fi
 
@@ -35,6 +36,13 @@ for index in "${!MODEL_LABELS[@]}"; do
     if [[ ! "$label" =~ $MODEL_FILTER ]]; then
         continue
     fi
+    WEIGHT_ARGS=()
+    if [[ "$label" != "base" ]]; then
+        WEIGHT_ARGS=(
+            --strip-weight-prefix model.language_model.
+            --weight-prefix-replacement model.
+        )
+    fi
     uv run python mason.py \
         --task_name "qwen35-2b-opd-math-eval-${label//_/-}" \
         --description "Qwen3.5-2B math OPD checkpoint sweep: ${label}, AIME 2025 + BRUMO 2025, pass@1/pass@8" \
@@ -51,11 +59,12 @@ for index in "${!MODEL_LABELS[@]}"; do
         --gpus 1 \
         --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
         --env VLLM_DISABLE_COMPILE_CACHE=1 \
-        --env VLLM_USE_V1=1 \
+        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
+        --env EVAL_VLLM_WHEEL_URL="$EVAL_VLLM_WHEEL_URL" \
         "${MASON_DATASET_ARGS[@]}" \
         --no_auto_dataset_cache \
         -- \
-    uv run python "$EVAL_SCRIPT" \
+    bash "$EVAL_RUNNER" \
         --model "$model" \
         --model-label "$label" \
         --datasets \
@@ -68,6 +77,7 @@ for index in "${!MODEL_LABELS[@]}"; do
         --top-p 1.0 \
         --max-prompt-tokens 2048 \
         --max-response-tokens 16384 \
+        "${WEIGHT_ARGS[@]}" \
         --seed 42 \
         --output-dir /output "$@"
 done

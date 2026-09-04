@@ -4,6 +4,9 @@
 
 import argparse
 import json
+import math
+import shutil
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -11,10 +14,12 @@ from typing import Any
 import numpy as np
 import vllm
 from datasets import load_dataset
+from safetensors import safe_open
+from safetensors.torch import save_file
 from transformers import AutoTokenizer
 from vllm.inputs import TokensPrompt
 
-from open_instruct import grpo_utils, logger_utils
+from open_instruct import logger_utils
 from open_instruct.dataset_transformation import CHAT_TEMPLATES
 from open_instruct.ground_truth_utils import MathVerifier
 
@@ -36,6 +41,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--scoring-workers", type=int, default=16)
+    parser.add_argument(
+        "--strip-weight-prefix",
+        help="Strip this prefix from local safetensors keys into a temporary vLLM-compatible checkpoint.",
+    )
+    parser.add_argument(
+        "--weight-prefix-replacement",
+        default="",
+        help="Prefix tensor names changed by --strip-weight-prefix with this value.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("/output"))
     return parser.parse_args()
 
@@ -56,11 +70,87 @@ def score_prediction(item: tuple[str, str, str]) -> float:
     return MathVerifier()([], prediction, label, query=query).score
 
 
+def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:
+    """Compute pass@1, pass@n, and unbiased power-of-two pass@k metrics."""
+    correct = np.asarray(correct_per_prompt, dtype=bool)
+    num_samples = int(correct.shape[1])
+    correct_counts = correct.sum(axis=1).astype(np.int64)
+    metrics = {"pass_at_1": float((correct_counts / num_samples).mean())}
+    if num_samples > 1:
+        metrics[f"pass_at_{num_samples}"] = float((correct_counts > 0).mean())
+
+    k = 1
+    while k <= num_samples:
+        estimates = [
+            1.0 - math.comb(num_samples - int(count), k) / math.comb(num_samples, k)
+            if num_samples - int(count) >= k
+            else 1.0
+            for count in correct_counts
+        ]
+        metrics[f"pass_at_{k}_unbiased"] = float(np.mean(estimates))
+        k *= 2
+    return metrics
+
+
+def remap_weight_name(name: str, weight_prefix: str, replacement_prefix: str) -> str:
+    if not name.startswith(weight_prefix):
+        return name
+    return replacement_prefix + name[len(weight_prefix) :]
+
+
+def normalize_checkpoint_for_vllm(model: str, weight_prefix: str | None, replacement_prefix: str) -> str:
+    """Copy a local checkpoint while replacing an incompatible tensor-name prefix."""
+    if not weight_prefix:
+        return model
+
+    model_path = Path(model)
+    if not model_path.is_dir():
+        raise ValueError("--strip-weight-prefix requires --model to be a local checkpoint directory")
+    weight_files = sorted(model_path.glob("*.safetensors"))
+    if not weight_files:
+        raise FileNotFoundError(f"No safetensors files found in {model_path}")
+
+    output_path = Path(tempfile.mkdtemp(prefix="math-vllm-checkpoint-"))
+    for source_path in model_path.iterdir():
+        if (
+            source_path.is_file()
+            and source_path.suffix != ".safetensors"
+            and source_path.name != "model.safetensors.index.json"
+        ):
+            shutil.copy2(source_path, output_path / source_path.name)
+
+    renamed_tensors = 0
+    for source_path in weight_files:
+        with safe_open(source_path, framework="pt", device="cpu") as source:
+            tensors = {}
+            for name in list(source.keys()):
+                mapped_name = remap_weight_name(name, weight_prefix, replacement_prefix)
+                if mapped_name in tensors:
+                    raise ValueError(f"Tensor-name collision after replacing {weight_prefix!r}: {mapped_name}")
+                tensors[mapped_name] = source.get_tensor(name)
+                renamed_tensors += mapped_name != name
+            save_file(tensors, output_path / source_path.name, metadata=source.metadata())
+
+    if renamed_tensors == 0:
+        raise ValueError(f"No tensor names started with {weight_prefix!r} in {model_path}")
+
+    index_path = model_path / "model.safetensors.index.json"
+    if index_path.exists():
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        index["weight_map"] = {
+            remap_weight_name(name, weight_prefix, replacement_prefix): shard
+            for name, shard in index["weight_map"].items()
+        }
+        (output_path / index_path.name).write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+
+    logger.info(
+        f"Replaced {weight_prefix!r} with {replacement_prefix!r} in {renamed_tensors} tensors into {output_path}"
+    )
+    return str(output_path)
+
+
 def summarize(correct_per_prompt: np.ndarray, response_lengths: np.ndarray, finish_reasons: list[str]) -> dict:
-    metrics = {
-        key.removeprefix("eval/"): value
-        for key, value in grpo_utils.compute_pass_at_k_metrics(correct_per_prompt).items()
-    }
+    metrics = compute_pass_at_k_metrics(correct_per_prompt)
     metrics.update(
         {
             "num_prompts": int(correct_per_prompt.shape[0]),
@@ -99,10 +189,13 @@ def main() -> None:
         logger.info(f"Loaded {len(dataset)} prompts from {dataset_name}:{args.split}")
 
     prompts = build_prompts(tokenizer, rows, args.max_prompt_tokens)
+    runtime_model = normalize_checkpoint_for_vllm(args.model, args.strip_weight_prefix, args.weight_prefix_replacement)
     max_model_len = args.max_prompt_tokens + args.max_response_tokens
     llm = vllm.LLM(
-        model=args.model,
+        model=runtime_model,
         tokenizer=args.model,
+        skip_tokenizer_init=True,
+        language_model_only=True,
         trust_remote_code=True,
         dtype="bfloat16",
         tensor_parallel_size=1,
@@ -133,8 +226,9 @@ def main() -> None:
         outputs = llm.generate(prompt_payloads, sampling_params=sampling_params)
         for row_index, output in enumerate(outputs):
             completion = output.outputs[0]
-            responses[row_index].append(completion.text)
-            response_token_ids[row_index].append(list(completion.token_ids))
+            completion_token_ids = list(completion.token_ids)
+            responses[row_index].append(tokenizer.decode(completion_token_ids, skip_special_tokens=False))
+            response_token_ids[row_index].append(completion_token_ids)
             finish_reasons[row_index].append(completion.finish_reason)
 
     score_inputs = [
@@ -195,6 +289,8 @@ def main() -> None:
         "max_prompt_tokens": args.max_prompt_tokens,
         "max_response_tokens": args.max_response_tokens,
         "seed": args.seed,
+        "stripped_weight_prefix": args.strip_weight_prefix,
+        "weight_prefix_replacement": args.weight_prefix_replacement,
         "datasets": summaries,
     }
     summary_path = args.output_dir / "summary.json"
