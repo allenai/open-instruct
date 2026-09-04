@@ -77,8 +77,6 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
-from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
 from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
@@ -507,36 +505,33 @@ class PolicyTrainerRayProcess(RayProcess):
         return {"optimization_steps_done": optimization_steps_done, "checkpoint_state": checkpoint_state}
 
     def setup_model_update_group(self, vllm_engines):
+        """Record the rendezvous every trainer rank needs for weight sync.
+
+        The transfer engine itself is built lazily on the first broadcast, which
+        is also what drives the vLLM-side init RPCs. Non-sender ranks still need
+        a rendezvous so they join the gather collectives inside the weight
+        source; only rank 0 reads the master address/port.
+        """
         self.vllm_engines = vllm_engines
-        self.model_update_group = None
-        if self.rank == 0:
-            if self.args.single_gpu_mode:
-                init_infos: list[dict] = [{} for _ in vllm_engines]
-                master_info: dict | None = None
-            else:
-                master_address = self.get_current_node_ip()
-                master_port = utils.find_free_port()
-                vllm_num_engines, vllm_tensor_parallel_size = (
-                    self.vllm_config.vllm_num_engines,
-                    self.vllm_config.vllm_tensor_parallel_size,
-                )
-                world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
-                master_info = {"master_address": master_address, "master_port": master_port, "world_size": world_size}
-                init_infos = [
-                    master_info | {"rank_offset": i * vllm_tensor_parallel_size + 1}
-                    for i, _ in enumerate(vllm_engines)
-                ]
-
-            refs = [
-                engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info=info))
-                for engine, info in zip(vllm_engines, init_infos)
-            ]
-
-            if master_info is not None:
+        vllm_tensor_parallel_size = self.vllm_config.vllm_tensor_parallel_size
+        if self.args.single_gpu_mode:
+            self.model_update_group = vllm_utils.WeightSyncRendezvous(
+                backend="ipc", rank=self.rank, tensor_parallel_size=vllm_tensor_parallel_size
+            )
+        else:
+            master_address = self.get_current_node_ip() if self.rank == 0 else ""
+            master_port = utils.find_free_port() if self.rank == 0 else 0
+            world_size = self.vllm_config.vllm_num_engines * vllm_tensor_parallel_size + 1
+            self.model_update_group = vllm_utils.WeightSyncRendezvous(
+                backend="nccl",
+                rank=self.rank,
+                tensor_parallel_size=vllm_tensor_parallel_size,
+                master_address=master_address,
+                master_port=master_port,
+                world_size=world_size,
+            )
+            if self.rank == 0:
                 torch.cuda.set_device(self.local_rank)
-                self.model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
-
-            ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
 
     def warmup_for_weight_sync(self):

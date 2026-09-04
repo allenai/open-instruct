@@ -1,9 +1,7 @@
-ARG CUDA_VERSION=12
-FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS cuda12
-FROM nvidia/cuda:13.0.3-devel-ubuntu22.04 AS cuda13
-FROM cuda${CUDA_VERSION}
-
-ARG CUDA_VERSION
+# PyTorch 2.12 dropped its cu128 build and no prebuilt flash-attn exists for
+# cu129 + torch 2.13, so CUDA 13.0 is the only version the dependency graph
+# resolves against. The former cuda12/cuda13 build args are gone with it.
+FROM nvidia/cuda:13.0.3-devel-ubuntu22.04
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles" \
@@ -42,12 +40,12 @@ RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-ho
     apt-get autoremove -y && \
     rm doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb
 
-# Install Google Cloud CLI
+# Install Google Cloud CLI (the apt package was renamed google-cloud-sdk -> google-cloud-cli)
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
         | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
     && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
         | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-sdk \
+    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-cli \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 # Taken from https://beaker.org/api/v3/release (add | jq -r '.version' if you want it programmatically).
@@ -63,11 +61,19 @@ RUN curl --silent \
     && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
     && rm beaker.tar.gz
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
+# Must understand uv.lock revision 4, which uv 0.8.6 does not; reading a
+# newer-revision lock there surfaces as "Group `dev` is not defined".
+COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /uvx /bin/
 
 WORKDIR /stage/
 
-ENV UV_CACHE_DIR=/root/.cache/uv \
+# `preview = true` makes uv >=0.12 place the project environment inside
+# UV_CACHE_DIR and leave .venv as a symlink to it. UV_CACHE_DIR is a build cache
+# mount, so that environment never lands in the image and /stage/.venv ends up
+# dangling -- the image builds fine and then dies with "python: command not
+# found". Pinning an explicit path keeps the environment in the layer.
+ENV UV_PROJECT_ENVIRONMENT=/stage/.venv \
+    UV_CACHE_DIR=/root/.cache/uv \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     UV_COMPILE_BYTECODE=0 \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPEN_INSTRUCT=0.0.0+docker
@@ -76,7 +82,7 @@ ENV UV_CACHE_DIR=/root/.cache/uv \
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
+    uv run --frozen --no-default-groups --group dev \
         python -m nltk.downloader punkt punkt_tab words
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
