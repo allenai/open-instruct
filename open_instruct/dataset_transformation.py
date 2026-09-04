@@ -1208,6 +1208,25 @@ class AssistantSpanDerivationError(ValueError):
     """Raised when a conversation's assistant label spans cannot be derived reliably."""
 
 
+def _assistant_header_content_overlap(header: str, content: Any) -> int:
+    """Return the longest header suffix that is also a prefix of assistant content.
+
+    A few Hub chat templates put a generation hint (for example ``<think>``) at the end
+    of ``add_generation_prompt=True``.  Reasoning traces commonly start with that same
+    hint, so treating the whole rendered prompt as masked would hide the first content
+    token from the loss.  The overlap is intentionally character based: the caller can
+    map the corrected boundary through the tokenizer's offsets, including tokens that
+    straddle the header/content edge.
+    """
+    if not isinstance(content, str) or not content or not header:
+        return 0
+    max_overlap = min(len(header), len(content))
+    for overlap in range(max_overlap, 0, -1):
+        if header.endswith(content[:overlap]):
+            return overlap
+    return 0
+
+
 def _trainable_assistant_indices(messages: list[dict[str, Any]], last_turn_only: bool) -> list[int]:
     assistant_indices = [idx for idx, m in enumerate(messages) if m["role"] == "assistant"]
     if last_turn_only:
@@ -1221,6 +1240,8 @@ def _assistant_token_spans_from_prefix_lengths(
     tools: list | None,
     max_seq_length: int | None,
     trainable_indices: list[int],
+    rendered: str | None = None,
+    offsets: Sequence[Sequence[int]] | None = None,
 ) -> list[tuple[int, int, int]]:
     """Derive per-assistant-turn token spans from prefix token counts.
 
@@ -1239,15 +1260,51 @@ def _assistant_token_spans_from_prefix_lengths(
         "max_length": max_seq_length,
         "tools": tools,
     }
+    # If the caller already tokenized the full render, use its offsets to map a corrected
+    # character boundary back to a token index.  This preserves the fast-tokenizer behavior
+    # for boundary tokens whose merge spans the header/content edge.  Prefix-unstable
+    # templates may not make every prefix a literal prefix of ``rendered``; those cases use
+    # the tokenized prefix fallback below.
+    full_offsets = offsets
     spans = []
     for message_idx in trainable_indices:
         # add_generation_prompt=True so the assistant header itself stays masked.
         if message_idx == 0:
             start = 0
         else:
-            start = tokenizer.apply_chat_template(
-                conversation=messages[:message_idx], add_generation_prompt=True, **chat_template_kwargs
-            ).shape[1]
+            header = tokenizer.apply_chat_template(
+                conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=True
+            )
+            assert isinstance(header, str)
+            content = messages[message_idx].get("content")
+            overlap = _assistant_header_content_overlap(header, content)
+            corrected_boundary = len(header) - overlap
+            if overlap and rendered is not None and full_offsets is not None and rendered.startswith(header):
+                # Include a token that straddles the corrected boundary, matching the
+                # overlap semantics used by the character-offset path.
+                start = next(
+                    (
+                        token_idx
+                        for token_idx, (token_start, token_end) in enumerate(full_offsets)
+                        if token_end > corrected_boundary
+                    ),
+                    len(full_offsets),
+                )
+            elif overlap:
+                # Prefix instability can make offsets unavailable.  Tokenizing the header
+                # without its duplicated suffix still removes the generation hint while
+                # retaining the tokenizer's special-token behavior.
+                start = tokenizer(
+                    header[:corrected_boundary],
+                    add_special_tokens=False,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=False,
+                )[INPUT_IDS_KEY].shape[1]
+            else:
+                start = tokenizer.apply_chat_template(
+                    conversation=messages[:message_idx], add_generation_prompt=True, **chat_template_kwargs
+                ).shape[1]
         end = tokenizer.apply_chat_template(
             conversation=messages[: message_idx + 1], add_generation_prompt=False, **chat_template_kwargs
         ).shape[1]
@@ -1396,11 +1453,13 @@ def _tokenize_tulu_sft_with_assistant_labels(
         if not (len(header) <= len(through) and rendered.startswith(header) and rendered.startswith(through)):
             prefix_unstable = True
             break
-        trainable_char_spans.append((len(header), len(through)))
+        content = messages[message_idx].get("content")
+        overlap = _assistant_header_content_overlap(header, content)
+        trainable_char_spans.append((len(header) - overlap, len(through)))
 
     if prefix_unstable:
         token_spans = _assistant_token_spans_from_prefix_lengths(
-            messages, tokenizer, tools, max_seq_length, trainable_indices
+            messages, tokenizer, tools, max_seq_length, trainable_indices, rendered=rendered, offsets=offsets
         )
         for _, start, end in token_spans:
             start, end = max(0, start), min(end, input_ids.shape[1])
