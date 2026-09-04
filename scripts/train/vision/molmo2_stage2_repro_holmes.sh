@@ -18,6 +18,7 @@ MAX_STEPS="${1:-100}"
 STAGE1_CKPT="${2:-/weka/oe-training-default/ai2-llm/checkpoints/jasonr/molmo2-stage1-4b-lossw-20260828}"
 GIT_REF="${3:-vision-pr4}"
 NUM_NODES="${4:-1}"
+RESUME_DIR="${5:-}"  # optional: an output dir with checkpoints to resume from (latest step)
 # A CUDA-13 environment image known to run on holmes in this workspace (olmo-miles);
 # used only as the base OS/CUDA environment — code and python env are bootstrapped.
 BOOTSTRAP_IMAGE="robertb/olmo-miles-v0-1-20260901"
@@ -28,6 +29,7 @@ uv run python mason.py \
     --cluster ai2/holmes \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
+    --max_retries 3 \
     --image "$BOOTSTRAP_IMAGE" \
     --description "open-instruct-multimodal: Molmo2-4B stage-2 repro on holmes (bootstrap, ${MAX_STEPS} steps)." \
     --pure_docker_mode \
@@ -52,13 +54,14 @@ uv run python mason.py \
     --compile_vision false \
     --compile_connector false \
     --max_train_steps "$MAX_STEPS" \
-    --checkpointing_steps 2000 \
+    --checkpointing_steps 1000 \
     --ephemeral_save_interval -1 \
     --keep_last_n_checkpoints -1 \
     --logging_steps 5 \
     --prefetch_workers 8 \
     --seed 6198 \
     --data_loader_seed 50189 \
+    ${RESUME_DIR:+--resume_from_checkpoint "$RESUME_DIR"} \
     --with_tracking \
     --wandb_project molmo2-stage2 \
     --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}"
