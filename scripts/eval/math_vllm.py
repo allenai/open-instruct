@@ -42,7 +42,8 @@ def parse_args() -> argparse.Namespace:
 
 def build_prompts(tokenizer: Any, rows: list[dict[str, Any]], max_prompt_tokens: int) -> list[list[int]]:
     prompts = [
-        tokenizer.apply_chat_template(row["messages"], add_generation_prompt=True, tokenize=True) for row in rows
+        tokenizer.apply_chat_template(row["messages"], add_generation_prompt=True, tokenize=True)["input_ids"]
+        for row in rows
     ]
     too_long = [(index, len(prompt)) for index, prompt in enumerate(prompts) if len(prompt) > max_prompt_tokens]
     if too_long:
