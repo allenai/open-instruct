@@ -13,10 +13,7 @@ supported-markers = [
 ]
 
 [manifest]
-overrides = [
-    { name = "apache-tvm-ffi", specifier = "==0.1.11" },
-    { name = "transformers", specifier = ">=5.15.0" },
-]
+overrides = [{ name = "transformers", specifier = ">=5.15.0" }]
 
 [[package]]
 name = "absl-py"
@@ -1307,7 +1304,7 @@ wheels = [
 
 [[package]]
 name = "flash-attn-4"
-version = "4.0.0b28"
+version = "4.0.0b19"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apache-tvm-ffi" },
@@ -1318,9 +1315,9 @@ dependencies = [
     { name = "torch-c-dlpack-ext" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/86/de2a7e2744c231bd96e723b592265c0ec4ba19468277968670447b2574a5/flash_attn_4-4.0.0b28.tar.gz", hash = "sha256:feda044eacd29e1c26f673ca98b25b12e7eb95df8dbe3e3f1f3fa9dc58165ce5", size = 377693, upload-time = "2026-08-26T08:47:48.138Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/93/63/6a00e1cd55765f5cf7d7a0100d1a5831824227ae3306275f3e6db420a76e/flash_attn_4-4.0.0b19.tar.gz", hash = "sha256:c904c9da0387c2ac0420cffdf61d6201d94cfeb354b6768fde794b04e9fc4e89", size = 353141, upload-time = "2026-06-24T09:15:14.881Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/aa/3fbbf512a901b8174f840fa35fcc5eaed03dd3dba9879c16c435f6e62092/flash_attn_4-4.0.0b28-py3-none-any.whl", hash = "sha256:b6fc43864488b97becee5c123536bc7d0de98bfac0754973aa6c00521eced9cf", size = 402718, upload-time = "2026-08-26T08:47:46.577Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/0e/5298d57e3efd5b7a07755fa9009fc1f6efc0f2d422915113eb7288a6552b/flash_attn_4-4.0.0b19-py3-none-any.whl", hash = "sha256:bc3856e018fa32e2b833726566641e51d02d45f2d444849937276a46c01653a2", size = 377662, upload-time = "2026-06-24T09:15:13.249Z" },
 ]
 
 [[package]]
