@@ -20,7 +20,7 @@ EXP_NAME=swerl_qwen35_9b_dppo_prod_4node_64k_holmes_gateway
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; sandboxes via literegistry gateway jupiter-cs-aus-148:45216, 32 replicas)" \
+       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; sandboxes via literegistry gateway jupiter-cs-aus-148:45216, redeployed w/ exec-wrapper fix (literegistry PR #3); fresh run for throughput benchmark vs podman twins)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents-holmes \
        --priority urgent \
@@ -85,7 +85,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --active_sampling \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/qwen35_9b_prod_4node_64k_holmes_gateway_001 \
+    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/qwen35_9b_prod_4node_64k_holmes_gateway_002 \
     --checkpoint_state_freq 5 \
     --inflight_updates true \
     --lm_head_fp32 true \
