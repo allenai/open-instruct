@@ -310,6 +310,13 @@ def load_hf_weights_into_olmo_core(
         load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
 
 
+def load_hf_weights_into_model(model: torch.nn.Module, model_name_or_path: str, work_dir: str | None = None) -> None:
+    """Load an HF checkpoint into an olmo-core model through the model-type dispatcher."""
+    model_state_dict = model.state_dict()
+    load_hf_weights_into_olmo_core(model_state_dict, model_name_or_path, work_dir=work_dir)
+    model.load_state_dict(model_state_dict)
+
+
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
     """Reload HF weights into a parallelized train_module.
 
@@ -317,9 +324,7 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     reinitializing all model weights. This reloads the HF checkpoint on top.
     """
     logger.info("Reloading HuggingFace weights after parallelization...")
-    sd = train_module.model.state_dict()
-    load_hf_weights_into_olmo_core(sd, model_name_or_path, work_dir=work_dir)
-    train_module.model.load_state_dict(sd)
+    load_hf_weights_into_model(train_module.model, model_name_or_path, work_dir=work_dir)
 
 
 def build_base_callbacks(
