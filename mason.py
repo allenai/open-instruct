@@ -147,6 +147,16 @@ def get_args():
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    parser.add_argument(
+        "--min_runtime",
+        type=str,
+        default=None,
+        help="Minimum runtime during which Beaker will not preempt the task (for example, '1h').",
+    )
+    auto_resume_group = parser.add_mutually_exclusive_group()
+    auto_resume_group.add_argument("--auto_resume", dest="auto_resume", action="store_true")
+    auto_resume_group.add_argument("--no_auto_resume", dest="auto_resume", action="store_false")
+    parser.set_defaults(auto_resume=None)
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
         "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
@@ -558,6 +568,18 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         constraints = beaker.BeakerConstraints(hostname=args.hostname)
     else:
         constraints = beaker.BeakerConstraints(cluster=args.cluster)
+    min_runtime = getattr(args, "min_runtime", None)
+    auto_resume = getattr(args, "auto_resume", None)
+    if args.preemptible and (min_runtime is not None or auto_resume is not None):
+        raise ValueError("--preemptible cannot be combined with --min_runtime or --auto_resume")
+    if min_runtime is not None or auto_resume is not None:
+        task_context = beaker.BeakerTaskContext(
+            priority=beaker.BeakerJobPriority[args.priority], min_runtime=min_runtime, auto_resume=auto_resume
+        )
+    else:
+        task_context = beaker.BeakerTaskContext(
+            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+        )
     spec = beaker.BeakerTaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.BeakerImageSource(beaker=args.image),
@@ -565,9 +587,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
-        context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
-        ),
+        context=task_context,
         constraints=constraints,
         env_vars=get_env_vars(
             args.pure_docker_mode,

@@ -131,6 +131,33 @@ class TestExperimentSpec(unittest.TestCase):
                     "mount_docker_socket": False,
                 },
             ),
+            (
+                "minimum_runtime",
+                {
+                    "cluster": ["ai2/jupiter"],
+                    "image": "test-user/open-instruct-integration-test",
+                    "description": "Task with a minimum runtime.",
+                    "pure_docker_mode": True,
+                    "workspace": "ai2/open-instruct-dev",
+                    "priority": "urgent",
+                    "num_nodes": 1,
+                    "max_retries": 0,
+                    "timeout": "2h",
+                    "env": [],
+                    "budget": None,
+                    "gpus": 8,
+                    "no_host_networking": False,
+                    "beaker_datasets": [],
+                    "secret": [],
+                    "shared_memory": "10.24gb",
+                    "task_name": "beaker_mason",
+                    "preemptible": False,
+                    "min_runtime": "1h",
+                    "auto_resume": True,
+                    "hostname": None,
+                    "mount_docker_socket": False,
+                },
+            ),
         ]
     )
     def test_experiment_spec(self, name, args_dict):
@@ -142,6 +169,19 @@ class TestExperimentSpec(unittest.TestCase):
 
         actual_spec = mason.make_task_spec(args, full_command, 0, beaker_secrets, whoami, resumable)
 
+        min_runtime = getattr(args, "min_runtime", None)
+        auto_resume = getattr(args, "auto_resume", None)
+        if min_runtime is not None or auto_resume is not None:
+            expected_context = beaker.BeakerTaskContext(
+                priority=beaker.BeakerJobPriority[args.priority],
+                min_runtime=min_runtime,
+                auto_resume=auto_resume,
+            )
+        else:
+            expected_context = beaker.BeakerTaskContext(
+                priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+            )
+
         expected_spec = beaker.BeakerTaskSpec(
             name=f"{args.task_name}__0",
             image=beaker.BeakerImageSource(beaker=args.image),
@@ -149,9 +189,7 @@ class TestExperimentSpec(unittest.TestCase):
             arguments=[full_command],
             result=beaker.BeakerResultSpec(path="/output"),
             datasets=mason.get_datasets(args.beaker_datasets, args.cluster),
-            context=beaker.BeakerTaskContext(
-                priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
-            ),
+            context=expected_context,
             constraints=beaker.BeakerConstraints(cluster=args.cluster)
             if args.hostname is None
             else beaker.BeakerConstraints(hostname=args.hostname),
