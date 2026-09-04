@@ -23,6 +23,7 @@ Example:
 """
 
 import argparse
+import collections
 import concurrent.futures
 import hashlib
 import json
@@ -32,6 +33,7 @@ import threading
 import time
 
 import datasets
+import huggingface_hub
 import openai
 import transformers
 
@@ -80,6 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer", required=True, help="HF repo whose tokenizer counts the tokens")
     parser.add_argument("--api-base", default="http://localhost:8008/v1")
     parser.add_argument("--dataset", default="allenai/Dolci-Think-SFT-7B")
+    parser.add_argument("--parse-health-after", type=int, default=50, help="log the trace-shape mix after N traces")
     parser.add_argument("--dataset-split", default="train")
     parser.add_argument("--num-prompts", type=int, default=200)
     parser.add_argument("--num-samples", type=int, default=4, help="completions per prompt")
@@ -95,6 +98,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, help="destination .jsonl")
     parser.add_argument("--prompts-output", default=None, help="optional .jsonl copy of the resolved prompt sample")
     return parser.parse_args()
+
+
+def dataset_revision(name: str) -> str | None:
+    """Resolve the corpus to an immutable commit sha.
+
+    Without this the join back to the source dataset is only as stable as the
+    Hub's main branch: a re-upload would silently repoint every source_id.
+    """
+    try:
+        return huggingface_hub.dataset_info(name).sha
+    except Exception as exc:  # noqa: BLE001 - a missing revision must not stop a run
+        logger.warning("could not resolve revision for %s: %s", name, exc)
+        return None
 
 
 def select_prompts(args: argparse.Namespace, tokenizer) -> list[dict]:
@@ -130,6 +146,8 @@ def select_prompts(args: argparse.Namespace, tokenizer) -> list[dict]:
         prompts.append(
             {
                 "prompt_index": len(prompts),
+                "dataset": args.dataset,
+                "dataset_revision": args.dataset_revision,
                 "prompt_sha": sha,
                 "prompt": text,
                 "prompt_tokens": n_tokens,
@@ -234,6 +252,9 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
         "sample_index": sample_index,
         "model": args.model,
         "tokenizer": args.tokenizer,
+        "dataset": prompt["dataset"],
+        "dataset_revision": prompt["dataset_revision"],
+        "source_id": prompt["source_id"],
         "dataset_source": prompt["dataset_source"],
         "prompt_tokens": prompt["prompt_tokens"],
         "kind": kind,
@@ -244,16 +265,21 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
         "thinking_chars": len(thinking_text),
         "completion_tokens": getattr(usage, "completion_tokens", None),
         "latency_s": round(time.monotonic() - started, 3),
-        "thinking_head": thinking_text[:400],
-        "answer_head": answer_text[:400],
+        # Full text, not an excerpt: these traces are the expensive artifact of
+        # the run and get published as a dataset. Storing them whole also means
+        # a parsing change can be re-applied offline instead of re-generating.
+        "thinking_text": thinking_text,
+        "answer_text": answer_text,
     }
 
 
 def main() -> None:
     args = parse_args()
     logger.info("loading tokenizer %s", args.tokenizer)
-    tokenizer = transformers.AutoTokenizer.from_pretrained(args.tokenizer)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(args.tokenizer, trust_remote_code=True)
 
+    args.dataset_revision = dataset_revision(args.dataset)
+    logger.info("corpus %s pinned at revision %s", args.dataset, args.dataset_revision)
     prompts = select_prompts(args, tokenizer)
     if args.prompts_output:
         os.makedirs(os.path.dirname(os.path.abspath(args.prompts_output)), exist_ok=True)
@@ -273,6 +299,7 @@ def main() -> None:
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     write_lock = threading.Lock()
+    shapes: collections.Counter = collections.Counter()
     done = 0
     started_at = time.monotonic()
 
@@ -284,6 +311,20 @@ def main() -> None:
                 handle.write(json.dumps(record) + "\n")
                 handle.flush()
                 done += 1
+                shapes[record.get("kind") or "error"] += 1
+                # Early warning: if a chat template behaves differently than the
+                # parser expects, the shape mix is wrong from the first handful
+                # of traces. Surfacing it here turns a 14-hour discovery into a
+                # 5-minute one -- and because full text is stored, a mis-parse is
+                # recoverable offline rather than needing the run repeated.
+                if done == args.parse_health_after:
+                    logger.info("parse health after %d traces: %s", done, dict(shapes))
+                    if shapes.get(KIND_CLOSED, 0) == 0:
+                        logger.error(
+                            "NO closed <think>...</think> traces yet -- the parser and this "
+                            "model's chat template likely disagree. Full text is being stored, "
+                            "so this is fixable offline, but check before trusting the lengths."
+                        )
                 if done % 25 == 0 or done == len(work):
                     elapsed = time.monotonic() - started_at
                     logger.info(
@@ -294,6 +335,7 @@ def main() -> None:
                         done / max(elapsed / 60, 1e-9),
                     )
 
+    logger.info("final trace-shape mix: %s", dict(shapes))
     logger.info("wrote %s", args.output)
 
 
