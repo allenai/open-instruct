@@ -45,7 +45,12 @@ HF_REPO_ID=""
 HF_TOKEN_SECRET_NAME="${HF_TOKEN_SECRET_NAME:-}"
 JOB_NAME="think-len-sweep"
 PRIORITY="normal"
-MIN_RUNTIME="16h"
+# Beaker rejects anything above 8h ("min_runtime must not exceed 8h0m0s"), which
+# matches the cluster's session ceiling. A model takes longer than that, so the
+# protection window cannot cover a whole model, let alone the sweep. Periodic
+# sync + idempotent resume + auto-resume are the real safety net; this just
+# guarantees the first 8h of each attempt.
+MIN_RUNTIME="8h"
 NO_AUTO_RESUME=0
 TASK_TIMEOUT="72h"
 BUDGET="ai2/oe-other"
