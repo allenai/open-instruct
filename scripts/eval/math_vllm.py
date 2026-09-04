@@ -12,6 +12,7 @@ import numpy as np
 import vllm
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from vllm.inputs import TokensPrompt
 
 from open_instruct import grpo_utils, logger_utils
 from open_instruct.dataset_transformation import CHAT_TEMPLATES
@@ -117,7 +118,7 @@ def main() -> None:
     responses: list[list[str]] = [[] for _ in rows]
     response_token_ids: list[list[list[int]]] = [[] for _ in rows]
     finish_reasons: list[list[str]] = [[] for _ in rows]
-    prompt_payloads = [{"prompt_token_ids": prompt} for prompt in prompts]
+    prompt_payloads = [TokensPrompt(prompt_token_ids=prompt) for prompt in prompts]
     for sample_index in range(args.samples_per_prompt):
         sampling_params = vllm.SamplingParams(
             temperature=args.temperature,
