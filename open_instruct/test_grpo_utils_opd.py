@@ -24,7 +24,7 @@ class TestComputePerDatasetEvalMetrics(unittest.TestCase):
             scores=np.array([1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0]),
             response_lengths=np.array([1, 2, 1, 3, 1, 1, 2, 2]),
             finish_reasons=["stop", "length", "stop", "stop", "length", "length", "stop", "length"],
-            dataset_names=["math_aime_2025"] * 4 + ["math_brumo_2025"] * 4,
+            dataset_names=[["math_aime_2025"]] * 4 + [["math_brumo_2025"]] * 4,
             eval_k=2,
             max_possible_score=1.0,
         )
@@ -39,6 +39,19 @@ class TestComputePerDatasetEvalMetrics(unittest.TestCase):
         self.assertEqual(metrics["eval/math_brumo_2025/pass_at_2"], 0.5)
         self.assertEqual(metrics["eval/math_brumo_2025/sequence_lengths"], 1.5)
         self.assertEqual(metrics["eval/math_brumo_2025/stop_rate"], 0.25)
+
+    def test_response_can_belong_to_multiple_datasets(self):
+        metrics = grpo_utils.compute_per_dataset_eval_metrics(
+            scores=np.array([1.0, 0.0]),
+            response_lengths=np.array([1, 2]),
+            finish_reasons=["stop", "length"],
+            dataset_names=[["math_aime_2025", "math_brumo_2025"], ["math_brumo_2025"]],
+            eval_k=1,
+            max_possible_score=1.0,
+        )
+
+        self.assertEqual(metrics["eval/math_aime_2025/scores"], 1.0)
+        self.assertEqual(metrics["eval/math_brumo_2025/scores"], 0.5)
 
     def test_returns_no_metrics_when_result_lengths_differ(self):
         metrics = grpo_utils.compute_per_dataset_eval_metrics(

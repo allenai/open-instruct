@@ -3013,7 +3013,10 @@ def maybe_evaluate(
         table["scores"] = eval_batch.scores
         table["ground_truth"] = eval_batch.ground_truths if eval_batch else []
         if eval_dataset_names:
-            table["dataset"] = eval_dataset_names
+            table["dataset"] = [
+                ",".join(dataset_names) if isinstance(dataset_names, list) else dataset_names
+                for dataset_names in eval_dataset_names
+            ]
         if eval_batch.active_tools is not None:
             table["active_tools"] = [str(tools) if tools is not None else "all" for tools in eval_batch.active_tools]
         df = pd.DataFrame(table)

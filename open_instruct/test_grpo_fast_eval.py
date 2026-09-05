@@ -253,7 +253,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             queries=[[1, 2, 3]] * 8,
             decoded_responses=[f"resp_{index}" for index in range(8)],
             ground_truths=["42"] * 8,
-            datasets=["math_aime_2025"] * 4 + ["math_brumo_2025"] * 4,
+            datasets=[["math_aime_2025"]] * 4 + [["math_brumo_2025"]] * 4,
             active_tools=None,
         )
 

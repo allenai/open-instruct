@@ -62,7 +62,7 @@ def compute_per_dataset_eval_metrics(
     scores: np.ndarray,
     response_lengths: np.ndarray,
     finish_reasons: list[str],
-    dataset_names: list[str],
+    dataset_names: list[str | list[str]],
     eval_k: int,
     max_possible_score: float,
 ) -> dict[str, float]:
@@ -78,10 +78,22 @@ def compute_per_dataset_eval_metrics(
         )
         return {}
 
+    normalized_dataset_names = [
+        [dataset_name] if isinstance(dataset_name, str) else dataset_name for dataset_name in dataset_names
+    ]
+    unique_dataset_names = dict.fromkeys(
+        dataset_name for response_dataset_names in normalized_dataset_names for dataset_name in response_dataset_names
+    )
+
     metrics: dict[str, float] = {}
-    dataset_names_array = np.asarray(dataset_names, dtype=object)
-    for dataset_name in dict.fromkeys(dataset_names):
-        indices = np.flatnonzero(dataset_names_array == dataset_name)
+    for dataset_name in unique_dataset_names:
+        indices = np.array(
+            [
+                response_index
+                for response_index, response_dataset_names in enumerate(normalized_dataset_names)
+                if dataset_name in response_dataset_names
+            ]
+        )
         dataset_scores = scores[indices]
         dataset_response_lengths = response_lengths[indices]
         dataset_finish_reasons = [finish_reasons[index] for index in indices]
