@@ -12,6 +12,8 @@ CODE_PATCH_DATASET="${3:?Usage: $0 <beaker-image> <dapo-split-dataset> <code-pat
 
 MODEL="${MODEL:?Set MODEL to a Hugging Face model ID or Weka checkpoint path}"
 MODEL_LABEL="${MODEL_LABEL:?Set MODEL_LABEL to a short experiment-safe name}"
+TOKENIZER="${TOKENIZER:-$MODEL}"
+VLLM_MODEL="${VLLM_MODEL:-$MODEL}"
 EVAL_MODE="${EVAL_MODE:-sampled}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
@@ -66,7 +68,8 @@ cp /patch/open_instruct/data_loader.py \
 \&\& uv run open_instruct/grpo_fast.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL" \
-    --tokenizer_name_or_path "$MODEL" \
+    --tokenizer_name_or_path "$TOKENIZER" \
+    --vllm_model_name_or_path "$VLLM_MODEL" \
     --dataset_mixer_list /dapo/train.jsonl 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list \

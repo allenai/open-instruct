@@ -2509,7 +2509,7 @@ def create_model_and_optimizer(
         vllm_config.vllm_tensor_parallel_size,
         vllm_config.vllm_enforce_eager,
         tc.tokenizer_name_or_path,
-        model_config.model_name_or_path,
+        vllm_config.vllm_model_name_or_path or model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,
         vllm_config.vllm_enable_prefix_caching,
