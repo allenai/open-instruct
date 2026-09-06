@@ -1,41 +1,47 @@
 #!/bin/bash
 
-# Paired math-objective experiment for a Qwen3.5-2B student. Both arms use
-# the same deterministic DAPO train split, rollout budget, optimizer, DPPO
-# policy loss, and fixed DAPO/AIME/BRUMO evaluations. Set OBJECTIVE=opd for
-# teacher-logprob advantages or OBJECTIVE=verifier for grouped math-reward
-# advantages. This makes the source of the advantage the controlled variable.
+# Four-node verifier-DPPO training for Qwen3.5-9B on the same fixed DAPO
+# train/holdout split and AIME/BRUMO evaluations used by the paired 2B
+# verifier-vs-OPD experiment. This intentionally keeps the math recipe at
+# 16k and borrows only the proven 9B systems layout from the terminal DPPO
+# reproduction: 16 ZeRO-3 learner ranks, 16 one-GPU vLLM engines, and
+# sequence parallelism of four.
 set -euo pipefail
 
-BEAKER_IMAGE="${1:?Usage: OBJECTIVE=opd|verifier $0 <beaker-image> <dapo-split-beaker-dataset>}"
-DAPO_SPLIT_DATASET="${2:?Usage: OBJECTIVE=opd|verifier $0 <beaker-image> <dapo-split-beaker-dataset>}"
+BEAKER_IMAGE="${1:?Usage: RUN_MODE=smoke|full $0 <beaker-image> <dapo-split-beaker-dataset>}"
+DAPO_SPLIT_DATASET="${2:?Usage: RUN_MODE=smoke|full $0 <beaker-image> <dapo-split-beaker-dataset>}"
 shift 2
 
-MODEL="${MODEL:-Qwen/Qwen3.5-2B}"
+MODEL="${MODEL:-Qwen/Qwen3.5-9B}"
 TOKENIZER="${TOKENIZER:-$MODEL}"
-TEACHER_MODEL="${TEACHER_MODEL:-Qwen/Qwen3.5-9B}"
-OBJECTIVE="${OBJECTIVE:-verifier}"
+RUN_MODE="${RUN_MODE:-full}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 
-case "$OBJECTIVE" in
-    opd)
-        EXP_NAME="${EXP_NAME:-qwen35_2b_opd_math_fixed_dapo_eval_4node}"
-        DESCRIPTION="pure OPD from $TEACHER_MODEL"
-        OBJECTIVE_ARGS=(
-            --opd_teacher_model_name_or_path "$TEACHER_MODEL"
-            --opd_kl_coef 1.0
-            --opd_pure
-        )
+case "$RUN_MODE" in
+    smoke)
+        EXP_NAME="${EXP_NAME:-qwen35_9b_verifier_dppo_math_smoke_4node}"
+        TOTAL_EPISODES=256
+        EVAL_RESPONSE_LENGTH=512
+        LOCAL_EVAL_EVERY=1
+        SAVE_FREQ=-1
+        CHECKPOINT_STATE_FREQ=-1
+        MIN_RUNTIME=1h
+        TIMEOUT=3h
         ;;
-    verifier)
-        EXP_NAME="${EXP_NAME:-qwen35_2b_verifier_dppo_math_fixed_dapo_eval_4node}"
-        DESCRIPTION="grouped verifier advantages with DPPO loss"
-        OBJECTIVE_ARGS=()
+    full)
+        EXP_NAME="${EXP_NAME:-qwen35_9b_verifier_dppo_math_fixed_dapo_100step_4node}"
+        TOTAL_EPISODES=25600
+        EVAL_RESPONSE_LENGTH=16384
+        LOCAL_EVAL_EVERY=20
+        SAVE_FREQ=20
+        CHECKPOINT_STATE_FREQ=10
+        MIN_RUNTIME=4h
+        TIMEOUT=12h
         ;;
     *)
-        echo "OBJECTIVE must be 'opd' or 'verifier', got '$OBJECTIVE'" >&2
+        echo "RUN_MODE must be 'smoke' or 'full', got '$RUN_MODE'" >&2
         exit 2
         ;;
 esac
@@ -44,17 +50,17 @@ RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 uv run python mason.py \
     --task_name "$EXP_NAME" \
-    --description "$RUN_NAME: Qwen3.5-2B on fixed DAPO split; $DESCRIPTION" \
+    --description "$RUN_NAME: verifier-DPPO Qwen3.5-9B on fixed DAPO math ($RUN_MODE)" \
     --cluster "$CLUSTER" \
     --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     --beaker_datasets "/dapo:$DAPO_SPLIT_DATASET" \
-    --min_runtime 4h \
+    --min_runtime "$MIN_RUNTIME" \
     --num_nodes 4 \
     --max_retries 0 \
-    --timeout 12h \
+    --timeout "$TIMEOUT" \
     --gpus 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
@@ -78,13 +84,13 @@ source configs/beaker_configs/ray_node_setup.sh \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
+    --eval_response_length "$EVAL_RESPONSE_LENGTH" \
     --pack_length 18432 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 128 \
     --num_samples_per_prompt_rollout 2 \
     --async_steps 4 \
     --inflight_updates true \
-    "${OBJECTIVE_ARGS[@]}" \
     --filter_zero_std_samples false \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
@@ -92,9 +98,10 @@ source configs/beaker_configs/ray_node_setup.sh \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --lr_scheduler_type constant \
-    --total_episodes 25600 \
+    --total_episodes "$TOTAL_EPISODES" \
     --num_epochs 1 \
     --deepspeed_stage 3 \
+    --sequence_parallel_size 4 \
     --num_learners_per_node 8 8 \
     --vllm_num_engines 16 \
     --vllm_tensor_parallel_size 1 \
@@ -116,12 +123,12 @@ source configs/beaker_configs/ray_node_setup.sh \
     --mask_truncated_completions false \
     --gradient_checkpointing \
     --eval_pass_at_k 1 \
-    --local_eval_every 20 \
+    --local_eval_every "$LOCAL_EVAL_EVERY" \
     --synchronous_local_eval true \
     --final_eval_timeout 1800 \
     --eval_on_step_0 true \
-    --save_freq 20 \
-    --checkpoint_state_freq 10 \
+    --save_freq "$SAVE_FREQ" \
+    --checkpoint_state_freq "$CHECKPOINT_STATE_FREQ" \
     --keep_last_n_checkpoints 2 \
     --save_traces \
     --save_trainer_logprobs false \
