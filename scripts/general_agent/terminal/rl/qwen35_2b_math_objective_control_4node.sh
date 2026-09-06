@@ -91,7 +91,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --lr_scheduler_type constant \
-    --total_episodes 25344 \
+    --total_episodes 25600 \
     --num_epochs 1 \
     --deepspeed_stage 3 \
     --num_learners_per_node 8 8 \
