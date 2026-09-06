@@ -15,6 +15,7 @@ MODEL="${MODEL:-Qwen/Qwen3.5-2B}"
 TOKENIZER="${TOKENIZER:-$MODEL}"
 TEACHER_MODEL="${TEACHER_MODEL:-Qwen/Qwen3.5-9B}"
 OBJECTIVE="${OBJECTIVE:-verifier}"
+RUN_MODE="${RUN_MODE:-full}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
@@ -56,6 +57,47 @@ case "$OBJECTIVE" in
         ;;
 esac
 
+case "$RUN_MODE" in
+    smoke)
+        NUM_NODES=1
+        NUM_LEARNERS_PER_NODE=(4)
+        VLLM_NUM_ENGINES=4
+        NUM_UNIQUE_PROMPTS=32
+        NUM_SAMPLES_PER_PROMPT=2
+        ASYNC_STEPS=1
+        RESPONSE_LENGTH=8192
+        EVAL_RESPONSE_LENGTH=512
+        PACK_LENGTH=10240
+        TOTAL_EPISODES=64
+        LOCAL_EVAL_EVERY=1
+        SAVE_FREQ=-1
+        CHECKPOINT_STATE_FREQ=-1
+        MIN_RUNTIME=1h
+        TIMEOUT=2h
+        ;;
+    full)
+        NUM_NODES=4
+        NUM_LEARNERS_PER_NODE=(8 8)
+        VLLM_NUM_ENGINES=16
+        NUM_UNIQUE_PROMPTS=128
+        NUM_SAMPLES_PER_PROMPT=2
+        ASYNC_STEPS=4
+        RESPONSE_LENGTH=16384
+        EVAL_RESPONSE_LENGTH=16384
+        PACK_LENGTH=18432
+        TOTAL_EPISODES=25600
+        LOCAL_EVAL_EVERY=20
+        SAVE_FREQ=20
+        CHECKPOINT_STATE_FREQ=10
+        MIN_RUNTIME=4h
+        TIMEOUT=12h
+        ;;
+    *)
+        echo "RUN_MODE must be 'smoke' or 'full', got '$RUN_MODE'" >&2
+        exit 2
+        ;;
+esac
+
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
 
 uv run python mason.py \
@@ -67,11 +109,11 @@ uv run python mason.py \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     "${BEAKER_DATASETS[@]}" \
-    --min_runtime 4h \
+    --min_runtime "$MIN_RUNTIME" \
     --no_auto_resume \
-    --num_nodes 4 \
+    --num_nodes "$NUM_NODES" \
     --max_retries 0 \
-    --timeout 12h \
+    --timeout "$TIMEOUT" \
     --gpus 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
@@ -95,12 +137,13 @@ source configs/beaker_configs/ray_node_setup.sh \
         mnoukhov/brumo_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
-    --pack_length 18432 \
+    --response_length "$RESPONSE_LENGTH" \
+    --eval_response_length "$EVAL_RESPONSE_LENGTH" \
+    --pack_length "$PACK_LENGTH" \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 128 \
-    --num_samples_per_prompt_rollout 2 \
-    --async_steps 4 \
+    --num_unique_prompts_rollout "$NUM_UNIQUE_PROMPTS" \
+    --num_samples_per_prompt_rollout "$NUM_SAMPLES_PER_PROMPT" \
+    --async_steps "$ASYNC_STEPS" \
     --inflight_updates true \
     "${OBJECTIVE_ARGS[@]}" \
     --filter_zero_std_samples false \
@@ -110,11 +153,11 @@ source configs/beaker_configs/ray_node_setup.sh \
     --temperature 1.0 \
     --learning_rate 1e-6 \
     --lr_scheduler_type constant \
-    --total_episodes 25600 \
+    --total_episodes "$TOTAL_EPISODES" \
     --num_epochs 1 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 8 8 \
-    --vllm_num_engines 16 \
+    --num_learners_per_node "${NUM_LEARNERS_PER_NODE[@]}" \
+    --vllm_num_engines "$VLLM_NUM_ENGINES" \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.85 \
     --vllm_enable_prefix_caching \
@@ -134,12 +177,12 @@ source configs/beaker_configs/ray_node_setup.sh \
     --mask_truncated_completions false \
     --gradient_checkpointing \
     --eval_pass_at_k 1 \
-    --local_eval_every 20 \
+    --local_eval_every "$LOCAL_EVAL_EVERY" \
     --synchronous_local_eval true \
     --final_eval_timeout 1800 \
     --eval_on_step_0 true \
-    --save_freq 20 \
-    --checkpoint_state_freq 10 \
+    --save_freq "$SAVE_FREQ" \
+    --checkpoint_state_freq "$CHECKPOINT_STATE_FREQ" \
     --keep_last_n_checkpoints 2 \
     --save_traces \
     --save_trainer_logprobs false \
