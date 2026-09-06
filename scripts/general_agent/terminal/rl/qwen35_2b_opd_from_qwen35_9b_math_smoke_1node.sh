@@ -7,8 +7,9 @@
 # gradient.
 #
 # This is intentionally a plumbing test rather than a training run: 64
-# rollouts/update and 128 total episodes give two optimizer updates. There are
-# no tools, environment actors, teacher routing, or local benchmark evals.
+# rollouts/update and 128 total episodes give two optimizer updates. A short
+# synchronous AIME + BRUMO eval runs on the base, step-1, and final step-2
+# weights to verify exact-checkpoint and required-final-eval behavior.
 # Layout: four ZeRO-3 learner ranks (including the sharded 9B teacher) and four
 # one-GPU vLLM rollout engines on a single 8-GPU node.
 set -euo pipefail
@@ -21,7 +22,7 @@ TOKENIZER="${TOKENIZER:-$MODEL}"
 TEACHER_MODEL="${TEACHER_MODEL:-Qwen/Qwen3.5-9B}"
 EXP_NAME="${EXP_NAME:-qwen35_2b_opd_from_qwen35_9b_math_smoke_1node}"
 RUN_NAME="${RUN_NAME:-${EXP_NAME}_$(date +%Y%m%d_%H%M%S)}"
-PRIORITY="${PRIORITY:-high}"
+PRIORITY="${PRIORITY:-urgent}"
 
 uv run python mason.py \
     --task_name "$EXP_NAME" \
@@ -34,7 +35,7 @@ uv run python mason.py \
     --min_runtime 1h \
     --auto_resume \
     --num_nodes 1 \
-    --max_retries 1 \
+    --max_retries 0 \
     --timeout 2h \
     --gpus 8 \
     --auto_checkpoint_state_dir "" \
@@ -53,8 +54,13 @@ source configs/beaker_configs/ray_node_setup.sh \
     --tokenizer_name_or_path "$TOKENIZER" \
     --dataset_mixer_list hamishivi/DAPO-Math-17k-Processed_filtered 1.0 \
     --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list \
+        mnoukhov/aime_2025_openinstruct 1.0 \
+        mnoukhov/brumo_2025_openinstruct 1.0 \
+    --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
+    --eval_response_length 512 \
     --pack_length 10240 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
@@ -93,13 +99,19 @@ source configs/beaker_configs/ray_node_setup.sh \
     --chat_template qwen_instruct_user_boxed_math \
     --mask_truncated_completions false \
     --gradient_checkpointing \
-    --local_eval_every -1 \
+    --eval_pass_at_k 1 \
+    --local_eval_every 1 \
+    --synchronous_local_eval true \
+    --final_eval_timeout 1200 \
+    --eval_on_step_0 true \
     --save_freq -1 \
     --checkpoint_state_freq -1 \
     --save_traces \
     --save_trainer_logprobs false \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --with_tracking \
+    --wandb_entity allenai-team1 \
+    --wandb_project opd \
     --seed 42 \
     --push_to_hub false \
     --try_auto_save_to_beaker false "$@"

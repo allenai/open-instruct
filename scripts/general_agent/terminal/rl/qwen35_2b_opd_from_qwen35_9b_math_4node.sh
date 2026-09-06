@@ -32,7 +32,7 @@ uv run python mason.py \
     --min_runtime 4h \
     --auto_resume \
     --num_nodes 4 \
-    --max_retries 5 \
+    --max_retries 0 \
     --timeout 12h \
     --gpus 8 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -97,6 +97,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --gradient_checkpointing \
     --eval_pass_at_k 1 \
     --local_eval_every 20 \
+    --synchronous_local_eval true \
+    --final_eval_timeout 1800 \
     --eval_on_step_0 true \
     --save_freq 20 \
     --checkpoint_state_freq 10 \

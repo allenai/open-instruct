@@ -2619,7 +2619,9 @@ class WeightSyncTrigger:
     def __init__(self) -> None:
         self._event = threading.Event()
         self._lock = threading.Lock()
+        self._completion_condition = threading.Condition(self._lock)
         self._step: int | None = None
+        self._completed_step = -1
 
     def notify(self, step: int | None = None) -> None:
         with self._lock:
@@ -2636,6 +2638,17 @@ class WeightSyncTrigger:
             step = self._step
             self._event.clear()
             return step
+
+    def mark_completed(self, step: int) -> None:
+        """Record that all vLLM engines now serve ``step`` weights."""
+        with self._completion_condition:
+            self._completed_step = max(self._completed_step, step)
+            self._completion_condition.notify_all()
+
+    def wait_until_completed(self, step: int, timeout: float | None = None) -> bool:
+        """Wait until all vLLM engines have completed a sync through ``step``."""
+        with self._completion_condition:
+            return self._completion_condition.wait_for(lambda: self._completed_step >= step, timeout=timeout)
 
 
 def weight_sync_thread(
@@ -2712,6 +2725,7 @@ def weight_sync_thread(
                     desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
                     enable=args.verbose,
                 )
+                weight_sync_trigger.mark_completed(target_model_step)
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -2914,6 +2928,9 @@ def maybe_evaluate(
     base_env_config: EnvConfig,
     max_possible_score: float,
     actor_manager=None,
+    wait_for_results: bool = False,
+    checkpoint_step: int | None = None,
+    require_checkpoint_step: bool = False,
 ) -> bool:
     """Optionally evaluate the model.
 
@@ -2924,11 +2941,10 @@ def maybe_evaluate(
         return True  # No eval to do, so consider it "successful"
 
     try:
-        is_final_step = training_step >= args.num_training_steps
         num_eval_prompts = len(eval_dataset)
-        # On non-final steps, only evaluate when we have a full batch ready.
+        # Asynchronous evaluations are collected only when a full batch is ready.
         # This avoids partially draining the queue and losing results.
-        if not is_final_step:
+        if not wait_for_results:
             queued_results = evaluation_inference_results_Q.qsize()
             if queued_results < num_eval_prompts:
                 logger.info(
@@ -2938,8 +2954,7 @@ def maybe_evaluate(
                 )
                 return False
 
-        # Wait for final-step evals if needed; otherwise consume immediately after the queue size gate above.
-        timeout = 100 if is_final_step else 0.01
+        timeout = getattr(args, "final_eval_timeout", 1800.0) if wait_for_results else 0.01
 
         # Accumulate evaluation results from all vLLM engines
         eval_result, eval_batch, eval_reward_metrics, _ = accumulate_inference_batches(
@@ -2979,6 +2994,7 @@ def maybe_evaluate(
             )
         eval_metrics = {
             "eval/scores": scores.mean(),
+            "eval/collection_training_step": training_step,
             "eval/sequence_lengths": eval_sequence_lengths.mean(),
             "eval/sequence_lengths_min": eval_sequence_lengths.min(),
             "eval/sequence_lengths_max": eval_sequence_lengths.max(),
@@ -2986,6 +3002,16 @@ def maybe_evaluate(
             **eval_reward_metrics,
             **eval_pass_at_k_metrics,
         }
+        if checkpoint_step is not None:
+            eval_metrics["eval/checkpoint_step"] = checkpoint_step
+        if require_checkpoint_step:
+            model_step_min = eval_metrics.get("eval/model_step_min")
+            model_step_max = eval_metrics.get("eval/model_step_max")
+            if model_step_min != checkpoint_step or model_step_max != checkpoint_step:
+                raise RuntimeError(
+                    f"Evaluation requested checkpoint step {checkpoint_step}, but responses came from model steps "
+                    f"{model_step_min} through {model_step_max}"
+                )
         eval_dataset_names = getattr(eval_batch, "datasets", None)
         if eval_dataset_names:
             eval_metrics.update(
@@ -3028,7 +3054,11 @@ def maybe_evaluate(
             print_rich_table(df.iloc[:1])
         del table
         return True
-    except Empty:
+    except Empty as error:
+        if wait_for_results:
+            raise RuntimeError(
+                f"Required evaluation for checkpoint step {checkpoint_step} did not finish within {timeout} seconds"
+            ) from error
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
         return False
 
@@ -3279,6 +3309,30 @@ def run_training(
         )
     else:
         eval_data_loader = None
+
+    def enqueue_evaluation(checkpoint_step: int) -> None:
+        assert eval_data_loader is not None
+        for eval_example in iter(eval_data_loader):
+            add_prompt_to_generator(
+                eval_example,
+                checkpoint_step,
+                prompt_Q,
+                generation_configs["eval"],
+                is_eval=True,
+                base_env_config=base_env_config,
+            )
+        eval_data_loader.reset()
+
+    def wait_for_synced_model(target_step: int) -> None:
+        if weight_sync_trigger is None:
+            raise RuntimeError("Cannot run an exact-checkpoint evaluation before weight sync is initialized")
+        if not weight_sync_trigger.wait_until_completed(target_step, timeout=WEIGHT_SYNC_TIMEOUT_S):
+            health_check_fn(weight_sync_thread_future)
+            raise RuntimeError(
+                f"Weight sync for required evaluation checkpoint {target_step} timed out after "
+                f"{WEIGHT_SYNC_TIMEOUT_S}s"
+            )
+
     training_start_time = time.perf_counter()  # Track overall training start time
     maybe_update_beaker_description(
         current_step=resume_training_step - 1,
@@ -3286,7 +3340,31 @@ def run_training(
         start_time=training_start_time,
         wandb_url=wandb_url,
     )
-    last_eval_collected = True
+    pending_eval_checkpoint_step: int | None = None
+    if (
+        eval_data_loader is not None
+        and args.local_eval_every > 0
+        and args.synchronous_local_eval
+        and args.eval_on_step_0
+        and resume_training_step == 1
+    ):
+        enqueue_evaluation(checkpoint_step=0)
+        maybe_evaluate(
+            args,
+            training_step=0,
+            evaluation_inference_results_Q=evaluation_inference_results_Q,
+            tokenizer=tokenizer,
+            episode=episode,
+            eval_dataset=eval_dataset,
+            eval_generation_config=generation_configs["eval"],
+            model_dims=model_dims,
+            base_env_config=base_env_config,
+            max_possible_score=streaming_config.max_possible_score,
+            actor_manager=actor_manager,
+            wait_for_results=True,
+            checkpoint_step=0,
+        )
+
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -3298,26 +3376,39 @@ def run_training(
         if (
             eval_data_loader is not None
             and args.local_eval_every > 0
+            and not args.synchronous_local_eval
             and (
                 (args.eval_on_step_0 and training_step == 1)
-                or (training_step % args.local_eval_every == 0 and training_step > 1)
+                or (
+                    training_step % args.local_eval_every == 0
+                    and training_step > 1
+                    and training_step < args.num_training_steps
+                )
             )
         ):
-            if not last_eval_collected:
-                logger.warning(
-                    "[Main Thread] ⚠️ Previous eval round was not fully collected and may be included in future evals. "
-                    "Consider increasing local_eval_every."
+            if pending_eval_checkpoint_step is not None:
+                logger.info(
+                    "[Main Thread] Waiting for checkpoint %s evaluation before submitting another round.",
+                    pending_eval_checkpoint_step,
                 )
-            for eval_example in iter(eval_data_loader):
-                add_prompt_to_generator(
-                    eval_example,
-                    training_step,
-                    prompt_Q,
-                    generation_configs["eval"],
-                    is_eval=True,
+                maybe_evaluate(
+                    args,
+                    training_step=training_step,
+                    evaluation_inference_results_Q=evaluation_inference_results_Q,
+                    tokenizer=tokenizer,
+                    episode=episode,
+                    eval_dataset=eval_dataset,
+                    eval_generation_config=generation_configs["eval"],
+                    model_dims=model_dims,
                     base_env_config=base_env_config,
+                    max_possible_score=streaming_config.max_possible_score,
+                    actor_manager=actor_manager,
+                    wait_for_results=True,
+                    checkpoint_step=pending_eval_checkpoint_step,
                 )
-            eval_data_loader.reset()
+                pending_eval_checkpoint_step = None
+            pending_eval_checkpoint_step = 0 if training_step == 1 else training_step - 1
+            enqueue_evaluation(checkpoint_step=pending_eval_checkpoint_step)
 
         data_thread_metrics = {}
         try:
@@ -3387,19 +3478,69 @@ def run_training(
             # weight_sync_trigger is already set in that case.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
 
-        last_eval_collected = maybe_evaluate(
-            args,
-            training_step,
-            evaluation_inference_results_Q,
-            tokenizer,
-            episode,
-            eval_dataset,
-            generation_configs["eval"],
-            model_dims,
-            base_env_config,
-            streaming_config.max_possible_score,
-            actor_manager,
+        if pending_eval_checkpoint_step is not None:
+            eval_collected = maybe_evaluate(
+                args,
+                training_step,
+                evaluation_inference_results_Q,
+                tokenizer,
+                episode,
+                eval_dataset,
+                generation_configs["eval"],
+                model_dims,
+                base_env_config,
+                streaming_config.max_possible_score,
+                actor_manager,
+                checkpoint_step=pending_eval_checkpoint_step,
+            )
+            if eval_collected:
+                pending_eval_checkpoint_step = None
+
+        should_run_exact_eval = (
+            eval_data_loader is not None
+            and args.local_eval_every > 0
+            and (
+                training_step == args.num_training_steps
+                or (args.synchronous_local_eval and training_step % args.local_eval_every == 0)
+            )
         )
+        if should_run_exact_eval:
+            if pending_eval_checkpoint_step is not None:
+                maybe_evaluate(
+                    args,
+                    training_step,
+                    evaluation_inference_results_Q,
+                    tokenizer,
+                    episode,
+                    eval_dataset,
+                    generation_configs["eval"],
+                    model_dims,
+                    base_env_config,
+                    streaming_config.max_possible_score,
+                    actor_manager,
+                    wait_for_results=True,
+                    checkpoint_step=pending_eval_checkpoint_step,
+                )
+                pending_eval_checkpoint_step = None
+
+            wait_for_synced_model(training_step)
+            enqueue_evaluation(checkpoint_step=training_step)
+            maybe_evaluate(
+                args,
+                training_step,
+                evaluation_inference_results_Q,
+                tokenizer,
+                episode,
+                eval_dataset,
+                generation_configs["eval"],
+                model_dims,
+                base_env_config,
+                streaming_config.max_possible_score,
+                actor_manager,
+                wait_for_results=True,
+                checkpoint_step=training_step,
+                require_checkpoint_step=True,
+            )
 
         maybe_update_beaker_description(
             current_step=training_step,

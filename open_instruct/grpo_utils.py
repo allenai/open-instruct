@@ -158,6 +158,10 @@ class GRPOExperimentConfig(
     """RUNTIME VALUE: The number of training_steps to train"""
     local_eval_every: int = 100
     """Run evaluation after this many training steps. This controls in-loop evals, which reuse the generation/reward verifier setup. Set to -1 to disable."""
+    synchronous_local_eval: bool = False
+    """Wait for exact post-update weights and finish each local evaluation before training continues."""
+    final_eval_timeout: float = 1800.0
+    """Maximum seconds to wait for a required synchronous or final local evaluation."""
     save_freq: int = 200
     """How many train steps to save the model"""
     backend_timeout: int = 120
@@ -588,6 +592,8 @@ class GRPOExperimentConfig(
                 "`eval_on_step_0` requires `local_eval_every` > 0. "
                 "Set `local_eval_every` to a positive value or disable `eval_on_step_0`."
             )
+        if self.final_eval_timeout <= 0:
+            raise ValueError(f"`final_eval_timeout` must be greater than 0, got {self.final_eval_timeout}.")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
             raise ValueError(f"`gs_bucket_path` must start with 'gs://', got: {self.gs_bucket_path}")
         if self.sequence_parallel_size > 1 and self.deepspeed_stage != 3:

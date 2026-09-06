@@ -16,7 +16,12 @@ from open_instruct.dataset_transformation import (
     RAW_PROMPT_KEY,
     VERIFIER_SOURCE_KEY,
 )
-from open_instruct.grpo_fast import _count_sampled_episodes_for_step, create_generation_configs, maybe_evaluate
+from open_instruct.grpo_fast import (
+    WeightSyncTrigger,
+    _count_sampled_episodes_for_step,
+    create_generation_configs,
+    maybe_evaluate,
+)
 
 
 class _QueueWithSize:
@@ -30,9 +35,7 @@ class _QueueWithSize:
 class TestEpisodeAccounting(unittest.TestCase):
     def test_active_sampling_counts_filtered_prompt_groups(self):
         streaming_config = data_loader_lib.StreamingDataLoaderConfig(
-            active_sampling=True,
-            num_unique_prompts_rollout=8,
-            num_samples_per_prompt_rollout=4,
+            active_sampling=True, num_unique_prompts_rollout=8, num_samples_per_prompt_rollout=4
         )
 
         episodes = _count_sampled_episodes_for_step(streaming_config, {"batch/filtered_prompts": 3})
@@ -41,9 +44,7 @@ class TestEpisodeAccounting(unittest.TestCase):
 
     def test_inactive_sampling_keeps_fixed_step_size(self):
         streaming_config = data_loader_lib.StreamingDataLoaderConfig(
-            active_sampling=False,
-            num_unique_prompts_rollout=8,
-            num_samples_per_prompt_rollout=4,
+            active_sampling=False, num_unique_prompts_rollout=8, num_samples_per_prompt_rollout=4
         )
 
         episodes = _count_sampled_episodes_for_step(streaming_config, {"batch/filtered_prompts": 3})
@@ -114,13 +115,16 @@ class TestMaybeEvaluate(unittest.TestCase):
 
         mock_accumulate.assert_not_called()
 
-    def test_final_step_calls_accumulate_even_when_queue_is_incomplete(self):
-        args = SimpleNamespace(num_training_steps=10, with_tracking=False)
+    def test_required_eval_raises_when_results_do_not_finish(self):
+        args = SimpleNamespace(num_training_steps=10, with_tracking=False, final_eval_timeout=0.01)
         eval_dataset = self._build_eval_dataset(num_prompts=3)
         eval_queue = _QueueWithSize(size=0)
         eval_generation_config = SimpleNamespace(n=32)
 
-        with patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate:
+        with (
+            patch("open_instruct.grpo_fast.accumulate_inference_batches", side_effect=Empty) as mock_accumulate,
+            self.assertRaisesRegex(RuntimeError, "checkpoint step 10"),
+        ):
             maybe_evaluate(
                 args=args,
                 training_step=10,
@@ -132,6 +136,8 @@ class TestMaybeEvaluate(unittest.TestCase):
                 model_dims=Mock(),
                 base_env_config=EnvConfig(),
                 max_possible_score=1.0,
+                wait_for_results=True,
+                checkpoint_step=10,
             )
 
         mock_accumulate.assert_called_once()
@@ -157,7 +163,7 @@ class TestMaybeEvaluate(unittest.TestCase):
             ground_truths=["42", "42"],
             active_tools=None,
         )
-        reward_metrics = {"model_step_min": 102.0, "model_step_max": 104.0, "model_step_mean": 103.0}
+        reward_metrics = {"model_step_min": 103.0, "model_step_max": 103.0, "model_step_mean": 103.0}
 
         with (
             patch(
@@ -178,12 +184,16 @@ class TestMaybeEvaluate(unittest.TestCase):
                 model_dims=Mock(),
                 base_env_config=EnvConfig(),
                 max_possible_score=1.0,
+                checkpoint_step=103,
+                require_checkpoint_step=True,
             )
 
         logged = mock_print_metrics.call_args.args[0]
-        self.assertEqual(logged["eval/model_step_min"], 102.0)
-        self.assertEqual(logged["eval/model_step_max"], 104.0)
+        self.assertEqual(logged["eval/model_step_min"], 103.0)
+        self.assertEqual(logged["eval/model_step_max"], 103.0)
         self.assertEqual(logged["eval/model_step_mean"], 103.0)
+        self.assertEqual(logged["eval/checkpoint_step"], 103)
+        self.assertEqual(logged["eval/collection_training_step"], 100)
 
     def test_records_pass_at_k_metrics(self):
         args = SimpleNamespace(num_training_steps=200, with_tracking=False)
@@ -290,6 +300,18 @@ class TestMaybeEvaluate(unittest.TestCase):
         self.assertEqual(logged["eval/math_brumo_2025/pass_at_2"], 0.5)
         self.assertEqual(logged["eval/math_brumo_2025/stop_rate"], 0.25)
         self.assertEqual(mock_wandb_log.call_args.kwargs["step"], 100)
+
+
+class TestWeightSyncTrigger(unittest.TestCase):
+    def test_waits_for_requested_completed_step(self):
+        trigger = WeightSyncTrigger()
+
+        self.assertFalse(trigger.wait_until_completed(20, timeout=0))
+        trigger.mark_completed(20)
+
+        self.assertTrue(trigger.wait_until_completed(19, timeout=0))
+        self.assertTrue(trigger.wait_until_completed(20, timeout=0))
+        self.assertFalse(trigger.wait_until_completed(21, timeout=0))
 
 
 class TestComputePassAtKMetrics(unittest.TestCase):
