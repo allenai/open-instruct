@@ -16,6 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="hamishivi/DAPO-Math-17k-Processed_filtered")
     parser.add_argument("--split", default="train")
     parser.add_argument("--eval-size", type=int, default=512)
+    parser.add_argument("--eval-dataset-label", default="dapo_math_holdout")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
@@ -28,11 +29,14 @@ def main() -> None:
         raise ValueError(f"eval-size must be between 1 and {len(dataset) - 1}, got {args.eval_size}")
 
     splits = dataset.train_test_split(test_size=args.eval_size, seed=args.seed, shuffle=True)
+    eval_dataset = (
+        splits["test"].remove_columns("dataset").add_column("dataset", [args.eval_dataset_label] * len(splits["test"]))
+    )
     args.output_dir.mkdir(parents=True, exist_ok=False)
     train_path = args.output_dir / "train.jsonl"
     eval_path = args.output_dir / "eval.jsonl"
     splits["train"].to_json(train_path)
-    splits["test"].to_json(eval_path)
+    eval_dataset.to_json(eval_path)
 
     metadata = {
         "source_dataset": args.dataset,
@@ -40,6 +44,7 @@ def main() -> None:
         "seed": args.seed,
         "train_size": len(splits["train"]),
         "eval_size": len(splits["test"]),
+        "eval_dataset_label": args.eval_dataset_label,
         "train_file": train_path.name,
         "eval_file": eval_path.name,
     }
