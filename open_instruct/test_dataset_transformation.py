@@ -684,13 +684,23 @@ CONVERSATION_SHAPES = {
 # sweep exists to catch, and no combination is allowed to do it.
 #
 # Growing this set is the goal of the P1 work in
-# https://github.com/allenai/open-instruct/issues/1800: templates that rewrite assistant
-# content as they render (`*_thinker*` inject or split on <think>) cannot be located by either
-# the char-offset or the token-count derivation, and need `{% generation %}` markers instead.
-# Consecutive assistant turns are underivable for the same underlying reason -- every
-# derivation must render a prefix ending in an assistant turn, which templates that
-# special-case the final turn render differently from the full conversation.
+# https://github.com/allenai/open-instruct/issues/1800. The `*_thinker*` templates end their
+# generation prompt with `<think>`; the header boundary is the common prefix of that render and
+# the turn's own render, so a turn that does not open with the tag is located correctly (see
+# TestThinkTemplateLabelSpans for the reasoning-bearing shapes). Consecutive assistant turns
+# remain underivable under templates that special-case the final turn -- every derivation must
+# render a prefix ending in an assistant turn, which those templates render differently from the
+# full conversation -- and `simple_chat` emits its role marker only inside the turn, so no render
+# can separate header from content.
 DERIVABLE_COMBINATIONS = {
+    ("tulu_thinker", "native_eos", "alternating"),
+    ("tulu_thinker", "im_end_eos", "alternating"),
+    ("tulu_thinker_r1_style", "native_eos", "alternating"),
+    ("tulu_thinker_r1_style", "im_end_eos", "alternating"),
+    ("olmo_thinker", "native_eos", "alternating"),
+    ("olmo_thinker", "im_end_eos", "alternating"),
+    ("olmo_thinker_remove_intermediate_thinking", "native_eos", "alternating"),
+    ("olmo_thinker_remove_intermediate_thinking", "im_end_eos", "alternating"),
     ("tulu", "native_eos", "alternating"),
     ("tulu", "im_end_eos", "alternating"),
     ("olmo", "native_eos", "alternating"),
@@ -839,7 +849,7 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         tokenized = tokenizer(rendered, add_special_tokens=False, return_tensors="pt")
         input_ids = tokenized[open_instruct.dataset_transformation.INPUT_IDS_KEY]
         # Message 1 is the first assistant turn; run its span to the end of the conversation.
-        over_wide = [(1, self._first_assistant_token(tokenizer, messages, input_ids), input_ids.shape[1])]
+        over_wide = [(1, self._first_assistant_token(tokenizer, messages, input_ids), input_ids.shape[1], None)]
         with self.assertRaisesRegex(
             open_instruct.dataset_transformation.AssistantSpanDerivationError, "extends past its turn"
         ):
@@ -960,5 +970,328 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         self.assertEqual(sum(masks), 0)
 
 
+class TestOverLengthStrategy(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+
+    def _tokenize(self, max_seq_length, over_length_strategy):
+        row = {
+            "messages": [
+                {"role": "user", "content": "Count upward for a while."},
+                {"role": "assistant", "content": " ".join(str(i) for i in range(400))},
+            ]
+        }
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=max_seq_length, over_length_strategy=over_length_strategy
+        )
+
+    def _short_row(self, over_length_strategy):
+        row = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), self.tokenizer, max_seq_length=4096, over_length_strategy=over_length_strategy
+        )
+
+    def test_keep_leaves_a_truncated_row_unterminated(self):
+        out = self._tokenize(64, "keep")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertNotEqual(input_ids[-1], self.tokenizer.eos_token_id)
+
+    def test_terminate_ends_a_truncated_row_with_a_trainable_eos(self):
+        out = self._tokenize(64, "terminate")
+        input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertEqual(len(input_ids), 64)
+        self.assertEqual(input_ids[-1], self.tokenizer.eos_token_id)
+        # Trainable, so the model learns to stop rather than merely being delimited.
+        self.assertEqual(labels[-1], self.tokenizer.eos_token_id)
+
+    def test_drop_masks_a_truncated_row_so_the_filter_removes_it(self):
+        out = self._tokenize(64, "drop")
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+        self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    @parameterized.expand([("keep",), ("terminate",), ("drop",)])
+    def test_rows_that_fit_are_untouched(self, over_length_strategy):
+        """A row that fits must be byte-identical across strategies."""
+        baseline = self._short_row("keep")
+        out = self._short_row(over_length_strategy)
+        for key in (
+            open_instruct.dataset_transformation.INPUT_IDS_KEY,
+            open_instruct.dataset_transformation.LABELS_KEY,
+            open_instruct.dataset_transformation.ATTENTION_MASK_KEY,
+        ):
+            self.assertEqual(out[key].tolist(), baseline[key].tolist(), key)
+        self.assertTrue(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    def test_exact_length_row_that_covers_its_render_is_not_treated_as_truncated(self):
+        """A conversation can render to exactly `max_seq_length` tokens without being cut."""
+        offsets = [(0, 3), (3, 7)]
+        rendered = "abcdefg"
+        self.assertFalse(
+            open_instruct.dataset_transformation._was_truncated(offsets, rendered, n_tokens=2, max_seq_length=2)
+        )
+
+    def test_over_length_render_cut_on_an_eos_is_still_truncated(self):
+        """A render cut exactly on an earlier turn's EOS ends in EOS but still lost text."""
+        offsets = [(0, 3), (3, 7)]
+        rendered = "abcdefg and a great deal more text"
+        self.assertTrue(
+            open_instruct.dataset_transformation._was_truncated(offsets, rendered, n_tokens=2, max_seq_length=2)
+        )
+
+    def test_terminate_leaves_a_cut_in_a_masked_span_alone(self):
+        """A cut in a later user turn has no trainable tail to terminate."""
+        input_ids = torch.tensor([[10, 11, 12]])
+        labels = torch.tensor([[-100, 11, -100]])  # earlier trainable token, masked tail
+        out_ids, out_labels = open_instruct.dataset_transformation._apply_over_length_strategy(
+            input_ids.clone(), labels.clone(), self.tokenizer, truncated=True, over_length_strategy="terminate"
+        )
+        self.assertEqual(out_ids.tolist(), input_ids.tolist())
+        self.assertEqual(out_labels.tolist(), labels.tolist())
+
+    def test_terminate_rewrites_a_cut_inside_a_trainable_span(self):
+        input_ids = torch.tensor([[10, 11, 12]])
+        labels = torch.tensor([[-100, 11, 12]])
+        out_ids, out_labels = open_instruct.dataset_transformation._apply_over_length_strategy(
+            input_ids.clone(), labels.clone(), self.tokenizer, truncated=True, over_length_strategy="terminate"
+        )
+        self.assertEqual(out_ids[0, -1].item(), self.tokenizer.eos_token_id)
+        self.assertEqual(out_labels[0, -1].item(), self.tokenizer.eos_token_id)
+
+    def test_terminate_does_not_rescue_an_all_masked_row(self):
+        """A single trainable EOS must not rescue a row the filter is meant to drop."""
+        with mock.patch.object(
+            open_instruct.dataset_transformation,
+            "_tokenize_tulu_sft_with_assistant_labels",
+            side_effect=open_instruct.dataset_transformation.AssistantSpanDerivationError("forced"),
+        ):
+            out = self._tokenize(64, "terminate")
+        labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+        self.assertTrue(all(label == -100 for label in labels))
+        self.assertFalse(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, self.tokenizer))
+
+    def test_default_is_omitted_from_the_tokenize_args(self):
+        """Keeps existing dataset cache hashes unchanged."""
+        self.assertEqual(
+            open_instruct.dataset_transformation.sft_tokenize_fn_args(4096, "keep"), {"max_seq_length": 4096}
+        )
+
+    @parameterized.expand([("terminate",), ("drop",)])
+    def test_opting_in_is_recorded_in_the_tokenize_args(self, over_length_strategy):
+        self.assertEqual(
+            open_instruct.dataset_transformation.sft_tokenize_fn_args(4096, over_length_strategy),
+            {"max_seq_length": 4096, "over_length_strategy": over_length_strategy},
+        )
+
+    def test_unknown_strategy_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._tokenize(64, "truncate-harder")
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def _trained_text(tokenizer, out):
+    input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+    labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+    return tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+
+
+class TestThinkTemplateLabelSpans(unittest.TestCase):
+    """Templates whose generation prompt ends with `<think>` must locate every assistant turn.
+
+    The generation prompt is not a pure header for these templates: the model is started
+    inside the reasoning block. Multi-turn conversations route through the token-count
+    fallback (the templates swap `<|im_end|>` for eos on the final turn), which is where the
+    boundary used to land past the first token(s) of every turn and the verifier dropped the
+    row. Every shape here was dropped before; each must now train exactly the assistant text.
+    """
+
+    THINK_CONTENT = [
+        {"role": "user", "content": "USERONE"},
+        {"role": "assistant", "content": "<think>REASONONE</think>ANSWERONE"},
+        {"role": "user", "content": "USERTWO"},
+        {"role": "assistant", "content": "<think>REASONTWO</think>ANSWERTWO"},
+    ]
+    REASONING_FIELD = [
+        {"role": "user", "content": "USERONE"},
+        {"role": "assistant", "reasoning_content": "REASONONE", "content": "ANSWERONE"},
+        {"role": "user", "content": "USERTWO"},
+        {"role": "assistant", "reasoning_content": "REASONTWO", "content": "ANSWERTWO"},
+    ]
+
+    def _tokenizer(self, template):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = template
+        return tokenizer
+
+    def _tokenize(self, tokenizer, messages):
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+
+    def _assert_only_assistant_text(self, tokenizer, out, *, expected, forbidden):
+        self.assertTrue(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, tokenizer), "row was dropped")
+        trained = _trained_text(tokenizer, out)
+        for text in expected:
+            self.assertIn(text, trained, f"{text!r} missing from the loss ({trained!r})")
+        for text in forbidden:
+            self.assertNotIn(text, trained, f"{text!r} leaked into the loss ({trained!r})")
+        return trained
+
+    def test_plain_reply_under_think_template_is_trained(self):
+        # A turn without reasoning does not reproduce the generation prompt's `<think>`, so the
+        # header must stop at the role marker rather than subtracting a tag the turn never had.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        out = self._tokenize(tokenizer, CONVERSATION_SHAPES["alternating"])
+        self._assert_only_assistant_text(
+            tokenizer,
+            out,
+            expected=["ASSISTONE", "ASSISTTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant", "<think>"],
+        )
+
+    def test_inline_think_multi_turn_masks_the_forced_tag_and_trains_the_rest(self):
+        # The turn reproduces the generation prompt's `<think>`, so the tag is header (the
+        # template forces it at inference) and everything after it is trained.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        out = self._tokenize(tokenizer, self.THINK_CONTENT)
+        trained = self._assert_only_assistant_text(
+            tokenizer,
+            out,
+            expected=["REASONONE</think>ANSWERONE", "REASONTWO</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant", "<think>"],
+        )
+        self.assertEqual(trained.count("</think>"), 2)
+
+    def test_reasoning_content_field_multi_turn_is_trained(self):
+        # Reasoning supplied as a separate field renders as `<think>reasoning</think>content`, so
+        # the span legitimately starts with text that is not `content`. The verifier must compare
+        # against the rendered turn, not the raw content string.
+        base = open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"]
+        content_block = "{% if message.get('content', none) is not none %}{{ message['content'] }}{% endif %}"
+        self.assertIn(content_block, base)
+        template = base.replace(
+            content_block,
+            "{% if message.get('reasoning_content', none) is not none %}"
+            "{{ '<think>' + message['reasoning_content'] + '</think>' }}{% endif %}" + content_block,
+        )
+        tokenizer = self._tokenizer(template)
+        self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, self.REASONING_FIELD),
+            expected=["REASONONE</think>ANSWERONE", "REASONTWO</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant", "<think>"],
+        )
+
+    def test_generation_prompt_without_think_trains_the_tag(self):
+        # With no `<think>` in the generation prompt the tag is the turn's first token and must be
+        # trained: the model has to learn to emit it.
+        tokenizer = self._tokenizer(
+            open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker_no_think_sft_tokenization"]
+        )
+        trained = self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, self.THINK_CONTENT),
+            expected=["<think>REASONONE</think>ANSWERONE", "<think>REASONTWO</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant"],
+        )
+        self.assertEqual(trained.count("<think>"), 2)
+
+    def test_header_boundary_never_splits_a_token(self):
+        # Content that shares a partial prefix with the generation prompt's tail (`<thinking`
+        # vs `<think>`) must not leave a half-token in the header.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        messages = [
+            {"role": "user", "content": "USERONE"},
+            {"role": "assistant", "content": "<thinking aloud> ANSWERONE"},
+            {"role": "user", "content": "USERTWO"},
+            {"role": "assistant", "content": "ANSWERTWO"},
+        ]
+        self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, messages),
+            expected=["<thinking aloud> ANSWERONE", "ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant"],
+        )
+
+    def test_single_turn_matches_multi_turn_labelling(self):
+        # Single-turn conversations take the char-offset path and multi-turn ones the fallback;
+        # the same turn must be labelled the same way on both.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        single = self._tokenize(tokenizer, self.THINK_CONTENT[:2])
+        self.assertEqual(_trained_text(tokenizer, single).strip(), "REASONONE</think>ANSWERONE" + tokenizer.eos_token)
+
+
+class TestToolCallArgumentNormalization(unittest.TestCase):
+    TEMPLATE = (
+        "{% for m in messages %}<|{{ m['role'] }}|>\n{{ m['content'] }}"
+        "{% for tc in m.get('tool_calls', []) %}<call>{{ tc['function']['name'] }}("
+        "{% for k, v in tc['function']['arguments'].items() %}{{ k }}={{ v | tojson }}{% endfor %})</call>"
+        "{% endfor %}{% if m['role'] == 'assistant' %}{{ eos_token }}{% endif %}\n{% endfor %}"
+        "{% if add_generation_prompt %}<|assistant|>\n{% endif %}"
+    )
+
+    def _call(self, arguments):
+        return {"id": "call_0", "type": "function", "function": {"name": "lookup", "arguments": arguments}}
+
+    def test_json_string_arguments_are_parsed_to_a_mapping(self):
+        messages = [{"role": "assistant", "content": "", "tool_calls": [self._call('{"city": "Paris", "days": 5}')]}]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(messages)
+        self.assertEqual(out[0]["tool_calls"][0]["function"]["arguments"], {"city": "Paris", "days": 5})
+        # The input row is left untouched.
+        self.assertEqual(messages[0]["tool_calls"][0]["function"]["arguments"], '{"city": "Paris", "days": 5}')
+
+    def test_mapping_arguments_and_non_object_strings_pass_through(self):
+        calls = [self._call({"city": "Paris"}), self._call("not json"), self._call("[1, 2]")]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(
+            [{"role": "assistant", "content": "", "tool_calls": calls}]
+        )
+        self.assertEqual(
+            [c["function"]["arguments"] for c in out[0]["tool_calls"]], [{"city": "Paris"}, "not json", "[1, 2]"]
+        )
+
+    def test_flat_tool_calls_are_parsed_too(self):
+        flat = {"name": "lookup", "arguments": '{"city": "Paris"}'}
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(
+            [{"role": "assistant", "content": "", "tool_calls": [flat]}]
+        )
+        self.assertEqual(out[0]["tool_calls"][0]["arguments"], {"city": "Paris"})
+
+    def test_string_and_mapping_arguments_tokenize_identically(self):
+        # Templates iterate arguments as a mapping; a dataset that stores them as JSON strings
+        # (unavoidable when argument names vary across rows) must render exactly like one that
+        # stores dicts, rather than crash inside the template.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = self.TEMPLATE
+
+        def row(arguments):
+            return {
+                "messages": [
+                    {"role": "user", "content": "weather?"},
+                    {"role": "assistant", "content": "Checking.", "tool_calls": [self._call(arguments)]},
+                    {"role": "tool", "content": "sunny"},
+                    {"role": "assistant", "content": "Sunny in Paris."},
+                ]
+            }
+
+        as_string = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            row('{"city": "Paris", "days": 5}'), tokenizer, max_seq_length=4096
+        )
+        as_dict = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            row({"city": "Paris", "days": 5}), tokenizer, max_seq_length=4096
+        )
+        for key in (
+            open_instruct.dataset_transformation.INPUT_IDS_KEY,
+            open_instruct.dataset_transformation.LABELS_KEY,
+        ):
+            self.assertEqual(as_string[key].tolist(), as_dict[key].tolist())
+        trained = _trained_text(tokenizer, as_string)
+        self.assertIn('<call>lookup(city="Paris"days=5)</call>', trained)
+        self.assertIn("Sunny in Paris.", trained)
+        self.assertNotIn("sunny\n", trained)
+        self.assertNotIn("weather?", trained)
