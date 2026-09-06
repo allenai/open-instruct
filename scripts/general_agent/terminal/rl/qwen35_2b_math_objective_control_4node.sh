@@ -72,6 +72,7 @@ case "$RUN_MODE" in
         LOCAL_EVAL_EVERY=1
         SAVE_FREQ=-1
         CHECKPOINT_STATE_FREQ=-1
+        MASON_CHECKPOINT_ARGS=(--auto_checkpoint_state_dir "")
         MIN_RUNTIME=1h
         TIMEOUT=2h
         ;;
@@ -89,6 +90,7 @@ case "$RUN_MODE" in
         LOCAL_EVAL_EVERY=20
         SAVE_FREQ=20
         CHECKPOINT_STATE_FREQ=10
+        MASON_CHECKPOINT_ARGS=()
         MIN_RUNTIME=4h
         TIMEOUT=12h
         ;;
@@ -120,6 +122,7 @@ uv run python mason.py \
     --env VLLM_DISABLE_COMPILE_CACHE=1 \
     --env VLLM_USE_V1=1 \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
+    "${MASON_CHECKPOINT_ARGS[@]}" \
     --no_auto_dataset_cache \
     -- \
 "${PATCH_SETUP[@]}" \
