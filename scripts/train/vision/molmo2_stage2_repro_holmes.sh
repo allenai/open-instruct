@@ -7,9 +7,10 @@
 # dependency group from the lockfile (cached on weka for fast restarts). mason joins
 # the payload tokens into one `/bin/bash -c` string, so quoted '&&' tokens chain.
 #
-# rank_microbatch_instances=3: mb4 OOMs at seq 16384 (261.7/267.7 GiB — activations
-# scale with microbatch tokens, and 16k-seq is ~6x the 2560-seq benchmarks where mb4
-# doubled TPS). mb3 projects to ~195 GiB. LM AC stays at block-interval 2.
+# Microbatch stays at the default 2 (Stage2 parity): mb4 OOMs at seq 16384
+# (261.7/267.7 GiB) and mb3 violates divisibility (per-rank batch of 8 instances
+# splits only by 1/2/4/8). The remaining speed levers are more nodes, or the
+# upstream compile_vision fix (OLMo-core#848).
 #
 # Defaults to a SHORT validation (100 steps) so it does not duplicate the full
 # 20k-step run on the CUDA-12 clusters; pass a step count to override.
@@ -55,7 +56,6 @@ uv run python mason.py \
     --exp_name "molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}" \
     --mixture image-only-v9 \
     --model_name_or_path "$STAGE1_CKPT" \
-    --rank_microbatch_instances 3 \
     --compile_vision false \
     --compile_connector false \
     --max_train_steps "$MAX_STEPS" \
