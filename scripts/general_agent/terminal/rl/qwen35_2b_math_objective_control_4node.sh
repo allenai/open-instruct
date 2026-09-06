@@ -16,6 +16,7 @@ TOKENIZER="${TOKENIZER:-$MODEL}"
 TEACHER_MODEL="${TEACHER_MODEL:-Qwen/Qwen3.5-9B}"
 OBJECTIVE="${OBJECTIVE:-verifier}"
 PRIORITY="${PRIORITY:-urgent}"
+WORKSPACE="${WORKSPACE:-ai2/open-instruct-dev}"
 
 case "$OBJECTIVE" in
     opd)
@@ -44,7 +45,7 @@ uv run python mason.py \
     --task_name "$EXP_NAME" \
     --description "$RUN_NAME: Qwen3.5-2B on fixed DAPO split; $DESCRIPTION" \
     --cluster ai2/jupiter \
-    --workspace ai2/open-instruct-dev \
+    --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
