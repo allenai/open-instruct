@@ -7,6 +7,10 @@
 # dependency group from the lockfile (cached on weka for fast restarts). mason joins
 # the payload tokens into one `/bin/bash -c` string, so quoted '&&' tokens chain.
 #
+# rank_microbatch_instances=4: the user's own B300 benchmarks (scratch-bench-b300
+# vs -mb4) show microbatch 4 nearly doubles TPS/device; B300 memory (50% used at
+# mb2) affords it. LM AC stays at block-interval 2.
+#
 # Defaults to a SHORT validation (100 steps) so it does not duplicate the full
 # 20k-step run on the CUDA-12 clusters; pass a step count to override.
 #
@@ -51,6 +55,7 @@ uv run python mason.py \
     --exp_name "molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}" \
     --mixture image-only-v9 \
     --model_name_or_path "$STAGE1_CKPT" \
+    --rank_microbatch_instances 4 \
     --compile_vision false \
     --compile_connector false \
     --max_train_steps "$MAX_STEPS" \
