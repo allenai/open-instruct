@@ -18,6 +18,22 @@ OBJECTIVE="${OBJECTIVE:-verifier}"
 PRIORITY="${PRIORITY:-urgent}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
+PATCH_DATASET="${PATCH_DATASET:-}"
+
+BEAKER_DATASETS=(--beaker_datasets "/dapo:$DAPO_SPLIT_DATASET")
+PATCH_SETUP=()
+if [[ -n "$PATCH_DATASET" ]]; then
+    BEAKER_DATASETS+=("/patch:$PATCH_DATASET")
+    PATCH_SETUP=(
+        cp
+        /patch/open_instruct/data_loader.py
+        /patch/open_instruct/ground_truth_utils.py
+        /patch/open_instruct/grpo_fast.py
+        /patch/open_instruct/grpo_utils.py
+        /stage/open_instruct/
+        '\&\&'
+    )
+fi
 
 case "$OBJECTIVE" in
     opd)
@@ -50,7 +66,7 @@ uv run python mason.py \
     --priority "$PRIORITY" \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
-    --beaker_datasets "/dapo:$DAPO_SPLIT_DATASET" \
+    "${BEAKER_DATASETS[@]}" \
     --min_runtime 4h \
     --num_nodes 4 \
     --max_retries 0 \
@@ -63,6 +79,7 @@ uv run python mason.py \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --no_auto_dataset_cache \
     -- \
+"${PATCH_SETUP[@]}" \
 source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
     --run_name "$RUN_NAME" \
