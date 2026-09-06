@@ -14,6 +14,7 @@ MODEL="${MODEL:?Set MODEL to a Hugging Face model ID or Weka checkpoint path}"
 MODEL_LABEL="${MODEL_LABEL:?Set MODEL_LABEL to a short experiment-safe name}"
 TOKENIZER="${TOKENIZER:-$MODEL}"
 VLLM_MODEL="${VLLM_MODEL:-$MODEL}"
+VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.85}"
 EVAL_MODE="${EVAL_MODE:-sampled}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
@@ -94,7 +95,7 @@ cp /patch/open_instruct/data_loader.py \
     --num_learners_per_node 4 \
     --vllm_num_engines 4 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_gpu_memory_utilization 0.85 \
+    --vllm_gpu_memory_utilization "$VLLM_GPU_MEMORY_UTILIZATION" \
     --vllm_enable_prefix_caching \
     --vllm_gdn_prefill_backend triton \
     --load_ref_policy false \
