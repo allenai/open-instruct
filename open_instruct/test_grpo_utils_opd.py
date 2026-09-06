@@ -362,6 +362,20 @@ class TestEvalOnlyConfigValidation(unittest.TestCase):
 
         self.assertTrue(config.eval_only)
 
+    def test_skip_weight_sync_requires_eval_only(self):
+        with self.assertRaisesRegex(ValueError, "eval_only_skip_weight_sync"):
+            grpo_utils.GRPOExperimentConfig(eval_only_skip_weight_sync=True)
+
+        config = grpo_utils.GRPOExperimentConfig(
+            eval_only=True,
+            eval_only_skip_weight_sync=True,
+            eval_on_step_0=True,
+            local_eval_every=1,
+            synchronous_local_eval=True,
+        )
+
+        self.assertTrue(config.eval_only_skip_weight_sync)
+
 
 if __name__ == "__main__":
     unittest.main()

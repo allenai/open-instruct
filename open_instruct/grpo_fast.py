@@ -3291,7 +3291,14 @@ def run_training(
     # data prep starts generating with vLLM/tool actors. This avoids initializing
     # the trainer<->vLLM NCCL group while sandbox Docker work is already active.
     _data_prep_actor = ray.get_actor(data_loader_lib.DATA_PREP_ACTOR_NAME)
-    if args.deepspeed_stage == 3:
+    if args.eval_only_skip_weight_sync:
+        logger.info("[Main Thread] Eval-only: using weights already loaded by vLLM; skipping initial weight sync.")
+        weight_sync_trigger = WeightSyncTrigger()
+        ray_get_with_progress(
+            [engine.set_model_step.remote(0) for engine in vllm_engines], desc="Initializing vLLM model step to 0"
+        )
+        weight_sync_trigger.mark_completed(0)
+    elif args.deepspeed_stage == 3:
         logger.info("[Main Thread] ZeRO-3: running dummy optimizer step to prime NCCL state.")
         ray_get_with_progress([m.dummy_optimizer_step.remote() for m in policy_group.models], desc="ZeRO-3 dummy step")
         weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()

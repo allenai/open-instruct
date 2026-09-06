@@ -15,6 +15,7 @@ MODEL_LABEL="${MODEL_LABEL:?Set MODEL_LABEL to a short experiment-safe name}"
 TOKENIZER="${TOKENIZER:-$MODEL}"
 VLLM_MODEL="${VLLM_MODEL:-$MODEL}"
 VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.85}"
+EVAL_ONLY_SKIP_WEIGHT_SYNC="${EVAL_ONLY_SKIP_WEIGHT_SYNC:-false}"
 EVAL_MODE="${EVAL_MODE:-sampled}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
@@ -109,6 +110,7 @@ cp /patch/open_instruct/data_loader.py \
     --synchronous_local_eval true \
     --eval_on_step_0 true \
     --eval_only true \
+    --eval_only_skip_weight_sync "$EVAL_ONLY_SKIP_WEIGHT_SYNC" \
     --final_eval_timeout 7200 \
     --save_freq -1 \
     --checkpoint_state_freq -1 \

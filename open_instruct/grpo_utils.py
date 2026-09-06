@@ -442,6 +442,8 @@ class GRPOExperimentConfig(
     """Number of completions per eval prompt for local pass@k metrics."""
     eval_only: bool = False
     """Run the step-0 local evaluation and exit without performing an optimizer update."""
+    eval_only_skip_weight_sync: bool = False
+    """Skip the initial policy-to-vLLM sync when eval-only vLLM already loaded the exact policy weights."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
@@ -596,6 +598,8 @@ class GRPOExperimentConfig(
             )
         if self.eval_only and (not self.eval_on_step_0 or not self.synchronous_local_eval):
             raise ValueError("`eval_only` requires `eval_on_step_0=true` and `synchronous_local_eval=true`.")
+        if self.eval_only_skip_weight_sync and not self.eval_only:
+            raise ValueError("`eval_only_skip_weight_sync` requires `eval_only=true`.")
         if self.final_eval_timeout <= 0:
             raise ValueError(f"`final_eval_timeout` must be greater than 0, got {self.final_eval_timeout}.")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
