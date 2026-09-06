@@ -74,6 +74,7 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     "${BEAKER_DATASETS[@]}" \
     --min_runtime "$MIN_RUNTIME" \
+    --no_auto_resume \
     --num_nodes 4 \
     --max_retries 0 \
     --timeout "$TIMEOUT" \
