@@ -31,7 +31,7 @@ if [[ -n "$PATCH_DATASET" ]]; then
         /patch/open_instruct/grpo_fast.py
         /patch/open_instruct/grpo_utils.py
         /stage/open_instruct/
-        '\&\&'
+        '&&'
     )
 fi
 
