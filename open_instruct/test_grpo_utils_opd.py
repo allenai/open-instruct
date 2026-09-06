@@ -351,5 +351,17 @@ class TestOPDConfigValidation(unittest.TestCase):
             grpo_utils.GRPOExperimentConfig(**self._base_kwargs(opd_adv_clip=0.0))
 
 
+class TestEvalOnlyConfigValidation(unittest.TestCase):
+    def test_requires_synchronous_step_zero_eval(self):
+        with self.assertRaisesRegex(ValueError, "eval_only"):
+            grpo_utils.GRPOExperimentConfig(eval_only=True)
+
+        config = grpo_utils.GRPOExperimentConfig(
+            eval_only=True, eval_on_step_0=True, local_eval_every=1, synchronous_local_eval=True
+        )
+
+        self.assertTrue(config.eval_only)
+
+
 if __name__ == "__main__":
     unittest.main()

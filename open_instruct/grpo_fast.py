@@ -3365,6 +3365,12 @@ def run_training(
             checkpoint_step=0,
         )
 
+    if args.eval_only:
+        if eval_data_loader is None:
+            raise ValueError("`eval_only` requires a non-empty `dataset_mixer_eval_list`.")
+        logger.info("[Main Thread] Evaluation-only run completed at checkpoint step 0.")
+        return episode
+
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 

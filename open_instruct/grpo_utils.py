@@ -440,6 +440,8 @@ class GRPOExperimentConfig(
     """Whether to run local evaluation at training step 0. Defaults to False."""
     eval_pass_at_k: int = 1
     """Number of completions per eval prompt for local pass@k metrics."""
+    eval_only: bool = False
+    """Run the step-0 local evaluation and exit without performing an optimizer update."""
 
     def __post_init__(self):
         if self.send_slack_alerts and not os.environ.get("SLACK_WEBHOOK_URL"):
@@ -592,6 +594,8 @@ class GRPOExperimentConfig(
                 "`eval_on_step_0` requires `local_eval_every` > 0. "
                 "Set `local_eval_every` to a positive value or disable `eval_on_step_0`."
             )
+        if self.eval_only and (not self.eval_on_step_0 or not self.synchronous_local_eval):
+            raise ValueError("`eval_only` requires `eval_on_step_0=true` and `synchronous_local_eval=true`.")
         if self.final_eval_timeout <= 0:
             raise ValueError(f"`final_eval_timeout` must be greater than 0, got {self.final_eval_timeout}.")
         if self.gs_bucket_path is not None and not self.gs_bucket_path.startswith("gs://"):
