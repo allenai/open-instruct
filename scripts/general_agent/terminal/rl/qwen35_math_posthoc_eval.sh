@@ -44,11 +44,12 @@ uv run python mason.py \
     --image "$BEAKER_IMAGE" \
     --beaker_datasets "/patch:$CODE_PATCH_DATASET" "/dapo:$DAPO_SPLIT_DATASET" \
     --min_runtime 2h \
-    --auto_resume \
+    --no_auto_resume \
     --num_nodes 1 \
     --max_retries 0 \
     --timeout 6h \
     --gpus 8 \
+    --auto_checkpoint_state_dir "" \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
     --env VLLM_DISABLE_COMPILE_CACHE=1 \
@@ -106,7 +107,7 @@ cp /patch/open_instruct/data_loader.py \
     --eval_only true \
     --final_eval_timeout 7200 \
     --save_freq -1 \
-    --checkpoint_state_freq 1 \
+    --checkpoint_state_freq -1 \
     --output_dir /output \
     --with_tracking \
     --wandb_entity allenai-team1 \
