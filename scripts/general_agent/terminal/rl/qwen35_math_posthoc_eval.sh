@@ -95,6 +95,8 @@ cp /patch/open_instruct/data_loader.py \
     --vllm_gdn_prefill_backend triton \
     --load_ref_policy false \
     --beta 0.0 \
+    --use_vllm_logprobs true \
+    --truncated_importance_sampling_ratio_cap 0.0 \
     --loss_fn dppo \
     --chat_template qwen_instruct_user_boxed_math \
     --eval_pass_at_k "$EVAL_PASS_AT_K" \

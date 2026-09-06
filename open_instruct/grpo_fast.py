@@ -3272,7 +3272,8 @@ def run_training(
         )
 
         logger.info("[Main Thread] Triggering initial native vLLM weight sync.")
-        trigger.notify(step=resume_training_step)
+        initial_model_step = 0 if args.eval_only else resume_training_step
+        trigger.notify(step=initial_model_step)
         health_check_fn(future, expect_new_weight_sync=True)
         return future, trigger
 
@@ -3363,6 +3364,7 @@ def run_training(
             actor_manager=actor_manager,
             wait_for_results=True,
             checkpoint_step=0,
+            require_checkpoint_step=args.eval_only,
         )
 
     if args.eval_only:
