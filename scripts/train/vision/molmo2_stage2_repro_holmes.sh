@@ -28,6 +28,19 @@ RESUME_DIR="${5:-}"  # optional: an output dir with checkpoints to resume from (
 # used only as the base OS/CUDA environment — code and python env are bootstrapped.
 BOOTSTRAP_IMAGE="robertb/olmo-miles-v0-1-20260901"
 
+# MM_COMPILE_VISION=1 enables torch.compile for the vision tower and connector
+# (upstream's default, which we disable because of OLMo-core#848: inductor pads
+# saved-activation strides to 128B, then the backward stride guard rejects the
+# natural stride when crop counts change). TORCHINDUCTOR_COMPREHENSIVE_PADDING=0
+# turns that padding off, which should make the compiled path usable.
+if [[ "${MM_COMPILE_VISION:-0}" == "1" ]]; then
+    COMPILE_ARGS=(--compile_vision true --compile_connector true)
+    COMPILE_ENV=(--env TORCHINDUCTOR_COMPREHENSIVE_PADDING=0)
+else
+    COMPILE_ARGS=(--compile_vision false --compile_connector false)
+    COMPILE_ENV=()
+fi
+
 echo "holmes run: ${MAX_STEPS} steps, ${NUM_NODES} node(s), ref ${GIT_REF}, ckpt ${STAGE1_CKPT}"
 
 uv run python mason.py \
@@ -46,6 +59,7 @@ uv run python mason.py \
     --env VIT_CROP_MICROBATCH=16 \
     --env OLMO_SHARED_FS=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    "${COMPILE_ENV[@]}" \
     -- \
     rm -rf /stage/oi '&&' \
     git clone --depth 1 -b "$GIT_REF" https://github.com/allenai/open-instruct.git /stage/oi '&&' \
@@ -56,8 +70,7 @@ uv run python mason.py \
     --exp_name "molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}" \
     --mixture image-only-v9 \
     --model_name_or_path "$STAGE1_CKPT" \
-    --compile_vision false \
-    --compile_connector false \
+    "${COMPILE_ARGS[@]}" \
     --max_train_steps "$MAX_STEPS" \
     --checkpointing_steps 1000 \
     --ephemeral_save_interval -1 \
