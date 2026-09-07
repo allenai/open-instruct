@@ -849,7 +849,7 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         tokenized = tokenizer(rendered, add_special_tokens=False, return_tensors="pt")
         input_ids = tokenized[open_instruct.dataset_transformation.INPUT_IDS_KEY]
         # Message 1 is the first assistant turn; run its span to the end of the conversation.
-        over_wide = [(1, self._first_assistant_token(tokenizer, messages, input_ids), input_ids.shape[1], None)]
+        over_wide = [(1, self._first_assistant_token(tokenizer, messages, input_ids), input_ids.shape[1], None, 0)]
         with self.assertRaisesRegex(
             open_instruct.dataset_transformation.AssistantSpanDerivationError, "extends past its turn"
         ):
@@ -1187,6 +1187,35 @@ class TestThinkTemplateLabelSpans(unittest.TestCase):
             expected=["REASONONE</think>ANSWERONE", "REASONTWO</think>ANSWERTWO"],
             forbidden=["USERONE", "USERTWO", "<|im_start|>assistant", "<think>"],
         )
+
+    def test_empty_reasoning_field_renders_an_empty_think_block_that_is_trained(self):
+        # Arrow-backed datasets cannot omit a struct field, so a turn without reasoning carries
+        # reasoning_content == "" and the template emits `<think></think>` before the content. That
+        # markup is the turn's own output: the span must start right after the forced `<think>`
+        # and cover the closing tag, even when the tokenizer merges `>` and `<` across the edge.
+        base = open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"]
+        content_block = "{% if message.get('content', none) is not none %}{{ message['content'] }}{% endif %}"
+        template = base.replace(
+            content_block,
+            "{% if message.get('reasoning_content', none) is not none %}"
+            "{{ '<think>' + message['reasoning_content'] + '</think>' }}{% endif %}" + content_block,
+        )
+        tokenizer = self._tokenizer(template)
+        messages = [
+            {"role": "user", "content": "USERONE"},
+            {"role": "assistant", "reasoning_content": "", "content": "ANSWERONE"},
+            {"role": "user", "content": "USERTWO"},
+            {"role": "assistant", "reasoning_content": "", "content": "ANSWERTWO"},
+        ]
+        trained = self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, messages),
+            expected=["</think>ANSWERONE", "</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant"],
+        )
+        # `<think>` itself is header (forced at inference); at most the `>` of a straddling token
+        # may precede the closing tag, never the whole opening tag.
+        self.assertNotIn("<think>", trained)
 
     def test_generation_prompt_without_think_trains_the_tag(self):
         # With no `<think>` in the generation prompt the tag is the turn's first token and must be

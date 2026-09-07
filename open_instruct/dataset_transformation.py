@@ -1297,17 +1297,20 @@ def _assistant_turn_boundaries(
         return "", through, through
     generation_prompt = render(conversation=messages[:message_idx], add_generation_prompt=True)
     assert isinstance(generation_prompt, str)
-    anchors = _message_text_anchors(messages[message_idx])
+    without_prompt = render(conversation=messages[:message_idx], add_generation_prompt=False)
+    assert isinstance(without_prompt, str)
+    # A template that ignores add_generation_prompt emits the role marker only inside the turn,
+    # so no render can separate header from content: the marker would land in the body and be
+    # trained. Such templates are handed to the token-count derivation and the content-anchored
+    # verifier to adjudicate, exactly as before.
+    prompt_stem = _strip_trailing_eos(without_prompt, tokenizer)
+    if not (generation_prompt.startswith(prompt_stem) and len(generation_prompt) > len(prompt_stem)):
+        return generation_prompt, through, None
     if through.startswith(generation_prompt):
-        body = through[len(generation_prompt) :]
-        # The body must begin with text the message itself supplied, or the generation prompt is
-        # not the whole header: a template that ignores add_generation_prompt emits the role
-        # marker only inside the turn, so the marker lands in the body and would be trained. Such
-        # templates are handed to the token-count derivation and the content-anchored verifier to
-        # adjudicate, exactly as before.
-        if not _body_starts_with_message_text(anchors, body, tokenizer):
-            return generation_prompt, through, None
-        return generation_prompt, through, body
+        # The generation prompt is the whole header by construction. Whatever the template emits
+        # between it and the message's text -- an empty `<think></think>` for a turn whose
+        # reasoning field is present but empty, say -- is the turn's own output and is trained.
+        return generation_prompt, through, through[len(generation_prompt) :]
     # The turn does not reproduce the tail of the generation prompt. The header then ends where
     # the message's own text starts, provided that lies inside the region both renders agree on
     # and past everything the preceding messages rendered. A boundary at or before that point
@@ -1315,10 +1318,9 @@ def _assistant_turn_boundaries(
     # turn and the previous turn is also an assistant turn), and the common prefix says nothing
     # about where the header ends.
     agreed = _common_prefix_length(generation_prompt, through)
-    without_prompt = render(conversation=messages[:message_idx], add_generation_prompt=False)
-    assert isinstance(without_prompt, str)
     if agreed <= len(without_prompt):
         return generation_prompt, through, None
+    anchors = _message_text_anchors(messages[message_idx])
     starts = [through.find(anchor, len(without_prompt)) for anchor in anchors]
     starts = [start for start in starts if 0 <= start <= agreed]
     if not starts:
@@ -1333,20 +1335,6 @@ def _message_text_anchors(message: dict[str, Any]) -> list[str]:
     return [anchor for anchor in anchors if anchor]
 
 
-def _body_starts_with_message_text(anchors: list[str], body: str, tokenizer: PreTrainedTokenizer) -> bool:
-    """Whether a rendered assistant body opens with the message's own content or reasoning.
-
-    The body may also be a *suffix* of the content: with reasoning inline in ``content`` and a
-    generation prompt ending in ``<think>``, the tag is header and the body starts right after it.
-    A turn with neither content nor reasoning (tool calls only) has nothing to anchor on and is
-    accepted, matching how such turns were always treated.
-    """
-    text = _strip_trailing_eos(body, tokenizer).strip()
-    if not anchors or not text:
-        return True
-    return any(text.startswith(anchor) or anchor.endswith(text) for anchor in anchors)
-
-
 def _assistant_token_spans_from_prefix_lengths(
     tokenizer: PreTrainedTokenizer, max_seq_length: int | None, boundaries: list[tuple[int, str, str, str | None]]
 ) -> list[tuple[int, int, int, str | None]]:
@@ -1356,7 +1344,9 @@ def _assistant_token_spans_from_prefix_lengths(
     many tokens each prefix produced. ``boundaries`` carries ``(message_idx, header, through,
     body)`` per trainable turn as returned by ``_assistant_turn_boundaries``.
 
-    Returns ``(message_idx, start_token, end_token, body)`` per trainable assistant turn.
+    Returns ``(message_idx, start_token, end_token, body, header_chars_in_span)`` per trainable
+    assistant turn, the last being how many leading characters of the span's first token belong
+    to the header because that token straddles the boundary.
     """
     spans = []
     for message_idx, header, through, body in boundaries:
@@ -1368,14 +1358,20 @@ def _assistant_token_spans_from_prefix_lengths(
             max_length=max_seq_length,
         )
         end = len(tokenized[INPUT_IDS_KEY])
+        header_chars_in_span = 0
         if body is None:
             # The header is not a prefix of the through render, so count its tokens on their own.
             start = len(tokenizer(header, add_special_tokens=False)[INPUT_IDS_KEY]) if header else 0
         else:
             # The header is a prefix of ``through``: the span starts at the first token that
-            # reaches past it, so a token straddling the boundary is trained, not masked.
-            start = sum(1 for _, token_end in tokenized["offset_mapping"] if token_end <= len(header))
-        spans.append((message_idx, start, end, body))
+            # reaches past it, so a token straddling the boundary is trained, not masked (e.g.
+            # the `><` of `<think></think>` when `<think>` is not a special token). The verifier
+            # is told how many of that token's characters belong to the header.
+            offsets = tokenized["offset_mapping"]
+            start = sum(1 for _, token_end in offsets if token_end <= len(header))
+            if start < len(offsets) and offsets[start][0] < len(header):
+                header_chars_in_span = len(header) - offsets[start][0]
+        spans.append((message_idx, start, end, body, header_chars_in_span))
     return spans
 
 
@@ -1391,7 +1387,7 @@ def _verify_assistant_spans_cover_content(
     tokenizer: PreTrainedTokenizer,
     input_ids: torch.Tensor,
     rendered: str,
-    spans: list[tuple[int, int, int, str | None]],
+    spans: list[tuple[int, int, int, str | None, int]],
 ) -> None:
     """Raise if a derived span does not line up with its assistant turn.
 
@@ -1405,7 +1401,7 @@ def _verify_assistant_spans_cover_content(
     renders (``body`` None) is checked against the message content instead, as before.
     """
     sequence_end = input_ids.shape[1]
-    for message_idx, start, end, body in spans:
+    for message_idx, start, end, body, header_chars_in_span in spans:
         content = messages[message_idx].get("content")
         if body is not None:
             expected = _strip_trailing_eos(body, tokenizer).strip()
@@ -1420,6 +1416,9 @@ def _verify_assistant_spans_cover_content(
         if start >= end:
             continue
         decoded = tokenizer.decode(input_ids[0, start:end], clean_up_tokenization_spaces=False)
+        if header_chars_in_span:
+            # Discount the header characters of a token straddling the header/body edge.
+            decoded = decoded[header_chars_in_span:]
         # Truncated final span is fine if what survived is a prefix; checked first because the
         # tests below assume the whole turn is present.
         if truncated_tail and decoded.lstrip() and expected.startswith(decoded.lstrip()):
@@ -1525,7 +1524,7 @@ def _tokenize_tulu_sft_with_assistant_labels(
     )
     if not prefix_stable:
         token_spans = _assistant_token_spans_from_prefix_lengths(tokenizer, max_seq_length, boundaries)
-        for _, start, end, _ in token_spans:
+        for _, start, end, _, _ in token_spans:
             start, end = max(0, start), min(end, input_ids.shape[1])
             if start < end:
                 labels[0, start:end] = input_ids[0, start:end]
