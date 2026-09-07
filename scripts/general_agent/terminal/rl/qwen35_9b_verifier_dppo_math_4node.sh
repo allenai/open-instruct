@@ -37,18 +37,34 @@ fi
 
 case "$RUN_MODE" in
     smoke)
-        EXP_NAME="${EXP_NAME:-qwen35_9b_verifier_dppo_math_smoke_4node}"
-        TOTAL_EPISODES=256
+        EXP_NAME="${EXP_NAME:-qwen35_9b_verifier_dppo_math_smoke_1node}"
+        NUM_NODES=1
+        NUM_LEARNERS_PER_NODE=(4)
+        VLLM_NUM_ENGINES=4
+        NUM_UNIQUE_PROMPTS=32
+        NUM_SAMPLES_PER_PROMPT=2
+        ASYNC_STEPS=1
+        RESPONSE_LENGTH=8192
+        PACK_LENGTH=10240
+        TOTAL_EPISODES=64
         EVAL_RESPONSE_LENGTH=512
         LOCAL_EVAL_EVERY=1
         SAVE_FREQ=-1
         CHECKPOINT_STATE_FREQ=-1
         MASON_CHECKPOINT_STATE_DIR=""
-        MIN_RUNTIME=30m
-        TIMEOUT=3h
+        MIN_RUNTIME=1h
+        TIMEOUT=2h
         ;;
     full)
         EXP_NAME="${EXP_NAME:-qwen35_9b_verifier_dppo_math_fixed_dapo_100step_4node}"
+        NUM_NODES=4
+        NUM_LEARNERS_PER_NODE=(8 8)
+        VLLM_NUM_ENGINES=16
+        NUM_UNIQUE_PROMPTS=128
+        NUM_SAMPLES_PER_PROMPT=2
+        ASYNC_STEPS=4
+        RESPONSE_LENGTH=16384
+        PACK_LENGTH=18432
         TOTAL_EPISODES=25600
         EVAL_RESPONSE_LENGTH=16384
         LOCAL_EVAL_EVERY=20
@@ -72,13 +88,12 @@ uv run python mason.py \
     --cluster "$CLUSTER" \
     --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
-    --preemptible \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     "${BEAKER_DATASETS[@]}" \
     --min_runtime "$MIN_RUNTIME" \
     --no_auto_resume \
-    --num_nodes 4 \
+    --num_nodes "$NUM_NODES" \
     --max_retries 0 \
     --timeout "$TIMEOUT" \
     --gpus 8 \
@@ -105,13 +120,13 @@ source configs/beaker_configs/ray_node_setup.sh \
         mnoukhov/brumo_2025_openinstruct 1.0 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
-    --response_length 16384 \
+    --response_length "$RESPONSE_LENGTH" \
     --eval_response_length "$EVAL_RESPONSE_LENGTH" \
-    --pack_length 18432 \
+    --pack_length "$PACK_LENGTH" \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 128 \
-    --num_samples_per_prompt_rollout 2 \
-    --async_steps 4 \
+    --num_unique_prompts_rollout "$NUM_UNIQUE_PROMPTS" \
+    --num_samples_per_prompt_rollout "$NUM_SAMPLES_PER_PROMPT" \
+    --async_steps "$ASYNC_STEPS" \
     --inflight_updates true \
     --filter_zero_std_samples false \
     --apply_verifiable_reward true \
@@ -124,8 +139,8 @@ source configs/beaker_configs/ray_node_setup.sh \
     --num_epochs 1 \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
-    --num_learners_per_node 8 8 \
-    --vllm_num_engines 16 \
+    --num_learners_per_node "${NUM_LEARNERS_PER_NODE[@]}" \
+    --vllm_num_engines "$VLLM_NUM_ENGINES" \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.85 \
     --vllm_enable_prefix_caching \

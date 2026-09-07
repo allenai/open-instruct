@@ -108,7 +108,6 @@ uv run python mason.py \
     --cluster "$CLUSTER" \
     --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
-    --preemptible \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     "${BEAKER_DATASETS[@]}" \
