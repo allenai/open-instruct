@@ -36,11 +36,16 @@
 #   memory. Never substitute kda_mt_sft.json (both off; an OOM there would be
 #   misdiagnosed as "64K doesn't fit"). The DDP train module reads the optimizer
 #   and dp_config from this file verbatim.
-# * Tokenizer and chat template are held identical to the SFT that produced the
-#   base. --chat_template_name olmo123 is not in CHAT_TEMPLATES, so it falls
-#   through to the tokenizer repo's own template (#1805); that is the template
-#   the base trained on. Changing the prompt format at this boundary would
-#   confound the data change with a template change.
+# * TOKENIZER is allenai/dolma2-tokenizer-olmo35: the same BPE and vocabulary as
+#   the olmo-3-tokenizer-instruct-dev the base was SFT'd with (only ids
+#   100266-100275 are renamed), so the checkpoint's embeddings line up, but it
+#   ships the Olmo 3.5 chat template: Qwen-style <tool_call> XML, <tool_response>
+#   wrappers, and a generation prompt ending in <think>. --chat_template_name
+#   olmo123 is not in CHAT_TEMPLATES, so it falls through to that template (#1805);
+#   the flag is inert and the tokenizer repo is what selects the format. This is
+#   a deliberate format change from the base's Olmo 3 <function_calls> style, and
+#   it needs the label-span fix from #1885 (merged into this branch): without it
+#   every multi-turn think conversation is dropped at tokenization.
 # * MAX_SEQ_LENGTH 65536 is the base's native window and the length #1859
 #   trained at. Training this family below its window destroyed extrapolation
 #   past the window (RULER at 65536: 0.0883 for a 32768-trained checkpoint vs
@@ -97,7 +102,7 @@ if [[ -z "${MIXER:-}" ]]; then
     echo "MIXER is required, e.g. MIXER=\"allenai/<agentic-sft-dataset> 1.0\" (space-separated dataset/weight pairs)" >&2
     exit 1
 fi
-TOKENIZER="${TOKENIZER:-allenai/olmo-3-tokenizer-instruct-dev}"
+TOKENIZER="${TOKENIZER:-allenai/dolma2-tokenizer-olmo35}"
 CHAT_TEMPLATE="${CHAT_TEMPLATE:-olmo123}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-65536}"
 SEED="${SEED:-33333}"
