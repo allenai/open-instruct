@@ -27,6 +27,10 @@ RESUME_DIR="${5:-}"  # optional: an output dir with checkpoints to resume from (
 # A CUDA-13 environment image known to run on holmes in this workspace (olmo-miles);
 # used only as the base OS/CUDA environment — code and python env are bootstrapped.
 BOOTSTRAP_IMAGE="robertb/olmo-miles-v0-1-20260901"
+# Checkpoint root. oe-adapt-default hit 100% (453T/455T) mid-save and killed a run,
+# so default to oe-training-default, which carries ~18T free and already hosts the
+# stage-1 checkpoints. Override with MM_OUT_ROOT.
+OUT_ROOT="${MM_OUT_ROOT:-/weka/oe-training-default/ai2-llm/checkpoints}"
 
 # MM_COMPILE_VISION=1 enables torch.compile for the vision tower and connector
 # (upstream's default, which we disable because of OLMo-core#848: inductor pads
@@ -91,4 +95,4 @@ uv run python mason.py \
     ${RESUME_DIR:+--resume_from_checkpoint "$RESUME_DIR"} \
     --with_tracking \
     --wandb_project molmo2-stage2 \
-    --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}"
+    --output_dir "${OUT_ROOT}/${BEAKER_USER}/molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}"
