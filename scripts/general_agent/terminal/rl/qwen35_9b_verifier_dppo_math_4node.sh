@@ -52,7 +52,7 @@ case "$RUN_MODE" in
         SAVE_FREQ=-1
         CHECKPOINT_STATE_FREQ=-1
         MASON_CHECKPOINT_STATE_DIR=""
-        MIN_RUNTIME=30m
+        MIN_RUNTIME=15m
         TIMEOUT=2h
         ;;
     full)
