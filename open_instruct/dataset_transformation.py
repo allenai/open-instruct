@@ -1337,7 +1337,7 @@ def _message_text_anchors(message: dict[str, Any]) -> list[str]:
 
 def _assistant_token_spans_from_prefix_lengths(
     tokenizer: PreTrainedTokenizer, max_seq_length: int | None, boundaries: list[tuple[int, str, str, str | None]]
-) -> list[tuple[int, int, int, str | None]]:
+) -> list[tuple[int, int, int, str | None, int]]:
     """Derive per-assistant-turn token spans from prefix token counts.
 
     Unlike char offsets this does not require prefix-stable rendering, since it only counts how
