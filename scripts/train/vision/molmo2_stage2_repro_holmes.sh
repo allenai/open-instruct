@@ -33,6 +33,15 @@ BOOTSTRAP_IMAGE="robertb/olmo-miles-v0-1-20260901"
 # saved-activation strides to 128B, then the backward stride guard rejects the
 # natural stride when crop counts change). TORCHINDUCTOR_COMPREHENSIVE_PADDING=0
 # turns that padding off, which should make the compiled path usable.
+# Beaker only sets the replica env vars for multi-replica jobs; at 1 node they
+# expand to empty and torchrun rejects the rendezvous endpoint (cf.
+# oc_sft_olmo3_7b_1node.sh). Single-node torchrun defaults to localhost.
+if [[ "$NUM_NODES" -gt 1 ]]; then
+    RDZV_ARGS=(--nnodes="$NUM_NODES" '--node_rank=$BEAKER_REPLICA_RANK' '--master_addr=$BEAKER_LEADER_REPLICA_HOSTNAME' --master_port=29400)
+else
+    RDZV_ARGS=(--nnodes=1)
+fi
+
 if [[ "${MM_COMPILE_VISION:-0}" == "1" ]]; then
     COMPILE_ARGS=(--compile_vision true --compile_connector true)
     COMPILE_ENV=(--env TORCHINDUCTOR_COMPREHENSIVE_PADDING=0)
@@ -65,7 +74,7 @@ uv run python mason.py \
     git clone --depth 1 -b "$GIT_REF" https://github.com/allenai/open-instruct.git /stage/oi '&&' \
     cd /stage/oi '&&' \
     bash scripts/train/vision/holmes_bootstrap.sh "$GIT_REF" \
-    --nnodes="$NUM_NODES" '--node_rank=$BEAKER_REPLICA_RANK' '--master_addr=$BEAKER_LEADER_REPLICA_HOSTNAME' --master_port=29400 \
+    "${RDZV_ARGS[@]}" \
     --nproc_per_node=8 open_instruct/olmo_core_mixture_finetune.py \
     --exp_name "molmo2_stage2_repro_4b_holmes_${MAX_STEPS}_n${NUM_NODES}" \
     --mixture image-only-v9 \
