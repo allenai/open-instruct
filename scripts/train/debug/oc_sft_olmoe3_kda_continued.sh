@@ -15,7 +15,8 @@
 # MIXER has no default on purpose: the agentic mixture is the one thing this run
 # exists to vary, and a silent fallback to Dolci-Think would train another epoch
 # of the data the base already saw. Everything else has a default and an env
-# override.
+# override, including RUN_NAME, which otherwise derives from the mixture so the
+# runs are distinguishable in W&B.
 #
 # Run the three modes in order. Training hard-fails if the pre-tokenized cache is
 # absent, and the cache key hashes the tokenizer, chat template, mixer, transform
@@ -128,6 +129,14 @@ GRAD_ACCUM="${GRAD_ACCUM:-$(( GLOBAL_BATCH_TOKENS / (MAX_SEQ_LENGTH * NNODES * N
 CHECKPOINTING_STEPS="${CHECKPOINTING_STEPS:-500}"
 DIST_TIMEOUT_HOURS="${DIST_TIMEOUT_HOURS:-4}"
 
+# W&B run name (entity ai2-llm, project open_instruct_internal). The entrypoint's default is
+# derived from the model path, so every run in this series would be called sft-step23607;
+# name them by mixture instead, e.g. kda-continued-sft-simfc-thinking-qwen35+tmax-sft-glm-52-seq65536.
+if [[ -z "${RUN_NAME:-}" ]]; then
+    MIXTURE_SLUG=$(echo "$MIXER" | awk '{for (i = 1; i <= NF; i += 2) {sub(".*/", "", $i); printf "%s%s", (i > 1 ? "+" : ""), $i}}')
+    RUN_NAME="kda-continued-sft-${MIXTURE_SLUG}-seq${MAX_SEQ_LENGTH}"
+fi
+
 CLUSTER="${CLUSTER:-ai2/holmes}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 PRIORITY="${PRIORITY:-urgent}"
@@ -137,6 +146,7 @@ PY="${PY:-uv run python}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 echo "Mode: $MODE"
 echo "Mixer: $MIXER  seq: $MAX_SEQ_LENGTH  nodes x gpus: ${NNODES}x${NPROC}  grad_accum: $GRAD_ACCUM"
+echo "Run name: $RUN_NAME"
 
 # Arguments shared by every mode, so the cache the tokenize job writes hashes
 # identically to the one training looks for.
@@ -231,6 +241,7 @@ case "$MODE" in
             --dist_timeout_hours "$DIST_TIMEOUT_HOURS" \
             --no_save_async \
             --logging_steps 1 \
+            --run_name "$RUN_NAME" \
             --data_loader_seed 34521 \
             --output_dir \$CHECKPOINT_OUTPUT_DIR \
             "${EXTRA[@]}"
