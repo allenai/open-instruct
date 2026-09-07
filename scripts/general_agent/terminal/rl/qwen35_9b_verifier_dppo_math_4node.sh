@@ -37,10 +37,10 @@ fi
 
 case "$RUN_MODE" in
     smoke)
-        EXP_NAME="${EXP_NAME:-qwen35_9b_verifier_dppo_math_smoke_1node}"
-        NUM_NODES=1
-        NUM_LEARNERS_PER_NODE=(4)
-        VLLM_NUM_ENGINES=4
+        EXP_NAME="${EXP_NAME:-qwen35_9b_verifier_dppo_math_smoke_2node}"
+        NUM_NODES=2
+        NUM_LEARNERS_PER_NODE=(4 4)
+        VLLM_NUM_ENGINES=8
         NUM_UNIQUE_PROMPTS=32
         NUM_SAMPLES_PER_PROMPT=2
         ASYNC_STEPS=1
