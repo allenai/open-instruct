@@ -108,6 +108,7 @@ uv run python mason.py \
     --cluster "$CLUSTER" \
     --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
+    --preemptible \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
     "${BEAKER_DATASETS[@]}" \
@@ -125,7 +126,7 @@ uv run python mason.py \
     --auto_checkpoint_state_dir "$MASON_CHECKPOINT_STATE_DIR" \
     --no_auto_dataset_cache \
     -- \
-"${PATCH_SETUP[@]}" \
+${PATCH_SETUP[@]+"${PATCH_SETUP[@]}"} \
 source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
     --run_name "$RUN_NAME" \
@@ -148,7 +149,7 @@ source configs/beaker_configs/ray_node_setup.sh \
     --num_samples_per_prompt_rollout "$NUM_SAMPLES_PER_PROMPT" \
     --async_steps "$ASYNC_STEPS" \
     --inflight_updates true \
-    "${OBJECTIVE_ARGS[@]}" \
+    ${OBJECTIVE_ARGS[@]+"${OBJECTIVE_ARGS[@]}"} \
     --filter_zero_std_samples false \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
