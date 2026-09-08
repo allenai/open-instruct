@@ -25,7 +25,10 @@
 # harbor as a local task directory.
 #
 # One GPU: the 1.3B-active MoE fits on an H100 with the 65536 window and serves 8 concurrent
-# agents comfortably. Task containers run under podman inside the job (BEAKER_ALLOW_SUBCONTAINERS)
+# agents, but not quickly: in eager mode an agent step takes ~1 min on average, and the tasks'
+# own agent timeouts (900 s for most Terminal-Bench 2.1 tasks) then cut most trials off around
+# step 15 of 64. Set HARBOR_AGENT_TIMEOUT_MULTIPLIER (or HARBOR_AGENT_TIMEOUT_SEC) to give the
+# agent a time budget that matches its speed, or lower N_CONCURRENT. Task containers run under podman inside the job (BEAKER_ALLOW_SUBCONTAINERS)
 # and pull from Docker Hub with the DOCKER_PAT secret to stay under the anonymous pull cap.
 #
 # Not verified end to end at the time of writing: the serving stack on the tmax image
@@ -113,4 +116,5 @@ $PY mason.py \
     --env "TMAX_GIT_REF=${TMAX_GIT_REF:-f0a3db4792ccd6cf75c377ea7fe628c3b3ab9145}" \
     --env "PLUGIN_DIR=${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}" \
     --env "HARBOR_AGENT_TIMEOUT_SEC=${HARBOR_AGENT_TIMEOUT_SEC:-}" --env "HARBOR_TIMEOUT_MULTIPLIER=${HARBOR_TIMEOUT_MULTIPLIER:-}" \
+    --env "HARBOR_AGENT_TIMEOUT_MULTIPLIER=${HARBOR_AGENT_TIMEOUT_MULTIPLIER:-}" --env "HARBOR_VERIFIER_TIMEOUT_MULTIPLIER=${HARBOR_VERIFIER_TIMEOUT_MULTIPLIER:-}" \
     -- "$FETCH && SERVE_LIB=\$SERVE_LIB bash \$RUNNER"
