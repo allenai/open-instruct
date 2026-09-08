@@ -47,4 +47,5 @@ uv run python mason.py \
     --seed 42 \
     --compile_model true \
     --with_tracking \
-    --output_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/ab_sft_olmocore"
+    --output_dir \$CHECKPOINT_OUTPUT_DIR \
+    --hf_export_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint/${BEAKER_USER}/ab_sft_olmocore/hf_model"

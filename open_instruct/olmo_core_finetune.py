@@ -122,6 +122,10 @@ class SFTConfig:
     """Timeout for distributed collectives, in hours."""
     save_async: bool = True
     """Whether olmo-core saves checkpoints asynchronously."""
+    hf_export_dir: str | None = None
+    """Where to write the final HF export. Defaults to <output_dir>/hf_model. Set this
+    when output_dir is unique per launch (e.g. mason's $CHECKPOINT_OUTPUT_DIR) but a
+    stable export path is wanted."""
 
 
 @dataclasses.dataclass
@@ -362,7 +366,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     logger.info("Training complete.")
 
     if use_hf_ckpt:
-        hf_model_path = os.path.join(args.checkpoint.output_dir, "hf_model")
+        hf_model_path = args.sft.hf_export_dir or os.path.join(args.checkpoint.output_dir, "hf_model")
         olmo_core_utils.export_to_hf(
             train_module.model, tc.tokenizer, hf_model_path, args.model.model_name_or_path, is_main_process
         )
