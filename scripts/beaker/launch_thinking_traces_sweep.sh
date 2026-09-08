@@ -27,14 +27,11 @@ MODELS="Qwen/Qwen3.5-397B-A17B-FP8 moonshotai/Kimi-K2.6 deepseek-ai/DeepSeek-V3.
 # 0.28 is the first release registering GlmMoeDsaForCausalLM, KimiK25ForConditionalGeneration,
 # DeepseekV32ForCausalLM and Qwen3_5MoeForConditionalGeneration. B300 is sm_103 and needs the
 # CUDA 13 image, so unlike the L40S runs this wants a NEW vLLM, not an old one.
-# 0.23.0, not the newest. vLLM 0.28 routes attention, sampling and FP8 GEMMs
-# through FlashInfer/DeepGEMM kernels that it JIT-builds for sm_103 with nvcc --
-# and the CUDA 13 Beaker image ships the runtime without a compiler, so engine
-# init dies with "ninja: build stopped" three different ways. 0.23.0 is the
-# version tmax validated on this same image and B300 hardware, and it already
-# registers all four architectures in this slate (only Qwen3_5MoeForCausalLM is
-# missing, which is not the variant we serve).
-VLLM_PKG_VERSION="0.23.0"
+# 0.28.0: registers every architecture in the slate, and Kimi-K2.6's published
+# recipe requires >= 0.25.0. Downgrading was an attempt to dodge JIT kernel
+# builds, but 0.23 JIT-builds FlashInfer's trtllm fused-MoE kernels too, so the
+# real fix is installing nvcc in-job (see ensure_nvcc) rather than version choice.
+VLLM_PKG_VERSION="0.28.0"
 CLUSTER="ai2/holmes"
 GPU_COUNT=4
 TP_SIZE=""

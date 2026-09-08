@@ -50,7 +50,7 @@ dump_vllm_failure() {
 }
 
 : "${MODELS:?set MODELS}"
-: "${VLLM_PKG_VERSION:=0.23.0}"
+: "${VLLM_PKG_VERSION:=0.28.0}"
 : "${SERVE_PORT:=8008}"
 : "${GPU_COUNT:=4}"
 : "${TP_SIZE:=$GPU_COUNT}"
@@ -105,6 +105,17 @@ if [ -n "${HF_CACHE_DIR:-}" ]; then
     mkdir -p "$HF_CACHE_DIR"; export HF_HOME="$HF_CACHE_DIR"
 fi
 
+# Keep FlashInfer's compiled kernels on weka. They are JIT-built per (version,
+# arch) and the container-local cache dies with the job, so without this every
+# model in the slate pays the same multi-minute sm_103 build again.
+if [ -d /weka/oe-adapt-default ]; then
+    _fi_cache="/weka/oe-adapt-default/${BEAKER_USER_ID:-shared}/flashinfer_cache"
+    mkdir -p "$_fi_cache" /root/.cache
+    rm -rf /root/.cache/flashinfer 2>/dev/null || true
+    ln -sfn "$_fi_cache" /root/.cache/flashinfer
+    log "flashinfer JIT cache -> $_fi_cache"
+fi
+
 log "sweep configuration"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv || true
 cat <<EOF
@@ -119,6 +130,55 @@ cat <<EOF
   HF_HOME       : ${HF_HOME:-<default>}
   hub repo      : ${HF_REPO_ID:-<none: push skipped>}
 EOF
+
+# --- CUDA compiler --------------------------------------------------------------
+# The Beaker CUDA images ship the runtime but not nvcc, and there is no
+# cuda13-dev image. Every recent vLLM JIT-builds *something* for sm_103 on
+# Blackwell -- DeepGEMM FP8 GEMMs, FlashInfer sampling, FlashInfer FMHA, and (even
+# with VLLM_USE_FLASHINFER_MOE_FP8=0, which is already the default) FlashInfer's
+# trtllm fused-MoE kernels, which every FP8 MoE in this slate hits. Disabling
+# them one at a time just surfaces the next one, so install the compiler instead.
+#
+# These are NVIDIA's own redistributables pinned to 13.1, matching the image's
+# CUDA 13.1 runtime, so nothing is version-mixed. 32 MB total.
+ensure_nvcc() {
+    if command -v nvcc >/dev/null 2>&1 && [ -x "${CUDA_HOME:-/usr/local/cuda}/bin/nvcc" ]; then
+        log "nvcc already present: $(nvcc --version 2>/dev/null | tail -1)"
+        return 0
+    fi
+    local base="https://developer.download.nvidia.com/compute/cuda/redist"
+    local dest=/opt/cuda-jit
+    mkdir -p "$dest"
+    local comp
+    for comp in \
+        "cuda_nvcc/linux-x86_64/cuda_nvcc-linux-x86_64-13.1.115-archive.tar.xz" \
+        "cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-13.1.80-archive.tar.xz" \
+        "cuda_cccl/linux-x86_64/cuda_cccl-linux-x86_64-13.1.115-archive.tar.xz"
+    do
+        log "fetching $(basename "$comp")"
+        if ! curl -fsSL "$base/$comp" -o /tmp/c.tar.xz; then
+            log "WARNING: could not download $comp; JIT kernels will fail"
+            return 1
+        fi
+        # each archive has a single top-level dir; merge their bin/ include/ lib/
+        tar -xf /tmp/c.tar.xz -C /tmp && rm -f /tmp/c.tar.xz
+        local top; top="$(find /tmp -maxdepth 1 -name '*-archive' -type d | head -1)"
+        [ -n "$top" ] && cp -a "$top"/. "$dest"/ && rm -rf "$top"
+    done
+    export CUDA_HOME="$dest"
+    export PATH="$dest/bin:$PATH"
+    # FlashInfer and torch look for $CUDA_HOME/bin/nvcc, but some paths hardcode
+    # /usr/local/cuda, so make that resolve here too.
+    mkdir -p /usr/local/cuda/bin /usr/local/cuda/include
+    ln -sf "$dest/bin/nvcc" /usr/local/cuda/bin/nvcc 2>/dev/null || true
+    cp -an "$dest"/include/. /usr/local/cuda/include/ 2>/dev/null || true
+    if command -v nvcc >/dev/null 2>&1; then
+        log "nvcc installed: $(nvcc --version 2>/dev/null | tail -1)  CUDA_HOME=$CUDA_HOME"
+    else
+        log "WARNING: nvcc still not on PATH after install"
+    fi
+}
+ensure_nvcc || log "continuing without nvcc; JIT-dependent kernels may fail"
 
 if ! command -v uv >/dev/null 2>&1; then
     log "installing uv"
