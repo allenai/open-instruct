@@ -56,7 +56,7 @@ DATASET=hamishivi/swerl-tmax-15k
 uv run python mason.py \
        --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "SWERL tmax-15k GRPO with Qwen3.5-4B (OpenSandbox spot sandboxes)" \
+       --description "SWERL tmax-15k GRPO with Qwen3.5-4B (OpenSandbox spot sandboxes with loss exclusion)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents \
        --priority urgent \
@@ -135,7 +135,7 @@ uv run python mason.py \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_15k_grpo_opensandbox \
+    --exp_name swerl_qwen35_4b_base_tmax_15k_grpo_opensandbox_loss_exclusion \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False \
