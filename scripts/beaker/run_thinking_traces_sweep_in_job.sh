@@ -148,7 +148,27 @@ ensure_nvcc() {
     fi
     local base="https://developer.download.nvidia.com/compute/cuda/redist"
     local dest=/opt/cuda-jit
+    local cache="${TOOLCHAIN_CACHE:-}"
+    if [ -z "$cache" ] && [ -d /weka/oe-adapt-default ]; then
+        cache="/weka/oe-adapt-default/${BEAKER_USER_ID:-shared}/cuda-jit-13.1.tar"
+    fi
     mkdir -p "$dest"
+
+    # Assembling the toolchain costs ~875 MB from NVIDIA, most of it libcublas.
+    # Cache the assembled tree on weka so the other models in the slate, and any
+    # relaunch, restore it in seconds instead.
+    if [ -n "$cache" ] && [ -f "$cache" ]; then
+        log "restoring CUDA toolchain from $cache"
+        if tar -xf "$cache" -C "$dest" 2>/dev/null; then
+            export CUDA_HOME="$dest" CUDA_PATH="$dest"
+            export PATH="$dest/bin:$PATH"
+            export LD_LIBRARY_PATH="$dest/lib:${LD_LIBRARY_PATH:-}"
+            mkdir -p /usr/local/cuda && cp -asn "$dest"/. /usr/local/cuda/ 2>/dev/null || true
+            verify_nvcc && return 0
+            log "cached toolchain did not verify; rebuilding from scratch"
+            rm -rf "${dest:?}"/* 2>/dev/null || true
+        fi
+    fi
     # CUDA 13 splits the toolchain finely, and a partial install fails late and
     # confusingly: without cuda_crt the build dies on 'crt/host_defines.h: No
     # such file or directory', and without libnvvm nvcc has no cicc to run.
@@ -163,7 +183,8 @@ ensure_nvcc() {
         "cuda_crt/linux-x86_64/cuda_crt-linux-x86_64-13.1.115-archive.tar.xz" \
         "cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-13.1.80-archive.tar.xz" \
         "cuda_cccl/linux-x86_64/cuda_cccl-linux-x86_64-13.1.115-archive.tar.xz" \
-        "libnvvm/linux-x86_64/libnvvm-linux-x86_64-13.1.115-archive.tar.xz"
+        "libnvvm/linux-x86_64/libnvvm-linux-x86_64-13.1.115-archive.tar.xz" \
+        "libcublas/linux-x86_64/libcublas-linux-x86_64-13.2.2.2-archive.tar.xz"
     do
         name="$(basename "$comp")"
         log "fetching $name"
@@ -189,20 +210,36 @@ ensure_nvcc() {
     # Some build paths hardcode /usr/local/cuda rather than reading CUDA_HOME.
     mkdir -p /usr/local/cuda
     cp -asn "$dest"/. /usr/local/cuda/ 2>/dev/null || true
+    if [ -n "$cache" ] && [ ! -f "$cache" ]; then
+        log "caching assembled toolchain -> $cache"
+        tar -cf "${cache}.tmp$$" -C "$dest" . 2>/dev/null && mv -f "${cache}.tmp$$" "$cache" || \
+            { log "  (cache write failed; continuing)"; rm -f "${cache}.tmp$$"; }
+    fi
+    verify_nvcc
+}
+
+# Checks the toolchain end to end: the headers each past failure turned on, then
+# an actual sm_103 compile+link. Every one of these was previously discovered
+# only once vLLM attempted a real JIT build, ~15 minutes into a weight load.
+verify_nvcc() {
+    local dest=/opt/cuda-jit h missing=0
     if command -v nvcc >/dev/null 2>&1; then
         log "nvcc: $(nvcc --version 2>/dev/null | tail -1)"
-        log "  CUDA_HOME=$CUDA_HOME  cicc=$([ -x "$dest/nvvm/bin/cicc" ] && echo yes || echo MISSING)" \
-            "crt_headers=$([ -f "$dest/include/crt/host_defines.h" ] && echo yes || echo MISSING)"
-        # Prove the toolchain works before vLLM depends on it.
-        printf '__global__ void k(){}\nint main(){return 0;}\n' > /tmp/probe.cu
+        for h in crt/host_defines.h cuda_runtime.h cublasLt.h cublas_v2.h; do
+            [ -f "$dest/include/$h" ] || { log "  MISSING header: $h"; missing=1; }
+        done
+        [ -x "$dest/nvvm/bin/cicc" ] || { log "  MISSING cicc (libnvvm)"; missing=1; }
+        [ -f "$dest/lib/libcudart_static.a" ] || { log "  MISSING libcudart_static.a"; missing=1; }
+        printf '#include <cublasLt.h>\n__global__ void k(){}\nint main(){return 0;}\n' > /tmp/probe.cu
         if nvcc -arch=sm_103 -o /tmp/probe /tmp/probe.cu 2>/tmp/probe.err; then
-            log "  nvcc sm_103 compile probe: OK"
-        else
-            log "  nvcc sm_103 compile probe FAILED:"; tail -5 /tmp/probe.err
+            log "  nvcc sm_103 compile+link probe: OK (headers ok=$([ $missing = 0 ] && echo yes || echo no))"
+            return 0
         fi
-    else
-        log "WARNING: nvcc still not on PATH after install"
+        log "  nvcc sm_103 compile probe FAILED:"; tail -6 /tmp/probe.err
+        return 1
     fi
+    log "WARNING: nvcc not on PATH"
+    return 1
 }
 ensure_nvcc || log "continuing without nvcc; JIT-dependent kernels may fail"
 
