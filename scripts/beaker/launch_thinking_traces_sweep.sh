@@ -27,7 +27,7 @@ MODELS="Qwen/Qwen3.5-397B-A17B-FP8 moonshotai/Kimi-K2.6 deepseek-ai/DeepSeek-V3.
 # 0.28 is the first release registering GlmMoeDsaForCausalLM, KimiK25ForConditionalGeneration,
 # DeepseekV32ForCausalLM and Qwen3_5MoeForConditionalGeneration. B300 is sm_103 and needs the
 # CUDA 13 image, so unlike the L40S runs this wants a NEW vLLM, not an old one.
-VLLM_VERSION="0.28.0"
+VLLM_PKG_VERSION="0.28.0"
 CLUSTER="ai2/holmes"
 GPU_COUNT=4
 TP_SIZE=""
@@ -131,7 +131,7 @@ cat <<EOF
 
 === Thinking-trace sweep ===
   Models      : ${MODELS}
-  Hardware    : ${CLUSTER}, ${GPU_COUNT} GPUs (TP=${TP_SIZE}), vLLM ${VLLM_VERSION}
+  Hardware    : ${CLUSTER}, ${GPU_COUNT} GPUs (TP=${TP_SIZE}), vLLM ${VLLM_PKG_VERSION}
   Context     : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   Sampling    : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples (seed ${SEED}), concurrency ${CONCURRENCY}
   Hub         : ${HF_REPO_ID:-<none>}  secret=${HF_TOKEN_SECRET_NAME:-<none>}
@@ -147,7 +147,7 @@ cmd=(
     --ref "$REPO_GIT_REF" --cluster "$CLUSTER" --gpus "$GPU_COUNT"
     --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" --task-timeout "$TASK_TIMEOUT"
     --beaker-image "$BEAKER_IMAGE" --budget "$BUDGET"
-    --env "MODELS=${MODELS}" --env "VLLM_VERSION=${VLLM_VERSION}"
+    --env "MODELS=${MODELS}" --env "VLLM_PKG_VERSION=${VLLM_PKG_VERSION}"
     --env "GPU_COUNT=${GPU_COUNT}" --env "TP_SIZE=${TP_SIZE}"
     --env "MAX_MODEL_LEN=${MAX_MODEL_LEN}" --env "MAX_TOKENS=${MAX_TOKENS}"
     --env "MAX_PROMPT_TOKENS=${MAX_PROMPT_TOKENS}" --env "DATASET=${DATASET}"

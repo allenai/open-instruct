@@ -17,7 +17,7 @@
 #
 # Env vars (set by beaker_configs/launch_thinking_traces_sweep.sh):
 #   MODELS             space-separated HF repo ids, served in order
-#   VLLM_VERSION       default 0.28.0 (needs >= 0.28 for GLM-5.2/Kimi-K2.x/
+#   VLLM_PKG_VERSION   default 0.28.0 (needs >= 0.28 for GLM-5.2/Kimi-K2.x/
 #                      DeepSeek-V3.2/Qwen3.5 architectures)
 #   GPU_COUNT/TP_SIZE  GPUs and tensor-parallel size (default: 4 / GPU_COUNT)
 #   MAX_MODEL_LEN      context (default 131072)
@@ -34,7 +34,7 @@ set -uo pipefail   # NOT -e: a failing model must not kill the sweep
 log() { printf '\n=== [%s] %s ===\n' "$(date -u +%H:%M:%S)" "$*"; }
 
 : "${MODELS:?set MODELS}"
-: "${VLLM_VERSION:=0.28.0}"
+: "${VLLM_PKG_VERSION:=0.28.0}"
 : "${SERVE_PORT:=8008}"
 : "${GPU_COUNT:=4}"
 : "${TP_SIZE:=$GPU_COUNT}"
@@ -78,7 +78,7 @@ log "sweep configuration"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv || true
 cat <<EOF
   models        : ${MODELS}
-  vLLM          : ${VLLM_VERSION}   TP=${TP_SIZE} over ${GPU_COUNT} GPUs
+  vLLM          : ${VLLM_PKG_VERSION}   TP=${TP_SIZE} over ${GPU_COUNT} GPUs
   context       : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   sampling      : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples, T=${TEMPERATURE} top_p=${TOP_P} seed=${SEED}
   concurrency   : ${CONCURRENCY}
@@ -116,7 +116,12 @@ run_one_model() {
     log "MODEL ${model} -> served as ${served}"
     local vllm_log=/tmp/vllm_${served}.log
 
-    uvx "vllm==${VLLM_VERSION}" serve "$model" \
+    # --python 3.12 is load-bearing, not tidiness. uvx otherwise resolves 3.11,
+    # where flashinfer's fd_exchange module fails to import with
+    # "TypeError: type 'array.array' is not subscriptable" -- array.array only
+    # became subscriptable in 3.12. That module is pulled in by the multi-GPU
+    # all-reduce path, so it breaks every TP>1 serve while TP=1 works fine.
+    uvx --python 3.12 "vllm==${VLLM_PKG_VERSION}" serve "$model" \
         --served-model-name "$served" \
         --port "$SERVE_PORT" \
         --tensor-parallel-size "$TP_SIZE" \
