@@ -112,6 +112,8 @@ $PY mason.py \
     --env "AGENT_IMPORT_PATH=${AGENT_IMPORT_PATH:-Vanillux2Agent:Vanillux2Agent}" \
     --env "TENSOR_PARALLEL=$GPUS" --env "MAX_MODEL_LEN=${MAX_MODEL_LEN:-65536}" \
     --env "MAX_OUTPUT_TOKENS=${MAX_OUTPUT_TOKENS:-16384}" \
+    --env "TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-qwen3_xml}" --env "REASONING_PARSER=${REASONING_PARSER:-olmo3}" \
+    --env "VLLM_EXTRA_ARGS=${VLLM_EXTRA_ARGS:-}" \
     --env "TMAX_GIT_URL=${TMAX_GIT_URL:-https://github.com/shatu/tmax.git}" \
     --env "TMAX_GIT_REF=${TMAX_GIT_REF:-f0a3db4792ccd6cf75c377ea7fe628c3b3ab9145}" \
     --env "PLUGIN_DIR=${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}" \

@@ -25,6 +25,10 @@
 #   which works on plain-text think tags; the qwen3 parser needs them as single tokens),
 #   so BFCL's stock OpenAI handler evaluates the model exactly as it evaluates gpt-*-FC. The
 #   model is registered into BFCL's config at runtime by bfcl_cli_with_olmo_models.py.
+# * TOOL_CALL_PARSER / REASONING_PARSER select vLLM's parsers for the checkpoint's template.
+#   Defaults fit the Olmo 3.5 template (qwen3_xml / olmo3). A checkpoint exported with the
+#   Olmo 3 instruct-dev template (`<function_calls>name(k=v)</function_calls>`) needs
+#   TOOL_CALL_PARSER=olmo3; the reasoning parser is the same for both.
 # * TEST_CATEGORY defaults to single_turn,multi_turn -- the BFCL v3 scope. BFCL's `all` also
 #   runs the v4 agentic memory and web_search categories, the latter needing a SerpAPI key.
 # * Results land under OUT_DIR on Weka: result/<model>/ (raw responses) and score/ (per-category
@@ -122,6 +126,8 @@ case "$MODE" in
             --env "BFCL_MODEL_NAME=$BFCL_MODEL_NAME" --env "TEST_CATEGORY=$TEST_CATEGORY" \
             --env "NUM_THREADS=$NUM_THREADS" --env "TENSOR_PARALLEL=$GPUS" \
             --env "MAX_MODEL_LEN=${MAX_MODEL_LEN:-65536}" \
+            --env "TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-qwen3_xml}" --env "REASONING_PARSER=${REASONING_PARSER:-olmo3}" \
+            --env "VLLM_EXTRA_ARGS=${VLLM_EXTRA_ARGS:-}" \
             --env "PLUGIN_DIR=${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}" \
             -- "$FETCH && CLI_PY=\$CLI_PY SERVE_LIB=\$SERVE_LIB bash \$RUNNER"
         ;;
