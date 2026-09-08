@@ -28,7 +28,20 @@ TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen3_xml}"
 # start otherwise ("could not locate think start/end tokens"). This tokenizer spells them as
 # ordinary text, which the olmo3 parser handles, including a <think> supplied by the prompt.
 REASONING_PARSER="${REASONING_PARSER:-olmo3}"
-PORT="${PORT:-8000}"
+# Beaker jobs on one node share the host network: a fixed port would let this job's readiness
+# check (and every BFCL request) reach a sibling job's vLLM. Pick an unused high port, bind to
+# loopback, and treat the server as ready only when it reports *this* model name.
+pick_free_port() {
+    python3 - <<'PY'
+import socket
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+}
+PORT="${PORT:-$(pick_free_port)}"
+# Abort on a failed smoke request by default; set SMOKE_STRICT=0 to only warn.
+SMOKE_STRICT="${SMOKE_STRICT:-1}"
 SERVER_TIMEOUT_S="${SERVER_TIMEOUT_S:-2400}"
 PLUGIN_DIR="${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}"
 OLMO_CORE_REF="${OLMO_CORE_REF:-f2cf93839}"
@@ -88,7 +101,7 @@ uv pip install -q --python "$BFCL_VENV/bin/python" "$BFCL_EVAL_SPEC" soundfile
 log "starting vLLM on port $PORT"
 "$VLLM_VENV/bin/vllm" serve "$CKPT" \
     --served-model-name "$SERVED_MODEL_NAME" \
-    --port "$PORT" \
+    --host 127.0.0.1 --port "$PORT" \
     --trust-remote-code \
     --dtype bfloat16 \
     --max-model-len "$MAX_MODEL_LEN" \
@@ -115,27 +128,34 @@ dump_server_failure() {
     echo "==== vLLM server log: last 40 lines ====" >&2
     tail -40 "$OUT_DIR/vllm_server.log" >&2
 }
+server_ready() {
+    # Ready means our model id is listed, not merely that something answers on the port.
+    curl -sf "http://127.0.0.1:$PORT/v1/models" 2>/dev/null | grep -q "\"id\":\"$SERVED_MODEL_NAME\""
+}
 deadline=$((SECONDS + SERVER_TIMEOUT_S))
-until curl -sf "http://localhost:$PORT/v1/models" >/dev/null 2>&1; do
+until server_ready; do
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "vLLM exited during startup" >&2; dump_server_failure; exit 3; fi
     if (( SECONDS > deadline )); then echo "vLLM not ready after ${SERVER_TIMEOUT_S}s" >&2; dump_server_failure; exit 3; fi
     sleep 10
 done
-log "vLLM ready: $(curl -s "http://localhost:$PORT/v1/models" | head -c 300)"
+log "vLLM ready on port $PORT: $(curl -s "http://127.0.0.1:$PORT/v1/models" | head -c 300)"
 
 # One end-to-end tool call before spending hours on the suite: proves the template renders
 # tools, the model emits the XML, and the parser turns it into a structured tool_call.
-curl -s "http://localhost:$PORT/v1/chat/completions" -H 'Content-Type: application/json' -d "{
+curl -s "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' -d "{
   \"model\": \"$SERVED_MODEL_NAME\", \"temperature\": 0,
   \"messages\": [{\"role\": \"user\", \"content\": \"What is the weather in Paris in celsius?\"}],
   \"tools\": [{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Get the weather\",
      \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}, \"unit\": {\"type\": \"string\", \"enum\": [\"celsius\", \"fahrenheit\"]}}, \"required\": [\"city\"]}}}]
 }" | tee "$OUT_DIR/smoke_tool_call.json" | head -c 1500; echo
-grep -q '"tool_calls"' "$OUT_DIR/smoke_tool_call.json" || log "WARNING: smoke request produced no structured tool_calls; check the parser and template before trusting scores"
+if ! grep -q '"tool_calls"' "$OUT_DIR/smoke_tool_call.json"; then
+    log "smoke request produced no structured tool_calls; check the parser and template before trusting scores"
+    if [ "$SMOKE_STRICT" = "1" ]; then echo "aborting (SMOKE_STRICT=1)" >&2; exit 4; fi
+fi
 
 # ---- BFCL ------------------------------------------------------------------------------------
 export BFCL_PROJECT_ROOT="$OUT_DIR"
-export OPENAI_BASE_URL="http://localhost:$PORT/v1"
+export OPENAI_BASE_URL="http://127.0.0.1:$PORT/v1"
 export OPENAI_API_KEY=EMPTY
 export BFCL_MODEL_NAME BFCL_SERVED_MODEL_NAME="$SERVED_MODEL_NAME"
 touch "$OUT_DIR/.env"  # BFCL loads PROJECT_ROOT/.env; keep it present but empty
