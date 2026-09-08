@@ -38,10 +38,18 @@ set -euo pipefail
 MODE="${1:?usage: $0 convert <dcp_step_dir> [hf_out_dir] | eval <hf_dir> <run_name>}"
 shift
 
-WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 PRIORITY="${PRIORITY:-urgent}"
 PY="${PY:-uv run python}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+# Workspace follows the cluster: jobs on jupiter or holmes go to ai2/olmo-instruct, everything
+# else must run in ai2/open-instruct-dev. Override with WORKSPACE.
+workspace_for() {
+    case "$1" in
+        *jupiter*|*holmes*) echo "ai2/olmo-instruct" ;;
+        *) echo "ai2/open-instruct-dev" ;;
+    esac
+}
 
 case "$MODE" in
     convert)
@@ -55,9 +63,12 @@ case "$MODE" in
         CONFIG="${CONFIG:-scripts/train/debug/kda_lc_sft.json}"
         TOKENIZER="${TOKENIZER:-allenai/dolma2-tokenizer-olmo35}"
         MAX_SEQ="${MAX_SEQ:-65536}"
-        echo "convert $DCP -> $HF_OUT (image $TRAIN_IMAGE, tokenizer $TOKENIZER)"
+        CONVERT_CLUSTERS="${CONVERT_CLUSTERS:-ai2/saturn ai2/neptune ai2/ceres}"
+        WORKSPACE="${WORKSPACE:-$(workspace_for "$CONVERT_CLUSTERS")}"
+        echo "convert $DCP -> $HF_OUT (image $TRAIN_IMAGE, tokenizer $TOKENIZER, workspace $WORKSPACE)"
+        # shellcheck disable=SC2086
         $PY mason.py \
-            --cluster ai2/saturn ai2/neptune ai2/ceres \
+            --cluster $CONVERT_CLUSTERS \
             --workspace "$WORKSPACE" --priority "$PRIORITY" \
             --image "$TRAIN_IMAGE" --pure_docker_mode \
             --description "Convert $(basename "$(dirname "$DCP")")/$(basename "$DCP") to HF (OLMoE3 KDA)" \
@@ -71,6 +82,7 @@ case "$MODE" in
         RUN_NAME="${2:?eval needs <run_name>}"
         EVAL_IMAGE="${EVAL_IMAGE:-akshitab/olmo-core-tch2110cu128-rma-2026-08-04}"
         CLUSTER="${CLUSTER:-ai2/ceres}"
+        WORKSPACE="${WORKSPACE:-$(workspace_for "$CLUSTER")}"
         GPUS="${GPUS:-1}"
         OUT_DIR="${OUT_DIR:-/weka/oe-adapt-default/$(beaker account whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["name"])')/bfcl/$RUN_NAME}"
         TEST_CATEGORY="${TEST_CATEGORY:-single_turn,multi_turn}"
@@ -96,7 +108,7 @@ case "$MODE" in
             FETCH="mkdir -p /opt/bfcl-run && curl -sfL $RAW/$RUNNER_REL -o /opt/bfcl-run/run.sh && curl -sfL $RAW/$CLI_REL -o /opt/bfcl-run/cli.py && RUNNER=/opt/bfcl-run/run.sh; CLI_PY=/opt/bfcl-run/cli.py"
         fi
 
-        echo "eval $HF_DIR as $BFCL_MODEL_NAME on $CLUSTER x$GPUS; results -> $OUT_DIR"
+        echo "eval $HF_DIR as $BFCL_MODEL_NAME on $CLUSTER x$GPUS (workspace $WORKSPACE); results -> $OUT_DIR"
         $PY mason.py \
             --cluster "$CLUSTER" \
             --workspace "$WORKSPACE" --priority "$PRIORITY" \
