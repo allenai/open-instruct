@@ -73,8 +73,12 @@ uv pip list --python "$VLLM_VENV/bin/python" 2>/dev/null | grep -iE "^(vllm|torc
 BFCL_VENV=/opt/venv-bfcl
 log "building BFCL venv at $BFCL_VENV"
 uv venv -q "$BFCL_VENV" --python "$(command -v python3)"
-uv pip install -q --python "$BFCL_VENV/bin/python" "$BFCL_EVAL_SPEC"
-"$BFCL_VENV/bin/python" -c "import bfcl_eval, importlib.metadata as m; print('bfcl-eval', m.version('bfcl-eval'))"
+# soundfile: bfcl_eval imports qwen_agent at import time (for its Qwen API handler), and
+# qwen_agent imports soundfile without declaring it. Import the CLI module here, before the
+# model is loaded, so any further undeclared dependency fails in seconds rather than after a
+# multi-minute model load.
+uv pip install -q --python "$BFCL_VENV/bin/python" "$BFCL_EVAL_SPEC" soundfile
+"$BFCL_VENV/bin/python" -c "import importlib.metadata as m; import bfcl_eval.__main__; print('bfcl-eval', m.version('bfcl-eval'), 'imports cleanly')"
 
 # ---- serve ----------------------------------------------------------------------------------
 # Flags mirror the olmo-eval provider kwargs for this family: eager mode (torch.compile does not
