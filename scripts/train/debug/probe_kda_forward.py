@@ -20,10 +20,12 @@ rather than a few hundred. Read the result as:
 """
 
 import argparse
+import importlib.metadata as metadata
 import json
 import pathlib
 
 import torch
+from olmo_core.nn.attention import kda
 
 from open_instruct import logger_utils
 
@@ -36,25 +38,19 @@ def main() -> None:
     parser.add_argument("--seq-lens", type=int, nargs="+", default=[128, 512, 2048, 8192])
     args = parser.parse_args()
 
-
-
     payload = json.loads(pathlib.Path(args.config).read_text())
     model_section = payload["model"]
     d_model = model_section["d_model"]
     mixer_config = model_section["block"]["sequence_mixer"]
 
-    import importlib.metadata as metadata
-
     logger.info("torch=%s", torch.__version__)
     logger.info("fla=%s", metadata.version("flash-linear-attention"))
     logger.info("cuda=%s device=%s", torch.version.cuda, torch.cuda.get_device_name(0))
 
-    from olmo_core.nn.attention.kda import KimiDeltaAttentionConfig
-
-    config = KimiDeltaAttentionConfig.from_dict({k: v for k, v in mixer_config.items() if k != "type"})
-    layer = config.build(
-        d_model=d_model, layer_idx=0, n_layers=model_section["n_layers"], init_device="cuda"
-    ).to("cuda")
+    config = kda.KimiDeltaAttentionConfig.from_dict({k: v for k, v in mixer_config.items() if k != "type"})
+    layer = config.build(d_model=d_model, layer_idx=0, n_layers=model_section["n_layers"], init_device="cuda").to(
+        "cuda"
+    )
     n_params = sum(p.numel() for p in layer.parameters())
     logger.info("built one KDA layer: %s params, d_model=%d", f"{n_params:,}", d_model)
 

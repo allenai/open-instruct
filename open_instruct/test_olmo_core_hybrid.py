@@ -1,5 +1,6 @@
 """Tests for Olmo Hybrid (GDN + attention) config and HF state conversion."""
 
+import types
 import unittest
 
 import torch
@@ -92,6 +93,18 @@ class TestHybridStateConversion(unittest.TestCase):
         converted = olmo_core_hybrid.convert_hybrid_state_from_hf(hf_state, layer_types)
         self.assertEqual(converted["blocks.0.feed_forward_norm.weight"].item(), 0.0)
         self.assertEqual(converted["blocks.1.attention_norm.weight"].item(), 1.0)
+
+    def test_export_dispatches_on_model_type(self) -> None:
+        """Export must not reach olmo-core's generic converter, which raises on every
+        GDN parameter -- aborting DPO and GRPO at their pre-training export check."""
+        hf_config = types.SimpleNamespace(
+            model_type=olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE, layer_types=["linear_attention", "full_attention"]
+        )
+        state = {"blocks.0.attention.A_log": torch.empty(0), "blocks.1.attention.w_q.weight": torch.empty(0)}
+        converted = olmo_core_utils.convert_olmo_core_state_to_hf(hf_config, state)
+        self.assertEqual(
+            set(converted), {"model.layers.0.linear_attn.A_log", "model.layers.1.self_attn.q_proj.weight"}
+        )
 
     def test_unmapped_key_raises(self) -> None:
         """A silently dropped weight would leave randomly initialised parameters behind."""

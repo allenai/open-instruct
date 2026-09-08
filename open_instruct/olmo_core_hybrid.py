@@ -1,19 +1,7 @@
 """Olmo Hybrid (gated DeltaNet + attention) support for the olmo-core training path.
 
-olmo-core can *export* a hybrid model to HF format (``convert_hybrid_state_to_hf``)
-but it has neither a :class:`TransformerConfig` preset for Olmo Hybrid 7B nor the
-inverse HF -> olmo-core conversion needed to fine-tune from ``allenai/Olmo-Hybrid-7B``.
-Both live here until they land upstream.
-
-Two things to know about this architecture, because neither matches Olmo 3:
-
-* It is **NoPE**. ``config.json`` carries ``rope_parameters = {"rope_theta": null}``
-  and HF's ``OlmoHybrid`` builds no rotary embedding, so the full-attention layers
-  have no positional encoding at all -- position comes from the GDN layers. Do not
-  pass ``--rope_scaling_factor``.
-* The two block types use **different norm conventions**: GDN blocks are pre-norm
-  and attention blocks are reordered-norm (Olmo 2 style). The HF key names differ
-  accordingly, which is why the per-layer key maps below are split in two.
+Holds the ``TransformerConfig`` preset for Olmo Hybrid 7B and the HF <-> olmo-core
+state conversion for ``model_type: olmo_hybrid``, neither of which olmo-core has.
 """
 
 from typing import Any
@@ -101,22 +89,16 @@ def olmo_hybrid_like(
     linear_num_value_heads: int,
     linear_key_head_dim: int,
     linear_value_head_dim: int,
-    linear_conv_kernel_dim: int = 4,
-    linear_allow_neg_eigval: bool = True,
-    layer_norm_eps: float = 1e-6,
-    # The GDN output norm does NOT use rms_norm_eps: HF hardcodes 1e-5 for it
-    # (see OlmoHybridGatedDeltaNet.__init__), which is also olmo-core's default.
-    gdn_norm_eps: float = 1e-5,
     attn_backend: AttentionBackendName = AttentionBackendName.flash_2,
     dtype: DType = DType.float32,
-    **kwargs: Any,
 ) -> TransformerConfig:
     """Build an Olmo-Hybrid-style config: three GDN blocks per full-attention block.
 
-    The attention blocks carry no RoPE (see the module docstring) and use full-width
-    (not per-head) QK norm, matching Olmo 2/3.
+    Only the geometry varies between hybrid checkpoints, so everything else is
+    fixed below. The attention blocks use full-width (not per-head) QK norm,
+    matching Olmo 2/3.
     """
-    layer_norm = LayerNormConfig(name=LayerNormType.rms, eps=layer_norm_eps, bias=False, dtype=dtype)
+    layer_norm = LayerNormConfig(name=LayerNormType.rms, eps=1e-6, bias=False, dtype=dtype)
     feed_forward = FeedForwardConfig(hidden_size=intermediate_size, bias=False, dtype=dtype)
 
     gdn_block = TransformerBlockConfig(
@@ -126,9 +108,11 @@ def olmo_hybrid_like(
             n_v_heads=linear_num_value_heads,
             head_dim=linear_key_head_dim,
             expand_v=linear_value_head_dim / linear_key_head_dim,
-            allow_neg_eigval=linear_allow_neg_eigval,
-            conv_size=linear_conv_kernel_dim,
-            norm_eps=gdn_norm_eps,
+            allow_neg_eigval=True,
+            conv_size=4,
+            # NOT rms_norm_eps: HF hardcodes 1e-5 for the GDN output norm (see
+            # OlmoHybridGatedDeltaNet.__init__), which is also olmo-core's default.
+            norm_eps=1e-5,
             dtype=dtype,
         ),
         feed_forward=feed_forward,
@@ -142,6 +126,10 @@ def olmo_hybrid_like(
             n_kv_heads=n_kv_heads,
             head_dim=head_dim,
             bias=False,
+            # NoPE: config.json carries rope_parameters = {"rope_theta": null} and HF
+            # builds no rotary embedding, so these layers have no positional encoding.
+            # A RoPE here is one the trained weights never saw; do not pass
+            # --rope_scaling_factor either.
             rope=None,
             qk_norm=layer_norm,
             use_head_qk_norm=False,
@@ -159,12 +147,13 @@ def olmo_hybrid_like(
         block_pattern=[GDN_BLOCK_KEY, GDN_BLOCK_KEY, GDN_BLOCK_KEY, ATTN_BLOCK_KEY],
         lm_head=LMHeadConfig(layer_norm=layer_norm, bias=False, dtype=dtype),
         dtype=dtype,
-        tie_word_embeddings=kwargs.pop("tie_word_embeddings", False),
-        **kwargs,
+        tie_word_embeddings=False,
     )
 
 
-def olmo3_hybrid_7B(vocab_size: int, **kwargs: Any) -> TransformerConfig:
+def olmo3_hybrid_7B(
+    vocab_size: int, attn_backend: AttentionBackendName = AttentionBackendName.flash_2
+) -> TransformerConfig:
     """The config for ``allenai/Olmo-Hybrid-7B``.
 
     32 layers, 24 GDN + 8 full-attention (at indices 3, 7, ..., 31).
@@ -181,7 +170,7 @@ def olmo3_hybrid_7B(vocab_size: int, **kwargs: Any) -> TransformerConfig:
         linear_num_value_heads=30,
         linear_key_head_dim=96,
         linear_value_head_dim=192,
-        **kwargs,
+        attn_backend=attn_backend,
     )
 
 
@@ -197,72 +186,59 @@ def layer_types_from_hf_config(hf_config: transformers.PretrainedConfig) -> list
     return list(layer_types)
 
 
-def convert_hybrid_state_from_hf(hf_state: dict[str, Any], layer_types: list[str]) -> dict[str, torch.Tensor]:
-    """Convert an HF ``olmo_hybrid`` state dict to olmo-core format.
+LAYER_PREFIXES = {"hf": "model.layers.", "olmo-core": "blocks."}
 
-    This is a pure renaming: every parameter has identical shape and layout on both
-    sides, so no fusing, splitting or transposing is needed.
+
+def _convert_state(state: dict[str, Any], layer_types: list[str], src: str) -> dict[str, torch.Tensor]:
+    """Rename ``state`` from ``src`` ("hf" or "olmo-core") to the other side.
+
+    Both directions are pure renamings -- every parameter has identical shape and
+    layout on both sides, so no fusing, splitting or transposing is needed -- and
+    both walk the same three maps, so one implementation serves both. Keeping them
+    separate would let the maps drift, and a converter that disagrees with its own
+    inverse loses weights silently.
     """
-    olmo_state: dict[str, torch.Tensor] = {}
-    unmapped: list[str] = []
-    for hf_key, value in hf_state.items():
-        shared = HF_TO_OLMO_CORE_SHARED_KEYS.get(hf_key)
-        if shared is not None:
-            olmo_state[shared] = value
-            continue
+    dst = "olmo-core" if src == "hf" else "hf"
+    shared, gdn, attn = HF_TO_OLMO_CORE_SHARED_KEYS, HF_TO_OLMO_CORE_GDN_KEYS, HF_TO_OLMO_CORE_ATTN_KEYS
+    if src != "hf":
+        shared = {v: k for k, v in shared.items()}
+        gdn = {v: k for k, v in gdn.items()}
+        attn = {v: k for k, v in attn.items()}
 
-        prefix, _, suffix = hf_key.partition(".")
-        if prefix != "model" or not suffix.startswith("layers."):
-            unmapped.append(hf_key)
-            continue
-        _, layer_str, block_suffix = suffix.split(".", 2)
-        layer_idx = int(layer_str)
-        key_map = (
-            HF_TO_OLMO_CORE_GDN_KEYS if layer_types[layer_idx] == "linear_attention" else HF_TO_OLMO_CORE_ATTN_KEYS
-        )
-        olmo_suffix = key_map.get(block_suffix)
-        if olmo_suffix is None:
-            unmapped.append(hf_key)
-            continue
-        olmo_state[f"blocks.{layer_idx}.{olmo_suffix}"] = value
+    converted: dict[str, torch.Tensor] = {}
+    unmapped: list[str] = []
+    for key, value in state.items():
+        mapped = shared.get(key)
+        if mapped is None:
+            if not key.startswith(LAYER_PREFIXES[src]):
+                unmapped.append(key)
+                continue
+            layer_str, _, block_suffix = key[len(LAYER_PREFIXES[src]) :].partition(".")
+            key_map = gdn if layer_types[int(layer_str)] == "linear_attention" else attn
+            block_key = key_map.get(block_suffix)
+            if block_key is None:
+                unmapped.append(key)
+                continue
+            mapped = f"{LAYER_PREFIXES[dst]}{int(layer_str)}.{block_key}"
+        converted[mapped] = value
 
     if unmapped:
-        raise KeyError(f"{len(unmapped)} HF keys could not be mapped to olmo-core, e.g. {sorted(unmapped)[:5]}")
-    return olmo_state
+        raise KeyError(f"{len(unmapped)} {src} keys could not be mapped to {dst}, e.g. {sorted(unmapped)[:5]}")
+    return converted
+
+
+def convert_hybrid_state_from_hf(hf_state: dict[str, Any], layer_types: list[str]) -> dict[str, torch.Tensor]:
+    """Convert an HF ``olmo_hybrid`` state dict to olmo-core format."""
+    return _convert_state(hf_state, layer_types, "hf")
 
 
 def convert_hybrid_state_to_hf(state_dict: dict[str, Any], layer_types: list[str]) -> dict[str, torch.Tensor]:
     """Convert an olmo-core hybrid state dict back to HF ``olmo_hybrid`` format.
 
     olmo-core ships its own ``convert_hybrid_state_to_hf``, but its GDN key map
-    disagrees with the released checkpoint (see ``HF_TO_OLMO_CORE_GDN_KEYS``), so
-    this inverts the maps here instead.
+    disagrees with the released checkpoint (see ``HF_TO_OLMO_CORE_GDN_KEYS``).
     """
-    shared = {v: k for k, v in HF_TO_OLMO_CORE_SHARED_KEYS.items()}
-    gdn = {v: k for k, v in HF_TO_OLMO_CORE_GDN_KEYS.items()}
-    attn = {v: k for k, v in HF_TO_OLMO_CORE_ATTN_KEYS.items()}
-
-    hf_state: dict[str, torch.Tensor] = {}
-    unmapped: list[str] = []
-    for olmo_key, value in state_dict.items():
-        if olmo_key in shared:
-            hf_state[shared[olmo_key]] = value
-            continue
-        prefix, _, rest = olmo_key.partition(".")
-        if prefix != "blocks":
-            unmapped.append(olmo_key)
-            continue
-        layer_str, _, block_suffix = rest.partition(".")
-        key_map = gdn if layer_types[int(layer_str)] == "linear_attention" else attn
-        hf_suffix = key_map.get(block_suffix)
-        if hf_suffix is None:
-            unmapped.append(olmo_key)
-            continue
-        hf_state[f"model.layers.{layer_str}.{hf_suffix}"] = value
-
-    if unmapped:
-        raise KeyError(f"{len(unmapped)} olmo-core keys could not be mapped to HF, e.g. {sorted(unmapped)[:5]}")
-    return hf_state
+    return _convert_state(state_dict, layer_types, "olmo-core")
 
 
 def load_hf_hybrid_model(model_name_or_path: str, model_state_dict: dict[str, Any]) -> None:

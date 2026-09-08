@@ -20,11 +20,7 @@ import json
 import pathlib
 import sys
 
-CHECKPOINT_FLAGS = (
-    "checkpoint_attn",
-    "checkpoint_permute_moe_unpermute",
-    "checkpoint_second_unpermute",
-)
+CHECKPOINT_FLAGS = ("checkpoint_attn", "checkpoint_permute_moe_unpermute", "checkpoint_second_unpermute")
 
 # The full-attention layers pretrain with the TransformerEngine backend, which
 # raises "doesn't currently support intra-document masking" (01M0GJD4P8743W4T9NSS9C7B7X).

@@ -54,6 +54,7 @@ CHAT_TEMPLATE=olmo123
 MAX_SEQ_LENGTH=32768
 MIXER="allenai/Dolci-Instruct-SFT 1.0"
 SEED=33333
+LOCAL_CACHE_DIR=/weka/oe-adapt-default/allennlp/numpy_sft_cache
 # add_bos must stay off: dataset_transformation.py asserts it for any "olmo*"
 # chat template.
 # ----------------------------------------------------------------------
