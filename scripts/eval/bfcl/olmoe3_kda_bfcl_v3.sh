@@ -21,7 +21,8 @@
 #   of this repo.
 # * BFCL is run in function-calling mode against vLLM's OpenAI-compatible server. vLLM parses
 #   the Olmo 3.5 template's Qwen3-Coder-style XML tool calls (--tool-call-parser qwen3_xml)
-#   into structured tool_calls and strips the forced <think> block (--reasoning-parser qwen3),
+#   into structured tool_calls and strips the forced <think> block (--reasoning-parser olmo3,
+#   which works on plain-text think tags; the qwen3 parser needs them as single tokens),
 #   so BFCL's stock OpenAI handler evaluates the model exactly as it evaluates gpt-*-FC. The
 #   model is registered into BFCL's config at runtime by bfcl_cli_with_olmo_models.py.
 # * TEST_CATEGORY defaults to single_turn,multi_turn -- the BFCL v3 scope. BFCL's `all` also

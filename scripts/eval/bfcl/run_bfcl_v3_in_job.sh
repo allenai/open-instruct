@@ -24,7 +24,10 @@ MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-8192}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
 TENSOR_PARALLEL="${TENSOR_PARALLEL:-1}"
 TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen3_xml}"
-REASONING_PARSER="${REASONING_PARSER:-qwen3}"
+# olmo3, not qwen3: vLLM's qwen3 parser needs <think>/</think> to be single tokens and refuses to
+# start otherwise ("could not locate think start/end tokens"). This tokenizer spells them as
+# ordinary text, which the olmo3 parser handles, including a <think> supplied by the prompt.
+REASONING_PARSER="${REASONING_PARSER:-olmo3}"
 PORT="${PORT:-8000}"
 SERVER_TIMEOUT_S="${SERVER_TIMEOUT_S:-2400}"
 PLUGIN_DIR="${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}"
@@ -77,7 +80,7 @@ uv pip install -q --python "$BFCL_VENV/bin/python" "$BFCL_EVAL_SPEC"
 # Flags mirror the olmo-eval provider kwargs for this family: eager mode (torch.compile does not
 # handle the fla kernels), fp32 SSM cache, flash-attn backend. Tool calls come out in Qwen3-Coder
 # style XML, which the Olmo 3.5 template adopted, so vLLM's qwen3_xml parser turns them into
-# structured tool_calls; the qwen3 reasoning parser strips the <think> block the template forces.
+# structured tool_calls; the olmo3 reasoning parser strips the <think> block the template forces.
 log "starting vLLM on port $PORT"
 "$VLLM_VENV/bin/vllm" serve "$CKPT" \
     --served-model-name "$SERVED_MODEL_NAME" \
