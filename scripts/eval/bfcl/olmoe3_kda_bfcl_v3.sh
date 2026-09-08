@@ -97,16 +97,17 @@ case "$MODE" in
         # which therefore has to be pushed.
         RUNNER_REL=scripts/eval/bfcl/run_bfcl_v3_in_job.sh
         CLI_REL=scripts/eval/bfcl/bfcl_cli_with_olmo_models.py
+        SERVE_REL=scripts/eval/olmoe3_kda_vllm_serve.sh
         if [[ "$REPO_ROOT" == /weka/* ]]; then
-            FETCH="RUNNER=$REPO_ROOT/$RUNNER_REL; CLI_PY=$REPO_ROOT/$CLI_REL"
+            FETCH="RUNNER=$REPO_ROOT/$RUNNER_REL; CLI_PY=$REPO_ROOT/$CLI_REL; SERVE_LIB=$REPO_ROOT/$SERVE_REL"
         else
-            if [[ -n "$(git -C "$REPO_ROOT" status --porcelain -- scripts/eval/bfcl)" ]]; then
-                echo "scripts/eval/bfcl has uncommitted changes; commit and push so the job can fetch them" >&2; exit 1
+            if [[ -n "$(git -C "$REPO_ROOT" status --porcelain -- scripts/eval)" ]]; then
+                echo "scripts/eval has uncommitted changes; commit and push so the job can fetch them" >&2; exit 1
             fi
             COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
             git -C "$REPO_ROOT" branch -r --contains "$COMMIT" | grep -q origin/ || { echo "commit $COMMIT is not pushed to origin" >&2; exit 1; }
             RAW="https://raw.githubusercontent.com/allenai/open-instruct/$COMMIT"
-            FETCH="mkdir -p /opt/bfcl-run && curl -sfL $RAW/$RUNNER_REL -o /opt/bfcl-run/run.sh && curl -sfL $RAW/$CLI_REL -o /opt/bfcl-run/cli.py && RUNNER=/opt/bfcl-run/run.sh; CLI_PY=/opt/bfcl-run/cli.py"
+            FETCH="mkdir -p /opt/bfcl-run && curl -sfL $RAW/$RUNNER_REL -o /opt/bfcl-run/run.sh && curl -sfL $RAW/$CLI_REL -o /opt/bfcl-run/cli.py && curl -sfL $RAW/$SERVE_REL -o /opt/bfcl-run/serve.sh && RUNNER=/opt/bfcl-run/run.sh; CLI_PY=/opt/bfcl-run/cli.py; SERVE_LIB=/opt/bfcl-run/serve.sh"
         fi
 
         echo "eval $HF_DIR as $BFCL_MODEL_NAME on $CLUSTER x$GPUS (workspace $WORKSPACE); results -> $OUT_DIR"
@@ -122,7 +123,7 @@ case "$MODE" in
             --env "NUM_THREADS=$NUM_THREADS" --env "TENSOR_PARALLEL=$GPUS" \
             --env "MAX_MODEL_LEN=${MAX_MODEL_LEN:-65536}" \
             --env "PLUGIN_DIR=${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}" \
-            -- "$FETCH && CLI_PY=\$CLI_PY bash \$RUNNER"
+            -- "$FETCH && CLI_PY=\$CLI_PY SERVE_LIB=\$SERVE_LIB bash \$RUNNER"
         ;;
     *)
         echo "Unknown mode: $MODE (expected 'convert' or 'eval')" >&2; exit 1
