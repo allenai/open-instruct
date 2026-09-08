@@ -85,7 +85,9 @@ case "$DATASET_CHOICE" in
     *) echo "unknown dataset '$DATASET_CHOICE' (expected tb2.1, tb2.1-git, tb2.0, tblite, or a harbor name@version)" >&2; exit 1 ;;
 esac
 DATASET_SLUG="${DATASET_LABEL//[^A-Za-z0-9]/-}"
-JOB_NAME="${JOB_NAME:-${RUN_NAME}-${DATASET_SLUG}}"
+# RUN_TAG distinguishes repeated runs of the same model and dataset: tmax copies results into
+# RESULTS_DIR/<job name>, so a reused name would merge two runs' trial directories.
+JOB_NAME="${JOB_NAME:-${RUN_NAME}-${DATASET_SLUG}${RUN_TAG:+-$RUN_TAG}}"
 RESULTS_DIR="${RESULTS_DIR:-/weka/oe-adapt-default/$BEAKER_USER/tmax-eval/$JOB_NAME}"
 
 # The image has no copy of this repo. Read the runner and the serving library from the checkout
