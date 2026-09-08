@@ -177,8 +177,15 @@ ensure_nvcc() {
         cp -a "$tmpd"/*/. "$dest"/ 2>/dev/null || true
         rm -rf "$tmpd"
     done
+    # nvcc searches $CUDA_HOME/lib64 on x86_64, but the redistributable archives
+    # lay their libraries out under lib/. Without this the compile succeeds and
+    # only the link fails, on -lcudart_static and -lcudadevrt.
+    [ -d "$dest/lib" ] && [ ! -e "$dest/lib64" ] && ln -sfn "$dest/lib" "$dest/lib64"
+
     export CUDA_HOME="$dest"
+    export CUDA_PATH="$dest"
     export PATH="$dest/bin:$PATH"
+    export LD_LIBRARY_PATH="$dest/lib:${LD_LIBRARY_PATH:-}"
     # Some build paths hardcode /usr/local/cuda rather than reading CUDA_HOME.
     mkdir -p /usr/local/cuda
     cp -asn "$dest"/. /usr/local/cuda/ 2>/dev/null || true
