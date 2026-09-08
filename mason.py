@@ -113,6 +113,13 @@ def get_args():
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
     )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
+    parser.add_argument(
+        "--min_runtime",
+        type=str,
+        default=None,
+        help="Beaker duration string (e.g. '90m', '2h'): the scheduler will not preempt the job "
+        "before it has run this long. Only meaningful with --preemptible.",
+    )
     parser.add_argument("--budget", type=str, help="Budget to use. If unset, Beaker uses the default budget.", default=None)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument(
@@ -566,7 +573,9 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
         context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+            priority=beaker.BeakerJobPriority[args.priority],
+            preemptible=args.preemptible,
+            min_runtime=args.min_runtime,
         ),
         constraints=constraints,
         env_vars=get_env_vars(

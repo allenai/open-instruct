@@ -34,6 +34,12 @@
 # Checkpointing: checkpoint_state_dir is REQUIRED for checkpoint_state_freq
 # to do anything — without it the 2026-08-21 run lost 84 steps (21.5h on
 # 32 GPUs) to a single preempted Beaker node.
+#
+# min_runtime (BEAKER_MIN_RUNTIME, default 2h): the Beaker scheduler will not
+# preempt the job before it has run this long — enough to clear the slow
+# first step (~25-40 min) and reach the first checkpoint_state save at step
+# 10 (~6 min/step after warm-up), so a preemption never sends a retry back
+# to step 1. Requires beaker-py >= 2.7.2 (mason --min_runtime).
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=Qwen/Qwen3.5-4B
@@ -48,6 +54,7 @@ uv run python mason.py \
        --workspace ai2/oe-agents \
        --priority urgent \
        --preemptible \
+       --min_runtime "${BEAKER_MIN_RUNTIME:-2h}" \
        --num_nodes 4 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
