@@ -116,6 +116,16 @@ run_one_model() {
     log "MODEL ${model} -> served as ${served}"
     local vllm_log=/tmp/vllm_${served}.log
 
+    # Pre-seed from traces an interrupted attempt already produced, so the run
+    # continues instead of restarting. Preemption protection maxes out at 8h and
+    # a model takes longer, so partial state is the expected case.
+    local resume_flag=()
+    if [ -s "$store" ]; then
+        cp "$store" "$traces"
+        resume_flag=(--resume)
+        log "resuming ${served} from $(wc -l < "$store") existing traces"
+    fi
+
     # --python 3.12 is load-bearing, not tidiness. uvx otherwise resolves 3.11,
     # where flashinfer's fd_exchange module fails to import with
     # "TypeError: type 'array.array' is not subscriptable" -- array.array only
@@ -169,7 +179,8 @@ run_one_model() {
         --max-tokens "$MAX_TOKENS" --max-prompt-tokens "$MAX_PROMPT_TOKENS" \
         --seed "$SEED" --concurrency "$CONCURRENCY" \
         --prompts-output "$RESULTS_DIR/prompts_${served}.jsonl" \
-        --output "$traces" 2>&1 | tee "$RESULTS_DIR/generate_${served}.log"
+        ${resume_flag[@]+"${resume_flag[@]}"} \
+        --output "$traces" 2>&1 | tee -a "$RESULTS_DIR/generate_${served}.log"
     local rc=${PIPESTATUS[0]}
 
     kill "$sync_pid" 2>/dev/null; wait "$sync_pid" 2>/dev/null

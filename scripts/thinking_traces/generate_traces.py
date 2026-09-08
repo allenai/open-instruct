@@ -96,8 +96,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--request-timeout", type=float, default=3600.0)
     parser.add_argument("--max-retries", type=int, default=4)
     parser.add_argument("--output", required=True, help="destination .jsonl")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="if --output already holds traces, keep them and generate only what is missing",
+    )
     parser.add_argument("--prompts-output", default=None, help="optional .jsonl copy of the resolved prompt sample")
     return parser.parse_args()
+
+
+def load_completed(path: str) -> set[tuple[str, int]]:
+    """Read (prompt_sha, sample_index) for traces already generated in ``path``.
+
+    Tolerates a truncated final line, which is the normal state of a file whose
+    writer was killed mid-flush.
+    """
+    if not os.path.exists(path):
+        return set()
+    done: set[tuple[str, int]] = set()
+    malformed = 0
+    with open(path) as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                malformed += 1
+                continue
+            if "error" in record:
+                continue
+            done.add((record["prompt_sha"], record["sample_index"]))
+    if malformed:
+        logger.warning("%s: skipped %d unparseable line(s) (likely a killed write)", path, malformed)
+    return done
 
 
 def dataset_revision(name: str) -> str | None:
@@ -295,6 +328,21 @@ def main() -> None:
     )
 
     work = [(prompt, sample) for prompt in prompts for sample in range(args.num_samples)]
+
+    # Trace-level resume. Beaker caps preemption protection at 8h but a model
+    # takes considerably longer, so an interrupted run is the expected case, not
+    # the exceptional one. Keying on (prompt_sha, sample_index) rather than a
+    # position in the work list means resume stays correct even though results
+    # are written in completion order rather than submission order.
+    completed = load_completed(args.output) if args.resume else set()
+    if completed:
+        before = len(work)
+        work = [(p, s) for p, s in work if (p["prompt_sha"], s) not in completed]
+        logger.info("resuming: %d of %d traces already present, %d to generate", before - len(work), before, len(work))
+        if not work:
+            logger.info("nothing left to generate; %s is already complete", args.output)
+            return
+
     logger.info("generating %d traces (%d prompts x %d samples)", len(work), len(prompts), args.num_samples)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
@@ -303,7 +351,8 @@ def main() -> None:
     done = 0
     started_at = time.monotonic()
 
-    with open(args.output, "w") as handle, concurrent.futures.ThreadPoolExecutor(args.concurrency) as pool:
+    mode = "a" if completed else "w"
+    with open(args.output, mode) as handle, concurrent.futures.ThreadPoolExecutor(args.concurrency) as pool:
         futures = [pool.submit(generate_one, client, args, tokenizer, p, s) for p, s in work]
         for future in concurrent.futures.as_completed(futures):
             record = future.result()

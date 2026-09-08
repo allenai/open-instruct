@@ -1,5 +1,7 @@
 """Tests for thinking-trace parsing and the length statistics built on top of it."""
 
+import json
+
 import numpy as np
 import pytest
 from scripts.thinking_traces import analyze_traces, generate_traces
@@ -48,6 +50,25 @@ def test_split_trace_ignores_think_tag_inside_the_answer():
     assert kind == generate_traces.KIND_CLOSED
     assert thinking.strip() == "reasoning"
     assert "<think>" in answer
+
+
+def test_load_completed_reads_keys_and_survives_a_killed_write(tmp_path):
+    """Resume must key on (prompt_sha, sample_index) and tolerate a torn last line."""
+    path = tmp_path / "traces.jsonl"
+    with open(path, "w") as handle:
+        handle.write(json.dumps({"prompt_sha": "a", "sample_index": 0, "thinking_tokens": 5}) + "\n")
+        handle.write(json.dumps({"prompt_sha": "a", "sample_index": 1, "thinking_tokens": 6}) + "\n")
+        handle.write(json.dumps({"prompt_sha": "b", "sample_index": 0, "error": "boom"}) + "\n")
+        handle.write('{"prompt_sha": "c", "sample_ind')  # killed mid-flush
+
+    done = generate_traces.load_completed(str(path))
+
+    assert done == {("a", 0), ("a", 1)}  # the failed record is not "done"
+    assert ("c", 0) not in done  # the torn line is ignored, not crashed on
+
+
+def test_load_completed_on_missing_file_is_empty():
+    assert generate_traces.load_completed("/nonexistent/traces.jsonl") == set()
 
 
 def _records(groups):
