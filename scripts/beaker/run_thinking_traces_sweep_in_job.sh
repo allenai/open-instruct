@@ -33,6 +33,19 @@ set -uo pipefail   # NOT -e: a failing model must not kill the sweep
 
 log() { printf '\n=== [%s] %s ===\n' "$(date -u +%H:%M:%S)" "$*"; }
 
+# vLLM buries the actual cause far above the final traceback -- the API server's
+# wrapper exception is what lands in a tail, while the engine/worker error that
+# explains it scrolled past. Grep the whole log for exception lines so the job
+# log alone is enough to diagnose a failure.
+dump_vllm_failure() {
+    local logfile="$1"
+    log "root-cause candidates in $logfile:"
+    grep -aoE "(TypeError|ImportError|ValueError|RuntimeError|AttributeError|ModuleNotFoundError|OSError|AssertionError|NotImplementedError|KeyError|CUDA error|out of memory)[^\"]{0,200}" \
+        "$logfile" 2>/dev/null | sort -u | tail -20 || true
+    log "last 80 lines of $logfile:"
+    tail -80 "$logfile" 2>/dev/null || true
+}
+
 : "${MODELS:?set MODELS}"
 : "${VLLM_PKG_VERSION:=0.28.0}"
 : "${SERVE_PORT:=8008}"
@@ -57,6 +70,15 @@ log() { printf '\n=== [%s] %s ===\n' "$(date -u +%H:%M:%S)" "$*"; }
 # vLLM reserves VLLM_PORT as the base of its internal port range; leaking one in
 # makes every parallel rank derive the same rendezvous port (EADDRINUSE).
 unset VLLM_PORT
+
+# DeepGEMM JIT-compiles FP8 kernels with nvcc, which is not in the Beaker CUDA
+# image: every FP8 MoE here dies at engine init with
+#   Assertion error (deepgemm .../jit/compiler.hpp): std::filesystem::exists(nvcc_path)
+# vLLM 0.28 defaults both of these to on, so they must be turned off explicitly.
+# The CUTLASS fallback kernels ship precompiled in the wheel. This mirrors the
+# tmax recipe, which keeps DeepGEMM opt-in for the same reason.
+export VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}"
+export VLLM_MOE_USE_DEEP_GEMM="${VLLM_MOE_USE_DEEP_GEMM:-0}"
 
 REPO_ROOT="$(pwd)"
 mkdir -p "$RESULTS_DIR"
@@ -83,6 +105,7 @@ cat <<EOF
   sampling      : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples, T=${TEMPERATURE} top_p=${TOP_P} seed=${SEED}
   concurrency   : ${CONCURRENCY}
   trace store   : ${TRACE_STORE}
+  DeepGEMM      : VLLM_USE_DEEP_GEMM=${VLLM_USE_DEEP_GEMM} MOE=${VLLM_MOE_USE_DEEP_GEMM} (needs nvcc; off => CUTLASS)
   HF_HOME       : ${HF_HOME:-<default>}
   hub repo      : ${HF_REPO_ID:-<none: push skipped>}
 EOF
@@ -146,12 +169,12 @@ run_one_model() {
     local deadline=$(( SECONDS + VLLM_READY_TIMEOUT )) ticks=0
     until curl -sf "http://localhost:$SERVE_PORT/v1/models" >/dev/null 2>&1; do
         if ! kill -0 "$vllm_pid" 2>/dev/null; then
-            log "FAILED ${model}: vllm died. tail:"; tail -60 "$vllm_log"
+            log "FAILED ${model}: vllm died."; dump_vllm_failure "$vllm_log"
             cp "$vllm_log" "$RESULTS_DIR/" 2>/dev/null || true
             return 1
         fi
         if [ "$SECONDS" -ge "$deadline" ]; then
-            log "FAILED ${model}: vllm not ready in ${VLLM_READY_TIMEOUT}s. tail:"; tail -60 "$vllm_log"
+            log "FAILED ${model}: vllm not ready in ${VLLM_READY_TIMEOUT}s."; dump_vllm_failure "$vllm_log"
             kill "$vllm_pid" 2>/dev/null; cp "$vllm_log" "$RESULTS_DIR/" 2>/dev/null || true
             return 1
         fi
