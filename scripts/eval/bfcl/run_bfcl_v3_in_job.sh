@@ -64,6 +64,7 @@ VPIP=(uv pip install -q --python "$VLLM_VENV/bin/python")
 "${VPIP[@]}" "$PLUGIN_DIR/vllm_plugin"
 "${VPIP[@]}" --no-deps "$PLUGIN_DIR/transformers_plugin"
 "$VLLM_VENV/bin/python" -c "import vllm, torch; print('vllm', vllm.__version__, '| torch', torch.__version__)"
+uv pip list --python "$VLLM_VENV/bin/python" 2>/dev/null | grep -iE "^(vllm|torch|transformers|flash|triton|ai2-olmo-core|olmoe3|fla) " || true
 
 # ---- BFCL venv, separate so its pins never touch the serving stack ---------------------------
 BFCL_VENV=/opt/venv-bfcl
@@ -97,10 +98,20 @@ log "starting vLLM on port $PORT"
 SERVER_PID=$!
 trap 'log "stopping vLLM (pid $SERVER_PID)"; kill $SERVER_PID 2>/dev/null || true' EXIT
 
+# On failure, the API server's own traceback only says "engine core initialization failed"; the
+# cause is in the EngineCore process's lines earlier in the log, so surface those specifically.
+dump_server_failure() {
+    echo "==== vLLM server log: error lines with context ====" >&2
+    grep -nE "Error|Exception|Traceback|not supported|No module|CUDA out of memory|Killed" "$OUT_DIR/vllm_server.log" | grep -v "raise RuntimeError\|Engine core initialization failed" | head -40 >&2
+    echo "==== vLLM server log: EngineCore lines ====" >&2
+    grep -E "EngineCore" "$OUT_DIR/vllm_server.log" | tail -80 >&2
+    echo "==== vLLM server log: last 40 lines ====" >&2
+    tail -40 "$OUT_DIR/vllm_server.log" >&2
+}
 deadline=$((SECONDS + SERVER_TIMEOUT_S))
 until curl -sf "http://localhost:$PORT/v1/models" >/dev/null 2>&1; do
-    if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "vLLM exited during startup; tail of log:" >&2; tail -60 "$OUT_DIR/vllm_server.log" >&2; exit 3; fi
-    if (( SECONDS > deadline )); then echo "vLLM not ready after ${SERVER_TIMEOUT_S}s; tail of log:" >&2; tail -60 "$OUT_DIR/vllm_server.log" >&2; exit 3; fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "vLLM exited during startup" >&2; dump_server_failure; exit 3; fi
+    if (( SECONDS > deadline )); then echo "vLLM not ready after ${SERVER_TIMEOUT_S}s" >&2; dump_server_failure; exit 3; fi
     sleep 10
 done
 log "vLLM ready: $(curl -s "http://localhost:$PORT/v1/models" | head -c 300)"
