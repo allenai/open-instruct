@@ -142,103 +142,104 @@ EOF
 # These are NVIDIA's own redistributables pinned to 13.1, matching the image's
 # CUDA 13.1 runtime, so nothing is version-mixed. 32 MB total.
 ensure_nvcc() {
-    if command -v nvcc >/dev/null 2>&1 && [ -x "${CUDA_HOME:-/usr/local/cuda}/bin/nvcc" ]; then
-        log "nvcc already present: $(nvcc --version 2>/dev/null | tail -1)"
-        return 0
-    fi
-    local base="https://developer.download.nvidia.com/compute/cuda/redist"
     local dest=/opt/cuda-jit
+    local base="https://developer.download.nvidia.com/compute/cuda/redist"
+    local manifest="redistrib_${CUDA_REDIST_VERSION:-13.1.2}.json"
     local cache="${TOOLCHAIN_CACHE:-}"
     if [ -z "$cache" ] && [ -d /weka/oe-adapt-default ]; then
-        cache="/weka/oe-adapt-default/${BEAKER_USER_ID:-shared}/cuda-jit-13.1.tar"
+        cache="/weka/oe-adapt-default/${BEAKER_USER_ID:-shared}/cuda-jit-${CUDA_REDIST_VERSION:-13.1.2}.tar"
     fi
     mkdir -p "$dest"
 
-    # Assembling the toolchain costs ~875 MB from NVIDIA, most of it libcublas.
-    # Cache the assembled tree on weka so the other models in the slate, and any
-    # relaunch, restore it in seconds instead.
     if [ -n "$cache" ] && [ -f "$cache" ]; then
-        log "restoring CUDA toolchain from $cache"
+        log "restoring CUDA toolkit from $cache"
         if tar -xf "$cache" -C "$dest" 2>/dev/null; then
-            export CUDA_HOME="$dest" CUDA_PATH="$dest"
-            export PATH="$dest/bin:$PATH"
-            export LD_LIBRARY_PATH="$dest/lib:${LD_LIBRARY_PATH:-}"
-            mkdir -p /usr/local/cuda && cp -asn "$dest"/. /usr/local/cuda/ 2>/dev/null || true
+            export_cuda_env
             verify_nvcc && return 0
-            log "cached toolchain did not verify; rebuilding from scratch"
+            log "cached toolkit did not verify; rebuilding"
             rm -rf "${dest:?}"/* 2>/dev/null || true
         fi
     fi
-    # CUDA 13 splits the toolchain finely, and a partial install fails late and
-    # confusingly: without cuda_crt the build dies on 'crt/host_defines.h: No
-    # such file or directory', and without libnvvm nvcc has no cicc to run.
-    #   cuda_nvcc  - nvcc, ptxas, cudafe++, fatbinary, nvlink
-    #   cuda_crt   - the crt/ headers nvcc's generated host code includes
-    #   cuda_cudart- vector_types.h and friends
-    #   cuda_cccl  - CUB/Thrust headers the kernels use
-    #   libnvvm    - cicc, the NVVM device-compiler frontend
-    local comp name tmpd
-    for comp in \
-        "cuda_nvcc/linux-x86_64/cuda_nvcc-linux-x86_64-13.1.115-archive.tar.xz" \
-        "cuda_crt/linux-x86_64/cuda_crt-linux-x86_64-13.1.115-archive.tar.xz" \
-        "cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-13.1.80-archive.tar.xz" \
-        "cuda_cccl/linux-x86_64/cuda_cccl-linux-x86_64-13.1.115-archive.tar.xz" \
-        "libnvvm/linux-x86_64/libnvvm-linux-x86_64-13.1.115-archive.tar.xz" \
-        "libcublas/linux-x86_64/libcublas-linux-x86_64-13.2.2.2-archive.tar.xz"
-    do
+
+    # Install the whole toolkit rather than hand-picking components. Picking them
+    # one at a time cost a full weight-load cycle per missing header -- cuda_crt,
+    # then libcublas, then libcurand -- because each is only reached once
+    # FlashInfer's JIT gets far enough to include it. The excluded set is
+    # profilers, debuggers, the driver and datacenter tooling: none of them
+    # supply headers a kernel build includes.
+    log "assembling CUDA toolkit from $manifest (~2 GB, cached afterwards)"
+    local paths
+    paths="$(curl -fsSL "$base/$manifest" | python3 -c '
+import json,sys
+DENY={"nsight_compute","nsight_systems","nvidia_driver","cuda_gdb","cuda_documentation",
+      "collectx_bringup","mft","mft_autocomplete","mft_oem","fabricmanager","imex","nvlsm",
+      "libnvidia_nscq","cuda_sanitizer_api","nvidia_fs","libnvsdm","cuda_nsight","cuda_compat",
+      "libcufile","cuda_cupti","libnpp","libnvjpeg"}
+d=json.load(sys.stdin)
+for k,v in d.items():
+    if isinstance(v,dict) and "linux-x86_64" in v and k not in DENY:
+        print(v["linux-x86_64"]["relative_path"])
+')" || { log "WARNING: could not read CUDA manifest"; return 1; }
+
+    local n=0 comp name tmpd
+    for comp in $paths; do
         name="$(basename "$comp")"
-        log "fetching $name"
         if ! curl -fsSL "$base/$comp" -o "/tmp/$name"; then
-            log "WARNING: could not download $name; JIT kernels will fail"
-            return 1
+            log "WARNING: download failed for $name"
+            continue
         fi
         tmpd="$(mktemp -d)"
-        tar -xf "/tmp/$name" -C "$tmpd" && rm -f "/tmp/$name"
-        # every archive is a single <component>-archive/ dir holding bin/ include/ lib/
-        cp -a "$tmpd"/*/. "$dest"/ 2>/dev/null || true
-        rm -rf "$tmpd"
+        tar -xf "/tmp/$name" -C "$tmpd" 2>/dev/null && cp -a "$tmpd"/*/. "$dest"/ 2>/dev/null
+        rm -rf "$tmpd" "/tmp/$name"
+        n=$(( n + 1 ))
     done
-    # nvcc searches $CUDA_HOME/lib64 on x86_64, but the redistributable archives
-    # lay their libraries out under lib/. Without this the compile succeeds and
-    # only the link fails, on -lcudart_static and -lcudadevrt.
-    [ -d "$dest/lib" ] && [ ! -e "$dest/lib64" ] && ln -sfn "$dest/lib" "$dest/lib64"
+    log "installed $n CUDA components into $dest"
 
-    export CUDA_HOME="$dest"
-    export CUDA_PATH="$dest"
-    export PATH="$dest/bin:$PATH"
-    export LD_LIBRARY_PATH="$dest/lib:${LD_LIBRARY_PATH:-}"
-    # Some build paths hardcode /usr/local/cuda rather than reading CUDA_HOME.
-    mkdir -p /usr/local/cuda
-    cp -asn "$dest"/. /usr/local/cuda/ 2>/dev/null || true
-    if [ -n "$cache" ] && [ ! -f "$cache" ]; then
-        log "caching assembled toolchain -> $cache"
-        tar -cf "${cache}.tmp$$" -C "$dest" . 2>/dev/null && mv -f "${cache}.tmp$$" "$cache" || \
-            { log "  (cache write failed; continuing)"; rm -f "${cache}.tmp$$"; }
+    export_cuda_env
+    if [ -n "$cache" ]; then
+        log "caching toolkit -> $cache"
+        tar -cf "${cache}.tmp$$" -C "$dest" . 2>/dev/null && mv -f "${cache}.tmp$$" "$cache" \
+            || { log "  (cache write failed; continuing)"; rm -f "${cache}.tmp$$"; }
     fi
     verify_nvcc
 }
 
-# Checks the toolchain end to end: the headers each past failure turned on, then
-# an actual sm_103 compile+link. Every one of these was previously discovered
-# only once vLLM attempted a real JIT build, ~15 minutes into a weight load.
+export_cuda_env() {
+    local dest=/opt/cuda-jit
+    # nvcc searches $CUDA_HOME/lib64 on x86_64; the archives use lib/.
+    [ -d "$dest/lib" ] && [ ! -e "$dest/lib64" ] && ln -sfn "$dest/lib" "$dest/lib64"
+    export CUDA_HOME="$dest" CUDA_PATH="$dest"
+    export PATH="$dest/bin:$PATH"
+    export LD_LIBRARY_PATH="$dest/lib:${LD_LIBRARY_PATH:-}"
+    mkdir -p /usr/local/cuda && cp -asn "$dest"/. /usr/local/cuda/ 2>/dev/null || true
+}
+
+# Compile and link a kernel that includes the headers FlashInfer's trtllm
+# kernels pull in. Each of these was previously discovered only when vLLM
+# attempted a real JIT build, 15-50 minutes into a run.
 verify_nvcc() {
-    local dest=/opt/cuda-jit h missing=0
-    if command -v nvcc >/dev/null 2>&1; then
-        log "nvcc: $(nvcc --version 2>/dev/null | tail -1)"
-        for h in crt/host_defines.h cuda_runtime.h cublasLt.h cublas_v2.h; do
-            [ -f "$dest/include/$h" ] || { log "  MISSING header: $h"; missing=1; }
-        done
-        [ -x "$dest/nvvm/bin/cicc" ] || { log "  MISSING cicc (libnvvm)"; missing=1; }
-        [ -f "$dest/lib/libcudart_static.a" ] || { log "  MISSING libcudart_static.a"; missing=1; }
-        printf '#include <cublasLt.h>\n__global__ void k(){}\nint main(){return 0;}\n' > /tmp/probe.cu
-        if nvcc -arch=sm_103 -o /tmp/probe /tmp/probe.cu 2>/tmp/probe.err; then
-            log "  nvcc sm_103 compile+link probe: OK (headers ok=$([ $missing = 0 ] && echo yes || echo no))"
-            return 0
-        fi
-        log "  nvcc sm_103 compile probe FAILED:"; tail -6 /tmp/probe.err
-        return 1
+    local dest=/opt/cuda-jit h missing=""
+    command -v nvcc >/dev/null 2>&1 || { log "WARNING: nvcc not on PATH"; return 1; }
+    for h in crt/host_defines.h cuda_runtime.h cublasLt.h cublas_v2.h curand_kernel.h \
+             cuda_fp8.h cuda_bf16.h cooperative_groups.h; do
+        [ -f "$dest/include/$h" ] || missing="$missing $h"
+    done
+    [ -x "$dest/nvvm/bin/cicc" ] || missing="$missing cicc"
+    [ -f "$dest/lib/libcudart_static.a" ] || missing="$missing libcudart_static.a"
+    [ -n "$missing" ] && log "  MISSING:$missing"
+    cat > /tmp/probe.cu <<'CUEOF'
+#include <cublasLt.h>
+#include <curand_kernel.h>
+#include <cuda_fp8.h>
+#include <cuda_bf16.h>
+__global__ void k(){}
+int main(){return 0;}
+CUEOF
+    if nvcc -arch=sm_103 -o /tmp/probe /tmp/probe.cu 2>/tmp/probe.err; then
+        log "  nvcc sm_103 compile+link probe: OK$([ -n "$missing" ] && echo " (but headers missing:$missing)")"
+        return 0
     fi
-    log "WARNING: nvcc not on PATH"
+    log "  nvcc sm_103 probe FAILED:"; tail -6 /tmp/probe.err
     return 1
 }
 ensure_nvcc || log "continuing without nvcc; JIT-dependent kernels may fail"
