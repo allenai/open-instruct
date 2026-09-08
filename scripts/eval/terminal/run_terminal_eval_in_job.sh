@@ -14,9 +14,10 @@
 #      probes, with the qwen3_xml tool parser and the olmo3 reasoning parser the Olmo 3.5
 #      template needs.
 #   2. Its hard-coded `--dataset "$DATASET"` becomes `$HARBOR_DATASET_FLAGS`, so a dataset can
-#      also be given as a local task directory (`-p`). Terminal-Bench 2.1 is not in the harbor
-#      registry that tmax's harbor pin (0.6.6) reads; it is a git repo of harbor tasks, which
-#      we clone and pass with -p.
+#      also be given as a local task directory (`-p`): DATASET_GIT_URL clones a repo of harbor
+#      tasks (e.g. harbor-framework/terminal-bench-2-1 at a pinned commit) for runs that must
+#      be reproducible against a fixed ref. By default Terminal-Bench 2.1 is taken from its
+#      Harbor Hub id, terminal-bench/terminal-bench-2-1, as the reference tmax run did.
 #
 # Both substitutions must match exactly once or the run aborts, so drift in tmax shows up as
 # a loud failure rather than a silently different evaluation.
@@ -24,7 +25,8 @@
 # Inputs (environment):
 #   CKPT                HF export directory                              (required)
 #   SERVE_LIB           path to olmoe3_kda_vllm_serve.sh                 (required)
-#   DATASET             harbor registry id, e.g. openthoughts-tblite@2.0 or terminal-bench@2.0;
+#   DATASET             harbor dataset id: registry name@version, or a Harbor Hub id such as
+#                       terminal-bench/terminal-bench-2-1;
 #                       ignored when DATASET_GIT_URL is set
 #   DATASET_GIT_URL     git repo of harbor tasks (e.g. Terminal-Bench 2.1); DATASET_GIT_REF pins
 #                       it; DATASET_SUBDIR is the tasks directory inside (default tasks)
@@ -38,7 +40,7 @@ set -euo pipefail
 : "${SERVE_LIB:?path to olmoe3_kda_vllm_serve.sh}"
 : "${RESULTS_DIR:?results directory on Weka}"
 TMAX_GIT_URL="${TMAX_GIT_URL:-https://github.com/shatu/tmax.git}"
-TMAX_GIT_REF="${TMAX_GIT_REF:-f0a3db4792ccd6cf75c377ea7fe628c3b3ab9145}"  # pd_sft_regen, 2026-08-16
+TMAX_GIT_REF="${TMAX_GIT_REF:-595caabfeaec}"  # pd_sft_podman, 2026-08-27: the ref of the reference eval run
 DATASET="${DATASET:-terminal-bench@2.0}"
 DATASET_SUBDIR="${DATASET_SUBDIR:-tasks}"
 WORKDIR="${WORKDIR:-/workspace}"
@@ -71,7 +73,7 @@ if [ -n "${DATASET_GIT_URL:-}" ]; then
     log "dataset: local task directory $WORKDIR/dataset/$DATASET_SUBDIR ($(find "$WORKDIR/dataset/$DATASET_SUBDIR" -mindepth 1 -maxdepth 1 -type d | wc -l) tasks)"
 else
     HARBOR_DATASET_FLAGS="--dataset $DATASET"
-    log "dataset: harbor registry $DATASET"
+    log "dataset: harbor id $DATASET"
 fi
 export HARBOR_DATASET_FLAGS
 
@@ -109,7 +111,7 @@ PY
 
 # ---- run tmax's pipeline against our server -------------------------------------------------
 export MODEL_PATH="$CKPT" MODEL_REVISION=main
-export VLLM_PORT="$PORT" TP_SIZE="${TENSOR_PARALLEL:-1}" DP_SIZE=1
+export VLLM_PORT="$PORT" TP_SIZE="${TENSOR_PARALLEL:-1}" DP_SIZE="${DATA_PARALLEL:-1}"
 export AGENT_IMPORT_PATH="${AGENT_IMPORT_PATH:-Vanillux2Agent:Vanillux2Agent}"
 export JOB_NAME="${JOB_NAME:-${SERVED_MODEL_NAME}-${DATASET//[^A-Za-z0-9]/-}}"
 export N_CONCURRENT="${N_CONCURRENT:-8}" N_ATTEMPTS="${N_ATTEMPTS:-1}"

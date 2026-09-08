@@ -1,7 +1,7 @@
 #!/bin/bash
 # Terminal-Bench 2.1 / 2.0 and OpenThoughts-TBLite on an OLMoE3 KDA MoE HF checkpoint, on Beaker.
 #
-#   ./scripts/eval/terminal/olmoe3_kda_terminal_eval.sh <hf_dir> <run_name> [tb2.1|tb2.0|tblite|<name@version>]
+#   ./scripts/eval/terminal/olmoe3_kda_terminal_eval.sh <hf_dir> <run_name> [tb2.1|tb2.1-git|tb2.0|tblite|<name@version>]
 #
 #   ./scripts/eval/terminal/olmoe3_kda_terminal_eval.sh \
 #       /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/ecppxpon/hf_step604 kda-sft-simfc-tmax tb2.1
@@ -19,32 +19,39 @@
 #   GitHub at the launching commit (or read from the checkout when it lives on Weka), and the
 #   tmax checkout is cloned inside the job at a pinned ref.
 #
-# Datasets: `tblite` and `tb2.0` are harbor registry ids. Terminal-Bench 2.1 is not in the
-# registry that tmax's harbor pin reads; it is the harbor-framework/terminal-bench-2-1 repo of
-# harbor tasks (90 tasks, 26 fixed relative to 2.0), cloned at a pinned commit and passed to
-# harbor as a local task directory.
+# Datasets: `tblite` and `tb2.0` are harbor registry ids; `tb2.1` is the Harbor Hub id
+# terminal-bench/terminal-bench-2-1, as the reference tmax run (Beaker 01M125XZZKJCFJ7NHEBECVTGKA)
+# used; `tb2.1-git` clones harbor-framework/terminal-bench-2-1 at a pinned commit instead.
 #
-# One GPU: the 1.3B-active MoE fits on an H100 with the 65536 window and serves 8 concurrent
-# agents, but not quickly: in eager mode an agent step takes ~1 min on average, and the tasks'
-# own agent timeouts (900 s for most Terminal-Bench 2.1 tasks) then cut most trials off around
-# step 15 of 64. Set HARBOR_AGENT_TIMEOUT_MULTIPLIER (or HARBOR_AGENT_TIMEOUT_SEC) to give the
-# agent a time budget that matches its speed, or lower N_CONCURRENT. Task containers run under podman inside the job (BEAKER_ALLOW_SUBCONTAINERS)
-# and pull from Docker Hub with the DOCKER_PAT secret to stay under the anonymous pull cap.
+# Protocol follows that reference run: tmax at pd_sft_podman (595caabf), Vanillux2Agent with its
+# 64-step budget, 8 concurrent trials, 1 attempt, 65536 context, the tasks' own timeouts (no
+# multipliers), 2 GPUs. The reference itself ended with 46 of 88 trials in error, 35 of them
+# agent timeouts, at mean reward 0.191; timeouts are part of the protocol.
+#
+# Serving speed matters under time-limited tasks: on one eager-mode H100 an agent step averaged
+# ~1 min at 8 concurrent trials, against 900 s per-task agent timeouts. The default is two GPUs
+# as two vLLM replicas. HARBOR_AGENT_TIMEOUT_MULTIPLIER / HARBOR_AGENT_TIMEOUT_SEC are passed
+# through for deliberate departures from the protocol. Task containers run under podman inside
+# the job (BEAKER_ALLOW_SUBCONTAINERS) and pull from Docker Hub with the DOCKER_PAT secret.
 #
 # Not verified end to end at the time of writing: the serving stack on the tmax image
 # (verified on the olmo-eval image), and the podman path in the ai2/open-instruct-dev
 # workspace. The runner smoke-tests one tool call before handing over to harbor.
 set -euo pipefail
 
-HF_DIR="${1:?usage: $0 <hf_dir> <run_name> [tb2.1|tb2.0|tblite|<name@version>]}"
-RUN_NAME="${2:?usage: $0 <hf_dir> <run_name> [tb2.1|tb2.0|tblite|<name@version>]}"
+HF_DIR="${1:?usage: $0 <hf_dir> <run_name> [tb2.1|tb2.1-git|tb2.0|tblite|<name@version>]}"
+RUN_NAME="${2:?usage: $0 <hf_dir> <run_name> [tb2.1|tb2.1-git|tb2.0|tblite|<name@version>]}"
 DATASET_CHOICE="${3:-tb2.1}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PY="${PY:-uv run python}"
 PRIORITY="${PRIORITY:-urgent}"
 CLUSTER="${CLUSTER:-ai2/saturn}"
-GPUS="${GPUS:-1}"
+# Two GPUs as two replicas (vLLM data parallelism), matching the reference run's 2-GPU serving
+# throughput without relying on the plugin's untested tensor parallelism.
+GPUS="${GPUS:-2}"
+DATA_PARALLEL="${DATA_PARALLEL:-$GPUS}"
+TENSOR_PARALLEL="${TENSOR_PARALLEL:-1}"
 IMAGE="${IMAGE:-hamishivi/tmax-eval-interactive}"
 BEAKER_USER="${BEAKER_USER:-$(beaker account whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["name"])')}"
 # Docker Hub credentials for task image pulls: prefer the user's own secret, fall back to the
@@ -62,6 +69,11 @@ esac
 DATASET_ENVS=()
 case "$DATASET_CHOICE" in
     tb2.1)
+        # Harbor Hub id, as the reference tmax run used (harbor resolves it without a login).
+        DATASET_LABEL="terminal-bench/terminal-bench-2-1"; DATASET_ENVS+=(--env "DATASET=$DATASET_LABEL") ;;
+    tb2.1-git)
+        # The same tasks from the harbor-framework/terminal-bench-2-1 repo at a pinned commit,
+        # passed to harbor as a local task directory; for reproducibility against a fixed ref.
         DATASET_LABEL="terminal-bench@2.1"
         DATASET_ENVS+=(--env "DATASET=$DATASET_LABEL"
                        --env "DATASET_GIT_URL=${TB21_GIT_URL:-https://github.com/harbor-framework/terminal-bench-2-1.git}"
@@ -70,7 +82,7 @@ case "$DATASET_CHOICE" in
     tb2.0)  DATASET_LABEL="terminal-bench@2.0";     DATASET_ENVS+=(--env "DATASET=$DATASET_LABEL") ;;
     tblite) DATASET_LABEL="openthoughts-tblite@2.0"; DATASET_ENVS+=(--env "DATASET=$DATASET_LABEL") ;;
     *@*)    DATASET_LABEL="$DATASET_CHOICE";         DATASET_ENVS+=(--env "DATASET=$DATASET_LABEL") ;;
-    *) echo "unknown dataset '$DATASET_CHOICE' (expected tb2.1, tb2.0, tblite, or a harbor name@version)" >&2; exit 1 ;;
+    *) echo "unknown dataset '$DATASET_CHOICE' (expected tb2.1, tb2.1-git, tb2.0, tblite, or a harbor name@version)" >&2; exit 1 ;;
 esac
 DATASET_SLUG="${DATASET_LABEL//[^A-Za-z0-9]/-}"
 JOB_NAME="${JOB_NAME:-${RUN_NAME}-${DATASET_SLUG}}"
@@ -110,12 +122,12 @@ $PY mason.py \
     "${DATASET_ENVS[@]}" \
     --env "N_CONCURRENT=${N_CONCURRENT:-8}" --env "N_ATTEMPTS=${N_ATTEMPTS:-1}" --env "N_TASKS=${N_TASKS:-}" \
     --env "AGENT_IMPORT_PATH=${AGENT_IMPORT_PATH:-Vanillux2Agent:Vanillux2Agent}" \
-    --env "TENSOR_PARALLEL=$GPUS" --env "MAX_MODEL_LEN=${MAX_MODEL_LEN:-65536}" \
+    --env "TENSOR_PARALLEL=$TENSOR_PARALLEL" --env "DATA_PARALLEL=$DATA_PARALLEL" --env "MAX_MODEL_LEN=${MAX_MODEL_LEN:-65536}" \
     --env "MAX_OUTPUT_TOKENS=${MAX_OUTPUT_TOKENS:-16384}" \
     --env "TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-qwen3_xml}" --env "REASONING_PARSER=${REASONING_PARSER:-olmo3}" \
     --env "VLLM_EXTRA_ARGS=${VLLM_EXTRA_ARGS:-}" \
     --env "TMAX_GIT_URL=${TMAX_GIT_URL:-https://github.com/shatu/tmax.git}" \
-    --env "TMAX_GIT_REF=${TMAX_GIT_REF:-f0a3db4792ccd6cf75c377ea7fe628c3b3ab9145}" \
+    --env "TMAX_GIT_REF=${TMAX_GIT_REF:-595caabfeaec}" \
     --env "PLUGIN_DIR=${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}" \
     --env "HARBOR_AGENT_TIMEOUT_SEC=${HARBOR_AGENT_TIMEOUT_SEC:-}" --env "HARBOR_TIMEOUT_MULTIPLIER=${HARBOR_TIMEOUT_MULTIPLIER:-}" \
     --env "HARBOR_AGENT_TIMEOUT_MULTIPLIER=${HARBOR_AGENT_TIMEOUT_MULTIPLIER:-}" --env "HARBOR_VERIFIER_TIMEOUT_MULTIPLIER=${HARBOR_VERIFIER_TIMEOUT_MULTIPLIER:-}" \

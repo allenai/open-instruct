@@ -20,7 +20,8 @@
 #   MAX_MODEL_LEN           default 65536, the family's native window
 #   MAX_OUTPUT_TOKENS       default completion cap when a client sends no max_tokens (8192)
 #   GPU_MEMORY_UTILIZATION  default 0.9
-#   TENSOR_PARALLEL         default 1
+#   TENSOR_PARALLEL         default 1; the plugin's TP support is untested
+#   DATA_PARALLEL           default 1; extra replicas on extra GPUs, the safe way to add throughput
 #   TOOL_CALL_PARSER        default qwen3_xml: the Olmo 3.5 template emits Qwen3-Coder-style XML
 #   REASONING_PARSER        default olmo3: string-based, handles <think>/</think> as plain text and
 #                           a <think> supplied by the prompt (the qwen3 parser needs single tokens)
@@ -48,6 +49,7 @@ olmoe3_vllm_defaults() {
     MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-8192}"
     GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
     TENSOR_PARALLEL="${TENSOR_PARALLEL:-1}"
+    DATA_PARALLEL="${DATA_PARALLEL:-1}"
     TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen3_xml}"
     REASONING_PARSER="${REASONING_PARSER:-olmo3}"
     SERVER_TIMEOUT_S="${SERVER_TIMEOUT_S:-2400}"
@@ -98,6 +100,7 @@ start_olmoe3_vllm() {
         --max-model-len "$MAX_MODEL_LEN" \
         --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
         --tensor-parallel-size "$TENSOR_PARALLEL" \
+        --data-parallel-size "$DATA_PARALLEL" \
         --enforce-eager \
         --mamba-ssm-cache-dtype float32 \
         --attention-backend FLASH_ATTN \
