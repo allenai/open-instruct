@@ -17,7 +17,10 @@
 #
 # Env vars (set by beaker_configs/launch_thinking_traces_sweep.sh):
 #   MODELS             space-separated HF repo ids, served in order
-#   VLLM_PKG_VERSION   default 0.28.0 (needs >= 0.28 for GLM-5.2/Kimi-K2.x/
+#   VLLM_PKG_VERSION   default 0.23.0 (validated by tmax on this image + B300;
+#                      registers all four architectures. Newer vLLM JIT-builds
+#                      FlashInfer kernels with nvcc, which the image lacks.)
+#   (was: needs >= 0.28 for GLM-5.2/Kimi-K2.x/
 #                      DeepSeek-V3.2/Qwen3.5 architectures)
 #   GPU_COUNT/TP_SIZE  GPUs and tensor-parallel size (default: 4 / GPU_COUNT)
 #   MAX_MODEL_LEN      context (default 131072)
@@ -47,7 +50,7 @@ dump_vllm_failure() {
 }
 
 : "${MODELS:?set MODELS}"
-: "${VLLM_PKG_VERSION:=0.28.0}"
+: "${VLLM_PKG_VERSION:=0.23.0}"
 : "${SERVE_PORT:=8008}"
 : "${GPU_COUNT:=4}"
 : "${TP_SIZE:=$GPU_COUNT}"
