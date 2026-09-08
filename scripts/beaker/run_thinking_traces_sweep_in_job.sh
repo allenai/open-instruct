@@ -149,31 +149,50 @@ ensure_nvcc() {
     local base="https://developer.download.nvidia.com/compute/cuda/redist"
     local dest=/opt/cuda-jit
     mkdir -p "$dest"
-    local comp
+    # CUDA 13 splits the toolchain finely, and a partial install fails late and
+    # confusingly: without cuda_crt the build dies on 'crt/host_defines.h: No
+    # such file or directory', and without libnvvm nvcc has no cicc to run.
+    #   cuda_nvcc  - nvcc, ptxas, cudafe++, fatbinary, nvlink
+    #   cuda_crt   - the crt/ headers nvcc's generated host code includes
+    #   cuda_cudart- vector_types.h and friends
+    #   cuda_cccl  - CUB/Thrust headers the kernels use
+    #   libnvvm    - cicc, the NVVM device-compiler frontend
+    local comp name tmpd
     for comp in \
         "cuda_nvcc/linux-x86_64/cuda_nvcc-linux-x86_64-13.1.115-archive.tar.xz" \
+        "cuda_crt/linux-x86_64/cuda_crt-linux-x86_64-13.1.115-archive.tar.xz" \
         "cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-13.1.80-archive.tar.xz" \
-        "cuda_cccl/linux-x86_64/cuda_cccl-linux-x86_64-13.1.115-archive.tar.xz"
+        "cuda_cccl/linux-x86_64/cuda_cccl-linux-x86_64-13.1.115-archive.tar.xz" \
+        "libnvvm/linux-x86_64/libnvvm-linux-x86_64-13.1.115-archive.tar.xz"
     do
-        log "fetching $(basename "$comp")"
-        if ! curl -fsSL "$base/$comp" -o /tmp/c.tar.xz; then
-            log "WARNING: could not download $comp; JIT kernels will fail"
+        name="$(basename "$comp")"
+        log "fetching $name"
+        if ! curl -fsSL "$base/$comp" -o "/tmp/$name"; then
+            log "WARNING: could not download $name; JIT kernels will fail"
             return 1
         fi
-        # each archive has a single top-level dir; merge their bin/ include/ lib/
-        tar -xf /tmp/c.tar.xz -C /tmp && rm -f /tmp/c.tar.xz
-        local top; top="$(find /tmp -maxdepth 1 -name '*-archive' -type d | head -1)"
-        [ -n "$top" ] && cp -a "$top"/. "$dest"/ && rm -rf "$top"
+        tmpd="$(mktemp -d)"
+        tar -xf "/tmp/$name" -C "$tmpd" && rm -f "/tmp/$name"
+        # every archive is a single <component>-archive/ dir holding bin/ include/ lib/
+        cp -a "$tmpd"/*/. "$dest"/ 2>/dev/null || true
+        rm -rf "$tmpd"
     done
     export CUDA_HOME="$dest"
     export PATH="$dest/bin:$PATH"
-    # FlashInfer and torch look for $CUDA_HOME/bin/nvcc, but some paths hardcode
-    # /usr/local/cuda, so make that resolve here too.
-    mkdir -p /usr/local/cuda/bin /usr/local/cuda/include
-    ln -sf "$dest/bin/nvcc" /usr/local/cuda/bin/nvcc 2>/dev/null || true
-    cp -an "$dest"/include/. /usr/local/cuda/include/ 2>/dev/null || true
+    # Some build paths hardcode /usr/local/cuda rather than reading CUDA_HOME.
+    mkdir -p /usr/local/cuda
+    cp -asn "$dest"/. /usr/local/cuda/ 2>/dev/null || true
     if command -v nvcc >/dev/null 2>&1; then
-        log "nvcc installed: $(nvcc --version 2>/dev/null | tail -1)  CUDA_HOME=$CUDA_HOME"
+        log "nvcc: $(nvcc --version 2>/dev/null | tail -1)"
+        log "  CUDA_HOME=$CUDA_HOME  cicc=$([ -x "$dest/nvvm/bin/cicc" ] && echo yes || echo MISSING)" \
+            "crt_headers=$([ -f "$dest/include/crt/host_defines.h" ] && echo yes || echo MISSING)"
+        # Prove the toolchain works before vLLM depends on it.
+        printf '__global__ void k(){}\nint main(){return 0;}\n' > /tmp/probe.cu
+        if nvcc -arch=sm_103 -o /tmp/probe /tmp/probe.cu 2>/tmp/probe.err; then
+            log "  nvcc sm_103 compile probe: OK"
+        else
+            log "  nvcc sm_103 compile probe FAILED:"; tail -5 /tmp/probe.err
+        fi
     else
         log "WARNING: nvcc still not on PATH after install"
     fi
