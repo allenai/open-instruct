@@ -79,6 +79,12 @@ unset VLLM_PORT
 # tmax recipe, which keeps DeepGEMM opt-in for the same reason.
 export VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}"
 export VLLM_MOE_USE_DEEP_GEMM="${VLLM_MOE_USE_DEEP_GEMM:-0}"
+# FlashInfer JIT-builds its sampling kernels for sm_103 the same way, and hits
+# the same missing compiler:
+#   /usr/local/cuda/bin/nvcc: not found ... ninja: build stopped
+# There is no CUDA 13 *dev* Beaker image to get nvcc from, so route sampling
+# through vLLM's native PyTorch path instead.
+export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 
 REPO_ROOT="$(pwd)"
 mkdir -p "$RESULTS_DIR"
@@ -105,7 +111,8 @@ cat <<EOF
   sampling      : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples, T=${TEMPERATURE} top_p=${TOP_P} seed=${SEED}
   concurrency   : ${CONCURRENCY}
   trace store   : ${TRACE_STORE}
-  DeepGEMM      : VLLM_USE_DEEP_GEMM=${VLLM_USE_DEEP_GEMM} MOE=${VLLM_MOE_USE_DEEP_GEMM} (needs nvcc; off => CUTLASS)
+  JIT paths off : DEEP_GEMM=${VLLM_USE_DEEP_GEMM} MOE_DEEP_GEMM=${VLLM_MOE_USE_DEEP_GEMM} FLASHINFER_SAMPLER=${VLLM_USE_FLASHINFER_SAMPLER}
+                  (image has no nvcc, so every JIT path must fall back to precompiled kernels)
   HF_HOME       : ${HF_HOME:-<default>}
   hub repo      : ${HF_REPO_ID:-<none: push skipped>}
 EOF
