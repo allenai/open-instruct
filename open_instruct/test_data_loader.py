@@ -122,6 +122,81 @@ class TestComputeGroupAdvantages(unittest.TestCase):
 
         np.testing.assert_allclose(advantages, np.zeros_like(scores))
 
+    @parameterized.parameterized.expand([("standard",), ("centered",), ("maxrl",)])
+    def test_all_ones_valid_mask_matches_unmasked(self, normalization_type):
+        rng = np.random.default_rng(0)
+        scores = rng.random(12)
+
+        unmasked = data_loader.compute_group_advantages(
+            scores=scores, num_samples_per_prompt=4, advantage_normalization_type=normalization_type
+        )
+        masked = data_loader.compute_group_advantages(
+            scores=scores,
+            num_samples_per_prompt=4,
+            advantage_normalization_type=normalization_type,
+            valid_mask=np.ones_like(scores),
+        )
+
+        np.testing.assert_allclose(masked, unmasked)
+
+    def test_valid_mask_excludes_failed_sample_from_group_baseline(self):
+        # One infra-failed zero in a group of 4: the baseline must come from
+        # the 3 surviving samples (mean 1/3), and the failed sample's
+        # advantage must be exactly 0, not -mean.
+        scores = np.array([1.0, 0.0, 0.0, 0.0])
+        valid_mask = np.array([1.0, 1.0, 1.0, 0.0])
+
+        advantages = data_loader.compute_group_advantages(
+            scores=scores, num_samples_per_prompt=4, advantage_normalization_type="centered", valid_mask=valid_mask
+        )
+
+        np.testing.assert_allclose(advantages, np.array([2.0 / 3.0, -1.0 / 3.0, -1.0 / 3.0, 0.0]))
+
+    def test_valid_mask_standard_uses_std_of_valid_samples_only(self):
+        scores = np.array([1.0, 0.0, 0.0, 0.0])
+        valid_mask = np.array([1.0, 1.0, 1.0, 0.0])
+        valid_mean = 1.0 / 3.0
+        valid_std = np.sqrt(((1.0 - valid_mean) ** 2 + 2 * valid_mean**2) / 3.0)
+
+        advantages = data_loader.compute_group_advantages(
+            scores=scores, num_samples_per_prompt=4, advantage_normalization_type="standard", valid_mask=valid_mask
+        )
+
+        denominator = valid_std + 1e-8
+        expected = np.array(
+            [(1.0 - valid_mean) / denominator, -valid_mean / denominator, -valid_mean / denominator, 0.0]
+        )
+        np.testing.assert_allclose(advantages, expected, rtol=1e-6)
+
+    def test_valid_mask_maxrl_normalizes_by_valid_mean(self):
+        scores = np.array([1.0, 0.0, 0.0, 0.0])
+        valid_mask = np.array([1.0, 1.0, 1.0, 0.0])
+
+        advantages = data_loader.compute_group_advantages(
+            scores=scores, num_samples_per_prompt=4, advantage_normalization_type="maxrl", valid_mask=valid_mask
+        )
+
+        np.testing.assert_allclose(advantages, np.array([2.0, -1.0, -1.0, 0.0]))
+
+    def test_all_invalid_group_gets_zero_advantages_without_affecting_others(self):
+        scores = np.array([0.0, 0.0, 1.0, 0.0])
+        valid_mask = np.array([0.0, 0.0, 1.0, 1.0])
+
+        advantages = data_loader.compute_group_advantages(
+            scores=scores, num_samples_per_prompt=2, advantage_normalization_type="centered", valid_mask=valid_mask
+        )
+
+        np.testing.assert_allclose(advantages, np.array([0.0, 0.0, 0.5, -0.5]))
+
+    def test_valid_mask_size_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            data_loader.compute_group_advantages(
+                scores=np.zeros(4),
+                num_samples_per_prompt=4,
+                advantage_normalization_type="centered",
+                valid_mask=np.ones(3),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

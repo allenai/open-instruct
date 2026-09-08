@@ -1177,6 +1177,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
             logger.warning(error_msg)
             rollout.done = True
             rollout.rewards.append(0.0)
+            rollout.info["infra_failed"] = True
             rollout.tool_error += error_msg
             rollout.tool_call_stats.append(ToolCallStats(tool_name="env_reset", success=False, runtime=0.0))
             max_steps = 0
@@ -1293,6 +1294,12 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                     if step_result.done:
                         rollout.done = True
                     meta = step_result.metadata or {}
+                    if meta.get("sandbox_died"):
+                        # Sandbox vanished mid-episode (Spot preemption): the
+                        # zero reward reflects infrastructure, not the policy.
+                        # data_loader can exclude these from the loss via
+                        # mask_infra_failed_completions.
+                        rollout.info["infra_failed"] = True
                     rollout.timeout = rollout.timeout or meta.get("timeout", False)
                     rollout.tool_error += meta.get("error", "")
                     rollout.tool_runtime += meta.get("runtime", 0.0)
@@ -1328,6 +1335,7 @@ async def process_request(actor: LLMRayActor, sub_request_id: str, sampling_para
                         )
                         logger.warning(f"[{sub_request_id}] {breaker_msg}")
                         rollout.tool_error += breaker_msg
+                        rollout.info["infra_failed"] = True
                         rollout.done = True
                 except Exception as e:
                     add_timing("tool_step", phase_start_time)

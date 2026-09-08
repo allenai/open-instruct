@@ -571,6 +571,20 @@ class StreamingDataLoaderConfig:
     Prompt groups with zero mean reward get zero advantages.
     """
     mask_truncated_completions: bool = False
+    mask_infra_failed_completions: bool = False
+    """Exclude infrastructure-failed rollouts from the loss.
+
+    Rollouts whose zero reward reflects infrastructure rather than the policy
+    (sandbox died mid-episode on a preempted Spot node, environment reset
+    failed, or the consecutive-timeout circuit breaker tripped — flagged as
+    ``info.infra_failed`` by the rollout loop) are excluded from group
+    advantage statistics (mean/std computed over surviving samples only,
+    advantage 0 for the failed ones) and then dropped from the training batch.
+    Without this, every preemption injects a fake zero into its GRPO group,
+    biasing the surviving samples' advantages upward. ``val/infra_failed_rate``
+    reports the affected fraction whether or not masking is enabled. Defaults
+    to ``False`` so existing runs are unchanged.
+    """
     mask_non_submitting_completions: bool = False
     """Drop rollouts where the env state never reached `done=True`.
 
@@ -864,8 +878,18 @@ def _compute_avg_group_performance(n_solved: int, n_zero: int, n_kept: int, batc
 
 
 def compute_group_advantages(
-    scores: np.ndarray, num_samples_per_prompt: int, advantage_normalization_type: str
+    scores: np.ndarray,
+    num_samples_per_prompt: int,
+    advantage_normalization_type: str,
+    valid_mask: np.ndarray | None = None,
 ) -> np.ndarray:
+    """Compute per-group advantages, optionally over a subset of valid samples.
+
+    When ``valid_mask`` is given (1.0 = valid, 0.0 = infra-failed), group mean
+    and std are computed over the valid samples only and invalid samples get
+    advantage 0, so a sandbox death's fake zero reward cannot bias its group's
+    baseline. A group with no valid samples gets all-zero advantages.
+    """
     if num_samples_per_prompt <= 0:
         raise ValueError(f"num_samples_per_prompt must be positive, got {num_samples_per_prompt}.")
     scores = np.asarray(scores)
@@ -877,10 +901,21 @@ def compute_group_advantages(
 
     score_dtype = np.result_type(scores.dtype, np.float32)
     scores_per_prompt = scores.astype(score_dtype, copy=False).reshape(-1, num_samples_per_prompt)
-    mean_grouped_rewards = scores_per_prompt.mean(axis=-1, keepdims=True)
+    if valid_mask is None:
+        valid_per_prompt = np.ones_like(scores_per_prompt)
+    else:
+        valid_mask = np.asarray(valid_mask)
+        if valid_mask.size != scores.size:
+            raise ValueError(f"valid_mask size ({valid_mask.size}) must match scores size ({scores.size}).")
+        valid_per_prompt = valid_mask.astype(score_dtype, copy=False).reshape(-1, num_samples_per_prompt)
+    # max(count, 1) keeps the divisions defined for all-invalid groups; the
+    # trailing multiplication by the mask zeroes those groups out anyway.
+    valid_counts = np.maximum(valid_per_prompt.sum(axis=-1, keepdims=True), 1.0)
+    mean_grouped_rewards = (scores_per_prompt * valid_per_prompt).sum(axis=-1, keepdims=True) / valid_counts
 
     if advantage_normalization_type == "standard":
-        std_grouped_rewards = scores_per_prompt.std(axis=-1, keepdims=True)
+        squared_deviations = valid_per_prompt * (scores_per_prompt - mean_grouped_rewards) ** 2
+        std_grouped_rewards = np.sqrt(squared_deviations.sum(axis=-1, keepdims=True) / valid_counts)
         advantages = (scores_per_prompt - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
     elif advantage_normalization_type == "centered":
         advantages = scores_per_prompt - mean_grouped_rewards
@@ -894,7 +929,7 @@ def compute_group_advantages(
         )
     else:
         raise ValueError(f"Invalid advantage normalization type: {advantage_normalization_type}")
-    return advantages.reshape(-1)
+    return (advantages * valid_per_prompt).reshape(-1)
 
 
 def single_example_collator(examples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1725,10 +1760,25 @@ class DataPreparationActor:
                         )
                         concave_length_metrics["concave_length_penalty/groups_with_multi_success"] = len(group_gaps)
 
+            # Infra-failure stats are computed on the unfiltered batch (like the
+            # truncated-completion stats below) so val/infra_failed_rate stays
+            # meaningful whether or not mask_infra_failed_completions is set.
+            rollout_states = result.request_info.rollout_states
+            infra_failed_idxes = [
+                i
+                for i, rollout_state in enumerate(rollout_states[: len(scores)])
+                if (rollout_state.get("info") or {}).get("infra_failed", False)
+            ]
+            infra_valid_mask = None
+            if self.config.mask_infra_failed_completions and infra_failed_idxes:
+                infra_valid_mask = np.ones(len(scores), dtype=np.float32)
+                infra_valid_mask[infra_failed_idxes] = 0.0
+
             advantages = compute_group_advantages(
                 scores=scores,
                 num_samples_per_prompt=self.config.num_samples_per_prompt_rollout,
                 advantage_normalization_type=self.config.advantage_normalization_type,
+                valid_mask=infra_valid_mask,
             )
 
             if self.config.save_traces and self.config.rollouts_save_path:
@@ -1783,8 +1833,13 @@ class DataPreparationActor:
             num_non_submitting_completion = len(non_submitting_idxes)
             num_unmasked_non_submitting_completion = 0
 
-            do_mask_filter = self.config.mask_truncated_completions or self.config.mask_non_submitting_completions
+            do_mask_filter = (
+                self.config.mask_truncated_completions
+                or self.config.mask_non_submitting_completions
+                or self.config.mask_infra_failed_completions
+            )
             if do_mask_filter:
+                infra_drop_idxes = set(infra_failed_idxes) if self.config.mask_infra_failed_completions else set()
                 truncated_drop_idxes = {
                     i for i in range(num_before_filter) if self.config.mask_truncated_completions and _is_truncated(i)
                 }
@@ -1794,6 +1849,7 @@ class DataPreparationActor:
                     if self.config.mask_non_submitting_completions
                     and _is_non_submitting(i)
                     and i not in truncated_drop_idxes
+                    and i not in infra_drop_idxes
                 ]
                 unmasked_non_submitting_idxes: set[int] = set()
                 if self.config.mask_non_submitting_completions_percent > 0.0:
@@ -1810,13 +1866,19 @@ class DataPreparationActor:
                     )
                     num_unmasked_non_submitting_completion = len(unmasked_non_submitting_idxes)
 
-                drop_idxes = truncated_drop_idxes | (set(non_submitting_drop_idxes) - unmasked_non_submitting_idxes)
+                drop_idxes = (
+                    infra_drop_idxes
+                    | truncated_drop_idxes
+                    | (set(non_submitting_drop_idxes) - unmasked_non_submitting_idxes)
+                )
                 keep_idxes_list = [i for i in range(num_before_filter) if i not in drop_idxes]
                 num_dropped = num_before_filter - len(keep_idxes_list)
                 if num_dropped > 0:
                     logger.info(
                         f"[DataPreparationActor] Filtered {num_dropped} rollouts "
-                        f"(mask_truncated={self.config.mask_truncated_completions}, "
+                        f"(mask_infra_failed={self.config.mask_infra_failed_completions} "
+                        f"[{len(infra_drop_idxes)} dropped], "
+                        f"mask_truncated={self.config.mask_truncated_completions}, "
                         f"mask_non_submitting={self.config.mask_non_submitting_completions}, "
                         f"mask_non_submitting_percent={self.config.mask_non_submitting_completions_percent}, "
                         f"unmasked_non_submitting={num_unmasked_non_submitting_completion}). "
@@ -1914,6 +1976,10 @@ class DataPreparationActor:
                     "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
                     "val/sequence_lengths_solved_hist": sequence_length_solved,
                     "val/stop_rate": stop_rate,
+                    "val/infra_failed_count": len(infra_failed_idxes),
+                    "val/infra_failed_rate": (
+                        len(infra_failed_idxes) / num_before_filter if num_before_filter else 0.0
+                    ),
                     "val/truncated_completion_count": num_truncated_completion,
                     "val/truncated_completion_fraction": (
                         num_truncated_completion / num_before_filter if num_before_filter else 0.0

@@ -35,11 +35,18 @@
 # to do anything — without it the 2026-08-21 run lost 84 steps (21.5h on
 # 32 GPUs) to a single preempted Beaker node.
 #
-# min_runtime (BEAKER_MIN_RUNTIME, default 2h): the Beaker scheduler will not
+# min_runtime (BEAKER_MIN_RUNTIME, default 8h): the Beaker scheduler will not
 # preempt the job before it has run this long — enough to clear the slow
 # first step (~25-40 min) and reach the first checkpoint_state save at step
 # 10 (~6 min/step after warm-up), so a preemption never sends a retry back
 # to step 1. Requires beaker-py >= 2.7.2 (mason --min_runtime).
+#
+# Loss exclusion (MASK_INFRA_FAILED, default true): Spot-preempted sandboxes
+# end episodes with a fake zero reward (~5-15% of episodes, 30% in spikes)
+# that would bias GRPO group advantages. mask_infra_failed_completions
+# excludes those rollouts from group mean/std and drops them from the batch;
+# wandb reports the affected fraction as val/infra_failed_rate either way.
+# Set MASK_INFRA_FAILED=false to train on them (previous behavior).
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=Qwen/Qwen3.5-4B
@@ -54,7 +61,7 @@ uv run python mason.py \
        --workspace ai2/oe-agents \
        --priority urgent \
        --preemptible \
-       --min_runtime "${BEAKER_MIN_RUNTIME:-2h}" \
+       --min_runtime "${BEAKER_MIN_RUNTIME:-8h}" \
        --num_nodes 4 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
@@ -114,12 +121,13 @@ uv run python mason.py \
     --save_traces \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"backend": "opensandbox", "task_data_hf_repo": "hamishivi/swerl-tmax-15k", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 512 \
+    --pool_size 1024 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
     --active_sampling \
+    --mask_infra_failed_completions "${MASK_INFRA_FAILED:-true}" \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
     --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/swerl_qwen35_4b_base_tmax_15k_grpo_opensandbox \
