@@ -20,6 +20,11 @@ EVAL_MODE="${EVAL_MODE:-sampled}"
 WORKSPACE="${WORKSPACE:-ai2/olmo-instruct}"
 CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-urgent}"
+NUM_NODES="${NUM_NODES:-1}"
+NUM_UNIQUE_PROMPTS_ROLLOUT="${NUM_UNIQUE_PROMPTS_ROLLOUT:-4}"
+TOTAL_EPISODES="${TOTAL_EPISODES:-$NUM_UNIQUE_PROMPTS_ROLLOUT}"
+VLLM_NUM_ENGINES="${VLLM_NUM_ENGINES:-4}"
+read -r -a NUM_LEARNERS_PER_NODE_VALUES <<< "${NUM_LEARNERS_PER_NODE:-4}"
 
 case "$EVAL_MODE" in
     greedy)
@@ -49,7 +54,7 @@ uv run python mason.py \
     --beaker_datasets "/patch:$CODE_PATCH_DATASET" "/dapo:$DAPO_SPLIT_DATASET" \
     --min_runtime 2h \
     --no_auto_resume \
-    --num_nodes 1 \
+    --num_nodes "$NUM_NODES" \
     --max_retries 0 \
     --timeout 6h \
     --gpus 8 \
@@ -83,9 +88,9 @@ cp /patch/open_instruct/data_loader.py \
     --response_length 16384 \
     --pack_length 18432 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 4 \
+    --num_unique_prompts_rollout "$NUM_UNIQUE_PROMPTS_ROLLOUT" \
     --num_samples_per_prompt_rollout 1 \
-    --total_episodes 4 \
+    --total_episodes "$TOTAL_EPISODES" \
     --async_steps 1 \
     --filter_zero_std_samples false \
     --apply_verifiable_reward true \
@@ -93,8 +98,8 @@ cp /patch/open_instruct/data_loader.py \
     --remap_verifier dapo_math_holdout=math,math_aime_2025=math,math_brumo_2025=math \
     --temperature "$TEMPERATURE" \
     --deepspeed_stage 3 \
-    --num_learners_per_node 4 \
-    --vllm_num_engines 4 \
+    --num_learners_per_node "${NUM_LEARNERS_PER_NODE_VALUES[@]}" \
+    --vllm_num_engines "$VLLM_NUM_ENGINES" \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization "$VLLM_GPU_MEMORY_UTILIZATION" \
     --vllm_enable_prefix_caching \
