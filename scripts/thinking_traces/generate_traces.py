@@ -268,13 +268,23 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
 
     choice = response.choices[0]
     text = choice.message.content or ""
-    # Some builds route the trace to reasoning_content when a reasoning parser
-    # is enabled; stitch it back so parsing sees one canonical string.
     reasoning = getattr(choice.message, "reasoning_content", None)
-    if reasoning:
-        text = f"{THINK_OPEN}{reasoning}{THINK_CLOSE}{text}"
 
-    thinking_text, answer_text, kind = split_trace(text, choice.finish_reason)
+    if reasoning is not None:
+        # A --reasoning-parser is active, so the server already separated the
+        # trace. Take that split directly rather than re-wrapping it in tags and
+        # re-parsing: stitching a synthetic </think> onto a completion that was
+        # cut off mid-thought would make a censored trace look complete, and
+        # silently bias the very statistic this run exists to measure.
+        thinking_text, answer_text = reasoning, text
+        if choice.finish_reason == "length" and not answer_text.strip():
+            kind = KIND_TRUNCATED
+        elif thinking_text.strip():
+            kind = KIND_CLOSED
+        else:
+            kind = KIND_NO_BLOCK
+    else:
+        thinking_text, answer_text, kind = split_trace(text, choice.finish_reason)
     thinking_tokens = len(tokenizer(thinking_text, add_special_tokens=False)["input_ids"])
     answer_tokens = len(tokenizer(answer_text, add_special_tokens=False)["input_ids"])
     usage = response.usage

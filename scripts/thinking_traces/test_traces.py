@@ -71,6 +71,29 @@ def test_load_completed_on_missing_file_is_empty():
     assert generate_traces.load_completed("/nonexistent/traces.jsonl") == set()
 
 
+def test_reasoning_parser_truncation_is_not_mistaken_for_a_complete_trace():
+    """With --reasoning-parser on, a cut-off trace must not be classified closed.
+
+    The server hands back reasoning_content with no answer when a completion
+    runs out of budget mid-thought. Re-wrapping that in <think></think> would
+    parse as a complete trace and bias the length statistic downward.
+    """
+
+    # Mirrors generate_one's reasoning_content branch.
+    def classify(reasoning, content, finish_reason):
+        if finish_reason == "length" and not content.strip():
+            return generate_traces.KIND_TRUNCATED
+        if reasoning.strip():
+            return generate_traces.KIND_CLOSED
+        return generate_traces.KIND_NO_BLOCK
+
+    assert classify("thinking...", "", "length") == generate_traces.KIND_TRUNCATED
+    assert classify("thinking...", "answer", "stop") == generate_traces.KIND_CLOSED
+    assert classify("", "answer", "stop") == generate_traces.KIND_NO_BLOCK
+    # answer cut off after the trace completed: trace length is still exact
+    assert classify("thinking...", "partial ans", "length") == generate_traces.KIND_CLOSED
+
+
 def _records(groups):
     return [
         {"prompt_index": i, "prompt_sha": f"sha{i}", "thinking_tokens": v, "dataset_source": "s", "answer_tokens": 1}

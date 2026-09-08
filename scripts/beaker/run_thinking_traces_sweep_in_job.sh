@@ -132,6 +132,26 @@ log "pre-resolving client deps"
 "${UV_RUN[@]}" python -c "import datasets, transformers, openai, numpy, huggingface_hub; print('client deps ready')" \
     || { log "FATAL: client dependency resolution failed"; exit 1; }
 
+# Per-model serve flags taken from the published vLLM recipes
+# (recipes.vllm.ai/<org>/<model>.json). These are correctness/efficiency flags,
+# not tuning: --language-model-only skips the vision tower on a multimodal
+# checkpoint we only use as a text model, --tokenizer-mode selects the
+# tokenizer DeepSeek V3.2 actually ships, and GLM's FP8 KV cache is the
+# vendor's B300 configuration.
+#
+# Reasoning parsers are deliberately NOT enabled. They only change how the
+# server splits the response, and leaving them off keeps the literal <think>
+# tags in content so one parser handles every model uniformly. The client
+# handles reasoning_content correctly either way.
+model_extra_args() {
+    case "$1" in
+        *Qwen3.5*)       echo "--language-model-only" ;;
+        *GLM-5.2*)       echo "--kv-cache-dtype fp8" ;;
+        *DeepSeek-V3.2*) echo "--tokenizer-mode deepseek_v32" ;;
+        *)               echo "" ;;
+    esac
+}
+
 # --- per-model run ------------------------------------------------------------
 run_one_model() {
     local model="$1"
@@ -164,7 +184,12 @@ run_one_model() {
     # "TypeError: type 'array.array' is not subscriptable" -- array.array only
     # became subscriptable in 3.12. That module is pulled in by the multi-GPU
     # all-reduce path, so it breaks every TP>1 serve while TP=1 works fine.
+    local extra; extra="$(model_extra_args "$model")"
+    [ -n "$extra" ] && log "recipe flags for ${served}: ${extra}"
+
+    # shellcheck disable=SC2086  # $extra must word-split into separate flags
     uvx --python 3.12 "vllm==${VLLM_PKG_VERSION}" serve "$model" \
+        ${extra} \
         --served-model-name "$served" \
         --port "$SERVE_PORT" \
         --tensor-parallel-size "$TP_SIZE" \
