@@ -9,7 +9,7 @@ dependencies = [
     "antlr4-python3-runtime==4.11",
     "backoff>=2.2.1",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
-    "datasets>=4.0.0",
+    "datasets>=4.8.4,<5",  # 4.8.4 guards `from torchvision.io import VideoReader` (removed in torchvision 0.26, which KDA needs)
     "debugpy>=1.8.13",
     "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
@@ -45,7 +45,7 @@ dependencies = [
     "mcp>=1.9.0",
     "openenv-core>=0.2.1",
     "docker>=7.0.0",
-    "flash-linear-attention>=0.5.0",
+    "flash-linear-attention>=0.5.2",
     # Provides the tilelang backend for fla's gated chunk_bwd_dqkwg, which fla routes to on
     # Hopper with Triton>=3.4.0 (the Triton kernel produces incorrect gradients there; see fla #640).
     "tilelang>=0.1.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
@@ -71,7 +71,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "fa6c5014c9f6e9ee789da2d9c20d5126fee8df0d" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "f2cf93839" }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda12" },
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda13" },
@@ -143,6 +143,12 @@ conflicts = [
 ]
 override-dependencies = [
     "transformers>=5.4.0",
+    # SPIKE: force the Torch generation the pretraining team trains OLMoE3 KDA on
+    # (their TRAIN_IMAGE is torch 2.11 / cu130). Overrides are used rather than a
+    # clean dependency group because vllm 0.19.1 pins torch 2.10 and is a top-level
+    # dependency; vllm is unused by the olmo-core training path, so letting the
+    # override break it is acceptable on this branch but NOT mergeable as-is.
+    "torch==2.11.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
