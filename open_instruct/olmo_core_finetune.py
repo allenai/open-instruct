@@ -126,6 +126,9 @@ class SFTConfig:
     """Where to write the final HF export. Defaults to <output_dir>/hf_model. Set this
     when output_dir is unique per launch (e.g. mason's $CHECKPOINT_OUTPUT_DIR) but a
     stable export path is wanted."""
+    tracking_url: str | None = None
+    """Optional URL (GitHub issue, ticket, experiment log) recorded in the run
+    directory's provenance README so any copy of a checkpoint traces back to it."""
 
 
 @dataclasses.dataclass
@@ -143,7 +146,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
-    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
+    transform_fn_args = [
+        dataset_transformation.sft_tokenize_fn_args(args.training.max_seq_length, args.training.over_length_strategy),
+        {},
+    ]
 
     dcs = dataset_transformation.load_dataset_configs(
         dataset_mixer_list=args.dataset.mixer_list,
@@ -181,6 +187,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             cache_args.append("--add_bos")
         if args.dataset.transform_fn:
             cache_args.append(f"--transform_fn {' '.join(args.dataset.transform_fn)}")
+        # Part of the cache hash.
+        if args.training.over_length_strategy != dataset_transformation.DEFAULT_OVER_LENGTH_STRATEGY:
+            cache_args.append(f"--over_length_strategy {args.training.over_length_strategy}")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
         cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
@@ -318,6 +327,16 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     run_name = args.tracking.run_name or f"sft-{os.path.basename(args.model.model_name_or_path)}"
     config_dict = dataclasses.asdict(args)
 
+    if is_main_process:
+        olmo_core_utils.write_provenance_readme(
+            output_dir=args.checkpoint.output_dir,
+            run_name=run_name,
+            model_name_or_path=args.model.model_name_or_path,
+            tracking_url=args.sft.tracking_url,
+            wandb_project=args.logging.wandb_project if args.logging.with_tracking else None,
+            wandb_entity=args.logging.wandb_entity,
+        )
+
     trainer_callbacks: dict[str, Any] = olmo_core_utils.build_base_callbacks(
         config_dict=config_dict,
         run_name=run_name,
@@ -336,20 +355,25 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # NOTE: PerfCallback currently no-ops on this path (TransformerTrainModule never
         # records train/token_count); SpeedMonitorCallback above is the working metric source.
         # Tracked separately.
-        trainer_callbacks["perf"] = PerfCallback(
-            model_dims=utils.ModelDims.from_hf_config(args.model.model_name_or_path),
-            gradient_accumulation_steps=args.training.gradient_accumulation_steps,
-            dp_world_size=dp_world_size,
-            tensor_parallel_degree=1,
-        )
+        try:
+            model_dims = utils.ModelDims.from_hf_config(args.model.model_name_or_path)
+        except ValueError as e:
+            # ModelDims resolves the GPU name against GPU_SPECS, which does not cover
+            # every device (e.g. desktop 4090, L4, V100); MFU is undefined there anyway.
+            logger.warning(f"Skipping PerfCallback: {e}")
+        else:
+            trainer_callbacks["perf"] = PerfCallback(
+                model_dims=model_dims,
+                gradient_accumulation_steps=args.training.gradient_accumulation_steps,
+                dp_world_size=dp_world_size,
+                tensor_parallel_degree=1,
+            )
     else:
         logger.warning("Skipping PerfCallback: ModelDims requires an HF checkpoint config.")
 
-    load_strategy = LoadStrategy.never if not use_hf_ckpt else LoadStrategy.if_available
-
     trainer = TrainerConfig(
         save_folder=args.checkpoint.output_dir,
-        load_strategy=load_strategy,
+        load_strategy=LoadStrategy.never,
         max_duration=max_duration,
         metrics_collect_interval=args.logging.logging_steps,
         callbacks=trainer_callbacks,
@@ -357,7 +381,24 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         checkpointer=CheckpointerConfig(save_thread_count=1, load_thread_count=32, throttle_uploads=True),
     ).build(train_module, data_loader)
 
-    if not use_hf_ckpt:
+    # Loaded here rather than by fit(), which skips its own load once anything has
+    # been loaded: putting the base weights in first would suppress it. Precedence
+    # is fit()'s own -- an interrupted run in output_dir, then an explicit resume,
+    # then the base weights.
+    resumed = trainer.maybe_load_checkpoint(args.checkpoint.output_dir, load_trainer_state=True, load_optim_state=True)
+    if args.checkpoint.resume_from_checkpoint is not None:
+        if resumed:
+            logger.warning(
+                f"Ignoring --resume_from_checkpoint ({args.checkpoint.resume_from_checkpoint}) "
+                f"since a checkpoint was found in {args.checkpoint.output_dir}"
+            )
+        else:
+            logger.info(f"Resuming from {args.checkpoint.resume_from_checkpoint}...")
+            # Raises when the path holds no checkpoint: a typo here must not
+            # silently fall back to an expensive restart from the base weights.
+            trainer.load_checkpoint(args.checkpoint.resume_from_checkpoint)
+            resumed = True
+    if not resumed and not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
 
