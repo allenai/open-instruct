@@ -162,6 +162,15 @@ def main() -> int:
         help="Fraction off the on-demand rates for spot pods (GCP quotes 60-91%%; "
         "the BigQuery billing export shows the realized discount).",
     )
+    parser.add_argument(
+        "--sandbox-hourly-cost",
+        type=float,
+        default=None,
+        help="Directly price each sandbox-hour at this $ rate, bypassing the "
+        "vCPU/GiB pod model and --pricing entirely. Use for whole-node billing "
+        "on GKE Standard, where each cpu=2 sandbox occupies a full "
+        "e2-standard-4 spot node (~0.040 $/hr in us-west1).",
+    )
     args = parser.parse_args()
 
     events = parse_log(args.log)
@@ -176,13 +185,24 @@ def main() -> int:
     if pricing == "auto":
         markers = [m.strip().lower() for m in args.spot_domain_markers.split(",") if m.strip()]
         pricing = "spot" if any(marker in domain.lower() for marker in markers) else "on-demand"
+        if pricing == "on-demand" and args.sandbox_hourly_cost is None:
+            print(
+                "WARNING: --pricing auto found no spot marker in the endpoint domain and is "
+                "assuming ON-DEMAND rates. Spot-ness is a property of the server's node pools, "
+                "invisible to the client — if the deployment runs sandboxes on Spot (the AI2 "
+                "deployment does), pass --pricing spot or the estimate is ~3.3x too high."
+            )
 
     cpu = args.cpu if args.cpu is not None else detected.get("cpu", 1.0)
     memory_gib = args.memory_gib if args.memory_gib is not None else detected.get("memory_gib", 4.0)
     lifetime_cap = args.lifetime_cap if args.lifetime_cap is not None else int(detected.get("lifetime_s", 3600))
-    hourly_rate = cpu * args.vcpu_rate + memory_gib * args.gib_rate
-    if pricing == "spot":
-        hourly_rate *= 1.0 - args.spot_discount
+    if args.sandbox_hourly_cost is not None:
+        pricing = "fixed per-sandbox-hour"
+        hourly_rate = args.sandbox_hourly_cost
+    else:
+        hourly_rate = cpu * args.vcpu_rate + memory_gib * args.gib_rate
+        if pricing == "spot":
+            hourly_rate *= 1.0 - args.spot_discount
 
     if not starts:
         print("No OpenSandbox sandbox lifecycle events found in the log.")
