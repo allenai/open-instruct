@@ -5,6 +5,7 @@ OLMo-core utility functions, shared training configurations, and model configura
 import datetime
 import json
 import os
+import shlex
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -702,7 +703,9 @@ def write_provenance_readme(
             "",
             "Command:",
             "```",
-            " ".join(sys.argv),
+            # shlex.join, not " ".join: a run name or path with a space (or a `;`) would
+            # otherwise re-parse into different arguments when someone pastes this back.
+            shlex.join(sys.argv),
             "```",
         ]
         with open(path, "w") as f:
