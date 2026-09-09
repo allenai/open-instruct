@@ -52,6 +52,10 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=Qwen/Qwen3.5-4B
 TOKENIZER=Qwen/Qwen3.5-4B
 DATASET=hamishivi/swerl-tmax-15k
+# exp_name doubles as the checkpoint-state identity: a run launched with an
+# existing checkpoint dir RESUMES it (that is how preemption retries work),
+# so changing the experiment requires changing EXP_NAME, which moves both.
+EXP_NAME="${EXP_NAME:-swerl_qwen35_4b_base_tmax_15k_grpo_opensandbox_loss_exclusion}"
 
 uv run python mason.py \
        --cluster ai2/jupiter \
@@ -130,12 +134,12 @@ uv run python mason.py \
     --mask_infra_failed_completions "${MASK_INFRA_FAILED:-true}" \
     --backend_timeout 1200 \
     --checkpoint_state_freq 10 \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/swerl_qwen35_4b_base_tmax_15k_grpo_opensandbox \
+    --checkpoint_state_dir "/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/${EXP_NAME}" \
     --inflight_updates true \
     --advantage_normalization_type centered \
     --rollouts_save_path /weka/oe-adapt-default/allennlp/deletable_rollouts/ \
     --output_dir /output \
-    --exp_name swerl_qwen35_4b_base_tmax_15k_grpo_opensandbox_loss_exclusion \
+    --exp_name "$EXP_NAME" \
     --local_eval_every 10 \
     --save_freq 20 \
     --try_launch_beaker_eval_jobs_on_weka False \
