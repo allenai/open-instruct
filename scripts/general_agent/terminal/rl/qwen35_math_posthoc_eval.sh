@@ -45,7 +45,7 @@ EXP_NAME="qwen35_math_posthoc_${MODEL_LABEL}_${EVAL_MODE}"
 
 uv run python mason.py \
     --task_name "$EXP_NAME" \
-    --description "$EXP_NAME: matched DAPO/AIME/BRUMO evaluation only" \
+    --description "$EXP_NAME: matched DAPO/AIME/BRUMO/MATH-500 evaluation only" \
     --cluster "$CLUSTER" \
     --workspace "$WORKSPACE" \
     --priority "$PRIORITY" \
@@ -71,6 +71,8 @@ cp /patch/open_instruct/data_loader.py \
     /patch/open_instruct/grpo_fast.py \
     /patch/open_instruct/grpo_utils.py \
     /stage/open_instruct/ \
+\&\& rm -rf /tmp/math500_eval \
+\&\& uv run python scripts/data/rlvr/prepare_math500_eval.py --output-dir /tmp/math500_eval \
 \&\& source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
     --exp_name "$EXP_NAME" \
@@ -83,6 +85,7 @@ cp /patch/open_instruct/data_loader.py \
         /dapo/eval.jsonl 1.0 \
         mnoukhov/aime_2025_openinstruct 1.0 \
         mnoukhov/brumo_2025_openinstruct 1.0 \
+        /tmp/math500_eval/eval.jsonl 1.0 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
@@ -95,7 +98,7 @@ cp /patch/open_instruct/data_loader.py \
     --filter_zero_std_samples false \
     --apply_verifiable_reward true \
     --verification_reward 1.0 \
-    --remap_verifier dapo_math_holdout=math,math_aime_2025=math,math_brumo_2025=math \
+    --remap_verifier dapo_math_holdout=math,math_aime_2025=math,math_brumo_2025=math,math_500=math \
     --temperature "$TEMPERATURE" \
     --deepspeed_stage 3 \
     --num_learners_per_node "${NUM_LEARNERS_PER_NODE_VALUES[@]}" \
