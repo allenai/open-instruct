@@ -159,7 +159,12 @@ How it's wired:
   (`SWERL_OPENSANDBOX_LIFETIME_S`, default 1h), loud retry on failed kill, an atexit
   reaper, and an end-of-job janitor
   (`scripts/opensandbox/cleanup_opensandbox_sandboxes.sh`) keyed on the
-  `open_instruct_app` metadata tag.
+  `open_instruct_app` metadata tag. **A killed Beaker job never reaches the trailing
+  janitor**: at pool_size 1024 it leaves ~1,000 live sandboxes occupying the entire
+  node pool/CPU quota for up to one lifetime, and a run launched immediately after
+  ramps into leftovers (creates 504 while the pool is full — observed 2026-09-09).
+  After manually killing a run, sweep with the janitor before relaunching, or wait
+  one sandbox lifetime.
 - **Mid-episode sandbox death is terminal, not retried**: if the sandbox vanishes
   during an exec (Spot preemption, crash, lifetime expiry), the backend raises
   `SandboxDiedError` and the SWERL envs end the episode (reward 0,
