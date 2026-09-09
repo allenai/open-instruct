@@ -251,10 +251,39 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 UV_RUN=( uv run --no-project --python 3.11
-         --with datasets --with transformers --with openai --with numpy --with huggingface_hub )
+         --with datasets --with transformers --with openai --with numpy --with huggingface_hub
+         --with tiktoken --with blobfile --with sentencepiece --with protobuf )
 log "pre-resolving client deps"
 "${UV_RUN[@]}" python -c "import datasets, transformers, openai, numpy, huggingface_hub; print('client deps ready')" \
     || { log "FATAL: client dependency resolution failed"; exit 1; }
+
+# Load every model's tokenizer before serving any of them. generate_traces
+# needs it to count tokens, but only runs once vLLM is up -- so a missing
+# tokenizer dependency surfaces an hour into the job, after the weight load and
+# kernel compilation, and takes the whole model with it. Kimi-K2.6 cost exactly
+# that: it served correctly after 3147s and then died on a missing tiktoken.
+# Fetching a tokenizer takes seconds, so check them all up front.
+TOKENIZER_FAIL_FILE=/tmp/tokenizer_failures
+preflight_tokenizers() {
+    log "pre-flighting tokenizers: $MODELS"
+    : > "$TOKENIZER_FAIL_FILE"
+    MODELS="$MODELS" "${UV_RUN[@]}" python -c '
+import os
+import transformers
+for m in os.environ.get("MODELS", "").split():
+    try:
+        t = transformers.AutoTokenizer.from_pretrained(m, trust_remote_code=True)
+        print("TOKENIZER OK   %s (vocab %s)" % (m, getattr(t, "vocab_size", "?")))
+    except Exception as exc:
+        print("TOKENIZER FAIL %s -> %s: %s" % (m, type(exc).__name__, str(exc)[:220]))
+' 2>&1 | tee /tmp/preflight.log
+    grep -a "^TOKENIZER FAIL" /tmp/preflight.log | awk '{print $3}' >> "$TOKENIZER_FAIL_FILE" || true
+    if [ -s "$TOKENIZER_FAIL_FILE" ]; then
+        log "WARNING: tokenizer load failed for:$(tr '\n' ' ' < "$TOKENIZER_FAIL_FILE")"
+    fi
+}
+
+preflight_tokenizers
 
 # Per-model serve flags taken from the published vLLM recipes
 # (recipes.vllm.ai/<org>/<model>.json). These are correctness/efficiency flags,
@@ -288,6 +317,11 @@ run_one_model() {
         log "SKIP ${model}: already complete ($(wc -l < "$store" 2>/dev/null || echo 0) traces in $store)"
         cp "$store" "$traces" 2>/dev/null || true
         return 0
+    fi
+
+    if [ -s "$TOKENIZER_FAIL_FILE" ] && grep -qxF "$model" "$TOKENIZER_FAIL_FILE"; then
+        log "SKIP ${model}: tokenizer will not load, so serving it would waste the weight load"
+        return 1
     fi
 
     log "MODEL ${model} -> served as ${served}"
