@@ -3,12 +3,14 @@
 # Evaluate one Qwen3.5 model with the same local math verifier and fixed datasets
 # used by the paired 2B OPD/verifier runs. Example:
 #   EVAL_MODE=sampled MODEL_LABEL=verifier_final MODEL=/weka/path/to/model \
-#     ./scripts/general_agent/terminal/rl/qwen35_math_posthoc_eval.sh IMAGE DAPO_DATASET PATCH_DATASET
+#     ./scripts/general_agent/terminal/rl/qwen35_math_posthoc_eval.sh \
+#       IMAGE DAPO_DATASET MATH500_DATASET PATCH_DATASET
 set -euo pipefail
 
-BEAKER_IMAGE="${1:?Usage: $0 <beaker-image> <dapo-split-dataset> <code-patch-dataset>}"
-DAPO_SPLIT_DATASET="${2:?Usage: $0 <beaker-image> <dapo-split-dataset> <code-patch-dataset>}"
-CODE_PATCH_DATASET="${3:?Usage: $0 <beaker-image> <dapo-split-dataset> <code-patch-dataset>}"
+BEAKER_IMAGE="${1:?Usage: $0 <beaker-image> <dapo-split-dataset> <math500-dataset> <code-patch-dataset>}"
+DAPO_SPLIT_DATASET="${2:?Usage: $0 <beaker-image> <dapo-split-dataset> <math500-dataset> <code-patch-dataset>}"
+MATH500_DATASET="${3:?Usage: $0 <beaker-image> <dapo-split-dataset> <math500-dataset> <code-patch-dataset>}"
+CODE_PATCH_DATASET="${4:?Usage: $0 <beaker-image> <dapo-split-dataset> <math500-dataset> <code-patch-dataset>}"
 
 MODEL="${MODEL:?Set MODEL to a Hugging Face model ID or Weka checkpoint path}"
 MODEL_LABEL="${MODEL_LABEL:?Set MODEL_LABEL to a short experiment-safe name}"
@@ -51,7 +53,10 @@ uv run python mason.py \
     --priority "$PRIORITY" \
     --pure_docker_mode \
     --image "$BEAKER_IMAGE" \
-    --beaker_datasets "/patch:$CODE_PATCH_DATASET" "/dapo:$DAPO_SPLIT_DATASET" \
+    --beaker_datasets \
+        "/patch:$CODE_PATCH_DATASET" \
+        "/dapo:$DAPO_SPLIT_DATASET" \
+        "/math500:$MATH500_DATASET" \
     --min_runtime 2h \
     --no_auto_resume \
     --num_nodes "$NUM_NODES" \
@@ -71,8 +76,6 @@ cp /patch/open_instruct/data_loader.py \
     /patch/open_instruct/grpo_fast.py \
     /patch/open_instruct/grpo_utils.py \
     /stage/open_instruct/ \
-\&\& rm -rf /tmp/math500_eval \
-\&\& uv run python scripts/data/rlvr/prepare_math500_eval.py --output-dir /tmp/math500_eval \
 \&\& source configs/beaker_configs/ray_node_setup.sh \
 \&\& uv run open_instruct/grpo_fast.py \
     --exp_name "$EXP_NAME" \
@@ -85,7 +88,7 @@ cp /patch/open_instruct/data_loader.py \
         /dapo/eval.jsonl 1.0 \
         mnoukhov/aime_2025_openinstruct 1.0 \
         mnoukhov/brumo_2025_openinstruct 1.0 \
-        /tmp/math500_eval/eval.jsonl 1.0 \
+        /math500/eval.jsonl 1.0 \
     --dataset_mixer_eval_list_splits train \
     --max_prompt_token_length 2048 \
     --response_length 16384 \
