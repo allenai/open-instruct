@@ -64,7 +64,7 @@ dump_vllm_failure() {
 : "${SEED:=1234}"
 : "${CONCURRENCY:=256}"
 : "${VLLM_MAX_NUM_SEQS:=$CONCURRENCY}"
-: "${VLLM_READY_TIMEOUT:=5400}"
+: "${VLLM_READY_TIMEOUT:=14400}"
 : "${DATASET:=allenai/Dolci-Think-SFT-7B}"
 : "${RESULTS_DIR:=/results}"
 : "${SYNC_INTERVAL:=180}"
@@ -355,6 +355,7 @@ run_one_model() {
         --max-num-seqs "$VLLM_MAX_NUM_SEQS" \
         --enable-prefix-caching \
         --trust-remote-code \
+        --safetensors-load-strategy "${SAFETENSORS_LOAD_STRATEGY:-prefetch}" \
         >"$vllm_log" 2>&1 &
     local vllm_pid=$!
 
