@@ -102,6 +102,10 @@ class TrainingConfig:
     """Maximum gradient norm for clipping. None means no clipping."""
     max_seq_length: int = 4096
     """The maximum total input sequence length after tokenization."""
+    over_length_strategy: str = "keep"
+    """What to do with a conversation that `max_seq_length` truncation cut short: `keep` leaves it
+    unterminated, `terminate` ends it with a trainable EOS, `drop` discards it. The default leaves
+    existing dataset cache hashes untouched."""
     lr_scheduler_type: str = "linear"
     """The scheduler type to use for learning rate adjustment."""
     max_train_steps: int | None = None

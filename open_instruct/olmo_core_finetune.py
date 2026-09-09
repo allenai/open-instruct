@@ -138,7 +138,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     use_hf_ckpt = olmo_core_utils.is_hf_checkpoint(args.model.model_name_or_path)
 
     olmo_core_utils.setup_tokenizer_and_cache(args.model, args.dataset, tc)
-    transform_fn_args = [{"max_seq_length": args.training.max_seq_length}, {}]
+    transform_fn_args = [
+        dataset_transformation.sft_tokenize_fn_args(args.training.max_seq_length, args.training.over_length_strategy),
+        {},
+    ]
 
     dcs = dataset_transformation.load_dataset_configs(
         dataset_mixer_list=args.dataset.mixer_list,
@@ -176,6 +179,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             cache_args.append("--add_bos")
         if args.dataset.transform_fn:
             cache_args.append(f"--transform_fn {' '.join(args.dataset.transform_fn)}")
+        # Part of the cache hash.
+        if args.training.over_length_strategy != dataset_transformation.DEFAULT_OVER_LENGTH_STRATEGY:
+            cache_args.append(f"--over_length_strategy {args.training.over_length_strategy}")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
         cache_cmd = " \\\n      ".join(cache_args)
         raise FileNotFoundError(
