@@ -147,6 +147,20 @@ def get_args():
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    parser.add_argument(
+        "--min_runtime",
+        type=str,
+        default=None,
+        help="Beaker min_runtime as a proto-Duration STRING, e.g. '28800s' for 8h (Holmes caps at 8h, "
+        "min 5m). Non-deprecated replacement for bare --preemptible; pair with --auto_resume. NOTE: pass a "
+        "string like '28800s' — beaker-py 2.7.1's native int min_runtime serializes as a bare int the "
+        "server misreads; the Duration string is what the REST API accepts.",
+    )
+    parser.add_argument(
+        "--auto_resume",
+        action="store_true",
+        help="If given (with --min_runtime), auto-resume the job after it is preempted past min_runtime.",
+    )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
         "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
@@ -565,8 +579,14 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
+        # beaker-py>=2.7.1 exposes min_runtime + auto_resume natively (no subclass needed). Pass
+        # min_runtime as a proto-Duration STRING ('28800s'); the native int type serializes as a bare
+        # int the REST server misreads. Both None -> omitted, so non-Holmes launches are unchanged.
         context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+            priority=beaker.BeakerJobPriority[args.priority],
+            preemptible=args.preemptible,
+            min_runtime=args.min_runtime,
+            auto_resume=True if (args.auto_resume and args.min_runtime) else None,
         ),
         constraints=constraints,
         env_vars=get_env_vars(

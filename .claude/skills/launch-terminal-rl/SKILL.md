@@ -23,19 +23,29 @@ docker.io, so it hides as "working" while giving ZERO caching + a failed-connect
 failover on every pull (worse with the podman image janitor re-pulling). Launch scripts
 routinely carry a **stale** mirror host copied from an older script.
 
-- **DEAD (do not use):** `jupiter-cs-aus-193.reviz.ai2.in:5000`
-- **LIVE (AI2 Jupiter, canonical):** `jupiter-cs-aus-137.reviz.ai2.in:5000` — same mirror
-  `run-terminal-eval` uses. But do not assume — **always re-check**, mirror hosts move.
+**Mirror hosts move CONSTANTLY — do NOT trust a hardcoded host** (`-137`/`-193`/`-112` dead,
+`-102` served corrupt images). Find the CURRENT one by reading the node the mirror workload is
+scheduled on (workspace `ai2/general-tool-use`, chain `01KTYHEWPNFFNZ7BPMPTBJ1XQ5`) → `<node>:5000`:
 
 ```bash
-host=jupiter-cs-aus-137.reviz.ai2.in:5000   # or whatever the script's MIRROR_URL is
-curl -sS -m8  -o /dev/null -w "v2 %{http_code}\n" "http://$host/v2/"                       # want 200
-curl -sS -m20 -o /dev/null -w "manifest %{http_code}\n" \
-  -H "Accept: application/vnd.oci.image.index.v1+json" \
-  "http://$host/v2/library/python/manifests/3.12-slim"                                     # want 200 (pull-through)
-# optional warmth check: curl -sS "http://$host/v2/_catalog" | head -c 300
+node=$(beaker experiment get 01KTYHEWPNFFNZ7BPMPTBJ1XQ5 --format json | jq -r '.[0].jobs[-1].node')
+beaker node get "$node" --format json | jq -r '.[0].hostname'   # e.g. jupiter-cs-aus-155.reviz.ai2.in → MIRROR_URL=<host>:5000
 ```
-If not 200, fix `MIRROR_URL` in the script before launching.
+Then confirm it serves a real **task** image, not just `library/python` — a dev-box `/v2/`=200 is
+NOT sufficient (a mirror can pass that yet serve CORRUPT images):
+```bash
+host=<hostname>:5000
+curl -sS -m8  -o /dev/null -w "v2 %{http_code}\n" "http://$host/v2/"                                           # want 200
+curl -sS -m20 -o /dev/null -w "task %{http_code}\n" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+  "http://$host/v2/hamishi740/swerl-tmax-v3/manifests/<some-tag>"                                              # want 200
+```
+**How a bad mirror actually shows up:** image pulls fail — `500 ... failed to convert ImageData to
+ImageInspect` / `404 ... failed to find image hamishi740/...` — so those tasks' sandbox **resets
+fail** (and with `SWERL_RESET_FAILURE_ZERO_REWARD=1` those specific rollouts get 0). That's a
+*fraction* of rollouts. **A bad mirror does NOT make every rollout score 0 / empty the batch** — if
+you see uniform-0 scores with resets otherwise succeeding, that's a CONFIG problem, not the mirror
+(in our case it was the missing `--vllm_gdn_prefill_backend triton` for Qwen3.5 GDN; also check
+rollout width vs the hard tasks). Full detail: memory `reference_verify_image_mirror_before_launch`.
 
 ## 1. GPU sizing (how grpo_fast splits GPUs)
 
@@ -102,6 +112,27 @@ keys the image on the current commit hash and skips the build if it already exis
 It prints `Kicked off Beaker job. https://beaker.org/ex/<EXP_ID>`. Default workspace
 `ai2/oe-agents`, priority `urgent`, `--preemptible`, `--max_retries 5`. Docker Hub creds:
 `DOCKERHUB_USERNAME=shashankg209` + `--secret DOCKER_PAT=shashankg_DOCKER_PAT`.
+
+**CUDA 12 (Hopper) vs CUDA 13 (B300 / ai2/holmes).** The launcher takes an optional **leading**
+`--cuda-version 12|13` (default 12 today; cu13 is the direction as we move to B300) — it picks the
+Dockerfile base (`12.8.1` vs `13.0.3-devel`), the `uv --group cuda${v}`, and the image name suffix
+`-cuda${v}`. From any normal checkout, just pass the flag:
+```bash
+./scripts/train/build_image_and_launch_dirty.sh --cuda-version 13 \
+    scripts/general_agent/terminal/rl/holmes_smoke_4gpu_9b_cuda13.sh    # B300 / --cluster ai2/holmes
+```
+On B300 the working attention is **fa4**: set `--attn_implementation flash_4` (needs deepspeed
+0.19.3 + flash-attn-4 b23 — pinned per-CUDA-group) and `--vllm_gdn_prefill_backend triton`
+(Qwen3.5 GatedDeltaNet). cu12/Hopper is unchanged (backend FA3).
+
+> Dev-only aside (ignore unless replicating the original test setup): the separate
+> `open-instruct-cuda13` worktree + `source env.cuda13.sh` were **just cache isolation** — so a
+> cu12 and a cu13 session could run on the SAME box without their shared-weka uv/triton caches
+> clobbering each other (env.cuda13.sh also set a no-ssh gitconfig for the container). **Not
+> required to build/train cu13** — the `--cuda-version` flag is all you need.
+
+Full detail: memory `feedback_build_image_and_launch_dirty`, and `CUDA13_MIGRATION.md` /
+`CUDA13_FA4_SP_PLAYBOOK.md`.
 
 Reliability envs worth carrying (from tmax's proven 9B script): `PYTORCH_ALLOC_CONF=expandable_segments:True`,
 the podman image-janitor trio (`SWERL_PODMAN_IMAGE_JANITOR_ENABLED/INTERVAL_S=60/UNTIL=10m` —
