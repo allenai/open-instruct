@@ -31,6 +31,7 @@
 #   HF_REPO_ID         optional dataset repo to push each model's traces to
 #   TRACE_STORE        weka dir for durable traces + resume markers
 #   SYNC_INTERVAL      seconds between syncs (default 180)
+#   RESET_TRACES       1 to discard stored traces for these models before running
 
 set -uo pipefail   # NOT -e: a failing model must not kill the sweep
 
@@ -296,6 +297,18 @@ preflight_tokenizers
 # server splits the response, and leaving them off keeps the literal <think>
 # tags in content so one parser handles every model uniformly. The client
 # handles reasoning_content correctly either way.
+# Hybrid think/non-think models need the toggle set explicitly. DeepSeek-V3.2's
+# template defaults to NON-thinking -- it prefills a closing </think>, so the
+# model answers directly and every trace comes back empty. Its kwarg is
+# "thinking"; Qwen's "enable_thinking" is silently ignored here. Qwen3.5, Kimi
+# and GLM all default to thinking ON, so they need nothing.
+model_chat_template_kwargs() {
+    case "$1" in
+        *DeepSeek-V3.2*) echo '{"thinking": true}' ;;
+        *)               echo "" ;;
+    esac
+}
+
 model_extra_args() {
     case "$1" in
         *Qwen3.5*)       echo "--language-model-only" ;;
@@ -312,6 +325,15 @@ run_one_model() {
     local traces="$RESULTS_DIR/traces_${served}.jsonl"
     local store="$TRACE_STORE/traces_${served}.jsonl"
     local done_marker="$store.done"
+
+    # RESET_TRACES exists because resume is otherwise too eager: if a run
+    # produced wrong-but-parseable traces (e.g. a hybrid model served in
+    # non-thinking mode), resume would preserve them and only fill the gaps,
+    # silently mixing two different generation configurations in one dataset.
+    if [ "${RESET_TRACES:-0}" = "1" ]; then
+        log "RESET_TRACES=1: discarding any stored traces for ${served}"
+        rm -f "$store" "$done_marker" "$traces"
+    fi
 
     if [ -f "$done_marker" ]; then
         log "SKIP ${model}: already complete ($(wc -l < "$store" 2>/dev/null || echo 0) traces in $store)"
@@ -342,6 +364,8 @@ run_one_model() {
     # "TypeError: type 'array.array' is not subscriptable" -- array.array only
     # became subscriptable in 3.12. That module is pulled in by the multi-GPU
     # all-reduce path, so it breaks every TP>1 serve while TP=1 works fine.
+    local ctk; ctk="$(model_chat_template_kwargs "$model")"
+    [ -n "$ctk" ] && log "chat_template_kwargs for ${served}: ${ctk}"
     local extra; extra="$(model_extra_args "$model")"
     [ -n "$extra" ] && log "recipe flags for ${served}: ${extra}"
 
@@ -395,6 +419,7 @@ run_one_model() {
         --temperature "$TEMPERATURE" --top-p "$TOP_P" \
         --max-tokens "$MAX_TOKENS" --max-prompt-tokens "$MAX_PROMPT_TOKENS" \
         --seed "$SEED" --concurrency "$CONCURRENCY" \
+        ${ctk:+--chat-template-kwargs "$ctk"} \
         --prompts-output "$RESULTS_DIR/prompts_${served}.jsonl" \
         ${resume_flag[@]+"${resume_flag[@]}"} \
         --output "$traces" 2>&1 | tee -a "$RESULTS_DIR/generate_${served}.log"

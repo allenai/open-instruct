@@ -91,6 +91,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-tokens", type=int, default=30720)
     parser.add_argument("--max-prompt-tokens", type=int, default=1536)
     parser.add_argument("--seed", type=int, default=1234)
+    parser.add_argument(
+        "--chat-template-kwargs",
+        default=None,
+        help="JSON passed through to the chat template, e.g. '{\"thinking\": true}'. "
+        "Hybrid models that default to non-thinking need this or they emit no trace at all.",
+    )
     parser.add_argument("--shuffle-buffer", type=int, default=100_000)
     parser.add_argument("--concurrency", type=int, default=64)
     parser.add_argument("--request-timeout", type=float, default=3600.0)
@@ -233,12 +239,16 @@ def generate_one(client, args, tokenizer, prompt: dict, sample_index: int) -> di
     for attempt in range(args.max_retries + 1):
         try:
             started = time.monotonic()
+            extra_body = {}
+            if args.chat_template_kwargs:
+                extra_body["chat_template_kwargs"] = json.loads(args.chat_template_kwargs)
             response = client.chat.completions.create(
                 model=args.model,
                 messages=[{"role": "user", "content": prompt["prompt"]}],
                 temperature=args.temperature,
                 top_p=args.top_p,
                 max_tokens=args.max_tokens,
+                extra_body=extra_body or None,
                 # Distinct per (prompt, sample) so the run is reproducible while
                 # the samples within a prompt stay independent draws.
                 seed=args.seed * 1_000_003 + prompt["prompt_index"] * 97 + sample_index,
@@ -323,6 +333,8 @@ def main() -> None:
 
     args.dataset_revision = dataset_revision(args.dataset)
     logger.info("corpus %s pinned at revision %s", args.dataset, args.dataset_revision)
+    if args.chat_template_kwargs:
+        logger.info("chat_template_kwargs: %s", args.chat_template_kwargs)
     prompts = select_prompts(args, tokenizer)
     if args.prompts_output:
         os.makedirs(os.path.dirname(os.path.abspath(args.prompts_output)), exist_ok=True)

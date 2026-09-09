@@ -46,6 +46,7 @@ TOP_P=0.95
 SEED=1234
 CONCURRENCY=256
 HF_REPO_ID=""
+RESET_TRACES=0
 HF_TOKEN_SECRET_NAME="${HF_TOKEN_SECRET_NAME:-}"
 JOB_NAME="think-len-sweep"
 PRIORITY="normal"
@@ -80,6 +81,8 @@ Options:
   --concurrency N        in-flight requests (default: ${CONCURRENCY})
   --seed N               prompt-sampling seed (default: ${SEED})
   --hf-repo-id REPO      dataset repo to push traces to (default: none)
+  --reset-traces         discard stored traces for these models before running,
+                         instead of resuming from them
   --hf-token-secret NAME beaker secret exposed as HF_TOKEN
   --job-name NAME        default: ${JOB_NAME}
   --priority PRI         default: ${PRIORITY}
@@ -109,6 +112,7 @@ while [ $# -gt 0 ]; do
         --concurrency)       CONCURRENCY="$2"; shift 2 ;;
         --seed)              SEED="$2"; shift 2 ;;
         --hf-repo-id)        HF_REPO_ID="$2"; shift 2 ;;
+        --reset-traces)      RESET_TRACES=1; shift ;;
         --hf-token-secret)   HF_TOKEN_SECRET_NAME="$2"; shift 2 ;;
         --job-name)          JOB_NAME="$2"; shift 2 ;;
         --priority)          PRIORITY="$2"; shift 2 ;;
@@ -158,6 +162,7 @@ cmd=(
     --env "NUM_PROMPTS=${NUM_PROMPTS}" --env "NUM_SAMPLES=${NUM_SAMPLES}"
     --env "TEMPERATURE=${TEMPERATURE}" --env "TOP_P=${TOP_P}" --env "SEED=${SEED}"
     --env "CONCURRENCY=${CONCURRENCY}" --env "HF_REPO_ID=${HF_REPO_ID}"
+    --env "RESET_TRACES=${RESET_TRACES}"
     --propagate-failure --no-python
 )
 [ "$NO_AUTO_RESUME" = "1" ] && cmd+=(--no-auto-resume)
