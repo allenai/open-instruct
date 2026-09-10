@@ -95,6 +95,39 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
     return {"name": name, "value": value}
 
 
+def resolve_is_external_user(launcher: str | None, has_beaker_config: bool, has_beaker_token: bool) -> bool:
+    """Decide whether to run in non-Ai2 ('local') mode.
+
+    An explicit --launcher wins. Otherwise fall back to the historical
+    auto-detection: a user with neither a Beaker config file nor a BEAKER_TOKEN
+    is treated as external.
+    """
+    if launcher == "local":
+        return True
+    if launcher == "beaker":
+        return False
+    return not has_beaker_config and not has_beaker_token
+
+
+def validate_cluster_for_beaker(is_external_user: bool, cluster: list[str] | None) -> None:
+    """--cluster is a Beaker concept, so it is only required for the Beaker launcher."""
+    if not is_external_user and not cluster:
+        raise ValueError(
+            "--cluster is required when launching on Beaker. "
+            "Pass one or more clusters (e.g. --cluster ai2/jupiter), or use --launcher local."
+        )
+
+
+def validate_beaker_credentials(launcher: str | None, has_beaker_config: bool, has_beaker_token: bool) -> None:
+    """An explicit --launcher beaker with no Beaker credentials would otherwise fail with an
+    unhandled SDK error at client construction in main(); fail early with a clear message."""
+    if launcher == "beaker" and not has_beaker_config and not has_beaker_token:
+        raise ValueError(
+            "--launcher beaker requires Beaker credentials (a ~/.beaker/config.yml file, "
+            "a BEAKER_CONFIG path, or the BEAKER_TOKEN environment variable)."
+        )
+
+
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
 # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
@@ -110,7 +143,21 @@ DEFAULT_ENV_VARS = {
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--cluster", type=str, nargs="+", help="Beaker clusters on which the job could be run.", required=True
+        "--cluster",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Beaker clusters on which the job could be run. "
+        "Required for the beaker launcher (the default when Beaker credentials are present).",
+    )
+    parser.add_argument(
+        "--launcher",
+        type=str,
+        choices=["beaker", "local"],
+        default=None,
+        help="How to launch: 'beaker' submits to Beaker (default for Ai2 users); "
+        "'local' prints the fully-resolved command without Beaker (run it on your own infra). "
+        "If unset, inferred from whether a Beaker config/token is present.",
     )
     parser.add_argument(
         "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
@@ -226,6 +273,23 @@ def get_args():
             "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
         )
     mason_args.resumable = is_resumable
+
+    # Resolve the launcher and validate --cluster here, where the parser lives, so a
+    # missing --cluster on the beaker path yields a clean argparse usage error instead
+    # of an unhandled traceback out of main().
+    config_path = os.path.expanduser("~/.beaker/config.yml")
+    has_beaker_config = os.path.exists(config_path)
+    has_beaker_token = "BEAKER_TOKEN" in os.environ
+    mason_args.is_external_user = resolve_is_external_user(mason_args.launcher, has_beaker_config, has_beaker_token)
+    try:
+        validate_cluster_for_beaker(mason_args.is_external_user, mason_args.cluster)
+        # The credentials guard accepts any source beaker.Beaker.from_env() supports, including a
+        # BEAKER_CONFIG path override; auto-detection above keeps its historical signals only.
+        validate_beaker_credentials(
+            mason_args.launcher, has_beaker_config or "BEAKER_CONFIG" in os.environ, has_beaker_token
+        )
+    except ValueError as e:
+        parser.error(str(e))
 
     return mason_args, commands
 
@@ -400,13 +464,16 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
         # Once it's cached, we don't need to cache it again.
 
-        # Add the whoami parts if not already present
-        if not any("hf_entity" in c for c in command):
-            command.append("--hf_entity")
-            command.append("allenai")
-        if not any("wandb_entity" in c for c in command):
-            command.append("--wandb_entity")
-            command.append("ai2-llm")
+        # Add the Ai2-specific whoami parts if not already present. Only for Ai2
+        # users: a local (`--launcher local`) command must not be silently rewritten
+        # to push to Ai2's HuggingFace/Weights & Biases orgs.
+        if not is_external_user:
+            if not any("hf_entity" in c for c in command):
+                command.append("--hf_entity")
+                command.append("allenai")
+            if not any("wandb_entity" in c for c in command):
+                command.append("--wandb_entity")
+                command.append("ai2-llm")
 
         dataset_cache_paths = []
         dataset_config_hashes = []
@@ -490,7 +557,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
         # Otherwise, we'll set a default path in the user's directory on Weka
-        if any(c in launch_utils.WEKA_CLUSTERS for c in args.cluster):
+        if args.cluster and any(c in launch_utils.WEKA_CLUSTERS for c in args.cluster):
             if len(args.auto_output_dir_path) > 0:
                 need_to_override_output_dir = True
                 for idx, cmd in enumerate(command):
@@ -691,9 +758,8 @@ def maybe_override_checkpoint_dir(
 
 def main():
     args, commands = get_args()
-    # If the user is not in Ai2, we run the command as is
-    config_path = os.path.expanduser("~/.beaker/config.yml")
-    is_external_user = not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ
+    # Launcher resolution + --cluster validation happen in get_args() (clean CLI errors).
+    is_external_user = args.is_external_user
     if is_external_user:
         whoami = "external_user"
         beaker_secrets = []

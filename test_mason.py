@@ -194,5 +194,92 @@ class TestExperimentSpec(unittest.TestCase):
         self.assertEqual(actual_spec, expected_spec)
 
 
+class TestResolveIsExternalUser(unittest.TestCase):
+    @parameterized.parameterized.expand(
+        [
+            ("explicit_local_wins", "local", True, True, True),
+            ("explicit_beaker_wins", "beaker", False, False, False),
+            ("auto_no_config_no_token_external", None, False, False, True),
+            ("auto_config_present_internal", None, True, False, False),
+            ("auto_token_present_internal", None, False, True, False),
+        ]
+    )
+    def test_resolve(self, name, launcher, has_config, has_token, expected):
+        self.assertEqual(mason.resolve_is_external_user(launcher, has_config, has_token), expected)
+
+
+class TestValidateClusterForBeaker(unittest.TestCase):
+    def test_beaker_without_cluster_raises(self):
+        with self.assertRaises(ValueError):
+            mason.validate_cluster_for_beaker(is_external_user=False, cluster=None)
+
+    def test_beaker_with_empty_cluster_raises(self):
+        with self.assertRaises(ValueError):
+            mason.validate_cluster_for_beaker(is_external_user=False, cluster=[])
+
+    def test_beaker_with_cluster_ok(self):
+        mason.validate_cluster_for_beaker(is_external_user=False, cluster=["ai2/jupiter"])
+
+    def test_local_without_cluster_ok(self):
+        mason.validate_cluster_for_beaker(is_external_user=True, cluster=None)
+
+
+class TestValidateBeakerCredentials(unittest.TestCase):
+    def test_explicit_beaker_without_credentials_raises(self):
+        with self.assertRaises(ValueError):
+            mason.validate_beaker_credentials(launcher="beaker", has_beaker_config=False, has_beaker_token=False)
+
+    def test_explicit_beaker_with_config_ok(self):
+        mason.validate_beaker_credentials(launcher="beaker", has_beaker_config=True, has_beaker_token=False)
+
+    def test_explicit_beaker_with_token_ok(self):
+        mason.validate_beaker_credentials(launcher="beaker", has_beaker_config=False, has_beaker_token=True)
+
+    def test_local_without_credentials_ok(self):
+        mason.validate_beaker_credentials(launcher="local", has_beaker_config=False, has_beaker_token=False)
+
+    def test_unset_launcher_without_credentials_ok(self):
+        mason.validate_beaker_credentials(launcher=None, has_beaker_config=False, has_beaker_token=False)
+
+
+class TestMakeInternalCommandLocal(unittest.TestCase):
+    """The --launcher local path: no cluster, and no Ai2-org rewriting of the command."""
+
+    def _args(self, cluster):
+        return Namespace(
+            cluster=cluster,
+            num_nodes=1,
+            pure_docker_mode=True,
+            no_auto_dataset_cache=True,
+            auto_output_dir_path="/weka/oe-adapt-default/deletable_checkpoint",
+            auto_checkpoint_state_dir="/weka/oe-adapt-default/deletable_checkpoint_states",
+            artifact_ttl=None,
+        )
+
+    def test_local_training_command_without_cluster_does_not_crash(self):
+        # Regression: cluster=None on the external path must not TypeError in the
+        # WEKA-cluster check (`any(... for c in args.cluster)` over None).
+        command = ["python", "open_instruct/grpo_fast.py", "--model_name_or_path", "Qwen/Qwen3-0.6B"]
+        result = mason.make_internal_command(command, self._args(cluster=None), "external_user", is_external_user=True)
+        self.assertIsInstance(result, str)
+        self.assertIn("open_instruct/grpo_fast.py", result)
+
+    def test_local_training_command_omits_ai2_entities(self):
+        # A local user's command must not be rewritten to push to Ai2's HF/W&B orgs.
+        command = ["python", "open_instruct/grpo_fast.py", "--model_name_or_path", "Qwen/Qwen3-0.6B"]
+        result = mason.make_internal_command(command, self._args(cluster=None), "external_user", is_external_user=True)
+        self.assertNotIn("--hf_entity", result)
+        self.assertNotIn("--wandb_entity", result)
+
+    def test_ai2_training_command_keeps_ai2_entities(self):
+        # Ai2 users: entity injection is unchanged (byte-for-byte behavior preserved).
+        command = ["python", "open_instruct/grpo_fast.py", "--model_name_or_path", "Qwen/Qwen3-0.6B"]
+        result = mason.make_internal_command(
+            command, self._args(cluster=["ai2/jupiter"]), "testuser", is_external_user=False
+        )
+        self.assertIn("--hf_entity allenai", result)
+        self.assertIn("--wandb_entity ai2-llm", result)
+
+
 if __name__ == "__main__":
     unittest.main()
