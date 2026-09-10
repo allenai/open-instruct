@@ -1,0 +1,161 @@
+{
+  "date_utc": "2026-09-10",
+  "status": "Point-in-time local evidence; not production qualification",
+  "compiled_runtime": "olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks",
+  "core_source": {
+    "repository": "https://github.com/allenai/OLMo-core.git",
+    "revision": "169b8f9d06bce0276143876c82f630af483b03b7",
+    "development_commit": "b7f1e5296704779e7deb06de4c4242be9729d1a9",
+    "patch": "patches/olmo-core.patch",
+    "patch_sha256": "4d7cdf74ff9f25aa2d030af9ffb27d90c4c747dcf73436df54cea8e33cd2e954"
+  },
+  "export_benchmark": {
+    "checkpoint": "/validation/local-moe/hf",
+    "device": "NVIDIA GeForce RTX 4090",
+    "buffer_mib": 32,
+    "parameters": 32447104,
+    "samples": {
+      "cpu_staging": [
+        {
+          "seconds": 0.011505749076604843,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.014164218679070473,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.013764315284788609,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.01105173397809267,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.010242137592285872,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.012911879923194647,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.011038318742066622,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.011228557210415602,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.01146287890151143,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.010705051012337208,
+          "extra_peak_gpu_bytes": 33372672,
+          "tensors": 74
+        }
+      ],
+      "streaming": [
+        {
+          "seconds": 0.0003405720926821232,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.0002995552495121956,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.0003309040330350399,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.00029833195731043816,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.00031672604382038116,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.0003065168857574463,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.00031443266198039055,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.00030073709785938263,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.0003195018507540226,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        },
+        {
+          "seconds": 0.0002974802628159523,
+          "extra_peak_gpu_bytes": 2359296,
+          "tensors": 74
+        }
+      ]
+    },
+    "medians": {
+      "cpu_staging": {
+        "seconds": 0.011345718055963516,
+        "extra_peak_gpu_bytes": 33372672.0,
+        "tensors": 74.0
+      },
+      "streaming": {
+        "seconds": 0.0003104747738689184,
+        "extra_peak_gpu_bytes": 2359296.0,
+        "tensors": 74.0
+      }
+    }
+  },
+  "hybrid_lifecycle": {
+    "parameters": 13657864,
+    "steps": 3,
+    "separate_process_resume": true,
+    "verified_responses": 12,
+    "model": "random KDA + latent MoE, two layers; GPT2 tokenizer and public GSM8K",
+    "train_rollout_logprob_abs_diff": [
+      0.0023097172379493713,
+      0.003055684268474579,
+      0.0022548064589500427
+    ],
+    "all_task_rewards_zero": true,
+    "updates": "MoE auxiliary losses; not task learning",
+    "artifacts": "/tmp/miles-validation/public-hybrid-moe"
+  },
+  "beaker_attempts": [
+    {
+      "id": "01M24ZXCVN3K2NX6K6JDJQK0Q8",
+      "result": "failed before training: Jupiter driver only supports CUDA 12.8"
+    },
+    {
+      "id": "01M250PF2X9JK5ENJR5A4500WJ",
+      "result": "Holmes baseline trained two steps and published versions 0/1/2, then NCCL teardown timed out; optimized arm not reached"
+    }
+  ]
+}

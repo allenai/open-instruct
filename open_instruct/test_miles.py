@@ -9,7 +9,7 @@ import torch
 
 from open_instruct.miles import rewards
 from open_instruct.miles.config import CoreConfig, RunConfig
-from open_instruct.miles.data import policy_versions, sample_batches
+from open_instruct.miles.data import policy_versions, sample_batches, score_agreement, validate_score_agreement
 from open_instruct.miles.state import PolicyClock, atomic_json
 
 
@@ -118,3 +118,19 @@ def test_mixed_rewards_use_existing_verifier_and_preserve_components(tmp_path):
     sample.metadata["verifiers"][0]["name"] = "untrusted.module.Factory"
     with pytest.raises(ValueError, match="trusted reward registry"):
         asyncio.run(rewards.registered_reward(args, sample))
+
+
+def test_policy_agreement_ignores_tool_tokens_and_weights_active_tokens():
+    rollout = {
+        "log_probs": [torch.tensor([-1.1, float("nan"), -1.2]), torch.tensor([-2.3])],
+        "rollout_log_probs": [torch.tensor([-1.0, float("nan"), -1.0]), torch.tensor([-2.0])],
+        "loss_masks": [torch.tensor([1, 0, 1]), torch.tensor([1])],
+    }
+    stats = score_agreement(rollout)
+    assert stats.tolist() == pytest.approx([0.6, 3])
+    assert validate_score_agreement(stats, 0.21) == pytest.approx(0.2)
+    with pytest.raises(ValueError, match="exceeds"):
+        validate_score_agreement(stats, 0.19)
+    rollout["loss_masks"][0][1] = 1
+    with pytest.raises(ValueError, match="Non-finite"):
+        score_agreement(rollout)

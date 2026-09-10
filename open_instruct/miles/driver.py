@@ -85,6 +85,10 @@ async def train(args):
     finally:
         cleanup_error = None
         for component, operation, timeout in (
+            # Async generation must stop, but the servers must remain alive while
+            # both sides collectively destroy the weight-update NCCL group.
+            (manager if args.fully_async else None, lambda: manager.core_publication_boundary.remote(True), 60),
+            (learner, lambda: learner._broadcast("close_weight_transport"), 60),
             (manager, lambda: manager.dispose.remote(), 120),
             (learner, lambda: learner.dispose(), 60),
         ):

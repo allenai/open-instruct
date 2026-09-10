@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -210,6 +211,49 @@ def bootstrap(options):
     )
 
 
+def hybrid(options):
+    """Build a tiny KDA+latent policy using the already prepared public task slice."""
+    root = options.output
+    root.mkdir(parents=True, exist_ok=True)
+    hf_config_utils._register_olmo3moe_auto_classes()
+    hf = Olmo3MoeConfig.from_pretrained(options.fixture / "hf")
+    hf.layer_types = ["linear_attention", "full_attention"]
+    hf.dense_layers_indices = [0]
+    hf.dense_mlp_intermediate_size = 256
+    hf.dense_mlp_uses_shared_experts = True
+    hf.shared_expert_intermediate_size = 128
+    hf.latent_moe_dim = 64
+    hf.use_rope = False
+    hf.attention_gate_type = "elementwise"
+    hf.linear_num_key_heads = 8
+    hf.linear_num_value_heads = 8
+    hf.linear_key_head_dim = 64
+    hf.linear_value_head_dim = 64
+    torch.manual_seed(17)
+    model = AutoModelForCausalLM.from_config(hf).to(torch.bfloat16)
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            if name.endswith(("A_log", "dt_bias")):
+                parameter.zero_()
+    if (root / "hf").exists():
+        raise FileExistsError(root / "hf")
+    model.save_pretrained(root / "hf")
+    AutoTokenizer.from_pretrained(options.fixture / "hf").save_pretrained(root / "hf")
+    for name in ("prompts.jsonl", "verifiers.json"):
+        shutil.copyfile(options.fixture / name, root / name)
+    (root / "preparation.json").write_text(
+        json.dumps(
+            dict(
+                source="fresh random KDA + latent MoE; seed 17; public tokenizer/task slice",
+                parameters=sum(p.numel() for p in model.parameters()),
+                export_dtype="bfloat16",
+            ),
+            indent=2,
+        )
+        + "\n"
+    )
+
+
 def run(options):
     root = options.output
     os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
@@ -217,6 +261,7 @@ def run(options):
         CoreConfig(
             attention_backend="torch",
             stream_moe_export=not options.legacy_export,
+            max_train_rollout_logprob_abs_diff=0.05,
             weight_sync_mode="per_tensor" if options.per_tensor else "flattened",
             max_sequence_length=512,
             activation_checkpointing=False,
@@ -241,6 +286,9 @@ def run(options):
             metadata_key="metadata",
             rollout_max_response_len=32,
             sglang_context_length=512,
+            sglang_max_total_tokens=4096,
+            sglang_max_running_requests=4,
+            sglang_server_concurrency=4,
             sglang_mem_fraction_static=0.2,
             sglang_disable_cuda_graph=True,
             sglang_attention_backend="torch_native",
@@ -254,6 +302,9 @@ def run(options):
             lr_decay_iters=3,
         ),
     )
+    hf = json.loads((root / "hf/config.json").read_text())
+    if "linear_attention" in hf.get("layer_types", []):
+        config.miles.update(sglang_disable_radix_cache=True, sglang_max_mamba_cache_size=16)
     if options.disaggregated:
         config.miles.pop("colocate")
     if not options.resume:
@@ -340,9 +391,10 @@ def audit(options):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["prepare", "bootstrap", "run", "audit"])
+    parser.add_argument("command", choices=["prepare", "bootstrap", "hybrid", "run", "audit"])
     parser.add_argument("output", type=Path)
     parser.add_argument("--source", type=Path)
+    parser.add_argument("--fixture", type=Path)
     parser.add_argument("--tokenizer", type=Path)
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--resume", action="store_true")
@@ -353,6 +405,8 @@ def main():
     options = parser.parse_args()
     if options.command == "prepare":
         prepare(options)
+    elif options.command == "hybrid":
+        hybrid(options)
     elif options.command == "bootstrap":
         bootstrap(options)
     elif options.command == "run":

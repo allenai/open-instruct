@@ -83,6 +83,40 @@
       "cause": "Jupiter driver reports CUDA 12.8; pinned PyTorch requires CUDA 13",
       "image": "01M24ZWPHZBJ36AJDYKV08818Y",
       "open_instruct_commit": "6a7ab36c1c26"
+    },
+    "local_hybrid_gsm8k": {
+      "parameters": 13657864,
+      "steps": 3,
+      "separate_process_resume": true,
+      "verified_responses": 12,
+      "model": "random KDA + latent MoE, two layers; GPT2 tokenizer and public GSM8K",
+      "train_rollout_logprob_abs_diff": [
+        0.0023097172379493713,
+        0.003055684268474579,
+        0.0022548064589500427
+      ],
+      "all_task_rewards_zero": true,
+      "updates": "MoE auxiliary losses; not task learning",
+      "artifacts": "/tmp/miles-validation/public-hybrid-moe"
+    },
+    "beaker_disaggregated_attempt": {
+      "id": "01M250PF2X9JK5ENJR5A4500WJ",
+      "result": "Holmes baseline trained two steps and published versions 0/1/2, then NCCL teardown timed out; optimized arm not reached"
+    },
+    "local_export_profile": {
+      "evidence": "docs/measurements/miles-core-local-20260910.json",
+      "medians": {
+        "cpu_staging": {
+          "seconds": 0.011345718055963516,
+          "extra_peak_gpu_bytes": 33372672.0,
+          "tensors": 74.0
+        },
+        "streaming": {
+          "seconds": 0.0003104747738689184,
+          "extra_peak_gpu_bytes": 2359296.0,
+          "tensors": 74.0
+        }
+      }
     }
   },
   "limitations": [
@@ -94,5 +128,5 @@
   ],
   "core_base_branch": "jacobm/moe-v2-core-gdn2",
   "core_base_revision": "169b8f9d06bce0276143876c82f630af483b03b7",
-  "core_development_commit": "9a2a3c3b9a889a3978ecbe50b2d76feeb1ac430f"
+  "core_development_commit": "b7f1e5296704779e7deb06de4c4242be9729d1a9"
 }

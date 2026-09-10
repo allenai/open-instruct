@@ -6,7 +6,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-
 COMMAND = """set -euo pipefail
 cd /opt/core-rl
 export HF_HOME=/tmp/hf-cache

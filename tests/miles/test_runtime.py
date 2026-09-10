@@ -1,6 +1,7 @@
 """Integration tests run inside the pinned MILES + patched Core image."""
 
 import contextlib
+import dataclasses
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -150,6 +151,14 @@ def test_real_miles_loss_core_update_and_native_resume(parsed_args, tmp_path, mo
             "rollout_log_probs": [torch.full((3,), -5.0, device="cuda") for _ in range(4)],
         }
         monkeypatch.setattr(actor.miles_data, "get_rollout_data", lambda *a, **kw: (rollout, contextlib.nullcontext()))
+        original_core_config = args.olmo_core
+        args.olmo_core = dataclasses.replace(original_core_config, max_train_rollout_logprob_abs_diff=0.0)
+        with pytest.raises(RuntimeError, match="logprob difference"):
+            worker.train(0, None)
+        assert worker.clock.completed_steps == 0
+        for name, value in worker.model.state_dict().items():
+            torch.testing.assert_close(value, before[name], rtol=0, atol=0)
+        args.olmo_core = original_core_config
         worker.train(0, None)
         assert worker.clock.completed_steps == 1 and worker.clock.next_rollout_id == 1
         after = worker.model.state_dict()

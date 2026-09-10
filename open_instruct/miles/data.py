@@ -66,3 +66,32 @@ def router_routes(model, batch):
             layer = int(parts[parts.index("blocks") + 1])
             mapping[name] = routes[:, layer].unsqueeze(0).long()
     return mapping
+
+
+def score_agreement(rollout: dict[str, Any]) -> torch.Tensor:
+    """Return absolute-difference sum and active-token count for rank reduction."""
+    scores = rollout["log_probs"]
+    behavior = rollout.get("rollout_log_probs")
+    masks = rollout["loss_masks"]
+    if behavior is None or not scores or len(scores) != len(behavior) or len(scores) != len(masks):
+        raise ValueError("Behavior and training log probabilities must cover the same samples")
+    result = torch.zeros(2, dtype=torch.float64, device=scores[0].device)
+    for current, previous, mask in zip(scores, behavior, masks, strict=True):
+        previous = torch.as_tensor(previous, device=current.device, dtype=torch.float32)
+        if current.ndim != 1 or current.shape != previous.shape or current.shape != mask.shape:
+            raise ValueError("Behavior/training score and response-mask shapes differ")
+        active = mask.bool()
+        current, previous = current[active].float(), previous[active]
+        if not bool(torch.isfinite(current).all() & torch.isfinite(previous).all()):
+            raise ValueError("Non-finite active-token log probability")
+        result[0] += (current - previous).abs().double().sum()
+        result[1] += active.sum()
+    return result
+
+
+def validate_score_agreement(stats: torch.Tensor, limit: float | None) -> float:
+    """Validate the globally reduced active-token mean before any optimizer step."""
+    difference = float(stats[0] / stats[1].clamp_min(1))
+    if limit is not None and difference > limit:
+        raise ValueError(f"Train/rollout logprob difference {difference:.6f} exceeds {limit:.6f}")
+    return difference

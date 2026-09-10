@@ -12,6 +12,7 @@ import tomllib
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
+    max_train_rollout_logprob_abs_diff: float | None = None
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     model_config: str | None = None
@@ -25,6 +26,9 @@ class CoreConfig:
     router_z_loss_weight: float = 1e-5
 
     def __post_init__(self):
+        limit = self.max_train_rollout_logprob_abs_diff
+        if limit is not None and (not math.isfinite(limit) or limit < 0):
+            raise ValueError("core.max_train_rollout_logprob_abs_diff must be finite and nonnegative")
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise ValueError("core.weight_sync_mode must be flattened or per_tensor")
         if type(self.stream_moe_export) is not bool:

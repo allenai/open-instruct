@@ -164,7 +164,7 @@ The following remain required before deleting old GRPO code:
 | --- | --- |
 | Dense models | Tiny Llama, Qwen2, Qwen3, Olmo2 numerical parity; real training-scale model qualification remains |
 | Conventional Olmo3Moe | Real local 32.45M MoE GSM8K lifecycle, initial serving-weight equality, native/HF parity, updates and separate-process restart verified; larger-model and multi-rank EP qualification remains |
-| KDA / latent Olmo Hybrid | Native components and bidirectional weight conversion come from the gdn2 base; factory, exact HF weight roundtrips, GPU updates and native checkpoint restore tested; full HF/Core/SGLang numerical and multi-rank qualification remains |
+| KDA / latent Olmo Hybrid | Tiny KDA+latent model completed real SGLang/MILES/Core GSM8K iterations and separate-process restart; initial serving weights match and train/rollout mean logprob differences were 0.0023–0.0031; production architecture and multi-rank qualification remain |
 | Routing replay | Router/recompute gradients tested; serving route alignment, final unscored token's auxiliary loss, and full-model replay qualification remain |
 | Tools / environments | Masks survive the adapter; the complete open-instruct multi-turn environment rollout bridge remains to be migrated |
 | Mixed rewards | Existing verifier adapter tested with GSM8K; code/judge infrastructure, cleanup and complete registered-task coverage remain |
@@ -174,5 +174,38 @@ The following remain required before deleting old GRPO code:
 | Offload / packing | Trainer offload, dynamic packing and multi-sequence microbatches rejected |
 | Recovery | Same-topology durable resume verified; automatic trainer-cell recovery and exact serving RNG replay unavailable |
 | Performance | No throughput/memory acceptance claim; compare against the current olmo-miles Megatron baseline |
+
+Additional local hybrid check:
+
+```bash
+python tests/miles/local_moe.py hybrid /validation/hybrid --fixture /validation/public-toy-moe
+python tests/miles/local_moe.py run /validation/hybrid
+python tests/miles/local_moe.py run /validation/hybrid --resume
+python tests/miles/local_moe.py audit /validation/hybrid
+```
+
+The fixture caps total KV tokens at 4096 and concurrency at four, rather than
+letting a tiny model size its cache from a large B300's available memory. For KDA,
+it disables radix caching and caps recurrent state slots at 16. It also sets
+`core.max_train_rollout_logprob_abs_diff=0.05`. The guard computes an active-token
+mean across trainer ranks, excludes masked tool tokens, and rejects excessive
+drift before any optimizer update. General runs leave this limit unset unless
+configured, because intentionally stale async policies require a chosen drift
+budget. Active-token non-finite log probabilities are always rejected.
+
+For a matched export-only measurement, run
+`python tests/miles/profile_export.py /path/to/hf /path/to/profile.json` in the
+image. On the trained 32.45M toy model, ten alternating measured repetitions
+(after warmup) gave median export/packing times 11.35 ms for CPU staging and
+0.31 ms for streaming, with additional peak GPU allocation 31.8 MiB versus
+2.25 MiB. This excludes transport and serving. The raw local evidence is in
+`docs/measurements/miles-core-local-20260910.json`.
+
+The first Holmes trial exposed a shutdown defect after successful distributed
+training/publication: trainer teardown waited on the weight-update NCCL group
+after its engine peers were gone. Cleanup now quiesces async production, retires
+the weight group collectively while engines are alive, and then disposes engines
+and trainers. Cleanup failures remain visible; a saved checkpoint does not turn
+a failed shutdown into a passed trial.
 
 The full replacement is therefore unfinished. These are implementation or qualification gaps, not capabilities silently delegated to another trainer.

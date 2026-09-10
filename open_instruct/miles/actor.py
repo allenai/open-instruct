@@ -124,6 +124,14 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             versions = self._agree(lambda: data.policy_versions(rollout))
             self._agree(lambda: self.clock.validate_versions(versions, self.args.olmo_core.max_policy_lag))
             rollout["log_probs"] = self._score(self.train_module, batches, use_replay=True)
+            agreement = self._agree(lambda: data.score_agreement(rollout))
+            dist.all_reduce(agreement)
+            difference = self._agree(
+                lambda: data.validate_score_agreement(
+                    agreement, self.args.olmo_core.max_train_rollout_logprob_abs_diff
+                )
+            )
+            logger.info("Core behavior-policy agreement: mean_abs=%s active_tokens=%s", difference, int(agreement[1]))
             if self.ref_module is not None:
                 rollout["ref_log_probs"] = self._score(self.ref_module, batches, use_replay=False)
             miles_loss.compute_advantages_and_returns(self.args, rollout)
@@ -265,6 +273,21 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("a") as output:
                     output.write(json.dumps(timings) + "\n")
+
+    def close_weight_transport(self):
+        """Collectively retire the serving communicator before engines are stopped."""
+        updater = getattr(self, "weight_updater", None)
+        group = getattr(updater, "_model_update_groups", None)
+        if group is None:
+            return
+        pending = [
+            engine.destroy_weights_update_group.remote(updater._group_name) for engine in updater.rollout_engines
+        ]
+        try:
+            dist.destroy_process_group(group)
+        finally:
+            ray.get(pending)
+        updater._model_update_groups = None
 
     def export_hf(self, rollout_id, path):
         state = models.export_state(self.train_module, self.hf_config)
