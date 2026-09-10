@@ -99,7 +99,7 @@ uv run python mason.py \
     --save_trainer_logprobs true \
     --tools swerl_vanillux_sandbox \
     --tool_configs '{"backend": "opensandbox", "task_data_hf_repo": "allenai/tmax-15k-open-instruct", "test_timeout": 120, "image": "python:3.12-slim"}' \
-    --pool_size 512 \
+    --pool_size 1024 \
     --max_steps 64 \
     --verification_reward 1.0 \
     --tool_parser_type vllm_qwen3_xml \
