@@ -165,6 +165,19 @@ case "$MODE" in
     tokenize)
         # CPU-only, and NOT on holmes or jupiter: a 0-GPU slot on saturn/neptune/
         # ceres schedules in minutes. The cache lands on Weka, which training reads.
+        #
+        # Warm the shared HF hub cache first. The cache key hashes the dataset's README
+        # commit and the tokenizer files as found in the *local* hub cache (never
+        # refreshed from the Hub), so the first job to touch a dataset or tokenizer
+        # sees "not cached" and hashes differently from every later job: the simfc
+        # tokenize wrote 0f8809b247-* while training looked for 77c92e2c0a-*. Pulling
+        # those files before tokenizing puts both jobs on the same key.
+        WARM_CMD=(uv run hf download "$TOKENIZER" tokenizer_config.json tokenizer.json special_tokens_map.json vocab.json)
+        set -- $MIXER
+        while (( $# >= 2 )); do
+            WARM_CMD+=("&&" uv run hf download --repo-type dataset "$1" README.md)
+            shift 2
+        done
         $PY mason.py \
             --cluster ai2/saturn ai2/neptune ai2/ceres \
             --workspace "$WORKSPACE" \
@@ -177,7 +190,8 @@ case "$MODE" in
             --gpus 0 \
             --non_resumable \
             --no_auto_dataset_cache \
-            -- uv run python open_instruct/olmo_core_finetune.py \
+            -- "${WARM_CMD[@]}" "&&" \
+            uv run python open_instruct/olmo_core_finetune.py \
             "${common_args[@]}" \
             --cache_dataset_only
         ;;
