@@ -66,8 +66,15 @@ RUN curl --silent \
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
 
-# Install Podman for sandbox tasks that need subcontainers on Beaker.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install Podman for sandbox tasks that need subcontainers on Beaker (the
+# on-node podman/DinD backend). Opt-in (INSTALL_PODMAN=true): the packages
+# (passt, netavark) only exist on Ubuntu 23.04+, so this cannot build on the
+# 22.04 base the CUDA images now use. OpenSandbox and Modal backends run
+# sandboxes off-node and don't need it, so it defaults off.
+ARG INSTALL_PODMAN=false
+
+RUN if [ "$INSTALL_PODMAN" = "true" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
     autoconf \
     automake \
     conmon \
@@ -98,31 +105,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-sphinx \
     systemd \
     uidmap \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* ; \
+    fi
 
 RUN mkdir -p /etc/containers/registries.conf.d/
 COPY docker/podman/containers.conf /etc/containers/containers.conf
 COPY docker/podman/policy.json /etc/containers/policy.json
 COPY docker/podman/10-unqualified-search-registries.conf /etc/containers/registries.conf.d/10-unqualified-search-registries.conf
 
-RUN wget -qO- https://github.com/containers/podman/archive/refs/tags/v5.6.2.tar.gz \
+RUN if [ "$INSTALL_PODMAN" = "true" ]; then \
+    wget -qO- https://github.com/containers/podman/archive/refs/tags/v5.6.2.tar.gz \
     | tar xz -C /tmp \
     && cd /tmp/podman-5.6.2 \
     && make BUILDTAGS="selinux seccomp" PREFIX=/usr \
     && make install PREFIX=/usr \
-    && rm -rf /tmp/podman-5.6.2
+    && rm -rf /tmp/podman-5.6.2 ; \
+    fi
 
-RUN git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/crun \
+RUN if [ "$INSTALL_PODMAN" = "true" ]; then \
+    git clone --depth 1 -b 1.14.3 https://github.com/containers/crun.git /tmp/crun \
     && cd /tmp/crun \
     && ./autogen.sh \
     && ./configure --prefix=/usr --sysconfdir=/etc \
     && make \
     && make install \
-    && rm -rf /tmp/crun
+    && rm -rf /tmp/crun ; \
+    fi
 
 # Translate Docker CLI calls from sandbox code to Podman by default.
 # DinD scripts call /usr/bin/docker explicitly when they need the real Docker CLI.
-RUN ln -sf "$(which podman)" /usr/local/bin/docker
+RUN if [ "$INSTALL_PODMAN" = "true" ]; then ln -sf "$(which podman)" /usr/local/bin/docker ; fi
 
 RUN echo "root:10000:11165536" >> /etc/subuid \
     && echo "root:10000:11165536" >> /etc/subgid
