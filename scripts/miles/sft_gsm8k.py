@@ -33,7 +33,7 @@ def configuration(root):
     return RunConfig(
         CoreConfig(
             expert_parallel_size=2,
-            attention_backend="flash_2",
+            attention_backend="flash_4",
             max_sequence_length=6144,
             activation_checkpointing=True,
             max_train_rollout_logprob_abs_diff=0.05,
@@ -164,8 +164,11 @@ def prepare(root):
     print("SFT_GSM8K_PREPARED", json.dumps(report), flush=True)
 
 
-def run(root, validate_only=False):
+def run(root, validate_only=False, decode_graphs=False):
     config = configuration(root)
+    if decode_graphs:
+        config.miles.pop("sglang_disable_cuda_graph")
+        config.miles["sglang_cuda_graph_max_bs_decode"] = 4
     sys.argv = ["sft-gsm8k", *config.arguments()]
     args = arguments.parse_args()
     assert args.save_interval is None, "This bounded trial does not save optimizer checkpoints"
@@ -245,13 +248,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["prepare", "run", "audit", "validate"])
     parser.add_argument("output", type=Path)
+    parser.add_argument("--decode-graphs", action="store_true")
     options = parser.parse_args()
     if options.command == "prepare":
         prepare(options.output)
     elif options.command == "audit":
         audit(options.output)
     else:
-        run(options.output, validate_only=options.command == "validate")
+        run(options.output, validate_only=options.command == "validate", decode_graphs=options.decode_graphs)
 
 
 if __name__ == "__main__":

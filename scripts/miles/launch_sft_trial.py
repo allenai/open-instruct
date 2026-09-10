@@ -17,6 +17,7 @@ mkdir -p /output "$RUN_ROOT"
 # Source weights and responses remain on WEKA; the Beaker result contains reports only.
 trap 'for name in preparation.json arguments.json audit.json; do if [ -f "$RUN_ROOT/$name" ]; then cp "$RUN_ROOT/$name" /output/; fi; done' EXIT
 python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(), torch.version.cuda)'
+python scripts/miles/preflight_attention.py --backend flash_4
 python scripts/miles/sft_gsm8k.py prepare "$RUN_ROOT"
 python scripts/miles/sft_gsm8k.py run "$RUN_ROOT"
 """
@@ -26,7 +27,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--decode-graphs", action="store_true")
     args = parser.parse_args()
+    command = (
+        COMMAND.replace('sft_gsm8k.py run "$RUN_ROOT"', 'sft_gsm8k.py run "$RUN_ROOT" --decode-graphs')
+        if args.decode_graphs
+        else COMMAND
+    )
     spec = {
         "version": "v2",
         "description": "Open-instruct / MILES / Core: SFT step23607 GSM8K, EP2 + one engine, two updates and held-out before/after",
@@ -35,7 +42,7 @@ def main():
                 "name": "sft-gsm8k",
                 "image": {"beaker": args.image},
                 "command": ["bash", "-c"],
-                "arguments": [COMMAND],
+                "arguments": [command],
                 "datasets": [{"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}}],
                 "result": {"path": "/output"},
                 "resources": {"gpuCount": 3, "sharedMemory": "100 GiB"},

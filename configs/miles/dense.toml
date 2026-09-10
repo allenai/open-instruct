@@ -1,6 +1,6 @@
 # Replace /data paths with mounted, prepared inputs. All options use MILES semantics.
 [core]
-attention_backend = "flash_2"
+attention_backend = "flash_4"
 max_sequence_length = 4096
 activation_checkpointing = true
 max_policy_lag = 0

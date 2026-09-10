@@ -265,3 +265,24 @@ implemented; tiny resident colocation does not establish large-model offload.
 MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
   ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_core_sft_gsm8k.sh
 ```
+
+The first full SFT attempt,
+[01M261NF9E9GG112TBCQRY7TMK](https://beaker.org/ex/01M261NF9E9GG112TBCQRY7TMK),
+passed initial weight equality and scored 13/16 before training (two truncated
+answers). The first training batch scored 15/16, with one mixed-reward group.
+It failed before an update because FA2's entrypoint is absent from the pinned
+FA4 runtime. The SFT recipe now selects Core's FA4 backend and runs a small
+forward/backward numerical preflight before loading the large model. The
+preflight can be exercised on the workstation with `--backend torch`; actual
+FA4 execution requires Blackwell.
+
+Append `--decode-graphs` to the SFT launch wrapper command to enable decode
+CUDA graphs capped at batch size four. The initial eager baseline took 510 s
+for held-out generation and 342 s for its first rollout, while the complete
+37.0 GB initial weight publication took 3.48 s (0.32 s export/packing). These
+are phase measurements from a failed training attempt, not a completed run
+or a matched throughput comparison.
+
+The generic Core configuration defaults to the portable Torch SDPA backend.
+The B300 example and SFT trial explicitly select FA4; the compiled image does
+not provide the FA2 API.

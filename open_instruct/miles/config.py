@@ -18,7 +18,7 @@ class CoreConfig:
     model_config: str | None = None
     reward_config: str | None = None
     expert_parallel_size: int = 1
-    attention_backend: str = "flash_2"
+    attention_backend: str = "torch"
     activation_checkpointing: bool = True
     max_sequence_length: int = 8192
     max_policy_lag: int = 0

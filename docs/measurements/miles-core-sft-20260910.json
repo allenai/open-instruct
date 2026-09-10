@@ -1,0 +1,412 @@
+{
+  "attempts": [
+    {
+      "id": "01M261NF9E9GG112TBCQRY7TMK",
+      "source_commit": "19b9022392b2",
+      "exit_code": 1,
+      "result": "Failed before first optimizer step: FA2 entrypoint absent from FA4 runtime",
+      "checkpoint_preparation": {
+        "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+        "source_header_sha256": {
+          "model.safetensors": "3e66499d7c6978aae49b916a2538a78a94cd041e6fc201176bf703fbcb1af0cf"
+        },
+        "tensor_bytes_by_dtype": {
+          "BF16": 37028386304
+        },
+        "kda_parameters": {
+          "model.layers.0.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.0.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.1.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.1.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.10.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.10.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.11.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.11.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.12.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.12.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.13.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.13.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.15.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.15.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.16.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.16.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.17.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.17.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.18.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.18.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.2.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.2.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.3.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.3.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.5.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.5.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.6.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.6.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.7.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.7.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          },
+          "model.layers.8.self_attn.A_log": {
+            "dtype": "BF16",
+            "shape": [
+              16
+            ]
+          },
+          "model.layers.8.self_attn.dt_bias": {
+            "dtype": "BF16",
+            "shape": [
+              2048
+            ]
+          }
+        },
+        "template_source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-megatron/.olmo-miles/hf/chat_template.jinja",
+        "template_sha256": "f5186d42d99c8a0445d37fd8a6c7ccf07fe3e24a29ce622d8bd245da9507b12b",
+        "dataset": "ai2-adapt-dev/rlvr_gsm8k_zs",
+        "revision": "93ffaae6cd2acb8f821f6d4712651320a889b1b9",
+        "train_rows": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "heldout_rows": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23
+        ],
+        "interpretation": "Held out from this trial's updates; no claim of SFT decontamination",
+        "config": {
+          "architectures": [
+            "Olmo3MoeForCausalLM"
+          ],
+          "attention_bias": false,
+          "attention_dropout": 0.0,
+          "attention_gate_full_precision": true,
+          "attention_gate_type": "elementwise",
+          "attention_hidden_size": 2048,
+          "auto_map": {
+            "AutoConfig": "configuration_olmo3moe.Olmo3MoeConfig",
+            "AutoModelForCausalLM": "modeling_olmo3moe.Olmo3MoeForCausalLM"
+          },
+          "bos_token_id": null,
+          "dense_layers_indices": [
+            0
+          ],
+          "dense_layers_use_shared_expert": true,
+          "dense_mlp_intermediate_size": 8568,
+          "dtype": "bfloat16",
+          "embed_norm": true,
+          "embed_scale": 35.77708763999664,
+          "emo_eos_token_id": null,
+          "emo_eval_document_expert_pool": null,
+          "emo_max_document_expert_pool": null,
+          "emo_min_document_expert_pool": null,
+          "eos_token_id": 100257,
+          "gating_function": "softmax",
+          "global_load_balancing": false,
+          "head_dim": 128,
+          "hidden_act": "silu",
+          "hidden_size": 1280,
+          "initializer_range": 0.02,
+          "latent_moe_bias": false,
+          "latent_moe_dim": 640,
+          "latent_moe_up_proj_input_norm": false,
+          "layer_types": [
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "full_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "full_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "full_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "linear_attention",
+            "full_attention"
+          ],
+          "linear_allow_neg_eigval": true,
+          "linear_conv_kernel_dim": 4,
+          "linear_key_head_dim": 128,
+          "linear_norm_eps": 1e-05,
+          "linear_num_key_heads": 16,
+          "linear_num_value_heads": 16,
+          "linear_value_head_dim": 256,
+          "max_position_embeddings": 65536,
+          "model_type": "olmo3moe",
+          "moe_intermediate_size": 952,
+          "n_routed_experts": 512,
+          "normalize_expert_weights": 1.0,
+          "num_attention_heads": 16,
+          "num_experts_per_tok": 16,
+          "num_hidden_layers": 20,
+          "num_key_value_heads": 8,
+          "number_of_conv_states": 3,
+          "original_num_experts_per_tok": null,
+          "pad_token_id": 100277,
+          "restore_weight_scale": true,
+          "rms_norm_eps": 1e-06,
+          "rope_parameters": null,
+          "rope_theta": null,
+          "shared_expert_intermediate_size": 952,
+          "sliding_window": 128,
+          "tie_word_embeddings": false,
+          "transformers_version": "5.4.0",
+          "use_cache": false,
+          "use_head_qk_norm": true,
+          "use_peri_ln": true,
+          "use_rope": false,
+          "vocab_size": 100278
+        }
+      },
+      "publication": [
+        {
+          "buckets": 35,
+          "bytes": 37028386304,
+          "export_pack_seconds": 0.3209930285811424,
+          "finalize_seconds": 0.036512755788862705,
+          "pause_connect_seconds": 0.03640413796529174,
+          "stream_moe_export": true,
+          "tensors": 29669,
+          "total_seconds": 3.4837331189773977,
+          "transport": "flattened",
+          "transport_collectives": 35,
+          "transport_load_seconds": 3.0898227584548295,
+          "version": 0
+        }
+      ],
+      "metrics": {
+        "baseline": {
+          "eval/gsm8k-none_reward_ratio": 0.0,
+          "eval/gsm8k": 0.8125,
+          "eval/gsm8k/num_training_samples": 16,
+          "eval/gsm8k/episode_raw_reward": 0.8125,
+          "eval/gsm8k/episode_response_length/mean": 1884.25,
+          "eval/gsm8k/episode_response_length/median": 1397.5,
+          "eval/gsm8k/episode_response_length/max": 4096,
+          "eval/gsm8k/episode_response_length/min": 735,
+          "eval/gsm8k/episode_total_response_length/mean": 1884.25,
+          "eval/gsm8k/response_len/mean": 1884.25,
+          "eval/gsm8k/response_len/median": 1397.5,
+          "eval/gsm8k/response_len/max": 4096,
+          "eval/gsm8k/response_len/min": 735,
+          "eval/gsm8k/zero_std/all_zero_percentage": 0.0,
+          "eval/gsm8k/zero_std/all_one_percentage": 0.0,
+          "eval/gsm8k/prefix_cache_hit_rate": 0.0,
+          "eval/gsm8k/avg_cached_tokens_per_sample": 0.0,
+          "eval/gsm8k/repetition_frac": 0.0,
+          "eval/gsm8k/truncated_ratio": 0.125,
+          "eval/gsm8k/weight_version/mean": 0.0,
+          "eval/gsm8k/weight_version/median": 0.0,
+          "eval/gsm8k/weight_version/max": 0,
+          "eval/gsm8k/weight_version/min": 0,
+          "eval/gsm8k/weight_version/mixed_version_ratio": 0.0,
+          "eval/gsm8k-truncated_ratio": 0.125
+        },
+        "rollout_0": {
+          "rollout/num_training_samples": 16,
+          "rollout/episode_raw_reward": 0.9375,
+          "rollout/episode_response_length/mean": 1450.3125,
+          "rollout/episode_response_length/median": 1189.5,
+          "rollout/episode_response_length/max": 4096,
+          "rollout/episode_response_length/min": 553,
+          "rollout/episode_total_response_length/mean": 1450.3125,
+          "rollout/response_len/mean": 1450.3125,
+          "rollout/response_len/median": 1189.5,
+          "rollout/response_len/max": 4096,
+          "rollout/response_len/min": 553,
+          "rollout/zero_std/count_1.0": 3,
+          "rollout/zero_std/all_zero_percentage": 0.0,
+          "rollout/zero_std/all_one_percentage": 0.75,
+          "rollout/prefix_cache_hit_rate": 0.0,
+          "rollout/avg_cached_tokens_per_sample": 0.0,
+          "rollout/repetition_frac": 0.0,
+          "rollout/truncated_ratio": 0.0625,
+          "rollout/weight_version/mean": 0.0,
+          "rollout/weight_version/median": 0.0,
+          "rollout/weight_version/max": 0,
+          "rollout/weight_version/min": 0,
+          "rollout/weight_version/mixed_version_ratio": 0.0,
+          "perf/rollout_time": 341.63017892837524,
+          "perf/tokens_per_gpu_per_sec": 67.92432703922525,
+          "perf/longest_sample_tokens_per_sec": 11.989573089966242,
+          "perf/effective_tokens_per_gpu_per_sec": 67.92432703922525,
+          "perf/longest_effective_sample_tokens_per_sec": 11.989573089966242
+        }
+      }
+    }
+  ]
+}
