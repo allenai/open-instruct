@@ -24,13 +24,17 @@ def format_resource_snapshot(resources: dict[str, float] | None) -> str:
 
 
 def build_grpo_fast_startup_requirements(
-    num_learners_per_node: list[int], single_gpu_mode: bool, vllm_num_engines: int, vllm_tensor_parallel_size: int
+    num_learners_per_node: list[int],
+    single_gpu_mode: bool,
+    vllm_num_engines: int,
+    vllm_tensor_parallel_size: int,
+    accelerator_resource: str = "GPU",
 ) -> dict:
     learner_pg_bundles = [
-        {"GPU": actor_num_gpus, "CPU": actor_num_gpus * LEARNER_PLACEMENT_GROUP_CPU_PER_GPU}
+        {accelerator_resource: actor_num_gpus, "CPU": actor_num_gpus * LEARNER_PLACEMENT_GROUP_CPU_PER_GPU}
         for actor_num_gpus in num_learners_per_node
     ]
-    learner_pg_total_gpus = float(sum(bundle["GPU"] for bundle in learner_pg_bundles))
+    learner_pg_total_gpus = float(sum(bundle[accelerator_resource] for bundle in learner_pg_bundles))
     learner_pg_total_cpus = float(sum(bundle["CPU"] for bundle in learner_pg_bundles))
 
     # In single_gpu_mode, vLLM shares the learner placement group instead of reserving a separate one.
@@ -41,6 +45,7 @@ def build_grpo_fast_startup_requirements(
         separate_vllm_total_cpus = float(vllm_num_engines * vllm_tensor_parallel_size)
 
     return {
+        "accelerator_resource": accelerator_resource,
         "learner_pg_bundles": learner_pg_bundles,
         "learner_pg_total_gpus": learner_pg_total_gpus,
         "learner_pg_total_cpus": learner_pg_total_cpus,
@@ -57,21 +62,22 @@ def build_grpo_fast_startup_requirements(
 
 
 def format_grpo_fast_startup_requirements(requirements: dict) -> str:
+    accelerator_resource = requirements.get("accelerator_resource", "GPU")
     lines = [
         (
             "Learner placement group "
             f"strategy=STRICT_SPREAD, bundles={requirements['learner_pg_bundles']}, "
-            f"totals=(GPU={format_resource_amount(requirements['learner_pg_total_gpus'])}, "
+            f"totals=({accelerator_resource}={format_resource_amount(requirements['learner_pg_total_gpus'])}, "
             f"CPU={format_resource_amount(requirements['learner_pg_total_cpus'])})"
         ),
         (
             "Separate vLLM minimum totals="
-            f"(GPU={format_resource_amount(requirements['separate_vllm_total_gpus'])}, "
+            f"({accelerator_resource}={format_resource_amount(requirements['separate_vllm_total_gpus'])}, "
             f"CPU={format_resource_amount(requirements['separate_vllm_total_cpus'])})"
         ),
         (
             "Minimum full-topology totals="
-            f"(GPU={format_resource_amount(requirements['min_total_cluster_gpus'])}, "
+            f"({accelerator_resource}={format_resource_amount(requirements['min_total_cluster_gpus'])}, "
             f"CPU={format_resource_amount(requirements['min_total_cluster_cpus'])}; "
             "includes "
             f"DataPreparationActor CPU={format_resource_amount(requirements['data_prep_actor_cpus'])}, "
@@ -82,21 +88,22 @@ def format_grpo_fast_startup_requirements(requirements: dict) -> str:
 
 
 def get_grpo_fast_resource_shortfalls(requirements: dict, cluster_resources: dict[str, float]) -> list[str]:
-    cluster_gpus = float(cluster_resources.get("GPU", 0.0))
+    accelerator_resource = requirements.get("accelerator_resource", "GPU")
+    cluster_gpus = float(cluster_resources.get(accelerator_resource, 0.0))
     cluster_cpus = float(cluster_resources.get("CPU", 0.0))
 
     shortfalls = []
     if cluster_gpus < requirements["learner_pg_total_gpus"]:
         shortfalls.append(
             "learner placement group requires "
-            f"GPU={format_resource_amount(requirements['learner_pg_total_gpus'])} but Ray currently sees "
-            f"GPU={format_resource_amount(cluster_gpus)}"
+            f"{accelerator_resource}={format_resource_amount(requirements['learner_pg_total_gpus'])} "
+            f"but Ray currently sees {accelerator_resource}={format_resource_amount(cluster_gpus)}"
         )
     elif cluster_gpus < requirements["min_total_cluster_gpus"]:
         shortfalls.append(
             "full topology requires at least "
-            f"GPU={format_resource_amount(requirements['min_total_cluster_gpus'])} but Ray currently sees "
-            f"GPU={format_resource_amount(cluster_gpus)}"
+            f"{accelerator_resource}={format_resource_amount(requirements['min_total_cluster_gpus'])} "
+            f"but Ray currently sees {accelerator_resource}={format_resource_amount(cluster_gpus)}"
         )
 
     if cluster_cpus < requirements["learner_pg_total_cpus"]:

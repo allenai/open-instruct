@@ -24,7 +24,7 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 | Script | Scale | Description | Launch |
 |--------|-------|-------------|--------|
-| `scripts/train/olmo3/7b_instruct_rl.sh` | 8 nodes (64 GPUs) | Olmo 3 7B Instruct GRPO with multi-task reasoning datasets | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_instruct_rl.sh` |
+| `scripts/train/olmo3/7b_instruct_rl.sh` | 1 node (8 GPUs) | Olmo 3 7B Instruct GRPO with multi-task reasoning datasets | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_instruct_rl.sh` |
 | `scripts/train/olmo3/7b_think_rl.sh` | 4 nodes (32 GPUs) | Olmo 3 7B Think GRPO with pipeline RL | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/7b_think_rl.sh` |
 | `scripts/train/olmo3/32b_instruct_rl.sh` | 12 nodes (96 GPUs) | Olmo 3 32B Instruct GRPO | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_instruct_rl.sh` |
 | `scripts/train/olmo3/32b_think_rl.sh` | 28 nodes (224 GPUs) | Olmo 3 32B Think GRPO | `./scripts/train/build_image_and_launch.sh scripts/train/olmo3/32b_think_rl.sh` |

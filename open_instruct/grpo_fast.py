@@ -80,6 +80,11 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
 from vllm.distributed.weight_transfer.nccl_engine import NCCLWeightTransferEngine
 
+try:
+    from vllm_ascend.distributed.weight_transfer.hccl_engine import HCCLWeightTransferEngine
+except ImportError:
+    HCCLWeightTransferEngine = None
+
 from open_instruct import grpo_fast_resource_plan, logger_utils, model_utils, vllm_utils
 from open_instruct.actor_manager import ActorManager
 from open_instruct.data_types import ShutdownSentinel
@@ -161,7 +166,15 @@ WEIGHT_SYNC_TIMEOUT_S = 120.0
 CLUSTER_STARTUP_TIMEOUT_S = 1200.0
 PLACEMENT_GROUP_READY_TIMEOUT_S = 300.0
 LEARNER_ACTOR_NUM_CPUS = 4
-EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+EXCLUDED_ENV_VARS = {"ASCEND_RT_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
+
+
+def _get_collective_weight_transfer_engine():
+    if utils.get_accelerator_type() == "npu":
+        if HCCLWeightTransferEngine is None:
+            raise RuntimeError("vLLM-Ascend HCCL weight transfer is unavailable")
+        return HCCLWeightTransferEngine
+    return NCCLWeightTransferEngine
 
 
 def _build_vlm_name_mapper(model_name: str):
@@ -250,7 +263,7 @@ def wait_for_grpo_fast_placement_group(
         ) from exc
 
 
-@ray.remote(num_gpus=1)
+@ray.remote
 class PolicyTrainerRayProcess(RayProcess):
     def __init__(
         self,
@@ -310,13 +323,14 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model_config = model_config
         self.beaker_config = beaker_config
         self.wandb_url = wandb_url
-        torch.cuda.set_device(self.local_rank)
-        self.device = torch.device(self.local_rank)
+        self.device = utils.set_accelerator_device(self.local_rank)
+        self.accelerator = utils.get_accelerator_module(self.device)
 
         # Set seeds for this worker (different per rank to avoid correlation)
         worker_seed = args.seed + self.local_rank
         torch.manual_seed(worker_seed)
-        torch.cuda.manual_seed(worker_seed)
+        if self.accelerator is not None and hasattr(self.accelerator, "manual_seed"):
+            self.accelerator.manual_seed(worker_seed)
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
@@ -325,7 +339,9 @@ class PolicyTrainerRayProcess(RayProcess):
         # when multiple process groups exist (e.g., for weight sync to vLLM).
         # By initializing first, DeepSpeed will detect it and wrap it instead of re-initializing.
         if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend="nccl", timeout=timedelta(minutes=args.backend_timeout))
+            torch.distributed.init_process_group(
+                backend=utils.get_distributed_backend(), timeout=timedelta(minutes=args.backend_timeout)
+            )
         deepspeed.init_distributed(timeout=timedelta(minutes=args.backend_timeout))
 
         ds_config = get_train_ds_config(
@@ -355,7 +371,7 @@ class PolicyTrainerRayProcess(RayProcess):
             revision=model_config.model_revision,
             dtype=torch.bfloat16,
             attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
-            **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
+            **({"device_map": {"": self.device}} if args.deepspeed_stage != 3 else {}),
         )
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
@@ -419,13 +435,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 np.random.set_state(rng_states["numpy_rng_state"])
                 random.setstate(rng_states["python_rng_state"])
 
-                if torch.cuda.is_available() and "torch_cuda_rng_states" in rng_states:
-                    # device_str, e.g. "cuda:0"
-                    for device_str, rng_state in rng_states["torch_cuda_rng_states"].items():
+                accelerator_rng_key = f"torch_{self.device.type}_rng_states"
+                accelerator_rng_all_key = f"torch_{self.device.type}_rng_state_all"
+                if self.accelerator is not None and accelerator_rng_key in rng_states:
+                    for device_str, rng_state in rng_states[accelerator_rng_key].items():
                         device_id = int(device_str.split(":")[1])
-                        torch.cuda.set_rng_state(rng_state, device_id)
-                    if "torch_cuda_rng_state_all" in rng_states:
-                        torch.cuda.set_rng_state_all(rng_states["torch_cuda_rng_state_all"])
+                        self.accelerator.set_rng_state(rng_state, device_id)
+                    if accelerator_rng_all_key in rng_states and hasattr(self.accelerator, "set_rng_state_all"):
+                        self.accelerator.set_rng_state_all(rng_states[accelerator_rng_all_key])
 
                 logger.info(f"{self.rank=}: Restored RNG states from checkpoint")
 
@@ -533,8 +550,8 @@ class PolicyTrainerRayProcess(RayProcess):
             ]
 
             if master_info is not None:
-                torch.cuda.set_device(self.local_rank)
-                self.model_update_group = NCCLWeightTransferEngine.trainer_init(master_info)
+                utils.set_accelerator_device(self.local_rank)
+                self.model_update_group = _get_collective_weight_transfer_engine().trainer_init(master_info)
 
             ray_get_with_progress(refs, desc="Initializing vLLM weight transfer engines", timeout=600)
         torch.distributed.barrier()
@@ -545,17 +562,16 @@ class PolicyTrainerRayProcess(RayProcess):
         Without this, the first broadcast after ``deepspeed.initialize`` can send
         uninitialized storage to vLLM -- producing NaN logprobs on the first rollout.
         """
-        torch.cuda.set_device(self.local_rank)
+        utils.set_accelerator_device(self.local_rank)
         input_ids = torch.tensor([[self.pad_token_id]], device=self.device, dtype=torch.long)
         with torch.no_grad():
             self.model(input_ids=input_ids)
 
     def broadcast_to_vllm(self, model_step: int):
         # avoid OOM
-        torch.cuda.empty_cache()
-        # Ensure CUDA device is set before broadcast operations.
-        # DeepSpeed 0.17.3+ sets device_id in init_process_group which affects NCCL device binding.
-        torch.cuda.set_device(self.local_rank)
+        utils.empty_accelerator_cache(self.device)
+        # DeepSpeed 0.17.3+ binds the current accelerator during process-group setup.
+        utils.set_accelerator_device(self.local_rank)
         return vllm_utils.broadcast_weights_to_vllm(
             model=self.model.module,
             vllm_engines=self.vllm_engines,
@@ -635,7 +651,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         else:
                             old_logprobs_BT[i] = local_old_logprobs_BT[i]
 
-                        torch.cuda.empty_cache()
+                        utils.empty_accelerator_cache(self.device)
 
         local_step = 0
         num_samples = len(data_BT.query_responses)
@@ -723,8 +739,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # up, adjusting for the sequence parallel size (adjust by dp world size).
                     loss *= self.args.world_size // self.args.sequence_parallel_size
 
-                    # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
-                    torch.cuda.empty_cache()
+                    # Free allocator cache before backward reduce-scatter operations.
+                    utils.empty_accelerator_cache(self.device)
                     is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
                     # Tell deepspeed whether this backward is the last in the accumulation group.
                     self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
@@ -774,12 +790,14 @@ class PolicyTrainerRayProcess(RayProcess):
             "python_rng_state": random.getstate(),
         }
 
-        # Save CUDA RNG states for all devices
-        if torch.cuda.is_available():
-            rng_states["torch_cuda_rng_states"] = {
-                f"cuda:{i}": torch.cuda.get_rng_state(i) for i in range(torch.cuda.device_count())
+        if self.accelerator is not None and hasattr(self.accelerator, "get_rng_state"):
+            accelerator_rng_key = f"torch_{self.device.type}_rng_states"
+            rng_states[accelerator_rng_key] = {
+                f"{self.device.type}:{i}": self.accelerator.get_rng_state(i)
+                for i in range(self.accelerator.device_count())
             }
-            rng_states["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
+            if hasattr(self.accelerator, "get_rng_state_all"):
+                rng_states[f"torch_{self.device.type}_rng_state_all"] = self.accelerator.get_rng_state_all()
 
         # Add RNG states to client_state
         client_state["rng_states"] = rng_states
@@ -933,7 +951,7 @@ class ModelGroup:
         world_size = sum(self.num_gpus_per_node)
         master_policy = ray_process_cls.options(
             num_cpus=self.num_cpus_per_actor,
-            num_gpus=self.num_gpus_per_actor,
+            **utils.get_ray_accelerator_options(self.num_gpus_per_actor),
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=0
             ),
@@ -968,7 +986,7 @@ class ModelGroup:
             )
             worker_policy = ray_process_cls.options(
                 num_cpus=self.num_cpus_per_actor,
-                num_gpus=self.num_gpus_per_actor,
+                **utils.get_ray_accelerator_options(self.num_gpus_per_actor),
                 scheduling_strategy=scheduling_strategy,
             ).remote(world_size, rank, 0, master_addr, master_port, args, streaming_config, vllm_config, tokenizer)
             self.models.append(worker_policy)
@@ -1279,6 +1297,7 @@ def create_model_and_optimizer(
         single_gpu_mode=args.single_gpu_mode,
         vllm_num_engines=vllm_config.vllm_num_engines,
         vllm_tensor_parallel_size=vllm_config.vllm_tensor_parallel_size,
+        accelerator_resource=utils.get_ray_accelerator_resource() or "GPU",
     )
     wait_for_grpo_fast_minimum_cluster_resources(args, resource_requirements)
 

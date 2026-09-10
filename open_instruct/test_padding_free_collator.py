@@ -22,6 +22,7 @@ from open_instruct.olmo_core_train_modules import DPOLMHead
 from open_instruct.padding_free_collator import (
     TensorDataCollatorWithFlattening,
     TensorDataCollatorWithFlatteningDPO,
+    build_block_diagonal_causal_mask,
     calculate_per_token_logps,
     concatenated_inputs,
     get_batch_logps,
@@ -71,6 +72,49 @@ MODEL_KWARGS = {
         num_key_value_heads=2,
     ),
 }
+
+
+class TestBlockDiagonalCausalMask(unittest.TestCase):
+    def test_isolates_sequences_and_preserves_causality(self):
+        sequence_ids = torch.tensor([[0, 0, 1, 1, 1]], dtype=torch.int32)
+
+        mask = build_block_diagonal_causal_mask(sequence_ids, torch.float32)
+
+        self.assertEqual(mask.shape, (1, 1, 5, 5))
+        allowed = mask == 0
+        self.assertTrue(allowed[0, 0, 1, 0])
+        self.assertFalse(allowed[0, 0, 0, 1])
+        self.assertTrue(allowed[0, 0, 4, 2])
+        self.assertFalse(allowed[0, 0, 2, 1])
+
+    def test_sdpa_packed_logits_match_individual_sequences(self):
+        torch.manual_seed(42)
+        config = LlamaConfig(
+            hidden_size=32,
+            intermediate_size=64,
+            max_position_embeddings=32,
+            num_attention_heads=4,
+            num_hidden_layers=1,
+            num_key_value_heads=2,
+            vocab_size=64,
+            attn_implementation="sdpa",
+        )
+        model = LlamaForCausalLM(config).eval()
+        seq_a = torch.tensor([[5, 10, 15, 20]])
+        seq_b = torch.tensor([[7, 14, 21]])
+        packed = torch.cat([seq_a, seq_b], dim=1)
+        position_ids = torch.cat([torch.arange(seq_a.shape[1]), torch.arange(seq_b.shape[1])]).unsqueeze(0)
+        sequence_ids = torch.cat([torch.zeros(seq_a.shape[1]), torch.ones(seq_b.shape[1])]).to(torch.int32)[None]
+
+        with torch.no_grad():
+            individual_logits = model(seq_b).logits
+            packed_logits = model(
+                packed,
+                position_ids=position_ids,
+                attention_mask=build_block_diagonal_causal_mask(sequence_ids, torch.float32),
+            ).logits[:, -seq_b.shape[1] :]
+
+        torch.testing.assert_close(packed_logits, individual_logits)
 
 
 def _get_fa2_model_and_cfg(model_name: str, vocab_size: int, dtype: torch.dtype) -> nn.Module:

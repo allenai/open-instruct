@@ -172,6 +172,8 @@ class EvalConfig:
 
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
+    try_launch_local_eval: bool = False
+    """Whether to run olmo-eval with a local vLLM server after training"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     gs_bucket_path: str | None = None
@@ -182,6 +184,14 @@ class EvalConfig:
     """The max generation length for evaluation for oe-eval"""
     oe_eval_gpu_multiplier: int | None = None
     """The multiplier for the number of GPUs for evaluation"""
+    local_eval_num_gpus: int = 1
+    """The number of local accelerators assigned to olmo-eval"""
+    local_eval_limit: int | None = None
+    """The optional per-task instance limit for local evaluation"""
+    local_eval_max_tokens: int | None = None
+    """The optional per-request generation limit for local evaluation"""
+    local_eval_output_dir: str | None = None
+    """The local evaluation output directory; defaults to <output_dir>_eval"""
     eval_workspace: str | None = "ai2/tulu-3-results"
     """The workspace to launch evaluation jobs on"""
     eval_priority: Literal["low", "normal", "high"] | None = "high"
@@ -344,6 +354,14 @@ class DPOExperimentConfig(
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+        if self.try_launch_local_eval and not self.oe_eval_tasks:
+            raise ValueError("Local evaluation requires at least one --oe_eval_tasks entry.")
+        if self.local_eval_num_gpus < 1:
+            raise ValueError("--local_eval_num_gpus must be at least 1.")
+        if self.local_eval_limit is not None and self.local_eval_limit < 1:
+            raise ValueError("--local_eval_limit must be at least 1 when set.")
+        if self.local_eval_max_tokens is not None and self.local_eval_max_tokens < 1:
+            raise ValueError("--local_eval_max_tokens must be at least 1 when set.")
 
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)
