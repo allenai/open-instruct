@@ -40,6 +40,63 @@ PYTHONPATH=. uv run python scripts/thinking_traces/analyze_traces.py \
 The launcher submits the current git SHA, so **push your branch first**; local
 dirty changes do not reach the job.
 
+## Serving configuration and measured throughput
+
+Getting these models to serve at all, and then to serve *fast*, is a deliverable
+of this work in its own right -- not a prerequisite to it. What follows is
+measured on `ai2/holmes` (8x B300 per node, 288 GB/GPU, driver 590 / CUDA 13.1),
+vLLM 0.28.0, 1000 prompts x 8 samples, 128K context, concurrency 256.
+
+### Measured output throughput
+
+| Model | Active | Weights | TP | tok/s | traces/min | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Qwen3.5-397B-A17B-FP8 | 17B | 406 GB FP8 | 4 | **4687** | 36.6 | 8000 traces in 4.27 h |
+| DeepSeek-V3.2-Exp | 37B | 689 GB FP8 | 4 | **2124** | 24.0 | needs `thinking: true` |
+| Kimi-K2.6 | 32B | 595 GB INT4 | 4 | **814** | 6.6 | see quantization note |
+| GLM-5.2-FP8 | ~40B | 756 GB FP8 | 4 | *pending* | | `--kv-cache-dtype fp8` |
+
+**FP8 throughput tracks active parameters; INT4 does not.** Qwen at 17B active is
+2.2x faster than DeepSeek at 37B -- almost exactly the ratio of their active
+sizes. Kimi has nearly the same active size as DeepSeek (32B vs 37B) but runs
+**2.6x slower**, which puts the gap on the weight format rather than model scale.
+Blackwell's tensor cores consume FP4/FP6/FP8 natively; a 4-bit *integer* format
+has no such path. NVIDIA publishes `nvidia/Kimi-K2.6-NVFP4` precisely for this,
+and Kimi's own recipe pairs the INT4 weights with 8 GPUs while reserving TP=4 for
+the NVFP4 repack.
+
+### Settings that turned out to be load-bearing
+
+| Setting | Why |
+| --- | --- |
+| `--safetensors-load-strategy=prefetch` | vLLM does not recognise WEKAFS as a network FS, so it falls back to lazy mmap and reads shards serially: **321 s/shard vs 23 s/shard**, a 4-hour load instead of 25 minutes. Nodes have 2.95 TiB RAM, so prefetching a 595 GB checkpoint fits easily. |
+| Full CUDA toolkit installed in-job | The `ai2/cuda13.*` images ship the runtime without `nvcc`, and there is no `-dev` variant. Every recent vLLM JIT-builds sm_103 kernels for FP8 MoE, so serving is impossible without a compiler. ~2 GB, cached on weka. |
+| `VLLM_USE_DEEP_GEMM=0`, `VLLM_MOE_USE_DEEP_GEMM=0` | Both the Qwen and DeepSeek recipes specify this; DeepGEMM's JIT is the first thing to fail without a toolchain. |
+| `uvx --python 3.12` | On 3.11, flashinfer's `fd_exchange` fails to import (`array.array` is not subscriptable), which breaks **every TP>1 serve** while TP=1 is unaffected. |
+| FlashInfer cache on weka | Kernels are JIT-built per (version, arch); a container-local cache makes every model repeat a multi-minute sm_103 build. |
+| `chat_template_kwargs={"thinking": true}` | DeepSeek-V3.2 is hybrid and defaults to **non-thinking** -- it prefills a closing `</think>`. Without this every trace is empty. Qwen's `enable_thinking` is silently ignored; the kwarg is `thinking`. |
+| `--min-runtime 8h` + auto-resume | 8h is Beaker's maximum, and these jobs run 5-38h, so preemption is the expected ending. Trace-level resume plus auto-resume makes it survivable. |
+
+### Load times (all with prefetch, warm weka caches)
+
+| Model | Weights | Shards | Load | To `vllm ready` |
+| --- | --- | --- | --- | --- |
+| GLM-5.2-FP8 | 756 GB | 141 | **7 min** (1.8 s/shard) | pending |
+| DeepSeek-V3.2-Exp | 689 GB | 163 | ~32 min | 68-89 min (own DSA kernels) |
+| Kimi-K2.6 | 595 GB | 64 | ~24 min | 34-49 min |
+| Qwen3.5-397B-A17B-FP8 | 406 GB | - | - | 52 min (cold: toolkit + kernels) |
+
+Startup is dominated by kernel JIT, not weight I/O, once the caches are warm.
+
+### Caveat on the Kimi dataset
+
+Kimi's traces span two tensor-parallel widths: the first 3,641 were generated at
+TP=4 and the remainder at TP=8, after TP=4 proved too slow (1.9 traces/min once
+resume had drained the short prompts). Same weights, same sampling parameters,
+and each sample is an independent draw at temperature 0.6, so this should not
+bias the length distribution -- but TP width changes matmul reduction order, so
+the traces are not bit-identical in provenance.
+
 ## Things that decide whether the numbers mean anything
 
 **Prompt selection is deterministic**, a pure function of
