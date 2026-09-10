@@ -44,6 +44,7 @@ import unittest
 import datasets
 import ray
 import torch
+from packaging import version
 from parameterized import parameterized
 from ray.util import queue as ray_queue
 from ray.util.placement_group import placement_group
@@ -167,7 +168,12 @@ class TestGeneration(TestGrpoFastBase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
     def test_generation_deterministic(self, name: str, prompt: str, use_tools: bool, max_tokens: int):
         """Test generation produces expected output and tool invocation behavior."""
-        test_data_filename = f"generation_{name}_expected.json"
+        cuda_version = torch.version.cuda
+        assert cuda_version is not None
+        if not use_tools and version.Version(cuda_version).major == 12:
+            test_data_filename = f"generation_{name}_cuda12_expected.json"
+        else:
+            test_data_filename = f"generation_{name}_expected.json"
         test_data_path = TEST_DATA_DIR / test_data_filename
 
         tokenizer_name = "Qwen/Qwen3-0.6B"
