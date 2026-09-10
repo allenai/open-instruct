@@ -36,7 +36,7 @@ RUN wget https://www.mellanox.com/downloads/MFT/mft-${MFT_VER}-x86_64-deb.tgz &&
     rm mft-${MFT_VER}-x86_64-deb.tgz
 
 ENV DOFED_VER=2.10.0 \
-    OS_VER=ubuntu2404
+    OS_VER=ubuntu2204
 RUN wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOFED_VER}/host/doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
     dpkg -i doca-host_${DOFED_VER}-093000-25.01-${OS_VER}_amd64.deb && \
     apt-get update && apt-get -y install --no-install-recommends doca-ofed-userspace && \
