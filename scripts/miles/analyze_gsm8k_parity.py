@@ -154,7 +154,18 @@ def publication_summary(path):
     }
 
 
-def audit(root, backend):
+def arm_directory(backend, megatron_directory="megatron"):
+    if (
+        not megatron_directory
+        or Path(megatron_directory).name != megatron_directory
+        or megatron_directory in (".", "..")
+    ):
+        raise ValueError("megatron_directory must be one directory name beneath the campaign root")
+    return megatron_directory if backend == "megatron" else "core"
+
+
+def audit(root, backend, *, megatron_directory="megatron"):
+    selected_directory = arm_directory(backend, megatron_directory)
     preparation = json.loads((root / "preparation.json").read_text())
     if not {"train.jsonl", "eval.jsonl"}.issubset(preparation["files"]):
         raise ValueError("Preparation manifest is missing shared dataset hashes")
@@ -171,10 +182,11 @@ def audit(root, backend):
     # Core publishes completed optimizer steps directly. Never infer this shift
     # from the observed data, which could conceal a stale publication.
     version_offset = 0 if backend == "core" else 1
-    directory = root / backend / ("rollouts" if backend == "core" else "rollout_data")
+    directory = root / selected_directory / ("rollouts" if backend == "core" else "rollout_data")
     report = {
         "schema_version": 1,
         "backend": backend,
+        "artifact_directory": selected_directory,
         "version_offset": version_offset,
         "preparation_sha256": digest(root / "preparation.json"),
         "prepared_sha256": {name: digest(root / f"{name}.jsonl") for name in ("train", "eval")},
@@ -208,8 +220,8 @@ def audit(root, backend):
         report["training_summary"]["mixed_reward_groups"] / groups if groups else None
     )
     if backend == "core":
-        report["publication"] = publication_summary(root / backend / "metrics/publication.jsonl")
-    completion = root / backend / "completion.json"
+        report["publication"] = publication_summary(root / selected_directory / "metrics/publication.jsonl")
+    completion = root / selected_directory / "completion.json"
     if completion.is_file():
         report["completion"] = json.loads(completion.read_text())
     report["valid"] = not report["errors"] and all(row["valid"] for row in report["training"] + report["evaluation"])
@@ -271,6 +283,10 @@ def compare(core, megatron):
         errors=errors,
         learning_curves=curves,
         accuracy_gain_0_to_100=gains,
+        artifact_directories={
+            "core": core.get("artifact_directory", "core"),
+            "megatron": megatron.get("artifact_directory", "megatron"),
+        },
         interpretation="Descriptive single-pair comparison; no statistical significance or learning-rate claim.",
     )
 
@@ -491,9 +507,11 @@ def main():
     audit_parser.add_argument("root", type=Path)
     audit_parser.add_argument("--backend", choices=("core", "megatron"), required=True)
     audit_parser.add_argument("--output", type=Path)
+    audit_parser.add_argument("--megatron-directory", default="megatron")
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("root", type=Path)
     compare_parser.add_argument("--output", type=Path)
+    compare_parser.add_argument("--megatron-directory", default="megatron")
     compare_parser.add_argument("--core-log", type=Path)
     compare_parser.add_argument("--megatron-log", type=Path)
     compare_parser.add_argument("--warmup-updates", type=int, default=5)
@@ -502,11 +520,14 @@ def main():
     compare_parser.add_argument("--megatron-allocated-seconds", type=float)
     args = parser.parse_args()
     if args.command == "audit":
-        result = audit(args.root, args.backend)
-        output = args.output or args.root / args.backend / "audit.json"
+        result = audit(args.root, args.backend, megatron_directory=args.megatron_directory)
+        output = args.output or args.root / arm_directory(args.backend, args.megatron_directory) / "audit.json"
     else:
         result = compare(
-            *[json.loads((args.root / backend / "audit.json").read_text()) for backend in ("core", "megatron")]
+            *[
+                json.loads((args.root / arm_directory(backend, args.megatron_directory) / "audit.json").read_text())
+                for backend in ("core", "megatron")
+            ]
         )
         output = args.output or args.root / "comparison.json"
         result["timing"] = {

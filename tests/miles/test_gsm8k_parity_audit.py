@@ -3,10 +3,12 @@
 import copy
 import hashlib
 import json
+import sys
 
 import pytest
 import torch
 from scripts.miles import analyze_gsm8k_parity as audit
+from scripts.miles import launch_gsm8k_parity
 
 
 def _row(key):
@@ -319,3 +321,48 @@ def test_cadence_comparison_uses_common_indices_and_omits_diagnostic_training_sc
     assert compared["generation"]["core"]["mean_seconds"] == 30
     assert compared["generation"]["megatron"]["mean_seconds"] == 60
     assert compared["collection_boundary_cycle"]["core"]["count"] == 0
+
+
+def test_retry_directory_is_explicit_and_failed_attempt_stays_untouched(tmp_path, monkeypatch):
+    _campaign(tmp_path)
+    (tmp_path / "megatron").rename(tmp_path / "megatron-r2")
+    (tmp_path / "megatron").mkdir()
+    failure = tmp_path / "megatron/failure.json"
+    failure.write_text('{"completed_updates": 0, "failure": "missing router API"}\n')
+    before = failure.read_bytes()
+    assert not audit.audit(tmp_path, "megatron")["valid"]
+    retry = audit.audit(tmp_path, "megatron", megatron_directory="megatron-r2")
+    assert retry["valid"]
+    assert retry["artifact_directory"] == "megatron-r2"
+    core = audit.audit(tmp_path, "core")
+    (tmp_path / "core/audit.json").write_text(json.dumps(core))
+    (tmp_path / "megatron-r2/audit.json").write_text(json.dumps(retry))
+    monkeypatch.setattr(sys, "argv", ["audit", "compare", str(tmp_path), "--megatron-directory", "megatron-r2"])
+    audit.main()
+    compared = json.loads((tmp_path / "comparison.json").read_text())
+    assert compared["valid"]
+    assert compared["artifact_directories"] == {"core": "core", "megatron": "megatron-r2"}
+    assert failure.read_bytes() == before
+    assert not (tmp_path / "megatron/audit.json").exists()
+
+
+def test_cpu_audit_launcher_passes_explicit_retry_directory():
+    task = launch_gsm8k_parity.specification("test-image", "audit", megatron_directory="megatron-r2")["tasks"][0]
+    script = task["arguments"][0]
+    assert "export MEGATRON_DIRECTORY=megatron-r2" in script
+    assert script.count('--megatron-directory "$MEGATRON_DIRECTORY"') == 2
+    assert 'cp "$RUN_ROOT/$MEGATRON_DIRECTORY/audit.json"' in script
+    assert task["resources"]["gpuCount"] == 0
+    assert task["constraints"]["cluster"] == ["ai2/saturn"]
+    original = launch_gsm8k_parity.specification("test-image", "audit")["tasks"][0]
+    assert "export MEGATRON_DIRECTORY=megatron\n" in original["arguments"][0]
+    with pytest.raises(ValueError, match="audit artifacts only"):
+        launch_gsm8k_parity.specification("test-image", "core", megatron_directory="megatron-r2")
+
+
+@pytest.mark.parametrize("directory", ["", "..", "../megatron-r2", "/tmp/other"])
+def test_retry_directory_must_stay_beneath_campaign_root(directory):
+    with pytest.raises(ValueError, match="one directory name"):
+        audit.arm_directory("megatron", directory)
+    with pytest.raises(ValueError, match="one directory name"):
+        launch_gsm8k_parity.specification("test-image", "audit", megatron_directory=directory)

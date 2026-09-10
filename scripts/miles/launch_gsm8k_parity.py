@@ -10,7 +10,15 @@ from pathlib import Path
 ROOT = "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1"
 
 
-def specification(image, stage):
+def specification(image, stage, *, megatron_directory="megatron"):
+    if (
+        not megatron_directory
+        or Path(megatron_directory).name != megatron_directory
+        or megatron_directory in (".", "..")
+    ):
+        raise ValueError("megatron_directory must be one directory name beneath the campaign root")
+    if stage != "audit" and megatron_directory != "megatron":
+        raise ValueError("megatron_directory selects audit artifacts only")
     common = f"""set -euo pipefail
 cd /opt/core-rl
 export TOKENIZERS_PARALLELISM=false
@@ -32,11 +40,12 @@ cp "$RUN_ROOT/preparation.json" /output/
     elif stage == "audit":
         command = (
             common
+            + f"export MEGATRON_DIRECTORY={shlex.quote(megatron_directory)}\n"
             + """python scripts/miles/analyze_gsm8k_parity.py audit "$RUN_ROOT" --backend core
-python scripts/miles/analyze_gsm8k_parity.py audit "$RUN_ROOT" --backend megatron
-python scripts/miles/analyze_gsm8k_parity.py compare "$RUN_ROOT"
+python scripts/miles/analyze_gsm8k_parity.py audit "$RUN_ROOT" --backend megatron --megatron-directory "$MEGATRON_DIRECTORY"
+python scripts/miles/analyze_gsm8k_parity.py compare "$RUN_ROOT" --megatron-directory "$MEGATRON_DIRECTORY"
 cp "$RUN_ROOT/core/audit.json" /output/core-audit.json
-cp "$RUN_ROOT/megatron/audit.json" /output/megatron-audit.json
+cp "$RUN_ROOT/$MEGATRON_DIRECTORY/audit.json" /output/megatron-audit.json
 cp "$RUN_ROOT/comparison.json" /output/
 """
         )
@@ -93,8 +102,11 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--stage", choices=("prepare", "core", "audit"), required=True)
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--megatron-directory", default="megatron")
     args = parser.parse_args()
-    document = json.dumps(specification(args.image, args.stage), indent=2) + "\n"
+    document = (
+        json.dumps(specification(args.image, args.stage, megatron_directory=args.megatron_directory), indent=2) + "\n"
+    )
     if args.render_only:
         print(document, end="")
         return

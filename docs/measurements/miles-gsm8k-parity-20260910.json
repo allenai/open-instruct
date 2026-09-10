@@ -1,6 +1,6 @@
 {
   "campaign": "gsm8k-core-megatron-20260910-v1",
-  "status": "queued; no GPU training process started as of 2026-09-10T22:44:06Z",
+  "status": "incomplete: first Megatron attempt failed during trainer initialization; retry source repair is being prepared",
   "shared_root": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1",
   "preparation_sha256": "1d8a22500fffdd9a7461c445998815d5e85cf9dd79859d93313798472c0e76e0",
   "preparation_experiment": "01M26N8Q8BFN4887X2CKMDWEV2",
@@ -17,7 +17,41 @@
     "source": "31ec5b2a65c3a1567afbe2a07526dd41e83048d5",
     "image": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "job": "01M26P8GB90N3XPTVBWZYM697S",
-    "result": "01M26P8G14ZHJJQMYSHK962GZX"
+    "result": "01M26P8G14ZHJJQMYSHK962GZX",
+    "exit_code": 1,
+    "failed_attempts": [
+      {
+        "experiment": "01M26P8G0X2EHG52KYGAXT3BFP",
+        "job": "01M26P8GB90N3XPTVBWZYM697S",
+        "status": {
+          "created": "2026-09-10T22:15:52.60547Z",
+          "scheduled": "2026-09-10T23:04:28.408575Z",
+          "started": "2026-09-10T23:09:42.256679Z",
+          "exited": "2026-09-10T23:19:21.865094Z",
+          "finalized": "2026-09-10T23:19:23.492096Z",
+          "exitCode": 1,
+          "idleSince": "2026-09-10T23:19:21.809415Z",
+          "ready": "2026-09-10T23:09:41.506718Z"
+        },
+        "failure": "ImportError: assert_megatron_router_compute_contract absent from pinned olmo_megatron.checkpointing.router; actor initialization failed before evaluation or optimizer update",
+        "completed_updates": 0,
+        "heldout_evaluations": 0,
+        "queue_seconds": 2915.803105,
+        "allocated_seconds": 893.456519,
+        "started_to_exited_seconds": 579.608415,
+        "gpus": 3,
+        "allocated_gpu_hours": 0.7445470991666666,
+        "exclude_from_successful_run_learning_and_throughput": true,
+        "source": "31ec5b2a65c3a1567afbe2a07526dd41e83048d5"
+      }
+    ],
+    "pending_retry": {
+      "artifact_directory": "megatron-r2",
+      "olmo_miles_source": "7d56b23db0e6d442e601eb1a5f9145c37802120c",
+      "olmo_megatron_source": "ba5615df741a24ba4aee678d0e853306b3502282",
+      "repair": "Restore executable router precision checks and BF16 router model/checkpoint storage with FP32 torch-mm gating; rebuild MCore without obsolete FP32-storage patch0008.",
+      "status": "pending rebuilt-image validation and new launch identity"
+    }
   },
   "scheduling": {
     "workspace": "ai2/open-instruct-dev",
@@ -35,7 +69,7 @@
       "evidence": "miles-core-contract-parity-20260910.json"
     },
     "preparation_tests_passed": 9,
-    "audit_tests_passed": 17,
+    "audit_tests_passed": 23,
     "baseline_unit_tests": {
       "passed": 1122,
       "skipped": 104
