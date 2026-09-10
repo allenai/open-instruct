@@ -29,13 +29,22 @@ MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
 
 EXP_NAME="${EXP_NAME:-swerl_qwen35_9b_dppo_repro_4node_64k_opensandbox}"
+# For the B300 cluster:
+#   BEAKER_CLUSTER=ai2/holmes BEAKER_WORKSPACE=ai2/oe-agents-holmes $0 <image>
+# with an image built via `build_image_and_launch.sh --cuda-version 13`; the
+# Beaker secrets (pradeepd_OPEN_SANDBOX_API_KEY, pradeepd_DOCKER_PAT,
+# pradeepd_WANDB_API_KEY) must exist in that workspace too, and OpenSandbox
+# egress should be verified once from a holmes session
+# (scripts/opensandbox/check_opensandbox_egress.sh).
+BEAKER_CLUSTER="${BEAKER_CLUSTER:-ai2/jupiter}"
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/oe-agents}"
 
 uv run python mason.py \
-       --cluster ai2/jupiter \
+       --cluster "$BEAKER_CLUSTER" \
        --image "$BEAKER_IMAGE" \
        --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; OpenSandbox spot sandboxes)" \
        --pure_docker_mode \
-       --workspace ai2/oe-agents \
+       --workspace "$BEAKER_WORKSPACE" \
        --priority urgent \
        --preemptible \
        --min_runtime "${BEAKER_MIN_RUNTIME:-8h}" \
