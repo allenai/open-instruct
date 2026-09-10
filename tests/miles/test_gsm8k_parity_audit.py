@@ -234,8 +234,8 @@ def test_export_comparison_plot(tmp_path):
     result["timing"] = {
         backend: {
             "phases": {
-                phase: {"warm": {"mean_seconds": value}}
-                for phase, value in (("generation", 8), ("training", 4), ("publication", 0.5))
+                phase: {"points": [{"index": 5, "seconds": value}]}
+                for phase, value in (("generation", 8), ("collection_boundary_cycle", 14))
             }
         }
         for backend in ("core", "megatron")
@@ -243,3 +243,79 @@ def test_export_comparison_plot(tmp_path):
     path = tmp_path / "comparison.png"
     audit.plot_comparison(result, path)
     assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _generation_line(index, seconds, *, minute=0, pid=7):
+    return (
+        f"2026-09-10T09:00:00Z (RolloutManager pid={pid}) "
+        f"[2026-09-10 00:{minute:02d}:{seconds:02d}.000 rollout_manager] metrics.py:89 - "
+        f"perf {index}: {{'perf/rollout_time': 3.0}}"
+    )
+
+
+def test_collection_cycles_use_native_clock_and_exclude_eval_and_missing_boundaries(tmp_path):
+    path = tmp_path / "boundaries.log"
+    path.write_text(
+        "\n".join(
+            [
+                _generation_line(4, 0),
+                _generation_line(5, 10),
+                _generation_line(6, 22),
+                # Duplicate capture is harmless; no interval is fabricated for missing7..18.
+                _generation_line(6, 22),
+                _generation_line(19, 0, minute=1),
+                _generation_line(20, 0, minute=5),
+                _generation_line(21, 15, minute=5),
+            ]
+        )
+    )
+    result = audit.parse_timing_log(path)
+    cycles = result["phases"]["collection_boundary_cycle"]
+    assert result["collection_boundaries_observed"] == 6
+    assert result["excluded_eval_intervals"] == [[19, 20]]
+    assert [(point["index"], point["next_rollout"], point["seconds"]) for point in cycles["points"]] == [
+        (4, 5, 10),
+        (5, 6, 12),
+        (20, 21, 15),
+    ]
+    assert cycles["warm"]["count"] == 2
+    assert cycles["warm"]["mean_seconds"] == 13.5
+    assert not result["warnings"]
+
+
+def test_ambiguous_or_restarted_boundaries_never_form_cycles(tmp_path):
+    path = tmp_path / "restart.log"
+    path.write_text(
+        "\n".join(
+            [
+                _generation_line(5, 0),
+                _generation_line(6, 10),
+                _generation_line(6, 11),
+                _generation_line(7, 20),
+                _generation_line(8, 30, pid=8),
+            ]
+        )
+    )
+    result = audit.parse_timing_log(path)
+    assert result["phases"]["collection_boundary_cycle"]["all"]["count"] == 0
+    assert any("conflicting collection boundary" in error for error in result["warnings"])
+    assert any("changed manager" in error for error in result["warnings"])
+
+
+def test_cadence_comparison_uses_common_indices_and_omits_diagnostic_training_scope():
+    timing = {
+        backend: {
+            "warmup_updates_excluded": 5,
+            "phases": {
+                "generation": {"points": [{"index": index, "seconds": seconds} for index, seconds in points]},
+                "training": {"points": [{"index": 5, "seconds": 999}]},
+            },
+        }
+        for backend, points in (("core", [(4, 999), (5, 10), (6, 30)]), ("megatron", [(6, 60), (7, 70)]))
+    }
+    compared = audit.comparable_timing(timing)
+    assert set(compared) == {"generation", "collection_boundary_cycle"}
+    assert compared["generation"]["indices"] == [6]
+    assert compared["generation"]["core"]["mean_seconds"] == 30
+    assert compared["generation"]["megatron"]["mean_seconds"] == 60
+    assert compared["collection_boundary_cycle"]["core"]["count"] == 0

@@ -318,6 +318,7 @@ def parse_timing_log(path, *, warmup_updates=5):
         raise ValueError("warmup_updates must be nonnegative")
     points, conflicts, warnings, timestamps, timers = {}, set(), [], [], defaultdict(list)
     completion_seconds = None
+    generation_ends, boundary_conflicts = {}, set()
     for number, raw in enumerate(path.read_text(errors="replace").splitlines(), 1):
         line = re.sub(r"\x1b\[[0-9;]*m", "", raw.replace(r"\u001b", "\x1b"))
         stamp = re.search(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)", line)
@@ -341,6 +342,20 @@ def parse_timing_log(path, *, warmup_updates=5):
         additions = []
         if match:
             index = int(match.group(1))
+            # Use the manager's own clock, not a Beaker ingestion timestamp or
+            # a trainer timestamp. Duplicate/restarted boundaries are ambiguous.
+            native_stamp = re.search(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?) rollout_manager\]", line)
+            if "perf/rollout_time" in data and native_stamp:
+                manager = re.search(r"\(RolloutManager pid=([^)]*)\)", line)
+                boundary = (
+                    datetime.fromisoformat(native_stamp.group(1)).timestamp(),
+                    manager.group(1) if manager else None,
+                )
+                if index in generation_ends and generation_ends[index] != boundary:
+                    boundary_conflicts.add(index)
+                    warnings.append(f"line {number}: conflicting collection boundary at rollout {index}")
+                else:
+                    generation_ends[index] = boundary
             for field, phase in (
                 ("perf/rollout_time", "generation"),
                 ("perf/actor_train_time", "training"),
@@ -368,8 +383,24 @@ def parse_timing_log(path, *, warmup_updates=5):
                 points[key] = point
     for key in conflicts:
         points.pop(key, None)
+    for index in boundary_conflicts:
+        generation_ends.pop(index, None)
+    excluded_eval_intervals = []
+    for index, (end, manager) in sorted(generation_ends.items()):
+        if index - 1 not in generation_ends:
+            continue  # A partial log is not evidence for any missing boundary.
+        if index in EVAL_STEPS:
+            excluded_eval_intervals.append([index - 1, index])
+            continue
+        start, previous_manager = generation_ends[index - 1]
+        if end <= start or manager != previous_manager:
+            warnings.append(f"rollouts {index - 1}->{index}: nonmonotonic clock or changed manager")
+            continue
+        points["collection_boundary_cycle", index - 1] = dict(
+            index=index - 1, next_rollout=index, seconds=end - start, source="rollout_manager_native_timestamps"
+        )
     phases = {}
-    for phase in ("generation", "training", "publication", "scoring"):
+    for phase in ("generation", "collection_boundary_cycle", "training", "publication", "scoring"):
         selected = [point for (name, _), point in sorted(points.items()) if name == phase]
         warm = [point for point in selected if point["index"] >= warmup_updates]
         phases[phase] = dict(all=_duration_summary(selected), warm=_duration_summary(warm), points=selected)
@@ -378,16 +409,48 @@ def parse_timing_log(path, *, warmup_updates=5):
         warnings=warnings,
         warmup_updates_excluded=warmup_updates,
         phases=phases,
+        collection_boundaries_observed=len(generation_ends),
+        excluded_eval_intervals=excluded_eval_intervals,
+        diagnostic_phase_scopes={
+            "training": "Core step_seconds and MILES actor_train both exclude pre-update scoring, but differ in "
+            "instrumentation and rank reduction. Retained for diagnosis, not plotted as equivalent phases.",
+            "publication": "Backend-specific actor publication scopes; retained for diagnosis.",
+        },
         rounded_unindexed_timers={
             name: _duration_summary([{"seconds": x} for x in values]) for name, values in timers.items()
         },
         run_elapsed_seconds=completion_seconds,
         observed_log_span_seconds=max(timestamps) - min(timestamps) if timestamps else None,
-        scope="Warm phase means exclude indices below warmup_updates and all eval/setup. "
+        scope="Collection-boundary cycles run from generation-end N to generation-end N+1: "
+        "update/publication N plus generation N+1 and orchestration. Missing boundaries are never inferred. "
+        "Scheduled-eval crossings are excluded; final update99 is not covered by cycles. "
+        "Generation includes rewards and rollout debug-dump time. "
+        "Warm phase means exclude indices below warmup_updates and all eval/setup. "
         "Phase sums are not total runtime. Log span is only the observed timestamp span. "
         "Core training includes contract checks; MILES actor_train timing has different instrumentation. "
         "MILES publication perf index is the publication preceding that rollout (final publication may be absent).",
     )
+
+
+def comparable_timing(timing):
+    """Compare only common measured warm indices, never unlike trainer scopes."""
+    result = {}
+    for phase in ("generation", "collection_boundary_cycle"):
+        arms = []
+        for backend in ("core", "megatron"):
+            report = timing.get(backend, {})
+            warmup = report.get("warmup_updates_excluded", 5)
+            points = report.get("phases", {}).get(phase, {}).get("points", [])
+            arms.append({point["index"]: point for point in points if point["index"] >= warmup})
+        indices = sorted(arms[0].keys() & arms[1].keys())
+        result[phase] = {
+            "indices": indices,
+            **{
+                backend: _duration_summary([arm[index] for index in indices])
+                for backend, arm in zip(("core", "megatron"), arms, strict=True)
+            },
+        }
+    return result
 
 
 def plot_comparison(report, path):
@@ -403,16 +466,18 @@ def plot_comparison(report, path):
         )
     axes[0].set(xlabel="Completed optimizer updates", ylabel="Held-out accuracy", ylim=(0, 1))
     axes[0].legend()
-    timing = report.get("timing", {})
-    phases = ("generation", "training", "publication")
+    timing = comparable_timing(report.get("timing", {}))
+    phases = ("generation", "collection_boundary_cycle")
     for offset, backend in ((-0.18, "core"), (0.18, "megatron")):
-        values = [
-            timing.get(backend, {}).get("phases", {}).get(phase, {}).get("warm", {}).get("mean_seconds")
-            for phase in phases
-        ]
+        values = [timing[phase][backend]["mean_seconds"] for phase in phases]
         valid = [(index, value) for index, value in enumerate(values) if value is not None]
         axes[1].bar([index + offset for index, _ in valid], [value for _, value in valid], width=0.36, label=backend)
-    axes[1].set(xticks=range(3), xticklabels=phases, ylabel="Warm mean seconds per measured phase")
+    axes[1].set(
+        xticks=range(2),
+        xticklabels=("Generation\n(includes rewards/dump)", "Collection-boundary\ncycle"),
+        ylabel="Warm mean seconds (matched observed indices)",
+        title="Operational cadence; bars are not additive",
+    )
     axes[1].legend()
     figure.suptitle("One run per backend: descriptive learning and timing comparison")
     figure.savefig(path, dpi=160)
@@ -433,6 +498,8 @@ def main():
     compare_parser.add_argument("--megatron-log", type=Path)
     compare_parser.add_argument("--warmup-updates", type=int, default=5)
     compare_parser.add_argument("--plot", type=Path)
+    compare_parser.add_argument("--core-allocated-seconds", type=float)
+    compare_parser.add_argument("--megatron-allocated-seconds", type=float)
     args = parser.parse_args()
     if args.command == "audit":
         result = audit(args.root, args.backend)
@@ -447,6 +514,13 @@ def main():
             for backend, path in (("core", args.core_log), ("megatron", args.megatron_log))
             if path
         }
+        result["comparable_timing"] = comparable_timing(result["timing"])
+        result["allocated_runtime_seconds"] = {}
+        for backend, seconds in (("core", args.core_allocated_seconds), ("megatron", args.megatron_allocated_seconds)):
+            if seconds is not None:
+                if not math.isfinite(seconds) or seconds <= 0:
+                    raise ValueError("Allocated durations must be positive finite seconds from Beaker job metadata")
+                result["allocated_runtime_seconds"][backend] = seconds
         if args.plot and result["valid"]:
             args.plot.parent.mkdir(parents=True, exist_ok=True)
             plot_comparison(result, args.plot)
