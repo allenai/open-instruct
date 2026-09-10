@@ -8,10 +8,10 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/OLMo-core.git",
-      "revision": "a977e71336da54a16da54c74d04f344d3f100291",
-      "development_commit": "96b56fc178c9db98c2c14e97e4cf62a91e3f0a83",
+      "revision": "169b8f9d06bce0276143876c82f630af483b03b7",
+      "development_commit": "9a2a3c3b9a889a3978ecbe50b2d76feeb1ac430f",
       "patch": "patches/olmo-core.patch",
-      "patch_sha256": "0cc9a8e1b4adf7f751bbb5137c9f22b51621351fd04000f41d1ae80d6a1bf0a6"
+      "patch_sha256": "76dd9ef44cb41bca5207a0a1321ebaf57e7b07f7d1b7691901f6191fe4187988"
     },
     "miles": {
       "repository": "https://github.com/radixark/miles.git",

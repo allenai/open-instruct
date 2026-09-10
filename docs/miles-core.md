@@ -18,7 +18,7 @@ flowchart LR
 
 ## Reproduce the sources
 
-The lock in `runtime/miles/runtime.lock.json` records exact bases and patch hashes. Core starts at Jacob's `jacobm/moe-v2-core`, `a977e71336da54a16da54c74d04f344d3f100291`. MILES starts at `dbbab1566ae438f7202fff653eae938e07b1d4b6`. The Core patch adds an arbitrary-objective gradient lifecycle, explicit replay across backward recomputation, HF conversion support, and conventional Olmo3Moe model construction. The MILES patch includes the existing olmo-miles compatibility patches plus the explicit Core backend and lifecycle hooks.
+The lock in `runtime/miles/runtime.lock.json` records exact bases and patch hashes. Core starts at Jacob's **`jacobm/moe-v2-core-gdn2`**, `169b8f9d06bce0276143876c82f630af483b03b7`. MILES starts at `dbbab1566ae438f7202fff653eae938e07b1d4b6`. The Core patch adds an arbitrary-objective gradient lifecycle, explicit replay across backward recomputation, HF model construction using the branch's existing KDA and latent-MoE components, and dense-model HF conversion support. KDA/latent tensor conversion is already provided by this Core base. The MILES patch includes the existing olmo-miles compatibility patches plus the explicit Core backend and lifecycle hooks.
 
 ```bash
 python scripts/miles/prepare_runtime.py runtime/miles/sources
@@ -53,7 +53,13 @@ Async mode additionally requires `fully_async=true`, a positive lag budget, resi
 
 ## Checkpoints and publication
 
+HF is the serving interchange format. SGLang starts from an HF checkpoint directory containing the model config, tokenizer, and weights; olmo-sglang maps those weights into its fused inference layout. The training model is native Core. The adapter can initialize it from the same HF checkpoint, and publishes subsequent policy updates directly as HF-named tensors. A Core-origin model therefore follows `Core checkpoint → HF export → SGLang`; it does not need a Megatron checkpoint or a Megatron conversion step. Updating the policy does not require saving and reloading an HF directory at each step.
+
+HF format alone does not establish model support: the config, tensor mapping, and olmo-sglang implementation must agree on KDA, latent projections, gates, and normalization. Native Core checkpoints remain the resume format because they contain optimizer state that an HF serving export does not carry.
+
 Core checkpoints contain native model/optimizer state, scheduler and per-rank RNG state. MILES persists its data cursor and, for async runs, pristine outstanding prompt groups. `complete.json` and `core-latest.json` are written only after both sides are complete; the manifest hashes the cursor. Resume uses `miles.load` pointing to the checkpoint root and resolves the next rollout before constructing the manager. It currently requires the same trainer world size and model configuration. Interrupted checkpoint directories are preserved under `.incomplete-*` names before retrying that rollout. Generated async responses are regenerated after restart; serving RNG and bitwise-identical future rollouts are not promised.
+
+The pinned image also needs the existing olmo-miles FLA 0.5.2/Triton compatibility shim for KDA; the adapter installs it in each hybrid trainer process. That shim requires one KDA head width per process. Tiny hybrid test models use eight KDA heads to keep native DDP parameter offsets aligned for grouped matmul.
 
 Publication pauses generation, transfers weights, commits the optimizer-step version, and resumes generation. Dense conversion gathers one parameter at a time. MoE conversion stages the full unsharded model on CPU and still needs GPU space for one gathered expert parameter. This is not yet a measured large-model publication implementation. HF evaluation exports include the tokenizer and MILES completion marker.
 
@@ -62,8 +68,8 @@ Publication pauses generation, transfers weights, commits the optimizer-step ver
 Verified locally on an RTX 4090:
 
 - 62 focused adapter and existing Core SFT/DPO tests, including four dense HF/Core logits comparisons and exact weight roundtrips, streamed conversion, masked tool-token handling, mixed rewards, and policy clocks.
-- Three Core-owned tests for custom-objective accumulation and router replay through backward recomputation.
-- Six pinned-runtime tests for a real Core GPU optimizer update with MILES loss, native checkpoint restore, async prompt-cursor crash safety, and policy-group admission.
+- 13 Core-owned tests for KDA/latent factories and weight conversion, custom-objective accumulation, and router replay through backward recomputation.
+- 15 pinned-runtime tests including real Core GPU optimizer updates and exact native checkpoint restores for Qwen3, KDA, and KDA+latent; MILES schedule equivalence; async prompt-cursor crash safety; and policy-group admission.
 - A Ray/SGLang/Core smoke run completed two optimizer steps with published versions 0→1→2 and committed checkpoints. A fresh process resumed the cursor/model/optimizer/scheduler/RNG boundary and completed step 3 under version 2. Synthetic rewards test plumbing, not learning quality.
 - `make style quality` passes after reconstructing the locked sources.
 
@@ -89,7 +95,7 @@ The following remain required before deleting old GRPO code:
 | --- | --- |
 | Dense models | Tiny Llama, Qwen2, Qwen3, Olmo2 numerical parity; real training-scale model qualification remains |
 | Conventional Olmo3Moe | Factory, native optimizer/checkpoint and export code present; full HF/Core/SGLang and multi-rank EP qualification remains |
-| KDA / latent Olmo Hybrid | The selected Core base does not contain the corresponding primitives; not implemented by this adapter |
+| KDA / latent Olmo Hybrid | Native components and bidirectional weight conversion come from the gdn2 base; factory, exact HF weight roundtrips, GPU updates and native checkpoint restore tested; full HF/Core/SGLang numerical and multi-rank qualification remains |
 | Routing replay | Router/recompute gradients tested; serving route alignment, final unscored token's auxiliary loss, and full-model replay qualification remain |
 | Tools / environments | Masks survive the adapter; the complete open-instruct multi-turn environment rollout bridge remains to be migrated |
 | Mixed rewards | Existing verifier adapter tested with GSM8K; code/judge infrastructure, cleanup and complete registered-task coverage remain |

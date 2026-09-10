@@ -1,8 +1,8 @@
 diff --git a/src/olmo_core/nn/attention/__init__.py b/src/olmo_core/nn/attention/__init__.py
-index 23c6bf642976e0f6ea8e624e4b68280422e71095..91b14eba9092fd80adfd4c4ff6953c1965f3d0d4 100644
+index 174b6c0b7f8e7cd988e47a480fac0df5166ab16c..a102cfe720a33302f87890830a7553fe92e81c00 100644
 --- a/src/olmo_core/nn/attention/__init__.py
 +++ b/src/olmo_core/nn/attention/__init__.py
-@@ -333,6 +333,8 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+@@ -339,6 +339,8 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
      n_kv_heads: Optional[int] = None
      head_dim: Optional[int] = None
      bias: Optional[bool] = None
@@ -11,7 +11,7 @@ index 23c6bf642976e0f6ea8e624e4b68280422e71095..91b14eba9092fd80adfd4c4ff6953c19
      gate: Optional[GateConfig] = None
      rope: Optional[RoPEConfig] = None
      clip_qkv: Optional[float] = None
-@@ -388,16 +390,17 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+@@ -394,16 +396,17 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
          head_dim = self.head_dim or d_model // n_heads
          bias = self.bias if self.bias is not None else self.name != AttentionType.normalized
  
@@ -31,7 +31,7 @@ index 23c6bf642976e0f6ea8e624e4b68280422e71095..91b14eba9092fd80adfd4c4ff6953c19
              params += 2 * n_kv_heads * head_dim
  
          # Block attention QK norm.
-@@ -472,6 +475,9 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+@@ -478,6 +481,9 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
              cache=cache,
          )
  
@@ -41,7 +41,7 @@ index 23c6bf642976e0f6ea8e624e4b68280422e71095..91b14eba9092fd80adfd4c4ff6953c19
          # Attention sinks are only wired up for the default attention; drop the flag otherwise so
          # the other implementations don't see an unexpected keyword argument.
          if not kwargs.get("attention_sinks", False):
-@@ -587,6 +593,7 @@ class Attention(SequenceMixer):
+@@ -593,6 +599,7 @@ class Attention(SequenceMixer):
          n_kv_heads: Optional[int] = None,
          head_dim: Optional[int] = None,
          bias: bool = True,
@@ -49,7 +49,7 @@ index 23c6bf642976e0f6ea8e624e4b68280422e71095..91b14eba9092fd80adfd4c4ff6953c19
          gate: Optional[GateConfig] = None,
          rope: Optional[RoPEConfig] = None,
          clip_qkv: Optional[float] = None,
-@@ -619,13 +626,25 @@ class Attention(SequenceMixer):
+@@ -625,13 +632,25 @@ class Attention(SequenceMixer):
          else:
              self.head_dim = d_model // n_heads
          self.w_q = nn.Linear(
@@ -79,7 +79,7 @@ index 23c6bf642976e0f6ea8e624e4b68280422e71095..91b14eba9092fd80adfd4c4ff6953c19
          self.w_out = nn.Linear(
              n_heads * self.head_dim, d_model, bias=bias, dtype=dtype, device=init_device
 diff --git a/src/olmo_core/nn/hf/convert.py b/src/olmo_core/nn/hf/convert.py
-index 63895179d4c178994ce1c6c350b24da39dd96f2b..1c5cb1a27fe5b2af6ea95e8885ba483c1e169670 100644
+index 5c9e38b525775a900559066fa0a9b58da69440df..454b018e94aa13d08f3740cd8afd3fcff9c9168f 100644
 --- a/src/olmo_core/nn/hf/convert.py
 +++ b/src/olmo_core/nn/hf/convert.py
 @@ -36,6 +36,9 @@ HF_TO_OLMO_CORE_WEIGHT_MAPPINGS: Dict[str, str] = {
@@ -143,10 +143,10 @@ index 63895179d4c178994ce1c6c350b24da39dd96f2b..1c5cb1a27fe5b2af6ea95e8885ba483c
              f"blocks.{LAYER}.attention_norm.weight",
 diff --git a/src/olmo_core/nn/moe/v2/olmo3.py b/src/olmo_core/nn/moe/v2/olmo3.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8804cfb25
+index 0000000000000000000000000000000000000000..eac835ac1887ccc9ec48ede81d3469b7a0212e49
 --- /dev/null
 +++ b/src/olmo_core/nn/moe/v2/olmo3.py
-@@ -0,0 +1,519 @@
+@@ -0,0 +1,564 @@
 +"""Olmo3Moe builders and correctness-first OLMoDDP/HF weight interchange."""
 +
 +from __future__ import annotations
@@ -165,6 +165,9 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +    AttentionBackendName,
 +    AttentionConfig,
 +    AttentionType,
++    GateConfig,
++    GateGranularity,
++    KimiDeltaAttentionConfig,
 +    SlidingWindowAttentionConfig,
 +)
 +from olmo_core.nn.ddp.block import OLMoDDPTransformerBlockConfig
@@ -172,7 +175,11 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +from olmo_core.nn.hf.convert import convert_state_from_hf, convert_state_to_hf
 +from olmo_core.nn.layer_norm import LayerNormConfig, LayerNormType
 +from olmo_core.nn.lm_head import LMHeadConfig, LMLossImplementation
-+from olmo_core.nn.moe import MoELoadBalancingLossGranularity, MoERouterGatingFunction
++from olmo_core.nn.moe import (
++    LatentMoEConfig,
++    MoELoadBalancingLossGranularity,
++    MoERouterGatingFunction,
++)
 +from olmo_core.nn.moe.v2.ep_config import ExpertParallelConfig, ExpertParallelPath
 +from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 +from olmo_core.nn.moe.v2.routed_experts import RoutedExpertsConfig
@@ -184,6 +191,7 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +
 +OLMO3_FULL_ATTENTION = "full_attention"
 +OLMO3_SLIDING_ATTENTION = "sliding_attention"
++OLMO3_LINEAR_ATTENTION = "linear_attention"
 +
 +
 +def build_olmo3_moe_hf_config_from_native_config(
@@ -440,7 +448,11 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +    layer_types = tuple(config.get("layer_types") or (OLMO3_FULL_ATTENTION,) * n_layers)
 +    if len(layer_types) != n_layers:
 +        raise ValueError(f"Expected {n_layers} layer_types, got {len(layer_types)}.")
-+    unsupported = set(layer_types) - {OLMO3_FULL_ATTENTION, OLMO3_SLIDING_ATTENTION}
++    unsupported = set(layer_types) - {
++        OLMO3_FULL_ATTENTION,
++        OLMO3_SLIDING_ATTENTION,
++        OLMO3_LINEAR_ATTENTION,
++    }
 +    if unsupported:
 +        raise ValueError(f"Unsupported Olmo3Moe layer types: {sorted(unsupported)}")
 +
@@ -452,8 +464,18 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +        bias=False,
 +        dtype=dtype,
 +    )
++    latent_dim = config.get("latent_moe_dim")
++    latent_moe = (
++        LatentMoEConfig(
++            latent_dim=int(latent_dim),
++            bias=bool(config.get("latent_moe_bias", False)),
++            up_proj_input_norm_enabled=bool(config.get("latent_moe_up_proj_input_norm", False)),
++        )
++        if latent_dim is not None
++        else None
++    )
 +    routed_experts = RoutedExpertsConfig(
-+        d_model=d_model,
++        d_model=d_model if latent_dim is None else int(latent_dim),
 +        hidden_size=int(config["moe_intermediate_size"]),
 +        num_experts=num_experts,
 +        bias=False,
@@ -490,7 +512,7 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +    )
 +    ep.validate()
 +
-+    def make_block(sliding: bool, *, dense: bool) -> OLMoDDPTransformerBlockConfig:
++    def make_block(layer_type: str, *, dense: bool) -> OLMoDDPTransformerBlockConfig:
 +        window = int(config["sliding_window"]) - 1
 +        block_shared_experts: SharedExpertsConfig | None
 +        if dense:
@@ -504,33 +526,56 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +            )
 +        else:
 +            block_shared_experts = shared_experts
-+        return OLMoDDPTransformerBlockConfig(
-+            sequence_mixer=AttentionConfig(
-+                name=attention_type,
-+                n_heads=int(config["num_attention_heads"]),
-+                n_kv_heads=int(config["num_key_value_heads"]),
-+                head_dim=int(config["head_dim"]),
-+                bias=False,
-+                dropout=float(config.get("attention_dropout", 0.0)),
-+                rope=RoPEConfig(
-+                    name=RoPEType.default,
-+                    theta=int(config.get("rope_theta", 10_000)),
-+                    full_precision=True,
-+                ),
-+                qk_norm=layer_norm,
-+                use_head_qk_norm=True,
-+                backend=attention_backend,
-+                dtype=dtype,
-+                sliding_window=(
-+                    SlidingWindowAttentionConfig(
-+                        pattern=[window],
-+                        force_full_attention_on_first_layer=False,
-+                        force_full_attention_on_last_layer=False,
-+                    )
-+                    if sliding
-+                    else None
-+                ),
++        mixer: AttentionConfig | KimiDeltaAttentionConfig = AttentionConfig(
++            name=attention_type,
++            n_heads=int(config["num_attention_heads"]),
++            n_kv_heads=int(config["num_key_value_heads"]),
++            head_dim=int(config["head_dim"]),
++            bias=False,
++            dropout=float(config.get("attention_dropout", 0.0)),
++            rope=RoPEConfig(
++                name=RoPEType.default,
++                theta=float(config.get("rope_theta", 10_000)),
++                full_precision=True,
++            )
++            if config.get("use_rope", True)
++            else None,
++            gate=GateConfig(
++                granularity=GateGranularity(config["attention_gate_type"]),
++                full_precision=bool(config.get("attention_gate_full_precision", True)),
++            )
++            if config.get("attention_gate_type")
++            else None,
++            qk_norm=layer_norm,
++            use_head_qk_norm=True,
++            backend=attention_backend,
++            dtype=dtype,
++            sliding_window=(
++                SlidingWindowAttentionConfig(
++                    pattern=[window],
++                    force_full_attention_on_first_layer=False,
++                    force_full_attention_on_last_layer=False,
++                )
++                if layer_type == OLMO3_SLIDING_ATTENTION
++                else None
 +            ),
++        )
++        if layer_type == OLMO3_LINEAR_ATTENTION:
++            key_dim = int(config["linear_key_head_dim"])
++            value_dim = int(config["linear_value_head_dim"])
++            mixer = KimiDeltaAttentionConfig(
++                n_heads=int(config["linear_num_key_heads"]),
++                n_v_heads=int(config["linear_num_value_heads"]),
++                head_dim=key_dim,
++                expand_v=value_dim / key_dim,
++                conv_size=int(config.get("linear_conv_kernel_dim", 4)),
++                allow_neg_eigval=bool(config.get("linear_allow_neg_eigval", False)),
++                norm_eps=float(config.get("linear_norm_eps", 1e-5)),
++                dtype=dtype,
++            )
++        return OLMoDDPTransformerBlockConfig(
++            sequence_mixer=mixer,
++            latent_moe=None if dense else latent_moe,
 +            ep=None if dense else ep,
 +            routed_experts=None if dense else routed_experts,
 +            routed_experts_router=None if dense else routed_router,
@@ -554,7 +599,7 @@ index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8
 +        dense = layer_idx in dense_layers
 +        name = block_name(layer_type, dense=dense)
 +        if name not in blocks:
-+            blocks[name] = make_block(layer_type == OLMO3_SLIDING_ATTENTION, dense=dense)
++            blocks[name] = make_block(layer_type, dense=dense)
 +
 +    block: TransformerBlockConfig | dict[str, TransformerBlockConfig]
 +    resolved_block_pattern: list[str] | None
@@ -767,7 +812,7 @@ index 67d8a17acdb176b0637dffcbfbf8051bdd738066..69cc8bfeed8ea774cc91cd54baa0b8f9
                  if torch.is_grad_enabled():
                      self._recompute_cache = expert_indices.detach()  # save for recompute
 diff --git a/src/olmo_core/train/train_module/transformer/ddp_train_module.py b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-index a7c542f14aea14a6f68b630233fd5ee91f14b3a7..9e69aa11de156b001893a69080ca5a0c56b67a78 100644
+index 0dc7eb7dcceba2851efe40052f9f755f3d4a569d..c4a82b1021e210e0cfab4f00d22ea6ce7861ac6d 100644
 --- a/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 +++ b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 @@ -80,6 +80,7 @@ from olmo_core.utils import get_default_device, log_once, move_to_device
@@ -778,7 +823,7 @@ index a7c542f14aea14a6f68b630233fd5ee91f14b3a7..9e69aa11de156b001893a69080ca5a0c
  from .config import (
      TransformerActivationCheckpointingConfig,
      TransformerContextParallelConfig,
-@@ -1505,6 +1506,10 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -1504,6 +1505,10 @@ class OLMoDDPTrainModule(TrainModule):
                  flush=True,
              )
  
@@ -866,6 +911,81 @@ index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa974
      def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
          # Set model to train mode if it isn't already.
          self._set_model_mode("train")
+diff --git a/src/test/nn/moe/v2/olmo3_factory_test.py b/src/test/nn/moe/v2/olmo3_factory_test.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8035046e7e9a3896a1ffba4d8011a449278a5055
+--- /dev/null
++++ b/src/test/nn/moe/v2/olmo3_factory_test.py
+@@ -0,0 +1,69 @@
++"""Exercise the adapter factory against gdn2's real hybrid modules and HF tensors."""
++
++import pytest
++import torch
++
++from olmo_core.config import DType
++from olmo_core.nn.attention import AttentionBackendName, KimiDeltaAttention
++from olmo_core.nn.moe.v2 import olmo3
++from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
++from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
++
++
++def hybrid_config(latent_dim=16):
++    return Olmo3MoeConfig(
++        vocab_size=32,
++        hidden_size=32,
++        attention_hidden_size=32,
++        head_dim=8,
++        dense_mlp_intermediate_size=24,
++        dense_mlp_uses_shared_experts=True,
++        moe_intermediate_size=12,
++        shared_expert_intermediate_size=16,
++        n_routed_experts=4,
++        num_experts_per_tok=2,
++        num_hidden_layers=2,
++        num_attention_heads=4,
++        num_key_value_heads=2,
++        use_head_qk_norm=True,
++        use_rope=False,
++        attention_gate_type="elementwise",
++        linear_num_key_heads=4,
++        linear_num_value_heads=4,
++        linear_key_head_dim=8,
++        linear_value_head_dim=16,
++        linear_allow_neg_eigval=True,
++        latent_moe_dim=latent_dim,
++        layer_types=["linear_attention", "full_attention"],
++        dense_layers_indices=[0],
++        embed_norm=True,
++        use_peri_ln=True,
++    )
++
++
++@pytest.mark.parametrize("latent_dim", [None, 16])
++def test_hybrid_factory_uses_native_components_and_roundtrips_weights(latent_dim):
++    hf = hybrid_config(latent_dim)
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf, dtype=DType.bfloat16, attention_backend=AttentionBackendName.torch
++    )
++    native = config.build(init_device="cpu")
++    assert isinstance(native.blocks["0"].attention, KimiDeltaAttention)
++    sparse = native.blocks["1"]
++    assert sparse.routed_experts.d_model == (latent_dim or hf.hidden_size)
++    assert sparse.routed_experts_router.d_model == hf.hidden_size
++    assert sparse.shared_experts.d_model == hf.hidden_size
++    assert (sparse.latent_down_proj is not None) == (latent_dim is not None)
++    assert sparse.attention.rope is None
++    assert sparse.attention.gate.full_precision
++    reference = Olmo3MoeForCausalLM(hf).to(torch.bfloat16)
++    with torch.no_grad():
++        for name, parameter in reference.named_parameters():
++            if name.endswith(("A_log", "dt_bias")):
++                parameter.zero_()
++    state = reference.state_dict()
++    olmo3.load_olmo3_moe_hf_state(native, hf, state)
++    exported = olmo3.gather_olmo3_moe_hf_state(native, hf, cpu=True)
++    assert set(exported) == set(state)
++    for name in state:
++        torch.testing.assert_close(exported[name], state[name], rtol=0, atol=0, check_dtype=False)
 diff --git a/src/test/train/train_module/custom_objective_test.py b/src/test/train/train_module/custom_objective_test.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..2dfca24d5f06a8ec52d3753c128bd80871a5dd56

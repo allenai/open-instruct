@@ -11,6 +11,7 @@ from olmo_core.distributed import checkpoint as core_checkpoint
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn import attention, feed_forward, layer_norm, lm_head, transformer
 from olmo_core.nn.ddp import OLMoDDPModel
+from olmo_core.nn.hf import config as hf_config_utils
 from olmo_core.nn.hf import convert
 from olmo_core.nn.moe.v2 import olmo3
 from olmo_core.nn.transformer import config as transformer_config
@@ -22,6 +23,7 @@ from torch.distributed.checkpoint import state_dict as distributed_state
 from torch.distributed.tensor import DTensor
 
 from open_instruct import logger_utils
+from open_instruct.miles import fla_compat
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -125,7 +127,13 @@ class HFInitializedMoETrainModule(train_transformer.OLMoDDPTrainModule):
 
 
 def build_train_module(args, source=None):
+    hf_config_utils._register_olmo3moe_auto_classes()
     hf = transformers.AutoConfig.from_pretrained(source or args.hf_checkpoint, trust_remote_code=True)
+    if hf.model_type == "olmo3moe":
+        # Core DDP represents dense MLP blocks using a single shared expert.
+        hf.dense_mlp_uses_shared_experts = True
+    if "linear_attention" in (getattr(hf, "layer_types", None) or []):
+        fla_compat.install_kda_triton_compat()
     config = model_config_from_hf(hf, args.olmo_core)
     config.init_seed = args.seed
     if isinstance(config, transformer_config.OLMoDDPModelConfig):

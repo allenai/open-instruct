@@ -11,16 +11,18 @@ from miles.backends.fsdp_utils import lr_scheduler
 from miles.backends.training_utils import parallel
 from miles.utils import arguments
 from miles.utils.ft_utils.process_group_utils import GroupInfo
+from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
+from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from torch import distributed as dist
 from transformers import AutoModelForCausalLM, Qwen3Config
 
-from open_instruct.miles import actor, checkpoint, models
+from open_instruct.miles import actor, checkpoint, models, scheduler
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.state import PolicyClock
 
 
-@pytest.fixture
-def parsed_args(tmp_path, monkeypatch):
+@pytest.fixture(params=["qwen3", "kda", "kda_latent"])
+def parsed_args(tmp_path, monkeypatch, request):
     path = tmp_path / "hf"
     hf = Qwen3Config(
         vocab_size=256,
@@ -32,7 +34,43 @@ def parsed_args(tmp_path, monkeypatch):
         head_dim=64,
         max_position_embeddings=128,
     )
+    if request.param != "qwen3":
+        _register_olmo3moe_auto_classes()
+        hf = Olmo3MoeConfig(
+            vocab_size=256,
+            hidden_size=128,
+            attention_hidden_size=128,
+            head_dim=64,
+            dense_mlp_intermediate_size=256,
+            dense_mlp_uses_shared_experts=True,
+            moe_intermediate_size=128,
+            shared_expert_intermediate_size=128,
+            n_routed_experts=4,
+            num_experts_per_tok=2,
+            num_hidden_layers=2,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+            use_head_qk_norm=True,
+            use_rope=False,
+            attention_gate_type="elementwise",
+            # Eight KDA heads keep DDP flat parameter offsets 16-byte aligned.
+            linear_num_key_heads=8,
+            linear_num_value_heads=8,
+            linear_key_head_dim=64,
+            linear_value_head_dim=64,
+            latent_moe_dim=64 if request.param == "kda_latent" else None,
+            layer_types=["linear_attention", "full_attention"],
+            dense_layers_indices=[0],
+            use_peri_ln=True,
+            max_position_embeddings=128,
+        )
     model = AutoModelForCausalLM.from_config(hf).to(torch.bfloat16)
+    # HF conversion classes leave these direct parameters empty on construction.
+    # Real exported checkpoints supply their initialized Core values.
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            if name.endswith(("A_log", "dt_bias")):
+                parameter.zero_()
     model.save_pretrained(path)
     config = RunConfig(
         CoreConfig(attention_backend="torch", max_sequence_length=128, activation_checkpointing=False),
@@ -84,7 +122,7 @@ def test_real_miles_loss_core_update_and_native_resume(parsed_args, tmp_path, mo
         worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
         worker.model = worker.train_module.model
         worker.optimizer = worker.train_module.optim
-        worker.lr_scheduler = lr_scheduler.get_lr_scheduler(args, worker.optimizer)
+        worker.lr_scheduler = scheduler.CoreLRScheduler(args, worker.optimizer)
         worker.clock = PolicyClock()
         worker.clock.published()
         worker.ref_module = None
@@ -122,3 +160,38 @@ def test_real_miles_loss_core_update_and_native_resume(parsed_args, tmp_path, mo
             torch.testing.assert_close(tensor, expected[name], rtol=0, atol=0)
     finally:
         dist.destroy_process_group()
+
+
+@pytest.mark.parametrize("style", ["constant", "linear", "cosine", "inverse-square-root", "WSD"])
+def test_scheduler_matches_miles_and_restores(style):
+    args = SimpleNamespace(
+        num_rollout=12,
+        rollout_batch_size=1,
+        n_samples_per_prompt=4,
+        global_batch_size=4,
+        lr_decay_iters=None,
+        lr_warmup_init=0.0,
+        lr=0.01,
+        min_lr=0.001,
+        lr_warmup_fraction=None,
+        lr_warmup_iters=2,
+        lr_decay_style=style,
+        lr_wsd_decay_iters=3,
+        lr_wsd_decay_style="cosine",
+        override_lr_scheduler=False,
+        use_checkpoint_lr_scheduler=True,
+    )
+    reference_optim = torch.optim.SGD([torch.nn.Parameter(torch.ones(1))], lr=args.lr)
+    reference = lr_scheduler.get_lr_scheduler(args, reference_optim)
+    native = SimpleNamespace(param_groups=[{"lr": args.lr}])
+    actual = scheduler.CoreLRScheduler(args, native)
+    for index in range(15):
+        assert actual.get_last_lr() == reference.get_last_lr()
+        if index == 5:
+            state = actual.state_dict()
+            actual = scheduler.CoreLRScheduler(args, native)
+            actual.load_state_dict(state)
+            assert actual.get_last_lr() == reference.get_last_lr()
+        reference_optim.step()
+        reference.step()
+        actual.step()

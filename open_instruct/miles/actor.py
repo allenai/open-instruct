@@ -5,7 +5,7 @@ from pathlib import Path
 
 import ray
 import torch
-from miles.backends.fsdp_utils import lr_scheduler, update_weight_utils
+from miles.backends.fsdp_utils import update_weight_utils
 from miles.backends.training_utils import data as miles_data
 from miles.backends.training_utils import loss as miles_loss
 from miles.backends.training_utils import parallel
@@ -19,7 +19,7 @@ from torch import distributed as dist
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
-from open_instruct.miles import checkpoint, data, models
+from open_instruct.miles import checkpoint, data, models, scheduler
 from open_instruct.miles.state import PolicyClock
 
 logger = logger_utils.setup_logger(__name__)
@@ -52,7 +52,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         self.train_module, self.hf_config, self.model_config = models.build_train_module(args)
         self.model = self.train_module.model
         self.optimizer = self.train_module.optim
-        self.lr_scheduler = lr_scheduler.get_lr_scheduler(args, self.optimizer)
+        self.lr_scheduler = scheduler.CoreLRScheduler(args, self.optimizer)
         self.clock = PolicyClock()
         self.ref_module = models.build_train_module(args, source=args.ref_load)[0] if with_ref else None
         if self.ref_module is not None:
