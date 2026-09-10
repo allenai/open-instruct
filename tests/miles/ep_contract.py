@@ -7,6 +7,7 @@ can conceal uniform gradient scaling errors. All input weights are random.
 import argparse
 import contextlib
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -149,6 +150,7 @@ def run(root, mode, checkpointing):
                 lr=1e-4,
                 clip_grad=1e9,
                 use_rollout_routing_replay=True,
+                use_miles_router=True,
             ),
         )
         sys.argv = ["ep-contract", *config.arguments()]
@@ -202,35 +204,139 @@ def run(root, mode, checkpointing):
         dist.destroy_process_group()
 
 
+def _category(name):
+    return "router" if "router" in name else "expert" if "experts" in name else "dense"
+
+
+def _state_errors(reference, actual):
+    """Return finite aggregate evidence or a structural error, without raising."""
+    if set(reference) != set(actual):
+        return {}, "state keys differ"
+    groups = {}
+    for name, expected in reference.items():
+        value = actual[name]
+        if value.shape != expected.shape:
+            return {}, f"shape differs for {name}"
+        if not bool(torch.isfinite(value).all() and torch.isfinite(expected).all()):
+            return {}, f"non-finite state for {name}"
+        group = groups.setdefault(_category(name) + "/" + name.rsplit(".", 1)[1], [0.0, 0.0, 0.0])
+        delta = value.double() - expected.double()
+        group[0] += float(delta.square().sum())
+        group[1] += float(expected.double().square().sum())
+        group[2] = max(group[2], float(delta.abs().max()))
+    return {
+        name: {
+            "relative_l2_error": math.sqrt(a / max(b, 1e-20)),
+            "difference_l2": math.sqrt(a),
+            "reference_l2": math.sqrt(b),
+            "max_abs_error": c,
+        }
+        for name, (a, b, c) in groups.items()
+    }, None
+
+
+def _moment_signals(state):
+    groups = {}
+    for name, value in state.items():
+        if not name.endswith(".exp_avg"):
+            continue
+        group = groups.setdefault(_category(name), {"sum_squares": 0.0, "elements": 0})
+        if not bool(torch.isfinite(value).all()):
+            return {}, f"non-finite first moment for {name}"
+        group["sum_squares"] += float(value.double().square().sum())
+        group["elements"] += value.numel()
+    return {
+        name: {"l2": math.sqrt(values["sum_squares"]), "elements": values["elements"]}
+        for name, values in groups.items()
+    }, None
+
+
 def compare(root):
-    report = []
-    for mode in ("policy", "auxiliary", "combined"):
-        reference = torch.load(root / f"ep1-{mode}-ac0.pt", weights_only=True)
-        for world, checkpointing in ((1, True), (2, False), (2, True)):
-            actual = torch.load(root / f"ep{world}-{mode}-ac{int(checkpointing)}.pt", weights_only=True)
-            assert set(reference) == set(actual)
-            groups = {}
-            for name, expected in reference.items():
-                value = actual[name]
-                assert value.shape == expected.shape and torch.isfinite(value).all()
-                category = "router" if "router" in name else "expert" if "experts" in name else "dense"
-                suffix = name.rsplit(".", 1)[1]
-                group = groups.setdefault(category + "/" + suffix, [0.0, 0.0, 0.0])
-                group[0] += float((value.double() - expected.double()).square().sum())
-                group[1] += float(expected.double().square().sum())
-                group[2] = max(group[2], float((value - expected).abs().max()))
-            measured = {
-                name: {"relative_l2_error": (a / max(b, 1e-20)) ** 0.5, "max_abs_error": c}
-                for name, (a, b, c) in groups.items()
-            }
-            # BF16 distributed kernel ordering can differ; moments catch factor-of-world scaling errors.
-            for name, values in measured.items():
-                assert values["relative_l2_error"] < 0.05, (mode, world, checkpointing, name, values)
-            report.append(dict(mode=mode, world=world, activation_checkpointing=checkpointing, errors=measured))
-    (root / "ep-contract.json").write_text(
-        json.dumps({"passed": True, "relative_l2_tolerance": 0.05, "comparisons": report}, indent=2)
+    tolerance = 0.05
+    report = dict(
+        passed=False,
+        relative_l2_tolerance=tolerance,
+        comparisons=[],
+        first_moment_signals=[],
+        first_moment_superposition=[],
+        failures=[],
+        notes=[
+            "Master parameter comparisons measure state agreement, not relative update agreement.",
+            "Superposition divides residual L2 by policy L2 + auxiliary L2 to remain stable near cancellation.",
+            "Nonzero first moments reject disconnected native policy or auxiliary router gradients.",
+        ],
     )
-    print("EP_CONTRACT_PASSED", json.dumps(report))
+    states = {}
+    settings = ((1, False), (1, True), (2, False), (2, True))
+    for mode in ("policy", "auxiliary", "combined"):
+        for world, checkpointing in settings:
+            key = (mode, world, checkpointing)
+            path = root / f"ep{world}-{mode}-ac{int(checkpointing)}.pt"
+            try:
+                states[key] = torch.load(path, weights_only=True)
+            except (OSError, RuntimeError) as exc:
+                report["failures"].append(f"Cannot load {path.name}: {exc}")
+                continue
+            signal, error = _moment_signals(states[key])
+            report["first_moment_signals"].append(
+                dict(mode=mode, world=world, activation_checkpointing=checkpointing, categories=signal, error=error)
+            )
+            if error:
+                report["failures"].append(f"{key}: {error}")
+            if mode in ("policy", "auxiliary") and signal.get("router", {}).get("l2", 0.0) <= 0:
+                report["failures"].append(f"{key}: missing or zero router first-moment signal")
+        reference = states.get((mode, 1, False))
+        if reference is None:
+            continue
+        for world, checkpointing in settings[1:]:
+            actual = states.get((mode, world, checkpointing))
+            if actual is None:
+                continue
+            measured, error = _state_errors(reference, actual)
+            report["comparisons"].append(
+                dict(mode=mode, world=world, activation_checkpointing=checkpointing, errors=measured, error=error)
+            )
+            if error:
+                report["failures"].append(f"{mode}, EP{world}, checkpointing={checkpointing}: {error}")
+            for name, values in measured.items():
+                if values["relative_l2_error"] >= tolerance:
+                    report["failures"].append(
+                        f"{mode}, EP{world}, checkpointing={checkpointing}: {name} state error exceeds tolerance"
+                    )
+    for world, checkpointing in settings:
+        modes = [states.get((mode, world, checkpointing)) for mode in ("policy", "auxiliary", "combined")]
+        if any(state is None for state in modes):
+            continue
+        policy, auxiliary, combined = [
+            {name: value.double() for name, value in state.items() if name.endswith(".exp_avg")} for state in modes
+        ]
+        if set(policy) != set(auxiliary) or any(policy[name].shape != auxiliary[name].shape for name in policy):
+            report["failures"].append(
+                f"EP{world}, checkpointing={checkpointing}: component first-moment shapes differ"
+            )
+            continue
+        expected = {name: policy[name] + auxiliary[name] for name in policy}
+        measured, error = _state_errors(expected, combined)
+        component_signals = [_moment_signals(state)[0] for state in (policy, auxiliary)]
+        if error:
+            report["failures"].append(f"EP{world}, checkpointing={checkpointing}: superposition {error}")
+        for name, values in measured.items():
+            category = name.split("/")[0]
+            denominator = sum(signal[category]["l2"] for signal in component_signals)
+            values["component_l2_sum"] = denominator
+            values["relative_component_l2_error"] = values["difference_l2"] / max(denominator, 1e-10)
+            if values["relative_component_l2_error"] >= tolerance:
+                report["failures"].append(
+                    f"EP{world}, checkpointing={checkpointing}: {name} superposition error exceeds tolerance"
+                )
+        report["first_moment_superposition"].append(
+            dict(world=world, activation_checkpointing=checkpointing, errors=measured, error=error)
+        )
+    report["passed"] = not report["failures"]
+    (root / "ep-contract.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    print("EP_CONTRACT_PASSED" if report["passed"] else "EP_CONTRACT_FAILED", json.dumps(report, allow_nan=False))
+    if not report["passed"]:
+        raise AssertionError("; ".join(report["failures"]))
 
 
 def main():

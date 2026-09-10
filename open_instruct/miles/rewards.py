@@ -5,12 +5,237 @@
 weights, and targets in ``metadata.verifiers``; data cannot choose code to import.
 """
 
+import argparse
 import asyncio
+import atexit
+import contextlib
+import dataclasses
 import functools
 import importlib
 import json
 import math
+import os
+import signal
+import sys
+import weakref
 from pathlib import Path
+from types import SimpleNamespace
+
+_MATH_FACTORIES = {
+    "open_instruct.ground_truth_utils.MathVerifier",
+    "open_instruct.ground_truth_utils.StrictMathVerifier",
+}
+_POOLS = weakref.WeakKeyDictionary()
+_CHILDREN = set()
+_RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
+
+
+def _kill_remaining_children():
+    for pid in tuple(_CHILDREN):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+
+
+atexit.register(_kill_remaining_children)
+
+
+class _MathProcessPool:
+    """Persistent, bounded main-thread verifiers, never a fork of a Ray/CUDA worker.
+
+    Consumers are asyncio tasks: event-loop shutdown cancels them and reaps their
+    subprocesses. Cancelling a request or timing out kills its process, so a bad
+    symbolic expression cannot leave a slot permanently occupied.
+    """
+
+    def __init__(self, workers=4, timeout=45.0):
+        self.timeout = timeout
+        self.queue = asyncio.Queue(maxsize=workers * 2)
+        self.tasks = [asyncio.create_task(self._consume()) for _ in range(workers)]
+
+    async def score(self, request):
+        # Validate serializability before enqueueing; this is JSON IPC, not pickle.
+        payload = json.dumps({"schema_version": 1, **request}, allow_nan=False).encode() + b"\n"
+        future = asyncio.get_running_loop().create_future()
+        try:
+            await self.queue.put((payload, future))
+            return await future
+        finally:
+            if not future.done():
+                future.cancel()
+
+    async def close(self):
+        for task in self.tasks:
+            task.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+        while not self.queue.empty():
+            _, future = self.queue.get_nowait()
+            future.cancel()
+            self.queue.task_done()
+
+    @staticmethod
+    async def _start():
+        environment = dict(os.environ)
+        isolated = environment.get("OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH")
+        if isolated:
+            environment["PYTHONPATH"] = isolated + os.pathsep + environment.get("PYTHONPATH", "")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "open_instruct.miles.rewards",
+            "--math-worker",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=environment,
+            start_new_session=True,
+        )
+        _CHILDREN.add(process.pid)
+        return process
+
+    @staticmethod
+    async def _stop(process):
+        if process is not None:
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+            await process.wait()
+            _CHILDREN.discard(process.pid)
+
+    @staticmethod
+    async def _exchange(process, payload):
+        process.stdin.write(payload)
+        await process.stdin.drain()
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                raise RuntimeError("Math verifier process exited without a result")
+            if line.startswith(_RESPONSE_PREFIX):
+                response = json.loads(line[len(_RESPONSE_PREFIX) :])
+                break
+        if response.get("schema_version") != 1:
+            raise RuntimeError("Unsupported math verifier response schema")
+        if "error" in response:
+            raise RuntimeError("Math verifier failed: " + response["error"])
+        return SimpleNamespace(**response["result"])
+
+    async def _consume(self):
+        process = None
+        future = None
+        exchange = None
+        try:
+            while True:
+                payload, future = await self.queue.get()
+                try:
+                    if future.cancelled():
+                        continue
+                    if process is None:
+                        process = await self._start()
+                    exchange = asyncio.create_task(self._exchange(process, payload))
+                    done, _ = await asyncio.wait(
+                        (exchange, future), timeout=self.timeout, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if exchange in done:
+                        result = exchange.result()
+                        if not future.done():
+                            future.set_result(result)
+                    else:
+                        if not future.done():
+                            future.set_exception(TimeoutError(f"Math verifier exceeded {self.timeout} seconds"))
+                        exchange.cancel()
+                        await asyncio.gather(exchange, return_exceptions=True)
+                        await self._stop(process)
+                        process = None
+                except Exception as exc:
+                    if not future.done():
+                        future.set_exception(exc)
+                    await self._stop(process)
+                    process = None
+                finally:
+                    if exchange is not None:
+                        if not exchange.done():
+                            exchange.cancel()
+                        await asyncio.gather(exchange, return_exceptions=True)
+                    if future is not None and not future.done():
+                        future.cancel()
+                    self.queue.task_done()
+                    exchange = None
+                    future = None
+        finally:
+            if exchange is not None:
+                exchange.cancel()
+                await asyncio.gather(exchange, return_exceptions=True)
+            if future is not None and not future.done():
+                future.cancel()
+            await self._stop(process)
+
+
+async def isolated_verifier_call(
+    factory_spec, tokenized_prediction, prediction, label, query=None, rollout_state=None
+):
+    """Call an explicitly trusted verifier on a subprocess main thread.
+
+    Symbolic math keeps the original open-instruct/ANTLR grading semantics and
+    SIGALRM timeout. ANTLR 4.11 can live in a child-only dependency directory,
+    preserving the rollout process's OmegaConf/ANTLR 4.9 installation.
+    """
+    loop = asyncio.get_running_loop()
+    if loop not in _POOLS:
+        pool = _MathProcessPool()
+        _POOLS[loop] = pool
+        loop_ref = weakref.ref(loop)
+
+        def retire(_):
+            current = loop_ref()
+            if current is not None and all(task.done() for task in pool.tasks):
+                _POOLS.pop(current, None)
+
+        for task in pool.tasks:
+            task.add_done_callback(retire)
+    return await _POOLS[loop].score(
+        dict(
+            factory_spec=factory_spec,
+            tokenized_prediction=tokenized_prediction,
+            prediction=prediction,
+            label=label,
+            query=query,
+            rollout_state=rollout_state,
+        )
+    )
+
+
+class _IsolatedVerifier:
+    def __init__(self, spec):
+        self.spec = spec
+
+    async def async_call(self, *args, **kwargs):
+        return await isolated_verifier_call(self.spec, *args, **kwargs)
+
+
+@functools.lru_cache(maxsize=32)
+def _instantiate(spec_json):
+    spec = json.loads(spec_json)
+    module, _, symbol = spec["factory"].rpartition(".")
+    factory = getattr(importlib.import_module(module), symbol)
+    config = factory.get_config_class()(**spec.get("config", {}))
+    return factory(verifier_config=config, **spec.get("kwargs", {}))
+
+
+def _math_worker():
+    # Libraries may print during import or grading; reserve stdout for JSON IPC.
+    output = sys.stdout
+    sys.stdout = sys.stderr
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            if request.pop("schema_version") != 1:
+                raise ValueError("Unsupported math verifier request schema")
+            verifier = _instantiate(json.dumps(request.pop("factory_spec"), sort_keys=True))
+            result = verifier(**request)
+            response = {"schema_version": 1, "result": dataclasses.asdict(result)}
+        except Exception as exc:
+            response = {"schema_version": 1, "error": f"{type(exc).__name__}: {exc}"}
+        output.write(_RESPONSE_PREFIX.decode() + json.dumps(response, allow_nan=False) + "\n")
+        output.flush()
 
 
 def _finite(value, field):
@@ -29,7 +254,10 @@ def _registry(path):
         module, _, symbol = spec["factory"].rpartition(".")
         factory = getattr(importlib.import_module(module), symbol)
         config = factory.get_config_class()(**spec.get("config", {}))
-        result[name] = factory(verifier_config=config, **spec.get("kwargs", {}))
+        symbolic = any(f"{base.__module__}.{base.__name__}" in _MATH_FACTORIES for base in factory.__mro__)
+        result[name] = (
+            _IsolatedVerifier(spec) if symbolic else factory(verifier_config=config, **spec.get("kwargs", {}))
+        )
     return result
 
 
@@ -69,3 +297,10 @@ async def registered_reward(args, samples, **kwargs):
     if isinstance(samples, list):
         return list(await asyncio.gather(*(_score(args, sample) for sample in samples)))
     return await _score(args, samples)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Isolated open-instruct math verifier worker")
+    parser.add_argument("--math-worker", action="store_true", required=True)
+    parser.parse_args()
+    _math_worker()

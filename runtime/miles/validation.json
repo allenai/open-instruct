@@ -219,7 +219,13 @@
       "style_quality": "passed",
       "evidence": "docs/measurements/miles-core-contract-20260910.json",
       "coverage": "Independent PPO/entropy/KL reference, real Gloo rank reductions, auxiliary gradients, replay gradients, exact native next-update resume, lifecycle ordering",
-      "ep2": "prepared; not yet executed",
+      "ep2": {
+        "id": "01M26E52575DDQ5ANDB8158SN8",
+        "source_commit": "7db65a341",
+        "status": "stopped while queued; superseded by stronger comparator and early validation",
+        "gpu_count": 2,
+        "result_dataset": "01M26E525H13SNG7XK5HHRAGYX"
+      },
       "fixes": [
         "Unsharded-vocabulary entropy must not reduce across DP ranks",
         "All ranks agree on optimizer skip status before any policy clock advances"

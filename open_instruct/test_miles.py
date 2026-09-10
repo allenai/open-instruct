@@ -34,6 +34,8 @@ def test_config_compiles_native_miles_options(tmp_path):
         {"fully_async": True},
         {"offload_train": True},
         {"qkv_format": "thd"},
+        {"use_rollout_routing_replay": True},
+        {"check_weight_update_selector": "target"},
     ],
 )
 def test_config_rejects_unimplemented_or_ambiguous_behavior(change):

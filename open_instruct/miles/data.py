@@ -53,6 +53,8 @@ def router_routes(model, batch):
         raise ValueError("Rollout router replay requires expert IDs for every sample")
     routes = routes[0]
     tokens = batch["tokens"].shape[1]
+    if routes.dtype not in (torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64):
+        raise ValueError("Replay expert IDs must be integers")
     if routes.ndim != 3 or routes.shape[0] != tokens - 1:
         raise ValueError("MILES replay must contain [tokens-1, layers, top_k] expert IDs")
     # MILES records routing for next-token prediction inputs. The last response
@@ -64,7 +66,11 @@ def router_routes(model, batch):
         if name.endswith(".routed_experts_router"):
             parts = name.split(".")
             layer = int(parts[parts.index("blocks") + 1])
+            if layer >= routes.shape[1]:
+                raise ValueError("Replay layer axis does not cover every routed block")
             mapping[name] = routes[:, layer].unsqueeze(0).long()
+    if not mapping:
+        raise ValueError("Router replay requires routed MoE blocks")
     return mapping
 
 

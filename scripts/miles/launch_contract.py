@@ -13,6 +13,20 @@ export NCCL_CUMEM_ENABLE=1
 export TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=2
 mkdir -p /output
+retain_evidence() {
+  if [ -f /tmp/contract/ep-contract.json ]; then
+    cp /tmp/contract/ep-contract.json /output/
+  fi
+  for directory in /tmp/contract/ep*-ac*; do
+    if [ -d "$directory" ]; then
+      mkdir -p "/output/$(basename "$directory")"
+      for evidence in "$directory"/training_contract_rank*.jsonl; do
+        if [ -f "$evidence" ]; then cp "$evidence" "/output/$(basename "$directory")/"; fi
+      done
+    fi
+  done
+}
+trap retain_evidence EXIT
 python tests/miles/ep_contract.py bootstrap /tmp/contract
 for world in 1 2; do
   for mode in policy auxiliary combined; do
@@ -21,13 +35,7 @@ for world in 1 2; do
   done
 done
 python tests/miles/ep_contract.py compare /tmp/contract
-cp /tmp/contract/ep-contract.json /output/
-for directory in /tmp/contract/ep*-ac*; do
-  if [ -d "$directory" ]; then
-    mkdir -p "/output/$(basename "$directory")"
-    cp "$directory"/training_contract_rank*.jsonl "/output/$(basename "$directory")/"
-  fi
-done
+
 """
 
 

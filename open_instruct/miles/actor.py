@@ -121,6 +121,11 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         rollout, store = miles_data.get_rollout_data(self.args, rollout_data_ref)
         with store:
             batches = self._agree(lambda: data.sample_batches(rollout, self.args.olmo_core.max_sequence_length))
+            local_batch = self.args.global_batch_size // dist.get_world_size()
+            self._agree(lambda: self._validate_step_batches(batches, local_batch))
+            contract.validate_batch_schedule(len(batches), local_batch, batches[0]["tokens"].device)
+            if self.args.use_rollout_routing_replay:
+                self._agree(lambda: self._validate_replay_batches(batches))
             versions = self._agree(lambda: data.policy_versions(rollout))
             self._agree(lambda: self.clock.validate_versions(versions, self.args.olmo_core.max_policy_lag))
             rollout["log_probs"] = self._score(self.train_module, batches, use_replay=True)
@@ -143,15 +148,12 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             miles_loss.compute_advantages_and_returns(self.args, rollout)
             self._agree(lambda: contract.validate_training_data(rollout))
             batches = data.sample_batches(rollout, self.args.olmo_core.max_sequence_length)
-            local_batch = self.args.global_batch_size // dist.get_world_size()
-            self._agree(lambda: self._validate_step_batches(batches, local_batch))
-            contract.validate_batch_schedule(len(batches), local_batch, batches[0]["tokens"].device)
             for start in range(0, len(batches), local_batch):
                 step_batches = batches[start : start + local_batch]
+                step_versions = [version for batch in step_batches for version in data.policy_versions(batch)]
                 self._agree(
-                    lambda current=step_batches: self.clock.validate_versions(
-                        [v for batch in current for v in data.policy_versions(batch)],
-                        self.args.olmo_core.max_policy_lag,
+                    lambda current=step_versions: self.clock.validate_versions(
+                        current, self.args.olmo_core.max_policy_lag
                     )
                 )
                 normalization = contract.step_normalization(step_batches, self.args.global_batch_size)
@@ -213,7 +215,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                             "reduction": "token" if self.args.calculate_per_token_loss else "response",
                             "local_policy_objective": sum(float(m["normalized_policy_objective"]) for m in metrics),
                             "local_auxiliary_objective": aux_metrics,
-                            "behavior_versions": sorted(set(versions)),
+                            "local_behavior_versions": sorted(set(step_versions)),
                             "local_microbatches": count,
                             "lr_used": lr_used,
                             "lr_next": self.lr_scheduler.get_last_lr(),
@@ -233,6 +235,12 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 )
             self.clock.next_rollout_id = rollout_id + 1
         self._heartbeat.bump()
+
+    def _validate_replay_batches(self, batches):
+        # Validate every rank's external routes before any EP forward collective.
+        for batch in batches:
+            with self._replay_context(self.train_module, batch):
+                pass
 
     @staticmethod
     def _validate_step_batches(batches, local_batch):
@@ -300,10 +308,12 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             ray.get(self.rollout_manager.clear_updatable_has_new_engines.remote())
             ray.get([engine.continue_generation.remote() for engine in engines])
         dist.barrier()
+        repeated_version = self.clock.published_step == self.clock.completed_steps
         self.clock.published()
         if dist.get_rank() == 0:
             timings = dict(
                 version=self.clock.completed_steps,
+                repeated_version=repeated_version,
                 pause_connect_seconds=pause_done - started,
                 export_pack_seconds=export_done - pause_done - transfer_seconds,
                 transport_load_seconds=transfer_seconds,

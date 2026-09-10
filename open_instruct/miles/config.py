@@ -90,6 +90,8 @@ class RunConfig:
         collection = self.miles.get("rollout_batch_size", 0) * self.miles.get("n_samples_per_prompt", 1)
         if collection and (collection % samples or self.core.max_policy_lag < collection // samples - 1):
             raise ValueError("Rollout collection needs complete optimizer batches and a sufficient max_policy_lag")
+        if self.miles.get("check_weight_update_selector", "all") != "all":
+            raise ValueError("Core serving checks currently require check_weight_update_selector=all")
         if self.miles.get("ref_update_interval") is not None:
             raise ValueError("Core RL requires a fixed reference policy")
         if self.miles.get("offload_train", False):
@@ -104,6 +106,10 @@ class RunConfig:
         for name in ("use_critic", "multi_lora", "indep_dp", "use_opd", "use_routing_replay"):
             if self.miles.get(name, False):
                 raise ValueError(f"Core RL has no implementation for miles.{name}")
+        if self.miles.get("use_rollout_routing_replay", False) and not self.miles.get("use_miles_router", False):
+            raise ValueError(
+                "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
+            )
         if self.miles.get("fully_async", False):
             if self.miles.get("colocate", False) or self.miles.get("offload_rollout", False):
                 raise ValueError("Async Core training requires resident disaggregated rollout engines")

@@ -1,0 +1,64 @@
+# One GPU, tiny models only. Memory fit is model-dependent.
+# Prepared /data/hf includes tokenizer + chat template; train.jsonl is rendered.
+# Two optimizer updates plus durable checkpoints; a three-step LR horizon lets
+# a separate resume exercise complete the third step with the same schedule.
+[core]
+expert_parallel_size = 1
+attention_backend = "torch"
+max_sequence_length = 1024
+activation_checkpointing = true
+max_policy_lag = 0
+max_train_rollout_logprob_abs_diff = 0.05
+diagnostic_interval = 1
+router_aux_loss_weight = 0.01
+router_z_loss_weight = 0.00001
+stream_moe_export = true
+reward_config = "/data/verifiers.json"
+
+[miles]
+hf_checkpoint = "/data/hf"
+prompt_data = "/data/train.jsonl"
+input_key = "input"
+label_key = "label"
+metadata_key = "metadata"
+custom_rm_path = "open_instruct.miles.rewards.registered_reward"
+actor_num_nodes = 1
+actor_num_gpus_per_node = 1
+num_gpus_per_node = 1
+rollout_num_gpus = 1
+rollout_num_gpus_per_engine = 1
+colocate = true
+offload_rollout = false
+micro_batch_size = 1
+rollout_batch_size = 1
+n_samples_per_prompt = 4
+global_batch_size = 4
+num_rollout = 2
+rollout_temperature = 1.0
+rollout_seed = 17
+rollout_max_prompt_len = 768
+rollout_max_response_len = 256
+rollout_max_context_len = 1024
+sglang_context_length = 1024
+sglang_max_total_tokens = 4096
+sglang_max_running_requests = 4
+sglang_server_concurrency = 4
+sglang_mem_fraction_static = 0.2
+sglang_disable_radix_cache = true
+sglang_max_mamba_cache_size = 16
+sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_sampling_backend = "pytorch"
+sglang_attention_backend = "torch_native"
+sglang_log_level = "warning"
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+update_weights_interval = 1
+loss_type = "policy_loss"
+advantage_estimator = "grpo"
+lr = 0.000001
+lr_decay_iters = 3
+seed = 17
+save = "/data/checkpoints"
+save_interval = 1
+save_debug_rollout_data = "/data/rollouts/{rollout_id}.pt"

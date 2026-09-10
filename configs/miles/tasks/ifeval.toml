@@ -1,0 +1,7 @@
+# Input to scripts.miles.datasource_trials, not a standalone RunConfig.
+# Public OI RLVR datasource; schema/revision inspected on 2026-09-10.
+dataset = "allenai/RLVR-IFeval"
+revision = "47c03c73621c4aab2b824b7818681117d662770e"
+verifier = "ifeval_old"
+# ground_truth is a JSON object with func_name, NOT a modern instruction_id list.
+# Preserve it as JSON text because the legacy verifier mutates dictionary targets.

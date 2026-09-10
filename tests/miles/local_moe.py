@@ -263,6 +263,7 @@ def run(options):
     config = RunConfig(
         CoreConfig(
             attention_backend="torch",
+            diagnostic_interval=options.diagnostic_interval,
             expert_parallel_size=options.expert_parallel_size,
             stream_moe_export=not options.legacy_export,
             max_train_rollout_logprob_abs_diff=0.05,
@@ -312,7 +313,10 @@ def run(options):
         config.miles.update(sglang_disable_radix_cache=True, sglang_max_mamba_cache_size=16)
     if options.disaggregated:
         config.miles.pop("colocate")
-    if not options.resume:
+    if options.routing_replay:
+        config.miles["use_rollout_routing_replay"] = True
+        config.miles["use_miles_router"] = True
+    if not options.resume or options.diagnostic_interval:
         config.miles["check_weight_update_equal"] = True
     if options.resume:
         config.miles.update(load=str(root / "save"), start_rollout_id=2)
@@ -342,7 +346,8 @@ def audit(options):
     root = options.output
     verifier = GSM8KVerifier()
     prompts = [json.loads(line) for line in (root / "prompts.jsonl").read_text().splitlines()]
-    scores = []
+    scores, replay_shapes = [], []
+    hf = json.loads((root / "hf/config.json").read_text())
     for rollout_id in range(3):
         data = torch.load(root / f"rollouts/{rollout_id}.pt", weights_only=False)
         assert data["rollout_id"] == rollout_id and len(data["samples"]) == 4
@@ -352,6 +357,20 @@ def audit(options):
             assert set(sample["weight_versions"]) == {str(rollout_id)}
             assert len(sample["rollout_log_probs"]) == sample["response_length"]
             assert torch.isfinite(torch.tensor(sample["rollout_log_probs"])).all()
+            if options.routing_replay:
+                routes = torch.as_tensor(sample["rollout_routed_experts"])
+                assert routes.dtype in (torch.int16, torch.int32, torch.int64)
+                assert list(routes.shape) == [
+                    len(sample["tokens"]) - 1,
+                    hf["num_hidden_layers"],
+                    hf["num_experts_per_tok"],
+                ]
+                for layer in range(hf["num_hidden_layers"]):
+                    if layer not in hf.get("dense_layers_indices", []):
+                        assert bool(((routes[:, layer] >= 0) & (routes[:, layer] < hf["n_routed_experts"])).all())
+                        ordered = routes[:, layer].sort(dim=-1).values
+                        assert bool((ordered[:, 1:] != ordered[:, :-1]).all())
+                replay_shapes.append(list(routes.shape))
             score = verifier([], sample["response"], sample["label"]).score
             assert score == sample["reward"]
             scores.append(score)
@@ -376,6 +395,7 @@ def audit(options):
     report = dict(
         verified_samples=len(scores),
         rewards=scores,
+        replay_shapes=replay_shapes,
         rollout_versions=[0, 1, 2],
         prompt_cursor_continued=True,
         optimizer_steps=3,
@@ -403,6 +423,8 @@ def main():
     parser.add_argument("--legacy-export", action="store_true")
     parser.add_argument("--per-tensor", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--routing-replay", action="store_true")
+    parser.add_argument("--diagnostic-interval", type=int, default=0)
     options = parser.parse_args()
     if options.command == "prepare":
         prepare(options)

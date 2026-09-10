@@ -1,0 +1,69 @@
+# Bounded qualification default for the existing 18.5B-total KDA/latent SFT model.
+# Three B300 GPUs: two Core EP ranks and one resident SGLang engine.
+# Replace /data with a prepared run directory; HF descriptor must have the pinned
+# RL chat template. Prompts are already rendered, without reference solutions.
+# No optimizer checkpoint is saved by this two-update profile.
+[core]
+expert_parallel_size = 2
+attention_backend = "flash_4"
+max_sequence_length = 6144
+activation_checkpointing = true
+max_policy_lag = 0
+max_train_rollout_logprob_abs_diff = 0.05
+diagnostic_interval = 1
+router_aux_loss_weight = 0.01
+router_z_loss_weight = 0.00001
+stream_moe_export = true
+weight_sync_mode = "flattened"
+reward_config = "/data/verifiers.json"
+
+[miles]
+hf_checkpoint = "/data/hf"
+prompt_data = "/data/train.jsonl"
+input_key = "input"
+label_key = "label"
+metadata_key = "metadata"
+custom_rm_path = "open_instruct.miles.rewards.registered_reward"
+actor_num_nodes = 1
+actor_num_gpus_per_node = 2
+num_gpus_per_node = 3
+rollout_num_gpus = 1
+rollout_num_gpus_per_engine = 1
+offload_rollout = false
+micro_batch_size = 1
+rollout_batch_size = 4
+n_samples_per_prompt = 4
+global_batch_size = 16
+num_rollout = 2
+rollout_temperature = 1.0
+rollout_seed = 17
+rollout_max_prompt_len = 2048
+rollout_max_response_len = 4096
+rollout_max_context_len = 6144
+eval_prompt_data = ["heldout", "/data/eval.jsonl"]
+eval_interval = 2
+eval_temperature = 0.0
+n_samples_per_eval_prompt = 1
+eval_max_response_len = 4096
+sglang_context_length = 6144
+sglang_max_total_tokens = 32768
+sglang_max_running_requests = 4
+sglang_server_concurrency = 4
+sglang_mem_fraction_static = 0.6
+sglang_disable_radix_cache = true
+sglang_max_mamba_cache_size = 8
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 4
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_sampling_backend = "pytorch"
+sglang_log_level = "warning"
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+update_weights_interval = 1
+loss_type = "policy_loss"
+advantage_estimator = "grpo"
+lr = 0.000001
+lr_decay_iters = 2
+seed = 17
+save = "/data/metrics"
+save_debug_rollout_data = "/data/rollouts/{rollout_id}.pt"

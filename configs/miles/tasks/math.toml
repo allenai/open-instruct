@@ -1,0 +1,7 @@
+# Input to scripts.miles.datasource_trials, not a standalone RunConfig.
+# Schema/revision inspected on 2026-09-10. Same datasource used by OI's Qwen GRPO recipes.
+dataset = "ai2-adapt-dev/rlvr_open_reasoner_math"
+revision = "2cdc4f9e67b426a693d19f11dcc05f1cb8f44793"
+verifier = "math"
+# messages contains a reference assistant answer: preparation removes it.
+# ground_truth is a scalar mathematical answer string.

@@ -299,6 +299,17 @@ def test_auxiliary_gradients_match_independent_reference(world, microbatch):
     torch.testing.assert_close(total, expected)
     torch.testing.assert_close(actual.grad, expected_logits.grad)
     assert actual.grad.abs().sum() > 0
+    print(
+        "AUXILIARY_CONTRACT",
+        json.dumps(
+            dict(
+                world_size=world,
+                microbatch_size=microbatch,
+                loss=float(total.detach()),
+                gradient_max_abs_error=float((actual.grad - expected_logits.grad).abs().max()),
+            )
+        ),
+    )
 
 
 @pytest.mark.parametrize("checkpointed", [False, True])
@@ -333,6 +344,18 @@ def test_replay_policy_auxiliary_and_combined_gradients(checkpointed):
         assert router.weight.grad.abs().sum() > 0
         gradients.append(router.weight.grad.clone())
     torch.testing.assert_close(gradients[2], gradients[0] + gradients[1], atol=2e-6, rtol=2e-5)
+    print(
+        "REPLAY_CONTRACT",
+        json.dumps(
+            dict(
+                checkpointed=checkpointed,
+                policy_gradient_l2=float(gradients[0].norm()),
+                auxiliary_gradient_l2=float(gradients[1].norm()),
+                combined_gradient_l2=float(gradients[2].norm()),
+                superposition_max_abs=float((gradients[2] - gradients[0] - gradients[1]).abs().max()),
+            )
+        ),
+    )
 
 
 def test_active_nonfinite_rejected_masked_nonfinite_ignored():

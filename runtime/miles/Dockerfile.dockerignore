@@ -8,6 +8,9 @@ runtime/miles/sources/
 !scripts/
 !scripts/miles/
 !scripts/miles/**
+!configs/
+!configs/miles/
+!configs/miles/**
 !tests/
 !tests/miles/
 !tests/miles/**

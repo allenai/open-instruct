@@ -32,21 +32,32 @@ async def train(args):
             if args.offload_rollout:
                 await manager.onload_weights.remote()
             await learner.update_weights(rollout_id)
-            if args.offload_rollout:
-                await manager.onload_kv.remote()
-            if args.fully_async:
-                await manager.core_publication_boundary.remote(False)
-
             interval = args.olmo_core.diagnostic_interval
-            if args.check_weight_update_equal and (
-                rollout_id is None or (interval > 0 and (rollout_id + 1) % interval == 0)
-            ):
+            fresh_initial = rollout_id is None and args.start_rollout_id == 0
+            diagnostic = interval > 0 and (rollout_id is None or (rollout_id + 1) % interval == 0)
+            if args.check_weight_update_equal and (rollout_id is None or diagnostic):
+                if not fresh_initial:
+                    # The startup snapshot is the original HF checkpoint. It
+                    # cannot validate trained/restored weights. Instead measure
+                    # an exact current-state publication round trip, including
+                    # reset so an omitted tensor cannot pass as unchanged.
+                    await manager.check_weights.remote(action="snapshot", selector=args.check_weight_update_selector)
+                    await manager.check_weights.remote(
+                        action="reset_tensors",
+                        selector=args.check_weight_update_selector,
+                        skip_list=args.check_weight_update_skip_list,
+                    )
+                    await learner.update_weights(rollout_id)
                 await manager.check_weights.remote(
                     action="compare",
                     allow_quant_error=args.check_weight_update_allow_quant_error,
                     selector=args.check_weight_update_selector,
                     skip_list=args.check_weight_update_skip_list,
                 )
+            if args.offload_rollout:
+                await manager.onload_kv.remote()
+            if args.fully_async:
+                await manager.core_publication_boundary.remote(False)
 
         await publish()
         evaluation = EvalDispatcher(args, learner, manager)

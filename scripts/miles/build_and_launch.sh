@@ -12,10 +12,21 @@ fi
 : "${MILES_BASE_IMAGE:?Set MILES_BASE_IMAGE to the locally loaded base image recorded in runtime/miles/runtime.lock.json}"
 commit=$(git rev-parse HEAD)
 image_name="open-instruct-miles-core-${commit:0:12}"
-python scripts/miles/build_image.py --base-image "$MILES_BASE_IMAGE" --tag "$image_name"
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
-beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user" \
-    --description "Experimental MILES/Core integration; open-instruct commit $commit"
+expected_description="Experimental MILES/Core integration; open-instruct commit $commit"
+existing=$(beaker image get "$beaker_user/$image_name" --format json 2>/dev/null || true)
+if [[ -n "$existing" ]]; then
+    description=$(jq -r '.[0].description // ""' <<< "$existing")
+    if [[ "$description" != "$expected_description" ]]; then
+        echo "Existing image metadata does not match this source commit: $image_name"
+        exit 1
+    fi
+    echo "Reusing Beaker image for committed source $commit"
+else
+    python scripts/miles/build_image.py --base-image "$MILES_BASE_IMAGE" --tag "$image_name"
+    beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user" \
+        --description "$expected_description"
+fi
 script="$1"
 shift
 bash "$script" "$beaker_user/$image_name" "$@"

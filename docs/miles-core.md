@@ -45,6 +45,11 @@ The builder verifies the base image's immutable Docker ID. It fetches Core/MILES
 
 ## Configure and run
 
+For an inventory against our customized olmo-miles stack and bounded starting
+configurations, see [feature parity and default profiles](miles-feature-parity.md).
+The profiles distinguish tiny resident development, the measured SFT EP2
+synchronous shape, and an explicitly unqualified bounded-async candidate.
+
 `configs/miles/dense.toml` is an example with explicit mounted input/output paths. `configs/miles/prompts.jsonl` and `verifiers.json` show the prepared-data and mixed-verifier contracts. The reward registry is trusted run configuration. Samples select registered verifier names, targets, and weights, and cannot name arbitrary import paths.
 
 ```bash
@@ -60,6 +65,18 @@ The current implementation uses one unpadded sequence per microbatch with gradie
 
 Async mode additionally requires `fully_async=true`, a positive lag budget, resident disaggregated rollout engines, and publication after each collection. Groups must carry complete, homogeneous behavior-policy versions. The buffer reserves enough lag for all optimizer steps in the collection, and the actor checks again at consumption.
 
+Rollout routing replay requires both `use_rollout_routing_replay=true` and
+`use_miles_router=true` in this pinned runtime. The SGLang router otherwise
+strips expert-ID requests; an actual trial failed before an optimizer update
+with missing routes, and configuration now rejects that combination early.
+This is separate from Megatron's `use_routing_replay` flag, which Core rejects.
+The live retry and full-model replay still require qualification.
+
+The [additional datasource trials](miles-feature-parity.md#additional-datasource-trials)
+use pinned math and legacy IF datasets with the same SFT model and an independent
+reward audit. They have their own committed-image debug launcher; ordinary
+`train` configs can also consume prepared rows and trusted verifier registries.
+
 ## Checkpoints and publication
 
 HF is the serving interchange format. SGLang starts from an HF checkpoint directory containing the model config, tokenizer, and weights; olmo-sglang maps those weights into its fused inference layout. The training model is native Core. The adapter can initialize it from the same HF checkpoint, and publishes subsequent policy updates directly as HF-named tensors. A Core-origin model therefore follows `Core checkpoint → HF export → SGLang`; it does not need a Megatron checkpoint or a Megatron conversion step. Updating the policy does not require saving and reloading an HF directory at each step.
@@ -70,7 +87,7 @@ Core checkpoints contain native model/optimizer state, scheduler and per-rank RN
 
 The pinned image also needs the existing olmo-miles FLA 0.5.2/Triton compatibility shim for KDA; the adapter installs it in each hybrid trainer process. That shim requires one KDA head width per process. Tiny hybrid test models use eight KDA heads to keep native DDP parameter offsets aligned for grouped matmul.
 
-Publication pauses generation, transfers weights, commits the optimizer-step version, and resumes generation. Dense conversion gathers one parameter at a time. MoE conversion streams on the model device through Core's canonical HF converter. It retains the current expert slabs and output bucket, without staging a complete CPU model replica. Disaggregated publication uses one flattened NCCL broadcast per bucket. `core.stream_moe_export=false` and `core.weight_sync_mode="per_tensor"` select the baseline for comparisons. `publication.jsonl` records phase timings and tensor/byte/bucket counts when saving is enabled. Large-model memory and throughput qualification remain. HF evaluation exports include the tokenizer and MILES completion marker.
+Publication pauses generation, transfers weights, commits the optimizer-step version, and resumes generation. Dense conversion gathers one parameter at a time. MoE conversion streams on the model device through Core's canonical HF converter. It retains the current expert slabs and output bucket, without staging a complete CPU model replica. Disaggregated publication uses one flattened NCCL broadcast per bucket. `core.stream_moe_export=false` and `core.weight_sync_mode="per_tensor"` select the baseline for comparisons. `publication.jsonl` records phase timings and tensor/byte/bucket counts when `miles.save` is set, even without an optimizer checkpoint interval. The bounded full SFT run measured this path; broader topology, memory and throughput qualification remain. HF evaluation exports include the tokenizer and MILES completion marker.
 
 ## Local MoE task and restart check
 
@@ -376,7 +393,17 @@ explicitly not global optimizer norms: expert gradients may still need Core's
 EP-MP rescaling, and FP8 stores outside `named_parameters` are outside coverage.
 Update samples retain at most 256 values per named parameter, rather than cloning
 the model. With `check_weight_update_equal=true`, the driver also checks serving
-weights after every N rollout publications (the initial check remains enabled).
+weights at publication boundaries whose rollout count is divisible by N
+(and on initial publication). A fresh run compares its initial
+publication against SGLang's original HF snapshot. Periodic and resumed checks
+snapshot the **current** serving state, reset tensors, republish the same trainer
+version, and compare exactly when quantization tolerance is disabled, over the
+non-skipped tensors. This catches missing or inconsistent transfers;
+it is not an independent proof of the export mapping for changed weights.
+Logprob checks and the initial HF comparison supply separate evidence. The
+round trip adds a second full transfer, with `repeated_version=true` in the
+publication log; include both transfers when measuring diagnostic overhead.
+The async producer remains paused until the check completes.
 The interval defaults to zero, leaving these expensive probes disabled.
 
 Runtime failures include non-finite active inputs/rewards, empty effective

@@ -1,0 +1,749 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-10",
+  "scope": "Local datasource and reward integration qualification; not learning quality or full SFT qualification",
+  "source": {
+    "base_commit": "7db65a341bc2514c5252220b220669599955e3e3",
+    "state": "Uncommitted source overlays; IF audit helper corrected after its GPU run; source hashes below captured after both audits",
+    "file_sha256": {
+      "scripts/miles/datasource_trials.py": "8fbd8ea2f4a1708a079d61a85c068cc83481ed8879b9d171d830b0ac3a281b70",
+      "tests/miles/test_datasource_trials.py": "206e1c3100f6169d12d63705d63086c2f8e3c8a17cd37dde555c81aa767ac70d",
+      "open_instruct/miles/rewards.py": "5b28a194327484ba539726868ec61390918ffb4ec3918a054f2334b434577c3f",
+      "open_instruct/miles/actor.py": "438e7eb82a94c65aa330c8b3b5c3030d6a844962d586a13764d21ef1e21c7ec5",
+      "open_instruct/miles/driver.py": "8b1b8111fce4e29b1ee8f78e546f4c1e8866f21d783713eb9d5618bd28835a77"
+    }
+  },
+  "runtime": {
+    "image": "open-instruct:miles-core-local-moe",
+    "image_id": "sha256:60890d004c1c338a2d29b267ba4d7c0f202f3c2f3f76840386c4ff8eba34ffa4",
+    "source_overlay_wrapper": "/tmp/miles-current",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "gpus": 1,
+    "placement": "resident colocation",
+    "weight_transport": "ipc",
+    "model": {
+      "source": "fresh random KDA + latent MoE; seed 17; public tokenizer/task slice",
+      "parameters": 13657864,
+      "export_dtype": "bfloat16"
+    },
+    "hf_descriptor": "/tmp/miles-validation/datasource-hf",
+    "context_tokens": 512,
+    "max_prompt_tokens": 480,
+    "response_cap_tokens": 32,
+    "math_dependency_isolation": {
+      "environment": "OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/validation/datasource-deps",
+      "package": "antlr4-python3-runtime==4.11.1",
+      "purpose": "Child main-thread symbolic verifier; trainer keeps OmegaConf-compatible ANTLR"
+    }
+  },
+  "validation": {
+    "datasource_tests": {
+      "passed": 28,
+      "seconds": 110.36,
+      "log": "/tmp/miles-datasource-tests-final.log"
+    },
+    "real_verifier_fixtures": {
+      "passed": true,
+      "cases": [
+        {
+          "verifier": "math",
+          "expected": 1.0,
+          "bridge": 1.0,
+          "direct": 1.0,
+          "repeated": 1.0
+        },
+        {
+          "verifier": "math",
+          "expected": 0.0,
+          "bridge": 0.0,
+          "direct": 0.0,
+          "repeated": 0.0
+        },
+        {
+          "verifier": "ifeval_old",
+          "expected": 1.0,
+          "bridge": 1.0,
+          "direct": 1.0,
+          "repeated": 1.0
+        },
+        {
+          "verifier": "ifeval_old",
+          "expected": 0.0,
+          "bridge": 0.0,
+          "direct": 0.0,
+          "repeated": 0.0
+        },
+        {
+          "verifier": "ifeval",
+          "expected": 1.0,
+          "bridge": 1.0,
+          "direct": 1.0,
+          "repeated": 1.0
+        },
+        {
+          "verifier": "ifeval",
+          "expected": 0.5,
+          "bridge": 0.5,
+          "direct": 0.5,
+          "repeated": 0.5
+        },
+        {
+          "verifier": "ifeval",
+          "expected": 0.0,
+          "bridge": 0.0,
+          "direct": 0.0,
+          "repeated": 0.0
+        }
+      ],
+      "interpretation": "Verifier/adapter checks only; no model training"
+    },
+    "parser": "Both math and IF local configs passed pinned MILES parser",
+    "lint": "ruff format/check passed on datasource harness and tests"
+  },
+  "limitations": [
+    "Fresh random 13,657,864-parameter KDA + latent MoE, not the SFT checkpoint",
+    "All training groups had zero reward variance; policy objective was zero and updates came from router auxiliary losses",
+    "All 128 responses hit the deliberately small 32-token cap",
+    "Length-selected first 24 prompts from at most 256 source rows per task; sixteen held out only from these updates, not from pretraining/SFT",
+    "Diagnostic republishing tests same-version repeatability after reset, not an independent proof of HF export mapping",
+    "IPC timings from a tiny colocated model are not full-model NCCL performance measurements"
+  ],
+  "runs": {
+    "math": {
+      "source_dataset": "ai2-adapt-dev/rlvr_open_reasoner_math",
+      "source_revision": "2cdc4f9e67b426a693d19f11dcc05f1cb8f44793",
+      "snapshot_acquisition": "datasets.load_dataset at this immutable revision, train[:256], public token=False; copied to offline JSONL for network-isolated local runtime",
+      "preparation": {
+        "task": "math",
+        "profile": "local",
+        "verifier": "math",
+        "hf": "/validation/datasource-hf",
+        "source": {
+          "kind": "local_jsonl",
+          "path": "/validation/datasource-inputs/math-256.jsonl",
+          "sha256": "1633275a658c66b1a55c3a348952a0024bff92a78953796612e186b980387d78"
+        },
+        "template_sha256": "d3647b2a059a7748a57e49582bdbc3393eb74029fff4d70f2c6b654ac8a47178",
+        "prepared_sha256": {
+          "train": "659e68473b6f145501db8162f0d35e848204b892cc6e6895e434bb3381cc168c",
+          "eval": "d5a569c41f153fecaa06e651d86921e16001c6c531e215260e7a7e5fb4c62d42"
+        },
+        "train_rows": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "eval_rows": [
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23
+        ],
+        "selection": "First 24 prompts within token budget, scanning at most 256 source rows",
+        "interpretation": "Held out from these updates only; not a decontaminated benchmark or learning claim"
+      },
+      "audit": {
+        "passed": true,
+        "task": "math",
+        "results": {
+          "0": {
+            "samples": 16,
+            "mean_reward": 0.0,
+            "fully_correct": 0,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 0
+          },
+          "1": {
+            "samples": 16,
+            "mean_reward": 0.0,
+            "fully_correct": 0,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 1
+          },
+          "eval_0": {
+            "samples": 16,
+            "mean_reward": 0.0,
+            "fully_correct": 0,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 0
+          },
+          "eval_1": {
+            "samples": 16,
+            "mean_reward": 0.0,
+            "fully_correct": 0,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 2
+          }
+        },
+        "publication": [
+          {
+            "version": 0,
+            "repeated_version": false,
+            "pause_connect_seconds": 0.008239688817411661,
+            "export_pack_seconds": 0.0009220568463206291,
+            "transport_load_seconds": 0.009408783167600632,
+            "finalize_seconds": 0.005300961434841156,
+            "total_seconds": 0.023871741257607937,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 1,
+            "repeated_version": false,
+            "pause_connect_seconds": 0.004328158218413591,
+            "export_pack_seconds": 0.0005808137357234955,
+            "transport_load_seconds": 0.010217528324574232,
+            "finalize_seconds": 0.005353610962629318,
+            "total_seconds": 0.020480241160839796,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 1,
+            "repeated_version": true,
+            "pause_connect_seconds": 0.0023814579471945763,
+            "export_pack_seconds": 0.0005492148920893669,
+            "transport_load_seconds": 0.005128166172653437,
+            "finalize_seconds": 0.004344519227743149,
+            "total_seconds": 0.012403468135744333,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 2,
+            "repeated_version": false,
+            "pause_connect_seconds": 0.0043707480654120445,
+            "export_pack_seconds": 0.00048416294157505035,
+            "transport_load_seconds": 0.006768146995455027,
+            "finalize_seconds": 0.004537111148238182,
+            "total_seconds": 0.016160259023308754,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 2,
+            "repeated_version": true,
+            "pause_connect_seconds": 0.0024771089665591717,
+            "export_pack_seconds": 0.0004679323174059391,
+            "transport_load_seconds": 0.004930933937430382,
+            "finalize_seconds": 0.004004918970167637,
+            "total_seconds": 0.011880974285304546,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          }
+        ],
+        "optimizer_steps": 2,
+        "diagnostic_republications": 2,
+        "diagnostic_republication_seconds": 0.02428444242104888
+      },
+      "core_step_contract": [
+        {
+          "auxiliary_denominator": 3408.0,
+          "elapsed_seconds": 39.99158538226038,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.010235754251480102,
+            "router_z": 2.095226526260376e-05
+          },
+          "local_behavior_versions": [
+            0
+          ],
+          "local_microbatches": 16,
+          "local_policy_objective": 0.0,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 13313288,
+              "local_l2": 0.015055785970711475,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 344064,
+              "local_l2": 0.005758638597237888,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 512,
+              "local_l2": 0.0045551215298473835,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06
+          ],
+          "lr_used": [
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 512,
+            "model_tokens": 3408,
+            "samples": 16,
+            "token_denominator": 512,
+            "world_size": 1
+          },
+          "optimizer_skipped": false,
+          "published_step": 0,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 0,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 7176,
+              "sampled_update_l2": 2.4977889787064583e-05
+            },
+            "expert": {
+              "sampled_elements": 1536,
+              "sampled_update_l2": 4.964234128000471e-06
+            },
+            "router": {
+              "sampled_elements": 256,
+              "sampled_update_l2": 3.4385216478958026e-06
+            }
+          },
+          "schema_version": 1,
+          "step": 1
+        },
+        {
+          "auxiliary_denominator": 2008.0,
+          "elapsed_seconds": 0.13892310298979282,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.010092426538467408,
+            "router_z": 2.0941500663757324e-05
+          },
+          "local_behavior_versions": [
+            1
+          ],
+          "local_microbatches": 16,
+          "local_policy_objective": 0.0,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 13313288,
+              "local_l2": 0.008094499945947357,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 344064,
+              "local_l2": 0.0032711108511970684,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 512,
+              "local_l2": 0.0023350329138338566,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06
+          ],
+          "lr_used": [
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 512,
+            "model_tokens": 2008,
+            "samples": 16,
+            "token_denominator": 512,
+            "world_size": 1
+          },
+          "optimizer_skipped": false,
+          "published_step": 1,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 1,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 7176,
+              "sampled_update_l2": 2.3615328334887717e-05
+            },
+            "expert": {
+              "sampled_elements": 1536,
+              "sampled_update_l2": 6.744981439132423e-06
+            },
+            "router": {
+              "sampled_elements": 256,
+              "sampled_update_l2": 4.3702847432669066e-06
+            }
+          },
+          "schema_version": 1,
+          "step": 2
+        }
+      ],
+      "behavior_policy_agreement": [
+        {
+          "mean_abs": 0.0022094305604696274,
+          "active_tokens": 512
+        },
+        {
+          "mean_abs": 0.002325892448425293,
+          "active_tokens": 512
+        }
+      ],
+      "log": "/tmp/miles-datasource-math-run.log",
+      "log_sha256": "bacce3f165614e152963676801783cf1cf48acc7aad719e596c19d42cbf119bf",
+      "training_steps_completed": 2,
+      "responses_audited": 64,
+      "process_exit_code": 0,
+      "exit_reason": "Training, evaluation, audit, and teardown completed successfully"
+    },
+    "ifeval": {
+      "source_dataset": "allenai/RLVR-IFeval",
+      "source_revision": "47c03c73621c4aab2b824b7818681117d662770e",
+      "snapshot_acquisition": "datasets.load_dataset at this immutable revision, train[:256], public token=False; copied to offline JSONL for network-isolated local runtime",
+      "preparation": {
+        "task": "ifeval",
+        "profile": "local",
+        "verifier": "ifeval_old",
+        "hf": "/validation/datasource-hf",
+        "source": {
+          "kind": "local_jsonl",
+          "path": "/validation/datasource-inputs/ifeval-256.jsonl",
+          "sha256": "42bab49bb9ea90c1a44e2cdfdba3c2cba5eecd7dda9cb8841bbfa02cb4b33766"
+        },
+        "template_sha256": "d3647b2a059a7748a57e49582bdbc3393eb74029fff4d70f2c6b654ac8a47178",
+        "prepared_sha256": {
+          "train": "5ab11d2424c97bc5a37cc116b0467aca41a3fb982a3cbed246e991e0f5a60483",
+          "eval": "4cc69b6c7e4de2c7824d8d3c7c4f2e9ac114cf5f3a9d896c07a7fe4af62bfbe8"
+        },
+        "train_rows": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          7,
+          8
+        ],
+        "eval_rows": [
+          10,
+          11,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          24,
+          25,
+          26,
+          27
+        ],
+        "selection": "First 24 prompts within token budget, scanning at most 256 source rows",
+        "interpretation": "Held out from these updates only; not a decontaminated benchmark or learning claim"
+      },
+      "audit": {
+        "passed": true,
+        "task": "ifeval",
+        "results": {
+          "0": {
+            "samples": 16,
+            "mean_reward": 0.25,
+            "fully_correct": 4,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 0
+          },
+          "1": {
+            "samples": 16,
+            "mean_reward": 0.0,
+            "fully_correct": 0,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 1
+          },
+          "eval_0": {
+            "samples": 16,
+            "mean_reward": 0.0625,
+            "fully_correct": 1,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 0
+          },
+          "eval_1": {
+            "samples": 16,
+            "mean_reward": 0.0625,
+            "fully_correct": 1,
+            "mixed_reward_groups": 0,
+            "responses_at_token_cap": 16,
+            "policy_version": 2
+          }
+        },
+        "publication": [
+          {
+            "version": 0,
+            "repeated_version": false,
+            "pause_connect_seconds": 0.006138716824352741,
+            "export_pack_seconds": 0.000756516121327877,
+            "transport_load_seconds": 0.00972701795399189,
+            "finalize_seconds": 0.005735456943511963,
+            "total_seconds": 0.022357897832989693,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 1,
+            "repeated_version": false,
+            "pause_connect_seconds": 0.00460469676181674,
+            "export_pack_seconds": 0.0006348360329866409,
+            "transport_load_seconds": 0.00982563616707921,
+            "finalize_seconds": 0.005053243134170771,
+            "total_seconds": 0.020118562038987875,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 1,
+            "repeated_version": true,
+            "pause_connect_seconds": 0.002728091087192297,
+            "export_pack_seconds": 0.0005768067203462124,
+            "transport_load_seconds": 0.005242869257926941,
+            "finalize_seconds": 0.0045860218815505505,
+            "total_seconds": 0.013133889064192772,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 2,
+            "repeated_version": false,
+            "pause_connect_seconds": 0.004223458934575319,
+            "export_pack_seconds": 0.0005508377216756344,
+            "transport_load_seconds": 0.007790921255946159,
+            "finalize_seconds": 0.00488071795552969,
+            "total_seconds": 0.017446035984903574,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          },
+          {
+            "version": 2,
+            "repeated_version": true,
+            "pause_connect_seconds": 0.002812619786709547,
+            "export_pack_seconds": 0.0005684820935130119,
+            "transport_load_seconds": 0.005241516977548599,
+            "finalize_seconds": 0.004560763947665691,
+            "total_seconds": 0.01318348292261362,
+            "tensors": 55,
+            "bytes": 27315728,
+            "buckets": 1,
+            "transport_collectives": 1,
+            "stream_moe_export": true,
+            "transport": "ipc"
+          }
+        ],
+        "optimizer_steps": 2,
+        "diagnostic_republications": 2,
+        "diagnostic_republication_seconds": 0.026317371986806393
+      },
+      "core_step_contract": [
+        {
+          "auxiliary_denominator": 1988.0,
+          "elapsed_seconds": 40.74069506023079,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.010081366300582886,
+            "router_z": 1.9798961877822877e-05
+          },
+          "local_behavior_versions": [
+            0
+          ],
+          "local_microbatches": 16,
+          "local_policy_objective": 0.0,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 13313288,
+              "local_l2": 0.006929652273859328,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 344064,
+              "local_l2": 0.002891870960462855,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 512,
+              "local_l2": 0.002001307439059019,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06
+          ],
+          "lr_used": [
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 512,
+            "model_tokens": 1988,
+            "samples": 16,
+            "token_denominator": 512,
+            "world_size": 1
+          },
+          "optimizer_skipped": false,
+          "published_step": 0,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 0,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 7176,
+              "sampled_update_l2": 2.4414416447903218e-05
+            },
+            "expert": {
+              "sampled_elements": 1536,
+              "sampled_update_l2": 4.964234128000471e-06
+            },
+            "router": {
+              "sampled_elements": 256,
+              "sampled_update_l2": 3.4385216478958026e-06
+            }
+          },
+          "schema_version": 1,
+          "step": 1
+        },
+        {
+          "auxiliary_denominator": 2204.0,
+          "elapsed_seconds": 0.16107514407485723,
+          "event": "optimizer",
+          "local_auxiliary_objective": {
+            "load_balancing": 0.01015637993812561,
+            "router_z": 1.9458580017089844e-05
+          },
+          "local_behavior_versions": [
+            1
+          ],
+          "local_microbatches": 16,
+          "local_policy_objective": 0.0,
+          "local_pre_optimizer_gradients": {
+            "dense": {
+              "elements": 13313288,
+              "local_l2": 0.01129176236449024,
+              "missing_parameters": 0
+            },
+            "expert": {
+              "elements": 344064,
+              "local_l2": 0.004796441683024255,
+              "missing_parameters": 0
+            },
+            "router": {
+              "elements": 512,
+              "local_l2": 0.003021936397999525,
+              "missing_parameters": 0
+            }
+          },
+          "lr_next": [
+            1e-06
+          ],
+          "lr_used": [
+            1e-06
+          ],
+          "normalization": {
+            "active_tokens": 512,
+            "model_tokens": 2204,
+            "samples": 16,
+            "token_denominator": 512,
+            "world_size": 1
+          },
+          "optimizer_skipped": false,
+          "published_step": 1,
+          "rank": 0,
+          "reduction": "response",
+          "rollout_id": 1,
+          "sampled_model_updates": {
+            "dense": {
+              "sampled_elements": 7176,
+              "sampled_update_l2": 2.505353707133691e-05
+            },
+            "expert": {
+              "sampled_elements": 1536,
+              "sampled_update_l2": 6.804481101713227e-06
+            },
+            "router": {
+              "sampled_elements": 256,
+              "sampled_update_l2": 2.86102294921875e-06
+            }
+          },
+          "schema_version": 1,
+          "step": 2
+        }
+      ],
+      "behavior_policy_agreement": [
+        {
+          "mean_abs": 0.002313118427991867,
+          "active_tokens": 512
+        },
+        {
+          "mean_abs": 0.002377547323703766,
+          "active_tokens": 512
+        }
+      ],
+      "log": "/tmp/miles-datasource-ifeval-run.log",
+      "log_sha256": "34bb9cf72a7eecb73af4a2d13631f055a97359dfe4c4ed152b5ad1f2597fb3fe",
+      "training_steps_completed": 2,
+      "responses_audited": 64,
+      "process_exit_code": 1,
+      "exit_reason": "GPU lifecycle completed; initial audit helper had nested asyncio.run and raised RuntimeError after teardown. Corrected helper re-audited unchanged saved responses successfully.",
+      "standalone_audit_exit_code": 0,
+      "standalone_audit_log": "/tmp/miles-datasource-ifeval-audit.log"
+    }
+  }
+}
