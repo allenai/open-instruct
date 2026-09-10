@@ -133,6 +133,22 @@ class TestOPDConfigValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "use_value_model"):
             grpo_utils.GRPOExperimentConfig(**self._base_kwargs(use_value_model=True))
 
+    def test_opd_student_logprobs_learner_accepted(self):
+        config = grpo_utils.GRPOExperimentConfig(**self._base_kwargs(opd_student_logprobs="learner"))
+        self.assertEqual(config.opd_student_logprobs, "learner")
+
+    def test_opd_student_logprobs_default_is_vllm(self):
+        config = grpo_utils.GRPOExperimentConfig(**self._base_kwargs())
+        self.assertEqual(config.opd_student_logprobs, "vllm")
+
+    def test_opd_student_logprobs_rejects_unknown(self):
+        with self.assertRaisesRegex(ValueError, "opd_student_logprobs"):
+            grpo_utils.GRPOExperimentConfig(**self._base_kwargs(opd_student_logprobs="sglang"))
+
+    def test_opd_student_logprobs_requires_teacher(self):
+        with self.assertRaisesRegex(ValueError, "opd_student_logprobs"):
+            grpo_utils.GRPOExperimentConfig(opd_student_logprobs="learner")
+
 
 if __name__ == "__main__":
     unittest.main()

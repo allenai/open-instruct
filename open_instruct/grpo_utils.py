@@ -225,6 +225,20 @@ class GRPOExperimentConfig(
     ``--active_sampling``) with this flag, since reward-variance filtering
     discards groups that pure OPD can still learn from.
     """
+    opd_student_logprobs: Literal["vllm", "learner"] = "vllm"
+    """Where the student side of the OPD reverse KL comes from.
+
+    ``"vllm"`` (default, the original recipe): the rollout engine's logprobs, i.e.
+    the behavior policy that sampled the tokens. Under ``async_steps > 1`` that
+    policy is stale by up to ``async_steps`` updates, and vLLM/HF numerics differ
+    by ~0.02-0.05 nats/token, both of which land in the advantage.
+    ``"learner"``: an extra no-grad forward of the *current* trainer policy over
+    the batch (same tiled path and ``lm_head_fp32`` setting as the teacher), so
+    the KL is exactly on-policy and student/teacher share numerics -- this is
+    what slime does (``use_rollout_logprobs=False``). Costs one more student
+    forward per step. Either way the term is detached: gradients still flow only
+    through the surrogate loss.
+    """
 
     # PPO value model. When enabled, the trainer learns a scalar value function
     # and replaces group-relative advantages with GAE advantages.
@@ -394,8 +408,14 @@ class GRPOExperimentConfig(
                     "`opd_teacher_model_name_or_path` cannot be combined with `use_value_model`: "
                     "both replace the per-token advantages."
                 )
+            if self.opd_student_logprobs not in ("vllm", "learner"):
+                raise ValueError(
+                    f"`opd_student_logprobs` must be 'vllm' or 'learner' (got {self.opd_student_logprobs!r})."
+                )
         elif self.opd_pure:
             raise ValueError("`opd_pure=True` requires `opd_teacher_model_name_or_path` to be set.")
+        elif self.opd_student_logprobs != "vllm":
+            raise ValueError("`opd_student_logprobs` requires `opd_teacher_model_name_or_path` to be set.")
         if self.use_value_model:
             if self.value_loss_coef < 0.0:
                 raise ValueError(f"`value_loss_coef` must be >= 0, got {self.value_loss_coef}.")
@@ -930,15 +950,18 @@ def compute_opd_advantages(
     π_teacher(y_t)`` at the rollout tokens and subtracts ``kl_coef`` times it
     from the advantages (Thinking Machines' On-Policy Distillation recipe; the
     same additive form as slime's ``apply_opd_kl_to_advantages``). The student
-    side is the behavior policy that generated the rollout (vLLM logprobs), so
-    the whole term is constant w.r.t. the trainer policy — gradients flow only
-    through the surrounding surrogate loss, exactly as for reward advantages.
+    side is either the behavior policy that generated the rollout (vLLM
+    logprobs) or a detached no-grad forward of the current trainer policy
+    (``opd_student_logprobs="learner"``); in both cases the term is constant
+    w.r.t. the trainer policy — gradients flow only through the surrounding
+    surrogate loss, exactly as for reward advantages.
 
     Args:
         advantages:        ``[B, T]`` per-token advantages, aligned with
             ``query_responses`` (column 0 precedes the first shifted position).
-        behavior_logprobs: ``[B, T-1]`` log μ(y_t) from the rollout engine,
-            already masked via :func:`mask_logprobs`.
+        behavior_logprobs: ``[B, T-1]`` log π_student(y_t) — from the rollout
+            engine or a detached learner forward — already masked via
+            :func:`mask_logprobs`.
         teacher_logprobs:  ``[B, T-1]`` log π_teacher(y_t) from the frozen
             teacher's forward pass, already masked.
         response_mask:     ``[B, T-1]`` bool mask of valid response positions.

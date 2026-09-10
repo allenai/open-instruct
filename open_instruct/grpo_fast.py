@@ -1080,9 +1080,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # On-policy distillation: score the rollout tokens under the frozen
         # teacher and fold the sampled reverse KL into the advantages before
-        # the minibatch loop. The distillation term uses the vLLM (behavior)
-        # logprobs on the student side, so it is constant w.r.t. the trainer
-        # policy and composes with every loss_fn / trust-region mask downstream.
+        # the minibatch loop. The student side is either the vLLM (behavior)
+        # logprobs or, with `opd_student_logprobs="learner"`, a detached forward
+        # of the current policy through the same tiled path as the teacher; in
+        # both cases the term is constant w.r.t. the trainer policy and composes
+        # with every loss_fn / trust-region mask downstream.
         if self.teacher_model is not None:
             with Timer("OPD teacher logprobs", noop=self.rank != 0):
                 teacher_shards = max(1, int(self.args.liger_grpo_loss_chunk_size))
@@ -1100,13 +1102,41 @@ class PolicyTrainerRayProcess(RayProcess):
                         lm_head_fp32=self.args.lm_head_fp32,
                         cp_contexts=cp_contexts_BT,
                     )
+            learner_student_logprobs_BT: list[torch.Tensor] | None = None
+            if self.args.opd_student_logprobs == "learner":
+                with Timer("OPD student (learner) logprobs", noop=self.rank != 0):
+                    learner_student_logprobs_BT = grpo_utils.compute_logprobs_tiled(
+                        self.model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.streaming_config.temperature,
+                        shards=teacher_shards,
+                        lm_head_fp32=self.args.lm_head_fp32,
+                        cp_contexts=cp_contexts_BT,
+                    )
             with torch.no_grad():
                 opd_kl_sum = torch.zeros((), device=self.device)
                 opd_teacher_logprob_sum = torch.zeros((), device=self.device)
                 opd_token_count = torch.zeros((), device=self.device)
+                opd_student_vs_vllm_diff_sum = torch.zeros((), device=self.device)
                 for i in range(len(data_BT.query_responses)):
                     opd_response_mask = data_BT.response_masks[i][:, 1:].bool()
-                    behavior_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], opd_response_mask)
+                    vllm_student_logprobs = grpo_utils.mask_logprobs(
+                        data_BT.vllm_logprobs[i][:, 1:], opd_response_mask
+                    )
+                    if learner_student_logprobs_BT is not None:
+                        behavior_logprobs = grpo_utils.mask_logprobs(
+                            learner_student_logprobs_BT[i].detach(), opd_response_mask
+                        )
+                        # How far the stale/off-numerics vLLM student is from the
+                        # on-policy learner student (nats/token, response tokens only).
+                        opd_student_vs_vllm_diff_sum += torch.where(
+                            opd_response_mask,
+                            (behavior_logprobs.float() - vllm_student_logprobs.float()).abs(),
+                            torch.zeros_like(behavior_logprobs, dtype=torch.float32),
+                        ).sum()
+                    else:
+                        behavior_logprobs = vllm_student_logprobs
                     data_BT.advantages[i], reverse_kl = grpo_utils.compute_opd_advantages(
                         advantages=data_BT.advantages[i],
                         behavior_logprobs=behavior_logprobs,
@@ -1125,6 +1155,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics["objective/opd_teacher_logprob"] = (
                     opd_teacher_logprob_sum / opd_token_count
                 ).item()
+                if learner_student_logprobs_BT is not None:
+                    self.local_metrics["debug/opd_student_learner_vs_vllm_logprob_diff_mean"] = (
+                        opd_student_vs_vllm_diff_sum / opd_token_count
+                    ).item()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
