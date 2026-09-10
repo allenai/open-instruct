@@ -54,7 +54,7 @@ uv run python mason.py \
        --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; OpenSandbox spot sandboxes; ${MASK_LABEL})" \
        --pure_docker_mode \
        --workspace "$BEAKER_WORKSPACE" \
-       --priority urgent \
+       --priority "${BEAKER_PRIORITY:-high}" \
        --preemptible \
        --min_runtime "${BEAKER_MIN_RUNTIME:-8h}" \
        --num_nodes 4 \
