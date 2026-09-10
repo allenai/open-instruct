@@ -81,7 +81,8 @@ for f in (root.rglob("*.json") if root.is_dir() else []):
     if len(keep) != len(lines):
         f.write_text("".join(l + "\n" for l in keep))
 PY
-existing=$(find "$RESULT_DIR" -name '*.json' -exec cat {} + 2>/dev/null | wc -l | tr -d ' ')
+existing=0
+if [ -d "$RESULT_DIR" ]; then existing=$(find "$RESULT_DIR" -name '*.json' -exec cat {} + | wc -l | tr -d ' '); fi
 log "bfcl generate: model=$BFCL_MODEL_NAME categories=$TEST_CATEGORY threads=$NUM_THREADS existing_results=$existing overwrite=${BFCL_ALLOW_OVERWRITE:-0}"
 "${BFCL[@]}" generate --model "$BFCL_MODEL_NAME" --test-category "$TEST_CATEGORY" \
     --num-threads "$NUM_THREADS" --temperature "$TEMPERATURE" "${GEN_FLAGS[@]}" 2>&1 | tee -a "$OUT_DIR/bfcl_generate.log"
