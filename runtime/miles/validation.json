@@ -151,6 +151,20 @@
       "source_commit": "09c200d7f",
       "trainer_gpus": 2,
       "rollout_gpus": 1
+    },
+    "sft_trial_local_eval_smoke": {
+      "passed": true,
+      "fixture": "random tiny KDA + latent MoE, 32-token response cap, single RTX 4090",
+      "completed_updates": 2,
+      "audited_completions": 64,
+      "before_after_versions": [
+        0,
+        2
+      ],
+      "all_rewards_zero": true,
+      "runtime_tests_passed": 6,
+      "artifacts": "/tmp/miles-validation/sft-eval-smoke",
+      "config_preflight": "production EP2 config accepted by pinned MILES parser using local hybrid descriptor"
     }
   },
   "limitations": [

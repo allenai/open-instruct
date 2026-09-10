@@ -230,3 +230,34 @@ parser preflight passes locally; GPU qualification is recorded separately from
 that preflight.
 
 The full replacement is therefore unfinished. These are implementation or qualification gaps, not capabilities silently delegated to another trainer.
+
+## Bounded SFT GSM8K trial
+
+`scripts/train/debug/miles_core_sft_gsm8k.sh` launches the SFT step23607
+`router-bf16-autocast-v2-hf` artifact already used by olmo-miles. It reads weights
+from WEKA and uses the exact pinned chat template from that run's HF descriptor.
+No Megatron training state is loaded. Two Core EP ranks and one dedicated SGLang
+engine occupy three Holmes GPUs. The launcher bounds execution to 45 minutes
+and requests a 30-minute allocation window at normal priority.
+
+The workload is two updates, four prompts per update, four samples per prompt,
+and 16 held-out questions before and after training (64 completions total).
+Responses are capped at 4096 tokens inside a 6144-token context. These questions
+are held out from this trial's updates, not certified absent from the source
+model's SFT corpus. The 16-question comparison is a correctness check, not a
+statistically useful learning claim. The audit reports mixed-reward groups,
+accuracy, truncation, policy versions and publication timings; scores are
+independently recomputed using open-instruct's GSM8K verifier.
+
+Initial serving-weight comparison and the 0.05 mean train/rollout logprob drift
+guard remain enabled. The script saves responses and diagnostics under a fresh
+experiment-specific WEKA directory; it does not save optimizer checkpoints.
+Only compact reports are copied to the Beaker result. Full-checkpoint memory,
+precision and architecture compatibility remain unqualified until this run
+passes. This uses disaggregated placement because Core trainer offload is not
+implemented; tiny resident colocation does not establish large-model offload.
+
+```bash
+MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
+  ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_core_sft_gsm8k.sh
+```
