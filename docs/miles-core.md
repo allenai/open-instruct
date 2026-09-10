@@ -431,9 +431,12 @@ an unsharded vocabulary, while passing that value to a distributed entropy
 collective would use the default DP group. Entropy now executes locally for an
 unsharded vocabulary; real TP retains the existing distributed implementation.
 
-The final extended suite passed 90 tests on the pinned runtime plus 32 host tests.
+The final extended suite passed 90 tests on the pinned runtime plus 29 targeted
+host verifier tests.
 [The report](measurements/miles-core-contract-final-20260910.json) records
 source hashes taken before execution and rejects source changes during the run.
+Verifier targets are copied before dispatch, so legacy IF dictionary parsing
+cannot mutate shared targets or change the result of repeated grading.
 Local math and legacy IFEval each completed two updates and audited 64 responses;
 [their report](measurements/miles-core-datasources-local-20260910.json) separates
 verifier acceptance from the random model's zero policy advantages.
@@ -458,10 +461,13 @@ retains the comparison definitions, all category errors and per-rank records.
 This is native Core consistency on a fixed tiny batch, not Megatron parity.
 
 The [full-SFT math/IF trial](https://beaker.org/ex/01M26GC6F3TRRQEXR9HJQR0XGG)
-is running. Both Beaker jobs use commit `4a17027ef9f6`; the later checkpoint-schema
-change does not affect these jobs, which do not save optimizer checkpoints.
-The datasource job runs the tasks sequentially on one three-GPU allocation,
-with two updates and 64 audited responses planned per task.
+passed with exit code zero: two updates and 64 audited responses per task,
+starting each task from the same SFT weights. Math had one mixed-reward group;
+instruction following had four. Math hit the response cap on 63/64 responses,
+so this demonstrates execution rather than math learning quality.
+[The report](measurements/miles-core-datasources-sft-20260910.json) records
+policy drift, updates, publication and the uninstrumented final IF reporting pause.
+Both Beaker jobs used commit `4a17027ef9f6`.
 
 Remaining qualification includes a matched Megatron comparison, full-model
 replay/restart, longer runs and additional topologies. The

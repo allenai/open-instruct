@@ -10,7 +10,7 @@ configuration change. Status below is as of September 10, 2026.
 
 | Gate | Current evidence |
 | --- | --- |
-| Independent loss, reduction, auxiliary gradients and lifecycle tests | [90 pinned-runtime tests](measurements/miles-core-contract-final-20260910.json) plus 32 host tests passed. This is not full-model or cross-backend parity. |
+| Independent loss, reduction, auxiliary gradients and lifecycle tests | [90 pinned-runtime tests](measurements/miles-core-contract-final-20260910.json) plus 29 targeted host verifier tests passed. This is not full-model or cross-backend parity. |
 | Native Core EP consistency | [Twelve arms](measurements/miles-core-native-ep-20260910.json): EP1/EP2 × policy/auxiliary/combined × recomputation off/on passed. Maximum category relative L2 error was 5.79e-5; fixed routes came from Core. This was one response-averaged tiny batch without a clipping stress case, not exact update parity. |
 | Actual serving replay | [Tiny SGLang/Core replay](measurements/miles-core-replay-local-20260910.json) passed two updates, a fresh-process third update and a 12-response audit. Full-model replay and the final unscored token's auxiliary-routing semantics remain open. |
 | Public tiny default and resume | [The 512-token resident profile](measurements/miles-core-tiny-default-20260910.json) passed two updates and a separate-process third update with schema-2 checkpoints and a 12-response audit. |
@@ -45,6 +45,11 @@ a later topology gate, not a prerequisite for the present EP2 default.
 The mixed-source manifest, cross-backend fixed-batch runner and cache lifecycle
 are proposed additions; the existing individual-source launcher does not
 implement them automatically.
+
+The full-SFT math slice reached the 4096-token cap in 63 of 64 responses.
+Before using that shape for math-quality comparisons, measure a longer-response
+configuration with matching context, KV capacity and admission limits. Keep the
+original bounded result as evidence; do not reinterpret it as an uncapped score.
 
 For the mixture, start with equal numbers of prompt groups to expose each
 verifier. This is a diagnostic mixture, not the released Olmo 3 recipe. Record
@@ -103,6 +108,26 @@ Its results are evidence for how to design this comparison, not measurements of
 our present Core/MILES adapter. The baseline
 `docs/measurements/async-multistep-20260907.md` provides the separate multi-update
 policy-clock and restart protocol to reproduce after single-update async passes.
+
+## Matched held-out learning comparison
+
+The current Core GSM8K result (14/16 before, 15/16 after two updates) is a small
+in-loop evaluation check. No matched learning-curve comparison with olmo-miles
+has run. After resolving the fixed-batch backend contract, freeze one shared SFT
+checkpoint, training manifest and at least 128 disjoint held-out GSM8K prompts.
+Run 100 optimizer updates and evaluate the identical prompts at updates
+0, 20, 40, 60, 80 and 100 in both backends, following the
+[frozen comparison design](miles-gsm8k-parity-design.md). Match response/context budgets, temperature,
+samples per prompt, seed, LR schedule, effective global batch and auxiliary
+semantics. Retain prompt-level correctness and truncation at every boundary.
+
+Plot accuracy against optimizer updates, consumed training tokens and elapsed
+GPU time separately. A single-seed screen can reveal a regression but cannot
+establish equal learning efficiency; repeat seeds before drawing that conclusion.
+The held-out set is disjoint from this RL training manifest, not automatically
+certified absent from SFT. Do not compare the new curve directly with historical
+olmo-miles curves that used different prompts, response caps or update budgets.
+This comparison is proposed work, not an additional submitted job.
 
 ## Promotion criteria
 

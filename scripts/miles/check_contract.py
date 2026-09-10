@@ -28,6 +28,7 @@ def main():
         "tests/miles/test_lifecycle.py",
         "tests/miles/test_contract_early_validation.py",
         "tests/miles/test_checkpoint_topology.py",
+        "tests/miles/test_training_metrics.py",
         "tests/miles/test_ep_contract_comparison.py",
         "tests/miles/test_datasource_trials.py",
         "open_instruct/test_miles_reward_process.py",

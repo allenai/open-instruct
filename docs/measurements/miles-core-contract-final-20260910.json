@@ -8,7 +8,7 @@
   "passed": true,
   "changed_sources": [],
   "exit_code": 0,
-  "elapsed_seconds": 280.5455909818411,
+  "elapsed_seconds": 299.2550812647678,
   "runtime_lock": {
     "schema_version": 1,
     "status": "experimental; full GRPO replacement acceptance incomplete",
@@ -53,7 +53,7 @@
     "open_instruct/miles/fla_compat.py": "3973c89da82473ef1bf8d3f240fb95a90221bb49fe55caf05b57eaf4ad68bd39",
     "open_instruct/miles/models.py": "05dc62d586f8fb719ee46f74a72cedce97a09939c51067cfcaa94ca11334ba40",
     "open_instruct/miles/publication.py": "3613dac8243ca3c202a49651ae4e9c720fbad0131829f1261c6806c185d80075",
-    "open_instruct/miles/rewards.py": "5b28a194327484ba539726868ec61390918ffb4ec3918a054f2334b434577c3f",
+    "open_instruct/miles/rewards.py": "096e0984b1738ac37a09fa1f17c3c6d0d558271a53a1b4b6d2dfbd7090372b90",
     "open_instruct/miles/scheduler.py": "57304a3124841c100990583cfaae896e57d02d66f948901713e54bed74e0f044",
     "open_instruct/miles/state.py": "a69b848678885487c8962633e49fb2f87af0deef456dc40bcd89220ebc21c29a",
     "tests/miles/test_contract.py": "48ed4da26e47e4bb9677c01375e44a62dd7ee15782e1a2b3e7055c672f28cbc1",
@@ -392,7 +392,7 @@
         "steps": [
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 1.2970910361036658,
+            "elapsed_seconds": 1.3291106061078608,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.0,
@@ -439,7 +439,7 @@
           },
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 0.019150411244481802,
+            "elapsed_seconds": 0.021297642961144447,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.0,
@@ -486,7 +486,7 @@
           },
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 0.019482437055557966,
+            "elapsed_seconds": 0.019600453786551952,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.0,
@@ -542,7 +542,7 @@
         "steps": [
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 37.04511464713141,
+            "elapsed_seconds": 38.53014931501821,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.01055940866470337,
@@ -556,7 +556,7 @@
             "local_pre_optimizer_gradients": {
               "dense": {
                 "elements": 501064,
-                "local_l2": 81.89669338890397,
+                "local_l2": 81.89667880742549,
                 "missing_parameters": 0
               },
               "expert": {
@@ -607,7 +607,7 @@
           },
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 0.03685845900326967,
+            "elapsed_seconds": 0.07145010493695736,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.01001738429069519,
@@ -672,7 +672,7 @@
           },
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 0.03734090831130743,
+            "elapsed_seconds": 0.050415556877851486,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.01001738429069519,
@@ -746,7 +746,7 @@
         "steps": [
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 0.036899706814438105,
+            "elapsed_seconds": 0.05038768518716097,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.010088539123535157,
@@ -811,7 +811,7 @@
           },
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 0.04622323391959071,
+            "elapsed_seconds": 0.04502242198213935,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.010022798776626587,
@@ -876,7 +876,7 @@
           },
           {
             "auxiliary_denominator": 20.0,
-            "elapsed_seconds": 0.03734375303611159,
+            "elapsed_seconds": 0.04272289713844657,
             "event": "optimizer",
             "local_auxiliary_objective": {
               "load_balancing": 0.010022798776626587,
@@ -947,8 +947,21 @@
     "Gloo reference tests do not qualify native EP; use ep_contract.py on two GPUs",
     "No full-SFT replay or matched Megatron comparison in this suite"
   ],
-  "source_commit": "8d93389f446deb10b1c9f3d8a491a826b4e63494",
+  "source_commit": "d4836a848700253ef4e05deec3fcee0437597cb9",
   "runtime_image": "open-instruct:miles-core-contract-followup",
   "runtime_image_id": "sha256:ec7e8e715c2cd9bd69b3b3c87ab44ba17d20077bcf0870f8264a8ebfb80b2fdf",
-  "runtime_source_mounts": "Current open-instruct, miles-core and miles-runtime worktrees mounted read-only; exact file hashes recorded above."
+  "runtime_source_mounts": "Current open-instruct, miles-core and miles-runtime worktrees mounted read-only; exact file hashes recorded above.",
+  "host_verifier_tests": {
+    "passed": 29,
+    "command": "uv run pytest -q open_instruct/test_miles.py open_instruct/test_miles_reward_process.py",
+    "elapsed_seconds": 4.68,
+    "source_commit": "d4836a848700253ef4e05deec3fcee0437597cb9",
+    "source_sha256": {
+      "open_instruct/test_miles.py": "022a96fc437d13f9ace2b5a6d3c6321464d6d7ded053c8999356af46590bc412",
+      "open_instruct/test_miles_reward_process.py": "2156e15bfaf7e0602100d5069d70a29555532c379bfe98af3d92d4537e149663",
+      "open_instruct/miles/rewards.py": "096e0984b1738ac37a09fa1f17c3c6d0d558271a53a1b4b6d2dfbd7090372b90"
+    },
+    "includes": "Shared dictionary IFEval targets remain intact across concurrent completions and repeated grading; symbolic subprocess isolation and cleanup."
+  },
+  "style_quality": "make style quality passed"
 }

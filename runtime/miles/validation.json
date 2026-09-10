@@ -280,7 +280,7 @@
     "sft_datasources": {
       "id": "01M26GC6F3TRRQEXR9HJQR0XGG",
       "source_commit": "4a17027ef9f6656579a3f474286c93f7569a5630",
-      "status": "running",
+      "status": "passed",
       "tasks": [
         "math",
         "ifeval"
@@ -289,7 +289,12 @@
       "job_id": "01M26GC6JRGJAAGKKTYC0PEP67",
       "observed_status": {
         "created": "2026-09-10T20:33:02.435519Z"
-      }
+      },
+      "exit_code": 0,
+      "result_dataset": "01M26GC6FAWBJ5HTY4TCQZ4CM8",
+      "optimizer_steps_per_task": 2,
+      "audited_responses_per_task": 64,
+      "evidence": "docs/measurements/miles-core-datasources-sft-20260910.json"
     },
     "checkpoint_topology": {
       "passed": true,
@@ -317,13 +322,20 @@
     },
     "training_contract_final": {
       "passed": true,
-      "source_commit": "8d93389f446deb10b1c9f3d8a491a826b4e63494",
+      "source_commit": "d4836a848700253ef4e05deec3fcee0437597cb9",
       "runtime_tests_passed": 90,
       "skipped": 0,
       "changed_sources": [],
-      "host_tests_passed": 32,
+      "host_tests_passed": 29,
       "style_quality": "passed",
       "evidence": "docs/measurements/miles-core-contract-final-20260910.json"
+    },
+    "verifier_target_immutability": {
+      "passed": true,
+      "source_commit": "d4836a848700253ef4e05deec3fcee0437597cb9",
+      "tests_passed": 29,
+      "evidence": "docs/measurements/miles-core-contract-final-20260910.json",
+      "note": "Deep-copy targets before verifier invocation; current Beaker datasource job uses serialized string targets and is unaffected."
     }
   },
   "limitations": [

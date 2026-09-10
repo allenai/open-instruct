@@ -22,6 +22,7 @@ from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
 from open_instruct.miles import checkpoint, contract, data, models, publication, scheduler
+from open_instruct.miles import metrics as training_metrics
 from open_instruct.miles.state import PolicyClock
 
 logger = logger_utils.setup_logger(__name__)
@@ -32,6 +33,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         if role != "actor" or with_opd_teacher or recv_ckpt_src_rank is not None:
             raise ValueError("Core backend supports the policy actor without trainer-cell recovery")
         super().init(args, role, with_ref=with_ref, with_opd_teacher=False)
+        self._agree(lambda: training_metrics.init_tracking(args))
         torch.manual_seed(args.seed)
         world = dist.get_world_size()
         rank = dist.get_rank()
@@ -178,10 +180,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                     if self.args.calculate_per_token_loss:
                         loss = normalization.scale_token_loss(loss)
                     self._agree(lambda: self._validate_loss(loss))
-                    return loss, {
-                        **dict(zip(metrics["keys"], metrics["values"][1:], strict=True)),
-                        "normalized_policy_objective": loss.detach(),
-                    }
+                    return loss, training_metrics.loss_metrics(metrics, loss)
 
                 metrics = self.train_module.train_batch_with_loss(step_batches, objective, self._replay_context)
                 gradient_stats = self._agree(probe.gradients) if probe is not None else None
@@ -228,11 +227,27 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                     ),
                 )
                 self.train_module._trainer.global_step = self.clock.completed_steps
-                logger.info(
-                    "Core optimizer step %s: %s",
-                    self.clock.completed_steps,
-                    {key: sum(float(m[key]) for m in metrics) / len(metrics) for key in metrics[0]},
+                losses = training_metrics.aggregate_losses(metrics)
+                summary = training_metrics.step_summary(metrics, aux_metrics, time.perf_counter() - started)
+                logged = self._agree(
+                    lambda losses=losses,
+                    summary=summary,
+                    lr_used=lr_used,
+                    gradient_stats=gradient_stats: training_metrics.log_step(
+                        self.args,
+                        losses=losses,
+                        summary=summary,
+                        scores=training_metrics.score_metrics(difference, int(agreement[1]), profile),
+                        clock=self.clock,
+                        rollout_id=rollout_id,
+                        lr_used=lr_used,
+                        lr_next=self.lr_scheduler.get_last_lr(),
+                        optimizer_metrics=self.train_module._trainer.metrics,
+                        gradient_stats=gradient_stats,
+                    )
                 )
+                if logged is not None:
+                    logger.info("Core optimizer step %s: %s", self.clock.completed_steps, logged)
             self.clock.next_rollout_id = rollout_id + 1
         self._heartbeat.bump()
 
