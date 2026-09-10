@@ -1,0 +1,103 @@
+{
+  "campaign": "gsm8k-core-megatron-20260910-v1",
+  "status": "queued; no GPU training process started as of 2026-09-10T22:44:06Z",
+  "shared_root": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1",
+  "preparation_sha256": "1d8a22500fffdd9a7461c445998815d5e85cf9dd79859d93313798472c0e76e0",
+  "preparation_experiment": "01M26N8Q8BFN4887X2CKMDWEV2",
+  "preparation_exit_code": 0,
+  "core": {
+    "experiment": "01M26P6XX6SN886DCVZ68WMQK2",
+    "job": "01M26P6Y0QKZHMM77C9H3MM1CE",
+    "result": "01M26P6XXDC0V5DJ3EZH6TP75H",
+    "source": "c3a41598e434d50058f929e6c55b82e34aa4ff09",
+    "image": "01M26N80T0V9PREQTS87J849P8"
+  },
+  "megatron": {
+    "experiment": "01M26P8G0X2EHG52KYGAXT3BFP",
+    "source": "31ec5b2a65c3a1567afbe2a07526dd41e83048d5",
+    "image": "01M24E7MSDGN2QFW1T8Z31BCKS",
+    "job": "01M26P8GB90N3XPTVBWZYM697S",
+    "result": "01M26P8G14ZHJJQMYSHK962GZX"
+  },
+  "scheduling": {
+    "workspace": "ai2/open-instruct-dev",
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "minimum_runtime": "4h",
+    "core_timeout": "4h",
+    "megatron_timeout": "monitored four-hour budget; no native hard timeout",
+    "latest_blocker": "workspace group ai2/oe-scaling allocated 158/160 slots; each arm requires 3"
+  },
+  "checks": {
+    "core_contract": {
+      "passed": 94,
+      "skipped": 0,
+      "evidence": "miles-core-contract-parity-20260910.json"
+    },
+    "preparation_tests_passed": 9,
+    "audit_tests_passed": 17,
+    "baseline_unit_tests": {
+      "passed": 1122,
+      "skipped": 104
+    },
+    "direct_grader_comparison": {
+      "passed": true,
+      "cases": 1195,
+      "differences": [],
+      "scope": "Direct GSM8K grading with canonical normalized labels; fixed edge cases plus seeded numeric cases. Bridge plumbing covered separately."
+    }
+  },
+  "protocol": {
+    "updates": 100,
+    "training_prompts": 400,
+    "samples_per_prompt": 4,
+    "prompts_per_update": 4,
+    "heldout_questions": 128,
+    "eval_completed_steps": [
+      0,
+      20,
+      40,
+      60,
+      80,
+      100
+    ],
+    "train_response_cap": 4096,
+    "eval_response_cap": 4096,
+    "lr": 1e-06,
+    "grpo_std_normalization": false,
+    "ppo_clip_low": 0.2,
+    "ppo_clip_high": 0.28,
+    "aux_loss": 0.01,
+    "z_loss": 1e-05,
+    "replay": false
+  },
+  "preparation": {
+    "dataset": "ai2-adapt-dev/rlvr_gsm8k_zs",
+    "revision": "93ffaae6cd2acb8f821f6d4712651320a889b1b9",
+    "eval_split": "test",
+    "seed": 17,
+    "descriptor": {
+      "config_sha256": "b94297059ada18b47012e67320f59d37da820f9f7ab6343c4e32c15baa0c008c",
+      "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+      "source_header_sha256": {
+        "model.safetensors": "3e66499d7c6978aae49b916a2538a78a94cd041e6fc201176bf703fbcb1af0cf"
+      },
+      "template_sha256": "f5186d42d99c8a0445d37fd8a6c7ccf07fe3e24a29ce622d8bd245da9507b12b"
+    },
+    "files": {
+      "baseline/eval.jsonl": "5a931e98d097e424239380abb0541427e0516d0ec6de7de51b86c03c4ee0257f",
+      "baseline/rl-manifest.json": "9327e2e3fc74b553525800ef180643fcf6aa47374c9b15d610a15775ba3633bc",
+      "baseline/train.jsonl": "b948d0aa0b6537a012b9c4ddd93a3357ca36a71f457681c824d43314026fffb7",
+      "eval.jsonl": "6008c065c2555667cc38449057b822bc011001530fd7585f5ab03b3e67af3804",
+      "hf/chat_template.jinja": "f5186d42d99c8a0445d37fd8a6c7ccf07fe3e24a29ce622d8bd245da9507b12b",
+      "hf/config.json": "b94297059ada18b47012e67320f59d37da820f9f7ab6343c4e32c15baa0c008c",
+      "hf/tokenizer.json": "66becb9a96db60fb124531b6b12d911ca9c69e4f35d453f6f283dbdfe9c013d4",
+      "hf/tokenizer_config.json": "88976301de123208a2a5434b33b39172de43024e43238e92699278692d491bc6",
+      "tasks.toml": "9140804f20156fd60414a0b9524f13f9b7f904adea913593c372c3a64f3128fa",
+      "train.jsonl": "991c7722b0c0be97012588442cd63ac235437abbd0c6c6b7e848322704f26a46",
+      "verifiers.json": "b928b6f4c2091d6cacb3c48500bd7ba261c800541d663afa41aa3b69d8fceaef"
+    },
+    "tokenization": "native chat tokenize=True equals rendered encode(add_special_tokens=False) for every row"
+  },
+  "results": null
+}
