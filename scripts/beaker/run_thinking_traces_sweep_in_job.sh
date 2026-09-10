@@ -23,6 +23,9 @@
 #   (was: needs >= 0.28 for GLM-5.2/Kimi-K2.x/
 #                      DeepSeek-V3.2/Qwen3.5 architectures)
 #   GPU_COUNT/TP_SIZE  GPUs and tensor-parallel size (default: 4 / GPU_COUNT)
+#   DCP_SIZE           decode-context-parallel size. MLA models replicate their
+#                      latent KV cache under TP; DCP shards it along sequence
+#                      instead, which is worth several-fold concurrency.
 #   MAX_MODEL_LEN      context (default 131072)
 #   MAX_TOKENS         per-completion cap (default 128000)
 #   NUM_PROMPTS        prompts per model (default 1000)
@@ -121,7 +124,7 @@ log "sweep configuration"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv || true
 cat <<EOF
   models        : ${MODELS}
-  vLLM          : ${VLLM_PKG_VERSION}   TP=${TP_SIZE} over ${GPU_COUNT} GPUs
+  vLLM          : ${VLLM_PKG_VERSION}   TP=${TP_SIZE}${DCP_SIZE:+ DCP=${DCP_SIZE}} over ${GPU_COUNT} GPUs
   context       : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   sampling      : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples, T=${TEMPERATURE} top_p=${TOP_P} seed=${SEED}
   concurrency   : ${CONCURRENCY}
@@ -378,6 +381,7 @@ run_one_model() {
         --max-model-len "$MAX_MODEL_LEN" \
         --max-num-seqs "$VLLM_MAX_NUM_SEQS" \
         --enable-prefix-caching \
+        ${DCP_SIZE:+--decode-context-parallel-size "$DCP_SIZE"} \
         --trust-remote-code \
         --safetensors-load-strategy "${SAFETENSORS_LOAD_STRATEGY:-prefetch}" \
         >"$vllm_log" 2>&1 &

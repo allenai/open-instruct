@@ -35,6 +35,7 @@ VLLM_PKG_VERSION="0.28.0"
 CLUSTER="ai2/holmes"
 GPU_COUNT=4
 TP_SIZE=""
+DCP_SIZE=""
 MAX_MODEL_LEN=131072
 MAX_TOKENS=128000
 MAX_PROMPT_TOKENS=1536
@@ -74,6 +75,10 @@ Options:
   --cluster CLUSTER      default: ${CLUSTER}
   --gpus N               GPUs / slots (default: ${GPU_COUNT})
   --tp N                 tensor-parallel size (default: --gpus)
+  --dcp N                decode-context-parallel size. For MLA models this is the
+                         single biggest throughput lever: TP replicates the MLA
+                         latent KV cache per rank, DCP shards it along sequence
+                         instead. Worth ~8x concurrency on GLM-5.2.
   --num-prompts N        prompts per model (default: ${NUM_PROMPTS})
   --num-samples N        completions per prompt (default: ${NUM_SAMPLES})
   --max-model-len N      context (default: ${MAX_MODEL_LEN})
@@ -105,6 +110,7 @@ while [ $# -gt 0 ]; do
         --cluster)           CLUSTER="$2"; shift 2 ;;
         --gpus)              GPU_COUNT="$2"; shift 2 ;;
         --tp)                TP_SIZE="$2"; shift 2 ;;
+        --dcp)               DCP_SIZE="$2"; shift 2 ;;
         --num-prompts)       NUM_PROMPTS="$2"; shift 2 ;;
         --num-samples)       NUM_SAMPLES="$2"; shift 2 ;;
         --max-model-len)     MAX_MODEL_LEN="$2"; shift 2 ;;
@@ -139,7 +145,7 @@ cat <<EOF
 
 === Thinking-trace sweep ===
   Models      : ${MODELS}
-  Hardware    : ${CLUSTER}, ${GPU_COUNT} GPUs (TP=${TP_SIZE}), vLLM ${VLLM_PKG_VERSION}
+  Hardware    : ${CLUSTER}, ${GPU_COUNT} GPUs (TP=${TP_SIZE}${DCP_SIZE:+ DCP=${DCP_SIZE}}), vLLM ${VLLM_PKG_VERSION}
   Context     : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   Sampling    : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples (seed ${SEED}), concurrency ${CONCURRENCY}
   Hub         : ${HF_REPO_ID:-<none>}  secret=${HF_TOKEN_SECRET_NAME:-<none>}
