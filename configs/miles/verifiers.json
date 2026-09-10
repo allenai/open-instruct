@@ -1,0 +1,4 @@
+{
+  "gsm8k": {"factory": "open_instruct.ground_truth_utils.GSM8KVerifier"},
+  "math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"}
+}

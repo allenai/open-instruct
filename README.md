@@ -234,3 +234,7 @@ OLMo 3:
       url={https://arxiv.org/abs/2512.13961},
 }
 ```
+
+### Experimental MILES / OLMo-core RL
+
+See [the implementation and validation status](docs/miles-core.md) for the separate Core RL runtime, native MILES configuration, and reproducible source patches. Full GRPO replacement acceptance remains incomplete.

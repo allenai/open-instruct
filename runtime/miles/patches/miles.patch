@@ -1,0 +1,1222 @@
+diff --git a/miles/backends/fsdp_utils/__init__.py b/miles/backends/fsdp_utils/__init__.py
+index 05099e93c01b0eaa8c480f2bb8791839e40bfd1a..1c2d7e4cb0f829d82810acb188200763400abfb0 100644
+--- a/miles/backends/fsdp_utils/__init__.py
++++ b/miles/backends/fsdp_utils/__init__.py
+@@ -1,33 +1,11 @@
+-import logging
++"""Lazy backend exports; shared configuration helpers do not load the HF trainer."""
+ 
+ 
+-try:
+-    _TORCH_MEMORY_SAVER_AVAILABLE = True
+-except ImportError:
+-    logging.warning("torch_memory_saver is not installed, refer to : https://github.com/fzyzcjy/torch_memory_saver")
+-    _TORCH_MEMORY_SAVER_AVAILABLE = False
+-
+-try:
+-    _FSDP_AVAILABLE = True
+-except ImportError as e:
+-    logging.warning(f"FSDP backend dependencies not available: {e}")
+-    _FSDP_AVAILABLE = False
+-
+-if _FSDP_AVAILABLE:
+-    from .actor import FSDPTrainRayActor
+-    from .arguments import load_fsdp_args
+-else:
+-
+-    def _raise_import_error(*args, **kwargs):
+-        raise ImportError(
+-            "FSDP backend is not available. "
+-            "Please ensure PyTorch with FSDP2 support is installed. "
+-            "For installation instructions, refer to: https://pytorch.org/docs/stable/distributed.fsdp.fully_shard.html"
+-        )
+-
+-    FSDPTrainRayActor = _raise_import_error
+-    load_fsdp_args = _raise_import_error
+-
+-__all__ = ["load_fsdp_args", "FSDPTrainRayActor"]
+-
+-logging.getLogger().setLevel(logging.WARNING)
++def __getattr__(name):
++    if name == "FSDPTrainRayActor":
++        from .actor import FSDPTrainRayActor
++        return FSDPTrainRayActor
++    if name == "load_fsdp_args":
++        from .arguments import load_fsdp_args
++        return load_fsdp_args
++    raise AttributeError(name)
+diff --git a/miles/backends/megatron_utils/__init__.py b/miles/backends/megatron_utils/__init__.py
+index c80c6c75fa30497a38b6326961a52929f54674d1..f58c2a65f523edef614d1e8aa36be9026d8a7830 100644
+--- a/miles/backends/megatron_utils/__init__.py
++++ b/miles/backends/megatron_utils/__init__.py
+@@ -20,9 +20,4 @@ try:
+ except ImportError:
+     logging.warning("deep_ep is not installed, some functionalities may be limited.")
+ 
+-try:
+-    import miles_plugins.megatron_bridge  # noqa: F401
+-except Exception as _e:  # best-effort; not every environment uses megatron.bridge
+-    logging.warning("miles megatron.bridge plugins failed to load: %s", _e)
+-
+ logging.getLogger("megatron").setLevel(logging.WARNING)
+diff --git a/miles/backends/megatron_utils/actor.py b/miles/backends/megatron_utils/actor.py
+index 4681c67ebc9a97b17acc78b4729c8b372b0a85c4..9b1ef7fc0683de42f18e8ed054de65c985fe8fca 100644
+--- a/miles/backends/megatron_utils/actor.py
++++ b/miles/backends/megatron_utils/actor.py
+@@ -1,4 +1,5 @@
+ import atexit
++import faulthandler
+ import logging
+ import os
+ import random
+@@ -86,6 +87,27 @@ def _setup_disk_offload_reclaim(disk_dir: str) -> None:
+ 
+ 
+ class MegatronTrainRayActor(TrainRayActor):
++    @with_logs
++    def dispose(self) -> None:
++        """Close weight-update, Megatron, and default process groups in ownership order."""
++        faulthandler.dump_traceback_later(60, repeat=False)
++        try:
++            disconnect = getattr(self.weight_updater, "disconnect_rollout_engines", None)
++            if disconnect is not None:
++                logger.info("Trainer teardown: disconnecting rollout weight-update process groups")
++                disconnect()
++                logger.info("Trainer teardown: disconnected rollout weight-update process groups")
++            else:
++                logger.info("Trainer teardown: weight updater has no persistent rollout process groups")
++            logger.info("Trainer teardown: destroying reloadable process groups")
++            destroy_process_groups()
++            logger.info("Trainer teardown: destroyed reloadable process groups")
++            logger.info("Trainer teardown: entering base actor disposal")
++            super().dispose()
++            logger.info("Trainer teardown: completed base actor disposal")
++        finally:
++            faulthandler.cancel_dump_traceback_later()
++
+     @with_logs
+     @with_defer(lambda: Timer().start("train_wait"))
+     def init(
+diff --git a/miles/backends/megatron_utils/bridge_lora_helpers.py b/miles/backends/megatron_utils/bridge_lora_helpers.py
+index b0746cc7627b120765dcbe6c0422a133a1bb0f92..7aee504322c6b227e946d17bd03493dc84bedb99 100644
+--- a/miles/backends/megatron_utils/bridge_lora_helpers.py
++++ b/miles/backends/megatron_utils/bridge_lora_helpers.py
+@@ -12,6 +12,8 @@ from dataclasses import dataclass
+ 
+ from megatron.core.utils import get_attr_wrapped_model
+ 
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++
+ from miles.utils.hf_config import load_hf_config
+ from miles.utils.multi_lora import is_multi_lora_enabled, targets_expert_leaves
+ 
+@@ -124,6 +126,7 @@ def _setup_lora_model_via_bridge(args: Namespace) -> list:
+     Returns:
+         List of DDP-wrapped model chunks with LoRA applied.
+     """
++    megatron_bridge_plugin.install()
+     from megatron.bridge import AutoBridge
+     from megatron.bridge.training.config import DistributedDataParallelConfig
+ 
+diff --git a/miles/backends/megatron_utils/checkpoint.py b/miles/backends/megatron_utils/checkpoint.py
+index 4063619f9e6177366b1e208170794fd82eadf615..0e87b73192967028b4d26efac1a225e1e683005f 100644
+--- a/miles/backends/megatron_utils/checkpoint.py
++++ b/miles/backends/megatron_utils/checkpoint.py
+@@ -10,6 +10,8 @@ from megatron.training.checkpointing import load_checkpoint as _load_checkpoint_
+ from megatron.training.checkpointing import save_checkpoint
+ from megatron.training.global_vars import get_args
+ 
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++
+ from miles.utils import megatron_bridge_utils
+ 
+ from .lora_utils import is_lora_enabled, is_lora_model, load_lora_adapter, save_lora_checkpoint
+@@ -178,6 +180,7 @@ def _is_megatron_checkpoint(path: str | Path) -> bool:
+ 
+ def _load_checkpoint_hf(ddp_model, optimizer, args, load_path: str):
+     assert args.megatron_to_hf_mode == "bridge", "Only bridge mode is supported for loading HF checkpoint"
++    megatron_bridge_plugin.install()
+     from megatron.bridge import AutoBridge
+ 
+     logger.info(f"Load checkpoint from HuggingFace model into Megatron (path={load_path})")
+diff --git a/miles/backends/megatron_utils/hf_export.py b/miles/backends/megatron_utils/hf_export.py
+index 67201c787aa2b1c2e4e79a684296c0ebf5fb353a..e27778707033697a00c9b93ea14949a53556f5a9 100644
+--- a/miles/backends/megatron_utils/hf_export.py
++++ b/miles/backends/megatron_utils/hf_export.py
+@@ -18,6 +18,8 @@ import safetensors.torch
+ import torch
+ from megatron.core.distributed import DistributedDataParallel as DDP
+ 
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++
+ from miles.backends.megatron_utils.lora_utils import is_lora_model, save_lora_checkpoint
+ from miles.backends.megatron_utils.update_weight.common import named_params_and_buffers
+ from miles.backends.megatron_utils.update_weight.hf_weight_iterator_direct import HfWeightIteratorDirect
+@@ -97,6 +99,7 @@ def export_hf_model_direct(
+ @cache
+ def _get_hf_bridge(hf_checkpoint: str):
+     # Local: megatron.bridge is only needed on the bridge export path.
++    megatron_bridge_plugin.install()
+     from megatron.bridge import AutoBridge
+ 
+     return AutoBridge.from_hf_pretrained(hf_checkpoint, trust_remote_code=True)
+diff --git a/miles/backends/megatron_utils/lora_utils.py b/miles/backends/megatron_utils/lora_utils.py
+index b86eb518ae4160c3a09007aef07f2b5c044a7441..fe3a3c150958d790a0a8852879070e358724df85 100644
+--- a/miles/backends/megatron_utils/lora_utils.py
++++ b/miles/backends/megatron_utils/lora_utils.py
+@@ -10,6 +10,8 @@ from typing import Any
+ import torch
+ import torch.distributed as dist
+ 
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++
+ from miles.backends.training_utils.parallel import get_parallel_state
+ from miles.utils.lora import is_lora_enabled, lora_rollout_enabled  # noqa: F401  (re-exported)
+ 
+@@ -434,6 +436,7 @@ def save_lora_checkpoint(
+     """
+     import json
+ 
++    megatron_bridge_plugin.install()
+     from megatron.bridge import AutoBridge
+ 
+     from miles.utils import megatron_bridge_utils
+diff --git a/miles/backends/megatron_utils/model.py b/miles/backends/megatron_utils/model.py
+index bd526e76ba040f41d84ffcb8b1140aa58b9e3a80..70bb534d286852bdc52f59763e04144d23dcc8c9 100644
+--- a/miles/backends/megatron_utils/model.py
++++ b/miles/backends/megatron_utils/model.py
+@@ -338,6 +338,7 @@ def forward_only(
+             labels=None,
+             packed_seq_params=packed_seq_params,
+             loss_mask=batch["full_loss_masks"],
++            padding_mask=batch["padding_mask"],
+             **(filter_keys(batch, ["witness_ids"]) if args.enable_witness else {}),
+             **(batch["multimodal_train_inputs"] if batch["multimodal_train_inputs"] is not None else {}),
+         )
+@@ -524,6 +525,7 @@ def train_one_step(
+                 labels=None,
+                 packed_seq_params=get_packed_seq_params(batch, args),
+                 loss_mask=batch["full_loss_masks"],
++                padding_mask=batch["padding_mask"],
+             )
+         else:
+             forward_kwargs = {
+@@ -533,6 +535,7 @@ def train_one_step(
+                 "labels": None,
+                 "packed_seq_params": get_packed_seq_params(batch, args),
+                 "loss_mask": batch["full_loss_masks"],
++                "padding_mask": batch["padding_mask"],
+                 **(filter_keys(batch, ["witness_ids"]) if args.enable_witness else {}),
+             }
+ 
+diff --git a/miles/backends/megatron_utils/model_provider.py b/miles/backends/megatron_utils/model_provider.py
+index 6fc43f1716c4fb59ab50c00f3c5aa0d287cb05f0..9e23cb820d2706d26db3cc07dc5383c154e6f649 100644
+--- a/miles/backends/megatron_utils/model_provider.py
++++ b/miles/backends/megatron_utils/model_provider.py
+@@ -17,6 +17,8 @@ from megatron.core.transformer.spec_utils import import_module
+ from megatron.core.transformer.transformer_config import TransformerConfig
+ from megatron.training.arguments import core_transformer_config_from_args
+ 
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++
+ from miles.utils.audit_utils.witness.module import install_witness
+ from miles.utils.misc import load_function
+ from miles.utils.replay_base import routing_replay_manager
+@@ -162,6 +164,7 @@ def get_model_provider_func(
+         return wrapped_model_provider
+ 
+     if args.megatron_to_hf_mode == "bridge":
++        megatron_bridge_plugin.install()
+         from megatron.bridge import AutoBridge
+ 
+         bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
+diff --git a/miles/backends/megatron_utils/multi_lora_utils.py b/miles/backends/megatron_utils/multi_lora_utils.py
+index 4d6d7689098877bfbdb092863963e0ee01e7605d..444fcbae71dd0d6950274e4b6ffe51ad84a6d4d0 100644
+--- a/miles/backends/megatron_utils/multi_lora_utils.py
++++ b/miles/backends/megatron_utils/multi_lora_utils.py
+@@ -9,6 +9,8 @@ import ray
+ import torch
+ import torch.distributed as dist
+ 
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++
+ from miles.backends.training_utils.parallel import get_parallel_state
+ from miles.ray.multi_lora.controller import get_multi_lora_controller
+ from miles.utils.adapter_config import AdapterRun
+@@ -196,6 +198,7 @@ def save_multi_lora_checkpoints(
+         ├── adapter_model.safetensors           ← gathered HF, inference / external
+         └── adapter_config.json                 ← HF PEFT metadata (r, alpha, ...)
+     """
++    megatron_bridge_plugin.install()
+     from megatron.bridge import AutoBridge
+     from megatron.bridge.peft.multi_lora_layers import expose_adapter_slot
+     from safetensors.torch import save_file as save_safetensors
+diff --git a/miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py b/miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py
+index cc15ecee73e565ae30b39d536270d4515ac28992..f8f5219a2e4cd4665b0af72c8e80ebcb5d8cd83e 100644
+--- a/miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py
++++ b/miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py
+@@ -2,6 +2,8 @@ import dataclasses
+ import json
+ import os
+ 
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++
+ from miles.backends.megatron_utils.lora_utils import is_lora_weight_name
+ from miles.utils import megatron_bridge_utils
+ 
+@@ -16,6 +18,7 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
+     def __init__(self, *args, **kwargs):
+         super().__init__(*args, **kwargs)
+ 
++        megatron_bridge_plugin.install()
+         from megatron.bridge import AutoBridge
+ 
+         self._bridge = AutoBridge.from_hf_pretrained(self.args.hf_checkpoint, trust_remote_code=True)
+diff --git a/miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py b/miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py
+index a7d37a5af98b5defdc6263d089d559e225507a0d..254f9bc4e56b15fd489c8ecd1a69c9b4dc6483ad 100644
+--- a/miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py
++++ b/miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py
+@@ -60,6 +60,17 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
+     def mark_engine_connection_stale(self) -> None:
+         self._connection_stale = True
+ 
++    def disconnect_rollout_engines(self) -> None:
++        """Close the persistent trainer-to-engine process group, if connected."""
++        group = self._model_update_groups
++        engines = self.rollout_engines
++        if not self._is_source or group is None or engines is None:
++            return
++        disconnect_rollout_engines_from_distributed(self.args, self._group_name, group, engines)
++        self._model_update_groups = None
++        self.rollout_engines = None
++        self._connection_stale = True
++
+     def connect_rollout_engines(
+         self,
+         rollout_engines: Sequence[ActorHandle],
+diff --git a/miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py b/miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py
+index 43373c45aa5ba6ad9a6035ba538cc53fbba1799a..640ec2420af0bee770c3363507ccc3c0abf60475 100644
+--- a/miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py
++++ b/miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py
+@@ -263,13 +263,9 @@ class UpdateWeightFromTensor:
+         megatron_local_weights = self.weights_getter()
+ 
+         if not skip_base_sync:
+-            for hf_named_tensors in self._hf_weight_iterator.get_hf_weight_chunks(
+-                megatron_local_weights, weight_type="base"
+-            ):
+-                refs, long_lived_tensors = self._send_base_params(hf_named_tensors)
+-                results = ray.get(refs)
+-                _check_weight_sync_results(results, is_lora=False)
+-                del long_lived_tensors
++            self._send_base_chunks(
++                self._hf_weight_iterator.get_hf_weight_chunks(megatron_local_weights, weight_type="base")
++            )
+ 
+             mm_tower_tensors = self._mm_tower_named_tensors()
+             if mm_tower_tensors is not None:
+@@ -320,6 +316,33 @@ class UpdateWeightFromTensor:
+             ray.get([engine.continue_generation.remote() for engine in self.rollout_engines])
+         dist.barrier(group=get_gloo_group())
+ 
++    def _send_base_chunks(self, chunks) -> None:
++        """Send base-weight chunks with a bounded colocated export/load pipeline."""
++        pipeline_depth = getattr(self.args, "colocated_weight_update_pipeline_depth", 1)
++        if pipeline_depth not in (1, 2):
++            raise ValueError("--colocated-weight-update-pipeline-depth must be 1 or 2, " f"got {pipeline_depth}")
++        if pipeline_depth == 2 and (not getattr(self.args, "colocate", False) or self.use_distribute or self.is_lora):
++            raise ValueError(
++                "--colocated-weight-update-pipeline-depth 2 requires colocated, "
++                "tensor-based base-model weight updates"
++            )
++
++        pending: list[tuple[list[ObjectRef], Any]] = []
++        for hf_named_tensors in chunks:
++            pending.append(self._send_base_params(hf_named_tensors))
++            if len(pending) >= pipeline_depth:
++                self._finish_base_chunk(pending.pop(0))
++
++        for chunk in pending:
++            self._finish_base_chunk(chunk)
++
++    @staticmethod
++    def _finish_base_chunk(chunk: tuple[list[ObjectRef], Any]) -> None:
++        refs, long_lived_tensors = chunk
++        results = ray.get(refs)
++        _check_weight_sync_results(results, is_lora=False)
++        del long_lived_tensors
++
+     def _mm_tower_named_tensors(self) -> list[tuple[str, torch.Tensor]] | None:
+         """Frozen vision/audio tower tensors to append to every base sync (see
+         __init__ comment). Returns None when the run has no MM towers. EVERY
+diff --git a/miles/backends/sglang_utils/sglang_engine.py b/miles/backends/sglang_utils/sglang_engine.py
+index 817a64c4fb13f24a9ea2f3fd0e1253ee650f9ed7..4afabc54fb5f8a1bac767370cc5b38fad67c4eab 100644
+--- a/miles/backends/sglang_utils/sglang_engine.py
++++ b/miles/backends/sglang_utils/sglang_engine.py
+@@ -711,7 +711,7 @@ class SGLangEngine(RayActor):
+     def update_weight_version(self, weight_version: str):
+         return self._make_request(
+             "update_weight_version",
+-            {"new_version": weight_version, "abort_all_requests": False},
++            {"new_version": weight_version, "abort_all_requests": True},
+         )
+ 
+     def start_profile(
+diff --git a/miles/backends/training_utils/data.py b/miles/backends/training_utils/data.py
+index 1bf6c743679e1b66cdd1cb1f834810d5c749b030..cbad477e67e8479e1c2c855abdcd8397f517ba93 100644
+--- a/miles/backends/training_utils/data.py
++++ b/miles/backends/training_utils/data.py
+@@ -172,6 +172,7 @@ def get_batch(
+ 
+     # for cp, we need all tokens to calculate logprob
+     batch["unconcat_tokens"] = tokens
++    padding_masks = [torch.zeros_like(token, dtype=torch.bool) for token in tokens]
+ 
+     cp_size = parallel_state.cp.size
+ 
+@@ -187,10 +188,16 @@ def get_batch(
+             tokens = [
+                 F.pad(t, (0, max_seqlen - t.size(0)), value=pad_token_id)[start : start + local_len] for t in tokens
+             ]
++            padding_masks = [
++                F.pad(mask, (0, max_seqlen - mask.size(0)), value=True)[start : start + local_len]
++                for mask in padding_masks
++            ]
+         else:
+             tokens = [slice_with_cp(t, pad_token_id, qkv_format, max_seqlen) for t in tokens]
++            padding_masks = [slice_with_cp(mask, True, qkv_format, max_seqlen) for mask in padding_masks]
+         sample_token_lengths = [t.size(0) for t in tokens]
+         tokens = torch.stack(tokens)
++        padding_mask = torch.stack(padding_masks)
+ 
+     elif qkv_format == "thd":
+         cp_rank = parallel_state.cp.rank
+@@ -204,6 +211,7 @@ def get_batch(
+                 cu_seqlens_list.append(cu_seqlens_list[-1] + t.size(0))
+ 
+             tokens = torch.cat(tokens, dim=0)
++            padding_mask = torch.cat(padding_masks, dim=0)
+ 
+             # Pad global stream so (1) divisible by cp_size (equal batches),
+             # (2) divisible by pad_size (reduce fragmentation).
+@@ -211,12 +219,15 @@ def get_batch(
+             pad = (global_pad_size - tokens.size(0) % global_pad_size) % global_pad_size
+             if pad != 0:
+                 tokens = F.pad(tokens, (0, pad), value=pad_token_id)
++                padding_mask = F.pad(padding_mask, (0, pad), value=True)
+                 cu_seqlens_list.append(cu_seqlens_list[-1] + pad)
+ 
+             cu_seqlens = torch.tensor(cu_seqlens_list, dtype=torch.int, device=torch.cuda.current_device())
+             tokens = tokens.chunk(cp_size, dim=0)[cp_rank]
++            padding_mask = padding_mask.chunk(cp_size, dim=0)[cp_rank]
+         else:
+             tokens = [slice_with_cp(t, pad_token_id, qkv_format) for t in tokens]
++            padding_masks = [slice_with_cp(mask, True, qkv_format) for mask in padding_masks]
+             sample_token_lengths = [t.size(0) for t in tokens]
+ 
+             cu_seqlens = [0]
+@@ -224,11 +235,13 @@ def get_batch(
+                 cu_seqlens.append(cu_seqlens[-1] + t.size(0))
+ 
+             tokens = torch.cat(tokens)
++            padding_mask = torch.cat(padding_masks)
+ 
+             # Always pad to reduce memory fragmentation and maybe make the computation faster
+             pad = (pad_size - tokens.size(0) % pad_size) % pad_size
+             if pad != 0:
+                 tokens = F.pad(tokens, (0, pad), value=pad_token_id)
++                padding_mask = F.pad(padding_mask, (0, pad), value=True)
+                 cu_seqlens.append(cu_seqlens[-1] + pad)
+ 
+             # thd requires the cu_seqlens to be of the origin length
+@@ -237,6 +250,7 @@ def get_batch(
+         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
+ 
+         tokens = tokens.unsqueeze(0)
++        padding_mask = padding_mask.unsqueeze(0)
+ 
+         batch["cu_seqlens"] = cu_seqlens
+         batch["max_seqlen"] = max_seqlen
+@@ -259,6 +273,8 @@ def get_batch(
+         batch["adapter_token_counts"] = counts
+ 
+     batch["tokens"] = tokens
++    assert padding_mask.shape == tokens.shape
++    batch["padding_mask"] = padding_mask
+ 
+     def _compute_transform_like_token_ids(ids_list: list):
+         assert not allgather_cp, "allgather CP is not supported for FSDP"
+diff --git a/miles/backends/training_utils/loss_hub/math_utils.py b/miles/backends/training_utils/loss_hub/math_utils.py
+index 49c2454addb17ffceb73e49e4cfc66e5d62da5fc..ef4dea738a77b3bf5cfa97ab44204bf126df4a73 100644
+--- a/miles/backends/training_utils/loss_hub/math_utils.py
++++ b/miles/backends/training_utils/loss_hub/math_utils.py
+@@ -292,7 +292,10 @@ def compute_log_probs(
+         log_probs = torch.log_softmax(full_logits, dim=-1)
+         return log_probs.gather(dim=-1, index=tokens.unsqueeze(-1)).squeeze(-1)
+ 
+-    # TODO: when megatron is not installed, fall back to naive implementation
++    # Unsharded vocabulary scoring does not require a Megatron runtime.
++    if get_parallel_state().tp.size == 1:
++        return -torch.nn.functional.cross_entropy(logits, tokens, reduction="none").unsqueeze(-1)
++
+     from megatron.core.fusions.fused_cross_entropy import fused_vocab_parallel_cross_entropy
+ 
+     # convert to [seq_len, batch_size, vocab_size] as expected by fused_vocab_parallel_cross_entropy
+diff --git a/miles/ray/actor_group.py b/miles/ray/actor_group.py
+index fb40d1250983997927364e0995b181377786b103..e5e3dfc68503ec64a6e980b393d4788e9e9858af 100644
+--- a/miles/ray/actor_group.py
++++ b/miles/ray/actor_group.py
+@@ -112,6 +112,9 @@ class RayTrainGroup:
+         """Save actor model"""
+         await self._broadcast("save_model", rollout_id, force_sync=force_sync)
+ 
++    async def finalize_checkpoint(self, rollout_id: int):
++        await self._broadcast("finalize_checkpoint", rollout_id)
++
+     async def export_hf(self, rollout_id: int, path: str):
+         """Export current weights as an HF checkpoint (collective across all ranks)."""
+         await self._broadcast("export_hf", rollout_id, path)
+@@ -143,6 +146,10 @@ class RayTrainGroup:
+     async def clear_memory(self):
+         await self._broadcast("clear_memory")
+ 
++    async def dispose(self) -> None:
++        """Flush and close every resident training worker."""
++        await self._broadcast("dispose")
++
+     async def set_rollout_manager(self):
+         self.rollout_manager = self._rollout_manager
+         await self._broadcast("set_rollout_manager", self._rollout_manager)
+diff --git a/miles/ray/rollout/rollout_manager.py b/miles/ray/rollout/rollout_manager.py
+index 2f74e4096fac39c2be9aaf948bde880fb7a4beab..ce181d9b37c92189eaa581ada7e7b3dd6e614bbc 100644
+--- a/miles/ray/rollout/rollout_manager.py
++++ b/miles/ray/rollout/rollout_manager.py
+@@ -30,6 +30,7 @@ from miles.rollout.base_types import (
+ from miles.rollout.checkpoint_eval import CheckpointEvalFn, EvalSkip
+ from miles.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
+ from miles.utils import object_store
++from miles.utils.async_utils import run
+ from miles.utils.audit_utils.event_analyzer import analyzer as event_analyzer
+ from miles.utils.audit_utils.event_logger import checkpoint as event_logger_checkpoint
+ from miles.utils.audit_utils.process_identity import RolloutManagerProcessIdentity
+@@ -41,7 +42,7 @@ from miles.utils.logging_utils import configure_logger
+ from miles.utils.metric_checker import MetricChecker
+ from miles.utils.misc import load_function
+ from miles.utils.timer import timer
+-from miles.utils.tracking_utils.tracking import init_tracking
++from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
+ 
+ logging.getLogger("httpx").setLevel(logging.WARNING)
+ logging.getLogger("httpcore").setLevel(logging.WARNING)
+@@ -128,7 +129,15 @@ class RolloutManager:
+     def get_router_address(self) -> tuple[str, int]:
+         return self.args.sglang_router_ip, self.args.sglang_router_port
+ 
++    def core_publication_boundary(self, begin: bool):
++        producer = self.generate_rollout
++        method = "prepare_publication" if begin else "finish_publication"
++        if hasattr(producer, method):
++            return run(getattr(producer, method)())
++
+     def dispose(self):
++        if self.args.train_backend == "olmo_core" and hasattr(self.generate_rollout, "shutdown"):
++            run(self.generate_rollout.shutdown())
+         if (close := getattr(self.data_source, "close", None)) is not None:
+             close()
+         event_analyzer.run_analysis_from_args(self.args)
+@@ -138,6 +147,7 @@ class RolloutManager:
+             self.eval_generate_rollout.dispose()
+         for monitor in self._health_monitors:
+             monitor.stop()
++        finish_tracking()
+ 
+     # -------------------------- data generation -----------------------------
+ 
+diff --git a/miles/ray/train/actor_factory.py b/miles/ray/train/actor_factory.py
+index 9afc33fdeeaaeaab6766bb17949ddfbbd02daf66..2ddf0efcddee2245ceb7824431808727a65a7290 100644
+--- a/miles/ray/train/actor_factory.py
++++ b/miles/ray/train/actor_factory.py
+@@ -76,6 +76,11 @@ def allocate_gpus_for_actor(
+ 
+         actor_impl = MegatronTrainRayActor
+ 
++    elif backend == "olmo_core":
++        from open_instruct.miles.actor import OLMoCoreTrainRayActor
++
++        actor_impl = OLMoCoreTrainRayActor
++
+     else:
+         from miles.backends.fsdp_utils import FSDPTrainRayActor
+ 
+diff --git a/miles/ray/train/group.py b/miles/ray/train/group.py
+index 3cb62d9627affacaf4578d6b83fb445dfc33ceca..d194c5ca710a81065d4d1bff4342288f596829ba 100644
+--- a/miles/ray/train/group.py
++++ b/miles/ray/train/group.py
+@@ -297,6 +297,12 @@ class RayTrainGroup:
+         # Catch *without* retry: cells w/ exceptions are auto marked errored, and will not be used
+         await self._execute_all_alive_and_catch("clear_memory")
+ 
++    async def dispose(self) -> None:
++        """Flush and close every alive training worker."""
++        for cell in self._cells:
++            cell.health_checker.pause()
++        await self._execute_all_alive_and_catch("dispose")
++
+     async def set_rollout_manager(self):
+         await asyncio.gather(*[cell.set_rollout_manager() for cell in self._cells])
+ 
+diff --git a/miles/ray/train_actor.py b/miles/ray/train_actor.py
+index 4e50149e1c6ed3f91eb7199f45986e739c3a5254..94ae2dcecf319c92b92eb0bcc37874aac098141b 100644
+--- a/miles/ray/train_actor.py
++++ b/miles/ray/train_actor.py
+@@ -20,6 +20,7 @@ from miles.utils.logging_utils import configure_logger
+ from miles.utils.memory_utils import clear_memory, print_memory
+ from miles.utils.test_utils.det_process_group import DET_NCCL_BACKEND_NAME, register_det_nccl_backend
+ from miles.utils.test_utils.fault_injector import inject_fault as _inject_fault
++from miles.utils.tracking_utils.tracking import finish_tracking
+ 
+ if TYPE_CHECKING:
+     from miles.ray.rollout.rollout_manager import EnginesAndLock
+@@ -150,6 +151,24 @@ class TrainRayActor(RayActor):
+         clear_memory()
+         print_memory("after TrainRayActor.clear_memory")
+ 
++    def dispose(self) -> None:
++        """Flush worker tracking and close its distributed process groups."""
++        if dist.is_initialized():
++            rank = dist.get_rank()
++            world_size = dist.get_world_size()
++            logger.info(
++                "Trainer teardown: destroying default process group rank=%s world_size=%s",
++                rank,
++                world_size,
++            )
++            dist.destroy_process_group()
++            logger.info("Trainer teardown: destroyed default process group rank=%s", rank)
++        else:
++            logger.info("Trainer teardown: default process group is not initialized")
++        logger.info("Trainer teardown: finishing tracking")
++        finish_tracking()
++        logger.info("Trainer teardown: finished tracking")
++
+     @abc.abstractmethod
+     def sleep(self, tags):
+         raise NotImplementedError
+diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
+index f0be5b7a17534c2f2eee230188f6febdf872f90e..7bf85968ea7664005a9e93d7f3396b451c10d5db 100644
+--- a/miles/utils/arguments.py
++++ b/miles/utils/arguments.py
+@@ -71,6 +71,11 @@ def _resolve_rollout_functions(args) -> None:
+ 
+     user_eval_path = args.eval_function_path
+     args.rollout_function_path, args.eval_function_path = resolve_rollout_function_paths(args)
++    if args.train_backend == "olmo_core" and args.fully_async:
++        original_path = args.rollout_function_path
++        args.rollout_function_path = "open_instruct.miles.async_rollout.ManagedFullyAsyncRolloutFn"
++        if args.eval_function_path == original_path:
++            args.eval_function_path = args.rollout_function_path
+     # An inherited eval path is the rollout fn serving eval itself, never a checkpoint
+     # backend: skip the resolve so custom rollout modules are not imported on the driver.
+     checkpoint_backend = user_eval_path is not None and is_checkpoint_eval_fn(args.eval_function_path)
+@@ -262,7 +267,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
+             parser.add_argument(
+                 "--train-backend",
+                 type=str,
+-                choices=["megatron", "fsdp"],
++                choices=["megatron", "fsdp", "olmo_core"],
+                 default="megatron",
+                 help="The backend for training.",
+             )
+@@ -776,6 +781,16 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
+                     "This is used for updating weights by batch and should be useful for MoE models."
+                 ),
+             )
++            parser.add_argument(
++                "--colocated-weight-update-pipeline-depth",
++                type=int,
++                choices=[1, 2],
++                default=1,
++                help=(
++                    "Number of colocated base-weight chunks retained while updating rollout engines. "
++                    "Depth 2 overlaps export of the next chunk with engine loading of the previous chunk."
++                ),
++            )
+             parser.add_argument(
+                 "--update-weights-interval",
+                 type=int,
+@@ -2693,6 +2708,13 @@ def parse_args(add_custom_arguments=None):
+         args.rank = 0
+         args.world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
+         args = set_default_megatron_args(args)
++    elif backend == "olmo_core":
++        from open_instruct.miles.arguments import load_core_args
++
++        args = load_core_args(extra_args_provider=add_miles_arguments)
++        args.rank = 0
++        args.world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
++        args.num_layers = resolve_fsdp_num_layers(load_hf_config(args.hf_checkpoint))
+     else:
+         from miles.backends.fsdp_utils.arguments import load_fsdp_args
+ 
+@@ -2729,7 +2751,7 @@ def parse_args(add_custom_arguments=None):
+                 "decoder_first_pipeline_num_layers and decoder_last_pipeline_num_layers should be None when "
+                 "pipeline_model_parallel_size is 1."
+             )
+-    else:
++    elif backend == "fsdp":
+         from miles.backends.fsdp_utils.arguments import validate_hybrid_shard_args
+ 
+         validate_hybrid_shard_args(args)
+@@ -2792,6 +2814,15 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
+     return eval_datasets
+ 
+ 
++def _validate_eval_datasets(args: argparse.Namespace) -> None:
++    """Require Miles-managed datasets unless an explicit custom eval owns its data."""
++    custom_eval_owns_data = (
++        args.eval_function_path is not None and args.eval_function_path != args.rollout_function_path
++    )
++    if not custom_eval_owns_data:
++        assert args.eval_datasets, "Evaluation datasets must be configured when eval_interval is set."
++
++
+ _FT_DEFAULT_COMPONENTS: list[str] = ["rollout"]
+ 
+ 
+@@ -3037,7 +3068,11 @@ def miles_validate_args(args):
+             raise ValueError("--opd-teacher-urls is set but --use-opd is not enabled. Please add --use-opd flag.")
+ 
+     # TODO: During loading, we need to set the start_rollout_id here.
+-    if args.megatron_to_hf_mode == "bridge":
++    if args.train_backend == "olmo_core":
++        # Native Core checkpoint metadata is validated and restored by its actor.
++        if args.start_rollout_id is None:
++            args.start_rollout_id = 0
++    elif args.megatron_to_hf_mode == "bridge":
+         # Fresh runs pass a not-yet-created `--load` dir; fall back to the reference
+         # weights (loaded via the HF bridge) instead of asserting in load_checkpoint.
+         # Mirrors the non-bridge branch below.
+@@ -3063,7 +3098,7 @@ def miles_validate_args(args):
+             args.start_rollout_id = 0
+ 
+     if args.eval_interval is not None:
+-        assert args.eval_datasets, "Evaluation datasets must be configured when eval_interval is set."
++        _validate_eval_datasets(args)
+ 
+     if args.eval_num_gpus > 0:
+         assert args.eval_num_gpus % args.eval_num_gpus_per_engine == 0, (
+@@ -3525,7 +3560,7 @@ def miles_validate_args(args):
+     ), "sglang_config and prefill_num_servers are mutually exclusive. Use server_groups in the YAML config instead."
+ 
+     if args.qkv_format == "bshd":
+-        assert args.train_backend == "megatron", "bshd format is only supported for megatron backend."
++        assert args.train_backend in ("megatron", "olmo_core"), "bshd requires Megatron or OLMo-core."
+         assert (
+             args.use_dynamic_batch_size is False
+         ), "Dynamic batch size is not supported for bshd format. Please specify --micro-batch-size instead."
+diff --git a/miles/utils/test_wandb_utils.py b/miles/utils/test_wandb_utils.py
+index c5e5c5ad7c4b70ecb17eab4879edc77ae16f0aa3..872bd5dc579b0bb4c3b04e0df56b41e1dbc14cf2 100644
+--- a/miles/utils/test_wandb_utils.py
++++ b/miles/utils/test_wandb_utils.py
+@@ -1,6 +1,9 @@
+ from types import SimpleNamespace
+ 
++import pytest
++
+ from miles.utils.tracking_utils import wandb_utils
++from miles.utils.tracking_utils.base import WandbBackend
+ 
+ 
+ def _args(**overrides):
+@@ -54,3 +57,29 @@ def test_secondary_wandb_init_uses_extended_init_timeout(monkeypatch):
+     assert settings.x_primary is False
+     assert settings.x_update_finish_state is False
+     assert settings.init_timeout == 300.0
++
++
++def test_wandb_backend_finish_tears_down_process_service(monkeypatch):
++    calls = []
++    monkeypatch.setattr(wandb_utils.wandb, "finish", lambda: calls.append("finish"))
++    monkeypatch.setattr(wandb_utils.wandb, "teardown", lambda: calls.append("teardown"))
++
++    WandbBackend().finish()
++
++    assert calls == ["finish", "teardown"]
++
++
++def test_wandb_backend_finish_tears_down_after_finish_error(monkeypatch):
++    calls = []
++
++    def fail_finish():
++        calls.append("finish")
++        raise RuntimeError("finish failed")
++
++    monkeypatch.setattr(wandb_utils.wandb, "finish", fail_finish)
++    monkeypatch.setattr(wandb_utils.wandb, "teardown", lambda: calls.append("teardown"))
++
++    with pytest.raises(RuntimeError, match="finish failed"):
++        WandbBackend().finish()
++
++    assert calls == ["finish", "teardown"]
+diff --git a/miles/utils/tracking_utils/base.py b/miles/utils/tracking_utils/base.py
+index c421525851be1e1a2c5ee6f6217ad2484add5148..364265373ddfde821616ad95c31d16735997fcc4 100644
+--- a/miles/utils/tracking_utils/base.py
++++ b/miles/utils/tracking_utils/base.py
+@@ -72,7 +72,14 @@ class WandbBackend(TrackingBackend):
+     def finish(self) -> None:
+         import wandb
+ 
+-        wandb.finish()
++        try:
++            wandb.finish()
++        finally:
++            # Ray workers remain alive after their run writer is flushed. Tear
++            # down W&B's process-local service while the worker is still under
++            # explicit lifecycle control so its atexit hook cannot race Ray
++            # process termination and write to an already-closed service pipe.
++            wandb.teardown()
+ 
+ 
+ class TensorboardBackend(TrackingBackend):
+diff --git a/miles_plugins/megatron_bridge/__init__.py b/miles_plugins/megatron_bridge/__init__.py
+index 6521214011dbe9dc2d939f33fa2e650ab7d1cb49..4d90a39aa647313511b99f0b5b3d2324de51235f 100644
+--- a/miles_plugins/megatron_bridge/__init__.py
++++ b/miles_plugins/megatron_bridge/__init__.py
+@@ -54,24 +54,28 @@ def _install_bridge_pp_group_unwrap() -> None:
+     MegatronParamMapping._miles_pp_group_unwrap_installed = True
+ 
+ 
+-try:
+-    _install_bridge_pp_group_unwrap()
+-except Exception as _e:  # best-effort
+-    logger.warning("miles bridge shim _install_bridge_pp_group_unwrap not applied: %s", _e)
++def install() -> None:
++    """Install every Bridge compatibility shim, retrying import-cycle failures."""
++    try:
++        _install_bridge_pp_group_unwrap()
++    except Exception as e:  # best-effort
++        logger.warning("miles bridge shim _install_bridge_pp_group_unwrap not applied: %s", e)
+ 
++    try:
++        from miles_plugins.models.qwen3_vl import install_qwen3_vl_packed_mrope_patch
+ 
+-try:
+-    from miles_plugins.models.qwen3_vl import install_qwen3_vl_packed_mrope_patch
++        install_qwen3_vl_packed_mrope_patch()
++    except Exception as e:  # best-effort; Qwen3-VL may be unavailable in some envs
++        logger.warning("miles Qwen3-VL THD packed mRoPE patch not applied: %s", e)
+ 
+-    install_qwen3_vl_packed_mrope_patch()
+-except Exception as _e:  # best-effort; Qwen3-VL may be unavailable in some envs
+-    logger.warning("miles Qwen3-VL THD packed mRoPE patch not applied: %s", _e)
++    # Each model-specific submodule exposes an idempotent installer so a
++    # partially initialized Megatron import can be retried.
++    try:
++        from . import nemotron_h
+ 
++        nemotron_h.install()
++    except Exception as e:  # pragma: no cover - defensive
++        logger.warning("miles nemotron_h plugin failed to load: %s", e)
+ 
+-# Model-specific bridge subclasses. Each submodule self-installs on import.
+-# Keep imports here so merely importing ``miles_plugins.megatron_bridge`` is
+-# enough to pick up every miles bridge (mirrors ``miles_plugins.mbridge``).
+-try:
+-    from . import nemotron_h  # noqa: F401
+-except Exception as _e:  # pragma: no cover - defensive
+-    logger.warning("miles nemotron_h plugin failed to load: %s", _e)
++
++install()
+diff --git a/miles_plugins/megatron_bridge/nemotron_h.py b/miles_plugins/megatron_bridge/nemotron_h.py
+index ee84afac6e71ee8af8637091c5fda1046648f92b..4c1f675d61c1ce2c8e95ec1c2f56322e73c60bd3 100644
+--- a/miles_plugins/megatron_bridge/nemotron_h.py
++++ b/miles_plugins/megatron_bridge/nemotron_h.py
+@@ -27,6 +27,7 @@ import logging
+ import torch
+ 
+ logger = logging.getLogger(__name__)
++_MILES_NEMOTRON_H_BRIDGE_INSTALLED = False
+ 
+ 
+ _NEMOTRONH_MOE_MAPPINGS: dict[str, str] = {
+@@ -209,12 +210,16 @@ def _install_mamba_model_loss_mask_shim() -> None:
+ 
+ 
+ def install() -> None:
+-    """Register the Nemotron-H bridge subclass."""
+-    for fn in (_build_bridge_subclass,):
+-        try:
+-            fn()
+-        except Exception as e:  # best-effort; avoid breaking unrelated models
+-            logger.warning("miles nemotron_h shim %s not applied: %s", fn.__name__, e)
++    """Register the Nemotron-H bridge subclass, retrying only after failures."""
++    global _MILES_NEMOTRON_H_BRIDGE_INSTALLED
++    if _MILES_NEMOTRON_H_BRIDGE_INSTALLED:
++        return
++    try:
++        _build_bridge_subclass()
++    except Exception as e:  # best-effort; avoid breaking unrelated models
++        logger.warning("miles nemotron_h shim _build_bridge_subclass not applied: %s", e)
++    else:
++        _MILES_NEMOTRON_H_BRIDGE_INSTALLED = True
+ 
+ 
+ install()
+diff --git a/tests/fast/backends/megatron_utils/test_bridge_plugin_retry.py b/tests/fast/backends/megatron_utils/test_bridge_plugin_retry.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e52abab61f13f4520cc5a46c22c15bdc98eea93a
+--- /dev/null
++++ b/tests/fast/backends/megatron_utils/test_bridge_plugin_retry.py
+@@ -0,0 +1,14 @@
++from miles.backends.megatron_utils import model_provider  # noqa: F401
++from miles_plugins import megatron_bridge as megatron_bridge_plugin
++from miles_plugins.megatron_bridge import nemotron_h
++from megatron.bridge.models.conversion.param_mapping import MegatronParamMapping
++
++
++def test_bridge_plugins_retry_after_megatron_initialization() -> None:
++    assert getattr(MegatronParamMapping, "_miles_pp_group_unwrap_installed", False)
++    assert nemotron_h._MILES_NEMOTRON_H_BRIDGE_INSTALLED
++
++    megatron_bridge_plugin.install()
++
++    assert MegatronParamMapping._miles_pp_group_unwrap_installed
++    assert nemotron_h._MILES_NEMOTRON_H_BRIDGE_INSTALLED
+diff --git a/tests/fast/backends/megatron_utils/test_colocated_weight_update_pipeline.py b/tests/fast/backends/megatron_utils/test_colocated_weight_update_pipeline.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..fe501586cfb3ed2797ac77dc02d3fb4228b279d3
+--- /dev/null
++++ b/tests/fast/backends/megatron_utils/test_colocated_weight_update_pipeline.py
+@@ -0,0 +1,89 @@
++from argparse import Namespace
++from unittest.mock import MagicMock, patch
++
++import pytest
++
++from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
++
++_UW_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_tensor"
++
++
++def _updater(*, depth: int, colocate: bool = True, distributed: bool = False, is_lora: bool = False):
++    updater = object.__new__(UpdateWeightFromTensor)
++    updater.args = Namespace(
++        colocated_weight_update_pipeline_depth=depth,
++        colocate=colocate,
++    )
++    updater.use_distribute = distributed
++    updater.is_lora = is_lora
++    return updater
++
++
++@patch(f"{_UW_MODULE}._check_weight_sync_results")
++@patch(f"{_UW_MODULE}.ray.get")
++def test_depth_two_exports_next_chunk_before_waiting(mock_ray_get, mock_check):
++    events = []
++    updater = _updater(depth=2)
++
++    def chunks():
++        for index in range(3):
++            events.append(f"export-{index}")
++            yield index
++
++    def send(index):
++        events.append(f"send-{index}")
++        return [f"ref-{index}"], MagicMock()
++
++    def wait(refs):
++        events.append(f"wait-{refs[0][-1]}")
++        return [(True, "Success")]
++
++    updater._send_base_params = send
++    mock_ray_get.side_effect = wait
++    updater._send_base_chunks(chunks())
++
++    assert events == [
++        "export-0",
++        "send-0",
++        "export-1",
++        "send-1",
++        "wait-0",
++        "export-2",
++        "send-2",
++        "wait-1",
++        "wait-2",
++    ]
++    assert mock_check.call_count == 3
++
++
++@patch(f"{_UW_MODULE}._check_weight_sync_results")
++@patch(f"{_UW_MODULE}.ray.get")
++def test_depth_one_preserves_serial_order(mock_ray_get, mock_check):
++    events = []
++    updater = _updater(depth=1)
++
++    def chunks():
++        for index in range(2):
++            events.append(f"export-{index}")
++            yield index
++
++    def send(index):
++        events.append(f"send-{index}")
++        return [f"ref-{index}"], MagicMock()
++
++    updater._send_base_params = send
++    mock_ray_get.side_effect = lambda refs: events.append(f"wait-{refs[0][-1]}") or [(True, "Success")]
++    updater._send_base_chunks(chunks())
++
++    assert events == ["export-0", "send-0", "wait-0", "export-1", "send-1", "wait-1"]
++    assert mock_check.call_count == 2
++
++
++@pytest.mark.parametrize(
++    ("colocate", "distributed", "is_lora"),
++    [(False, False, False), (True, True, False), (True, False, True)],
++)
++def test_depth_two_rejects_unsupported_update_modes(colocate, distributed, is_lora):
++    updater = _updater(depth=2, colocate=colocate, distributed=distributed, is_lora=is_lora)
++    with pytest.raises(ValueError, match="requires colocated"):
++        updater._send_base_chunks([])
+diff --git a/tests/fast/backends/megatron_utils/test_update_weight_from_distributed_lock.py b/tests/fast/backends/megatron_utils/test_update_weight_from_distributed_lock.py
+index c2e166c6c9ba047606e7f2854c484d1422b96c34..fb54404a7539bb9408b128b897b42a9b88ff91ef 100644
+--- a/tests/fast/backends/megatron_utils/test_update_weight_from_distributed_lock.py
++++ b/tests/fast/backends/megatron_utils/test_update_weight_from_distributed_lock.py
+@@ -8,7 +8,7 @@ the success path and both failure paths (broadcast setup and engine-side
+ completion).
+ """
+ 
+-from unittest.mock import MagicMock, patch
++from unittest.mock import MagicMock, PropertyMock, patch
+ 
+ import pytest
+ import torch
+@@ -69,6 +69,29 @@ def _named_tensors() -> list[tuple[str, torch.Tensor]]:
+     return [("layer.weight", torch.zeros(2, 2))]
+ 
+ 
++@patch(f"{_MODULE}.disconnect_rollout_engines_from_distributed")
++@patch.object(UpdateWeightFromDistributed, "_is_source", new_callable=PropertyMock, return_value=True)
++def test_disconnect_closes_persistent_group_once(_mock_is_source, mock_disconnect):
++    updater = object.__new__(UpdateWeightFromDistributed)
++    updater.args = MagicMock()
++    updater._group_name = "miles-pp_0"
++    updater._model_update_groups = MagicMock()
++    updater.rollout_engines = [MagicMock()]
++    updater._connection_stale = False
++    group = updater._model_update_groups
++    engines = updater.rollout_engines
++
++    updater.disconnect_rollout_engines()
++
++    mock_disconnect.assert_called_once_with(updater.args, "miles-pp_0", group, engines)
++    assert updater._model_update_groups is None
++    assert updater.rollout_engines is None
++    assert updater._connection_stale is True
++
++    updater.disconnect_rollout_engines()
++    mock_disconnect.assert_called_once()
++
++
+ @patch(f"{_MODULE}.update_weights_from_distributed")
+ @patch(f"{_MODULE}.ray")
+ def test_success_path_releases_lock_and_clears_tensors(mock_ray, mock_update):
+diff --git a/tests/fast/backends/sglang_utils/test_sglang_engine.py b/tests/fast/backends/sglang_utils/test_sglang_engine.py
+index a5b6c138e90f6364ee91398aec58d71295f96921..3fd11d56723979f8cdbb94f52f2c5f1551c546ef 100644
+--- a/tests/fast/backends/sglang_utils/test_sglang_engine.py
++++ b/tests/fast/backends/sglang_utils/test_sglang_engine.py
+@@ -4,6 +4,20 @@ import pytest
+ import requests
+ 
+ 
++def test_weight_version_update_aborts_inflight_requests() -> None:
++    """Do not allow a rollout trajectory to cross policy versions."""
++    pytest.importorskip("sglang")
++    from miles.backends.sglang_utils.sglang_engine import SGLangEngine
++
++    calls = []
++    engine = SGLangEngine.__new__(SGLangEngine)
++    engine._make_request = lambda endpoint, payload: calls.append((endpoint, payload))
++
++    engine.update_weight_version("7")
++
++    assert calls == [("update_weight_version", {"new_version": "7", "abort_all_requests": True})]
++
++
+ def test_flush_cache_sleeps_between_pending_request_retries(monkeypatch):
+     """Regression test for the fully_async weight-update crash: sglang
+     returns 400 (not an exception) while requests are still pending, so the
+diff --git a/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py b/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py
+index cdc4e07ca170e3ed6fb7613697fe00a0d0183273..62e064773600f101e7888e634adcdbd57254c3bd 100644
+--- a/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py
++++ b/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py
+@@ -132,3 +132,4 @@ def test_bshd_cp2_tokens_are_single_sliced(monkeypatch):
+         ]
+     )
+     assert torch.equal(out["tokens"], expected)
++    assert torch.equal(out["padding_mask"], expected.eq(0))
+diff --git a/tests/fast/ray/test_actor_group_shared_ppo.py b/tests/fast/ray/test_actor_group_shared_ppo.py
+index f8ee09c6256747889d4f72b793df4bb951ed634e..6b3e81438629e55fd604019502f413b12bf1912e 100644
+--- a/tests/fast/ray/test_actor_group_shared_ppo.py
++++ b/tests/fast/ray/test_actor_group_shared_ppo.py
+@@ -32,6 +32,34 @@ class _RemoteCall:
+         return result()
+ 
+ 
++async def test_dispose_broadcasts_to_all_legacy_workers():
++    from unittest.mock import AsyncMock
++
++    from miles.ray.actor_group import RayTrainGroup
++
++    group = object.__new__(RayTrainGroup)
++    group._broadcast = AsyncMock()
++
++    await group.dispose()
++
++    group._broadcast.assert_awaited_once_with("dispose")
++
++
++def test_train_actor_dispose_finishes_tracking_and_process_group(monkeypatch):
++    import miles.ray.train_actor as train_actor_module
++
++    calls = []
++    monkeypatch.setattr(train_actor_module, "finish_tracking", lambda: calls.append("tracking"))
++    monkeypatch.setattr(train_actor_module.dist, "is_initialized", lambda: True)
++    monkeypatch.setattr(train_actor_module.dist, "get_rank", lambda: 0)
++    monkeypatch.setattr(train_actor_module.dist, "get_world_size", lambda: 2)
++    monkeypatch.setattr(train_actor_module.dist, "destroy_process_group", lambda: calls.append("distributed"))
++
++    train_actor_module.TrainRayActor.dispose(object())
++
++    assert calls == ["distributed", "tracking"]
++
++
+ async def test_train_routes_each_critic_payload_to_matching_actor_rank():
+     from miles.ray.actor_group import RayTrainGroup
+ 
+diff --git a/tests/fast/ray/train/dummy_actor.py b/tests/fast/ray/train/dummy_actor.py
+index 36858be63e856cda729c72083a11fa5a7c8f9284..7c1f1c9ff86e9af75273d3b4da82745834bda4f0 100644
+--- a/tests/fast/ray/train/dummy_actor.py
++++ b/tests/fast/ray/train/dummy_actor.py
+@@ -61,6 +61,9 @@ class DummyTrainActor:
+     def clear_memory(self) -> None:
+         self._record("clear_memory", (), {})
+ 
++    def dispose(self) -> None:
++        self._record("dispose", (), {})
++
+     def save_model(self, *args: Any, **kwargs: Any) -> None:
+         self._record("save_model", args, kwargs)
+ 
+diff --git a/tests/fast/ray/train/test_group.py b/tests/fast/ray/train/test_group.py
+index 3c80eff00f30c80caca302a11aff23c902816d40..1b9035fdef0a262c18345464e943372fa48882e8 100644
+--- a/tests/fast/ray/train/test_group.py
++++ b/tests/fast/ray/train/test_group.py
+@@ -149,6 +149,18 @@ class TestInit:
+         assert group._cells[2].indep_dp_info.alive_rank == 2
+ 
+ 
++class TestDispose:
++    async def test_dispatches_dispose_to_every_alive_worker(self):
++        group = await _make_alive_group(num_cells=2, actor_count_per_cell=2)
++
++        await group.dispose()
++
++        for cell in group._cells:
++            for handle in cell._get_actor_handles():
++                calls = ray.get(handle.get_calls.remote())
++                assert any(call[0] == "dispose" for call in calls)
++
++
+ class TestStopStartCell:
+     async def test_stop_cell_transitions_to_stopped(self):
+         group = await _make_alive_group(num_cells=2)
+diff --git a/tests/fast/rollout/test_checkpoint_eval.py b/tests/fast/rollout/test_checkpoint_eval.py
+index bbeaf4efd854a429082a014ad89456c32688b829..2a3e55dbc1af3bd317ca13318cf08768a385bbae 100644
+--- a/tests/fast/rollout/test_checkpoint_eval.py
++++ b/tests/fast/rollout/test_checkpoint_eval.py
+@@ -43,6 +43,22 @@ def test_retarget_args_swaps_router_and_sizing():
+     assert args.rollout_num_gpus == 4
+ 
+ 
++def test_rollout_manager_dispose_finishes_secondary_tracking(monkeypatch):
++    calls = []
++    mgr = object.__new__(rollout_manager_mod.RolloutManager.__ray_actor_class__)
++    mgr.args = make_args()
++    mgr.data_source = SimpleNamespace(close=lambda: calls.append("data_source"))
++    mgr._metric_checker = None
++    mgr.eval_generate_rollout = None
++    mgr._health_monitors = []
++    monkeypatch.setattr(rollout_manager_mod.event_analyzer, "run_analysis_from_args", lambda args: None)
++    monkeypatch.setattr(rollout_manager_mod, "finish_tracking", lambda: calls.append("tracking"))
++
++    mgr.dispose()
++
++    assert calls == ["data_source", "tracking"]
++
++
+ # ---------------- RolloutManager._eval_checkpoint (the single snapshot path) ----------------
+ 
+ 
+diff --git a/tests/fast/utils/test_arguments.py b/tests/fast/utils/test_arguments.py
+index 1fce1f9de197afe231342e5c4d897d7406615cba..231a5a61db1fceff37ba52ddde2fe696c65380e9 100644
+--- a/tests/fast/utils/test_arguments.py
++++ b/tests/fast/utils/test_arguments.py
+@@ -12,6 +12,7 @@ from miles.utils.arguments import (
+     _maybe_apply_dumper_overrides,
+     _resolve_ft_components,
+     _resolve_rollout_functions,
++    _validate_eval_datasets,
+     _validate_rematerialize_param_from_master_weight,
+     get_miles_extra_args_provider,
+     miles_validate_args,
+@@ -25,6 +26,27 @@ PATH_ARGS = ["--rollout-function-path", "--custom-generate-function-path"]
+ REQUIRED_ARGS = ["--rollout-batch-size", "64"]
+ 
+ 
++def test_custom_eval_function_may_own_its_data() -> None:
++    args = SimpleNamespace(
++        eval_function_path="pkg.CustomEval",
++        rollout_function_path="pkg.Rollout",
++        eval_datasets=[],
++    )
++
++    _validate_eval_datasets(args)
++
++
++def test_shared_rollout_eval_still_requires_miles_dataset() -> None:
++    args = SimpleNamespace(
++        eval_function_path="pkg.Rollout",
++        rollout_function_path="pkg.Rollout",
++        eval_datasets=[],
++    )
++
++    with pytest.raises(AssertionError, match="Evaluation datasets must be configured"):
++        _validate_eval_datasets(args)
++
++
+ def make_class_with_add_arguments():
+     class MyFn:
+         @classmethod
+diff --git a/train.py b/train.py
+index 4e42fe292b3f3ea84738c4ce53416a3f98ffba01..93d0ea52ea3229e991449ccef46adac4d83afef8 100644
+--- a/train.py
++++ b/train.py
+@@ -89,6 +89,8 @@ async def train(args):
+         if args.use_critic:
+             await save_training_model(critic_model)
+         await rollout_manager.save.remote(rollout_id)
++        if args.train_backend == "olmo_core":
++            await actor_model.finalize_checkpoint(rollout_id)
+ 
+     # train loop.
+     # note that for async training, one can change the position of the sync operation(ray.get).
+@@ -147,6 +149,9 @@ async def train(args):
+             )
+             break
+ 
++    if critic_model is not None:
++        await critic_model.dispose()
++    await actor_model.dispose()
+     await rollout_manager.dispose.remote()
+ 
+ 

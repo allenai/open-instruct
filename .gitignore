@@ -163,3 +163,6 @@ cache/
 local_dataset_cache/
 scratch/
 .claude/worktrees/
+
+# Reconstructed pinned Core/MILES sources (scripts/miles/prepare_runtime.py).
+/runtime/miles/sources/

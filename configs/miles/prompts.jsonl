@@ -1,0 +1,1 @@
+{"input":"What is 6 times 7?","label":"42","metadata":{"verifiers":[{"name":"gsm8k","target":"42","weight":1.0}]}}

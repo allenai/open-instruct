@@ -1,0 +1,944 @@
+diff --git a/src/olmo_core/nn/attention/__init__.py b/src/olmo_core/nn/attention/__init__.py
+index 23c6bf642976e0f6ea8e624e4b68280422e71095..91b14eba9092fd80adfd4c4ff6953c1965f3d0d4 100644
+--- a/src/olmo_core/nn/attention/__init__.py
++++ b/src/olmo_core/nn/attention/__init__.py
+@@ -333,6 +333,8 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+     n_kv_heads: Optional[int] = None
+     head_dim: Optional[int] = None
+     bias: Optional[bool] = None
++    qkv_bias: Optional[bool] = None
++    """Override Q/K/V bias independently of the output projection (default attention only)."""
+     gate: Optional[GateConfig] = None
+     rope: Optional[RoPEConfig] = None
+     clip_qkv: Optional[float] = None
+@@ -388,16 +390,17 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+         head_dim = self.head_dim or d_model // n_heads
+         bias = self.bias if self.bias is not None else self.name != AttentionType.normalized
+ 
++        qkv_bias = bias if self.qkv_bias is None else self.qkv_bias
+         params = 0
+ 
+         # Block attention Q projection.
+         params += d_model * n_heads * head_dim
+-        if bias:
++        if qkv_bias:
+             params += n_heads * head_dim
+ 
+         # Block attention KV projections.
+         params += 2 * d_model * n_kv_heads * head_dim
+-        if bias:
++        if qkv_bias:
+             params += 2 * n_kv_heads * head_dim
+ 
+         # Block attention QK norm.
+@@ -472,6 +475,9 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+             cache=cache,
+         )
+ 
++        if kwargs.get("qkv_bias") is not None and self.name != AttentionType.default:
++            raise OLMoConfigurationError("qkv_bias is only supported by default attention")
++
+         # Attention sinks are only wired up for the default attention; drop the flag otherwise so
+         # the other implementations don't see an unexpected keyword argument.
+         if not kwargs.get("attention_sinks", False):
+@@ -587,6 +593,7 @@ class Attention(SequenceMixer):
+         n_kv_heads: Optional[int] = None,
+         head_dim: Optional[int] = None,
+         bias: bool = True,
++        qkv_bias: Optional[bool] = None,
+         gate: Optional[GateConfig] = None,
+         rope: Optional[RoPEConfig] = None,
+         clip_qkv: Optional[float] = None,
+@@ -619,13 +626,25 @@ class Attention(SequenceMixer):
+         else:
+             self.head_dim = d_model // n_heads
+         self.w_q = nn.Linear(
+-            d_model, n_heads * self.head_dim, bias=bias, dtype=dtype, device=init_device
++            d_model,
++            n_heads * self.head_dim,
++            bias=bias if qkv_bias is None else qkv_bias,
++            dtype=dtype,
++            device=init_device,
+         )
+         self.w_k = nn.Linear(
+-            d_model, self.n_kv_heads * self.head_dim, bias=bias, dtype=dtype, device=init_device
++            d_model,
++            self.n_kv_heads * self.head_dim,
++            bias=bias if qkv_bias is None else qkv_bias,
++            dtype=dtype,
++            device=init_device,
+         )
+         self.w_v = nn.Linear(
+-            d_model, self.n_kv_heads * self.head_dim, bias=bias, dtype=dtype, device=init_device
++            d_model,
++            self.n_kv_heads * self.head_dim,
++            bias=bias if qkv_bias is None else qkv_bias,
++            dtype=dtype,
++            device=init_device,
+         )
+         self.w_out = nn.Linear(
+             n_heads * self.head_dim, d_model, bias=bias, dtype=dtype, device=init_device
+diff --git a/src/olmo_core/nn/hf/convert.py b/src/olmo_core/nn/hf/convert.py
+index 63895179d4c178994ce1c6c350b24da39dd96f2b..1c5cb1a27fe5b2af6ea95e8885ba483c1e169670 100644
+--- a/src/olmo_core/nn/hf/convert.py
++++ b/src/olmo_core/nn/hf/convert.py
+@@ -36,6 +36,9 @@ HF_TO_OLMO_CORE_WEIGHT_MAPPINGS: Dict[str, str] = {
+     f"model.layers.{LAYER}.self_attn.k_proj.weight": f"blocks.{LAYER}.attention.w_k.weight",
+     f"model.layers.{LAYER}.self_attn.v_proj.weight": f"blocks.{LAYER}.attention.w_v.weight",
+     f"model.layers.{LAYER}.self_attn.o_proj.weight": f"blocks.{LAYER}.attention.w_out.weight",
++    f"model.layers.{LAYER}.self_attn.q_proj.bias": f"blocks.{LAYER}.attention.w_q.bias",
++    f"model.layers.{LAYER}.self_attn.k_proj.bias": f"blocks.{LAYER}.attention.w_k.bias",
++    f"model.layers.{LAYER}.self_attn.v_proj.bias": f"blocks.{LAYER}.attention.w_v.bias",
+     # MLP.
+     f"model.layers.{LAYER}.mlp.gate_proj.weight": f"blocks.{LAYER}.feed_forward.w1.weight",
+     f"model.layers.{LAYER}.mlp.down_proj.weight": f"blocks.{LAYER}.feed_forward.w2.weight",
+@@ -99,6 +102,9 @@ HF_TO_OLMO_CORE_MODULE_MAPPINGS: Dict[str, str] = {
+ #: different OLMo Core states depending on the HF model architecture. You may configure this to change
+ #: how HF state maps to OLMo Core state.
+ MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_WEIGHT_MAPPINGS: Dict[str, Dict[str, str]] = {
++    "qwen2": {
++        f"model.layers.{LAYER}.post_attention_layernorm.weight": f"blocks.{LAYER}.feed_forward_norm.weight"
++    },
+     "llama": {
+         f"model.layers.{LAYER}.post_attention_layernorm.weight": f"blocks.{LAYER}.feed_forward_norm.weight"
+     },
+@@ -120,6 +126,9 @@ MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_WEIGHT_MAPPINGS: Dict[str, Dict[str, str]] =
+ #: different OLMo Core states depending on the HF model architecture. You may configure this to change
+ #: how HF state maps to OLMo Core state.
+ MODEL_TYPE_SPECIFIC_HF_TO_OLMO_CORE_MODULE_MAPPINGS: Dict[str, Dict[str, str]] = {
++    "qwen2": {
++        f"model.layers.{LAYER}.post_attention_layernorm": f"blocks.{LAYER}.feed_forward_norm"
++    },
+     "llama": {
+         f"model.layers.{LAYER}.post_attention_layernorm": f"blocks.{LAYER}.feed_forward_norm"
+     },
+@@ -189,6 +198,9 @@ OLMO_CORE_TO_HF_WEIGHT_MAPPINGS: Dict[str, str] = {
+     f"blocks.{LAYER}.attention.w_k.weight": f"model.layers.{LAYER}.self_attn.k_proj.weight",
+     f"blocks.{LAYER}.attention.w_v.weight": f"model.layers.{LAYER}.self_attn.v_proj.weight",
+     f"blocks.{LAYER}.attention.w_out.weight": f"model.layers.{LAYER}.self_attn.o_proj.weight",
++    f"blocks.{LAYER}.attention.w_q.bias": f"model.layers.{LAYER}.self_attn.q_proj.bias",
++    f"blocks.{LAYER}.attention.w_k.bias": f"model.layers.{LAYER}.self_attn.k_proj.bias",
++    f"blocks.{LAYER}.attention.w_v.bias": f"model.layers.{LAYER}.self_attn.v_proj.bias",
+     # MLP.
+     f"blocks.{LAYER}.feed_forward.w1.weight": f"model.layers.{LAYER}.mlp.gate_proj.weight",
+     f"blocks.{LAYER}.feed_forward.w2.weight": f"model.layers.{LAYER}.mlp.down_proj.weight",
+@@ -316,6 +328,18 @@ MODEL_TYPE_SPECIFIC_OLMO_CORE_TO_HF_TEMPLATE_MAPPINGS: Dict[
+             unflatten_dim=(0, (TemplatePlaceholder.EXPERT, -1)),
+         ),
+     },
++    "qwen2": {
++        f"blocks.{LAYER}.attention_norm.weight": StateMappingTemplate(
++            f"blocks.{LAYER}.attention_norm.weight",
++            f"model.layers.{LAYER}.input_layernorm.weight",
++            state_type=StateType.weight,
++        ),
++        f"blocks.{LAYER}.feed_forward_norm.weight": StateMappingTemplate(
++            f"blocks.{LAYER}.feed_forward_norm.weight",
++            f"model.layers.{LAYER}.post_attention_layernorm.weight",
++            state_type=StateType.weight,
++        ),
++    },
+     "llama": {
+         f"blocks.{LAYER}.attention_norm.weight": StateMappingTemplate(
+             f"blocks.{LAYER}.attention_norm.weight",
+diff --git a/src/olmo_core/nn/moe/v2/olmo3.py b/src/olmo_core/nn/moe/v2/olmo3.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..04f4752b536248c68be6c9444f2537f8804cfb25
+--- /dev/null
++++ b/src/olmo_core/nn/moe/v2/olmo3.py
+@@ -0,0 +1,519 @@
++"""Olmo3Moe builders and correctness-first OLMoDDP/HF weight interchange."""
++
++from __future__ import annotations
++
++from copy import deepcopy
++from typing import Any, Mapping
++
++import torch
++import torch.distributed as dist
++from torch.distributed.tensor import DTensor
++from transformers import PretrainedConfig
++
++from olmo_core.config import DType
++from olmo_core.distributed.utils import get_local_tensor
++from olmo_core.nn.attention import (
++    AttentionBackendName,
++    AttentionConfig,
++    AttentionType,
++    SlidingWindowAttentionConfig,
++)
++from olmo_core.nn.ddp.block import OLMoDDPTransformerBlockConfig
++from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
++from olmo_core.nn.hf.convert import convert_state_from_hf, convert_state_to_hf
++from olmo_core.nn.layer_norm import LayerNormConfig, LayerNormType
++from olmo_core.nn.lm_head import LMHeadConfig, LMLossImplementation
++from olmo_core.nn.moe import MoELoadBalancingLossGranularity, MoERouterGatingFunction
++from olmo_core.nn.moe.v2.ep_config import ExpertParallelConfig, ExpertParallelPath
++from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
++from olmo_core.nn.moe.v2.routed_experts import RoutedExpertsConfig
++from olmo_core.nn.moe.v2.router import MoERouterConfigV2
++from olmo_core.nn.moe.v2.shared_experts import SharedExpertsConfig
++from olmo_core.nn.rope import RoPEConfig, RoPEType
++from olmo_core.nn.transformer import TransformerBlockType, TransformerType
++from olmo_core.nn.transformer.config import OLMoDDPModelConfig, TransformerBlockConfig
++
++OLMO3_FULL_ATTENTION = "full_attention"
++OLMO3_SLIDING_ATTENTION = "sliding_attention"
++
++
++def build_olmo3_moe_hf_config_from_native_config(
++    model_config: OLMoDDPModelConfig,
++    *,
++    max_position_embeddings: int,
++    pad_token_id: int | None,
++    bos_token_id: int | None,
++    eos_token_id: int | list[int] | None,
++) -> Olmo3MoeConfig:
++    """Build an exact serving config from a supported native OLMoDDP Olmo3MoE config."""
++    _register_olmo3moe_auto_classes()
++    blocks = model_config.resolved_block_configs
++    if not blocks:
++        raise ValueError("An Olmo3Moe model must contain at least one transformer block.")
++    if not all(isinstance(block, OLMoDDPTransformerBlockConfig) for block in blocks):
++        raise NotImplementedError("Olmo3Moe export requires OLMoDDP transformer blocks.")
++
++    typed_blocks = [block for block in blocks if isinstance(block, OLMoDDPTransformerBlockConfig)]
++    moe_blocks = [block for block in typed_blocks if block.routed_experts is not None]
++    dense_layers_indices = [
++        idx for idx, block in enumerate(typed_blocks) if block.routed_experts is None
++    ]
++    if not moe_blocks:
++        raise NotImplementedError("Olmo3Moe export requires at least one routed MoE block.")
++
++    representative = moe_blocks[0]
++    attention = representative.sequence_mixer
++    router = representative.routed_experts_router
++    routed_experts = representative.routed_experts
++    if not isinstance(attention, AttentionConfig):
++        raise NotImplementedError("Olmo3Moe export requires attention sequence mixers.")
++    if router is None or routed_experts is None:
++        raise NotImplementedError("Olmo3Moe blocks require routed experts and a router.")
++    if representative.layer_norm is None:
++        raise NotImplementedError("Olmo3Moe export requires RMS layer norms.")
++    if attention.rope is None or attention.rope.scaling is not None:
++        raise NotImplementedError("Olmo3Moe export requires unscaled RoPE.")
++    if attention.bias:
++        raise NotImplementedError("Olmo3Moe export does not support attention bias.")
++    if not attention.use_head_qk_norm or attention.qk_norm is None:
++        raise NotImplementedError("Olmo3Moe export requires head-wise QK norm.")
++    if any(block.use_pre_norm for block in typed_blocks):
++        raise NotImplementedError("Olmo3Moe export does not support pre-norm blocks.")
++    use_peri_ln = representative.use_peri_norm
++    if any(block.use_peri_norm != use_peri_ln for block in typed_blocks):
++        raise ValueError("All Olmo3Moe blocks must use the same peri-norm setting.")
++
++    def architecture_signature(block: OLMoDDPTransformerBlockConfig) -> tuple[Any, ...]:
++        block_attention = block.sequence_mixer
++        if not isinstance(block_attention, AttentionConfig):
++            raise NotImplementedError("Olmo3Moe export requires attention sequence mixers.")
++        return (
++            block_attention.n_heads,
++            block_attention.n_kv_heads,
++            block_attention.head_dim,
++            block_attention.bias,
++            block_attention.dropout,
++            block_attention.use_head_qk_norm,
++            block_attention.rope.theta if block_attention.rope is not None else None,
++            block.layer_norm.eps if block.layer_norm is not None else None,
++        )
++
++    expected_attention = architecture_signature(representative)
++    if any(architecture_signature(block) != expected_attention for block in typed_blocks):
++        raise ValueError("Olmo3Moe attention architecture must be consistent across layers.")
++
++    routed_signature = (
++        routed_experts.hidden_size,
++        routed_experts.num_experts,
++        routed_experts.bias,
++        routed_experts.activation,
++        router.num_experts,
++        router.top_k,
++        router.bias,
++        router.gating_function,
++        router.normalize_expert_weights,
++        router.restore_weight_scale,
++        router.original_top_k,
++    )
++    for block in moe_blocks[1:]:
++        block_router = block.routed_experts_router
++        block_experts = block.routed_experts
++        if block_router is None or block_experts is None:
++            raise ValueError("Every MoE block must have routed experts and a router.")
++        if (
++            block_experts.hidden_size,
++            block_experts.num_experts,
++            block_experts.bias,
++            block_experts.activation,
++            block_router.num_experts,
++            block_router.top_k,
++            block_router.bias,
++            block_router.gating_function,
++            block_router.normalize_expert_weights,
++            block_router.restore_weight_scale,
++            block_router.original_top_k,
++        ) != routed_signature:
++            raise ValueError("Routed expert architecture must be consistent across MoE layers.")
++
++    if routed_experts.bias or router.bias:
++        raise NotImplementedError("Olmo3Moe export does not support expert or router bias.")
++    if routed_experts.activation.value != "swiglu":
++        raise NotImplementedError("Olmo3Moe export only supports SwiGLU experts.")
++
++    shared_hidden_sizes = {
++        block.shared_experts.hidden_size for block in moe_blocks if block.shared_experts is not None
++    }
++    if any(block.shared_experts is None for block in moe_blocks) and shared_hidden_sizes:
++        raise ValueError("Shared experts must be present in either every or no MoE layer.")
++    if len(shared_hidden_sizes) > 1:
++        raise ValueError("Shared expert width must be consistent across MoE layers.")
++    if any(
++        block.shared_experts is not None
++        and (
++            block.shared_experts.num_experts != 1
++            or block.shared_experts.bias
++            or block.shared_experts.activation.value != "swiglu"
++        )
++        for block in moe_blocks
++    ):
++        raise NotImplementedError(
++            "Olmo3Moe export supports one bias-free SwiGLU shared expert per MoE layer."
++        )
++
++    dense_blocks = [block for block in typed_blocks if block.routed_experts is None]
++    dense_hidden_sizes = {
++        block.shared_experts.hidden_size
++        for block in dense_blocks
++        if block.shared_experts is not None
++    }
++    if dense_blocks and (
++        len(dense_hidden_sizes) != 1 or any(block.shared_experts is None for block in dense_blocks)
++    ):
++        raise ValueError("Dense Olmo3Moe layers must have one consistent shared-expert width.")
++    if any(
++        block.shared_experts is not None
++        and (
++            block.shared_experts.num_experts != 1
++            or block.shared_experts.bias
++            or block.shared_experts.activation.value != "swiglu"
++        )
++        for block in dense_blocks
++    ):
++        raise NotImplementedError(
++            "Dense Olmo3Moe layers require one bias-free SwiGLU shared expert."
++        )
++
++    layer_types: list[str] = []
++    window_sizes: set[int] = set()
++    for layer_idx, block in enumerate(typed_blocks):
++        block_attention = block.sequence_mixer
++        assert isinstance(block_attention, AttentionConfig)
++        sliding = block_attention.sliding_window
++        if sliding is not None and sliding.should_use_swa(layer_idx, model_config.n_layers):
++            layer_types.append(OLMO3_SLIDING_ATTENTION)
++            window_sizes.add(sliding.get_window_size(layer_idx, model_config.n_layers))
++        else:
++            layer_types.append(OLMO3_FULL_ATTENTION)
++    if len(window_sizes) > 1:
++        raise ValueError(
++            f"Olmo3Moe HF export supports one sliding window size, got {window_sizes}."
++        )
++
++    head_dim = attention.head_dim or model_config.d_model // attention.n_heads
++    return Olmo3MoeConfig(
++        vocab_size=model_config.vocab_size,
++        hidden_size=model_config.d_model,
++        attention_hidden_size=attention.n_heads * head_dim,
++        head_dim=head_dim,
++        dense_mlp_intermediate_size=(
++            next(iter(dense_hidden_sizes)) if dense_hidden_sizes else None
++        ),
++        moe_intermediate_size=routed_experts.hidden_size,
++        shared_expert_intermediate_size=(
++            next(iter(shared_hidden_sizes)) if shared_hidden_sizes else None
++        ),
++        n_routed_experts=routed_experts.num_experts,
++        num_experts_per_tok=router.top_k,
++        original_num_experts_per_tok=router.original_top_k,
++        num_hidden_layers=model_config.n_layers,
++        num_attention_heads=attention.n_heads,
++        num_key_value_heads=attention.n_kv_heads,
++        hidden_act="silu",
++        gating_function=str(router.gating_function),
++        normalize_expert_weights=router.normalize_expert_weights,
++        restore_weight_scale=router.restore_weight_scale,
++        max_position_embeddings=max_position_embeddings,
++        initializer_range=model_config.init_std,
++        pad_token_id=pad_token_id,
++        bos_token_id=bos_token_id,
++        eos_token_id=eos_token_id,
++        tie_word_embeddings=model_config.tie_word_embeddings,
++        rope_theta=attention.rope.theta,
++        attention_bias=False,
++        attention_dropout=attention.dropout or 0.0,
++        rms_norm_eps=representative.layer_norm.eps,
++        sliding_window=(next(iter(window_sizes)) + 1 if window_sizes else max_position_embeddings),
++        use_head_qk_norm=True,
++        layer_types=layer_types,
++        dense_layers_indices=dense_layers_indices,
++        embed_scale=(model_config.embed_scale if model_config.embed_scale is not None else 1.0),
++        embed_norm=model_config.embedding_norm is not None,
++        use_peri_ln=use_peri_ln,
++    )
++
++
++def _as_mapping(config: PretrainedConfig | Mapping[str, Any]) -> Mapping[str, Any]:
++    return config.to_dict() if isinstance(config, PretrainedConfig) else config
++
++
++def build_olmo3_moe_config_from_hf_config(
++    hf_config: PretrainedConfig | Mapping[str, Any],
++    *,
++    dtype: DType = DType.bfloat16,
++    attention_backend: AttentionBackendName = AttentionBackendName.flash_4,
++    attention_type: AttentionType = AttentionType.default,
++    ep_path: ExpertParallelPath | str = ExpertParallelPath.sync_1d,
++    ep_capacity_factor: float = 1.25,
++    router_aux_loss_weight: float | None = None,
++    router_z_loss_weight: float | None = None,
++    init_seed: int = 2026,
++) -> OLMoDDPModelConfig:
++    """Build an OLMoDDP model from a supported Olmo3Moe checkpoint config."""
++    config = _as_mapping(hf_config)
++    if config.get("model_type") != "olmo3moe":
++        raise ValueError(f"Expected model_type='olmo3moe', got {config.get('model_type')!r}.")
++    rope_parameters = config.get("rope_parameters") or config.get("rope_scaling") or {}
++    if rope_parameters and rope_parameters.get("rope_type", "default") != "default":
++        raise NotImplementedError("Scaled RoPE is not supported by this stage-one factory.")
++    if config.get("attention_bias", False):
++        raise NotImplementedError("Biased Olmo3Moe attention is not supported.")
++    if config.get("hidden_act", "silu") != "silu":
++        raise NotImplementedError("Only SwiGLU Olmo3Moe experts are supported.")
++    if not config.get("use_head_qk_norm", False):
++        raise NotImplementedError("Olmo3Moe conversion requires head-wise QK norm.")
++    if attention_type not in (AttentionType.default, AttentionType.fused_v2):
++        raise NotImplementedError(
++            f"Olmo3Moe conversion does not support attention type {attention_type!r}."
++        )
++
++    n_layers = int(config["num_hidden_layers"])
++    dense_layers = {int(idx) for idx in config.get("dense_layers_indices") or ()}
++    invalid_dense_layers = sorted(idx for idx in dense_layers if idx < 0 or idx >= n_layers)
++    if invalid_dense_layers:
++        raise ValueError(
++            f"dense_layers_indices must be in [0, {n_layers}), got {invalid_dense_layers}."
++        )
++    dense_hidden = config.get("dense_mlp_intermediate_size")
++    if dense_layers and dense_hidden is None:
++        raise ValueError(
++            "dense_mlp_intermediate_size must be set when dense_layers_indices is non-empty."
++        )
++    layer_types = tuple(config.get("layer_types") or (OLMO3_FULL_ATTENTION,) * n_layers)
++    if len(layer_types) != n_layers:
++        raise ValueError(f"Expected {n_layers} layer_types, got {len(layer_types)}.")
++    unsupported = set(layer_types) - {OLMO3_FULL_ATTENTION, OLMO3_SLIDING_ATTENTION}
++    if unsupported:
++        raise ValueError(f"Unsupported Olmo3Moe layer types: {sorted(unsupported)}")
++
++    d_model = int(config["hidden_size"])
++    num_experts = int(config["n_routed_experts"])
++    layer_norm = LayerNormConfig(
++        name=LayerNormType.rms,
++        eps=float(config["rms_norm_eps"]),
++        bias=False,
++        dtype=dtype,
++    )
++    routed_experts = RoutedExpertsConfig(
++        d_model=d_model,
++        hidden_size=int(config["moe_intermediate_size"]),
++        num_experts=num_experts,
++        bias=False,
++        dtype=dtype,
++    )
++    routed_router = MoERouterConfigV2(
++        d_model=d_model,
++        num_experts=num_experts,
++        top_k=int(config["num_experts_per_tok"]),
++        gating_function=MoERouterGatingFunction(config.get("gating_function", "softmax")),
++        normalize_expert_weights=config.get("normalize_expert_weights"),
++        restore_weight_scale=bool(config.get("restore_weight_scale", False)),
++        original_top_k=config.get("original_num_experts_per_tok"),
++        lb_loss_weight=router_aux_loss_weight,
++        z_loss_weight=router_z_loss_weight,
++        lb_loss_granularity=MoELoadBalancingLossGranularity.instance,
++        dtype=dtype,
++    )
++    shared_hidden = config.get("shared_expert_intermediate_size")
++    shared_experts = (
++        None
++        if shared_hidden is None
++        else SharedExpertsConfig(
++            d_model=d_model,
++            hidden_size=int(shared_hidden),
++            num_experts=1,
++            bias=False,
++            dtype=dtype,
++        )
++    )
++    ep = ExpertParallelConfig(
++        path=ExpertParallelPath(ep_path),
++        capacity_factor=ep_capacity_factor,
++    )
++    ep.validate()
++
++    def make_block(sliding: bool, *, dense: bool) -> OLMoDDPTransformerBlockConfig:
++        window = int(config["sliding_window"]) - 1
++        block_shared_experts: SharedExpertsConfig | None
++        if dense:
++            assert dense_hidden is not None
++            block_shared_experts = SharedExpertsConfig(
++                d_model=d_model,
++                hidden_size=int(dense_hidden),
++                num_experts=1,
++                bias=False,
++                dtype=dtype,
++            )
++        else:
++            block_shared_experts = shared_experts
++        return OLMoDDPTransformerBlockConfig(
++            sequence_mixer=AttentionConfig(
++                name=attention_type,
++                n_heads=int(config["num_attention_heads"]),
++                n_kv_heads=int(config["num_key_value_heads"]),
++                head_dim=int(config["head_dim"]),
++                bias=False,
++                dropout=float(config.get("attention_dropout", 0.0)),
++                rope=RoPEConfig(
++                    name=RoPEType.default,
++                    theta=int(config.get("rope_theta", 10_000)),
++                    full_precision=True,
++                ),
++                qk_norm=layer_norm,
++                use_head_qk_norm=True,
++                backend=attention_backend,
++                dtype=dtype,
++                sliding_window=(
++                    SlidingWindowAttentionConfig(
++                        pattern=[window],
++                        force_full_attention_on_first_layer=False,
++                        force_full_attention_on_last_layer=False,
++                    )
++                    if sliding
++                    else None
++                ),
++            ),
++            ep=None if dense else ep,
++            routed_experts=None if dense else routed_experts,
++            routed_experts_router=None if dense else routed_router,
++            shared_experts=block_shared_experts,
++            name=TransformerBlockType.moe_fused_v2,
++            use_pre_norm=False,
++            use_peri_norm=bool(config.get("use_peri_ln", False)),
++            layer_norm=deepcopy(layer_norm),
++            shared_experts_router=None,
++        )
++
++    def block_name(layer_type: str, *, dense: bool) -> str:
++        return f"{layer_type}_dense" if dense else layer_type
++
++    block_pattern = [
++        block_name(layer_type, dense=layer_idx in dense_layers)
++        for layer_idx, layer_type in enumerate(layer_types)
++    ]
++    blocks = {}
++    for layer_idx, layer_type in enumerate(layer_types):
++        dense = layer_idx in dense_layers
++        name = block_name(layer_type, dense=dense)
++        if name not in blocks:
++            blocks[name] = make_block(layer_type == OLMO3_SLIDING_ATTENTION, dense=dense)
++
++    block: TransformerBlockConfig | dict[str, TransformerBlockConfig]
++    resolved_block_pattern: list[str] | None
++    if len(blocks) == 1:
++        block = next(iter(blocks.values()))
++        resolved_block_pattern = None
++    else:
++        block = dict(blocks)
++        resolved_block_pattern = block_pattern
++
++    model_config = OLMoDDPModelConfig(
++        init_seed=init_seed,
++        init_std=float(config.get("initializer_range", 0.02)),
++        d_model=d_model,
++        vocab_size=int(config["vocab_size"]),
++        n_layers=n_layers,
++        block=block,
++        block_pattern=resolved_block_pattern,
++        embedding_norm=layer_norm if config.get("embed_norm", False) else None,
++        embed_scale=float(config.get("embed_scale", 1.0)),
++        tie_word_embeddings=bool(config.get("tie_word_embeddings", False)),
++        lm_head=LMHeadConfig(layer_norm=layer_norm, bias=False, dtype=dtype),
++        name=TransformerType.moe_fused_v2,
++        dtype=dtype,
++        two_batch_overlap=False,
++        recompute_each_block=False,
++        recompute_all_blocks_by_chunk=False,
++    )
++    model_config.lm_head.loss_implementation = LMLossImplementation.default
++    return model_config
++
++
++def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
++    wrapped = getattr(model, "module", None)
++    return wrapped if isinstance(wrapped, torch.nn.Module) else model
++
++
++def load_olmo3_moe_hf_state(
++    model: torch.nn.Module, hf_config: PretrainedConfig, hf_state: Mapping[str, torch.Tensor]
++) -> None:
++    """Load a full HF state into an unsharded or EP-sharded OLMoDDP model."""
++    model = _unwrap_model(model)
++    native_state = convert_state_from_hf(hf_config, dict(hf_state), model_type="olmo3moe")
++    parameters = dict(model.named_parameters())
++    for layer_idx in range(hf_config.num_hidden_layers):
++        prefix = f"blocks.{layer_idx}.attention."
++        fused_key = f"{prefix}w_qkv.weight"
++        if fused_key in parameters:
++            native_state[fused_key] = torch.cat(
++                [
++                    native_state.pop(f"{prefix}w_q.weight"),
++                    native_state.pop(f"{prefix}w_k.weight"),
++                    native_state.pop(f"{prefix}w_v.weight"),
++                ],
++                dim=0,
++            ).contiguous()
++    missing = set(parameters) - set(native_state)
++    if missing:
++        raise RuntimeError(f"Converted Olmo3Moe state is missing parameters: {sorted(missing)}")
++    unexpected = set(native_state) - set(parameters)
++    if unexpected:
++        raise RuntimeError(
++            f"Converted Olmo3Moe state has unexpected parameters: {sorted(unexpected)}"
++        )
++
++    with torch.no_grad():
++        for name, target in parameters.items():
++            source = native_state[name]
++            owner_name = name.rsplit(".", 1)[0]
++            owner = model.get_submodule(owner_name)
++            if getattr(owner, "_ep_sharded", False):
++                local_experts = int(owner.num_local_experts)
++                start = int(owner.ep_rank) * local_experts
++                source = source[start : start + local_experts]
++            if tuple(source.shape) != tuple(target.shape):
++                raise RuntimeError(
++                    f"Shape mismatch for {name}: converted={tuple(source.shape)}, "
++                    f"model={tuple(target.shape)}"
++                )
++            target.copy_(source.to(device=target.device, dtype=target.dtype))
++
++
++def gather_olmo3_moe_hf_state(
++    model: torch.nn.Module, hf_config: PretrainedConfig, *, cpu: bool = False
++) -> dict[str, torch.Tensor]:
++    """Collect an EP-sharded OLMoDDP model and return a full HF state on every rank."""
++    model = _unwrap_model(model)
++    native_state: dict[str, torch.Tensor] = {}
++    for name, value in model.state_dict().items():
++        local = get_local_tensor(value) if isinstance(value, DTensor) else value
++        owner_name = name.rsplit(".", 1)[0]
++        owner = model.get_submodule(owner_name)
++        if getattr(owner, "_ep_sharded", False):
++            group = owner.ep_mesh["ep_mp"].get_group()
++            gathered = [torch.empty_like(local) for _ in range(dist.get_world_size(group))]
++            dist.all_gather(gathered, local.contiguous(), group=group)
++            local = torch.cat(gathered, dim=0)
++        native_state[name] = local.cpu() if cpu else local
++
++    q_dim = hf_config.num_attention_heads * hf_config.head_dim
++    kv_dim = hf_config.num_key_value_heads * hf_config.head_dim
++    for layer_idx in range(hf_config.num_hidden_layers):
++        prefix = f"blocks.{layer_idx}.attention."
++        fused_key = f"{prefix}w_qkv.weight"
++        if fused_key in native_state:
++            q, k, v = native_state.pop(fused_key).split((q_dim, kv_dim, kv_dim), dim=0)
++            native_state[f"{prefix}w_q.weight"] = q
++            native_state[f"{prefix}w_k.weight"] = k
++            native_state[f"{prefix}w_v.weight"] = v
++
++    return convert_state_to_hf(hf_config, native_state)
+diff --git a/src/olmo_core/nn/moe/v2/replay.py b/src/olmo_core/nn/moe/v2/replay.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..07a0fd9ae8a5eed4dac0bb6523d82f02ce95490f
+--- /dev/null
++++ b/src/olmo_core/nn/moe/v2/replay.py
+@@ -0,0 +1,46 @@
++"""Explicit expert routing replay for scoring and activation recomputation."""
++
++from contextlib import contextmanager
++from typing import Iterator, Mapping
++
++import torch
++
++from .router import MoERouterV2
++
++
++@contextmanager
++def replay_routes(model: torch.nn.Module, routes: Mapping[str, torch.Tensor]) -> Iterator[None]:
++    """Replay routes by router module name, retaining gradients through routing weights.
++
++    Keep this context open through backward so activation recomputation uses the
++    same expert identities. Every routed router must be supplied; shared-only
++    routers are excluded by the caller's module-name selection. Nested contexts
++    restore their previous routes even when a forward or backward fails.
++    """
++    routers = {
++        name: module
++        for name, module in model.named_modules()
++        if isinstance(module, MoERouterV2) and name.endswith("routed_experts_router")
++    }
++    if not routers or set(routes) != set(routers):
++        raise ValueError("Replay must supply exactly the model's routed expert routers")
++    for name, indices in routes.items():
++        router = routers[name]
++        if indices.dtype not in (torch.int32, torch.int64):
++            raise ValueError(f"Replay indices for {name} must be integers")
++        if indices.ndim != 3 or indices.shape[-1] != router.top_k:
++            raise ValueError(f"Replay indices for {name} must have shape [batch, tokens, top_k]")
++        if bool(((indices < 0) | (indices >= router.num_experts)).any()):
++            raise ValueError(f"Replay indices for {name} are outside the expert range")
++        if bool((indices.sort(dim=-1).values.diff(dim=-1) == 0).any()):
++            raise ValueError(f"Replay indices for {name} must select distinct experts")
++    previous = {
++        name: getattr(router, "replay_expert_indices", None) for name, router in routers.items()
++    }
++    try:
++        for name, router in routers.items():
++            router.replay_expert_indices = routes[name]
++        yield
++    finally:
++        for name, router in routers.items():
++            router.replay_expert_indices = previous[name]
+diff --git a/src/olmo_core/nn/moe/v2/router.py b/src/olmo_core/nn/moe/v2/router.py
+index 67d8a17acdb176b0637dffcbfbf8051bdd738066..69cc8bfeed8ea774cc91cd54baa0b8f9a509cc5d 100644
+--- a/src/olmo_core/nn/moe/v2/router.py
++++ b/src/olmo_core/nn/moe/v2/router.py
+@@ -62,9 +62,9 @@ class MoERouterConfigV2(Config):
+     orth_loss_weight: Optional[float] = None
+     restore_weight_scale: bool = False  # if True, multiply the router weights by topK so that the scores have similar scale as dense models.
+     expert_weight_scale: Optional[float] = None
+-    original_top_k: Optional[
+-        int
+-    ] = None  # for restoring weight scales to match a model trained with a different top_k
++    original_top_k: Optional[int] = (
++        None  # for restoring weight scales to match a model trained with a different top_k
++    )
+     use_recompute_fp32_cast: bool = False  # whether to use an OutputDiscardCheckpoint to save the fp32 cast of the router input for recomputation in backward, which can save memory at the cost of extra compute in backward.
+     score_correction_bias: bool = False
+     n_group: Optional[int] = None
+@@ -604,8 +604,20 @@ class MoERouterV2(nn.Module):
+             # If we only need the scores, return them directly.
+             return scores, None, None, None
+ 
++        replay_indices = getattr(self, "replay_expert_indices", None)
++        if replay_indices is not None:
++            if replay_indices.shape != (*scores.shape[:-1], self.top_k):
++                raise ValueError("Replay expert indices do not match the router input shape")
++            expert_indices = replay_indices.to(device=scores.device, dtype=torch.long)
++            if self.gating_function == MoERouterGatingFunction.topk_softmax:
++                expert_weights = logits.gather(-1, expert_indices).softmax(dim=-1)
++            else:
++                expert_weights = scores.gather(-1, expert_indices)
++
+         UES_QUANT_SCORES = False
+-        if UES_QUANT_SCORES:
++        if replay_indices is not None:
++            pass
++        elif UES_QUANT_SCORES:
+             # TODO: merge into get_top_k
+             scores_sel = self._quantize_scores(scores)
+             scores_sel = self._break_ties(scores_sel)
+@@ -632,7 +644,7 @@ class MoERouterV2(nn.Module):
+ 
+         # TODO: check
+         # WARN: does not work with PP
+-        if self.use_recompute_cache:
++        if self.use_recompute_cache and replay_indices is None:
+             if self._recompute_cache is None:  # first forward
+                 if torch.is_grad_enabled():
+                     self._recompute_cache = expert_indices.detach()  # save for recompute
+diff --git a/src/olmo_core/train/train_module/transformer/ddp_train_module.py b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
+index a7c542f14aea14a6f68b630233fd5ee91f14b3a7..9e69aa11de156b001893a69080ca5a0c56b67a78 100644
+--- a/src/olmo_core/train/train_module/transformer/ddp_train_module.py
++++ b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
+@@ -80,6 +80,7 @@ from olmo_core.utils import get_default_device, log_once, move_to_device
+ 
+ from ...common import MetricMergeStrategy, ReduceType
+ from ..train_module import EvalBatchSpec, TrainModule
++from .objective import Objective, train_batch_with_loss
+ from .config import (
+     TransformerActivationCheckpointingConfig,
+     TransformerContextParallelConfig,
+@@ -1505,6 +1506,10 @@ class OLMoDDPTrainModule(TrainModule):
+                 flush=True,
+             )
+ 
++    def train_batch_with_loss(self, micro_batches, objective: Objective, context_factory=None):
++        """Accumulate a caller-normalized objective with Core gradient synchronization."""
++        return train_batch_with_loss(self, micro_batches, objective, context_factory)
++
+     @nvtx.annotate("train_batch")
+     def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
+         self._require_optimizer()
+diff --git a/src/olmo_core/train/train_module/transformer/objective.py b/src/olmo_core/train/train_module/transformer/objective.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6656db30b78a00c5f5a2f936bb74e55ca9defb4b
+--- /dev/null
++++ b/src/olmo_core/train/train_module/transformer/objective.py
+@@ -0,0 +1,48 @@
++"""Custom objectives with the transformer train modules' gradient lifecycle."""
++
++from contextlib import nullcontext
++from typing import Any, Callable, Dict, List, Sequence, Tuple
++
++import torch
++
++
++Objective = Callable[[Any, Dict[str, Any]], Tuple[torch.Tensor, Dict[str, torch.Tensor]]]
++
++
++def train_batch_with_loss(
++    module: Any, micro_batches: Sequence[Dict[str, Any]], objective: Objective, context_factory=None
++) -> List[Dict[str, torch.Tensor]]:
++    """Accumulate a custom objective using Core's microbatch synchronization.
++
++    The caller owns batch construction and objective normalization, and calls
++    ``zero_grads()`` before this operation and ``optim_step()`` afterwards.
++    ``objective(module, batch)`` owns the forward pass and returns a scalar loss
++    and metrics. It must use the module's forward API and include any required
++    auxiliary-loss scaling in the forward arguments. No CE labels or denominator
++    are synthesized here. Metrics are detached before returning.
++
++    Pipeline objectives require a pipeline schedule and are not accepted by
++    this non-pipeline entrypoint.
++    """
++    if getattr(module, "pp_enabled", False):
++        raise NotImplementedError("Custom objectives require a non-pipeline train module")
++    if not micro_batches:
++        raise ValueError("A custom-objective batch must contain at least one microbatch")
++    models = getattr(module, "model_parts", [module.model])
++    for model in models:
++        model.train()
++    metrics = []
++    for index, batch in enumerate(micro_batches):
++        with (
++            module._train_microbatch_context(index, len(micro_batches)),
++            context_factory(module, batch) if context_factory is not None else nullcontext(),
++        ):
++            loss, values = objective(module, batch)
++            if loss.ndim != 0 or not loss.requires_grad:
++                raise ValueError("The objective must return a differentiable scalar loss")
++            loss.backward()
++            metrics.append({name: value.detach() for name, value in values.items()})
++    for model in models:
++        if hasattr(model, "finalize_grad_reduce"):
++            model.finalize_grad_reduce()
++    return metrics
+diff --git a/src/olmo_core/train/train_module/transformer/train_module.py b/src/olmo_core/train/train_module/transformer/train_module.py
+index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa9746e311993 100644
+--- a/src/olmo_core/train/train_module/transformer/train_module.py
++++ b/src/olmo_core/train/train_module/transformer/train_module.py
+@@ -51,6 +51,7 @@ from olmo_core.utils import (
+ from ...common import ReduceType
+ from ..train_module import EvalBatchSpec, TrainModule
+ from .common import parallelize_model
++from .objective import Objective, train_batch_with_loss
+ from .config import (
+     TransformerActivationCheckpointingConfig,
+     TransformerContextParallelConfig,
+@@ -388,6 +389,10 @@ class TransformerTrainModule(TrainModule):
+             )
+             gc_cuda()
+ 
++    def train_batch_with_loss(self, micro_batches, objective: Objective, context_factory=None):
++        """Accumulate a caller-normalized objective with Core gradient synchronization."""
++        return train_batch_with_loss(self, micro_batches, objective, context_factory)
++
+     def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
+         # Set model to train mode if it isn't already.
+         self._set_model_mode("train")
+diff --git a/src/test/train/train_module/custom_objective_test.py b/src/test/train/train_module/custom_objective_test.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2dfca24d5f06a8ec52d3753c128bd80871a5dd56
+--- /dev/null
++++ b/src/test/train/train_module/custom_objective_test.py
+@@ -0,0 +1,70 @@
++"""Numerical checks against real Core modules and HF reference models."""
++
++import contextlib
++
++import pytest
++import torch
++from olmo_core.nn.moe.v2.replay import replay_routes
++from olmo_core.nn.moe.v2.router import MoERouterConfigV2
++from olmo_core.train.train_module.transformer.objective import train_batch_with_loss
++from torch import nn
++from torch.nn import functional as F
++from torch.utils.checkpoint import checkpoint
++
++
++class ObjectiveModule:
++    def __init__(self, model):
++        self.model = model
++        self.contexts = []
++
++    @contextlib.contextmanager
++    def _train_microbatch_context(self, index, count):
++        self.contexts.append((index, count))
++        yield
++
++
++def test_custom_objective_accumulation_matches_full_batch():
++    torch.manual_seed(17)
++    model = nn.Linear(4, 3)
++    reference = nn.Linear(4, 3)
++    reference.load_state_dict(model.state_dict())
++    x = torch.randn(5, 4)
++    labels = torch.tensor([0, 1, 2, 0, 2])
++    module = ObjectiveModule(model)
++
++    def objective(module, batch):
++        loss = F.cross_entropy(module.model(batch["x"]), batch["y"], reduction="sum") / 5
++        return loss, {"loss": loss}
++
++    metrics = train_batch_with_loss(
++        module, [{"x": x[:2], "y": labels[:2]}, {"x": x[2:], "y": labels[2:]}], objective
++    )
++    F.cross_entropy(reference(x), labels).backward()
++    torch.testing.assert_close(model.weight.grad, reference.weight.grad)
++    assert module.contexts == [(0, 2), (1, 2)]
++    assert all(not metric["loss"].requires_grad for metric in metrics)
++
++
++@pytest.mark.parametrize("recompute", [False, True])
++def test_router_replay_keeps_experts_and_router_gradients(recompute):
++    router = MoERouterConfigV2(d_model=8, num_experts=4, top_k=2).build()
++    router.reset_parameters() if hasattr(router, "reset_parameters") else nn.init.normal_(
++        router.weight, std=0.1
++    )
++    model = nn.Module()
++    model.add_module("routed_experts_router", router)
++    indices = torch.tensor([[[0, 2], [1, 3], [2, 3]]])
++    x = torch.randn(1, 3, 8, requires_grad=True)
++    seen = []
++
++    def forward(x):
++        weights, actual, _, _ = router(x, scores_only=False)
++        seen.append(actual.detach().clone())
++        return weights
++
++    with replay_routes(model, {"routed_experts_router": indices}):
++        weights = checkpoint(forward, x, use_reentrant=True) if recompute else forward(x)
++        (weights * torch.tensor([1.0, 2.0])).sum().backward()
++    assert seen and all(torch.equal(actual, indices) for actual in seen)
++    assert torch.isfinite(router.weight.grad).all() and router.weight.grad.abs().sum() > 0
++    assert router.replay_expert_indices is None

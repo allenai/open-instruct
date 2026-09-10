@@ -1,0 +1,39 @@
+{
+  "status": "experimental; full GRPO replacement acceptance incomplete",
+  "hardware": "one RTX 4090; local Docker with explicit NVIDIA devices and driver-library mounts",
+  "runtime_image": "open-instruct:miles-core-dev",
+  "runtime_image_id": "sha256:0803570edc6e56e4e57e3d54d1e232859ea3eb1e515dedd84605079826e3c5fe",
+  "checks": {
+    "make_style_quality": "passed with reconstructed locked Core source",
+    "adapter_and_existing_core_training_pytest": {
+      "passed": 62,
+      "subtests_passed": 2
+    },
+    "core_owned_objective_and_replay_pytest": {
+      "passed": 3
+    },
+    "runtime_gpu_and_async_pytest": {
+      "passed": 6
+    },
+    "fresh_ray_sglang_core_smoke": {
+      "passed": true,
+      "completed_optimizer_steps": 2,
+      "last_rollout_id": 1,
+      "image_id": "sha256:22cfa2eb7a3f4ccae27846b362664649776fc0217b92f01a4db06b220ef42b96"
+    },
+    "separate_process_resume": {
+      "passed": true,
+      "completed_optimizer_steps": 3,
+      "last_rollout_id": 2,
+      "image_id": "sha256:572e3073c692bca552f62a01dac8323968dbb939af9aa4dde150a358994ce4a7"
+    },
+    "later_checkpoint_retry_fix": "covered by focused CPU test and final runtime GPU checkpoint test",
+    "megatron_unavailable_import_probe": "passed with Megatron imports raising ImportError",
+    "source_patch_reconstruction": "indexed full-index diff hashes exactly match the lock"
+  },
+  "limitations": [
+    "No Beaker run",
+    "Synthetic rewards do not demonstrate learning quality",
+    "Full acceptance gaps are listed in docs/miles-core.md"
+  ]
+}

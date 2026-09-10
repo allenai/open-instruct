@@ -1,0 +1,31 @@
+# Replace /data paths with mounted, prepared inputs. All options use MILES semantics.
+[core]
+attention_backend = "flash_2"
+max_sequence_length = 4096
+activation_checkpointing = true
+max_policy_lag = 0
+reward_config = "/data/verifiers.json"
+
+[miles]
+hf_checkpoint = "/data/hf-model"
+prompt_data = "/data/prompts.jsonl"
+input_key = "input"
+label_key = "label"
+metadata_key = "metadata"
+custom_rm_path = "open_instruct.miles.rewards.registered_reward"
+actor_num_nodes = 1
+actor_num_gpus_per_node = 1
+num_gpus_per_node = 1
+rollout_num_gpus = 1
+rollout_num_gpus_per_engine = 1
+colocate = true
+offload_rollout = false
+sglang_mem_fraction_static = 0.4
+rollout_batch_size = 1
+n_samples_per_prompt = 4
+global_batch_size = 4
+rollout_max_response_len = 1024
+num_rollout = 100
+lr = 0.000001
+save = "/data/core-rl-checkpoints"
+save_interval = 10

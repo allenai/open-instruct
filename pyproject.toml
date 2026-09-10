@@ -181,7 +181,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=oe-eval-internal/"
+addopts = "--ignore=oe-eval-internal/ --ignore=runtime/miles/sources/"
 filterwarnings = [
     "ignore:.*sentry_sdk.Hub.*:DeprecationWarning",
     "ignore:builtin type SwigPy.*:DeprecationWarning",
@@ -234,6 +234,9 @@ split-on-trailing-comma = false
 
 # Ignore unresolved imports because some packages (e.g. vllm) are not available on macOS
 # Ignore possibly-missing-attribute for torch.distributed which has incomplete type stubs
+[tool.ty.environment]
+extra-paths = ["runtime/miles/sources/olmo-core/src"]
+
 [tool.ty.rules]
 unresolved-import = "ignore"
 possibly-missing-attribute = "ignore"
@@ -245,6 +248,7 @@ exclude = [
     "decontamination/",
     "human_eval/",
     "open_instruct/test_*.py",
+    "tests/miles/",
     "test_*.py",
     "open_instruct/IFEvalG/instructions.py",
     "open_instruct/dpo.py",

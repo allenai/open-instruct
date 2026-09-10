@@ -1,0 +1,15 @@
+**
+!open_instruct/
+!open_instruct/**
+!runtime/
+!runtime/miles/
+!runtime/miles/**
+runtime/miles/sources/
+!scripts/
+!scripts/miles/
+!scripts/miles/**
+!tests/
+!tests/miles/
+!tests/miles/**
+**/__pycache__/
+**/.pytest_cache/
