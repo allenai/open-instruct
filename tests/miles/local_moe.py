@@ -256,10 +256,14 @@ def hybrid(options):
 
 def run(options):
     root = options.output
+    if options.expert_parallel_size > 1 and not options.disaggregated:
+        raise ValueError("The EP fixture requires disaggregated serving")
+    total_gpus = options.expert_parallel_size + 1 if options.disaggregated else 1
     os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
     config = RunConfig(
         CoreConfig(
             attention_backend="torch",
+            expert_parallel_size=options.expert_parallel_size,
             stream_moe_export=not options.legacy_export,
             max_train_rollout_logprob_abs_diff=0.05,
             weight_sync_mode="per_tensor" if options.per_tensor else "flattened",
@@ -277,7 +281,8 @@ def run(options):
             num_rollout=3 if options.resume else 2,
             rollout_num_gpus=1,
             rollout_num_gpus_per_engine=1,
-            num_gpus_per_node=2 if options.disaggregated else 1,
+            actor_num_gpus_per_node=options.expert_parallel_size,
+            num_gpus_per_node=total_gpus,
             colocate=True,
             offload_rollout=False,
             prompt_data=str(root / "prompts.jsonl"),
@@ -319,12 +324,7 @@ def run(options):
     if options.validate_only:
         print("LOCAL_MOE_CONFIG_VALIDATED")
         return
-    ray.init(
-        num_gpus=2 if options.disaggregated else 1,
-        num_cpus=6,
-        include_dashboard=False,
-        object_store_memory=256 * 1024 * 1024,
-    )
+    ray.init(num_gpus=total_gpus, num_cpus=6, include_dashboard=False, object_store_memory=256 * 1024 * 1024)
     try:
         asyncio.run(train(args))
     finally:
@@ -399,6 +399,7 @@ def main():
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--disaggregated", action="store_true")
+    parser.add_argument("--expert-parallel-size", type=int, choices=[1, 2], default=1)
     parser.add_argument("--legacy-export", action="store_true")
     parser.add_argument("--per-tensor", action="store_true")
     parser.add_argument("--validate-only", action="store_true")

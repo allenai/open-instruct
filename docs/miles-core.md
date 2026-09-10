@@ -208,4 +208,11 @@ the weight group collectively while engines are alive, and then disposes engines
 and trainers. Cleanup failures remain visible; a saved checkpoint does not turn
 a failed shutdown into a passed trial.
 
+The EP follow-up uses `scripts/train/debug/miles_core_moe_ep.sh` through the same
+image wrapper. It requests three GPUs: two Core trainer ranks with EP=2 and one
+SGLang engine. Both CPU-staged/per-tensor and streamed/flattened paths must pass
+initial serving equality, two updates, restart, and the checkpoint audit. Its
+parser preflight passes locally; GPU qualification is recorded separately from
+that preflight.
+
 The full replacement is therefore unfinished. These are implementation or qualification gaps, not capabilities silently delegated to another trainer.

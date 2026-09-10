@@ -117,6 +117,30 @@
           "tensors": 74.0
         }
       }
+    },
+    "final_local_hybrid_capacity": {
+      "passed": true,
+      "optimizer_steps": 3,
+      "verified_responses": 12,
+      "kv_tokens": 4096,
+      "max_running_requests": 4,
+      "mamba_cache_slots": 16,
+      "radix_cache": false,
+      "drift_limit": 0.05,
+      "max_observed_mean_abs_logprob_diff": 0.002581268548965454,
+      "artifacts": "/tmp/miles-validation/hybrid-capped"
+    },
+    "policy_guard_gpu_suite": {
+      "passed": 16,
+      "includes": "A rejected score-drift check leaves all weights and the optimizer step unchanged; real GPU updates/restores for dense/KDA/latent and flattened wire contract"
+    },
+    "transport_cleanup_order_tests": {
+      "passed": 3
+    },
+    "beaker_teardown_retry": {
+      "id": "01M251NYNKZ8D4SK3JBRH13PZF",
+      "status": "running; result pending",
+      "source_commit": "dac5bc25a"
     }
   },
   "limitations": [

@@ -28,7 +28,10 @@ def main():
     parser.add_argument("--workspace", default="ai2/open-instruct-dev")
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument("--disaggregated", action="store_true")
+    parser.add_argument("--expert-parallel-size", type=int, choices=[1, 2], default=1)
     args = parser.parse_args()
+    if args.expert_parallel_size > 1:
+        args.disaggregated = True
     command = COMMAND
     if args.disaggregated:
         command = (
@@ -46,9 +49,12 @@ for mode in baseline streaming; do
 done
 """
         )
+    command = command.replace(
+        'flags="--disaggregated"', f'flags="--disaggregated --expert-parallel-size {args.expert_parallel_size}"'
+    )
     spec = {
         "version": "v2",
-        "description": "MILES/Core toy MoE: public GSM8K, weight publication, native restart, independent audit",
+        "description": f"MILES/Core toy MoE EP{args.expert_parallel_size}: public GSM8K, publication A/B, native restart and audit",
         "tasks": [
             {
                 "name": "toy-moe-gsm8k",
@@ -56,7 +62,10 @@ done
                 "command": ["bash", "-c"],
                 "arguments": [command],
                 "result": {"path": "/output"},
-                "resources": {"gpuCount": 2 if args.disaggregated else 1, "sharedMemory": "8 GiB"},
+                "resources": {
+                    "gpuCount": args.expert_parallel_size + 1 if args.disaggregated else 1,
+                    "sharedMemory": "8 GiB",
+                },
                 "context": {"priority": "normal", "minRuntime": "15m", "autoResume": False},
                 "constraints": {"cluster": [args.cluster]},
                 "timeout": "25m" if args.disaggregated else "20m",
