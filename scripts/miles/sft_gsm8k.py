@@ -168,7 +168,9 @@ def run(root, validate_only=False, decode_graphs=False):
     config = configuration(root)
     if decode_graphs:
         config.miles.pop("sglang_disable_cuda_graph")
+        config.miles["sglang_cuda_graph_backend_decode"] = "full"
         config.miles["sglang_cuda_graph_max_bs_decode"] = 4
+        config.miles["sglang_cuda_graph_backend_prefill"] = "disabled"
     sys.argv = ["sft-gsm8k", *config.arguments()]
     args = arguments.parse_args()
     assert args.save_interval is None, "This bounded trial does not save optimizer checkpoints"

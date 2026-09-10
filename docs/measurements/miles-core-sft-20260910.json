@@ -407,6 +407,13 @@
           "perf/longest_effective_sample_tokens_per_sec": 11.989573089966242
         }
       }
+    },
+    {
+      "id": "01M263FAD81X6DQFWQM0Z756JN",
+      "source_commit": "e2bfeb4b4",
+      "result": "Stopped during startup: removing the global disable flag also enabled 74-size prefill graph capture; no evaluation or training",
+      "fa4_forward_backward_preflight_passed": true,
+      "fix": "Explicitly disable prefill graphs while enabling decode graphs capped at batch size four"
     }
   ]
 }

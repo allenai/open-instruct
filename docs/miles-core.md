@@ -277,7 +277,7 @@ preflight can be exercised on the workstation with `--backend torch`; actual
 FA4 execution requires Blackwell.
 
 Append `--decode-graphs` to the SFT launch wrapper command to enable decode
-CUDA graphs capped at batch size four. The initial eager baseline took 510 s
+CUDA graphs capped at batch size four, with prefill graphs explicitly disabled. The initial eager baseline took 510 s
 for held-out generation and 342 s for its first rollout, while the complete
 37.0 GB initial weight publication took 3.48 s (0.32 s export/packing). These
 are phase measurements from a failed training attempt, not a completed run
