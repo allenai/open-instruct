@@ -28,7 +28,16 @@ BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
 
-EXP_NAME="${EXP_NAME:-swerl_qwen35_9b_dppo_repro_4node_64k_opensandbox}"
+# Loss exclusion on/off is baked into the experiment name and description so the
+# two variants are distinguishable in wandb and Beaker (and get separate
+# checkpoint dirs via EXP_NAME).
+MASK_INFRA_FAILED="${MASK_INFRA_FAILED:-true}"
+if [ "$MASK_INFRA_FAILED" = "true" ]; then
+    MASK_LABEL="mask_infra_failed"
+else
+    MASK_LABEL="no_mask_infra_failed"
+fi
+EXP_NAME="${EXP_NAME:-swerl_qwen35_9b_dppo_repro_4node_64k_opensandbox_${MASK_LABEL}}"
 # For the B300 cluster:
 #   BEAKER_CLUSTER=ai2/holmes BEAKER_WORKSPACE=ai2/oe-agents-holmes $0 <image>
 # with an image built via `build_image_and_launch.sh --cuda-version 13`; the
@@ -42,7 +51,7 @@ BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/oe-agents-holmes}"
 uv run python mason.py \
        --cluster "$BEAKER_CLUSTER" \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; OpenSandbox spot sandboxes)" \
+       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; OpenSandbox spot sandboxes; ${MASK_LABEL})" \
        --pure_docker_mode \
        --workspace "$BEAKER_WORKSPACE" \
        --priority urgent \
@@ -114,7 +123,7 @@ uv run python mason.py \
     --tool_parser_type vllm_qwen3_xml \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
     --active_sampling \
-    --mask_infra_failed_completions "${MASK_INFRA_FAILED:-true}" \
+    --mask_infra_failed_completions "$MASK_INFRA_FAILED" \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
     --checkpoint_state_freq 10 \
