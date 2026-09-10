@@ -190,31 +190,13 @@ class ModelConfig:
     gradient_checkpointing: bool = False
     """Whether to use gradient checkpointing in the model."""
 
-    # PEFT-related args
-    use_peft: bool = False
-    """Whether to use PEFT or not for training."""
-    lora_r: int | None = 16
-    """LoRA R value."""
-    lora_alpha: int | None = 32
-    """LoRA alpha."""
-    lora_dropout: float | None = 0.05
-    """LoRA dropout."""
-    lora_target_modules: list[str] | None = None
-    """LoRA target modules."""
-    lora_modules_to_save: list[str] | None = None
-    """Model layers to unfreeze & train"""
-    lora_task_type: str = "CAUSAL_LM"
-    """The task_type to pass for LoRA (use SEQ_CLS for reward modeling)"""
-
-    # quantization args
-    load_in_8bit: bool = False
-    """use 8 bit precision for the base model - works only with LoRA"""
-    load_in_4bit: bool = False
-    """use 4 bit precision for the base model - works only with LoRA"""
-    bnb_4bit_quant_type: str | None = "nf4"
-    """precise the quantization type (fp4 or nf4)"""
-    use_bnb_nested_quant: bool = False
-    """use nested quantization"""
+    # NOTE: PEFT/LoRA and bitsandbytes quantization args used to live here, but nothing
+    # ever read them off ModelConfig, so passing e.g. `--use_peft` to a script that takes
+    # ModelConfig (reward_modeling.py) silently did full finetuning. The scripts that do
+    # support LoRA (finetune.py, dpo_tune_cache.py) declare their own `use_lora`/`use_qlora`
+    # and `lora_rank`/`lora_alpha`/`lora_dropout` on FlatArguments and read those instead.
+    # If LoRA support is added to a ModelConfig-based script, add the flags back together
+    # with the code that consumes them.
 
     def __post_init__(self):
         if self.attn_implementation is None:
