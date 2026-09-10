@@ -431,8 +431,8 @@ an unsharded vocabulary, while passing that value to a distributed entropy
 collective would use the default DP group. Entropy now executes locally for an
 unsharded vocabulary; real TP retains the existing distributed implementation.
 
-The extended suite passed 75 tests on the pinned runtime plus 32 host tests.
-[The report](measurements/miles-core-contract-followup-20260910.json) records
+The final extended suite passed 90 tests on the pinned runtime plus 32 host tests.
+[The report](measurements/miles-core-contract-final-20260910.json) records
 source hashes taken before execution and rejects source changes during the run.
 Local math and legacy IFEval each completed two updates and audited 64 responses;
 [their report](measurements/miles-core-datasources-local-20260910.json) separates
@@ -446,12 +446,28 @@ SGLang router strips expert-ID requests, so this path requires
 IDs for its auxiliary forward; matching that auxiliary semantic to Megatron and
 qualifying full-model replay remain open.
 
-Native EP comparison and full-SFT math/IF trials are submitted from commit
-`4a17027ef9f6`: [EP contract](https://beaker.org/ex/01M26G4QJBGWN4XJ14BZSY0XPM)
-and [datasources](https://beaker.org/ex/01M26GC6F3TRRQEXR9HJQR0XGG).
-The EP comparison is running; the datasource trial is queued at the workspace
-allocation limit. Submission is not a passing result. The datasource job runs the tasks sequentially
-on one three-GPU allocation, with two updates and 64 audited responses per task.
+The [native EP comparison](https://beaker.org/ex/01M26G4QJBGWN4XJ14BZSY0XPM)
+passed all twelve arms with exit code zero: EP1/EP2, policy/auxiliary/combined
+losses and recomputation off/on, with fixed replayed routes. The maximum
+category-level relative L2 error across optimizer moments and master weights was
+5.79e-5 (first moments: 5.43e-6; second moments: 4.80e-8); the combined
+first-moment superposition residual was at most 0.00777
+relative to the component norms. Policy-only and auxiliary-only router moments
+were independently nonzero. [The full report](measurements/miles-core-native-ep-20260910.json)
+retains the comparison definitions, all category errors and per-rank records.
+This is native Core consistency on a fixed tiny batch, not Megatron parity.
+
+The [full-SFT math/IF trial](https://beaker.org/ex/01M26GC6F3TRRQEXR9HJQR0XGG)
+is running. Both Beaker jobs use commit `4a17027ef9f6`; the later checkpoint-schema
+change does not affect these jobs, which do not save optimizer checkpoints.
+The datasource job runs the tasks sequentially on one three-GPU allocation,
+with two updates and 64 audited responses planned per task.
 
 Remaining qualification includes a matched Megatron comparison, full-model
 replay/restart, longer runs and additional topologies.
+
+The corrected [tiny resident profile](../configs/miles/profiles/tiny-resident.toml)
+also completed two updates and a separate-process third update through the public
+entrypoint, with schema-2 checkpoints and a 12-response audit. Its 256-token
+prompt budget plus 256-token response budget match the fixture's 512-token HF
+context. [Evidence](measurements/miles-core-tiny-default-20260910.json).

@@ -1,0 +1,683 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-10",
+  "passed": true,
+  "implementation_commit": "8d93389f446deb10b1c9f3d8a491a826b4e63494",
+  "entrypoint": "open_instruct.miles.__main__.main, bounded local Ray initialized by test launcher",
+  "profile": "configs/miles/profiles/tiny-resident.toml",
+  "profile_sha256": "6e338fa63c87b78eda6f2ed659693d8328abf70c20280e1842606ad3f2dbdf91",
+  "effective_config": "# One GPU, tiny models only. Memory fit is model-dependent.\n# Prepared /validation/contract-replay-final/hf includes tokenizer + chat template; train.jsonl is rendered.\n# Two optimizer updates plus durable checkpoints; a three-step LR horizon lets\n# a separate resume exercise complete the third step with the same schedule.\n[core]\nexpert_parallel_size = 1\nattention_backend = \"torch\"\nmax_sequence_length = 512\nactivation_checkpointing = true\nmax_policy_lag = 0\nmax_train_rollout_logprob_abs_diff = 0.05\ndiagnostic_interval = 1\nrouter_aux_loss_weight = 0.01\nrouter_z_loss_weight = 0.00001\nstream_moe_export = true\nreward_config = \"/validation/contract-replay-final/verifiers.json\"\n\n[miles]\nhf_checkpoint = \"/validation/contract-replay-final/hf\"\nprompt_data = \"/validation/contract-replay-final/prompts.jsonl\"\ninput_key = \"input\"\nlabel_key = \"label\"\nmetadata_key = \"metadata\"\ncustom_rm_path = \"open_instruct.miles.rewards.registered_reward\"\nactor_num_nodes = 1\nactor_num_gpus_per_node = 1\nnum_gpus_per_node = 1\nrollout_num_gpus = 1\nrollout_num_gpus_per_engine = 1\ncolocate = true\noffload_rollout = false\nmicro_batch_size = 1\nrollout_batch_size = 1\nn_samples_per_prompt = 4\nglobal_batch_size = 4\nnum_rollout = 2\nrollout_temperature = 1.0\nrollout_seed = 17\nrollout_max_prompt_len = 256\nrollout_max_response_len = 256\nrollout_max_context_len = 512\nsglang_context_length = 512\nsglang_max_total_tokens = 4096\nsglang_max_running_requests = 4\nsglang_server_concurrency = 4\nsglang_mem_fraction_static = 0.2\nsglang_disable_radix_cache = true\nsglang_max_mamba_cache_size = 16\nsglang_cuda_graph_backend_decode = \"disabled\"\nsglang_cuda_graph_backend_prefill = \"disabled\"\nsglang_sampling_backend = \"pytorch\"\nsglang_attention_backend = \"torch_native\"\nsglang_log_level = \"warning\"\ncheck_weight_update_equal = true\nupdate_weight_buffer_size = 1073741824\nupdate_weights_interval = 1\nloss_type = \"policy_loss\"\nadvantage_estimator = \"grpo\"\nlr = 0.000001\nlr_decay_iters = 3\nseed = 17\nsave = \"/validation/tiny-profile-final/save\"\nsave_interval = 1\nsave_debug_rollout_data = \"/validation/tiny-profile-final/rollouts/{rollout_id}.pt\"\n",
+  "resume_config": "# One GPU, tiny models only. Memory fit is model-dependent.\n# Prepared /validation/contract-replay-final/hf includes tokenizer + chat template; train.jsonl is rendered.\n# Two optimizer updates plus durable checkpoints; a three-step LR horizon lets\n# a separate resume exercise complete the third step with the same schedule.\n[core]\nexpert_parallel_size = 1\nattention_backend = \"torch\"\nmax_sequence_length = 512\nactivation_checkpointing = true\nmax_policy_lag = 0\nmax_train_rollout_logprob_abs_diff = 0.05\ndiagnostic_interval = 1\nrouter_aux_loss_weight = 0.01\nrouter_z_loss_weight = 0.00001\nstream_moe_export = true\nreward_config = \"/validation/contract-replay-final/verifiers.json\"\n\n[miles]\nhf_checkpoint = \"/validation/contract-replay-final/hf\"\nprompt_data = \"/validation/contract-replay-final/prompts.jsonl\"\ninput_key = \"input\"\nlabel_key = \"label\"\nmetadata_key = \"metadata\"\ncustom_rm_path = \"open_instruct.miles.rewards.registered_reward\"\nactor_num_nodes = 1\nactor_num_gpus_per_node = 1\nnum_gpus_per_node = 1\nrollout_num_gpus = 1\nrollout_num_gpus_per_engine = 1\ncolocate = true\noffload_rollout = false\nmicro_batch_size = 1\nrollout_batch_size = 1\nn_samples_per_prompt = 4\nglobal_batch_size = 4\nnum_rollout = 3\nrollout_temperature = 1.0\nrollout_seed = 17\nrollout_max_prompt_len = 256\nrollout_max_response_len = 256\nrollout_max_context_len = 512\nsglang_context_length = 512\nsglang_max_total_tokens = 4096\nsglang_max_running_requests = 4\nsglang_server_concurrency = 4\nsglang_mem_fraction_static = 0.2\nsglang_disable_radix_cache = true\nsglang_max_mamba_cache_size = 16\nsglang_cuda_graph_backend_decode = \"disabled\"\nsglang_cuda_graph_backend_prefill = \"disabled\"\nsglang_sampling_backend = \"pytorch\"\nsglang_attention_backend = \"torch_native\"\nsglang_log_level = \"warning\"\ncheck_weight_update_equal = true\nupdate_weight_buffer_size = 1073741824\nupdate_weights_interval = 1\nloss_type = \"policy_loss\"\nadvantage_estimator = \"grpo\"\nlr = 0.000001\nlr_decay_iters = 3\nseed = 17\nsave = \"/validation/tiny-profile-final/save\"\nsave_interval = 1\nsave_debug_rollout_data = \"/validation/tiny-profile-final/rollouts/{rollout_id}.pt\"\n\nload = \"/validation/tiny-profile-final/save\"\n",
+  "checkpoint_manifests": [
+    {
+      "rollout": "rollout_0000000",
+      "schema_version": 2,
+      "expert_parallel_size": 1,
+      "clock": {
+        "completed_steps": 1,
+        "next_rollout_id": 1,
+        "published_step": 0
+      }
+    },
+    {
+      "rollout": "rollout_0000001",
+      "schema_version": 2,
+      "expert_parallel_size": 1,
+      "clock": {
+        "completed_steps": 2,
+        "next_rollout_id": 2,
+        "published_step": 1
+      }
+    },
+    {
+      "rollout": "rollout_0000002",
+      "schema_version": 2,
+      "expert_parallel_size": 1,
+      "clock": {
+        "completed_steps": 3,
+        "next_rollout_id": 3,
+        "published_step": 2
+      }
+    }
+  ],
+  "audit": {
+    "verified_samples": 12,
+    "rewards": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "replay_shapes": [],
+    "rollout_versions": [
+      0,
+      1,
+      2
+    ],
+    "prompt_cursor_continued": true,
+    "optimizer_steps": 3,
+    "max_parameter_changes_from_initial": [
+      {
+        "embeddings.weight": 2.000480890274048e-06,
+        "blocks.0.attention.A_log": 1.942901917573181e-06,
+        "blocks.0.attention.dt_bias": 1.9872491066053044e-06,
+        "blocks.0.attention.w_q.weight": 2.000480890274048e-06,
+        "blocks.0.attention.w_k.weight": 2.000480890274048e-06,
+        "blocks.0.attention.w_v.weight": 2.000480890274048e-06,
+        "blocks.0.attention.f_proj_1.weight": 1.9830185920000076e-06,
+        "blocks.0.attention.f_proj_2.weight": 1.9778963178396225e-06,
+        "blocks.0.attention.w_b.weight": 1.9988510757684708e-06,
+        "blocks.0.attention.q_conv1d.weight": 2.000480890274048e-06,
+        "blocks.0.attention.k_conv1d.weight": 2.000480890274048e-06,
+        "blocks.0.attention.v_conv1d.weight": 2.000480890274048e-06,
+        "blocks.0.attention.g_proj_1.weight": 1.9855797290802e-06,
+        "blocks.0.attention.g_proj_2.weight": 1.9855797290802e-06,
+        "blocks.0.attention.g_proj_2.bias": 1.9953467926825397e-06,
+        "blocks.0.attention.o_norm.weight": 2.0265579223632812e-06,
+        "blocks.0.attention.w_out.weight": 2.000480890274048e-06,
+        "blocks.0.attention_norm.weight": 2.0265579223632812e-06,
+        "blocks.0.attention_input_norm.weight": 2.0265579223632812e-06,
+        "blocks.0.shared_experts.w_up_gate": 2.000480890274048e-06,
+        "blocks.0.shared_experts.w_down": 2.000480890274048e-06,
+        "blocks.0.feed_forward_norm.weight": 2.0265579223632812e-06,
+        "blocks.0.feed_forward_input_norm.weight": 2.0265579223632812e-06,
+        "blocks.1.latent_down_proj.weight": 0.0,
+        "blocks.1.latent_up_proj.weight": 0.0,
+        "blocks.1.attention.w_q.weight": 1.998618245124817e-06,
+        "blocks.1.attention.w_k.weight": 1.998618245124817e-06,
+        "blocks.1.attention.w_v.weight": 2.000480890274048e-06,
+        "blocks.1.attention.w_out.weight": 2.000480890274048e-06,
+        "blocks.1.attention.w_g.weight": 1.9920989871025085e-06,
+        "blocks.1.attention.q_norm.weight": 1.9669532775878906e-06,
+        "blocks.1.attention.k_norm.weight": 1.9669532775878906e-06,
+        "blocks.1.attention_norm.weight": 2.0265579223632812e-06,
+        "blocks.1.attention_input_norm.weight": 2.0265579223632812e-06,
+        "blocks.1.routed_experts.w_up_gate": 0.0,
+        "blocks.1.routed_experts.w_down": 0.0,
+        "blocks.1.routed_experts_router.weight": 2.000480890274048e-06,
+        "blocks.1.shared_experts.w_up_gate": 0.0,
+        "blocks.1.shared_experts.w_down": 0.0,
+        "blocks.1.feed_forward_norm.weight": 0.0,
+        "blocks.1.feed_forward_input_norm.weight": 2.0265579223632812e-06,
+        "lm_head.norm.weight": 0.0,
+        "lm_head.w_out.weight": 0.0
+      },
+      {
+        "embeddings.weight": 3.0007213354110718e-06,
+        "blocks.0.attention.A_log": 2.8907554678880842e-06,
+        "blocks.0.attention.dt_bias": 2.9719326448685024e-06,
+        "blocks.0.attention.w_q.weight": 3.0007213354110718e-06,
+        "blocks.0.attention.w_k.weight": 3.0007213354110718e-06,
+        "blocks.0.attention.w_v.weight": 3.0007213354110718e-06,
+        "blocks.0.attention.f_proj_1.weight": 2.9462389647960663e-06,
+        "blocks.0.attention.f_proj_2.weight": 2.946704626083374e-06,
+        "blocks.0.attention.w_b.weight": 2.99699604511261e-06,
+        "blocks.0.attention.q_conv1d.weight": 2.9993243515491486e-06,
+        "blocks.0.attention.k_conv1d.weight": 2.998858690261841e-06,
+        "blocks.0.attention.v_conv1d.weight": 3.0007213354110718e-06,
+        "blocks.0.attention.g_proj_1.weight": 2.9620714485645294e-06,
+        "blocks.0.attention.g_proj_2.weight": 2.9653310775756836e-06,
+        "blocks.0.attention.g_proj_2.bias": 2.9848570193280466e-06,
+        "blocks.0.attention.o_norm.weight": 3.039836883544922e-06,
+        "blocks.0.attention.w_out.weight": 3.0007213354110718e-06,
+        "blocks.0.attention_norm.weight": 3.039836883544922e-06,
+        "blocks.0.attention_input_norm.weight": 2.9802322387695312e-06,
+        "blocks.0.shared_experts.w_up_gate": 3.0007213354110718e-06,
+        "blocks.0.shared_experts.w_down": 3.0007213354110718e-06,
+        "blocks.0.feed_forward_norm.weight": 3.039836883544922e-06,
+        "blocks.0.feed_forward_input_norm.weight": 3.039836883544922e-06,
+        "blocks.1.latent_down_proj.weight": 0.0,
+        "blocks.1.latent_up_proj.weight": 0.0,
+        "blocks.1.attention.w_q.weight": 2.998858690261841e-06,
+        "blocks.1.attention.w_k.weight": 2.99699604511261e-06,
+        "blocks.1.attention.w_v.weight": 3.0007213354110718e-06,
+        "blocks.1.attention.w_out.weight": 3.0007213354110718e-06,
+        "blocks.1.attention.w_g.weight": 2.9834918677806854e-06,
+        "blocks.1.attention.q_norm.weight": 2.86102294921875e-06,
+        "blocks.1.attention.k_norm.weight": 2.86102294921875e-06,
+        "blocks.1.attention_norm.weight": 3.039836883544922e-06,
+        "blocks.1.attention_input_norm.weight": 3.039836883544922e-06,
+        "blocks.1.routed_experts.w_up_gate": 0.0,
+        "blocks.1.routed_experts.w_down": 0.0,
+        "blocks.1.routed_experts_router.weight": 2.998858690261841e-06,
+        "blocks.1.shared_experts.w_up_gate": 0.0,
+        "blocks.1.shared_experts.w_down": 0.0,
+        "blocks.1.feed_forward_norm.weight": 0.0,
+        "blocks.1.feed_forward_input_norm.weight": 3.039836883544922e-06,
+        "lm_head.norm.weight": 0.0,
+        "lm_head.w_out.weight": 0.0
+      }
+    ],
+    "interpretation": "All-zero task rewards imply zero policy advantages; router auxiliary losses drive updates."
+  },
+  "training_contract": [
+    {
+      "active_tokens": 1024,
+      "event": "scores",
+      "groups": {
+        "first_third": {
+          "mean_abs": 0.002448395241138547,
+          "tokens": 344
+        },
+        "last_third": {
+          "mean_abs": 0.0023363169501809515,
+          "tokens": 340
+        },
+        "length_1025_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_gt_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_le_1024": {
+          "mean_abs": 0.0023377789184451103,
+          "tokens": 1024
+        },
+        "middle_third": {
+          "mean_abs": 0.002227323195513557,
+          "tokens": 340
+        }
+      },
+      "histogram_counts": [
+        329,
+        597,
+        97,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "histogram_upper_edges": [
+        0.0010000000474974513,
+        0.004999999888241291,
+        0.009999999776482582,
+        0.019999999552965164,
+        0.05000000074505806,
+        0.10000000149011612,
+        0.25,
+        0.5,
+        1.0,
+        null
+      ],
+      "max_abs": 0.010739326477050781,
+      "p50_upper": 0.004999999888241291,
+      "p95_upper": 0.009999999776482582,
+      "p99_upper": 0.009999999776482582,
+      "rank": 0,
+      "rollout_id": 0,
+      "schema_version": 1
+    },
+    {
+      "auxiliary_denominator": 1180.0,
+      "elapsed_seconds": 40.098109412938356,
+      "event": "optimizer",
+      "local_auxiliary_objective": {
+        "load_balancing": 0.010257867574691772,
+        "router_z": 2.006126165390015e-05
+      },
+      "local_behavior_versions": [
+        0
+      ],
+      "local_microbatches": 4,
+      "local_policy_objective": 0.0,
+      "local_pre_optimizer_gradients": {
+        "dense": {
+          "elements": 13313288,
+          "local_l2": 0.019831122667517742,
+          "missing_parameters": 0
+        },
+        "expert": {
+          "elements": 344064,
+          "local_l2": 0.010669499745499323,
+          "missing_parameters": 0
+        },
+        "router": {
+          "elements": 512,
+          "local_l2": 0.005701838061213493,
+          "missing_parameters": 0
+        }
+      },
+      "lr_next": [
+        1e-06
+      ],
+      "lr_used": [
+        1e-06
+      ],
+      "normalization": {
+        "active_tokens": 1024,
+        "model_tokens": 1180,
+        "samples": 4,
+        "token_denominator": 1024,
+        "world_size": 1
+      },
+      "optimizer_skipped": false,
+      "published_step": 0,
+      "rank": 0,
+      "reduction": "response",
+      "rollout_id": 0,
+      "sampled_model_updates": {
+        "dense": {
+          "sampled_elements": 7176,
+          "sampled_update_l2": 2.5125534389578884e-05
+        },
+        "expert": {
+          "sampled_elements": 1536,
+          "sampled_update_l2": 4.964234128000471e-06
+        },
+        "router": {
+          "sampled_elements": 256,
+          "sampled_update_l2": 3.4385216478958026e-06
+        }
+      },
+      "schema_version": 1,
+      "step": 1
+    },
+    {
+      "active_tokens": 1024,
+      "event": "scores",
+      "groups": {
+        "first_third": {
+          "mean_abs": 0.002403907997663631,
+          "tokens": 344
+        },
+        "last_third": {
+          "mean_abs": 0.0023592444027171417,
+          "tokens": 340
+        },
+        "length_1025_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_gt_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_le_1024": {
+          "mean_abs": 0.0023244833573698997,
+          "tokens": 1024
+        },
+        "middle_third": {
+          "mean_abs": 0.0022093632641960593,
+          "tokens": 340
+        }
+      },
+      "histogram_counts": [
+        325,
+        608,
+        88,
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "histogram_upper_edges": [
+        0.0010000000474974513,
+        0.004999999888241291,
+        0.009999999776482582,
+        0.019999999552965164,
+        0.05000000074505806,
+        0.10000000149011612,
+        0.25,
+        0.5,
+        1.0,
+        null
+      ],
+      "max_abs": 0.013674736022949219,
+      "p50_upper": 0.004999999888241291,
+      "p95_upper": 0.009999999776482582,
+      "p99_upper": 0.009999999776482582,
+      "rank": 0,
+      "rollout_id": 1,
+      "schema_version": 1
+    },
+    {
+      "auxiliary_denominator": 1148.0,
+      "elapsed_seconds": 0.060614429879933596,
+      "event": "optimizer",
+      "local_auxiliary_objective": {
+        "load_balancing": 0.010100371837615967,
+        "router_z": 2.0062541961669924e-05
+      },
+      "local_behavior_versions": [
+        1
+      ],
+      "local_microbatches": 4,
+      "local_policy_objective": 0.0,
+      "local_pre_optimizer_gradients": {
+        "dense": {
+          "elements": 13313288,
+          "local_l2": 0.0085118421117911,
+          "missing_parameters": 0
+        },
+        "expert": {
+          "elements": 344064,
+          "local_l2": 0.004547627638203805,
+          "missing_parameters": 0
+        },
+        "router": {
+          "elements": 512,
+          "local_l2": 0.0029478934593498707,
+          "missing_parameters": 0
+        }
+      },
+      "lr_next": [
+        1e-06
+      ],
+      "lr_used": [
+        1e-06
+      ],
+      "normalization": {
+        "active_tokens": 1024,
+        "model_tokens": 1148,
+        "samples": 4,
+        "token_denominator": 1024,
+        "world_size": 1
+      },
+      "optimizer_skipped": false,
+      "published_step": 1,
+      "rank": 0,
+      "reduction": "response",
+      "rollout_id": 1,
+      "sampled_model_updates": {
+        "dense": {
+          "sampled_elements": 7176,
+          "sampled_update_l2": 2.5025942144881057e-05
+        },
+        "expert": {
+          "sampled_elements": 1536,
+          "sampled_update_l2": 7.80435425605224e-06
+        },
+        "router": {
+          "sampled_elements": 256,
+          "sampled_update_l2": 9.5367431640625e-07
+        }
+      },
+      "schema_version": 1,
+      "step": 2
+    },
+    {
+      "active_tokens": 1024,
+      "event": "scores",
+      "groups": {
+        "first_third": {
+          "mean_abs": 0.002256182737128679,
+          "tokens": 344
+        },
+        "last_third": {
+          "mean_abs": 0.002188388039084042,
+          "tokens": 340
+        },
+        "length_1025_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_gt_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_le_1024": {
+          "mean_abs": 0.002252291887998581,
+          "tokens": 1024
+        },
+        "middle_third": {
+          "mean_abs": 0.0023122591130873738,
+          "tokens": 340
+        }
+      },
+      "histogram_counts": [
+        324,
+        627,
+        72,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "histogram_upper_edges": [
+        0.0010000000474974513,
+        0.004999999888241291,
+        0.009999999776482582,
+        0.019999999552965164,
+        0.05000000074505806,
+        0.10000000149011612,
+        0.25,
+        0.5,
+        1.0,
+        null
+      ],
+      "max_abs": 0.010752677917480469,
+      "p50_upper": 0.004999999888241291,
+      "p95_upper": 0.009999999776482582,
+      "p99_upper": 0.009999999776482582,
+      "rank": 0,
+      "rollout_id": 2,
+      "schema_version": 1
+    },
+    {
+      "auxiliary_denominator": 1268.0,
+      "elapsed_seconds": 1.5068244519643486,
+      "event": "optimizer",
+      "local_auxiliary_objective": {
+        "load_balancing": 0.010136576890945435,
+        "router_z": 1.882185459136963e-05
+      },
+      "local_behavior_versions": [
+        2
+      ],
+      "local_microbatches": 4,
+      "local_policy_objective": 0.0,
+      "local_pre_optimizer_gradients": {
+        "dense": {
+          "elements": 13313288,
+          "local_l2": 0.01222864307522268,
+          "missing_parameters": 0
+        },
+        "expert": {
+          "elements": 344064,
+          "local_l2": 0.006411693558678805,
+          "missing_parameters": 0
+        },
+        "router": {
+          "elements": 512,
+          "local_l2": 0.004553844686597586,
+          "missing_parameters": 0
+        }
+      },
+      "lr_next": [
+        1e-06
+      ],
+      "lr_used": [
+        1e-06
+      ],
+      "normalization": {
+        "active_tokens": 1024,
+        "model_tokens": 1268,
+        "samples": 4,
+        "token_denominator": 1024,
+        "world_size": 1
+      },
+      "optimizer_skipped": false,
+      "published_step": 2,
+      "rank": 0,
+      "reduction": "response",
+      "rollout_id": 2,
+      "sampled_model_updates": {
+        "dense": {
+          "sampled_elements": 7176,
+          "sampled_update_l2": 2.6971429735425813e-05
+        },
+        "expert": {
+          "sampled_elements": 1536,
+          "sampled_update_l2": 1.0228417984122573e-05
+        },
+        "router": {
+          "sampled_elements": 256,
+          "sampled_update_l2": 6.877043295791605e-06
+        }
+      },
+      "schema_version": 1,
+      "step": 3
+    }
+  ],
+  "publication": [
+    {
+      "version": 0,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.0058619799092411995,
+      "export_pack_seconds": 0.0007481193169951439,
+      "transport_load_seconds": 0.009536860976368189,
+      "finalize_seconds": 0.005607660859823227,
+      "total_seconds": 0.021754781249910593,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 1,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.004778659902513027,
+      "export_pack_seconds": 0.0005965735763311386,
+      "transport_load_seconds": 0.009292262140661478,
+      "finalize_seconds": 0.0046858773566782475,
+      "total_seconds": 0.01935349265113473,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 1,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.0025897379964590073,
+      "export_pack_seconds": 0.0006021540611982346,
+      "transport_load_seconds": 0.004960303194820881,
+      "finalize_seconds": 0.00410853885114193,
+      "total_seconds": 0.012260884046554565,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.0050766319036483765,
+      "export_pack_seconds": 0.0005426220595836639,
+      "transport_load_seconds": 0.006818754132837057,
+      "finalize_seconds": 0.004321979824453592,
+      "total_seconds": 0.01676006894558668,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.0026660719886422157,
+      "export_pack_seconds": 0.00048515433445572853,
+      "transport_load_seconds": 0.005503365769982338,
+      "finalize_seconds": 0.004248411860316992,
+      "total_seconds": 0.012903133872896433,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.006470468360930681,
+      "export_pack_seconds": 0.0006846697069704533,
+      "transport_load_seconds": 0.00943075492978096,
+      "finalize_seconds": 0.005928047001361847,
+      "total_seconds": 0.022514110431075096,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.0025653918273746967,
+      "export_pack_seconds": 0.00048556551337242126,
+      "transport_load_seconds": 0.004809078760445118,
+      "finalize_seconds": 0.004365422762930393,
+      "total_seconds": 0.012225569225847721,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 3,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.005406995303928852,
+      "export_pack_seconds": 0.0006050299853086472,
+      "transport_load_seconds": 0.007317244075238705,
+      "finalize_seconds": 0.00479726679623127,
+      "total_seconds": 0.018126636277884245,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 3,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.0025738682597875595,
+      "export_pack_seconds": 0.0004557785578072071,
+      "transport_load_seconds": 0.004597080405801535,
+      "finalize_seconds": 0.004350995644927025,
+      "total_seconds": 0.011977822985500097,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    }
+  ],
+  "limits": [
+    "Random tiny KDA/latent policy; zero task advantages; no learning-quality claim",
+    "One RTX4090 with resident colocation; does not qualify full-model colocation",
+    "Prepared plaintext GSM8K fixtures, not the full SFT chat template"
+  ]
+}

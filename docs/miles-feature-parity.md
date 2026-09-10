@@ -23,7 +23,7 @@ inheritance or environment-variable substitution is implied.
 
 | Profile | Topology and purpose | Starting shape | Evidence / limitation |
 | --- | --- | --- | --- |
-| [tiny-resident](../configs/miles/profiles/tiny-resident.toml) | One GPU shared by a tiny Core model and one SGLang engine | 1 prompt × 4 responses; 2 updates; context 512, response 256; eager decode; Torch attention | Tiny colocated models and separate-process restart have passed. This exact memory fit depends on the chosen fixture. All-zero rewards validate plumbing, not policy learning. |
+| [tiny-resident](../configs/miles/profiles/tiny-resident.toml) | One GPU shared by a tiny Core model and one SGLang engine | 1 prompt × 4 responses; 2 updates; context 512, response 256; eager decode; Torch attention | This profile passed two updates plus a separate-process third update through the public entrypoint with schema-2 checkpoints on the random tiny KDA/latent fixture. Memory fit remains model-dependent. All-zero rewards validate plumbing, not policy learning. |
 | [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two Core EP ranks plus one dedicated SGLang GPU | 4 prompts × 4 responses; 2 updates; context 6144, response 4096; decode graphs through batch 4; FA4 | Derived from the successful full SFT run with two real updates and 64 audited responses. Adds per-step contract diagnostics and explicit prompt admission; this file is not a claim of a new completed run. |
 | [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU allocation; bounded asynchronous generation | 4 prompts × 4 responses; 4 updates; context 2560, response 512; lag ≤1; one collection buffered; eager decode | Candidate for async qualification only. Core's bounded queue and ledger have targeted tests; full-model async endurance, restart and failures need their own run. Replay stays off. |
 
@@ -131,7 +131,7 @@ may themselves have limits; their presence is not a blanket performance claim.
 | --- | --- | --- |
 | Native KDA / latent MoE | Custom Megatron/Bridge model representation and conversion | Core already owns the architecture; adapter constructs it from HF and loads native weights. Full SFT EP2 two-update run passed; longer runs remain. [models](../open_instruct/miles/models.py) |
 | HF initialization / export | HF↔Megatron conversion, config manifests and parity tooling | HF→native Core import and native→HF export replace Bridge. Exact initial serving-weight equality and tiny round trips passed. Broader configurations and conversion parity remain. |
-| RL objective / accumulation | MILES Megatron schedule plus Olmo-specific auxiliary-loss wiring | New arbitrary-objective Core hook, rank/microbatch normalization and optimizer lifecycle. Independent fixed-batch contract suite exists; native EP and matched Megatron measurements define the next gates. [actor](../open_instruct/miles/actor.py), [contract](../open_instruct/miles/contract.py) |
+| RL objective / accumulation | MILES Megatron schedule plus Olmo-specific auxiliary-loss wiring | New arbitrary-objective Core hook, rank/microbatch normalization and optimizer lifecycle. Independent fixed-batch contract suite passed. Native EP1/EP2 moments and recomputation passed twelve replayed-route arms; matched Megatron measurements remain. [EP evidence](measurements/miles-core-native-ep-20260910.json) [actor](../open_instruct/miles/actor.py), [contract](../open_instruct/miles/contract.py) |
 | MoE auxiliary losses | Explicit 0.01 balancing / 1e-5 z-loss and backend scaling | Same coefficients; Core per-sequence router objective with an explicit model-token denominator. Policy-only, auxiliary-only and combined gradient tests matter separately. Equal coefficients do not establish equal training semantics. |
 | Router replay | Layer mapping, replay layout and serving/trainer alignment fixes; live replay has dedicated baseline evidence | `use_rollout_routing_replay` connects captured routes to Core's override and recomputation context. This differs from Megatron's `use_routing_replay`, which Core rejects. Router-gradient tests exist. The first live SGLang attempt failed before updating because the pinned SGLang router stripped expert-ID requests; configuration now requires `use_miles_router=true` for rollout replay. The retry passed two updates, separate-process restart, a third update and a 12-response route/reward audit. Final unscored-token auxiliary semantics and full-model replay remain unqualified. [Evidence](measurements/miles-core-replay-local-20260910.json) |
 | Efficient weight sync | Custom direct exporter, flattened transport, 1 GiB bucket screens and publication instrumentation | Streaming Core exporter replaces Megatron export; existing transport design is reused. EP2 SFT warm publications of 37.0 GB took 3.82/3.83 s. No per-step disk HF conversion. These are one-run measurements, not backend speed parity. [publication](../open_instruct/miles/publication.py) |
@@ -195,8 +195,8 @@ those values cannot establish a matched end-to-end speedup against Megatron.
 
 ## Promotion order
 
-1. Finish fixed-global-batch numerical gates: native EP, recomputation,
-   optimizer moments, isolated auxiliary gradients and restart. Run the same
+1. Extend the passing fixed-global-batch gates (native EP, recomputation,
+   optimizer moments, isolated auxiliary gradients and tiny restart) to a matched
    batch through the customized Megatron trainer under matched semantics.
 2. Qualify each new data/verifier family with immutable revisions and independent
    reward audits. Include nonzero policy signal, per-source denominators,

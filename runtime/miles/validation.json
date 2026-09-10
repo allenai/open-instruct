@@ -239,15 +239,23 @@
       "evidence": "docs/measurements/miles-core-contract-followup-20260910.json",
       "ep2": {
         "id": "01M26G4QJBGWN4XJ14BZSY0XPM",
-        "status": "running",
+        "status": "passed",
         "gpu_count": 2,
         "job_id": "01M26G4QP0AXXNX2MW6G38JTZ1",
         "observed_status": {
           "created": "2026-09-10T20:28:57.802908Z",
           "scheduled": "2026-09-10T20:34:21.745257Z",
           "started": "2026-09-10T20:40:22.78754Z",
+          "exited": "2026-09-10T20:51:49.462393Z",
+          "finalized": "2026-09-10T20:51:51.736297Z",
+          "exitCode": 0,
+          "idleSince": "2026-09-10T20:51:49.406805Z",
           "ready": "2026-09-10T20:40:22.079301Z"
-        }
+        },
+        "exit_code": 0,
+        "result_dataset": "01M26G4QJH6NSD7WWGHYRTR3V1",
+        "evidence": "docs/measurements/miles-core-native-ep-20260910.json",
+        "arms": 12
       }
     },
     "local_datasources": {
@@ -272,7 +280,7 @@
     "sft_datasources": {
       "id": "01M26GC6F3TRRQEXR9HJQR0XGG",
       "source_commit": "4a17027ef9f6656579a3f474286c93f7569a5630",
-      "status": "queued; workspace allocation slot limit",
+      "status": "running",
       "tasks": [
         "math",
         "ifeval"
@@ -297,6 +305,25 @@
       "response_tokens": 256,
       "context_tokens": 512,
       "validation": "Pinned MILES parser plus explicit check against local fixture HF max_position_embeddings"
+    },
+    "tiny_default_lifecycle": {
+      "passed": true,
+      "checkpoint_schema": 2,
+      "optimizer_steps": 3,
+      "audited_responses": 12,
+      "public_entrypoint": true,
+      "separate_process_resume": true,
+      "evidence": "docs/measurements/miles-core-tiny-default-20260910.json"
+    },
+    "training_contract_final": {
+      "passed": true,
+      "source_commit": "8d93389f446deb10b1c9f3d8a491a826b4e63494",
+      "runtime_tests_passed": 90,
+      "skipped": 0,
+      "changed_sources": [],
+      "host_tests_passed": 32,
+      "style_quality": "passed",
+      "evidence": "docs/measurements/miles-core-contract-final-20260910.json"
     }
   },
   "limitations": [
