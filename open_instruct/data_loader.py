@@ -561,6 +561,18 @@ class StreamingDataLoaderConfig:
 
     # Batching
     async_steps: int = 8
+    """How many training steps generation may run ahead of the learner.
+
+    ``k >= 1``: ``k`` batches of prompts are prefilled and every finished prompt is
+    replaced immediately, so batch N+1 is generated under the weights vLLM holds
+    while step N trains (weights after step N-1) -- ``training_step - model_step``
+    bottoms out at ~2 even for ``k = 1``. ``0``: fully synchronous, slime-style --
+    the next batch's prompts are only pushed after the post-step weight sync has
+    landed in vLLM, so every rollout is sampled from the policy that will be
+    trained on it (``training_step - model_step == 1``). No overlap: learners idle
+    during generation and engines idle during training. Incompatible with
+    ``active_sampling``.
+    """
     num_samples_per_prompt_rollout: int = 4
     num_unique_prompts_rollout: int = 16
 
@@ -720,8 +732,13 @@ class StreamingDataLoaderConfig:
                 "`filter_zero_std_samples` cannot be True when `num_samples_per_prompt_rollout` is 1, "
                 "as the reward standard deviation will always be 0, causing all samples to be filtered."
             )
-        if self.async_steps < 1:
-            raise ValueError("`async_steps` must be greater than 0. Fully synchronous training is not supported.")
+        if self.async_steps < 0:
+            raise ValueError("`async_steps` must be >= 0 (0 = fully synchronous generation/training).")
+        if self.async_steps == 0:
+            logger.info(
+                "async_steps=0: synchronous mode -- each batch is generated only after the previous step's "
+                "weights are synced to vLLM; expect step time ~= generation + training."
+            )
         if not 0.0 <= self.mask_non_submitting_completions_percent < 1.0:
             raise ValueError("`mask_non_submitting_completions_percent` must be in [0.0, 1.0).")
         if self.mask_non_submitting_completions_percent > 0.0 and not self.mask_non_submitting_completions:
@@ -1009,6 +1026,7 @@ def accumulate_inference_batches(
     active_sampling: bool = False,
     filter_zero_std_samples: bool = False,
     replenish_prompts: bool = False,
+    replenish_on_drop_only: bool = False,
     no_resampling_pass_rate: float | None = None,
     iter_dataloader: HFDataLoader | None = None,
     param_prompt_Q: ray_queue.Queue | None = None,
@@ -1134,7 +1152,12 @@ def accumulate_inference_batches(
         raw_query = example[RAW_PROMPT_KEY]
         sample_active_tools = example.get(TOOLS_COLUMN_KEY)
 
-        if replenish_prompts:
+        # Synchronous mode (`replenish_on_drop_only`): the next batch's prompts are
+        # pushed by the caller only after the post-step weight sync, so a finished
+        # prompt must NOT pull in a replacement here (that would start generating
+        # the next batch under the current, soon-to-be-stale weights). Dropped
+        # (stale) results above still replenish so the batch can fill.
+        if replenish_prompts and not replenish_on_drop_only:
             assert iter_dataloader is not None
             assert param_prompt_Q is not None
             example = next(iter_dataloader)
@@ -1575,6 +1598,8 @@ class DataPreparationActor:
         self.metrics: dict[int, dict] = {}
         self.current_prepared_step = -1
         self._last_consumed_step = -1
+        # Synchronous mode: highest prep step the trainer has released (see release_step).
+        self._released_through_step = -1
         self.lock = threading.Lock()
         self.training_step = 0
         self.total_samples_written = 0
@@ -1597,6 +1622,9 @@ class DataPreparationActor:
             return
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="DataPrepActor")
         self._prep_future = self._executor.submit(self._data_preparation_loop)
+        # The engines hold the right weights for the first step (initial sync runs
+        # before start()), so the first prep step is released up front.
+        self._released_through_step = max(self._released_through_step, self.training_step)
         logger.info(f"[DataPreparationActor] Started preparation loop from training_step={self.training_step}")
 
     def _data_preparation_loop(self):
@@ -1607,6 +1635,9 @@ class DataPreparationActor:
             save_rollout_metadata(self.config.rollouts_save_path, self.run_name, self.model_name)
             self.metadata_saved = True
 
+        sync_mode = self.config.async_steps == 0
+        # Synchronous mode prefills nothing: each batch's prompts are pushed below,
+        # once the trainer has released that step (weights synced to vLLM).
         num_initial_prompts = self.config.async_steps * self.global_batch_size
         logger.info(f"[DataPreparationActor] Pushing {num_initial_prompts} initial prompts to param_prompt_Q")
         for _ in range(num_initial_prompts):
@@ -1623,11 +1654,36 @@ class DataPreparationActor:
 
         for step in range(self.training_step, self.num_training_steps):
             generation_idle_wait_start_time = time.perf_counter()
-            while step - self._last_consumed_step > self.config.async_steps:
-                logger.info(
-                    f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
-                )
-                time.sleep(0.1)
+            if sync_mode:
+                # Prep step `step` feeds trainer step `step + 1`, which must train on
+                # rollouts from the weights after trainer step `step`; the main loop
+                # calls release_step(step) once that sync has landed in vLLM.
+                last_log = time.perf_counter()
+                while self._released_through_step < step:
+                    if time.perf_counter() - last_log > 60:
+                        logger.info(
+                            f"[DataPreparationActor] Step {step}: synchronous mode, waiting for the trainer to "
+                            f"release step {step} (released through {self._released_through_step})."
+                        )
+                        last_log = time.perf_counter()
+                    time.sleep(0.1)
+                for _ in range(self.global_batch_size):
+                    add_prompt_to_generator(
+                        next(self.iter_dataloader),
+                        self.iter_dataloader._epoch,
+                        self.param_prompt_Q,
+                        self.generation_config,
+                        is_eval=False,
+                        base_env_config=self.base_env_config,
+                        ground_truth_overrides=self.ground_truth_overrides,
+                        image_prewarm_actors=self.image_prewarm_actors,
+                    )
+            else:
+                while step - self._last_consumed_step > self.config.async_steps:
+                    logger.info(
+                        f"[DataPreparationActor] Step {step}: waiting for step {self._last_consumed_step + self.config.async_steps} to be consumed. Consider increasing training compute."
+                    )
+                    time.sleep(0.1)
             generation_idle_wait_time = time.perf_counter() - generation_idle_wait_start_time
 
             logger.info(
@@ -1644,13 +1700,14 @@ class DataPreparationActor:
                 active_sampling=self.config.active_sampling,
                 filter_zero_std_samples=self.config.filter_zero_std_samples,
                 replenish_prompts=True,
+                replenish_on_drop_only=sync_mode,
                 no_resampling_pass_rate=self.config.no_resampling_pass_rate,
                 iter_dataloader=self.iter_dataloader,
                 param_prompt_Q=self.param_prompt_Q,
                 training_step=step,
                 verbose=self.verbose,
                 max_possible_score=self.config.max_possible_score,
-                max_result_age_steps=self.config.async_steps,
+                max_result_age_steps=None if sync_mode else self.config.async_steps,
                 base_env_config=self.base_env_config,
                 ground_truth_overrides=self.ground_truth_overrides,
                 image_prewarm_actors=self.image_prewarm_actors,
@@ -1996,6 +2053,12 @@ class DataPreparationActor:
                 self.prepared_data[step] = collated_data
                 self.metrics[step] = step_metrics
                 self.current_prepared_step = step
+
+    def release_step(self, step: int) -> None:
+        """Synchronous mode: the trainer finished step ``step`` (1-based trainer
+        numbering == prep step ``step``'s consumer minus one) and its weights are in
+        vLLM, so prep step ``step`` may start generating."""
+        self._released_through_step = max(self._released_through_step, step)
 
     def get_data(self, rank: int, step: int) -> dict:
         """Called by each rank's StreamingDataLoader. Blocks until data ready."""

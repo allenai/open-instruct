@@ -599,6 +599,60 @@ class GrpoIntegrationTests(TestGrpoFastBase):
         self.assertEqual(reward_metrics["model_step_min"], 8.0)
         self.assertEqual(reward_metrics["model_step_max"], 10.0)
 
+    def test_accumulate_inference_batches_replenish_on_drop_only(self):
+        """Synchronous mode: finished prompts must not pull replacements into the
+        generator (the caller pushes the next batch after the weight sync); only
+        dropped (stale) results do."""
+        num_prompts = 2
+        tokenizer, _ = self.create_mock_tokenizer_and_reward_fn()
+        inference_results_Q = ray_queue.Queue(maxsize=4)
+        prompt_Q = ray_queue.Queue(maxsize=4)
+        self._ray_queues.extend([inference_results_Q, prompt_Q])
+
+        queries, ground_truths, datasets, raw_queries, _ = self.create_test_data(3)
+        mock_dataset = self.create_mock_dataset(queries, ground_truths, datasets, raw_queries)
+
+        class FakeDataLoader:
+            _epoch = 0
+
+            def __init__(self, dataset):
+                self.dataset = dataset
+                self.index = 0
+
+            def __next__(self):
+                example = self.dataset[self.index % len(self.dataset)]
+                self.index += 1
+                return example
+
+        inference_results_Q.put(self.create_mock_result(0, "0_0", model_step=1))
+        inference_results_Q.put(self.create_mock_result(1, "0_1", model_step=10))
+        inference_results_Q.put(self.create_mock_result(2, "0_2", model_step=10))
+
+        mock_generation_config = Mock()
+        mock_generation_config.n = 1
+
+        mock_model_dims = self.create_llama7b_model_dims()
+        _, batch, reward_metrics, _ = data_loader_lib.accumulate_inference_batches(
+            inference_results_Q,
+            mock_generation_config,
+            num_prompts=num_prompts,
+            model_dims=mock_model_dims,
+            tokenizer=tokenizer,
+            dataset=mock_dataset,
+            base_env_config=EnvConfig(),
+            replenish_prompts=True,
+            replenish_on_drop_only=True,
+            iter_dataloader=FakeDataLoader(mock_dataset),
+            param_prompt_Q=prompt_Q,
+            training_step=10,
+            max_result_age_steps=2,
+        )
+
+        self.assertEqual(batch.indices, [1, 2])
+        self.assertEqual(reward_metrics["stale_results_dropped"], 1.0)
+        # Exactly one replacement: for the stale drop, none for the two kept results.
+        self.assertEqual(prompt_Q.qsize(), 1)
+
     @unittest.skip("Timing-sensitive test that is flaky in CI environments")
     def test_accumulate_waits_for_all_engines(self):
         """Test that accumulate_inference_batches waits for all engines."""
@@ -985,6 +1039,25 @@ class TestDataPreparation(TestGrpoFastBase):
                         continue
                     first_pad_idx = padding_mask.nonzero(as_tuple=True)[0][0].item()
                     self.assertTrue(torch.all(row[first_pad_idx:] == pad_token_id))
+
+
+class TestStreamingDataLoaderConfigAsyncSteps(unittest.TestCase):
+    """`async_steps == 0` is synchronous mode; negative values and active_sampling
+    with it are rejected."""
+
+    def test_zero_is_synchronous_mode(self):
+        config = data_loader_lib.StreamingDataLoaderConfig(async_steps=0)
+        self.assertEqual(config.async_steps, 0)
+
+    def test_negative_rejected(self):
+        with self.assertRaisesRegex(ValueError, "async_steps"):
+            data_loader_lib.StreamingDataLoaderConfig(async_steps=-1)
+
+    def test_active_sampling_requires_async(self):
+        with self.assertRaises(AssertionError):
+            data_loader_lib.StreamingDataLoaderConfig(
+                async_steps=0, active_sampling=True, filter_zero_std_samples=True
+            )
 
 
 if __name__ == "__main__":

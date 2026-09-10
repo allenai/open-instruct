@@ -2619,19 +2619,22 @@ def weight_sync_thread(
                     desc="[Weight Sync Thread] Waking up vLLM engines",
                     enable=False,
                 )
+                # Label the engines BEFORE un-pausing the actors: new requests are
+                # only admitted once should_stop flips back, so every rollout that
+                # starts after this sync carries the new model_step. (Synchronous
+                # mode releases the next batch the moment should_stop is False.)
+                if target_model_step is not None:
+                    ray_get_with_progress(
+                        [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
+                        desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
+                        enable=args.verbose,
+                    )
         except Exception as e:
             logger.exception("[Weight Sync Thread] Weight Sync failed")
             raise RuntimeError from e
         finally:
             ray.get(actor_manager.set_should_stop.remote(False))
             logger.debug("[Weight Sync Thread] Set should_stop to False after weight sync")
-
-            if target_model_step is not None:
-                ray_get_with_progress(
-                    [engine.set_model_step.remote(target_model_step) for engine in vllm_engines],
-                    desc=f"[Weight Sync Thread] Marking vLLM model step as {target_model_step}",
-                    enable=args.verbose,
-                )
 
         # Calculate distribution statistics
         sync_time_stats = {
@@ -3284,11 +3287,20 @@ def run_training(
         if weight_sync_trigger is not None:
             logger.debug(f"[Main Thread] Triggered weight sync for step {training_step}")
             weight_sync_trigger.notify(step=training_step)
+            if streaming_config.async_steps == 0:
+                # Synchronous mode: nothing else can proceed until the new weights
+                # are in vLLM, so block here (pause seen -> resume seen) before
+                # releasing the next batch's generation.
+                with Timer("[Main Thread] ⏳ Waiting for weight sync (synchronous mode)"):
+                    health_check_fn(weight_sync_thread_future, expect_new_weight_sync=True)
         elif training_step == resume_training_step:
             # Non-ZeRO-3 runs initialise weight sync after the first training
             # step. ZeRO-3 is handled pre-loop via a dummy step, so
             # weight_sync_trigger is already set in that case.
             weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync()
+        if streaming_config.async_steps == 0:
+            # Prep step `training_step` feeds trainer step `training_step + 1`.
+            ray.get(_data_prep_actor.release_step.remote(training_step))
 
         last_eval_collected = maybe_evaluate(
             args,
@@ -3637,7 +3649,7 @@ def main(
         logger.info(f"Restored episode count: {episode}")
 
     # Create additional queues (main queues already created above)
-    weight_sync_metrics_Q = Queue(maxsize=streaming_config.async_steps)
+    weight_sync_metrics_Q = Queue(maxsize=max(1, streaming_config.async_steps))
 
     stop_event = threading.Event()
     executor = futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="grpo")
