@@ -404,10 +404,18 @@ run_one_model() {
     done
     log "vllm ready for ${served} after ${SECONDS}s"
 
-    # stream partial traces out while generating
+    # Stream partial traces out, and surface the telemetry vLLM already emits.
+    # Trace counts alone cannot distinguish "KV-bound" from "concurrency-starved"
+    # from "the traces are simply long" -- but Running/Waiting/KV-usage can, and
+    # vLLM logs them every few seconds to a file nobody was reading.
     ( while true; do sleep "$SYNC_INTERVAL"
         cp "$traces" "$store" 2>/dev/null || true
         [ -f "$traces" ] && log "sync: $(wc -l < "$traces") traces for ${served}"
+        grep -aoE "Avg generation throughput:[^,]*|Running: [0-9]+ reqs|Waiting: [0-9]+ reqs|GPU KV cache usage: [0-9.]+%|Prefix cache hit rate: [0-9.]+%" \
+            "$vllm_log" 2>/dev/null | tail -5 | paste -sd' ' - | sed 's/^/  vllm: /' || true
+        nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw \
+            --format=csv,noheader,nounits 2>/dev/null \
+            | awk -F', ' '{printf "gpu%s %s%% %sMiB %sW  ", $1,$2,$3,$4} END{print ""}' | sed 's/^/  util: /' || true
       done ) &
     local sync_pid=$!
 
