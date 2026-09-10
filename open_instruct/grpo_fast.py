@@ -803,17 +803,20 @@ class PolicyTrainerRayProcess(RayProcess):
         if ref_logprobs is not None:
             ref_logprobs = torch.where(response_mask, ref_logprobs, torch.zeros_like(ref_logprobs))
 
-        if loss_denominator_mode == "sequence":
-            loss_weights, _ = grpo_utils._sequence_loss_weights(response_mask, rollout_sample_ids, self._sp_group)
-            current_global_count = loss_weights.sum().float().detach()
-        else:
-            current_global_count = response_mask.sum().float().detach()
-        dist.all_reduce(current_global_count, op=dist.ReduceOp.SUM)
-        # Drain all queued device work through this collective so ranks enter
-        # ZeRO-3 backward with bounded skew.
+        scale = grpo_utils.tiled_grpo_loss_scale(
+            response_mask,
+            loss_denominator,
+            grpo_utils.deepspeed_gradient_reduction_divisor(
+                self.args.world_size, self.args.sequence_parallel_size, self.args.deepspeed_stage
+            ),
+            loss_denominator_mode,
+            rollout_sample_ids,
+            self._sp_group,
+        )
+        # Drain queued device work and keep ranks entering ZeRO-3 backward
+        # with bounded skew, without averaging their distinct local normalizers.
+        dist.barrier()
         torch.cuda.synchronize()
-        dp_world_size = self.args.world_size // self.args.sequence_parallel_size
-        scale = current_global_count * dp_world_size / (self.args.world_size * float(loss_denominator))
         loss, kl_avg, clipfrac, ratio_avg = grpo_utils.tiled_grpo_lm_head_loss(
             lm_head=lm_head,
             hidden_states=hidden_states,
@@ -1383,10 +1386,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     else:
                         loss = masked_mean(per_token_loss_BT, response_mask_BT, None, loss_denominator)
 
-                    # we already took world size into account via the tokens
-                    # but deepspeed will try to average over ranks, so multiply back
-                    # up, adjusting for the sequence parallel size (adjust by dp world size).
-                    loss *= self.args.world_size // self.args.sequence_parallel_size
+                    # The denominator is global; undo DeepSpeed's gradient averaging.
+                    loss *= grpo_utils.deepspeed_gradient_reduction_divisor(
+                        self.args.world_size, self.args.sequence_parallel_size, self.args.deepspeed_stage
+                    )
 
                     # Clear CUDA cache before backward pass to free memory for reduce_scatter operations
                     torch.cuda.empty_cache()

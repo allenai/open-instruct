@@ -968,6 +968,7 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         else:
             loss_weights_2d = mask_2d.to(dtype=torch.float32)
             loss_denom = loss_weights_2d.sum().clamp_min(1.0)
+        loss_denom = loss_denom.clamp_min(1.0)
         loss_weights = loss_weights_2d.reshape(-1)
         metric_denom = mask_2d.to(dtype=torch.float32).sum()
         incoming_grad = (loss_scale.detach().to(dtype=torch.float32) / loss_denom).reshape(())
@@ -1095,6 +1096,36 @@ class TiledGRPOLMHeadLoss(torch.autograd.Function):
         if isinstance(grad, torch.Tensor):
             x_grad = x_grad * grad.to(dtype=x_grad.dtype)
         return (None, x_grad, *([None] * 25))
+
+
+def deepspeed_gradient_reduction_divisor(world_size: int, sequence_parallel_size: int, zero_stage: int) -> int:
+    """Divisor used by the trainer's DeepSpeed gradient reduction configuration.
+
+    ZeRO-3 defaults to reduce_scatter=True, whose coalesced reduction averages
+    over the full sequence-data-parallel group. Stages 0/1/2 compensate for SP
+    and divide by the data-parallel size instead.
+    """
+    return world_size if zero_stage == 3 else world_size // sequence_parallel_size
+
+
+def tiled_grpo_loss_scale(
+    response_mask: torch.Tensor,
+    loss_denominator: float,
+    gradient_reduction_divisor: int,
+    loss_denominator_mode: str = "token",
+    rollout_sample_ids: torch.Tensor | None = None,
+    sequence_process_group: dist.ProcessGroup | None = None,
+) -> torch.Tensor:
+    """Replace the tiled kernel's local normalization with the global denominator."""
+    if loss_denominator_mode == "sequence":
+        _, normalizer = _sequence_loss_weights(response_mask, rollout_sample_ids, sequence_process_group)
+    else:
+        normalizer = response_mask.sum().float()
+    # Match the kernel's clamping, including shards with no response tokens.
+    normalizer = normalizer.clamp_min(1.0).detach()
+    if loss_denominator <= 0:
+        return torch.zeros_like(normalizer)
+    return normalizer * gradient_reduction_divisor / loss_denominator
 
 
 def tiled_grpo_lm_head_loss(
