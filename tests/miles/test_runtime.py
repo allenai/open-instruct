@@ -120,6 +120,18 @@ def test_real_miles_loss_core_update_and_native_resume(parsed_args, tmp_path, mo
         worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
         worker.args = args
         worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
+        # Exercise publication from the actual wrapped train module, not just
+        # conversion of an unwrapped standalone model.
+        exported = models.export_state(worker.train_module, worker.hf_config)
+        reference = AutoModelForCausalLM.from_pretrained(
+            args.hf_checkpoint, trust_remote_code=True, torch_dtype=torch.bfloat16
+        )
+        assert set(exported) == set(reference.state_dict())
+        for name, value in reference.state_dict().items():
+            # HF reload promotes KDA decay/bias parameters to FP32. The fixture
+            # checkpoint stored BF16 values; require exact values across that promotion.
+            torch.testing.assert_close(exported[name], value, rtol=0, atol=0, check_dtype=False)
+        del reference, exported
         worker.model = worker.train_module.model
         worker.optimizer = worker.train_module.optim
         worker.lr_scheduler = scheduler.CoreLRScheduler(args, worker.optimizer)

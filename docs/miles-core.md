@@ -63,6 +63,66 @@ The pinned image also needs the existing olmo-miles FLA 0.5.2/Triton compatibili
 
 Publication pauses generation, transfers weights, commits the optimizer-step version, and resumes generation. Dense conversion gathers one parameter at a time. MoE conversion stages the full unsharded model on CPU and still needs GPU space for one gathered expert parameter. This is not yet a measured large-model publication implementation. HF evaluation exports include the tokenizer and MILES completion marker.
 
+## Local MoE task and restart check
+
+`tests/miles/local_moe.py` exercises real GSM8K verification, SGLang sampling,
+MILES advantages/loss, native Core MoE updates, publication, and restart on one
+24 GB RTX 4090. The trained local fixture is
+`~/proj/OLMo-core/runs/local-4090-moe/step1090`: 32,447,104 parameters, two layers,
+eight experts, top two routing, conventional attention. Its older checkpoint
+stores flat FP32 optimizer master parameters. Preparation reads those parameters,
+exports BF16 HF weights, checks an exact BF16 roundtrip, and compares native/HF
+logits (observed cosine 0.9999961). The source checkpoint is read-only.
+
+Inside the built image, with checkpoint, GPT2 tokenizer, cached public RLVR GSM8K
+parquet, and a writable output directory mounted:
+
+```bash
+python tests/miles/local_moe.py prepare /validation/local-moe \
+  --source /source/step1090 --tokenizer /tokenizer --dataset /data/train.parquet
+python tests/miles/local_moe.py run /validation/local-moe
+python tests/miles/local_moe.py run /validation/local-moe --resume
+python tests/miles/local_moe.py audit /validation/local-moe
+```
+
+For a self-contained trial without a trained checkpoint, replace `prepare` with
+`bootstrap /validation/public-toy-moe`. Bootstrap initializes a smaller random
+conventional MoE and downloads pinned public GPT2 tokenizer and GSM8K revisions.
+Use that output path for the subsequent commands. This needs network access only
+for bootstrap. Run and audit can execute offline. GPU Docker requires the NVIDIA
+container toolkit or explicit device/driver-library mounts on this host.
+
+The task slice strips reference assistant solutions and uses a simple completion
+prompt ending in `Answer:`; it is not the production chat template. Four responses
+per prompt are scored by the actual `GSM8KVerifier`. Two fresh iterations and one
+iteration after restart produced 12 responses under versions 0, 1, and 2. Audit
+independently recomputes rewards, checks finite log probabilities, verifies the
+prompt cursor and versions, and checks native master parameters changed. All
+observed task rewards were zero: policy advantages were zero, and MoE auxiliary
+losses drove the updates. This proves lifecycle plumbing, not learning quality.
+
+The image now includes the verifier's missing Python dependencies and validates
+positive/negative GSM8K answers during build. Live MoE export must recognize
+Core's `MultiGroupDDP` wrapper; runtime regression tests exercise that path.
+
+A bounded public-input Beaker trial uses the required committed-image wrapper:
+
+```bash
+MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
+  ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_core_moe.sh
+```
+
+It requests one Jupiter GPU, a positive 15-minute allocation window, a 20-minute
+timeout, and saves restart/audit evidence under `/output`. Saving is enabled here
+because native restart is the acceptance objective. The launcher uses Beaker's
+CLI schema because the installed mason SDK lacks `minRuntime`. It generates
+fresh random weights in the allocation and fetches public task data; no local
+trained model is uploaded. It does not run the repository GPU pytest script and
+must not be cited as `GPU_TESTS=` evidence. The previous olmo-miles lessons applied
+here are a pinned compiled runtime, baked source overlay, local preflight,
+bounded workload, explicit allocation window, and checking artifacts after exit.
+Disaggregated placement and faster publication need separate qualification.
+
 ## Validation and remaining acceptance work
 
 Verified locally on an RTX 4090:
@@ -94,7 +154,7 @@ The following remain required before deleting old GRPO code:
 | Area | Current state / missing acceptance |
 | --- | --- |
 | Dense models | Tiny Llama, Qwen2, Qwen3, Olmo2 numerical parity; real training-scale model qualification remains |
-| Conventional Olmo3Moe | Factory, native optimizer/checkpoint and export code present; full HF/Core/SGLang and multi-rank EP qualification remains |
+| Conventional Olmo3Moe | Real local 32.45M MoE GSM8K lifecycle, initial serving-weight equality, native/HF parity, updates and separate-process restart verified; larger-model and multi-rank EP qualification remains |
 | KDA / latent Olmo Hybrid | Native components and bidirectional weight conversion come from the gdn2 base; factory, exact HF weight roundtrips, GPU updates and native checkpoint restore tested; full HF/Core/SGLang numerical and multi-rank qualification remains |
 | Routing replay | Router/recompute gradients tested; serving route alignment, final unscored token's auxiliary loss, and full-model replay qualification remain |
 | Tools / environments | Masks survive the adapter; the complete open-instruct multi-turn environment rollout bridge remains to be migrated |

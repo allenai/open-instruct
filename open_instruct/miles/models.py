@@ -193,7 +193,8 @@ def iter_export_state(module, hf):
     MoE conversion stages its full unsharded state on CPU. Its expert all-gather
     still needs room for one complete expert parameter on each EP rank.
     """
-    if isinstance(module.model, OLMoDDPModel):
+    # Core wraps the live MoE model in MultiGroupDDP, including at world size 1.
+    if isinstance(module, train_transformer.OLMoDDPTrainModule) or isinstance(module.model, OLMoDDPModel):
         yield from olmo3.gather_olmo3_moe_hf_state(module.model, hf, cpu=True).items()
         return
     for name, value in module.model.state_dict().items():

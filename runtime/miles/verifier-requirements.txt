@@ -1,0 +1,4 @@
+# Missing registry imports in the pinned compiled runtime; match open-instruct pins.
+langdetect==1.0.9
+immutabledict==1.2.0
+nltk==3.9.2

@@ -38,6 +38,36 @@
     "source_patch_reconstruction": "indexed full-index diff hashes exactly match the lock",
     "core_owned_factory_conversion_objective_and_replay_pytest": {
       "passed": 13
+    },
+    "local_trained_moe_gsm8k": {
+      "passed": true,
+      "source": "~/proj/OLMo-core/runs/local-4090-moe/step1090",
+      "parameters": 32447104,
+      "topology": "one RTX 4090, colocated SGLang/Core; 2 layers, 8 experts, top 2",
+      "image_id": "sha256:c5f15a4592d8f172b668ab81a0f50531047d1dea90b8d3a7d7ac7c3b6c42b673",
+      "native_hf_logit_cosine": 0.9999961256980896,
+      "bf16_weight_roundtrip": "exact",
+      "optimizer_steps": 3,
+      "separate_process_resume": true,
+      "independently_verified_samples": 12,
+      "rollout_versions": [
+        0,
+        1,
+        2
+      ],
+      "all_rewards_zero": true,
+      "parameter_updates": "MoE auxiliary losses; zero policy advantages",
+      "artifact_directory": "/tmp/miles-validation/local-moe",
+      "logs": "/tmp/miles-local-moe-{run,resume,audit}.log"
+    },
+    "host_adapter_verifier_utils_pytest": {
+      "passed": 171,
+      "note": "Hash-verified Git LFS fixture bodies were temporarily materialized for dataset tests."
+    },
+    "wrapped_export_runtime_gpu_pytest": {
+      "passed": 15,
+      "image_id": "sha256:60890d004c1c338a2d29b267ba4d7c0f202f3c2f3f76840386c4ff8eba34ffa4",
+      "includes": "Live wrapped MoE initial export equality, GPU updates and native restore for Qwen3, KDA, KDA+latent"
     }
   },
   "limitations": [
