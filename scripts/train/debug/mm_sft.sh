@@ -18,7 +18,7 @@ uv run python mason.py \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
-    --description "Multimodal SFT (Molmo2 stage 2) smoke test, 2 GPUs." \
+    --description "open-instruct-multimodal: smoke test (Molmo2 stage 2), 2 GPUs." \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \

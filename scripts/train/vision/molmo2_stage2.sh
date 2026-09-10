@@ -30,7 +30,7 @@ uv run python mason.py \
     --workspace ai2/open-instruct-dev \
     --priority urgent \
     --image "$BEAKER_IMAGE" \
-    --description "Molmo2 stage-2 multimodal SFT: image-only-v9 + Dolci via open_instruct_sft." \
+    --description "open-instruct-multimodal: Molmo2 stage-2 merged stage (image-only-v9 + Dolci via open_instruct_sft)." \
     --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
