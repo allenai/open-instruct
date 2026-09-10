@@ -314,3 +314,83 @@ from this bounded run; the earlier eager attempt is not a matched benchmark.
 Cold model initialization and kernel compilation remain substantial costs.
 The source commit, arguments, checkpoint identity, full audit and phase metrics
 are recorded in `docs/measurements/miles-core-sft-20260910.json`.
+
+## Training contract checks
+
+`python scripts/miles/check_contract.py OUTPUT` runs the contract suite inside
+our pinned image and writes `contract.json`, JUnit XML and the complete test log.
+The JSON includes source hashes, runtime versions and numerical measurements.
+It uses random fixtures and does not download or expose trained checkpoints.
+
+The independent policy reference explicitly indexes next-token logits and
+computes clipped PPO terms without calling MILES' slicing, loss or reduction
+helpers. Unequal response lengths, interior masked tokens, both advantage
+signs, clipping, entropy and reference KL are exercised. The real MILES loss
+and Core custom-objective hook are compared against it with microbatch sizes
+1/2/4 and one/two real Gloo processes. FP32 tolerances are `atol=2e-7`,
+`rtol=2e-6` for loss, gradients and AdamW updates. This establishes reduction
+algebra, not native Core expert-parallel execution.
+
+Auxiliary tests independently calculate per-sequence load balancing and router
+z-loss. They compare gradient scaling under different microbatch/rank splits.
+Router tests fix expert IDs and verify policy-only, auxiliary-only and combined
+gradients, including activation recomputation. Native GPU tests compare the
+next update after restoring a checkpoint with uninterrupted execution, requiring
+exact model and optimizer state and identical scheduler/clock state for tiny
+Qwen3, KDA and KDA+latent models.
+
+For native EP, launch after committing through the normal image wrapper:
+
+```bash
+MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
+  ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_core_contract.sh
+```
+
+This uses two Holmes GPUs, a random tiny KDA+latent model and a fixed mixed-reward
+batch. It compares Core EP1/EP2 with recomputation on/off, separately for policy,
+auxiliary and combined objectives. Routes are recorded once from Core and reused;
+this does not certify SGLang route capture. The comparison includes Adam first
+and second moments as well as FP32 master parameters: first-step Adam parameter
+updates alone can conceal uniform gradient-scaling errors. The declared BF16
+screen is relative L2 error below 0.05 in each router/expert/dense state category.
+This is a bounded numerical screen, not an exact-equality or full-model claim.
+Only compact metrics are placed in Beaker results. Random input and state files
+remain in the job's temporary directory.
+
+Every real training step now records `training_contract_rankN.jsonl` beneath
+`miles.save`, when supplied, and emits the same records to logs. Records include:
+
+- Actual global sample, active-token and model-token counts; policy and auxiliary
+  denominators; local accumulation count; response-versus-token reduction mode.
+- Local normalized policy objective and weighted auxiliary terms separately.
+  Averaging these local objectives across ranks gives the corresponding global
+  objective; they are not already global metrics.
+- Consumed/published policy versions, LR used/next, completed step and elapsed time.
+- Globally reduced probability-error histograms, exact maximum, upper-bin estimates
+  of p50/p95/p99, response-position thirds and response-length buckets. A null
+  quantile upper bound means the overflow bin (>1.0), not missing observations.
+
+`core.diagnostic_interval=N` additionally measures local gradient norms before
+optimizer intake and sampled model updates every N optimizer steps. These are
+explicitly not global optimizer norms: expert gradients may still need Core's
+EP-MP rescaling, and FP8 stores outside `named_parameters` are outside coverage.
+Update samples retain at most 256 values per named parameter, rather than cloning
+the model. With `check_weight_update_equal=true`, the driver also checks serving
+weights after every N rollout publications (the initial check remains enabled).
+The interval defaults to zero, leaving these expensive probes disabled.
+
+Runtime failures include non-finite active inputs/rewards, empty effective
+batches, inconsistent rank schedules, stale policy versions, non-finite losses,
+scheduler/clock disagreement and skipped optimizer steps. All ranks agree on
+skip status before any policy clock advances. The existing mean score-drift guard
+remains configurable; tail distributions are measured without inventing an
+unqualified universal cutoff. A skip aborts the run; this is not transactional
+rollback of ranks that already performed an optimizer update.
+
+The entropy regression covers a discovered boundary bug: `tp.group=None` means
+an unsharded vocabulary, while passing that value to a distributed entropy
+collective would use the default DP group. Entropy now executes locally for an
+unsharded vocabulary; real TP retains the existing distributed implementation.
+
+Remaining qualification includes a matched Megatron comparison, actual
+SGLang-to-Core replay, full-model restart, longer runs and additional topologies.

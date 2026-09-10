@@ -16,9 +16,9 @@
     "miles": {
       "repository": "https://github.com/radixark/miles.git",
       "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
-      "development_commit": "27412aab67bb853868af45103912e251641d2554",
+      "development_commit": "64ba71950c973e458f22a8d10541475940c911b0",
       "patch": "patches/miles.patch",
-      "patch_sha256": "d36eef03f5334de2af63adc80e14b8244bcf1a5b3ff92881717fb22b7659b2bb"
+      "patch_sha256": "e85add303ee3b7b38f4571e66b7b364a769b32e0fb096ab35e32f1447c173579"
     }
   }
 }

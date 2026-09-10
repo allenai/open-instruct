@@ -13,6 +13,7 @@ import tomllib
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
     max_train_rollout_logprob_abs_diff: float | None = None
+    diagnostic_interval: int = 0
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     model_config: str | None = None
@@ -26,6 +27,8 @@ class CoreConfig:
     router_z_loss_weight: float = 1e-5
 
     def __post_init__(self):
+        if type(self.diagnostic_interval) is not int or self.diagnostic_interval < 0:
+            raise ValueError("core.diagnostic_interval must be a nonnegative integer")
         limit = self.max_train_rollout_logprob_abs_diff
         if limit is not None and (not math.isfinite(limit) or limit < 0):
             raise ValueError("core.max_train_rollout_logprob_abs_diff must be finite and nonnegative")

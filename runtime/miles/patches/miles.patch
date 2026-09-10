@@ -447,7 +447,7 @@ index 1bf6c743679e1b66cdd1cb1f834810d5c749b030..cbad477e67e8479e1c2c855abdcd8397
      def _compute_transform_like_token_ids(ids_list: list):
          assert not allgather_cp, "allgather CP is not supported for FSDP"
 diff --git a/miles/backends/training_utils/loss_hub/math_utils.py b/miles/backends/training_utils/loss_hub/math_utils.py
-index 49c2454addb17ffceb73e49e4cfc66e5d62da5fc..ef4dea738a77b3bf5cfa97ab44204bf126df4a73 100644
+index 49c2454addb17ffceb73e49e4cfc66e5d62da5fc..917d256bf50d885823fe7c2ddb7ef74f97c9eccd 100644
 --- a/miles/backends/training_utils/loss_hub/math_utils.py
 +++ b/miles/backends/training_utils/loss_hub/math_utils.py
 @@ -292,7 +292,10 @@ def compute_log_probs(
@@ -462,6 +462,18 @@ index 49c2454addb17ffceb73e49e4cfc66e5d62da5fc..ef4dea738a77b3bf5cfa97ab44204bf1
      from megatron.core.fusions.fused_cross_entropy import fused_vocab_parallel_cross_entropy
  
      # convert to [seq_len, batch_size, vocab_size] as expected by fused_vocab_parallel_cross_entropy
+@@ -447,6 +450,11 @@ class _VocabParallelEntropy(torch.autograd.Function):
+ 
+ 
+ def compute_entropy_from_logits(logits: torch.Tensor, process_group) -> torch.Tensor:
++    # None denotes an unsharded vocabulary, not the default data-parallel group.
++    # DP ranks may have different response lengths and must not reduce these rows.
++    if process_group is None or dist.get_world_size(process_group) == 1:
++        log_probs = logits.log_softmax(dim=-1)
++        return -(log_probs.exp() * log_probs).sum(dim=-1)
+     return _VocabParallelEntropy.apply(logits, process_group)
+ 
+ 
 diff --git a/miles/ray/actor_group.py b/miles/ray/actor_group.py
 index fb40d1250983997927364e0995b181377786b103..e5e3dfc68503ec64a6e980b393d4788e9e9858af 100644
 --- a/miles/ray/actor_group.py

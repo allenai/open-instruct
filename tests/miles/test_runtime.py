@@ -1,7 +1,9 @@
 """Integration tests run inside the pinned MILES + patched Core image."""
 
 import contextlib
+import copy
 import dataclasses
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -74,7 +76,9 @@ def parsed_args(tmp_path, monkeypatch, request):
                 parameter.zero_()
     model.save_pretrained(path)
     config = RunConfig(
-        CoreConfig(attention_backend="torch", max_sequence_length=128, activation_checkpointing=False),
+        CoreConfig(
+            attention_backend="torch", max_sequence_length=128, activation_checkpointing=False, diagnostic_interval=1
+        ),
         {
             "hf_checkpoint": str(path),
             "global_batch_size": 4,
@@ -179,6 +183,39 @@ def test_real_miles_loss_core_update_and_native_resume(parsed_args, tmp_path, mo
         models.load_native(worker.train_module, native)
         for name, tensor in worker.model.state_dict().items():
             torch.testing.assert_close(tensor, expected[name], rtol=0, atol=0)
+
+        # Same next batch after native model+optimizer+scheduler+clock restore.
+        worker.clock.published()
+        rollout["weight_versions"] = [["1"] for _ in range(4)]
+        next_batch = copy.deepcopy(rollout)
+        worker.train(1, None)
+        uninterrupted = {name: value.detach().clone() for name, value in worker.model.state_dict().items()}
+        uninterrupted_lr = worker.lr_scheduler.state_dict()
+        uninterrupted_optimizer = copy.deepcopy(worker.optimizer.state_dict())
+        args.load = args.save
+        checkpoint.restore(worker)
+        worker.train_module._trainer.global_step = worker.clock.completed_steps
+        worker.clock.published()
+        rollout.clear()
+        rollout.update(copy.deepcopy(next_batch))
+        worker.train(1, None)
+        for name, tensor in worker.model.state_dict().items():
+            torch.testing.assert_close(tensor, uninterrupted[name], rtol=0, atol=0)
+        assert worker.lr_scheduler.state_dict() == uninterrupted_lr
+        torch.testing.assert_close(worker.optimizer.state_dict(), uninterrupted_optimizer, rtol=0, atol=0)
+        assert worker.clock.completed_steps == 2 and worker.clock.next_rollout_id == 2
+        records = [
+            json.loads(line) for line in (Path(args.save) / "training_contract_rank0.jsonl").read_text().splitlines()
+        ]
+        steps = [record for record in records if record["event"] == "optimizer"]
+        assert [record["step"] for record in steps] == [1, 2, 2]
+        assert all(record["normalization"]["active_tokens"] == 8 for record in steps)
+        assert all(record["local_pre_optimizer_gradients"] for record in steps)
+        assert all(record["sampled_model_updates"] for record in steps)
+        print(
+            "CORE_RESUME_CONTRACT",
+            json.dumps({"model": worker.hf_config.model_type, "next_update_exact": True, "steps": steps}),
+        )
     finally:
         dist.destroy_process_group()
 

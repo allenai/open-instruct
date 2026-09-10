@@ -211,6 +211,19 @@
       ],
       "result_dataset": "01M26438KJ4680M6A8JTDWZRX3",
       "evidence": "docs/measurements/miles-core-sft-20260910.json"
+    },
+    "training_contract": {
+      "passed": true,
+      "runtime_tests_passed": 28,
+      "host_tests_passed": 30,
+      "style_quality": "passed",
+      "evidence": "docs/measurements/miles-core-contract-20260910.json",
+      "coverage": "Independent PPO/entropy/KL reference, real Gloo rank reductions, auxiliary gradients, replay gradients, exact native next-update resume, lifecycle ordering",
+      "ep2": "prepared; not yet executed",
+      "fixes": [
+        "Unsharded-vocabulary entropy must not reduce across DP ranks",
+        "All ranks agree on optimizer skip status before any policy clock advances"
+      ]
     }
   },
   "limitations": [

@@ -1,0 +1,826 @@
+{
+  "passed": true,
+  "exit_code": 0,
+  "elapsed_seconds": 131.84737972775474,
+  "torch_version": "2.13.0+cu130",
+  "cuda": "13.0",
+  "device": "NVIDIA GeForce RTX 4090",
+  "source_sha256": {
+    "open_instruct/miles/__init__.py": "2f47463602ef11a1af8bdf85082c4588d0ce9a5985fc9ac174f296c1814a7162",
+    "open_instruct/miles/__main__.py": "bbe25f55a162120eeb55905bca81967cbb222b2d147733613c187b6c40bec3a9",
+    "open_instruct/miles/actor.py": "4d55c60b46dae964eb7b10e62b20e3ca05131ad956f38dd419931ea2c490dcb4",
+    "open_instruct/miles/arguments.py": "4ba7cb8d36ca81f298bad8306b06f9f1ea0a187209f9233ec46e75cec3db84f0",
+    "open_instruct/miles/async_buffer.py": "90a8d56db2df54626859c7f52931584b84d5d2685a7fe4c36459cdc1b9f93081",
+    "open_instruct/miles/async_rollout.py": "141bc96363104948630f9807957614363c38af369867e5d6c5d9b67bbcc6cd20",
+    "open_instruct/miles/checkpoint.py": "a25d81ad1adaf8d23fa7045931f006c451ea336c38c59f72c0630494d0a365b7",
+    "open_instruct/miles/config.py": "73b5e336202527808d398efb386d0726e8f52de67e4334cb59a3f3335ea48293",
+    "open_instruct/miles/contract.py": "680f35b9531681a624df8b190692a3f944e3249e9e2144336e7ecb1b5550bf68",
+    "open_instruct/miles/data.py": "0b9e1cd4056f517623ca5fb381b7156efe4eba759a7ef415fd1e2e28a08861a0",
+    "open_instruct/miles/data_source.py": "b78e54f1dd06f1c66674826bca1cb6897fd6f8ba14cf642ff517bb8dec4fb0c1",
+    "open_instruct/miles/driver.py": "83c3cc04c3a79c109661297b798868f734e76c85d28355d8bcce3c3e4d041794",
+    "open_instruct/miles/errors.py": "bf6d6d0ad65e36c323ea52f01e7c384babb2751c05cf80fb13bb71db5de6e993",
+    "open_instruct/miles/fla_compat.py": "3973c89da82473ef1bf8d3f240fb95a90221bb49fe55caf05b57eaf4ad68bd39",
+    "open_instruct/miles/models.py": "05dc62d586f8fb719ee46f74a72cedce97a09939c51067cfcaa94ca11334ba40",
+    "open_instruct/miles/publication.py": "3613dac8243ca3c202a49651ae4e9c720fbad0131829f1261c6806c185d80075",
+    "open_instruct/miles/rewards.py": "139533acf17100e9ae4906a366645ceeff14f04315227f907e1ddf00137edf7d",
+    "open_instruct/miles/scheduler.py": "57304a3124841c100990583cfaae896e57d02d66f948901713e54bed74e0f044",
+    "open_instruct/miles/state.py": "a69b848678885487c8962633e49fb2f87af0deef456dc40bcd89220ebc21c29a",
+    "tests/miles/test_contract.py": "21e3ec775cde12e59cbd5d21011dc6f2d36b69a6a08bee38d946b6e17adb8afe",
+    "tests/miles/test_runtime.py": "32eb820fc4befe1ea2ba73bbd755b24bc451170f91cf3f4e9e35e7f1032a5115"
+  },
+  "measurements": [
+    {
+      "kind": "CONTRACT_MEASUREMENT",
+      "value": [
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.0563921183347702,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392114609479904,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.0563921183347702,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584186077118,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584186077118,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.3379165530204773,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.3379165828227997,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        }
+      ]
+    },
+    {
+      "kind": "CONTRACT_MEASUREMENT",
+      "value": [
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392133235931396,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392133235931396,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392133235931396,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        }
+      ]
+    },
+    {
+      "kind": "CORE_RESUME_CONTRACT",
+      "value": {
+        "model": "qwen3",
+        "next_update_exact": true,
+        "steps": [
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              0
+            ],
+            "elapsed_seconds": 2.1721903290599585,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 394112,
+                "local_l2": 6.381268027871329,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 4992,
+                "sampled_update_l2": 1.4080832538827324e-05
+              }
+            },
+            "schema_version": 1,
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              1
+            ],
+            "elapsed_seconds": 0.12691491609439254,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 394112,
+                "local_l2": 6.382152249208392,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 4992,
+                "sampled_update_l2": 1.3852919622739744e-05
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              1
+            ],
+            "elapsed_seconds": 0.025230018887668848,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 394112,
+                "local_l2": 6.382152249208392,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 4992,
+                "sampled_update_l2": 1.3852919622739744e-05
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          }
+        ]
+      }
+    },
+    {
+      "kind": "CORE_RESUME_CONTRACT",
+      "value": {
+        "model": "olmo3moe",
+        "next_update_exact": true,
+        "steps": [
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              0
+            ],
+            "elapsed_seconds": 39.566835787147284,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.01055940866470337,
+              "router_z": 2.2782320976257325e-05
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": -5.550682544708252e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 501064,
+                "local_l2": 81.89669338890397,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 344064,
+                "local_l2": 4.563687221656546,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.23500482738018036,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 6728,
+                "sampled_update_l2": 2.59268670200033e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 7.268972157916508e-06
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 3.5683225505580343e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              1
+            ],
+            "elapsed_seconds": 0.042700659949332476,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.01001738429069519,
+              "router_z": 2.2973430156707764e-05
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": -6.565451622009277e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 501064,
+                "local_l2": 55.675906665078266,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 344064,
+                "local_l2": 4.5525299775287,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.23511797189712524,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 6728,
+                "sampled_update_l2": 4.1051645823232346e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8444748576772623e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 9.383520438267912e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              1
+            ],
+            "elapsed_seconds": 0.042420961894094944,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.01001738429069519,
+              "router_z": 2.2973430156707764e-05
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": -6.565451622009277e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 501064,
+                "local_l2": 55.675906665078266,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 344064,
+                "local_l2": 4.5525299775287,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.23511797189712524,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 6728,
+                "sampled_update_l2": 4.1051645823232346e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8444748576772623e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 9.383520438267912e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          }
+        ]
+      }
+    },
+    {
+      "kind": "CORE_RESUME_CONTRACT",
+      "value": {
+        "model": "olmo3moe",
+        "next_update_exact": true,
+        "steps": [
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              0
+            ],
+            "elapsed_seconds": 0.06283594109117985,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.010088539123535157,
+              "router_z": 2.080788850784302e-05
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": -2.4497509002685547e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 517448,
+                "local_l2": 197.22547235977217,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 245760,
+                "local_l2": 5.469835739649267,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.005135401617735624,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 7240,
+                "sampled_update_l2": 2.65265349622016e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 7.072638022514022e-06
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              1
+            ],
+            "elapsed_seconds": 0.0436140326783061,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.010022798776626587,
+              "router_z": 2.060260057449341e-05
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": 0.00011801719665527344,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 517448,
+                "local_l2": 208.10405315955987,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 245760,
+                "local_l2": 5.457952815405805,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.006099819205701351,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 7240,
+                "sampled_update_l2": 3.5571565631113937e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8572562464616943e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 3.814697265625e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "behavior_versions": [
+              1
+            ],
+            "elapsed_seconds": 0.041549266781657934,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.010022798776626587,
+              "router_z": 2.060260057449341e-05
+            },
+            "local_microbatches": 4,
+            "local_policy_objective": 0.00011801719665527344,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 517448,
+                "local_l2": 208.10405315955987,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 245760,
+                "local_l2": 5.457952815405805,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.006099819205701351,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 7240,
+                "sampled_update_l2": 3.5571565631113937e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8572562464616943e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 3.814697265625e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          }
+        ]
+      }
+    }
+  ],
+  "limits": [
+    "Gloo reference tests do not qualify native EP; use ep_contract.py on two GPUs",
+    "No full-SFT replay or matched Megatron comparison in this suite"
+  ],
+  "local_native_replay_recomputation": {
+    "max_abs": 1.1990778148174286e-08,
+    "max_relative_l2": 2.6531491093822808e-08,
+    "optimizer_state_tensors": 129
+  }
+}

@@ -37,14 +37,18 @@ async def train(args):
             if args.fully_async:
                 await manager.core_publication_boundary.remote(False)
 
+            interval = args.olmo_core.diagnostic_interval
+            if args.check_weight_update_equal and (
+                rollout_id is None or (interval > 0 and (rollout_id + 1) % interval == 0)
+            ):
+                await manager.check_weights.remote(
+                    action="compare",
+                    allow_quant_error=args.check_weight_update_allow_quant_error,
+                    selector=args.check_weight_update_selector,
+                    skip_list=args.check_weight_update_skip_list,
+                )
+
         await publish()
-        if args.check_weight_update_equal:
-            await manager.check_weights.remote(
-                action="compare",
-                allow_quant_error=args.check_weight_update_allow_quant_error,
-                selector=args.check_weight_update_selector,
-                skip_list=args.check_weight_update_skip_list,
-            )
         evaluation = EvalDispatcher(args, learner, manager)
         if args.eval_interval is not None and not args.skip_eval_before_train:
             await evaluation.dispatch(

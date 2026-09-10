@@ -21,7 +21,7 @@ from torch import distributed as dist
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
-from open_instruct.miles import checkpoint, data, models, publication, scheduler
+from open_instruct.miles import checkpoint, contract, data, models, publication, scheduler
 from open_instruct.miles.state import PolicyClock
 
 logger = logger_utils.setup_logger(__name__)
@@ -124,6 +124,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             versions = self._agree(lambda: data.policy_versions(rollout))
             self._agree(lambda: self.clock.validate_versions(versions, self.args.olmo_core.max_policy_lag))
             rollout["log_probs"] = self._score(self.train_module, batches, use_replay=True)
+            self._agree(lambda: contract.validate_training_data(rollout))
             agreement = self._agree(lambda: data.score_agreement(rollout))
             dist.all_reduce(agreement)
             difference = self._agree(
@@ -132,12 +133,19 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 )
             )
             logger.info("Core behavior-policy agreement: mean_abs=%s active_tokens=%s", difference, int(agreement[1]))
+            profile = contract.probability_profile(rollout)
+            logger.info(
+                "Core score contract: %s",
+                contract.record(self.args, {"event": "scores", "rollout_id": rollout_id, **profile}),
+            )
             if self.ref_module is not None:
                 rollout["ref_log_probs"] = self._score(self.ref_module, batches, use_replay=False)
             miles_loss.compute_advantages_and_returns(self.args, rollout)
+            self._agree(lambda: contract.validate_training_data(rollout))
             batches = data.sample_batches(rollout, self.args.olmo_core.max_sequence_length)
             local_batch = self.args.global_batch_size // dist.get_world_size()
             self._agree(lambda: self._validate_step_batches(batches, local_batch))
+            contract.validate_batch_schedule(len(batches), local_batch, batches[0]["tokens"].device)
             for start in range(0, len(batches), local_batch):
                 step_batches = batches[start : start + local_batch]
                 self._agree(
@@ -146,34 +154,77 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                         self.args.olmo_core.max_policy_lag,
                     )
                 )
-                denominator = sum(mask.sum().clamp_min(1) for batch in step_batches for mask in batch["loss_masks"])
-                dist.all_reduce(denominator)
-                auxiliary_tokens = torch.tensor(
-                    sum(batch["tokens"].numel() for batch in step_batches), device=denominator.device
-                )
-                dist.all_reduce(auxiliary_tokens)
+                normalization = contract.step_normalization(step_batches, self.args.global_batch_size)
                 for batch in step_batches:
-                    batch["aux_loss_div_factor"] = auxiliary_tokens / dist.get_world_size()
+                    batch["aux_loss_div_factor"] = normalization.auxiliary_denominator
+                interval = self.args.olmo_core.diagnostic_interval
+                diagnostic = interval > 0 and self.clock.completed_steps % interval == 0
+                probe = contract.ParameterProbe(self.model) if diagnostic else None
+                lr_used = self.lr_scheduler.get_last_lr()
+                self._agree(lambda: contract.validate_schedule(self.clock, self.lr_scheduler))
+                started = time.perf_counter()
+                contract.auxiliary_metrics(self.model, reset=True)
                 self.train_module.zero_grads()
 
                 count = len(step_batches)
 
-                def objective(module, batch, count=count, token_denominator=denominator):
+                def objective(module, batch, count=count, normalization=normalization):
                     logits = self._forward(module, batch)
                     loss, _, metrics = miles_loss.loss_function(
                         self.args, batch, count, logits, apply_megatron_loss_scaling=False
                     )
                     if self.args.calculate_per_token_loss:
-                        loss = loss * dist.get_world_size() / token_denominator
+                        loss = normalization.scale_token_loss(loss)
                     self._agree(lambda: self._validate_loss(loss))
-                    return loss, dict(zip(metrics["keys"], metrics["values"][1:], strict=True))
+                    return loss, {
+                        **dict(zip(metrics["keys"], metrics["values"][1:], strict=True)),
+                        "normalized_policy_objective": loss.detach(),
+                    }
 
                 metrics = self.train_module.train_batch_with_loss(step_batches, objective, self._replay_context)
+                gradient_stats = self._agree(probe.gradients) if probe is not None else None
+                aux_metrics = self._agree(lambda: contract.auxiliary_metrics(self.model))
                 self.train_module.optim_step()
-                self._agree(
-                    lambda: self.clock.optimizer_step(not bool(getattr(self.optimizer, "step_skipped", False)))
-                )
+                try:
+                    contract.validate_step_transition(self.clock, self.optimizer, step_batches[0]["tokens"].device)
+                except ValueError:
+                    contract.record(
+                        self.args,
+                        {
+                            "event": "optimizer_rejected",
+                            "step": self.clock.completed_steps,
+                            "local_optimizer_skipped": bool(getattr(self.optimizer, "step_skipped", False)),
+                        },
+                    )
+                    raise
+                self.clock.optimizer_step(True)
                 self.lr_scheduler.step()
+                update_stats = self._agree(probe.updates) if probe is not None else None
+                logger.info(
+                    "Core step contract: %s",
+                    contract.record(
+                        self.args,
+                        {
+                            "event": "optimizer",
+                            "step": self.clock.completed_steps,
+                            "rollout_id": rollout_id,
+                            "normalization": vars(normalization),
+                            "auxiliary_denominator": normalization.auxiliary_denominator,
+                            "reduction": "token" if self.args.calculate_per_token_loss else "response",
+                            "local_policy_objective": sum(float(m["normalized_policy_objective"]) for m in metrics),
+                            "local_auxiliary_objective": aux_metrics,
+                            "behavior_versions": sorted(set(versions)),
+                            "local_microbatches": count,
+                            "lr_used": lr_used,
+                            "lr_next": self.lr_scheduler.get_last_lr(),
+                            "published_step": self.clock.published_step,
+                            "optimizer_skipped": False,
+                            "elapsed_seconds": time.perf_counter() - started,
+                            "local_pre_optimizer_gradients": gradient_stats,
+                            "sampled_model_updates": update_stats,
+                        },
+                    ),
+                )
                 self.train_module._trainer.global_step = self.clock.completed_steps
                 logger.info(
                     "Core optimizer step %s: %s",
