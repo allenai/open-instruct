@@ -1648,6 +1648,17 @@ def count_words(text):
     return num_words
 
 
+def word_tokens(text):
+    """Return the word tokens in ``text``, excluding pure-punctuation tokens.
+
+    Tokenizes with ``nltk.word_tokenize`` (so non-Latin scripts tokenize correctly)
+    and keeps only tokens containing at least one alphanumeric character. Use this
+    for word counts and word de-duplication, where standalone punctuation tokens
+    (".", ",", ...) should not be treated as words.
+    """
+    return [tok for tok in nltk.word_tokenize(text) if any(ch.isalnum() for ch in tok)]
+
+
 @functools.cache
 def _get_sentence_tokenizer():
     return nltk.data.load("nltk:tokenizers/punkt/english.pickle")
