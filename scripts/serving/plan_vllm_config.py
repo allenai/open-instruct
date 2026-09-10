@@ -70,10 +70,23 @@ def model_config(repo: str) -> dict:
 
 
 def census(repo: str) -> dict:
-    """Parameter count by dtype, as reported for the repo's safetensors shards."""
-    d = fetch_json(f"https://huggingface.co/api/models/{repo}")
+    """Parameter count by dtype AND actual on-disk weight bytes.
+
+    Disk bytes are the authoritative memory figure. Deriving weight size as
+    params x bytes-per-param breaks on any packed format: an NVFP4 or GPTQ
+    checkpoint stores two 4-bit values per uint8 container, so the API's
+    parameter count is roughly half the logical parameters and a naive
+    bytes-per-param lands nowhere near the truth. The API also simply omits
+    `safetensors.total` for some repos.
+    """
+    d = fetch_json(f"https://huggingface.co/api/models/{repo}?blobs=true")
     st = d.get("safetensors") or {}
-    return {"total": st.get("total"), "by_dtype": st.get("parameters") or {}}
+    disk = sum(
+        (sib.get("lfs") or {}).get("size") or 0
+        for sib in d.get("siblings", [])
+        if sib.get("rfilename", "").endswith(".safetensors") and "/" not in sib.get("rfilename", "")
+    )
+    return {"total": st.get("total"), "by_dtype": st.get("parameters") or {}, "disk_bytes": disk}
 
 
 def weight_bytes_per_param(by_dtype: dict) -> float:
@@ -225,9 +238,19 @@ def plan(
 ) -> dict:
     t, full = model_config(repo)
     c = census(repo)
-    bpp = weight_bytes_per_param(c["by_dtype"])
-    total_p = c["total"] or 0
-    wbytes = total_p * bpp
+    pb_probe = param_breakdown(t)
+    # Prefer the checkpoint's own parameter count; fall back to geometry when the
+    # API omits it (common for third-party requantisations).
+    # Packed formats (NVFP4, GPTQ, AWQ) report CONTAINER elements, not logical
+    # parameters -- roughly half for 4-bit-in-uint8 -- which would double
+    # bytes-per-param and corrupt every derived figure. When the census differs
+    # from architecture by more than a quarter, trust the geometry.
+    census_total = c["total"] or 0
+    geom_total = pb_probe["total_geom"]
+    packed_census = census_total and abs(census_total - geom_total) / geom_total > 0.25
+    total_p = geom_total if (packed_census or not census_total) else census_total
+    wbytes = c["disk_bytes"] or (total_p * weight_bytes_per_param(c["by_dtype"]))
+    bpp = wbytes / max(total_p, 1)
     pb = param_breakdown(t)
     act_p = pb["active"]
     kvpt, kvkind = kv_bytes_per_token(t, kv_dtype)
@@ -236,11 +259,23 @@ def plan(
     hbm, bw, native = GPUS[gpu]
 
     quant = ((full.get("quantization_config") or {}).get("quant_method") or "").lower()
-    dtypes = set(k.lower() for k in c["by_dtype"])
-    int4ish = "i32" in dtypes and ("pack" in quant or "compressed" in quant or bpp < 1.0)
+    algo = str((full.get("quantization_config") or {}).get("quant_algo") or "").lower()
+    fp4ish = "nvfp4" in algo or "mxfp4" in algo or "fp4" in algo
+    # INT4 has no tensor-core path anywhere; NVFP4/MXFP4 do on Blackwell.
+    int4ish = (
+        (not fp4ish) and bpp < 1.0 and ("pack" in quant or "compressed" in quant or "gptq" in quant or "awq" in quant)
+    )
     # INT4 has no tensor-core path: vLLM dequantizes to BF16 and computes there,
     # so cost compute at 2 bytes/param even though storage is ~0.5.
-    compute_bpp = 2.0 if int4ish else max(bpp, 1.0)
+    # Compute cost per parameter. NVFP4/MXFP4 run natively on Blackwell tensor
+    # cores at 4 bits; INT4 has no such path anywhere and is dequantized to BF16
+    # by Marlin, so it is costed at 2 bytes despite ~0.5 bytes of storage.
+    if int4ish:
+        compute_bpp = 2.0
+    elif fp4ish:
+        compute_bpp = 0.5
+    else:
+        compute_bpp = max(bpp, 1.0)
 
     rows = []
     max_gpus = 16 if allow_multinode else 8
@@ -298,6 +333,7 @@ def plan(
         "attn_layers": attn_layers,
         "kv_kind": kvkind,
         "int4_no_native_path": int4ish,
+        "fp4": fp4ish,
         "quant": quant or "none",
         "dtypes": c["by_dtype"],
         "rows": rows,

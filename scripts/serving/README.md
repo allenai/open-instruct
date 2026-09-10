@@ -1,6 +1,6 @@
 # Serving large MoE reasoning models on B300
 
-Answers one question: **to maximise throughput, how many B300s should a model get,
+Answers one question: **to maximize throughput, how many B300s should a model get,
 what exact vLLM configuration, what memory does it consume, and what throughput
 should we expect from memory bandwidth?**
 
@@ -108,7 +108,7 @@ uv run --no-project --with huggingface_hub python \
 ```
 
 It derives everything from the model's own `config.json` geometry and
-cross-checks against the parameter census the HF API reports for the safetensors
+<!-- cross-checks against the parameter census the HF API reports for the safetensors -->
 shards. What it encodes, each of which cost us real time to learn:
 
 | Trap | What it does |
