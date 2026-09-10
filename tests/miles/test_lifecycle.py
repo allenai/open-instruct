@@ -71,3 +71,5 @@ def test_transport_destruction_starts_on_both_peers_before_wait(monkeypatch):
     assert updater._model_update_groups is None
     actor.OLMoCoreTrainRayActor.close_weight_transport(worker)
     assert len(events) == 3
+    actor.OLMoCoreTrainRayActor.close_weight_transport(SimpleNamespace())
+    assert len(events) == 3

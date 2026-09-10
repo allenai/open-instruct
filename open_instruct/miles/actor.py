@@ -277,6 +277,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
     def close_weight_transport(self):
         """Collectively retire the serving communicator before engines are stopped."""
         updater = getattr(self, "weight_updater", None)
+        if updater is None:
+            return
         group = getattr(updater, "_model_update_groups", None)
         if group is None:
             return
