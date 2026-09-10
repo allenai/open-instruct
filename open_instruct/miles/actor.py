@@ -79,8 +79,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         result = None
         try:
             result = operation()
-        except (ValueError, RuntimeError, KeyError, TypeError) as exc:
-            error = f"rank {dist.get_rank()}: {exc}"
+        except Exception as exc:
+            error = f"rank {dist.get_rank()}: {type(exc).__name__}: {exc}"
         errors = [None] * dist.get_world_size()
         dist.all_gather_object(errors, error, group=distributed_utils.get_gloo_group())
         if any(errors):

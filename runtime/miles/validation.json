@@ -230,6 +230,73 @@
         "Unsharded-vocabulary entropy must not reduce across DP ranks",
         "All ranks agree on optimizer skip status before any policy clock advances"
       ]
+    },
+    "training_contract_followup": {
+      "passed": true,
+      "source_commit": "4a17027ef9f6656579a3f474286c93f7569a5630",
+      "runtime_tests_passed": 75,
+      "host_tests_passed": 32,
+      "evidence": "docs/measurements/miles-core-contract-followup-20260910.json",
+      "ep2": {
+        "id": "01M26G4QJBGWN4XJ14BZSY0XPM",
+        "status": "running",
+        "gpu_count": 2,
+        "job_id": "01M26G4QP0AXXNX2MW6G38JTZ1",
+        "observed_status": {
+          "created": "2026-09-10T20:28:57.802908Z",
+          "scheduled": "2026-09-10T20:34:21.745257Z",
+          "started": "2026-09-10T20:40:22.78754Z",
+          "ready": "2026-09-10T20:40:22.079301Z"
+        }
+      }
+    },
+    "local_datasources": {
+      "passed": true,
+      "tasks": [
+        "math",
+        "ifeval"
+      ],
+      "optimizer_steps_per_task": 2,
+      "audited_responses_per_task": 64,
+      "policy_advantages": "all zero; auxiliary-only updates",
+      "evidence": "docs/measurements/miles-core-datasources-local-20260910.json"
+    },
+    "local_live_replay": {
+      "passed": true,
+      "optimizer_steps": 3,
+      "audited_responses": 12,
+      "separate_process_resume": true,
+      "use_miles_router": true,
+      "evidence": "docs/measurements/miles-core-replay-local-20260910.json"
+    },
+    "sft_datasources": {
+      "id": "01M26GC6F3TRRQEXR9HJQR0XGG",
+      "source_commit": "4a17027ef9f6656579a3f474286c93f7569a5630",
+      "status": "queued; workspace allocation slot limit",
+      "tasks": [
+        "math",
+        "ifeval"
+      ],
+      "gpu_count": 3,
+      "job_id": "01M26GC6JRGJAAGKKTYC0PEP67",
+      "observed_status": {
+        "created": "2026-09-10T20:33:02.435519Z"
+      }
+    },
+    "checkpoint_topology": {
+      "passed": true,
+      "checkpoint_schema": 2,
+      "tests_passed": 31,
+      "host_tests_passed": 32,
+      "style_quality": "passed",
+      "evidence": "docs/measurements/miles-core-checkpoint-topology-20260910.json"
+    },
+    "tiny_profile_context": {
+      "passed": true,
+      "prompt_tokens": 256,
+      "response_tokens": 256,
+      "context_tokens": 512,
+      "validation": "Pinned MILES parser plus explicit check against local fixture HF max_position_embeddings"
     }
   },
   "limitations": [

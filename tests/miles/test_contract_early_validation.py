@@ -59,6 +59,8 @@ def _worker(rank, rendezvous, fault):
                     rollout["rollout_routed_experts"][1][0, 0, 1] = 4
                 elif fault == "route_dtype":
                     rollout["rollout_routed_experts"][1] = rollout["rollout_routed_experts"][1].float() + 0.5
+                elif fault == "route_none":
+                    rollout["rollout_routed_experts"][1] = None
                 elif fault == "route_layers":
                     rollout["rollout_routed_experts"][1] = torch.empty(4, 0, 2, dtype=torch.long)
                 else:
@@ -76,6 +78,8 @@ def _worker(rank, rendezvous, fault):
         dist.destroy_process_group()
 
 
-@pytest.mark.parametrize("fault", ["schedule", "route_shape", "route_ids", "route_dtype", "route_layers"])
+@pytest.mark.parametrize(
+    "fault", ["schedule", "route_shape", "route_ids", "route_dtype", "route_layers", "route_none"]
+)
 def test_rank_local_validation_rejects_before_first_forward(fault, tmp_path):
     mp.spawn(_worker, args=(str(tmp_path / "rdzv"), fault), nprocs=2, join=True)

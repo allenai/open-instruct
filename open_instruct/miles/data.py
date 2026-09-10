@@ -49,7 +49,7 @@ def policy_versions(batch: dict[str, Any]) -> list[int]:
 
 def router_routes(model, batch):
     routes = batch.get("rollout_routed_experts")
-    if routes is None or len(routes) != 1:
+    if routes is None or len(routes) != 1 or not isinstance(routes[0], torch.Tensor):
         raise ValueError("Rollout router replay requires expert IDs for every sample")
     routes = routes[0]
     tokens = batch["tokens"].shape[1]

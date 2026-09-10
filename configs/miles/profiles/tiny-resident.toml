@@ -5,7 +5,7 @@
 [core]
 expert_parallel_size = 1
 attention_backend = "torch"
-max_sequence_length = 1024
+max_sequence_length = 512
 activation_checkpointing = true
 max_policy_lag = 0
 max_train_rollout_logprob_abs_diff = 0.05
@@ -36,10 +36,10 @@ global_batch_size = 4
 num_rollout = 2
 rollout_temperature = 1.0
 rollout_seed = 17
-rollout_max_prompt_len = 768
+rollout_max_prompt_len = 256
 rollout_max_response_len = 256
-rollout_max_context_len = 1024
-sglang_context_length = 1024
+rollout_max_context_len = 512
+sglang_context_length = 512
 sglang_max_total_tokens = 4096
 sglang_max_running_requests = 4
 sglang_server_concurrency = 4

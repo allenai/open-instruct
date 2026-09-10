@@ -70,7 +70,8 @@ Rollout routing replay requires both `use_rollout_routing_replay=true` and
 strips expert-ID requests; an actual trial failed before an optimizer update
 with missing routes, and configuration now rejects that combination early.
 This is separate from Megatron's `use_routing_replay` flag, which Core rejects.
-The live retry and full-model replay still require qualification.
+The tiny live replay and separate-process restart passed; full-model replay
+and final-token auxiliary equivalence still require qualification.
 
 The [additional datasource trials](miles-feature-parity.md#additional-datasource-trials)
 use pinned math and legacy IF datasets with the same SFT model and an independent
@@ -78,6 +79,17 @@ reward audit. They have their own committed-image debug launcher; ordinary
 `train` configs can also consume prepared rows and trusted verifier registries.
 
 ## Checkpoints and publication
+
+New checkpoints use schema 2 and persist both world size and expert-parallel
+degree. Restore validates them, model configuration, cursor integrity and
+rank-local state reads before any native checkpoint-loading collective. Legacy
+schema-1 checkpoints are accepted only for single-rank EP1; multi-rank legacy
+manifests need an explicit migration based on the original launch configuration.
+Automatic inference or topology changes during resume are not supported.
+The [topology follow-up](measurements/miles-core-checkpoint-topology-20260910.json)
+passed 31 targeted tests, including three native GPU exact-next-update restore
+comparisons.
+
 
 HF is the serving interchange format. SGLang starts from an HF checkpoint directory containing the model config, tokenizer, and weights; olmo-sglang maps those weights into its fused inference layout. The training model is native Core. The adapter can initialize it from the same HF checkpoint, and publishes subsequent policy updates directly as HF-named tensors. A Core-origin model therefore follows `Core checkpoint → HF export → SGLang`; it does not need a Megatron checkpoint or a Megatron conversion step. Updating the policy does not require saving and reloading an HF directory at each step.
 
@@ -419,5 +431,27 @@ an unsharded vocabulary, while passing that value to a distributed entropy
 collective would use the default DP group. Entropy now executes locally for an
 unsharded vocabulary; real TP retains the existing distributed implementation.
 
-Remaining qualification includes a matched Megatron comparison, actual
-SGLang-to-Core replay, full-model restart, longer runs and additional topologies.
+The extended suite passed 75 tests on the pinned runtime plus 32 host tests.
+[The report](measurements/miles-core-contract-followup-20260910.json) records
+source hashes taken before execution and rejects source changes during the run.
+Local math and legacy IFEval each completed two updates and audited 64 responses;
+[their report](measurements/miles-core-datasources-local-20260910.json) separates
+verifier acceptance from the random model's zero policy advantages.
+
+Live SGLang-to-Core replay also passed two updates, a separate-process restart,
+and a third update, with all 12 responses independently audited. See the
+[replay report](measurements/miles-core-replay-local-20260910.json). The pinned
+SGLang router strips expert-ID requests, so this path requires
+`use_miles_router=true`. The final unscored token still uses deterministic expert
+IDs for its auxiliary forward; matching that auxiliary semantic to Megatron and
+qualifying full-model replay remain open.
+
+Native EP comparison and full-SFT math/IF trials are submitted from commit
+`4a17027ef9f6`: [EP contract](https://beaker.org/ex/01M26G4QJBGWN4XJ14BZSY0XPM)
+and [datasources](https://beaker.org/ex/01M26GC6F3TRRQEXR9HJQR0XGG).
+The EP comparison is running; the datasource trial is queued at the workspace
+allocation limit. Submission is not a passing result. The datasource job runs the tasks sequentially
+on one three-GPU allocation, with two updates and 64 audited responses per task.
+
+Remaining qualification includes a matched Megatron comparison, full-model
+replay/restart, longer runs and additional topologies.

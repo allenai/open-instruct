@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-10",
+  "passed": true,
+  "base_commit": "4a17027ef9f6656579a3f474286c93f7569a5630",
+  "source_state": "Checkpoint-topology follow-up; source hashes identify the tested changes",
+  "source_sha256": {
+    "open_instruct/miles/checkpoint.py": "8126beeeafa5144e86e141c53133475c11d36cc96516265172ba42d8dbb2e8d6",
+    "open_instruct/miles/actor.py": "3ae45604406d73a98ee5e0aa6fc17a8e6e8c274fe357f375a0493debbdfa5617",
+    "open_instruct/miles/data.py": "e4f9506ec3e0350cb603628295e42e2d6028776362c6e6aa63cee96d1e89cd10",
+    "tests/miles/test_checkpoint_topology.py": "cad1b0c6634b6165bd12a3fcd71f484c2ec33a5f59e18c7e12dcc68eeb835d37",
+    "tests/miles/test_contract_early_validation.py": "d3518c12373c5407d413b813799721d96177c652420cbac0692cf5053d096e0e",
+    "tests/miles/test_runtime.py": "32eb820fc4befe1ea2ba73bbd755b24bc451170f91cf3f4e9e35e7f1032a5115"
+  },
+  "runtime": "Pinned runtime on NVIDIA GeForce RTX 4090",
+  "test_counts": {
+    "tests": 31,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "seconds": 144.374,
+  "test_cases": [
+    {
+      "name": "test_same_world_changed_ep_rejected_before_native_load[2-1]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_same_world_changed_ep_rejected_before_native_load[1-2]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_same_topology_and_unambiguous_legacy_restore[2-2-1]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_same_topology_and_unambiguous_legacy_restore[2-2-2]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_same_topology_and_unambiguous_legacy_restore[2-1-1]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_same_topology_and_unambiguous_legacy_restore[1-1-1]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_legacy_multirank_requires_explicit_migration",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_schema_two_requires_valid_saved_ep[None]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.0
+    },
+    {
+      "name": "test_schema_two_requires_valid_saved_ep[True]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.0
+    },
+    {
+      "name": "test_schema_two_requires_valid_saved_ep[0]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.0
+    },
+    {
+      "name": "test_schema_two_requires_valid_saved_ep[3]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.0
+    },
+    {
+      "name": "test_save_persists_schema_two_expert_degree",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 0.015
+    },
+    {
+      "name": "test_rank_local_resume_failure_rejected_collectively[topology]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 7.198
+    },
+    {
+      "name": "test_rank_local_resume_failure_rejected_collectively[read]",
+      "class": "tests.miles.test_checkpoint_topology",
+      "seconds": 7.397
+    },
+    {
+      "name": "test_rank_local_validation_rejects_before_first_forward[schedule]",
+      "class": "tests.miles.test_contract_early_validation",
+      "seconds": 7.4
+    },
+    {
+      "name": "test_rank_local_validation_rejects_before_first_forward[route_shape]",
+      "class": "tests.miles.test_contract_early_validation",
+      "seconds": 7.524
+    },
+    {
+      "name": "test_rank_local_validation_rejects_before_first_forward[route_ids]",
+      "class": "tests.miles.test_contract_early_validation",
+      "seconds": 7.564
+    },
+    {
+      "name": "test_rank_local_validation_rejects_before_first_forward[route_dtype]",
+      "class": "tests.miles.test_contract_early_validation",
+      "seconds": 7.517
+    },
+    {
+      "name": "test_rank_local_validation_rejects_before_first_forward[route_layers]",
+      "class": "tests.miles.test_contract_early_validation",
+      "seconds": 7.574
+    },
+    {
+      "name": "test_rank_local_validation_rejects_before_first_forward[route_none]",
+      "class": "tests.miles.test_contract_early_validation",
+      "seconds": 7.594
+    },
+    {
+      "name": "test_pinned_parser_selects_core[qwen3]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.101
+    },
+    {
+      "name": "test_pinned_parser_selects_core[kda]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.448
+    },
+    {
+      "name": "test_pinned_parser_selects_core[kda_latent]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.071
+    },
+    {
+      "name": "test_real_miles_loss_core_update_and_native_resume[qwen3]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 3.926
+    },
+    {
+      "name": "test_real_miles_loss_core_update_and_native_resume[kda]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 73.744
+    },
+    {
+      "name": "test_real_miles_loss_core_update_and_native_resume[kda_latent]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.561
+    },
+    {
+      "name": "test_scheduler_matches_miles_and_restores[constant]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_scheduler_matches_miles_and_restores[linear]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_scheduler_matches_miles_and_restores[cosine]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_scheduler_matches_miles_and_restores[inverse-square-root]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.001
+    },
+    {
+      "name": "test_scheduler_matches_miles_and_restores[WSD]",
+      "class": "tests.miles.test_runtime",
+      "seconds": 0.001
+    }
+  ],
+  "coverage": [
+    "Schema-2 saved/requested world size and expert-parallel degree",
+    "Legacy schema-1 single-rank compatibility; ambiguous multi-rank rejection",
+    "Real two-rank Gloo agreement before loading when one rank has bad topology or a file-read failure",
+    "Early collective rejection of missing/malformed routes",
+    "Native Qwen3, KDA and KDA+latent exact next-update restore comparisons"
+  ],
+  "limits": [
+    "No full-SFT restart or changed-topology resharding claim",
+    "The live SGLang replay restart report predates schema-2; this follow-up exercises the native checkpoint implementation"
+  ]
+}

@@ -1,0 +1,724 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-10",
+  "source_commit": "4a17027ef9f6656579a3f474286c93f7569a5630",
+  "runtime": "Pinned compiled image plus source worktrees; NVIDIA GeForce RTX 4090",
+  "passed": true,
+  "configuration": {
+    "use_miles_router": true,
+    "use_rollout_routing_replay": true,
+    "activation_checkpointing": true,
+    "diagnostic_interval": 1,
+    "placement": "resident colocation",
+    "trainer_gpus": 1,
+    "response_cap": 32
+  },
+  "audit": {
+    "verified_samples": 12,
+    "rewards": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "replay_shapes": [
+      [
+        70,
+        2,
+        2
+      ],
+      [
+        70,
+        2,
+        2
+      ],
+      [
+        70,
+        2,
+        2
+      ],
+      [
+        70,
+        2,
+        2
+      ],
+      [
+        62,
+        2,
+        2
+      ],
+      [
+        62,
+        2,
+        2
+      ],
+      [
+        62,
+        2,
+        2
+      ],
+      [
+        62,
+        2,
+        2
+      ],
+      [
+        92,
+        2,
+        2
+      ],
+      [
+        92,
+        2,
+        2
+      ],
+      [
+        92,
+        2,
+        2
+      ],
+      [
+        92,
+        2,
+        2
+      ]
+    ],
+    "rollout_versions": [
+      0,
+      1,
+      2
+    ],
+    "prompt_cursor_continued": true,
+    "optimizer_steps": 3,
+    "max_parameter_changes_from_initial": [
+      {
+        "embeddings.weight": 2.000248059630394e-05,
+        "blocks.0.attention.A_log": 1.9910370610887185e-05,
+        "blocks.0.attention.dt_bias": 1.9964347302448004e-05,
+        "blocks.0.attention.w_q.weight": 2.000248059630394e-05,
+        "blocks.0.attention.w_k.weight": 2.0002946257591248e-05,
+        "blocks.0.attention.w_v.weight": 2.0002247765660286e-05,
+        "blocks.0.attention.f_proj_1.weight": 1.9934959709644318e-05,
+        "blocks.0.attention.f_proj_2.weight": 1.9896775484085083e-05,
+        "blocks.0.attention.w_b.weight": 1.9999220967292786e-05,
+        "blocks.0.attention.q_conv1d.weight": 2.0002946257591248e-05,
+        "blocks.0.attention.k_conv1d.weight": 2.000480890274048e-05,
+        "blocks.0.attention.v_conv1d.weight": 2.0002946257591248e-05,
+        "blocks.0.attention.g_proj_1.weight": 1.9958242774009705e-05,
+        "blocks.0.attention.g_proj_2.weight": 1.994473859667778e-05,
+        "blocks.0.attention.g_proj_2.bias": 1.9980736396973953e-05,
+        "blocks.0.attention.o_norm.weight": 1.996755599975586e-05,
+        "blocks.0.attention.w_out.weight": 2.0001549273729324e-05,
+        "blocks.0.attention_norm.weight": 2.002716064453125e-05,
+        "blocks.0.attention_input_norm.weight": 2.002716064453125e-05,
+        "blocks.0.shared_experts.w_up_gate": 2.0002014935016632e-05,
+        "blocks.0.shared_experts.w_down": 2.000131644308567e-05,
+        "blocks.0.feed_forward_norm.weight": 2.002716064453125e-05,
+        "blocks.0.feed_forward_input_norm.weight": 2.002716064453125e-05,
+        "blocks.1.latent_down_proj.weight": 0.0,
+        "blocks.1.latent_up_proj.weight": 0.0,
+        "blocks.1.attention.w_q.weight": 1.9995495676994324e-05,
+        "blocks.1.attention.w_k.weight": 1.9997358322143555e-05,
+        "blocks.1.attention.w_v.weight": 2.000248059630394e-05,
+        "blocks.1.attention.w_out.weight": 2.0001782104372978e-05,
+        "blocks.1.attention.w_g.weight": 1.995079219341278e-05,
+        "blocks.1.attention.q_norm.weight": 1.990795135498047e-05,
+        "blocks.1.attention.k_norm.weight": 1.990795135498047e-05,
+        "blocks.1.attention_norm.weight": 2.002716064453125e-05,
+        "blocks.1.attention_input_norm.weight": 2.002716064453125e-05,
+        "blocks.1.routed_experts.w_up_gate": 0.0,
+        "blocks.1.routed_experts.w_down": 0.0,
+        "blocks.1.routed_experts_router.weight": 2.0002946257591248e-05,
+        "blocks.1.shared_experts.w_up_gate": 0.0,
+        "blocks.1.shared_experts.w_down": 0.0,
+        "blocks.1.feed_forward_norm.weight": 0.0,
+        "blocks.1.feed_forward_input_norm.weight": 2.002716064453125e-05,
+        "lm_head.norm.weight": 0.0,
+        "lm_head.w_out.weight": 0.0
+      },
+      {
+        "embeddings.weight": 3.0005350708961487e-05,
+        "blocks.0.attention.A_log": 2.9795752197969705e-05,
+        "blocks.0.attention.dt_bias": 2.9928582080174237e-05,
+        "blocks.0.attention.w_q.weight": 3.0007213354110718e-05,
+        "blocks.0.attention.w_k.weight": 3.000907599925995e-05,
+        "blocks.0.attention.w_v.weight": 3.0005117878317833e-05,
+        "blocks.0.attention.f_proj_1.weight": 2.9763206839561462e-05,
+        "blocks.0.attention.f_proj_2.weight": 2.97382939606905e-05,
+        "blocks.0.attention.w_b.weight": 2.9988586902618408e-05,
+        "blocks.0.attention.q_conv1d.weight": 3.0009541660547256e-05,
+        "blocks.0.attention.k_conv1d.weight": 2.9997434467077255e-05,
+        "blocks.0.attention.v_conv1d.weight": 3.000441938638687e-05,
+        "blocks.0.attention.g_proj_1.weight": 2.9890798032283783e-05,
+        "blocks.0.attention.g_proj_2.weight": 2.985866740345955e-05,
+        "blocks.0.attention.g_proj_2.bias": 2.9923598049208522e-05,
+        "blocks.0.attention.o_norm.weight": 2.9861927032470703e-05,
+        "blocks.0.attention.w_out.weight": 3.0008144676685333e-05,
+        "blocks.0.attention_norm.weight": 2.9921531677246094e-05,
+        "blocks.0.attention_input_norm.weight": 2.9921531677246094e-05,
+        "blocks.0.shared_experts.w_up_gate": 3.000791184604168e-05,
+        "blocks.0.shared_experts.w_down": 3.000692231580615e-05,
+        "blocks.0.feed_forward_norm.weight": 2.968311309814453e-05,
+        "blocks.0.feed_forward_input_norm.weight": 3.0040740966796875e-05,
+        "blocks.1.latent_down_proj.weight": 0.0,
+        "blocks.1.latent_up_proj.weight": 0.0,
+        "blocks.1.attention.w_q.weight": 2.9986724257469177e-05,
+        "blocks.1.attention.w_k.weight": 2.9997900128364563e-05,
+        "blocks.1.attention.w_v.weight": 3.000907599925995e-05,
+        "blocks.1.attention.w_out.weight": 3.000907599925995e-05,
+        "blocks.1.attention.w_g.weight": 2.989126369357109e-05,
+        "blocks.1.attention.q_norm.weight": 2.9206275939941406e-05,
+        "blocks.1.attention.k_norm.weight": 2.9206275939941406e-05,
+        "blocks.1.attention_norm.weight": 2.9861927032470703e-05,
+        "blocks.1.attention_input_norm.weight": 2.956390380859375e-05,
+        "blocks.1.routed_experts.w_up_gate": 0.0,
+        "blocks.1.routed_experts.w_down": 0.0,
+        "blocks.1.routed_experts_router.weight": 2.9943883419036865e-05,
+        "blocks.1.shared_experts.w_up_gate": 0.0,
+        "blocks.1.shared_experts.w_down": 0.0,
+        "blocks.1.feed_forward_norm.weight": 0.0,
+        "blocks.1.feed_forward_input_norm.weight": 2.9861927032470703e-05,
+        "lm_head.norm.weight": 0.0,
+        "lm_head.w_out.weight": 0.0
+      }
+    ],
+    "interpretation": "All-zero task rewards imply zero policy advantages; router auxiliary losses drive updates."
+  },
+  "training_contract": [
+    {
+      "active_tokens": 128,
+      "event": "scores",
+      "groups": {
+        "first_third": {
+          "mean_abs": 0.0022529472004283557,
+          "tokens": 44
+        },
+        "last_third": {
+          "mean_abs": 0.002783656120300293,
+          "tokens": 40
+        },
+        "length_1025_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_gt_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_le_1024": {
+          "mean_abs": 0.0024185553193092346,
+          "tokens": 128
+        },
+        "middle_third": {
+          "mean_abs": 0.002252253619107333,
+          "tokens": 44
+        }
+      },
+      "histogram_counts": [
+        40,
+        73,
+        15,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "histogram_upper_edges": [
+        0.0010000000474974513,
+        0.004999999888241291,
+        0.009999999776482582,
+        0.019999999552965164,
+        0.05000000074505806,
+        0.10000000149011612,
+        0.25,
+        0.5,
+        1.0,
+        null
+      ],
+      "max_abs": 0.00830841064453125,
+      "p50_upper": 0.004999999888241291,
+      "p95_upper": 0.009999999776482582,
+      "p99_upper": 0.009999999776482582,
+      "rank": 0,
+      "rollout_id": 0,
+      "schema_version": 1
+    },
+    {
+      "auxiliary_denominator": 284.0,
+      "elapsed_seconds": 30.715918492991477,
+      "event": "optimizer",
+      "local_auxiliary_objective": {
+        "load_balancing": 0.01015317440032959,
+        "router_z": 0.0020200977325439454
+      },
+      "local_behavior_versions": [
+        0
+      ],
+      "local_microbatches": 4,
+      "local_policy_objective": 0.0,
+      "local_pre_optimizer_gradients": {
+        "dense": {
+          "elements": 13313288,
+          "local_l2": 0.04049254493988205,
+          "missing_parameters": 0
+        },
+        "expert": {
+          "elements": 344064,
+          "local_l2": 0.015214978333138082,
+          "missing_parameters": 0
+        },
+        "router": {
+          "elements": 512,
+          "local_l2": 0.00864681601524353,
+          "missing_parameters": 0
+        }
+      },
+      "lr_next": [
+        1e-05
+      ],
+      "lr_used": [
+        1e-05
+      ],
+      "normalization": {
+        "active_tokens": 128,
+        "model_tokens": 284,
+        "samples": 4,
+        "token_denominator": 128,
+        "world_size": 1
+      },
+      "optimizer_skipped": false,
+      "published_step": 0,
+      "rank": 0,
+      "reduction": "response",
+      "rollout_id": 0,
+      "sampled_model_updates": {
+        "dense": {
+          "sampled_elements": 7176,
+          "sampled_update_l2": 0.0003924035407129138
+        },
+        "expert": {
+          "sampled_elements": 1536,
+          "sampled_update_l2": 0.00010563538270382542
+        },
+        "router": {
+          "sampled_elements": 256,
+          "sampled_update_l2": 7.475249459177179e-05
+        }
+      },
+      "schema_version": 1,
+      "step": 1
+    },
+    {
+      "active_tokens": 128,
+      "event": "scores",
+      "groups": {
+        "first_third": {
+          "mean_abs": 0.0024277947165749288,
+          "tokens": 44
+        },
+        "last_third": {
+          "mean_abs": 0.00247647762298584,
+          "tokens": 40
+        },
+        "length_1025_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_gt_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_le_1024": {
+          "mean_abs": 0.002430662512779236,
+          "tokens": 128
+        },
+        "middle_third": {
+          "mean_abs": 0.002391880208795721,
+          "tokens": 44
+        }
+      },
+      "histogram_counts": [
+        35,
+        84,
+        9,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "histogram_upper_edges": [
+        0.0010000000474974513,
+        0.004999999888241291,
+        0.009999999776482582,
+        0.019999999552965164,
+        0.05000000074505806,
+        0.10000000149011612,
+        0.25,
+        0.5,
+        1.0,
+        null
+      ],
+      "max_abs": 0.0059032440185546875,
+      "p50_upper": 0.004999999888241291,
+      "p95_upper": 0.009999999776482582,
+      "p99_upper": 0.009999999776482582,
+      "rank": 0,
+      "rollout_id": 1,
+      "schema_version": 1
+    },
+    {
+      "auxiliary_denominator": 252.0,
+      "elapsed_seconds": 0.04488186212256551,
+      "event": "optimizer",
+      "local_auxiliary_objective": {
+        "load_balancing": 0.010057579278945922,
+        "router_z": 0.002071699619293213
+      },
+      "local_behavior_versions": [
+        1
+      ],
+      "local_microbatches": 4,
+      "local_policy_objective": 0.0,
+      "local_pre_optimizer_gradients": {
+        "dense": {
+          "elements": 13313288,
+          "local_l2": 0.02959087885683358,
+          "missing_parameters": 0
+        },
+        "expert": {
+          "elements": 344064,
+          "local_l2": 0.011594112296723821,
+          "missing_parameters": 0
+        },
+        "router": {
+          "elements": 512,
+          "local_l2": 0.006369384471327066,
+          "missing_parameters": 0
+        }
+      },
+      "lr_next": [
+        1e-05
+      ],
+      "lr_used": [
+        1e-05
+      ],
+      "normalization": {
+        "active_tokens": 128,
+        "model_tokens": 252,
+        "samples": 4,
+        "token_denominator": 128,
+        "world_size": 1
+      },
+      "optimizer_skipped": false,
+      "published_step": 1,
+      "rank": 0,
+      "reduction": "response",
+      "rollout_id": 1,
+      "sampled_model_updates": {
+        "dense": {
+          "sampled_elements": 7176,
+          "sampled_update_l2": 0.000649829335002769
+        },
+        "expert": {
+          "sampled_elements": 1536,
+          "sampled_update_l2": 0.0002389632500396914
+        },
+        "router": {
+          "sampled_elements": 256,
+          "sampled_update_l2": 0.00013419725999365916
+        }
+      },
+      "schema_version": 1,
+      "step": 2
+    },
+    {
+      "active_tokens": 128,
+      "event": "scores",
+      "groups": {
+        "first_third": {
+          "mean_abs": 0.002776687795465643,
+          "tokens": 44
+        },
+        "last_third": {
+          "mean_abs": 0.002723288536071777,
+          "tokens": 40
+        },
+        "length_1025_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_gt_4096": {
+          "mean_abs": null,
+          "tokens": 0
+        },
+        "length_le_1024": {
+          "mean_abs": 0.002708345651626587,
+          "tokens": 128
+        },
+        "middle_third": {
+          "mean_abs": 0.0026264190673828125,
+          "tokens": 44
+        }
+      },
+      "histogram_counts": [
+        35,
+        73,
+        20,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "histogram_upper_edges": [
+        0.0010000000474974513,
+        0.004999999888241291,
+        0.009999999776482582,
+        0.019999999552965164,
+        0.05000000074505806,
+        0.10000000149011612,
+        0.25,
+        0.5,
+        1.0,
+        null
+      ],
+      "max_abs": 0.008558273315429688,
+      "p50_upper": 0.004999999888241291,
+      "p95_upper": 0.009999999776482582,
+      "p99_upper": 0.009999999776482582,
+      "rank": 0,
+      "rollout_id": 2,
+      "schema_version": 1
+    },
+    {
+      "auxiliary_denominator": 372.0,
+      "elapsed_seconds": 1.4922631639055908,
+      "event": "optimizer",
+      "local_auxiliary_objective": {
+        "load_balancing": 0.010045392513275147,
+        "router_z": 0.001850674033164978
+      },
+      "local_behavior_versions": [
+        2
+      ],
+      "local_microbatches": 4,
+      "local_policy_objective": 0.0,
+      "local_pre_optimizer_gradients": {
+        "dense": {
+          "elements": 13313288,
+          "local_l2": 0.02574190560081489,
+          "missing_parameters": 0
+        },
+        "expert": {
+          "elements": 344064,
+          "local_l2": 0.010254477718242202,
+          "missing_parameters": 0
+        },
+        "router": {
+          "elements": 512,
+          "local_l2": 0.006764369551092386,
+          "missing_parameters": 0
+        }
+      },
+      "lr_next": [
+        1e-05
+      ],
+      "lr_used": [
+        1e-05
+      ],
+      "normalization": {
+        "active_tokens": 128,
+        "model_tokens": 372,
+        "samples": 4,
+        "token_denominator": 128,
+        "world_size": 1
+      },
+      "optimizer_skipped": false,
+      "published_step": 2,
+      "rank": 0,
+      "reduction": "response",
+      "rollout_id": 2,
+      "sampled_model_updates": {
+        "dense": {
+          "sampled_elements": 7176,
+          "sampled_update_l2": 0.00036505864732366676
+        },
+        "expert": {
+          "sampled_elements": 1536,
+          "sampled_update_l2": 0.0001097557022136039
+        },
+        "router": {
+          "sampled_elements": 256,
+          "sampled_update_l2": 7.720051023612473e-05
+        }
+      },
+      "schema_version": 1,
+      "step": 3
+    }
+  ],
+  "publication": [
+    {
+      "version": 0,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.005913407541811466,
+      "export_pack_seconds": 0.0006842692382633686,
+      "transport_load_seconds": 0.009624614845961332,
+      "finalize_seconds": 0.005858344025909901,
+      "total_seconds": 0.022080885712057352,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 1,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.004689901135861874,
+      "export_pack_seconds": 0.0006021163426339626,
+      "transport_load_seconds": 0.009735903702676296,
+      "finalize_seconds": 0.004885740112513304,
+      "total_seconds": 0.01991377118974924,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 1,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.002531542908400297,
+      "export_pack_seconds": 0.0005774586461484432,
+      "transport_load_seconds": 0.004927559290081263,
+      "finalize_seconds": 0.0046761962585151196,
+      "total_seconds": 0.012712976895272732,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.0046499259769916534,
+      "export_pack_seconds": 0.0006455071270465851,
+      "transport_load_seconds": 0.011384261772036552,
+      "finalize_seconds": 0.004438648000359535,
+      "total_seconds": 0.02111854311078787,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.002487008925527334,
+      "export_pack_seconds": 0.0005845618434250355,
+      "transport_load_seconds": 0.004883436020463705,
+      "finalize_seconds": 0.00409883726388216,
+      "total_seconds": 0.012053965125232935,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.006401687860488892,
+      "export_pack_seconds": 0.0007245857268571854,
+      "transport_load_seconds": 0.009265338070690632,
+      "finalize_seconds": 0.005251230206340551,
+      "total_seconds": 0.021643101703375578,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 2,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.00251118466258049,
+      "export_pack_seconds": 0.0005586734041571617,
+      "transport_load_seconds": 0.004956644028425217,
+      "finalize_seconds": 0.0039825779385864735,
+      "total_seconds": 0.012009280733764172,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 3,
+      "repeated_version": false,
+      "pause_connect_seconds": 0.0050172279588878155,
+      "export_pack_seconds": 0.0006146975792944431,
+      "transport_load_seconds": 0.007412465289235115,
+      "finalize_seconds": 0.005748438183218241,
+      "total_seconds": 0.0187930790707469,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    },
+    {
+      "version": 3,
+      "repeated_version": true,
+      "pause_connect_seconds": 0.0026891487650573254,
+      "export_pack_seconds": 0.000536011066287756,
+      "transport_load_seconds": 0.005015245173126459,
+      "finalize_seconds": 0.004126338753849268,
+      "total_seconds": 0.0123668541200459,
+      "tensors": 55,
+      "bytes": 27315728,
+      "buckets": 1,
+      "transport_collectives": 1,
+      "stream_moe_export": true,
+      "transport": "ipc"
+    }
+  ],
+  "source_sha256": {
+    "tests/miles/local_moe.py": "6dcd079a85bbcb580ef4ae79b2882fc432096ba6a6d9f01613356ccefa55ed81",
+    "open_instruct/miles/actor.py": "438e7eb82a94c65aa330c8b3b5c3030d6a844962d586a13764d21ef1e21c7ec5",
+    "open_instruct/miles/driver.py": "ce573d767ef641f46833c892612e5120dcff72e34668ab1d851368c9e55a71f1",
+    "open_instruct/miles/data.py": "659225e3a8cde2b2a8a582630bb18710dba2a9a3fa06669d3a7072793070ea7a"
+  },
+  "limits": [
+    "Random tiny model; all-zero rewards and policy advantages; updates driven by auxiliary losses",
+    "The final unscored token uses deterministic expert IDs for the auxiliary forward; full-model/Megatron auxiliary parity remains unqualified",
+    "Publication round trips validate reset/republish consistency, not independent export mapping",
+    "This run used schema-1 checkpoints; later schema-2 topology guards are validated separately"
+  ]
+}

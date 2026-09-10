@@ -46,8 +46,9 @@ def save(actor, rollout_id):
         atomic_json(
             path / "pending.json",
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "world_size": dist.get_world_size(),
+                "expert_parallel_size": actor.args.olmo_core.expert_parallel_size,
                 "clock": actor.clock.as_dict(),
                 "model_config": actor.model_config.as_config_dict(),
                 "hf_config": actor.hf_config.to_dict(),
@@ -80,18 +81,56 @@ def resume_manifest(root):
     return path, manifest
 
 
+def validate_topology(manifest, world_size, expert_parallel_size):
+    """Reject ambiguous legacy topology and all unimplemented resharding."""
+    schema = manifest.get("schema_version")
+    saved_world = manifest.get("world_size")
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError(f"Unsupported Core RL checkpoint schema: {schema!r}")
+    if type(saved_world) is not int or saved_world < 1:
+        raise ValueError("Invalid saved trainer world_size")
+    if schema == 1:
+        if saved_world != 1:
+            raise ValueError(
+                "Legacy schema-1 multi-rank checkpoints do not record expert_parallel_size. "
+                "Verify the original launch configuration and explicitly migrate the manifest "
+                "to schema 2 with its saved expert_parallel_size; automatic inference is disabled."
+            )
+        saved_ep = 1
+    else:
+        saved_ep = manifest.get("expert_parallel_size")
+        if type(saved_ep) is not int or saved_ep < 1 or saved_world % saved_ep:
+            raise ValueError("Invalid or missing saved expert_parallel_size in schema-2 checkpoint")
+    if (saved_world, saved_ep) != (world_size, expert_parallel_size):
+        raise ValueError(
+            "Core RL resume requires the saved trainer topology: "
+            f"saved world_size={saved_world}, expert_parallel_size={saved_ep}; "
+            f"requested world_size={world_size}, expert_parallel_size={expert_parallel_size}. "
+            "Changing trainer topology during resume is not implemented."
+        )
+
+
+def _restore_preflight(actor):
+    # Read and validate rank-local state before any native checkpoint collective.
+    path, manifest = resume_manifest(actor.args.load)
+    validate_topology(manifest, dist.get_world_size(), actor.args.olmo_core.expert_parallel_size)
+    if manifest["model_config"] != actor.model_config.as_config_dict():
+        raise ValueError("Core model configuration differs from the saved architecture")
+    clock = PolicyClock.from_dict(manifest["clock"])
+    state = torch.load(path / f"rank_{dist.get_rank()}.pt", map_location="cpu", weights_only=False)
+    for field in ("scheduler", "python", "numpy", "torch", "cuda"):
+        if field not in state:
+            raise ValueError(f"Missing rank checkpoint field: {field}")
+    return path, state, clock
+
+
 def restore(actor):
     if not actor.args.load:
         return
-    path, manifest = resume_manifest(actor.args.load)
-    if manifest["schema_version"] != 1 or manifest["world_size"] != dist.get_world_size():
-        raise ValueError("Core RL resume currently requires the saved trainer topology")
-    if manifest["model_config"] != actor.model_config.as_config_dict():
-        raise ValueError("Core model configuration differs from the saved architecture")
+    path, state, clock = actor._agree(lambda: _restore_preflight(actor))
     models.load_native(actor.train_module, path / "model")
-    state = torch.load(path / f"rank_{dist.get_rank()}.pt", map_location="cpu", weights_only=False)
     actor.lr_scheduler.load_state_dict(state["scheduler"])
-    actor.clock = PolicyClock.from_dict(manifest["clock"])
+    actor.clock = clock
     random.setstate(state["python"])
     np.random.set_state(state["numpy"])
     torch.set_rng_state(state["torch"])
