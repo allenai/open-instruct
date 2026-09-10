@@ -147,10 +147,12 @@
     },
     "beaker_ep2_trial": {
       "id": "01M2608GC3Z0VWC3R7J2X21RQ7",
-      "status": "submitted; GPU qualification pending",
+      "status": "passed baseline and streaming training, restart and audits",
       "source_commit": "09c200d7f",
       "trainer_gpus": 2,
-      "rollout_gpus": 1
+      "rollout_gpus": 1,
+      "exit_code": 0,
+      "result_dataset": "01M2608GCAF12RYJJP5KX2D7XJ"
     },
     "sft_trial_local_eval_smoke": {
       "passed": true,
@@ -165,6 +167,17 @@
       "runtime_tests_passed": 6,
       "artifacts": "/tmp/miles-validation/sft-eval-smoke",
       "config_preflight": "production EP2 config accepted by pinned MILES parser using local hybrid descriptor"
+    },
+    "sft_gsm8k_trial": {
+      "id": "01M261NF9E9GG112TBCQRY7TMK",
+      "status": "running; checkpoint preparation passed",
+      "source_commit": "19b9022392b2",
+      "gpu_count": 3,
+      "source_parameters": 18514193152,
+      "source_storage_dtype": "BF16",
+      "checkpoint": "step23607 router-bf16-autocast-v2-hf",
+      "image_tests_passed": 6,
+      "meta_factory_parameter_count_exact": true
     }
   },
   "limitations": [

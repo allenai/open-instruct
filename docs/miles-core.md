@@ -177,7 +177,7 @@ The following remain required before deleting old GRPO code:
 | Area | Current state / missing acceptance |
 | --- | --- |
 | Dense models | Tiny Llama, Qwen2, Qwen3, Olmo2 numerical parity; real training-scale model qualification remains |
-| Conventional Olmo3Moe | Real local 32.45M MoE GSM8K lifecycle, initial serving-weight equality, native/HF parity, updates and separate-process restart verified; larger-model and multi-rank EP qualification remains |
+| Conventional Olmo3Moe | Real local 32.45M MoE GSM8K lifecycle, initial serving-weight equality, native/HF parity, updates and separate-process restart verified; tiny EP2 training/publication/restart also passed on Beaker; larger-model qualification remains |
 | KDA / latent Olmo Hybrid | Tiny KDA+latent model completed real SGLang/MILES/Core GSM8K iterations and separate-process restart; initial serving weights match and train/rollout mean logprob differences were 0.0023–0.0031; production architecture and multi-rank qualification remain |
 | Routing replay | Router/recompute gradients tested; serving route alignment, final unscored token's auxiliary loss, and full-model replay qualification remain |
 | Tools / environments | Masks survive the adapter; the complete open-instruct multi-turn environment rollout bridge remains to be migrated |
@@ -226,8 +226,12 @@ The EP follow-up uses `scripts/train/debug/miles_core_moe_ep.sh` through the sam
 image wrapper. It requests three GPUs: two Core trainer ranks with EP=2 and one
 SGLang engine. Both CPU-staged/per-tensor and streamed/flattened paths must pass
 initial serving equality, two updates, restart, and the checkpoint audit. Its
-parser preflight passes locally; GPU qualification is recorded separately from
-that preflight.
+[three-GPU trial](https://beaker.org/ex/01M2608GC3Z0VWC3R7J2X21RQ7)
+passed both paths, including separate-process restart, independent response and
+checkpoint audits, and clean teardown (exit 0). Median warm publication was
+77.9 ms for the baseline and 63.0 ms for streaming, with three warm measurements
+per arm. The source model was the random conventional toy MoE; this establishes
+neither large-model throughput nor full-size hybrid EP correctness.
 
 The full replacement is therefore unfinished. These are implementation or qualification gaps, not capabilities silently delegated to another trainer.
 
