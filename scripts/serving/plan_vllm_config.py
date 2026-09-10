@@ -255,8 +255,12 @@ def plan(
         # usually what limits concurrency on these models.
         ep_total_w = (pb["non_expert"] * bpp) * n + pb["experts"] * bpp
         tp_total_w = wbytes
+        # --decode-context-parallel-size shards the MLA latent along the sequence
+        # axis across the same ranks, recovering the sharding tensor parallelism
+        # cannot do for a single-head latent cache.
         for strat, wtot, kv_repl in (
             ("TP", tp_total_w, n if kvkind.startswith("MLA") else 1),
+            ("TP+DCP", tp_total_w, 1),
             ("DP+EP", ep_total_w, 1),
         ):
             kv_avail = budget - wtot
