@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import atexit
 import contextlib
+import copy
 import dataclasses
 import functools
 import importlib
@@ -279,7 +280,8 @@ async def _score(args, sample):
         result = await registry[name].async_call(
             tokens,
             sample.response,
-            spec["target"],
+            # Verifiers may consume dictionary labels; preserve the original targets.
+            copy.deepcopy(spec["target"]),
             query=metadata.get("query", sample.prompt),
             rollout_state=metadata.get("rollout_state"),
         )

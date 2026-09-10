@@ -195,6 +195,10 @@ those values cannot establish a matched end-to-end speedup against Megatron.
 
 ## Promotion order
 
+The [qualification plan](miles-qualification-plan.md) specifies bounded experiment
+shapes, the cross-backend comparison contract and criteria for promoting each
+default. The sequence below summarizes those gates.
+
 1. Extend the passing fixed-global-batch gates (native EP, recomputation,
    optimizer moments, isolated auxiliary gradients and tiny restart) to a matched
    batch through the customized Megatron trainer under matched semantics.

@@ -122,6 +122,32 @@ def test_mixed_rewards_use_existing_verifier_and_preserve_components(tmp_path):
         asyncio.run(rewards.registered_reward(args, sample))
 
 
+def test_dictionary_targets_survive_repeated_and_shared_ifeval_scoring(tmp_path):
+    registry = tmp_path / "verifiers.json"
+    registry.write_text(json.dumps({"ifeval": {"factory": "open_instruct.ground_truth_utils.IFEvalVerifierOld"}}))
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(registry)))
+    target = {"func_name": "validate_lowercase", "N": None}
+    samples = [
+        SimpleNamespace(
+            tokens=[],
+            response_length=0,
+            response=response,
+            prompt="Respond in lowercase.",
+            metadata={"verifiers": [{"name": "ifeval", "target": target}]},
+        )
+        for response in ("the ocean is blue.", "another lowercase answer.", "The ocean is blue.")
+    ]
+
+    async def score_twice():
+        for _ in range(2):
+            assert await rewards.registered_reward(args, samples) == [1.0, 1.0, 0.0]
+            assert target == {"func_name": "validate_lowercase", "N": None}
+            assert all(sample.metadata["verifiers"][0]["target"] is target for sample in samples)
+            assert [sample.metadata["reward_components"][0]["score"] for sample in samples] == [1.0, 1.0, 0.0]
+
+    asyncio.run(score_twice())
+
+
 def test_policy_agreement_ignores_tool_tokens_and_weights_active_tokens():
     rollout = {
         "log_probs": [torch.tensor([-1.1, float("nan"), -1.2]), torch.tensor([-2.3])],

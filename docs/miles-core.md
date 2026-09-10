@@ -464,7 +464,9 @@ The datasource job runs the tasks sequentially on one three-GPU allocation,
 with two updates and 64 audited responses planned per task.
 
 Remaining qualification includes a matched Megatron comparison, full-model
-replay/restart, longer runs and additional topologies.
+replay/restart, longer runs and additional topologies. The
+[qualification plan](miles-qualification-plan.md) defines bounded follow-up
+experiments and promotion criteria for the defaults.
 
 The corrected [tiny resident profile](../configs/miles/profiles/tiny-resident.toml)
 also completed two updates and a separate-process third update through the public
