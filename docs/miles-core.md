@@ -132,6 +132,20 @@ each with initial serving equality, two iterations, restart and an independent
 audit. Its timeout is 25 minutes. This tiny-model comparison measures machinery
 overhead; it is not evidence for production-model throughput.
 
+The [two-GPU Holmes A/B trial](https://beaker.org/ex/01M251NYNKZ8D4SK3JBRH13PZF)
+passed with exit code 0. Both arms completed two fresh optimizer steps, restored
+in a separate process for step three, and passed independent audits of 12
+responses, policy versions, task cursor continuation, and changed native weights.
+All task rewards were zero; router auxiliary losses drove the updates. Across
+three warm publications per arm, median publication time was 77.8 ms for the
+CPU-staged/per-tensor baseline and 52.6 ms for streaming/flattened publication.
+Median export/packing time was 15.2 ms versus 1.55 ms. The 49 HF tensors occupied
+27.5 MB; flattening reduced transport collectives from 49 to one. Cold first
+publications took 1.21–1.37 seconds including NCCL connection setup and are
+excluded from those warm medians. This small sample does not establish a
+production speedup. Audit artifacts and all timings are retained in
+`docs/measurements/miles-core-local-20260910.json`.
+
 ## Validation and remaining acceptance work
 
 Verified locally on an RTX 4090:

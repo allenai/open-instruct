@@ -139,16 +139,26 @@
     },
     "beaker_teardown_retry": {
       "id": "01M251NYNKZ8D4SK3JBRH13PZF",
-      "status": "running; result pending",
-      "source_commit": "dac5bc25a"
+      "status": "passed",
+      "source_commit": "dac5bc25a",
+      "exit_code": 0,
+      "result_dataset": "01M251NYNR58NXWHR6K1J8HVCR",
+      "evidence": "docs/measurements/miles-core-local-20260910.json"
+    },
+    "beaker_ep2_trial": {
+      "id": "01M2608GC3Z0VWC3R7J2X21RQ7",
+      "status": "submitted; GPU qualification pending",
+      "source_commit": "09c200d7f",
+      "trainer_gpus": 2,
+      "rollout_gpus": 1
     }
   },
   "limitations": [
-    "No Beaker run",
     "Synthetic rewards do not demonstrate learning quality",
-    "KDA/latent GPU training and checkpoint restore tested; full hybrid HF/Core/SGLang numerical parity and multi-rank qualification remain",
+    "Tiny KDA/latent full SGLang/Core lifecycle and logprob agreement passed locally; production architecture and multi-rank qualification remain",
     "Pinned FLA compatibility shim supports one KDA head width per process",
-    "Full acceptance gaps are listed in docs/miles-core.md"
+    "Full acceptance gaps are listed in docs/miles-core.md",
+    "Public GSM8K toy trials have all-zero rewards; parameter updates are driven by MoE auxiliary losses, not task learning"
   ],
   "core_base_branch": "jacobm/moe-v2-core-gdn2",
   "core_base_revision": "169b8f9d06bce0276143876c82f630af483b03b7",
