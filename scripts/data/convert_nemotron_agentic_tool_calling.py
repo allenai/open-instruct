@@ -85,6 +85,13 @@ def _get_tokenizer(name: str, revision: str):
     return _tokenizer
 
 
+def _parses_to_null(arguments: str) -> bool:
+    try:
+        return json.loads(arguments) is None
+    except json.JSONDecodeError:
+        return False
+
+
 def _clean_message(message: dict[str, Any]) -> dict[str, Any]:
     tool_calls = None
     if message.get("tool_calls"):
@@ -94,6 +101,12 @@ def _clean_message(message: dict[str, Any]) -> dict[str, Any]:
             arguments = function.get("arguments")
             if not isinstance(arguments, str):
                 arguments = json.dumps(arguments if arguments is not None else {}, ensure_ascii=False)
+            elif _parses_to_null(arguments):
+                # A handful of source rows carry the JSON string "null" for a no-argument call. Chat
+                # templates iterate arguments as a mapping, and the SFT tokenizer only parses strings
+                # that decode to an object, so "null" would reach the template as a string and crash
+                # it (jinja: "Can only get item pairs from a mapping"). Store the empty object instead.
+                arguments = "{}"
             tool_calls.append(
                 {
                     "id": tc.get("id"),
@@ -256,7 +269,9 @@ Derived from [{SOURCE_REPO}](https://huggingface.co/datasets/{SOURCE_REPO}) (rev
 - System messages with empty content are removed ({stats["empty_system_removed"]:,} rows) so a chat
   template's default system prompt applies.
 - `messages` fields are `role`, `content`, `reasoning_content` (assistant only), `tool_calls`
-  (assistant only; `arguments` is a JSON string, as in the source) and `tool_call_id` (tool only).
+  (assistant only; `arguments` is a JSON string, as in the source, except that the JSON string
+  `null` becomes `{{}}` so templates that iterate arguments as a mapping accept it) and
+  `tool_call_id` (tool only).
 
 | | |
 |---|---|
