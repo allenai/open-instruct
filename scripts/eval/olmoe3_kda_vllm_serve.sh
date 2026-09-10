@@ -57,9 +57,14 @@ olmoe3_vllm_defaults() {
     OLMO_CORE_REF="${OLMO_CORE_REF:-f2cf93839}"
     VLLM_VENV="${VLLM_VENV:-/opt/venv-vllm}"
     VLLM_LOG="${VLLM_LOG:-/tmp/vllm_server.log}"
-    # Triton (used by the KDA kernels) needs a ptxas matching the CUDA runtime; the olmo-core
-    # images carry one under conda. Only set it where that exists.
-    if [ -z "${TRITON_PTXAS_PATH:-}" ] && [ -x /opt/conda/bin/ptxas ]; then export TRITON_PTXAS_PATH=/opt/conda/bin/ptxas; fi
+    # Triton (used by the KDA kernels) needs a ptxas matching the CUDA runtime. Prefer a conda
+    # one where the image has it; otherwise the variable must be *unset*, not empty: the
+    # olmo-core image exports it empty, and triton 3.6 treats any non-None value as a path,
+    # so an empty one dies in the first autotune with "PermissionError: Permission denied: ''"
+    # instead of falling back to the bundled binary.
+    if [ -z "${TRITON_PTXAS_PATH:-}" ]; then
+        if [ -x /opt/conda/bin/ptxas ]; then export TRITON_PTXAS_PATH=/opt/conda/bin/ptxas; else unset TRITON_PTXAS_PATH; fi
+    fi
     export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     export PORT SERVED_MODEL_NAME
     export OPENAI_BASE_URL="http://127.0.0.1:$PORT/v1"
@@ -77,7 +82,10 @@ build_olmoe3_vllm_venv() {
     uv venv -q "$VLLM_VENV" --python "$(command -v python3)"
     local vpip=(uv pip install -q --python "$VLLM_VENV/bin/python")
     # vllm pins its own torch (2.10.0); take it from the cu128 index to match the driver stack.
-    "${vpip[@]}" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple "vllm==0.19.1" "datasets==4.8.4"
+    # transformers is pinned to what the verified runs resolved (2026-09-08); left free, the
+    # same install started pulling 5.17.0 two days later, and a different tokenizer / template
+    # stack would make later evals incomparable with the earlier ones.
+    "${vpip[@]}" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple "vllm==0.19.1" "datasets==4.8.4" "transformers==4.57.6"
     # olmo-core --no-deps (its torch pin would fight vllm's), so its runtime deps are listed by
     # hand; fla provides the KDA kernels.
     "${vpip[@]}" "cached-path>=1.7.2" "dataclass-extensions>=0.3.0" bettermap importlib_resources safetensors rich pandas "flash-linear-attention==0.4.1"
