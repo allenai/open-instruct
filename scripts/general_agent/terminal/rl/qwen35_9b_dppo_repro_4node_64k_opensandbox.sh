@@ -36,8 +36,8 @@ EXP_NAME="${EXP_NAME:-swerl_qwen35_9b_dppo_repro_4node_64k_opensandbox}"
 # pradeepd_WANDB_API_KEY) must exist in that workspace too, and OpenSandbox
 # egress should be verified once from a holmes session
 # (scripts/opensandbox/check_opensandbox_egress.sh).
-BEAKER_CLUSTER="${BEAKER_CLUSTER:-ai2/jupiter}"
-BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/oe-agents}"
+BEAKER_CLUSTER="${BEAKER_CLUSTER:-ai2/holmes}"
+BEAKER_WORKSPACE="${BEAKER_WORKSPACE:-ai2/oe-agents-holmes}"
 
 uv run python mason.py \
        --cluster "$BEAKER_CLUSTER" \
