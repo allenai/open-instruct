@@ -187,15 +187,18 @@ def build_train_module(args, source=None):
     return module, hf, config
 
 
-def iter_export_state(module, hf):
+def iter_export_state(module, hf, *, stream_moe=True):
     """Yield HF weights with at most one dense parameter gathered at a time.
 
-    MoE conversion stages its full unsharded state on CPU. Its expert all-gather
-    still needs room for one complete expert parameter on each EP rank.
+    MoE conversion streams through Core on the model device. The current expert
+    slabs and consumer bucket need device memory, without a full CPU replica.
     """
     # Core wraps the live MoE model in MultiGroupDDP, including at world size 1.
     if isinstance(module, train_transformer.OLMoDDPTrainModule) or isinstance(module.model, OLMoDDPModel):
-        yield from olmo3.gather_olmo3_moe_hf_state(module.model, hf, cpu=True).items()
+        if stream_moe:
+            yield from olmo3.iter_olmo3_moe_hf_state(module.model, hf)
+        else:
+            yield from olmo3.gather_olmo3_moe_hf_state(module.model, hf, cpu=True).items()
         return
     for name, value in module.model.state_dict().items():
         native = value.full_tensor() if isinstance(value, DTensor) else value

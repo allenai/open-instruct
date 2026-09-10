@@ -1,6 +1,8 @@
 """MILES TrainRayActor implemented with OLMo-core train modules."""
 
 import contextlib
+import json
+import time
 from pathlib import Path
 
 import ray
@@ -19,7 +21,7 @@ from torch import distributed as dist
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
-from open_instruct.miles import checkpoint, data, models, scheduler
+from open_instruct.miles import checkpoint, data, models, publication, scheduler
 from open_instruct.miles.state import PolicyClock
 
 logger = logger_utils.setup_logger(__name__)
@@ -64,6 +66,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             if args.colocate
             else update_weight_utils.UpdateWeightFromDistributed
         )
+        if not args.colocate and args.olmo_core.weight_sync_mode == "flattened":
+            updater = publication.FlattenedDistributedUpdater
         self.weight_updater = updater(args, self.model)
         return self.clock.next_rollout_id
 
@@ -188,6 +192,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         self._agree(lambda: checkpoint.finalize(self, rollout_id))
 
     def update_weights(self, info):
+        torch.cuda.synchronize()
+        started = time.perf_counter()
         updater = self.weight_updater
         if info.has_new_engines:
             updater.connect_rollout_engines(
@@ -201,15 +207,32 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             ray.get([engine.pause_generation.remote() for engine in engines])
             ray.get([engine.begin_weight_update.remote() for engine in engines])
         dist.barrier()
+        pause_done = time.perf_counter()
+        transfer_seconds, tensor_count, byte_count, bucket_count = 0.0, 0, 0, 0
+
+        def send(bucket):
+            nonlocal transfer_seconds, bucket_count
+            torch.cuda.synchronize()
+            before = time.perf_counter()
+            updater.update_bucket_weights(bucket, weight_version=self.clock.completed_steps)
+            torch.cuda.synchronize()
+            transfer_seconds += time.perf_counter() - before
+            bucket_count += 1
+
         bucket, size = [], 0
-        for name, tensor in models.iter_export_state(self.train_module, self.hf_config):
+        for name, tensor in models.iter_export_state(
+            self.train_module, self.hf_config, stream_moe=self.args.olmo_core.stream_moe_export
+        ):
+            tensor_count += 1
+            byte_count += tensor.nbytes
             if bucket and size + tensor.nbytes > self.args.update_weight_buffer_size:
-                updater.update_bucket_weights(bucket, weight_version=self.clock.completed_steps)
+                send(bucket)
                 bucket, size = [], 0
             bucket.append((name, tensor.to(device="cuda", dtype=torch.bfloat16).contiguous()))
             size += tensor.nbytes
         if bucket:
-            updater.update_bucket_weights(bucket, weight_version=self.clock.completed_steps)
+            send(bucket)
+        export_done = time.perf_counter()
         dist.barrier()
         if dist.get_rank() == 0:
             ray.get([engine.flush_cache.remote() for engine in engines])
@@ -219,6 +242,29 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             ray.get([engine.continue_generation.remote() for engine in engines])
         dist.barrier()
         self.clock.published()
+        if dist.get_rank() == 0:
+            timings = dict(
+                version=self.clock.completed_steps,
+                pause_connect_seconds=pause_done - started,
+                export_pack_seconds=export_done - pause_done - transfer_seconds,
+                transport_load_seconds=transfer_seconds,
+                finalize_seconds=time.perf_counter() - export_done,
+                total_seconds=time.perf_counter() - started,
+                tensors=tensor_count,
+                bytes=byte_count,
+                buckets=bucket_count,
+                transport_collectives=bucket_count
+                if self.args.colocate or self.args.olmo_core.weight_sync_mode == "flattened"
+                else tensor_count,
+                stream_moe_export=self.args.olmo_core.stream_moe_export,
+                transport="ipc" if self.args.colocate else self.args.olmo_core.weight_sync_mode,
+            )
+            logger.info("Core weight publication: %s", json.dumps(timings, sort_keys=True))
+            if self.args.save:
+                path = Path(self.args.save) / "publication.jsonl"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a") as output:
+                    output.write(json.dumps(timings) + "\n")
 
     def export_hf(self, rollout_id, path):
         state = models.export_state(self.train_module, self.hf_config)

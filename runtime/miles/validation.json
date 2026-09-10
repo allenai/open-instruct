@@ -68,6 +68,21 @@
       "passed": 15,
       "image_id": "sha256:60890d004c1c338a2d29b267ba4d7c0f202f3c2f3f76840386c4ff8eba34ffa4",
       "includes": "Live wrapped MoE initial export equality, GPU updates and native restore for Qwen3, KDA, KDA+latent"
+    },
+    "streaming_conversion_runtime": {
+      "passed": 30,
+      "additional_fused_qkv_factory_suite_passed": 5,
+      "flattened_wire_contract_tests_passed": 1,
+      "adapter_host_tests_passed": 29,
+      "colocated_streaming_lifecycle_steps": 2,
+      "source": "Core b7f1e5296 + open-instruct working tree, pinned compiled image"
+    },
+    "beaker_initial_trial": {
+      "id": "01M24ZXCVN3K2NX6K6JDJQK0Q8",
+      "status": "failed before training",
+      "cause": "Jupiter driver reports CUDA 12.8; pinned PyTorch requires CUDA 13",
+      "image": "01M24ZWPHZBJ36AJDYKV08818Y",
+      "open_instruct_commit": "6a7ab36c1c26"
     }
   },
   "limitations": [

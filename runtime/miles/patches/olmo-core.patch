@@ -79,9 +79,17 @@ index 174b6c0b7f8e7cd988e47a480fac0df5166ab16c..a102cfe720a33302f87890830a7553fe
          self.w_out = nn.Linear(
              n_heads * self.head_dim, d_model, bias=bias, dtype=dtype, device=init_device
 diff --git a/src/olmo_core/nn/hf/convert.py b/src/olmo_core/nn/hf/convert.py
-index 5c9e38b525775a900559066fa0a9b58da69440df..454b018e94aa13d08f3740cd8afd3fcff9c9168f 100644
+index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265cd99809a 100644
 --- a/src/olmo_core/nn/hf/convert.py
 +++ b/src/olmo_core/nn/hf/convert.py
+@@ -1,6 +1,6 @@
+ import logging
+ import re
+-from typing import Any, Dict, List
++from typing import Any, Dict, Iterator, List, Mapping
+ 
+ import torch
+ from transformers import PretrainedConfig
 @@ -36,6 +36,9 @@ HF_TO_OLMO_CORE_WEIGHT_MAPPINGS: Dict[str, str] = {
      f"model.layers.{LAYER}.self_attn.k_proj.weight": f"blocks.{LAYER}.attention.w_k.weight",
      f"model.layers.{LAYER}.self_attn.v_proj.weight": f"blocks.{LAYER}.attention.w_v.weight",
@@ -141,18 +149,252 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..454b018e94aa13d08f3740cd8afd3fcf
      "llama": {
          f"blocks.{LAYER}.attention_norm.weight": StateMappingTemplate(
              f"blocks.{LAYER}.attention_norm.weight",
+@@ -804,9 +828,7 @@ def convert_olmo3moe_state_from_hf(
+     dense_indices = _olmo3moe_dense_layer_indices(config)
+     has_shared = getattr(config, "shared_expert_intermediate_size", None) is not None
+     latent_dim = getattr(config, "latent_moe_dim", None)
+-    dense_mlp_uses_shared_experts = getattr(
+-        config, "dense_mlp_uses_shared_experts", False
+-    )
++    dense_mlp_uses_shared_experts = getattr(config, "dense_mlp_uses_shared_experts", False)
+     peri_ln = getattr(config, "use_peri_ln", False)
+     used: set[str] = set()
+ 
+@@ -937,11 +959,21 @@ def convert_olmo3moe_state_from_hf(
+ 
+ @beta_feature
+ def convert_olmo3moe_state_to_hf(
+-    config: PretrainedConfig,
+-    olmo_core_state: Dict[str, Any],
++    config: PretrainedConfig, olmo_core_state: Dict[str, Any]
+ ) -> Dict[str, Any]:
++    """Materialize the exact HF state; use the iterator for streaming publication."""
++    return dict(iter_olmo3moe_state_to_hf(config, olmo_core_state))
++
++
++def iter_olmo3moe_state_to_hf(
++    config: PretrainedConfig,
++    olmo_core_state: Mapping[str, Any],
++) -> Iterator[tuple[str, torch.Tensor]]:
+     """
+-    Convert an *unsharded* OLMo-core MoE-v2 state dict to HF ``olmo3moe`` format.
++    Yield an unsharded MoE-v2 state in HF format without retaining all layers.
++
++    A lazy input mapping may gather parameters on demand. Expert views retain
++    only the current layer slabs; the consumer controls output bucket lifetime.
+ 
+     Inverse of :func:`convert_olmo3moe_state_from_hf`. Splits the fused
+     ``w_up_gate`` routed-expert weight into per-expert HF ``up_proj``/``gate_proj``
+@@ -959,26 +991,22 @@ def convert_olmo3moe_state_to_hf(
+     has_shared = getattr(config, "shared_expert_intermediate_size", None) is not None
+     shared_hidden = getattr(config, "shared_expert_intermediate_size", None)
+     latent_dim = getattr(config, "latent_moe_dim", None)
+-    dense_mlp_uses_shared_experts = getattr(
+-        config, "dense_mlp_uses_shared_experts", False
+-    )
++    dense_mlp_uses_shared_experts = getattr(config, "dense_mlp_uses_shared_experts", False)
+     peri_ln = getattr(config, "use_peri_ln", False)
+     used: set[str] = set()
+ 
+-    hf_state: Dict[str, Any] = {}
+-
+-    hf_state["model.embed_tokens.weight"] = _take(olmo_core_state, used, "embeddings.weight")
+-    hf_state["model.norm.weight"] = _take(olmo_core_state, used, "lm_head.norm.weight")
+-    hf_state["lm_head.weight"] = _take(olmo_core_state, used, "lm_head.w_out.weight")
++    yield "model.embed_tokens.weight", _take(olmo_core_state, used, "embeddings.weight")
++    yield "model.norm.weight", _take(olmo_core_state, used, "lm_head.norm.weight")
++    yield "lm_head.weight", _take(olmo_core_state, used, "lm_head.w_out.weight")
+     if getattr(config, "embed_norm", False):
+-        hf_state["model.embed_norm.weight"] = _take(olmo_core_state, used, "embedding_norm.weight")
++        yield "model.embed_norm.weight", _take(olmo_core_state, used, "embedding_norm.weight")
+ 
+     for layer_idx in range(n_layers):
+         prefix = f"model.layers.{layer_idx}."
+         olmo_prefix = f"blocks.{layer_idx}."
+ 
+         if _olmo3moe_is_kda_layer(config, layer_idx):
+-            hf_state.update(_convert_kda_layer_to_hf(olmo_core_state, used, prefix, olmo_prefix))
++            yield from _convert_kda_layer_to_hf(olmo_core_state, used, prefix, olmo_prefix).items()
+         else:
+             attention_map = {
+                 "w_q.weight": "q_proj.weight",
+@@ -991,38 +1019,42 @@ def convert_olmo3moe_state_to_hf(
+             if getattr(config, "attention_gate_type", None) is not None:
+                 attention_map["w_g.weight"] = "g_proj.weight"
+             for olmo_suffix, hf_suffix in attention_map.items():
+-                hf_state[f"{prefix}self_attn.{hf_suffix}"] = _take(
+-                    olmo_core_state,
+-                    used,
+-                    f"{olmo_prefix}attention.{olmo_suffix}",
++                yield (
++                    f"{prefix}self_attn.{hf_suffix}",
++                    _take(olmo_core_state, used, f"{olmo_prefix}attention.{olmo_suffix}"),
+                 )
+ 
+-        hf_state[f"{prefix}post_attention_layernorm.weight"] = _take(
+-            olmo_core_state, used, f"{olmo_prefix}attention_norm.weight"
++        yield (
++            f"{prefix}post_attention_layernorm.weight",
++            _take(olmo_core_state, used, f"{olmo_prefix}attention_norm.weight"),
+         )
+-        hf_state[f"{prefix}post_feedforward_layernorm.weight"] = _take(
+-            olmo_core_state, used, f"{olmo_prefix}feed_forward_norm.weight"
++        yield (
++            f"{prefix}post_feedforward_layernorm.weight",
++            _take(olmo_core_state, used, f"{olmo_prefix}feed_forward_norm.weight"),
+         )
+         if peri_ln:
+-            hf_state[f"{prefix}pre_attention_layernorm.weight"] = _take(
+-                olmo_core_state, used, f"{olmo_prefix}attention_input_norm.weight"
++            yield (
++                f"{prefix}pre_attention_layernorm.weight",
++                _take(olmo_core_state, used, f"{olmo_prefix}attention_input_norm.weight"),
+             )
+-            hf_state[f"{prefix}pre_feedforward_layernorm.weight"] = _take(
+-                olmo_core_state,
+-                used,
+-                f"{olmo_prefix}feed_forward_input_norm.weight",
++            yield (
++                f"{prefix}pre_feedforward_layernorm.weight",
++                _take(olmo_core_state, used, f"{olmo_prefix}feed_forward_input_norm.weight"),
+             )
+ 
+         if layer_idx in dense_indices:
+             if not dense_mlp_uses_shared_experts:
+-                hf_state[f"{prefix}mlp.gate_proj.weight"] = _take(
+-                    olmo_core_state, used, f"{olmo_prefix}feed_forward.w1.weight"
++                yield (
++                    f"{prefix}mlp.gate_proj.weight",
++                    _take(olmo_core_state, used, f"{olmo_prefix}feed_forward.w1.weight"),
+                 )
+-                hf_state[f"{prefix}mlp.down_proj.weight"] = _take(
+-                    olmo_core_state, used, f"{olmo_prefix}feed_forward.w2.weight"
++                yield (
++                    f"{prefix}mlp.down_proj.weight",
++                    _take(olmo_core_state, used, f"{olmo_prefix}feed_forward.w2.weight"),
+                 )
+-                hf_state[f"{prefix}mlp.up_proj.weight"] = _take(
+-                    olmo_core_state, used, f"{olmo_prefix}feed_forward.w3.weight"
++                yield (
++                    f"{prefix}mlp.up_proj.weight",
++                    _take(olmo_core_state, used, f"{olmo_prefix}feed_forward.w3.weight"),
+                 )
+             else:
+                 dense_hidden = config.dense_mlp_intermediate_size
+@@ -1031,20 +1063,22 @@ def convert_olmo3moe_state_to_hf(
+                     used,
+                     f"{olmo_prefix}shared_experts.w_up_gate",
+                 ).reshape(d_model, 2 * dense_hidden)
+-                hf_state[f"{prefix}mlp.up_proj.weight"] = w_up_gate[:, :dense_hidden].T.contiguous()
+-                hf_state[f"{prefix}mlp.gate_proj.weight"] = w_up_gate[
+-                    :, dense_hidden:
+-                ].T.contiguous()
+-                hf_state[f"{prefix}mlp.down_proj.weight"] = (
++                yield f"{prefix}mlp.up_proj.weight", w_up_gate[:, :dense_hidden].T.contiguous()
++                yield f"{prefix}mlp.gate_proj.weight", w_up_gate[:, dense_hidden:].T.contiguous()
++                yield (
++                    f"{prefix}mlp.down_proj.weight",
+                     _take(olmo_core_state, used, f"{olmo_prefix}shared_experts.w_down")
+                     .reshape(dense_hidden, d_model)
+-                    .T.contiguous()
++                    .T.contiguous(),
+                 )
+             continue
+ 
+-        hf_state[f"{prefix}mlp.router.gate.weight"] = _take(
+-            olmo_core_state, used, f"{olmo_prefix}routed_experts_router.weight"
+-        ).reshape(n_experts, d_model)
++        yield (
++            f"{prefix}mlp.router.gate.weight",
++            _take(olmo_core_state, used, f"{olmo_prefix}routed_experts_router.weight").reshape(
++                n_experts, d_model
++            ),
++        )
+ 
+         w_up_gate = _take(olmo_core_state, used, f"{olmo_prefix}routed_experts.w_up_gate").reshape(
+             n_experts, 2 * moe_hidden, routed_d_model
+@@ -1055,29 +1089,34 @@ def convert_olmo3moe_state_to_hf(
+             n_experts, moe_hidden, routed_d_model
+         )
+         for e in range(n_experts):
+-            hf_state[f"{prefix}mlp.experts.{e}.up_proj.weight"] = w_up[e].contiguous()
+-            hf_state[f"{prefix}mlp.experts.{e}.gate_proj.weight"] = w_gate[e].contiguous()
+-            hf_state[f"{prefix}mlp.experts.{e}.down_proj.weight"] = w_down[e].T.contiguous()
++            yield f"{prefix}mlp.experts.{e}.up_proj.weight", w_up[e].contiguous()
++            yield f"{prefix}mlp.experts.{e}.gate_proj.weight", w_gate[e].contiguous()
++            yield f"{prefix}mlp.experts.{e}.down_proj.weight", w_down[e].T.contiguous()
++
++        del w_up_gate, w_up, w_gate, w_down
+ 
+         if latent_dim is not None:
+-            hf_state[f"{prefix}mlp.latent_down_proj.weight"] = _take(
+-                olmo_core_state, used, f"{olmo_prefix}latent_down_proj.weight"
++            yield (
++                f"{prefix}mlp.latent_down_proj.weight",
++                _take(olmo_core_state, used, f"{olmo_prefix}latent_down_proj.weight"),
+             )
+-            hf_state[f"{prefix}mlp.latent_up_proj.weight"] = _take(
+-                olmo_core_state, used, f"{olmo_prefix}latent_up_proj.weight"
++            yield (
++                f"{prefix}mlp.latent_up_proj.weight",
++                _take(olmo_core_state, used, f"{olmo_prefix}latent_up_proj.weight"),
+             )
+             if getattr(config, "latent_moe_bias", False):
+-                hf_state[f"{prefix}mlp.latent_down_proj.bias"] = _take(
+-                    olmo_core_state, used, f"{olmo_prefix}latent_down_proj.bias"
++                yield (
++                    f"{prefix}mlp.latent_down_proj.bias",
++                    _take(olmo_core_state, used, f"{olmo_prefix}latent_down_proj.bias"),
+                 )
+-                hf_state[f"{prefix}mlp.latent_up_proj.bias"] = _take(
+-                    olmo_core_state, used, f"{olmo_prefix}latent_up_proj.bias"
++                yield (
++                    f"{prefix}mlp.latent_up_proj.bias",
++                    _take(olmo_core_state, used, f"{olmo_prefix}latent_up_proj.bias"),
+                 )
+             if getattr(config, "latent_moe_up_proj_input_norm", False):
+-                hf_state[f"{prefix}mlp.latent_up_proj_input_norm.weight"] = _take(
+-                    olmo_core_state,
+-                    used,
+-                    f"{olmo_prefix}latent_up_proj_input_norm.weight",
++                yield (
++                    f"{prefix}mlp.latent_up_proj_input_norm.weight",
++                    _take(olmo_core_state, used, f"{olmo_prefix}latent_up_proj_input_norm.weight"),
+                 )
+ 
+         if has_shared:
+@@ -1087,15 +1126,14 @@ def convert_olmo3moe_state_to_hf(
+             ).reshape(d_model, 2 * shared_hidden)
+             shared_up = shared_up_gate[:, :shared_hidden]
+             shared_gate = shared_up_gate[:, shared_hidden:]
+-            hf_state[f"{prefix}mlp.shared_expert.up_proj.weight"] = shared_up.T.contiguous()
+-            hf_state[f"{prefix}mlp.shared_expert.gate_proj.weight"] = shared_gate.T.contiguous()
++            yield f"{prefix}mlp.shared_expert.up_proj.weight", shared_up.T.contiguous()
++            yield f"{prefix}mlp.shared_expert.gate_proj.weight", shared_gate.T.contiguous()
+             shared_down = _take(
+                 olmo_core_state, used, f"{olmo_prefix}shared_experts.w_down"
+             ).reshape(shared_hidden, d_model)
+-            hf_state[f"{prefix}mlp.shared_expert.down_proj.weight"] = shared_down.T.contiguous()
++            yield f"{prefix}mlp.shared_expert.down_proj.weight", shared_down.T.contiguous()
+ 
+     _require_exact_state_keys(olmo_core_state, used, state_name="OLMo-core")
+-    return hf_state
+ 
+ 
+ def _convert_state(
 diff --git a/src/olmo_core/nn/moe/v2/olmo3.py b/src/olmo_core/nn/moe/v2/olmo3.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..eac835ac1887ccc9ec48ede81d3469b7a0212e49
+index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a2886fdf6939
 --- /dev/null
 +++ b/src/olmo_core/nn/moe/v2/olmo3.py
-@@ -0,0 +1,564 @@
+@@ -0,0 +1,623 @@
 +"""Olmo3Moe builders and correctness-first OLMoDDP/HF weight interchange."""
 +
 +from __future__ import annotations
 +
++from collections.abc import Iterator, Mapping
 +from copy import deepcopy
-+from typing import Any, Mapping
++from typing import Any
 +
 +import torch
 +import torch.distributed as dist
@@ -172,7 +414,11 @@ index 0000000000000000000000000000000000000000..eac835ac1887ccc9ec48ede81d3469b7
 +)
 +from olmo_core.nn.ddp.block import OLMoDDPTransformerBlockConfig
 +from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
-+from olmo_core.nn.hf.convert import convert_state_from_hf, convert_state_to_hf
++from olmo_core.nn.hf.convert import (
++    convert_state_from_hf,
++    convert_state_to_hf,
++    iter_olmo3moe_state_to_hf,
++)
 +from olmo_core.nn.layer_norm import LayerNormConfig, LayerNormType
 +from olmo_core.nn.lm_head import LMHeadConfig, LMLossImplementation
 +from olmo_core.nn.moe import (
@@ -711,6 +957,60 @@ index 0000000000000000000000000000000000000000..eac835ac1887ccc9ec48ede81d3469b7
 +            native_state[f"{prefix}w_v.weight"] = v
 +
 +    return convert_state_to_hf(hf_config, native_state)
++
++
++class _GatheredMoEState(Mapping[str, torch.Tensor]):
++    """Read-only state inventory that gathers a parameter only when consumed."""
++
++    def __init__(self, model: torch.nn.Module, config: PretrainedConfig):
++        self.model = _unwrap_model(model)
++        self.state = self.model.state_dict()
++        self.aliases: dict[str, tuple[str, int]] = {}
++        self.dimensions = (
++            config.num_attention_heads * config.head_dim,
++            config.num_key_value_heads * config.head_dim,
++            config.num_key_value_heads * config.head_dim,
++        )
++        self.inventory = list(self.state)
++        for key in list(self.inventory):
++            if key.endswith(".attention.w_qkv.weight"):
++                self.inventory.remove(key)
++                for index, name in enumerate(("w_q", "w_k", "w_v")):
++                    alias = key.replace("w_qkv", name)
++                    self.aliases[alias] = (key, index)
++                    self.inventory.append(alias)
++
++    def __iter__(self):
++        return iter(self.inventory)
++
++    def __len__(self):
++        return len(self.inventory)
++
++    def __getitem__(self, name):
++        key, part = self.aliases.get(name, (name, None))
++        value = self.state[key]
++        local = get_local_tensor(value) if isinstance(value, DTensor) else value
++        owner = self.model.get_submodule(key.rsplit(".", 1)[0])
++        if getattr(owner, "_ep_sharded", False):
++            group = owner.ep_mesh["ep_mp"].get_group()
++            gathered = [torch.empty_like(local) for _ in range(dist.get_world_size(group))]
++            dist.all_gather(gathered, local.contiguous(), group=group)
++            local = torch.cat(gathered, dim=0)
++        if part is not None:
++            local = local.split(self.dimensions, dim=0)[part]
++        return local
++
++
++def iter_olmo3_moe_hf_state(
++    model: torch.nn.Module, hf_config: PretrainedConfig
++) -> Iterator[tuple[str, torch.Tensor]]:
++    """Stream HF tensors on the model device using the canonical converter.
++
++    All EP ranks must consume the iterator in the same order. No complete model
++    CPU replica is staged. The current expert slabs and consumer's output bucket
++    still need device memory; this is not an arbitrarily small-memory exporter.
++    """
++    yield from iter_olmo3moe_state_to_hf(hf_config, _GatheredMoEState(model, hf_config))
 diff --git a/src/olmo_core/nn/moe/v2/replay.py b/src/olmo_core/nn/moe/v2/replay.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..07a0fd9ae8a5eed4dac0bb6523d82f02ce95490f
@@ -913,17 +1213,17 @@ index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa974
          self._set_model_mode("train")
 diff --git a/src/test/nn/moe/v2/olmo3_factory_test.py b/src/test/nn/moe/v2/olmo3_factory_test.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..8035046e7e9a3896a1ffba4d8011a449278a5055
+index 0000000000000000000000000000000000000000..496d21c0ebe3dc0e6e1f25eb83701a6975eefd72
 --- /dev/null
 +++ b/src/test/nn/moe/v2/olmo3_factory_test.py
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,116 @@
 +"""Exercise the adapter factory against gdn2's real hybrid modules and HF tensors."""
 +
 +import pytest
 +import torch
 +
 +from olmo_core.config import DType
-+from olmo_core.nn.attention import AttentionBackendName, KimiDeltaAttention
++from olmo_core.nn.attention import AttentionBackendName, AttentionType, KimiDeltaAttention
 +from olmo_core.nn.moe.v2 import olmo3
 +from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 +from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
@@ -986,6 +1286,53 @@ index 0000000000000000000000000000000000000000..8035046e7e9a3896a1ffba4d8011a449
 +    assert set(exported) == set(state)
 +    for name in state:
 +        torch.testing.assert_close(exported[name], state[name], rtol=0, atol=0, check_dtype=False)
++
++
++@pytest.mark.parametrize("latent_dim", [None, 16])
++def test_streaming_export_matches_complete_export_and_is_lazy(latent_dim):
++    hf = hybrid_config(latent_dim)
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf, dtype=DType.bfloat16, attention_backend=AttentionBackendName.torch
++    )
++    native = config.build(init_device="cpu")
++    reference = Olmo3MoeForCausalLM(hf).to(torch.bfloat16)
++    with torch.no_grad():
++        for name, parameter in reference.named_parameters():
++            if name.endswith(("A_log", "dt_bias")):
++                parameter.zero_()
++    olmo3.load_olmo3_moe_hf_state(native, hf, reference.state_dict())
++    expected = olmo3.gather_olmo3_moe_hf_state(native, hf, cpu=True)
++    actual = dict(olmo3.iter_olmo3_moe_hf_state(native, hf))
++    assert actual.keys() == expected.keys()
++    for name in expected:
++        torch.testing.assert_close(actual[name], expected[name], rtol=0, atol=0)
++    # A later missing weight must not be touched by the first yield. Full
++    # consumption still rejects incomplete state, retaining strict conversion.
++    del native.blocks["1"].attention.w_out.weight
++    stream = olmo3.iter_olmo3_moe_hf_state(native, hf)
++    assert next(stream)[0] == "model.embed_tokens.weight"
++    with pytest.raises(KeyError):
++        dict(stream)
++
++
++def test_streaming_export_splits_fused_attention_weights():
++    hf = hybrid_config(None)
++    hf.layer_types = ["full_attention", "full_attention"]
++    hf.attention_gate_type = None
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf,
++        dtype=DType.bfloat16,
++        attention_backend=AttentionBackendName.torch,
++        attention_type=AttentionType.fused_v2,
++    )
++    native = config.build(init_device="cpu")
++    reference = Olmo3MoeForCausalLM(hf).to(torch.bfloat16)
++    olmo3.load_olmo3_moe_hf_state(native, hf, reference.state_dict())
++    expected = reference.state_dict()
++    actual = dict(olmo3.iter_olmo3_moe_hf_state(native, hf))
++    assert actual.keys() == expected.keys()
++    for name in expected:
++        torch.testing.assert_close(actual[name], expected[name], rtol=0, atol=0)
 diff --git a/src/test/train/train_module/custom_objective_test.py b/src/test/train/train_module/custom_objective_test.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..2dfca24d5f06a8ec52d3753c128bd80871a5dd56

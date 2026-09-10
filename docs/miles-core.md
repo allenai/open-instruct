@@ -61,7 +61,7 @@ Core checkpoints contain native model/optimizer state, scheduler and per-rank RN
 
 The pinned image also needs the existing olmo-miles FLA 0.5.2/Triton compatibility shim for KDA; the adapter installs it in each hybrid trainer process. That shim requires one KDA head width per process. Tiny hybrid test models use eight KDA heads to keep native DDP parameter offsets aligned for grouped matmul.
 
-Publication pauses generation, transfers weights, commits the optimizer-step version, and resumes generation. Dense conversion gathers one parameter at a time. MoE conversion stages the full unsharded model on CPU and still needs GPU space for one gathered expert parameter. This is not yet a measured large-model publication implementation. HF evaluation exports include the tokenizer and MILES completion marker.
+Publication pauses generation, transfers weights, commits the optimizer-step version, and resumes generation. Dense conversion gathers one parameter at a time. MoE conversion streams on the model device through Core's canonical HF converter. It retains the current expert slabs and output bucket, without staging a complete CPU model replica. Disaggregated publication uses one flattened NCCL broadcast per bucket. `core.stream_moe_export=false` and `core.weight_sync_mode="per_tensor"` select the baseline for comparisons. `publication.jsonl` records phase timings and tensor/byte/bucket counts when saving is enabled. Large-model memory and throughput qualification remain. HF evaluation exports include the tokenizer and MILES completion marker.
 
 ## Local MoE task and restart check
 
@@ -112,7 +112,7 @@ MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
   ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_core_moe.sh
 ```
 
-It requests one Jupiter GPU, a positive 15-minute allocation window, a 20-minute
+It requests one Holmes GPU, a positive 15-minute allocation window, a 20-minute
 timeout, and saves restart/audit evidence under `/output`. Saving is enabled here
 because native restart is the acceptance objective. The launcher uses Beaker's
 CLI schema because the installed mason SDK lacks `minRuntime`. It generates
@@ -121,7 +121,16 @@ trained model is uploaded. It does not run the repository GPU pytest script and
 must not be cited as `GPU_TESTS=` evidence. The previous olmo-miles lessons applied
 here are a pinned compiled runtime, baked source overlay, local preflight,
 bounded workload, explicit allocation window, and checking artifacts after exit.
-Disaggregated placement and faster publication need separate qualification.
+The first Jupiter attempt failed before training because its driver only supported
+CUDA 12.8; this CUDA 13 image requires Holmes or another verified compatible
+cluster. The command now checks CUDA before initialization. `NCCL_CUMEM_ENABLE=1`
+is inherited by trainer and engines to avoid the allocator mismatch found in
+olmo-miles. A two-GPU A/B trial uses
+`scripts/train/debug/miles_core_moe_disaggregated.sh`: one trainer GPU and one
+rollout GPU, baseline CPU export/per-tensor NCCL then streaming/flattened NCCL,
+each with initial serving equality, two iterations, restart and an independent
+audit. Its timeout is 25 minutes. This tiny-model comparison measures machinery
+overhead; it is not evidence for production-model throughput.
 
 ## Validation and remaining acceptance work
 

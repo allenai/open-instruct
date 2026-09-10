@@ -12,6 +12,8 @@ import tomllib
 
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
+    stream_moe_export: bool = True
+    weight_sync_mode: str = "flattened"
     model_config: str | None = None
     reward_config: str | None = None
     expert_parallel_size: int = 1
@@ -23,6 +25,10 @@ class CoreConfig:
     router_z_loss_weight: float = 1e-5
 
     def __post_init__(self):
+        if self.weight_sync_mode not in ("flattened", "per_tensor"):
+            raise ValueError("core.weight_sync_mode must be flattened or per_tensor")
+        if type(self.stream_moe_export) is not bool:
+            raise ValueError("core.stream_moe_export must be a boolean")
         for name in ("expert_parallel_size", "max_sequence_length"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:

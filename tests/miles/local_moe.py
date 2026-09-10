@@ -216,6 +216,8 @@ def run(options):
     config = RunConfig(
         CoreConfig(
             attention_backend="torch",
+            stream_moe_export=not options.legacy_export,
+            weight_sync_mode="per_tensor" if options.per_tensor else "flattened",
             max_sequence_length=512,
             activation_checkpointing=False,
             reward_config=str(root / "verifiers.json"),
@@ -230,7 +232,7 @@ def run(options):
             num_rollout=3 if options.resume else 2,
             rollout_num_gpus=1,
             rollout_num_gpus_per_engine=1,
-            num_gpus_per_node=1,
+            num_gpus_per_node=2 if options.disaggregated else 1,
             colocate=True,
             offload_rollout=False,
             prompt_data=str(root / "prompts.jsonl"),
@@ -252,6 +254,8 @@ def run(options):
             lr_decay_iters=3,
         ),
     )
+    if options.disaggregated:
+        config.miles.pop("colocate")
     if not options.resume:
         config.miles["check_weight_update_equal"] = True
     if options.resume:
@@ -261,7 +265,15 @@ def run(options):
     )
     sys.argv = ["local-moe", *config.arguments()]
     args = arguments.parse_args()
-    ray.init(num_gpus=1, num_cpus=6, include_dashboard=False, object_store_memory=256 * 1024 * 1024)
+    if options.validate_only:
+        print("LOCAL_MOE_CONFIG_VALIDATED")
+        return
+    ray.init(
+        num_gpus=2 if options.disaggregated else 1,
+        num_cpus=6,
+        include_dashboard=False,
+        object_store_memory=256 * 1024 * 1024,
+    )
     try:
         asyncio.run(train(args))
     finally:
@@ -334,6 +346,10 @@ def main():
     parser.add_argument("--tokenizer", type=Path)
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--disaggregated", action="store_true")
+    parser.add_argument("--legacy-export", action="store_true")
+    parser.add_argument("--per-tensor", action="store_true")
+    parser.add_argument("--validate-only", action="store_true")
     options = parser.parse_args()
     if options.command == "prepare":
         prepare(options)
