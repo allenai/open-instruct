@@ -186,11 +186,36 @@
       "mixed_reward_groups": 1,
       "completed_updates": 0,
       "evidence": "docs/measurements/miles-core-sft-20260910.json"
+    },
+    "sft_gsm8k_decode_retry": {
+      "id": "01M26438K8S3YHK7FDKYH46035",
+      "source_commit": "d8a272126",
+      "status": "passed",
+      "decode_graph_batch_sizes": [
+        1,
+        2,
+        4
+      ],
+      "prefill_graphs": false,
+      "exit_code": 0,
+      "completed_updates": 2,
+      "audited_completions": 64,
+      "mixed_reward_groups": 4,
+      "heldout_before_correct": 14,
+      "heldout_after_correct": 15,
+      "heldout_questions": 16,
+      "initial_serving_weights_exact": true,
+      "behavior_logprob_mean_abs_diff": [
+        0.021265332642056437,
+        0.021278707860388588
+      ],
+      "result_dataset": "01M26438KJ4680M6A8JTDWZRX3",
+      "evidence": "docs/measurements/miles-core-sft-20260910.json"
     }
   },
   "limitations": [
     "Synthetic rewards do not demonstrate learning quality",
-    "Tiny KDA/latent full SGLang/Core lifecycle and logprob agreement passed locally; production architecture and multi-rank qualification remain",
+    "Full SFT KDA/latent EP2 two-update lifecycle passed; full-model restart, longer training and multi-node qualification remain",
     "Pinned FLA compatibility shim supports one KDA head width per process",
     "Full acceptance gaps are listed in docs/miles-core.md",
     "Public GSM8K toy trials have all-zero rewards; parameter updates are driven by MoE auxiliary losses, not task learning"

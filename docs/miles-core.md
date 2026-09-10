@@ -4,6 +4,15 @@ This branch contains an experimental, executable MILES/Core integration. **It ha
 
 MILES owns rollout scheduling, SGLang serving, behavior log probabilities, advantage construction, policy loss, and evaluation dispatch. `open_instruct.miles` connects that runtime to Core's model, backward synchronization, optimizer, and distributed checkpoint APIs. No Megatron or MILES FSDP trainer is selected by this entrypoint. Shared MILES argument and transport helpers are reused.
 
+
+MILES placement options pass through the adapter: disaggregated trainers and
+rollout engines are supported, and resident colocation has passed tiny-model
+tests. Core trainer offload is rejected. The tested olmo-miles colocated recipe
+also keeps its trainer resident while offloading rollout memory, so trainer
+offload is not a prerequisite for that arrangement. Full SFT model colocation
+still needs its own memory and lifecycle qualification here; the successful
+SFT trial used two dedicated Core GPUs and one dedicated SGLang GPU.
+
 ```mermaid
 flowchart LR
     C[Native MILES config] --> D[Core RL driver]
@@ -178,7 +187,7 @@ The following remain required before deleting old GRPO code:
 | --- | --- |
 | Dense models | Tiny Llama, Qwen2, Qwen3, Olmo2 numerical parity; real training-scale model qualification remains |
 | Conventional Olmo3Moe | Real local 32.45M MoE GSM8K lifecycle, initial serving-weight equality, native/HF parity, updates and separate-process restart verified; tiny EP2 training/publication/restart also passed on Beaker; larger-model qualification remains |
-| KDA / latent Olmo Hybrid | Tiny KDA+latent model completed real SGLang/MILES/Core GSM8K iterations and separate-process restart; initial serving weights match and train/rollout mean logprob differences were 0.0023–0.0031; production architecture and multi-rank qualification remain |
+| KDA / latent Olmo Hybrid | Tiny KDA+latent model completed real SGLang/MILES/Core GSM8K iterations and separate-process restart; initial serving weights match and train/rollout mean logprob differences were 0.0023–0.0031; full SFT architecture passed two EP2 updates and a 64-response audit; full-model restart and longer-run qualification remain |
 | Routing replay | Router/recompute gradients tested; serving route alignment, final unscored token's auxiliary loss, and full-model replay qualification remain |
 | Tools / environments | Masks survive the adapter; the complete open-instruct multi-turn environment rollout bridge remains to be migrated |
 | Mixed rewards | Existing verifier adapter tested with GSM8K; code/judge infrastructure, cleanup and complete registered-task coverage remain |
@@ -256,9 +265,8 @@ independently recomputed using open-instruct's GSM8K verifier.
 Initial serving-weight comparison and the 0.05 mean train/rollout logprob drift
 guard remain enabled. The script saves responses and diagnostics under a fresh
 experiment-specific WEKA directory; it does not save optimizer checkpoints.
-Only compact reports are copied to the Beaker result. Full-checkpoint memory,
-precision and architecture compatibility remain unqualified until this run
-passes. This uses disaggregated placement because Core trainer offload is not
+Only compact reports are copied to the Beaker result. The full checkpoint passed
+this bounded EP2 run; longer training and full-model restart remain unqualified. This uses disaggregated placement because Core trainer offload is not
 implemented; tiny resident colocation does not establish large-model offload.
 
 ```bash
@@ -286,3 +294,23 @@ or a matched throughput comparison.
 The generic Core configuration defaults to the portable Torch SDPA backend.
 The B300 example and SFT trial explicitly select FA4; the compiled image does
 not provide the FA2 API.
+
+
+The corrected decode-only run,
+[01M26438K8S3YHK7FDKYH46035](https://beaker.org/ex/01M26438K8S3YHK7FDKYH46035),
+exited successfully after about 21.5 minutes. Both Core EP ranks completed two
+optimizer updates. The audit independently checked all 64 completions, rewards,
+and policy versions, including four mixed-reward training groups. Initial
+serving weights matched exactly; active-token mean Core/SGLang logprob differences
+were 0.02127 and 0.02128, below the configured 0.05 guard. Held-out accuracy was
+14/16 before and 15/16 after; this sample does not establish learning quality.
+Each held-out pass had one response reach the 4096-token cap.
+
+Updated 37.0 GB weight publications took 3.82 and 3.83 seconds, with only
+0.33 and 0.32 seconds spent exporting/packing. Each used 35 flattened NCCL
+collectives. Training rollout generation took 34.5 and 53.6 seconds, reporting
+685 and 802 response tokens per serving GPU per second. These are measurements
+from this bounded run; the earlier eager attempt is not a matched benchmark.
+Cold model initialization and kernel compilation remain substantial costs.
+The source commit, arguments, checkpoint identity, full audit and phase metrics
+are recorded in `docs/measurements/miles-core-sft-20260910.json`.
