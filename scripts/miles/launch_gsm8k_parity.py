@@ -77,7 +77,7 @@ python scripts/miles/gsm8k_parity.py "$RUN_ROOT"
                 "result": {"path": "/output"},
                 "resources": resources,
                 "context": {
-                    "priority": "normal",
+                    "priority": "urgent",
                     "minRuntime": "4h" if stage == "core" else "20m",
                     "autoResume": False,
                 },

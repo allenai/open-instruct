@@ -1,7 +1,9 @@
 # Matched GSM8K learning comparison
 
-This is the proposed paired experiment and launch contract. Preparation is in
-progress; neither matched run has been launched by this review. The purpose is
+Shared preparation passed on Beaker, and both 100-update runs are submitted:
+[Core](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2) and
+[Megatron](https://beaker.org/ex/01M26P8G0X2EHG52KYGAXT3BFP).
+Their live priorities were updated to urgent before either process started. The purpose is
 to compare learning and operation through our customized olmo-miles/Megatron
 trainer and open-instruct/MILES/Core under the closest feasible settings. It is
 not an assertion of identical numerical execution.
@@ -79,7 +81,7 @@ checkpoint was uncontaminated.
 | Serving | Decode graphs through batch 4 (1/2/4), prefill graphs off; radix cache off; client and engine concurrency 4; recurrent slots 8; static fraction 0.6 |
 | Publication | Direct HF-named export, 1 GiB buckets, every update; initial serving equality check |
 | Outputs | Full response artifacts and diagnostics on WEKA; no optimizer checkpoints or final HF export in this bounded learning comparison |
-| Cache / scheduling | Persistent compiler cache disabled for the first pair; explicit normal priority, positive minimum runtime, no automatic resume |
+| Cache / scheduling | Persistent compiler cache disabled for the first pair; explicit urgent priority, positive minimum runtime, no automatic resume |
 
 The original Core SFT trial did **not** disable GRPO std normalization; blindly
 reusing its configuration changes the algorithm relative to olmo-miles. Baseline
@@ -130,7 +132,14 @@ arguments. Real WEKA inputs, CUDA kernels and the full model remain job checks.
 The full baseline unit suite and final source commit/push are required before
 launch. Do not bypass the source-pin checks.
 
-The baseline TOML requests four hours minimum runtime; **minimum runtime is
+Use the established olmo-miles scheduling convention: **urgent** priority,
+`ai2/open-instruct-dev` workspace, Holmes for these GPU jobs, and a positive
+minimum runtime covering expected execution. CPU-only WEKA preparation and
+audits stay on Saturn. Zero-minimum backfill is an explicit exception for a
+very short job when current placement conditions justify it; it is not the
+default for training or work on the launch critical path.
+
+Both arms request four hours minimum runtime; **minimum runtime is
 not a timeout**. Use the public scheduler controls and monitor a declared
 wall-clock budget rather than inferring termination from that field. Avoid
 launching either dependent arm if its shared-artifact or initial-weight check

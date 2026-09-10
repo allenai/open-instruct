@@ -56,7 +56,7 @@ def main():
                 result={"path": "/output"},
                 resources={"gpuCount": 2, "sharedMemory": "16 GiB"},
                 constraints={"cluster": ["ai2/holmes"]},
-                context={"priority": "normal", "minRuntime": "20m", "autoResume": False},
+                context={"priority": "urgent", "minRuntime": "20m", "autoResume": False},
                 timeout="35m",
             )
         ],

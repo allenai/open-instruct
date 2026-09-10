@@ -46,7 +46,7 @@ def main():
                 "datasets": [{"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}}],
                 "result": {"path": "/output"},
                 "resources": {"gpuCount": 3, "sharedMemory": "100 GiB"},
-                "context": {"priority": "normal", "minRuntime": "30m", "autoResume": False},
+                "context": {"priority": "urgent", "minRuntime": "30m", "autoResume": False},
                 "constraints": {"cluster": ["ai2/holmes"]},
                 "timeout": "45m",
             }

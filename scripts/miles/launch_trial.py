@@ -66,7 +66,7 @@ done
                     "gpuCount": args.expert_parallel_size + 1 if args.disaggregated else 1,
                     "sharedMemory": "8 GiB",
                 },
-                "context": {"priority": "normal", "minRuntime": "15m", "autoResume": False},
+                "context": {"priority": "urgent", "minRuntime": "15m", "autoResume": False},
                 "constraints": {"cluster": [args.cluster]},
                 "timeout": "25m" if args.disaggregated else "20m",
             }
