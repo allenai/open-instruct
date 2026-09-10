@@ -127,7 +127,7 @@ case "$MODE" in
             --env "NUM_THREADS=$NUM_THREADS" --env "TENSOR_PARALLEL=$GPUS" \
             --env "MAX_MODEL_LEN=${MAX_MODEL_LEN:-65536}" \
             --env "TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-qwen3_xml}" --env "REASONING_PARSER=${REASONING_PARSER:-olmo3}" \
-            --env "VLLM_EXTRA_ARGS=${VLLM_EXTRA_ARGS:-}" \
+            --env "VLLM_EXTRA_ARGS=${VLLM_EXTRA_ARGS:-}" --env "BFCL_ALLOW_OVERWRITE=${BFCL_ALLOW_OVERWRITE:-0}" \
             --env "PLUGIN_DIR=${PLUGIN_DIR:-/weka/oe-adapt-default/abhishekr/repos/scaling-ladders-emo/ladders/olmoe3}" \
             -- "$FETCH && CLI_PY=\$CLI_PY SERVE_LIB=\$SERVE_LIB bash \$RUNNER"
         ;;

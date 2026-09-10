@@ -79,7 +79,7 @@ build_olmoe3_vllm_venv() {
         pip install -q uv 2>/dev/null || { curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$HOME/.local/bin:$PATH"; }
     fi
     log "building serving venv at $VLLM_VENV"
-    uv venv -q "$VLLM_VENV" --python "$(command -v python3)"
+    uv venv -q --clear "$VLLM_VENV" --python "$(command -v python3)"  # --clear: idempotent if the container restarts
     local vpip=(uv pip install -q --python "$VLLM_VENV/bin/python")
     # vllm pins its own torch (2.10.0); take it from the cu128 index to match the driver stack.
     # transformers is pinned to what the verified runs resolved (2026-09-08); left free, the

@@ -39,7 +39,7 @@ olmoe3_vllm_defaults
 if ! command -v uv >/dev/null 2>&1; then log "installing uv"; pip install -q uv; fi
 BFCL_VENV=/opt/venv-bfcl
 log "building BFCL venv at $BFCL_VENV"
-uv venv -q "$BFCL_VENV" --python "$(command -v python3)"
+uv venv -q --clear "$BFCL_VENV" --python "$(command -v python3)"  # --clear: idempotent if the container restarts
 uv pip install -q --python "$BFCL_VENV/bin/python" "$BFCL_EVAL_SPEC" soundfile
 "$BFCL_VENV/bin/python" -c "import importlib.metadata as m; import bfcl_eval.__main__; print('bfcl-eval', m.version('bfcl-eval'), 'imports cleanly')"
 
@@ -59,9 +59,32 @@ export BFCL_MODEL_NAME BFCL_SERVED_MODEL_NAME="$SERVED_MODEL_NAME"
 touch "$OUT_DIR/.env"  # BFCL loads PROJECT_ROOT/.env; keep it present but empty
 BFCL=("$BFCL_VENV/bin/python" "$CLI_PY")
 
-log "bfcl generate: model=$BFCL_MODEL_NAME categories=$TEST_CATEGORY threads=$NUM_THREADS"
+# Resume by default: BFCL loads the per-category result files already under OUT_DIR/result and
+# generates only the missing test cases, so a rerun into the same RUN_NAME (after a container
+# restart, or a relaunch) finishes what the previous job left instead of redoing the whole
+# suite. BFCL_ALLOW_OVERWRITE=1 deletes them first for a clean regeneration.
+GEN_FLAGS=()
+if [ "${BFCL_ALLOW_OVERWRITE:-0}" = "1" ]; then GEN_FLAGS+=(--allow-overwrite); fi
+RESULT_DIR="$OUT_DIR/result/$BFCL_MODEL_NAME"
+# A job killed mid-write can leave a truncated last line, which BFCL's loader would choke on.
+"$BFCL_VENV/bin/python" - "$RESULT_DIR" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+for f in (root.rglob("*.json") if root.is_dir() else []):
+    lines = f.read_text().splitlines()
+    keep = []
+    for line in lines:
+        try:
+            json.loads(line); keep.append(line)
+        except ValueError:
+            print(f"dropping unparsable result line in {f}")
+    if len(keep) != len(lines):
+        f.write_text("".join(l + "\n" for l in keep))
+PY
+existing=$(find "$RESULT_DIR" -name '*.json' -exec cat {} + 2>/dev/null | wc -l | tr -d ' ')
+log "bfcl generate: model=$BFCL_MODEL_NAME categories=$TEST_CATEGORY threads=$NUM_THREADS existing_results=$existing overwrite=${BFCL_ALLOW_OVERWRITE:-0}"
 "${BFCL[@]}" generate --model "$BFCL_MODEL_NAME" --test-category "$TEST_CATEGORY" \
-    --num-threads "$NUM_THREADS" --temperature "$TEMPERATURE" --allow-overwrite 2>&1 | tee "$OUT_DIR/bfcl_generate.log"
+    --num-threads "$NUM_THREADS" --temperature "$TEMPERATURE" "${GEN_FLAGS[@]}" 2>&1 | tee -a "$OUT_DIR/bfcl_generate.log"
 
 log "bfcl evaluate"
 "${BFCL[@]}" evaluate --model "$BFCL_MODEL_NAME" --test-category "$TEST_CATEGORY" 2>&1 | tee "$OUT_DIR/bfcl_evaluate.log"
