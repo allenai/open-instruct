@@ -1,0 +1,461 @@
+"""Audit trusted GSM8K campaign dumps on CPU and compare descriptive learning curves.
+
+The .pt inputs are trusted artifacts produced by this campaign. They are loaded
+with torch's full pickle loader; do not point this command at third-party dumps.
+Raw responses remain in their original files; output contains hashes and scores.
+"""
+
+import argparse
+import ast
+import hashlib
+import json
+import math
+import re
+from collections import Counter, defaultdict
+from datetime import datetime
+from pathlib import Path
+from statistics import median
+
+import torch
+from matplotlib import pyplot as plt
+
+from open_instruct.ground_truth_utils import GSM8KVerifier
+
+UPDATES = 100
+EVAL_STEPS = (0, 20, 40, 60, 80, 100)
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def identity(row):
+    return row["metadata"]["prepared_sample_id"]
+
+
+def read_rows(path):
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    ids = [identity(row) for row in rows]
+    if not ids or len(set(ids)) != len(ids):
+        raise ValueError(f"{path.name}: prepared prompt IDs must be nonempty and unique")
+    return rows
+
+
+def summarize(rows):
+    groups = defaultdict(list)
+    for row in rows:
+        groups[row["id"]].append(row["correct"])
+    count = len(rows)
+    mixed = sum(min(scores) != max(scores) for scores in groups.values())
+    return {
+        "samples": count,
+        "accuracy": sum(row["correct"] for row in rows) / count if count else None,
+        "mean_reward": sum(row["correct"] for row in rows) / count if count else None,
+        "mean_response_tokens": sum(row["response_tokens"] for row in rows) / count if count else None,
+        "truncation_rate": sum(row["truncated"] for row in rows) / count if count else None,
+        "at_response_cap": sum(row["at_response_cap"] for row in rows),
+        "prompt_groups": len(groups),
+        "mixed_reward_groups": mixed,
+        "mixed_reward_group_fraction": mixed / len(groups) if groups else None,
+    }
+
+
+def audit_dump(path, prepared_rows, *, version, multiplicity, response_cap=4096, token_proofs=None):
+    expected = {identity(row): row for row in prepared_rows}
+    expected_counts = Counter({key: multiplicity for key in expected})
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    errors, records, seen = [], [], Counter()
+    verifier = GSM8KVerifier()
+    expected_rollout_id = int(path.stem.removeprefix("eval_"))
+    if payload.get("rollout_id") != expected_rollout_id:
+        errors.append("dump rollout_id differs from filename")
+    for index, sample in enumerate(payload["samples"]):
+        prefix = f"sample {index}"
+        try:
+            key = identity(sample)
+        except (KeyError, TypeError):
+            errors.append(f"{prefix}: missing prepared prompt ID")
+            continue
+        if key not in expected:
+            errors.append(f"{prefix}: prompt ID outside expected membership")
+            continue
+        seen[key] += 1
+        row = expected[key]
+        if sample["prompt"] != row["input"] or sample["label"] != row["label"]:
+            errors.append(f"{prefix}: prompt or label differs from prepared data")
+        if sample["metadata"].get("verifiers") != row["metadata"].get("verifiers"):
+            errors.append(f"{prefix}: verifier specification differs from prepared data")
+        versions = sample.get("weight_versions")
+        if not versions or any(str(value) != str(version) for value in versions):
+            errors.append(f"{prefix}: missing or unexpected policy version (expected {version})")
+        length = sample["response_length"]
+        if not isinstance(length, int) or not 0 < length <= response_cap or length > len(sample["tokens"]):
+            errors.append(f"{prefix}: invalid response token length")
+            continue
+        if token_proofs is not None:
+            prompt_ids = list(sample["tokens"][:-length])
+            encoded = (json.dumps(prompt_ids, indent=2, sort_keys=True) + "\n").encode()
+            proof = token_proofs[key]
+            if hashlib.sha256(encoded).hexdigest() != proof["token_ids_sha256"]:
+                errors.append(f"{prefix}: prompt token IDs differ from preparation")
+        logprobs = sample.get("rollout_log_probs")
+        if logprobs is None or len(logprobs) != length or not all(math.isfinite(value) for value in logprobs):
+            errors.append(f"{prefix}: response log probabilities missing, wrong length, or nonfinite")
+        status = sample["status"]
+        if status not in ("completed", "truncated") or sample.get("remove_sample", False):
+            errors.append(f"{prefix}: unsuccessful or removed generation")
+        # Reconstruct the target from immutable preparation, bypassing the reward
+        # bridge and the sample's possibly corrupted target entirely.
+        score = verifier([], sample["response"], row["label"]).score
+        stored = sample["reward"]
+        if not isinstance(stored, (int, float)) or not math.isfinite(stored) or score != stored:
+            errors.append(f"{prefix}: stored reward differs from direct GSM8K verification")
+        records.append(
+            dict(
+                id=key,
+                correct=int(score),
+                response_tokens=length,
+                truncated=status == "truncated",
+                at_response_cap=length == response_cap,
+                response_sha256=hashlib.sha256(sample["response"].encode()).hexdigest(),
+            )
+        )
+    if seen != expected_counts:
+        errors.append("prompt membership or sample multiplicity differs from expected batch")
+    return dict(
+        file=path.name,
+        sha256=digest(path),
+        policy_version=version,
+        valid=not errors,
+        errors=errors,
+        summary=summarize(records),
+        samples=records,
+    )
+
+
+def publication_summary(path):
+    if not path.is_file():
+        return {"available": False}
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    durations = [row["total_seconds"] for row in rows]
+    return {
+        "available": True,
+        "sha256": digest(path),
+        "count": len(rows),
+        "versions": [row["version"] for row in rows],
+        "total_seconds": sum(durations),
+        "mean_seconds": sum(durations) / len(durations) if durations else None,
+        "max_seconds": max(durations, default=None),
+        "repeated_versions": sum(row.get("repeated_version", False) for row in rows),
+    }
+
+
+def audit(root, backend):
+    preparation = json.loads((root / "preparation.json").read_text())
+    if not {"train.jsonl", "eval.jsonl"}.issubset(preparation["files"]):
+        raise ValueError("Preparation manifest is missing shared dataset hashes")
+    for name, expected_hash in preparation["files"].items():
+        if digest(root / name) != expected_hash:
+            raise ValueError(f"Preparation artifact changed: {name}")
+    token_proofs = {
+        row["prepared_sample_id"]: row for partition in preparation["partitions"].values() for row in partition["rows"]
+    }
+    training, evaluation = read_rows(root / "train.jsonl"), read_rows(root / "eval.jsonl")
+    if set(map(identity, training)) & set(map(identity, evaluation)):
+        raise ValueError("Training and held-out prompt IDs overlap")
+    # The sync Megatron updater increments before its initial publication.
+    # Core publishes completed optimizer steps directly. Never infer this shift
+    # from the observed data, which could conceal a stale publication.
+    version_offset = 0 if backend == "core" else 1
+    directory = root / backend / ("rollouts" if backend == "core" else "rollout_data")
+    report = {
+        "schema_version": 1,
+        "backend": backend,
+        "version_offset": version_offset,
+        "preparation_sha256": digest(root / "preparation.json"),
+        "prepared_sha256": {name: digest(root / f"{name}.jsonl") for name in ("train", "eval")},
+        "training": [],
+        "evaluation": [],
+        "errors": [],
+        "interpretation": "One run per backend; descriptive comparison, without significance or learning-rate conclusions.",
+    }
+    for rollout in range(UPDATES):
+        selected = [training[(rollout * 4 + offset) % len(training)] for offset in range(4)]
+        path = directory / f"{rollout}.pt"
+        if not path.is_file():
+            report["errors"].append(f"missing training dump {path.name}")
+            continue
+        entry = audit_dump(path, selected, version=rollout + version_offset, multiplicity=4, token_proofs=token_proofs)
+        entry["completed_steps_before_update"] = rollout
+        report["training"].append(entry)
+    for step in EVAL_STEPS:
+        path = directory / f"eval_{step - 1 if step else 0}.pt"
+        if not path.is_file():
+            report["errors"].append(f"missing evaluation dump {path.name}")
+            continue
+        entry = audit_dump(path, evaluation, version=step + version_offset, multiplicity=1, token_proofs=token_proofs)
+        entry["completed_steps"] = step
+        report["evaluation"].append(entry)
+    report["training_summary"] = summarize([sample for row in report["training"] for sample in row["samples"]])
+    for key in ("prompt_groups", "mixed_reward_groups"):
+        report["training_summary"][key] = sum(row["summary"][key] for row in report["training"])
+    groups = report["training_summary"]["prompt_groups"]
+    report["training_summary"]["mixed_reward_group_fraction"] = (
+        report["training_summary"]["mixed_reward_groups"] / groups if groups else None
+    )
+    if backend == "core":
+        report["publication"] = publication_summary(root / backend / "metrics/publication.jsonl")
+    completion = root / backend / "completion.json"
+    if completion.is_file():
+        report["completion"] = json.loads(completion.read_text())
+    report["valid"] = not report["errors"] and all(row["valid"] for row in report["training"] + report["evaluation"])
+    return report
+
+
+def compare(core, megatron):
+    errors = []
+    if not core["valid"] or not megatron["valid"]:
+        errors.append("At least one arm failed its independent audit")
+    if (
+        core["prepared_sha256"] != megatron["prepared_sha256"]
+        or core["preparation_sha256"] != megatron["preparation_sha256"]
+    ):
+        errors.append("Arms were audited against different prepared data")
+    curves = []
+    for step in EVAL_STEPS:
+        arms = []
+        for report in (core, megatron):
+            rows = [row for row in report["evaluation"] if row["completed_steps"] == step]
+            arms.append(rows[0] if len(rows) == 1 else None)
+        if any(row is None for row in arms):
+            errors.append(f"Missing unique evaluation at completed step {step}")
+            continue
+        left, right = [{row["id"]: row for row in arm["samples"]} for arm in arms]
+        if any(len(arm["samples"]) != len(index) for arm, index in zip(arms, (left, right), strict=True)):
+            errors.append(f"Duplicate evaluation prompt IDs at completed step {step}")
+            continue
+        if left.keys() != right.keys():
+            errors.append(f"Evaluation membership differs at completed step {step}")
+            continue
+        pairs = [
+            dict(id=key, core_correct=left[key]["correct"], megatron_correct=right[key]["correct"])
+            for key in sorted(left)
+        ]
+        cells = Counter((pair["core_correct"], pair["megatron_correct"]) for pair in pairs)
+        curves.append(
+            dict(
+                completed_steps=step,
+                core=arms[0]["summary"],
+                megatron=arms[1]["summary"],
+                core_minus_megatron_accuracy=arms[0]["summary"]["accuracy"] - arms[1]["summary"]["accuracy"],
+                both_correct=cells[1, 1],
+                core_only_correct=cells[1, 0],
+                megatron_only_correct=cells[0, 1],
+                neither_correct=cells[0, 0],
+                pairs=pairs,
+            )
+        )
+    gains = {}
+    if curves and curves[0]["completed_steps"] == 0 and curves[-1]["completed_steps"] == 100:
+        gains = {
+            backend: curves[-1][backend]["accuracy"] - curves[0][backend]["accuracy"]
+            for backend in ("core", "megatron")
+        }
+    return dict(
+        schema_version=1,
+        valid=not errors,
+        errors=errors,
+        learning_curves=curves,
+        accuracy_gain_0_to_100=gains,
+        interpretation="Descriptive single-pair comparison; no statistical significance or learning-rate claim.",
+    )
+
+
+def _metric_dict(text):
+    """Decode logged numeric dictionaries without executing Python representations."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Read individual values so an unrelated tensor/numpy repr cannot discard
+        # otherwise ordinary numeric timer fields. Calls are never evaluated.
+        expression = ast.parse(text, mode="eval").body
+        if not isinstance(expression, ast.Dict):
+            raise ValueError("Expected a metric dictionary") from None
+        result = {}
+        for key, value in zip(expression.keys, expression.values, strict=True):
+            try:
+                result[ast.literal_eval(key)] = ast.literal_eval(value)
+            except (ValueError, TypeError):
+                continue
+        return result
+
+
+def _duration_summary(points):
+    values = [point["seconds"] for point in points]
+    return dict(
+        count=len(values),
+        sum_seconds=sum(values),
+        mean_seconds=sum(values) / len(values) if values else None,
+        median_seconds=median(values) if values else None,
+        min_seconds=min(values, default=None),
+        max_seconds=max(values, default=None),
+    )
+
+
+def parse_timing_log(path, *, warmup_updates=5):
+    """Extract indexed durations; initial eval/setup never enters warm phase means.
+
+    Rollout and trainer `perf` dictionaries can share a rollout ID. Merge their
+    distinct keys, deduplicate repeated log lines, and reject conflicting values.
+    Unindexed rounded Timer lines are retained separately; never assign them a
+    rollout ID by position, because partial logs would shift that assignment.
+    """
+    if warmup_updates < 0:
+        raise ValueError("warmup_updates must be nonnegative")
+    points, conflicts, warnings, timestamps, timers = {}, set(), [], [], defaultdict(list)
+    completion_seconds = None
+    for number, raw in enumerate(path.read_text(errors="replace").splitlines(), 1):
+        line = re.sub(r"\x1b\[[0-9;]*m", "", raw.replace(r"\u001b", "\x1b"))
+        stamp = re.search(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)", line)
+        if stamp:
+            timestamps.append(datetime.fromisoformat(stamp.group(1) + "T" + stamp.group(2)).timestamp())
+        timer = re.search(r"Timer ([a-z_]+) end \(elapsed: ([0-9.]+)s\)", line)
+        if timer:
+            timers[timer.group(1)].append(float(timer.group(2)))
+        match = re.search(r"\bperf (\d+): (\{.*\})", line)
+        core = re.search(r"Core optimizer step (\d+): (\{.*\})", line)
+        publication = re.search(r"Core weight publication: (\{.*\})", line)
+        completed = re.search(r"GSM8K_PARITY_CORE_COMPLETED (\{.*\})", line)
+        found = match or core or publication or completed
+        if found is None:
+            continue
+        try:
+            data = _metric_dict(found.group(2) if match or core else found.group(1))
+        except (SyntaxError, ValueError, TypeError):
+            warnings.append(f"line {number}: could not decode metric dictionary")
+            continue
+        additions = []
+        if match:
+            index = int(match.group(1))
+            for field, phase in (
+                ("perf/rollout_time", "generation"),
+                ("perf/actor_train_time", "training"),
+                ("perf/update_weights_time", "publication"),
+                ("perf/log_probs_time", "scoring"),
+            ):
+                if field in data:
+                    additions.append((phase, index, data[field], "miles_perf"))
+        elif core and "train/step_seconds" in data:
+            additions.append(("training", int(core.group(1)) - 1, data["train/step_seconds"], "core_step"))
+        elif publication and not data.get("repeated_version", False):
+            additions.append(("publication", data["version"], data["total_seconds"], "core_publication"))
+        elif completed:
+            completion_seconds = data.get("elapsed_seconds")
+        for phase, index, seconds, source in additions:
+            key = (phase, index)
+            if not isinstance(seconds, (float, int)) or not math.isfinite(seconds) or seconds < 0:
+                warnings.append(f"line {number}: invalid {phase} duration")
+                continue
+            point = dict(index=index, seconds=seconds, source=source)
+            if key in points and points[key]["seconds"] != seconds:
+                conflicts.add(key)
+                warnings.append(f"line {number}: conflicting {phase} duration at index {index}")
+            else:
+                points[key] = point
+    for key in conflicts:
+        points.pop(key, None)
+    phases = {}
+    for phase in ("generation", "training", "publication", "scoring"):
+        selected = [point for (name, _), point in sorted(points.items()) if name == phase]
+        warm = [point for point in selected if point["index"] >= warmup_updates]
+        phases[phase] = dict(all=_duration_summary(selected), warm=_duration_summary(warm), points=selected)
+    return dict(
+        log_sha256=digest(path),
+        warnings=warnings,
+        warmup_updates_excluded=warmup_updates,
+        phases=phases,
+        rounded_unindexed_timers={
+            name: _duration_summary([{"seconds": x} for x in values]) for name, values in timers.items()
+        },
+        run_elapsed_seconds=completion_seconds,
+        observed_log_span_seconds=max(timestamps) - min(timestamps) if timestamps else None,
+        scope="Warm phase means exclude indices below warmup_updates and all eval/setup. "
+        "Phase sums are not total runtime. Log span is only the observed timestamp span. "
+        "Core training includes contract checks; MILES actor_train timing has different instrumentation. "
+        "MILES publication perf index is the publication preceding that rollout (final publication may be absent).",
+    )
+
+
+def plot_comparison(report, path):
+    """Write an exportable figure; one pair supports descriptive curves only."""
+    curves = report["learning_curves"]
+    figure, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    for backend, label in (("core", "OLMo-core"), ("megatron", "Megatron")):
+        axes[0].plot(
+            [row["completed_steps"] for row in curves],
+            [row[backend]["accuracy"] for row in curves],
+            marker="o",
+            label=label,
+        )
+    axes[0].set(xlabel="Completed optimizer updates", ylabel="Held-out accuracy", ylim=(0, 1))
+    axes[0].legend()
+    timing = report.get("timing", {})
+    phases = ("generation", "training", "publication")
+    for offset, backend in ((-0.18, "core"), (0.18, "megatron")):
+        values = [
+            timing.get(backend, {}).get("phases", {}).get(phase, {}).get("warm", {}).get("mean_seconds")
+            for phase in phases
+        ]
+        valid = [(index, value) for index, value in enumerate(values) if value is not None]
+        axes[1].bar([index + offset for index, _ in valid], [value for _, value in valid], width=0.36, label=backend)
+    axes[1].set(xticks=range(3), xticklabels=phases, ylabel="Warm mean seconds per measured phase")
+    axes[1].legend()
+    figure.suptitle("One run per backend: descriptive learning and timing comparison")
+    figure.savefig(path, dpi=160)
+    plt.close(figure)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    audit_parser = commands.add_parser("audit")
+    audit_parser.add_argument("root", type=Path)
+    audit_parser.add_argument("--backend", choices=("core", "megatron"), required=True)
+    audit_parser.add_argument("--output", type=Path)
+    compare_parser = commands.add_parser("compare")
+    compare_parser.add_argument("root", type=Path)
+    compare_parser.add_argument("--output", type=Path)
+    compare_parser.add_argument("--core-log", type=Path)
+    compare_parser.add_argument("--megatron-log", type=Path)
+    compare_parser.add_argument("--warmup-updates", type=int, default=5)
+    compare_parser.add_argument("--plot", type=Path)
+    args = parser.parse_args()
+    if args.command == "audit":
+        result = audit(args.root, args.backend)
+        output = args.output or args.root / args.backend / "audit.json"
+    else:
+        result = compare(
+            *[json.loads((args.root / backend / "audit.json").read_text()) for backend in ("core", "megatron")]
+        )
+        output = args.output or args.root / "comparison.json"
+        result["timing"] = {
+            backend: parse_timing_log(path, warmup_updates=args.warmup_updates)
+            for backend, path in (("core", args.core_log), ("megatron", args.megatron_log))
+            if path
+        }
+        if args.plot and result["valid"]:
+            args.plot.parent.mkdir(parents=True, exist_ok=True)
+            plot_comparison(result, args.plot)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n")
+    print(json.dumps({"valid": result["valid"], "report": str(output)}))
+    if not result["valid"]:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

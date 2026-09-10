@@ -1,0 +1,956 @@
+{
+  "test_counts": {
+    "tests": 94,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "passed": true,
+  "changed_sources": [],
+  "exit_code": 0,
+  "elapsed_seconds": 284.9207462039776,
+  "runtime_lock": {
+    "schema_version": 1,
+    "status": "experimental; full GRPO replacement acceptance incomplete",
+    "base_image": {
+      "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+      "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    },
+    "sources": {
+      "olmo-core": {
+        "repository": "https://github.com/allenai/OLMo-core.git",
+        "revision": "169b8f9d06bce0276143876c82f630af483b03b7",
+        "development_commit": "b7f1e5296704779e7deb06de4c4242be9729d1a9",
+        "patch": "patches/olmo-core.patch",
+        "patch_sha256": "4d7cdf74ff9f25aa2d030af9ffb27d90c4c747dcf73436df54cea8e33cd2e954"
+      },
+      "miles": {
+        "repository": "https://github.com/radixark/miles.git",
+        "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
+        "development_commit": "64ba71950c973e458f22a8d10541475940c911b0",
+        "patch": "patches/miles.patch",
+        "patch_sha256": "e85add303ee3b7b38f4571e66b7b364a769b32e0fb096ab35e32f1447c173579"
+      }
+    }
+  },
+  "torch_version": "2.13.0+cu130",
+  "cuda": "13.0",
+  "device": "NVIDIA GeForce RTX 4090",
+  "source_sha256": {
+    "open_instruct/miles/__init__.py": "2f47463602ef11a1af8bdf85082c4588d0ce9a5985fc9ac174f296c1814a7162",
+    "open_instruct/miles/__main__.py": "bbe25f55a162120eeb55905bca81967cbb222b2d147733613c187b6c40bec3a9",
+    "open_instruct/miles/actor.py": "2ffda19fc743c6cc1d7f4a6dd140fa4b21e3f365bc16bfe93a359ed39fd5e3a6",
+    "open_instruct/miles/arguments.py": "4ba7cb8d36ca81f298bad8306b06f9f1ea0a187209f9233ec46e75cec3db84f0",
+    "open_instruct/miles/async_buffer.py": "90a8d56db2df54626859c7f52931584b84d5d2685a7fe4c36459cdc1b9f93081",
+    "open_instruct/miles/async_rollout.py": "141bc96363104948630f9807957614363c38af369867e5d6c5d9b67bbcc6cd20",
+    "open_instruct/miles/checkpoint.py": "8126beeeafa5144e86e141c53133475c11d36cc96516265172ba42d8dbb2e8d6",
+    "open_instruct/miles/config.py": "06df0ced54a18a55939c0df302fe27fa2750a8e72bbc86ccbc70892f0b30a98d",
+    "open_instruct/miles/contract.py": "680f35b9531681a624df8b190692a3f944e3249e9e2144336e7ecb1b5550bf68",
+    "open_instruct/miles/data.py": "e4f9506ec3e0350cb603628295e42e2d6028776362c6e6aa63cee96d1e89cd10",
+    "open_instruct/miles/data_source.py": "b78e54f1dd06f1c66674826bca1cb6897fd6f8ba14cf642ff517bb8dec4fb0c1",
+    "open_instruct/miles/driver.py": "ce573d767ef641f46833c892612e5120dcff72e34668ab1d851368c9e55a71f1",
+    "open_instruct/miles/errors.py": "bf6d6d0ad65e36c323ea52f01e7c384babb2751c05cf80fb13bb71db5de6e993",
+    "open_instruct/miles/fla_compat.py": "3973c89da82473ef1bf8d3f240fb95a90221bb49fe55caf05b57eaf4ad68bd39",
+    "open_instruct/miles/metrics.py": "394ac45d7c10b67ee96536dfe94ddd55117b15380322377cdd6c93996f72c29d",
+    "open_instruct/miles/models.py": "05dc62d586f8fb719ee46f74a72cedce97a09939c51067cfcaa94ca11334ba40",
+    "open_instruct/miles/publication.py": "3613dac8243ca3c202a49651ae4e9c720fbad0131829f1261c6806c185d80075",
+    "open_instruct/miles/rewards.py": "096e0984b1738ac37a09fa1f17c3c6d0d558271a53a1b4b6d2dfbd7090372b90",
+    "open_instruct/miles/scheduler.py": "57304a3124841c100990583cfaae896e57d02d66f948901713e54bed74e0f044",
+    "open_instruct/miles/state.py": "a69b848678885487c8962633e49fb2f87af0deef456dc40bcd89220ebc21c29a",
+    "tests/miles/test_contract.py": "48ed4da26e47e4bb9677c01375e44a62dd7ee15782e1a2b3e7055c672f28cbc1",
+    "tests/miles/test_runtime.py": "32eb820fc4befe1ea2ba73bbd755b24bc451170f91cf3f4e9e35e7f1032a5115",
+    "tests/miles/test_lifecycle.py": "812da74876619ff10bba0dd9fff0cc246f6afe03727dee7c6f47a8e108f71445",
+    "tests/miles/test_contract_early_validation.py": "d3518c12373c5407d413b813799721d96177c652420cbac0692cf5053d096e0e",
+    "tests/miles/test_checkpoint_topology.py": "cad1b0c6634b6165bd12a3fcd71f484c2ec33a5f59e18c7e12dcc68eeb835d37",
+    "tests/miles/test_training_metrics.py": "590dd198b0c1217e2d1ccb1eb02a7950ad50ae2813fee54ce9ca424e4d9928b2",
+    "tests/miles/test_ep_contract_comparison.py": "5bab1bbaab74bc99a72b732a121e740c697ff217f794b7e62b2b896a67a4b1fe",
+    "tests/miles/test_datasource_trials.py": "206e1c3100f6169d12d63705d63086c2f8e3c8a17cd37dde555c81aa767ac70d",
+    "open_instruct/test_miles_reward_process.py": "2156e15bfaf7e0602100d5069d70a29555532c379bfe98af3d92d4537e149663",
+    "scripts/miles/build_image.py": "03b5a508cd527da5c7d0e9a153bed1db69966694a52c2ec24bb9064164a6f1b2",
+    "scripts/miles/check_contract.py": "a8ba544ae66109134d2f0fc8688f7949cd57f9b719f2273fab4ccaa2d5c84035",
+    "scripts/miles/datasource_trials.py": "8fbd8ea2f4a1708a079d61a85c068cc83481ed8879b9d171d830b0ac3a281b70",
+    "scripts/miles/gsm8k_parity.py": "ede6fa641424d9f6ed5690293a459b0c51e23f870485ea74ba3dd33c8e7dd483",
+    "scripts/miles/launch_contract.py": "643acd098eab2936a8ebd744007b5029e1623358f909cfce434512756d26c0fc",
+    "scripts/miles/launch_datasource_trial.py": "392b48de0b91ac2d133dd89cb713de697b2918f5035139e0684c09c3ec1b773c",
+    "scripts/miles/launch_gsm8k_parity.py": "63b084473636a21212f5ed45bf966af00a817bf587fb502d281624019efaa941",
+    "scripts/miles/launch_sft_trial.py": "554b7a4fb9ae3be0ee5cc71692c1103085f1a0b9e335fb6ef530153205d2e7ea",
+    "scripts/miles/launch_trial.py": "5f43173fe3ff4415f351e1c8354323490a3efe20794974df669e85e412e20526",
+    "scripts/miles/preflight_attention.py": "a1141df593d2d1e3f57a425a6a8ecc64dec5f47912b2532ba584ff48962edd85",
+    "scripts/miles/prepare_gsm8k_parity.py": "aaedc11c428bb82fb1a46d18dfbeba1700c13c1492c68b195dba92fc1d7cbca5",
+    "scripts/miles/prepare_runtime.py": "38fc6765c076aadc193e97f99e6330507ad460c069b0879500ce1eeb10c1f01f",
+    "scripts/miles/sft_gsm8k.py": "8c636ea3ab5487173746a805f5743d696cb90576dee3b69884e7b2980f42205a",
+    "configs/miles/dense.toml": "edfebc4cdde11b8f0055566cbaf0b203cfb6598b79e2e359fb579d79e6bbcc7e",
+    "configs/miles/profiles/sft-b300-ep2-async-candidate.toml": "85108b90f8191149ae7628611f689462968fbf1b7146bfe42a4c2ebd47505916",
+    "configs/miles/profiles/sft-b300-ep2-sync.toml": "9daa3238a4d8c9ea4efe4ff2698b1d5e10f565aeeb0ce21550448a2ee59c1c76",
+    "configs/miles/profiles/tiny-resident.toml": "6e338fa63c87b78eda6f2ed659693d8328abf70c20280e1842606ad3f2dbdf91",
+    "configs/miles/tasks/ifeval.toml": "8231d68c3414f1431d9a1fac97f11c308905259a454d87316f1a0b2e36ac3c58",
+    "configs/miles/tasks/math.toml": "73a56d5c7e3dc065843edfcc08cffd578c16efe84fadfb5d6750d241723772fc",
+    "tests/miles/ep_contract.py": "560d59ab1c9c27a742f4f4c685063441c381034169791155190aef4033f5081e",
+    "runtime/miles/runtime.lock.json": "045c212a794f89646ae6dbc35cb26d18c86d3a07e97c0f6dba2aad7e10a1db43"
+  },
+  "measurements": [
+    {
+      "kind": "CONTRACT_MEASUREMENT",
+      "value": [
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.0563921183347702,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392114609479904,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.0563921183347702,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584186077118,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584186077118,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.3379165530204773,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 1,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.3379165828227997,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        }
+      ]
+    },
+    {
+      "kind": "CONTRACT_MEASUREMENT",
+      "value": [
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": false,
+          "loss": 0.10070133209228516,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392133235931396,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392133235931396,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": false,
+          "entropy_and_kl": true,
+          "loss": 0.056392133235931396,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": false,
+          "loss": 0.3824584484100342,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 1,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 2,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        },
+        {
+          "world_size": 2,
+          "microbatch_size": 4,
+          "token_average": true,
+          "entropy_and_kl": true,
+          "loss": 0.33791661262512207,
+          "gradient_max_abs_error": 7.450580596923828e-09,
+          "update_max_abs_error": 0.0
+        }
+      ]
+    },
+    {
+      "kind": "AUXILIARY_CONTRACT",
+      "value": {
+        "world_size": 1,
+        "microbatch_size": 1,
+        "loss": 0.009312192909419537,
+        "gradient_max_abs_error": 0.0
+      }
+    },
+    {
+      "kind": "AUXILIARY_CONTRACT",
+      "value": {
+        "world_size": 2,
+        "microbatch_size": 1,
+        "loss": 0.009312192909419537,
+        "gradient_max_abs_error": 0.0
+      }
+    },
+    {
+      "kind": "AUXILIARY_CONTRACT",
+      "value": {
+        "world_size": 1,
+        "microbatch_size": 2,
+        "loss": 0.009312193840742111,
+        "gradient_max_abs_error": 0.0
+      }
+    },
+    {
+      "kind": "AUXILIARY_CONTRACT",
+      "value": {
+        "world_size": 2,
+        "microbatch_size": 2,
+        "loss": 0.009312192909419537,
+        "gradient_max_abs_error": 0.0
+      }
+    },
+    {
+      "kind": "AUXILIARY_CONTRACT",
+      "value": {
+        "world_size": 1,
+        "microbatch_size": 4,
+        "loss": 0.009312193840742111,
+        "gradient_max_abs_error": 0.0
+      }
+    },
+    {
+      "kind": "AUXILIARY_CONTRACT",
+      "value": {
+        "world_size": 2,
+        "microbatch_size": 4,
+        "loss": 0.009312192909419537,
+        "gradient_max_abs_error": 0.0
+      }
+    },
+    {
+      "kind": "REPLAY_CONTRACT",
+      "value": {
+        "checkpointed": false,
+        "policy_gradient_l2": 1.5103309154510498,
+        "auxiliary_gradient_l2": 0.0034404348116368055,
+        "combined_gradient_l2": 1.510896921157837,
+        "superposition_max_abs": 4.039611667394638e-08
+      }
+    },
+    {
+      "kind": "REPLAY_CONTRACT",
+      "value": {
+        "checkpointed": true,
+        "policy_gradient_l2": 1.5103309154510498,
+        "auxiliary_gradient_l2": 0.0034404348116368055,
+        "combined_gradient_l2": 1.510896921157837,
+        "superposition_max_abs": 4.039611667394638e-08
+      }
+    },
+    {
+      "kind": "CORE_RESUME_CONTRACT",
+      "value": {
+        "model": "qwen3",
+        "next_update_exact": true,
+        "steps": [
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 1.3022819077596068,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              0
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 394112,
+                "local_l2": 6.381268027871329,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 4992,
+                "sampled_update_l2": 1.4080832538827324e-05
+              }
+            },
+            "schema_version": 1,
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 0.018339524045586586,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 394112,
+                "local_l2": 6.382152249208392,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 4992,
+                "sampled_update_l2": 1.3852919622739744e-05
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 0.01829171320423484,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 394112,
+                "local_l2": 6.382152249208392,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 4992,
+                "sampled_update_l2": 1.3852919622739744e-05
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          }
+        ]
+      }
+    },
+    {
+      "kind": "CORE_RESUME_CONTRACT",
+      "value": {
+        "model": "olmo3moe",
+        "next_update_exact": true,
+        "steps": [
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 37.11966317007318,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.01055940866470337,
+              "router_z": 2.2782320976257325e-05
+            },
+            "local_behavior_versions": [
+              0
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": -5.550682544708252e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 501064,
+                "local_l2": 81.89669338890397,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 344064,
+                "local_l2": 4.563687221656546,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.23500482738018036,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 6728,
+                "sampled_update_l2": 2.59268670200033e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 7.268972157916508e-06
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 3.5683225505580343e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 0.037643141113221645,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.01001738429069519,
+              "router_z": 2.2973430156707764e-05
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": -6.565451622009277e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 501064,
+                "local_l2": 55.675906665078266,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 344064,
+                "local_l2": 4.5525299775287,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.23511797189712524,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 6728,
+                "sampled_update_l2": 4.1051645823232346e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8444748576772623e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 9.383520438267912e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 0.041384197771549225,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.01001738429069519,
+              "router_z": 2.2973430156707764e-05
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": -6.565451622009277e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 501064,
+                "local_l2": 55.675906665078266,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 344064,
+                "local_l2": 4.5525299775287,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.23511797189712524,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 6728,
+                "sampled_update_l2": 4.1051645823232346e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8444748576772623e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 9.383520438267912e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          }
+        ]
+      }
+    },
+    {
+      "kind": "CORE_RESUME_CONTRACT",
+      "value": {
+        "model": "olmo3moe",
+        "next_update_exact": true,
+        "steps": [
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 0.039976014755666256,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.010088539123535157,
+              "router_z": 2.080788850784302e-05
+            },
+            "local_behavior_versions": [
+              0
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": -2.4497509002685547e-05,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 517448,
+                "local_l2": 197.22547235977217,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 245760,
+                "local_l2": 5.469835739649267,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.005135401617735624,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 7240,
+                "sampled_update_l2": 2.65265349622016e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 7.072638022514022e-06
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 0.049890420865267515,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.010022798776626587,
+              "router_z": 2.060260057449341e-05
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.00011801719665527344,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 517448,
+                "local_l2": 208.10405315955987,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 245760,
+                "local_l2": 5.457952815405805,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.006099819205701351,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 7240,
+                "sampled_update_l2": 3.5571565631113937e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8572562464616943e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 3.814697265625e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          },
+          {
+            "auxiliary_denominator": 20.0,
+            "elapsed_seconds": 0.038300036918371916,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.010022798776626587,
+              "router_z": 2.060260057449341e-05
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.00011801719665527344,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 517448,
+                "local_l2": 208.10405315955987,
+                "missing_parameters": 0
+              },
+              "expert": {
+                "elements": 245760,
+                "local_l2": 5.457952815405805,
+                "missing_parameters": 0
+              },
+              "router": {
+                "elements": 512,
+                "local_l2": 0.006099819205701351,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 8,
+              "model_tokens": 20,
+              "samples": 4,
+              "token_denominator": 8,
+              "world_size": 1
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "response",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 7240,
+                "sampled_update_l2": 3.5571565631113937e-05
+              },
+              "expert": {
+                "sampled_elements": 1536,
+                "sampled_update_l2": 1.8572562464616943e-05
+              },
+              "router": {
+                "sampled_elements": 256,
+                "sampled_update_l2": 3.814697265625e-06
+              }
+            },
+            "schema_version": 1,
+            "step": 2
+          }
+        ]
+      }
+    }
+  ],
+  "limits": [
+    "Gloo reference tests do not qualify native EP; use ep_contract.py on two GPUs",
+    "No full-SFT replay or matched Megatron comparison in this suite"
+  ],
+  "source_commit": "e640a18e72e2b4fa7411f1ba7a291056ffaf7bde"
+}

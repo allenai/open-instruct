@@ -336,6 +336,14 @@
       "tests_passed": 29,
       "evidence": "docs/measurements/miles-core-contract-final-20260910.json",
       "note": "Deep-copy targets before verifier invocation; current Beaker datasource job uses serialized string targets and is unaffected."
+    },
+    "training_contract_parity": {
+      "passed": true,
+      "source_commit": "e640a18e72e2b4fa7411f1ba7a291056ffaf7bde",
+      "runtime_tests_passed": 94,
+      "skipped": 0,
+      "changed_sources": [],
+      "evidence": "docs/measurements/miles-core-contract-parity-20260910.json"
     }
   },
   "limitations": [
