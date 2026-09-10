@@ -19,9 +19,11 @@ if [[ "$cuda_version" != "12" && "$cuda_version" != "13" ]]; then
   exit 1
 fi
 
+# SCRIPT is optional: with no script, build and upload the Beaker image then
+# exit (no launch). Useful for pre-building an image (e.g. a CUDA 13 image for
+# ai2/holmes) to hand to a launch script later via its <beaker-image> argument.
 if [[ $# -eq 0 ]]; then
-  echo "Usage: $0 [--cuda-version 12|13] SCRIPT [SCRIPT_ARGS...]"
-  exit 1
+  echo "No launch script given: will build and upload the image only."
 fi
 
 # 1) Verify we're inside a Git repo
@@ -92,6 +94,14 @@ else
 
   beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user" \
     --description "Git commit: $git_hash; CUDA: $cuda_version"
+fi
+
+# Image-only mode: no launch script, so skip the local uv sync (needed only to
+# run a launch script) and report the uploaded image.
+if [[ $# -eq 0 ]]; then
+  echo "Built and uploaded Beaker image: $beaker_user/$image_name"
+  echo "Launch with it via: <launch-script.sh> $beaker_user/$image_name"
+  exit 0
 fi
 
 # Ensure uv is installed and sync dependencies before running the script
