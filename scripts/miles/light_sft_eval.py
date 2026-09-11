@@ -64,6 +64,8 @@ def summarize(samples, prompts, proofs, step):
 
 class HistoricalEvaluation:
     def __init__(self, input):
+        if getattr(input.args, "eval_uses_snapshots", False):
+            raise ValueError("Historical evaluation requires the inline serving policy, not snapshots")
         self.native = InferenceRolloutFn(input)
         self.root = Path(input.args.prompt_data).parent
         args = copy.deepcopy(input.args)
@@ -87,6 +89,8 @@ class HistoricalEvaluation:
     async def __call__(self, input):
         if not input.evaluation:
             raise ValueError("HistoricalEvaluation is an evaluation-only extension")
+        if input.generate_state is not None or input.hf_dir is not None:
+            raise ValueError("Historical evaluation cannot inherit a snapshot generation state")
         native = await self.native(input)
         if input.rollout_id not in (0, 199):
             return native

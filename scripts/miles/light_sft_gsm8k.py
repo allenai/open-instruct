@@ -340,6 +340,10 @@ def configuration(root):
         sglang_max_prefill_tokens=16384,
         rollout_top_p=1.0,
         rollout_top_k=-1,
+        router_policy="cache_aware",
+        router_cache_threshold=0.8,
+        router_balance_abs_threshold=4,
+        router_balance_rel_threshold=1.5,
         eval_function_path="scripts.miles.light_sft_eval.HistoricalEvaluation",
     )
     return config
@@ -371,6 +375,10 @@ def effective_settings(args):
         "use_routing_replay": False,
         "fully_async": False,
         "sglang_sampling_backend": "flashinfer",
+        "router_policy": "cache_aware",
+        "router_cache_threshold": 0.8,
+        "router_balance_abs_threshold": 4,
+        "router_balance_rel_threshold": 1.5,
         "sglang_disable_radix_cache": False,
         "sglang_max_running_requests": 8,
         "sglang_server_concurrency": 4,

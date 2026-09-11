@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "experiment": "01M278RX23BD5Z1S1A7FP2ZHTZ",
+  "result_dataset": "01M278RX29105FBPCYX42WVGB2",
+  "source_commit": "60aabed89",
+  "exit_code": 0,
+  "historical_experiment": "01M12Y23YZS5ZJWBK45CKQJ7DP",
+  "records": {
+    "eval": 128,
+    "train": 7473
+  },
+  "max_native_prompt_tokens": {
+    "eval": 257,
+    "train": 305
+  },
+  "full_test_records": 1319,
+  "preparation_sha256": "60e1adc8681836ed8ad0a118dfe0ec00c3d69dfcdfd4d806adf60e207351e8dd",
+  "checkpoint_inventory_sha256": "44ca5ca20999a78c60af75a4382cdd3f31b08535d3df06cb94d8871654e605be",
+  "source_files": {
+    "baseline/eval.jsonl": "e8868b9416c0aba0d33b86adbb2a2a67ebe7c3ea4c1eddf9f970e2fc51a3d1d7",
+    "baseline/rl-manifest.json": "fbfa2f2e5fa81b260437db768693fd1d4b20fd3b1f0fb60fdbc669bf264d01c0",
+    "baseline/train.jsonl": "120698c3aceee9e24c5bec69ae15d5c51e1bf1f2ff57976b7f5d3862c31d2038",
+    "checkpoint-inventory.json": "44ca5ca20999a78c60af75a4382cdd3f31b08535d3df06cb94d8871654e605be",
+    "eval.jsonl": "4a8d3c9aa756f470bf494e8f563aa660ad88c31a824619ab924182d8872c5b1e",
+    "hf/chat_template.jinja": "f5186d42d99c8a0445d37fd8a6c7ccf07fe3e24a29ce622d8bd245da9507b12b",
+    "hf/config.json": "55c5084f071f04f65bc4b167339d260ce2530d336da2620130318512a06eb69d",
+    "hf/tokenizer.json": "7738a25c46a6043a0e2e605138851baa450269ce9d800af6ca9bf6192e45510c",
+    "hf/tokenizer_config.json": "d5ecebde2e4bb28af2d069a00175d9947df12903a57f34e09b145b5dd78648da",
+    "historical.json": "fe2a59810e20b12a9078af8a312df8eeed8a3bc8a2ae9ce47d02b06d8adce77f",
+    "offline/prompts.jsonl": "dc7f03e257f5b4002399f5b187eb1bbd4c03c6f0af69c535e91e7d0329ab274a",
+    "offline/requests.jsonl": "71c4d9b3389ae6a1c5364511d152bc3c41042e90ff41c97518ae1b9eb032ef28",
+    "offline/token-proofs.json": "80bed8a33bc9b417045132bea9ed5c9c88d7729845035f0c515e9330ec512cc6",
+    "train.jsonl": "f45cf3e29139c3e476afb68aadc2324f9ddd51e1336b2e9ea314f0d4965324b0",
+    "verifiers.json": "b928b6f4c2091d6cacb3c48500bd7ba261c800541d663afa41aa3b69d8fceaef"
+  },
+  "source_tensor_dtype_counts": {
+    "BF16": 29618,
+    "F32": 51
+  },
+  "router_tensors": 19,
+  "router_source_dtype": "F32",
+  "bf16_router_rounding": {
+    "max_abs": 0.0009275674819946289,
+    "min_relative_l2": 0.0016519732307642698,
+    "max_relative_l2": 0.001659042784012854,
+    "changed_elements": 12451648,
+    "total_elements": 12451840
+  },
+  "precision_interpretation": "Original SG and current SG both inherit BF16 engine model dtype for router storage and use default copy loading; source F32 alone does not establish an initial served-policy mismatch. Core BF16 router training versus historical Megatron precision remains a confound. Initial publication all-tensor equality stays enabled.",
+  "archived_after_prediction_rescore": {
+    "records": 1319,
+    "correct": 274,
+    "per_question_disagreements": 0
+  },
+  "prior_failed_preparations": [
+    {
+      "experiment": "01M2787CW17N1EV63Q9ZAJJ36H",
+      "reason": "Runtime descriptor was under docs, not copied into image; no original input access."
+    },
+    {
+      "experiment": "01M278J00JTPQQW582EX5XVM06",
+      "reason": "14 archived short_answer labels contain commas; historical normalized labels differ. Corrected validation to historical normalization, preserving exact request bytes."
+    }
+  ],
+  "limits": [
+    "CPU source identity/tokenization/config gate only; no learning result in this report.",
+    "Header and router payload SHA records do not constitute full model payload checksum verification."
+  ]
+}

@@ -1,5 +1,6 @@
 """Historical identity and evaluation contracts, without downloading data or weights."""
 
+import asyncio
 import copy
 import importlib
 import json
@@ -149,3 +150,13 @@ def test_archived_comma_answer_normalization():
     row["doc"]["short_answer"] = "1,450,000"
     rows, _ = light_sft_gsm8k.offline_rows([row], Tokenizer())
     assert rows[0]["label"] == "1450000"
+
+
+def test_full_test_rejects_external_snapshot_sampling_state():
+    pytest.importorskip("miles")
+    module = importlib.import_module("scripts.miles.light_sft_eval")
+    worker = object.__new__(module.HistoricalEvaluation)
+    for state, hf in ((object(), None), (None, "/snapshot")):
+        request = SimpleNamespace(evaluation=True, generate_state=state, hf_dir=hf)
+        with pytest.raises(ValueError, match="snapshot generation state"):
+            asyncio.run(worker(request))
