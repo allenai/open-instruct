@@ -1,0 +1,74 @@
+{
+  "passed": true,
+  "source_hashes_verified": true,
+  "passes": [
+    {
+      "name": "cold37",
+      "wall_seconds": 0.2918941299431026,
+      "cuda_stream_elapsed_seconds": 0.2918345947265625,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "249a95cc2eb90a478d1cad563cc0a9fb4bd365b8de702e70b35087fb24eb5188",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 37, (9,): 64, (10,): 16, (11,): 256, (12,): 3, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2878825617954135
+        }
+      ],
+      "jit_miss_count": 1,
+      "jit_miss_wall_seconds": 0.2878825617954135,
+      "cache_artifact_writes_by_extension": {
+        ".source": 1,
+        ".ttir": 1,
+        ".ttgir": 1,
+        ".llir": 1,
+        ".ptx": 1,
+        ".cubin": 1,
+        ".json": 2
+      },
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels"
+    },
+    {
+      "name": "warm37",
+      "wall_seconds": 0.00016296794638037682,
+      "cuda_stream_elapsed_seconds": 0.00014351999759674072,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [],
+      "jit_miss_count": 0,
+      "jit_miss_wall_seconds": 0,
+      "cache_artifact_writes_by_extension": {},
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels"
+    },
+    {
+      "name": "changed41",
+      "wall_seconds": 0.06154711917042732,
+      "cuda_stream_elapsed_seconds": 0.06152396774291992,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "6b360297696b691e8e73712994b9000546913052755da447a1db2a1de2d2ce80",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 41, (9,): 64, (10,): 16, (11,): 256, (12,): 3, (13,): False, (14,): 0}",
+          "wall_seconds": 0.06108327442780137
+        }
+      ],
+      "jit_miss_count": 1,
+      "jit_miss_wall_seconds": 0.06108327442780137,
+      "cache_artifact_writes_by_extension": {
+        ".source": 1,
+        ".ttir": 1,
+        ".ttgir": 1,
+        ".llir": 1,
+        ".ptx": 1,
+        ".cubin": 1,
+        ".json": 2
+      },
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels"
+    }
+  ],
+  "image": "01M26N80T0V9PREQTS87J849P8",
+  "device": "local RTX4090",
+  "scope": "Standalone frozen no-grad SwiGLU with rows37 then41; not full model scoring",
+  "source": "c3a41598e434d50058f929e6c55b82e34aa4ff09",
+  "core_source": "b7f1e5296704779e7deb06de4c4242be9729d1a9"
+}

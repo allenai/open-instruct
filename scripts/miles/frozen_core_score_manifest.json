@@ -1,0 +1,12 @@
+{
+  "image": "01M26N80T0V9PREQTS87J849P8",
+  "oi_source": "c3a41598e434d50058f929e6c55b82e34aa4ff09",
+  "core_source": "b7f1e5296704779e7deb06de4c4242be9729d1a9",
+  "module_sha256": {
+    "open_instruct.miles.actor": "2ffda19fc743c6cc1d7f4a6dd140fa4b21e3f365bc16bfe93a359ed39fd5e3a6",
+    "open_instruct.miles.models": "05dc62d586f8fb719ee46f74a72cedce97a09939c51067cfcaa94ca11334ba40",
+    "open_instruct.miles.data": "e4f9506ec3e0350cb603628295e42e2d6028776362c6e6aa63cee96d1e89cd10",
+    "scripts.miles.gsm8k_parity": "ede6fa641424d9f6ed5690293a459b0c51e23f870485ea74ba3dd33c8e7dd483",
+    "olmo_core.kernels.swiglu": "79e3738e1fe0cd72812d596b77169b834fd55b4e7d503f51a1f252b2031539f0"
+  }
+}

@@ -9,6 +9,20 @@ if [[ -n "$(git status --porcelain)" ]]; then
     echo "Commit the current changes before building and launching a MILES experiment."
     exit 1
 fi
+if [[ -n "${MILES_EXISTING_IMAGE:-}" ]]; then
+    if [[ ! "$MILES_EXISTING_IMAGE" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]]; then
+        echo "MILES_EXISTING_IMAGE must be an immutable Beaker image ID, not an alias."
+        exit 1
+    fi
+    resolved=$(beaker image get "$MILES_EXISTING_IMAGE" --format json | python -c 'import json, sys; print(json.load(sys.stdin)[0]["id"])')
+    if [[ "$resolved" != "$MILES_EXISTING_IMAGE" ]]; then
+        echo "Existing image metadata differs from the explicitly requested ID."
+        exit 1
+    fi
+    script="$1"
+    shift
+    exec bash "$script" "$MILES_EXISTING_IMAGE" "$@"
+fi
 : "${MILES_BASE_IMAGE:?Set MILES_BASE_IMAGE to the locally loaded base image recorded in runtime/miles/runtime.lock.json}"
 commit=$(git rev-parse HEAD)
 image_name="open-instruct-miles-core-${commit:0:12}"
