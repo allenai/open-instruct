@@ -107,3 +107,7 @@ Useful independent agent questions: where do update-zero captures first diverge;
 The Core-only update-zero retry was submitted as `01M27F1Q59128QKVBTMFW32JDD`, diagnostic source `ffeffe0f2`, on the same immutable original image. The actual original-image parser passed after omitting the unsupported negated W&B flag: zero rollouts, W&B disabled, original 100-step LR horizon retained. The failed first attempt remains recorded. Core retry tensors will be under `update-zero-20260911-v2/core`; Megatron remains under `update-zero-20260911-v1/megatron`, so comparison must accept separate backend roots. No trace result is claimed yet.
 
 The light-SFT third attempt is `01M27EWCG7P03CNY40E5WSXX1D`. Its separate observe-only terminal watcher is in `.artifacts/miles-light-r3-watch-20260911`, preserving both earlier failed runs and leaving the heavy pair's sole audit owner untouched.
+
+### Update at 07:25 UTC
+
+Core500 reached completed optimizer update 100 at 07:19:39 UTC and entered its first native save. Both sampled worker stacks remained in distributed checkpoint planning several minutes later; no save completion marker yet. The CPU drift job continues to wait. The [planning-latency observation](measurements/miles-core-checkpoint-planning-20260911.md) identifies per-element offset-vector construction as a candidate cost, without modifying the active save or claiming a completed timing result. Megatron's forward-only route probe is still queued. All analysis collectors remain active.
