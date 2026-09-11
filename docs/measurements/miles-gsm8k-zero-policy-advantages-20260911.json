@@ -1,0 +1,135 @@
+{
+  "scope": "Independent retained100-run audits. With group-centered GRPO, zero mixed groups implies zero current policy advantages; auxiliary gradients and Adam momentum can still update weights. These counts do not establish a learning cause.",
+  "arms": {
+    "core": {
+      "audit_sha256": "4464fbb9f6e2e1f52698351cc222403ea0b0533e13cabbf73da71be825f84034",
+      "zero_policy_advantage_update_count": 21,
+      "rollout_indices": [
+        5,
+        14,
+        18,
+        19,
+        25,
+        35,
+        37,
+        40,
+        41,
+        42,
+        52,
+        54,
+        55,
+        56,
+        57,
+        80,
+        92,
+        93,
+        94,
+        96,
+        97
+      ],
+      "mixed_group_count_histogram": {
+        "1": 42,
+        "2": 28,
+        "0": 21,
+        "4": 2,
+        "3": 7
+      },
+      "windows": [
+        {
+          "rollout_start": 0,
+          "rollout_end": 19,
+          "zero_policy_advantage_updates": 4
+        },
+        {
+          "rollout_start": 20,
+          "rollout_end": 39,
+          "zero_policy_advantage_updates": 3
+        },
+        {
+          "rollout_start": 40,
+          "rollout_end": 59,
+          "zero_policy_advantage_updates": 8
+        },
+        {
+          "rollout_start": 60,
+          "rollout_end": 79,
+          "zero_policy_advantage_updates": 0
+        },
+        {
+          "rollout_start": 80,
+          "rollout_end": 99,
+          "zero_policy_advantage_updates": 6
+        }
+      ]
+    },
+    "megatron": {
+      "audit_sha256": "24b8ef05db281d094f344d73f46da20f89145707c8672efb207cb1b8138f302c",
+      "zero_policy_advantage_update_count": 29,
+      "rollout_indices": [
+        7,
+        17,
+        19,
+        21,
+        25,
+        31,
+        37,
+        42,
+        45,
+        47,
+        52,
+        58,
+        59,
+        60,
+        61,
+        66,
+        67,
+        71,
+        76,
+        80,
+        82,
+        86,
+        88,
+        91,
+        92,
+        96,
+        97,
+        98,
+        99
+      ],
+      "mixed_group_count_histogram": {
+        "1": 35,
+        "3": 7,
+        "2": 28,
+        "0": 29,
+        "4": 1
+      },
+      "windows": [
+        {
+          "rollout_start": 0,
+          "rollout_end": 19,
+          "zero_policy_advantage_updates": 3
+        },
+        {
+          "rollout_start": 20,
+          "rollout_end": 39,
+          "zero_policy_advantage_updates": 4
+        },
+        {
+          "rollout_start": 40,
+          "rollout_end": 59,
+          "zero_policy_advantage_updates": 6
+        },
+        {
+          "rollout_start": 60,
+          "rollout_end": 79,
+          "zero_policy_advantage_updates": 6
+        },
+        {
+          "rollout_start": 80,
+          "rollout_end": 99,
+          "zero_policy_advantage_updates": 10
+        }
+      ]
+    }
+  }
+}

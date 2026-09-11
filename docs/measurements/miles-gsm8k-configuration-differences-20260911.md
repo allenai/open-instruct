@@ -238,3 +238,47 @@ On retained batches6–9 at initial weights, parent Core290 scorer time averaged
 and isolated candidate15.215s; no optimizer update or active runtime pin change occurred.
 This demonstrates recurring compilation cost in a controlled diagnostic, not a measured
 end-to-end training improvement or an explanation of the learning-curve difference.
+
+## Prioritized checks of the learning difference
+
+The compilation result is a performance finding, not a demonstrated cause of the
+learning difference. The next causal checks should isolate these concrete differences:
+
+1. **Scoring versus gradient-forward arithmetic.** The completed Core100 used the
+   pre-fix no-grad SwiGLU rounding path; new Core500 uses290d2ca. Measure old and corrected
+   score anchors, selected router IDs and actual gradient-forward logprobs on identical
+   retained tokens/weights. A difference here changes the PPO ratio even before an
+   optimizer update. Existing tiny tests prove the arithmetic discrepancy and correction;
+   they do not establish how much of the100-run learning difference it caused.
+2. **Unequal-length, padded auxiliary objectives under EP2.** Core averages unpadded
+   token contributions while Megatron's actual batches include rank-maximum padding.
+   The existing four-arm auxiliary derivative comparison uses equal lengths, no padding
+   and EP1; it intentionally cannot settle this real-workload difference. Reuse identical
+   tokens/anchors in both actual EP2 trainers, independently reconstruct auxiliary scalars
+   and compare policy/auxiliary/combined gradients by router/expert/dense category before
+   clipping. Preserve each implementation's current normalization rather than silently
+   making the gate pass by changing the algorithm.
+3. **Initial serving divergence before learning.** Some initial held-out completions
+   already differ. Compare the exact prepared token IDs, checkpoint tensor inventory,
+   serving settings and conditional logits/routes under controlled request scheduling.
+   Sampler/revision differences alone do not establish a cause, particularly for greedy
+   decoding. Keep this inference diagnostic separate from optimizer and reward checks.
+
+[Audited group-signal counts](miles-gsm8k-zero-policy-advantages-20260911.json) show21
+Core and29 Megatron updates with no mixed-reward prompt groups, hence zero current
+policy advantages under the configured centered GRPO objective. Counts were independently
+reconstructed from all3,200 audited sample outcomes. Auxiliary gradients and accumulated
+Adam momentum can still move weights on those steps. In successive20-update windows,
+counts are Core4/3/8/0/6 and Megatron3/4/6/6/10. This is useful objective context, not
+proof that auxiliary updates explain the curves or that Core uniquely lacks policy signal.
+
+Router replay is disabled in both completed100 and current500 runs:
+`use_rollout_routing_replay=False` and `use_routing_replay=False`; Megatron additionally
+prints `moe_enable_routing_replay=False`. Actual Core100 and Core500 rollout0 artifacts
+each contain16 samples with no populated `rollout_routed_experts`. Core's internal
+`_score(..., use_replay=True)` only permits its context wrapper; that wrapper remains a
+no-op when the configuration flag is false. Thus a replay-code failure is not an active
+mechanism in these runs. Separate replay qualification covers tiny live serving and
+native EP1/EP2 gradient/recomputation checks; full-SFT replay remains unqualified, and
+the final unscored token's synthetic IDs are a known auxiliary-loss limitation when
+replay is enabled. No active-run settings were changed during this review.
