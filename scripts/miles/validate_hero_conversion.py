@@ -8,6 +8,7 @@ import argparse
 import gc
 import hashlib
 import json
+import resource
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -78,6 +79,11 @@ def check_architecture(actual, expected):
         for key in ARCHITECTURE_FIELDS
         if getattr(actual, key, None) != getattr(expected, key, None)
     }
+    if (
+        "sliding_attention" in (getattr(expected, "layer_types", None) or [])
+        and actual.sliding_window != expected.sliding_window
+    ):
+        differences["sliding_window"] = [actual.sliding_window, expected.sliding_window]
     if getattr(expected, "use_rope", False):
         for key in ("rope_theta", "rope_parameters"):
             if getattr(actual, key, None) != getattr(expected, key, None):
@@ -172,6 +178,7 @@ def validate(native_path, hf_path):
         "native_to_hf": native_result,
         "hf_core_hf": roundtrip,
         "elapsed_seconds": time.monotonic() - started,
+        "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
     }
 
 

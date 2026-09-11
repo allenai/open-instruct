@@ -102,3 +102,10 @@ def test_rejects_same_shape_different_attention_semantics():
     wrong = Olmo3MoeConfig(scalable_softmax=False, use_head_qk_norm=True, qk_norm_per_head_gains=True)
     with pytest.raises(ValueError, match="scalable_softmax"):
         check_architecture(original, wrong)
+
+
+def test_rejects_different_sliding_window():
+    expected = Olmo3MoeConfig(num_hidden_layers=1, layer_types=["sliding_attention"], sliding_window=4)
+    actual = Olmo3MoeConfig(num_hidden_layers=1, layer_types=["sliding_attention"], sliding_window=3)
+    with pytest.raises(ValueError, match="sliding_window"):
+        check_architecture(actual, expected)
