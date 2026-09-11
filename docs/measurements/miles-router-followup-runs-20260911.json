@@ -1,0 +1,93 @@
+{
+  "as_of_utc": "2026-09-11T07:20:00Z",
+  "runs": {
+    "core_routes": {
+      "experiment": "01M27J5YARGEAV1RNQRYFGJT6T",
+      "jobs": [
+        {
+          "id": "01M27J5YEF176854M8AM1E8CT1",
+          "status": {
+            "created": "2026-09-11T06:23:49.080653Z",
+            "scheduled": "2026-09-11T06:47:48.250018Z",
+            "started": "2026-09-11T06:49:31.367845Z",
+            "ready": "2026-09-11T06:49:30.318792Z",
+            "exited": "2026-09-11T07:13:41.990901Z",
+            "finalized": "2026-09-11T07:14:03.782811Z",
+            "exitCode": 1
+          },
+          "result": "01M27J5YB4EB2ZAHXQTTPR3GFK"
+        }
+      ],
+      "measurement_status": "All captures validated; 180-second distributed teardown timeout"
+    },
+    "megatron_routes": {
+      "experiment": "01M27J6E1FTNGJG9ECTE0FH58Q",
+      "jobs": [
+        {
+          "id": "01M27J6E5BAC2FPWY777R2ZCAA",
+          "status": {
+            "created": "2026-09-11T06:24:05.167165Z"
+          },
+          "result": "01M27J6E1X47WMDAC2JEC5Q1A0"
+        }
+      ]
+    },
+    "route_comparison": {
+      "experiment": "01M27MX7930HVMZYVMSKCMB49X",
+      "jobs": [
+        {
+          "id": "01M27MX7CSJ5N2HFWMAGT79VEV",
+          "status": {
+            "created": "2026-09-11T07:11:29.059417Z",
+            "scheduled": "2026-09-11T07:11:46.398303Z",
+            "started": "2026-09-11T07:12:02.722868Z",
+            "idleSince": "2026-09-11T07:12:40.876566Z",
+            "ready": "2026-09-11T07:12:00.638611Z"
+          },
+          "result": "01M27MX79J1EKEH9X8VRAJW92M"
+        }
+      ]
+    },
+    "native_small_drift": {
+      "experiment": "01M27MRK07JHRYC7RWNMX4AJEQ",
+      "jobs": [
+        {
+          "id": "01M27MRK607X4KCX003E1SFQVA",
+          "status": {
+            "created": "2026-09-11T07:08:57.223608Z",
+            "scheduled": "2026-09-11T07:09:12.609952Z",
+            "started": "2026-09-11T07:09:30.876718Z",
+            "idleSince": "2026-09-11T07:09:48.365018Z",
+            "ready": "2026-09-11T07:09:28.823976Z"
+          },
+          "result": "01M27MRK0RC7Z6PT11G74EXYJF"
+        }
+      ]
+    },
+    "checkpoint_retention": {
+      "experiment": "01M27GYGMCX5SQYFZ78VEFXF6M",
+      "jobs": [
+        {
+          "id": "01M27GYGQY155PB0GWFE4N0KDH",
+          "status": {
+            "created": "2026-09-11T06:02:17.100094Z",
+            "scheduled": "2026-09-11T06:02:36.837084Z",
+            "started": "2026-09-11T06:02:55.201354Z",
+            "idleSince": "2026-09-11T06:02:57.750014Z",
+            "ready": "2026-09-11T06:02:52.216587Z"
+          },
+          "result": "01M27GYGMKH7P9392JDA2AV0YX"
+        }
+      ]
+    },
+    "core_independent_report": {
+      "experiment": "01M27N5DYPESAEW41TDVKVNW9V",
+      "comparison_exit_code": 0,
+      "source": "a3d843461"
+    }
+  },
+  "capture_source": "4dde4fe97",
+  "route_comparison_source": "4a7aed7bc",
+  "drift_source": "fce340aa2",
+  "scope": "Forward-only routing captures and CPU analysis; existing learning runs unchanged."
+}

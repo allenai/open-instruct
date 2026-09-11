@@ -1,0 +1,356 @@
+{
+  "as_of_utc": "2026-09-11T07:18:00Z",
+  "capture_experiment": "01M27J5YARGEAV1RNQRYFGJT6T",
+  "capture_exit_code": 1,
+  "capture_exit_reason": "180-second distributed teardown timeout after all measurements",
+  "comparison_experiment": "01M27N5DYPESAEW41TDVKVNW9V",
+  "comparison_exit_code": 0,
+  "report_path": "/tmp/miles-core-route-result/compare-native-scorer-routes/olmo_core.json",
+  "report_sha256": "d26bdebf5779dabdc22fdaba1e4ef7a1ef76fd29a26d6406efcf53037b682a93",
+  "observations_verified": true,
+  "cleanup": {
+    "completed": false,
+    "errors": [
+      "TimeoutError()"
+    ]
+  },
+  "completion": {
+    "completed": true,
+    "optimizer_calls": 0,
+    "backwards": 0,
+    "prefix_cases": 4,
+    "retained_cases": 16,
+    "scope": "Actual scorers and serving evaluated on identical token sequences; route indices identify processed input tokens."
+  },
+  "scope": "Same-token, rank-strided diagnostic forwards; sampled input-position routes and full response LPs. Differences are measurements, not automatic correctness failures.",
+  "cohorts": {
+    "prefixes": {
+      "cases": 4,
+      "token_layer_observations": 10944,
+      "exact_top16_set_fraction": 0.6375182748538012,
+      "individual_expert_agreement": 0.9731416758040936,
+      "active_response_tokens": 1274,
+      "active_logprob_mean_abs": 0.04381564881954948,
+      "active_logprob_max_abs": 0.8680973052978516,
+      "payload_sha256": "e5c288ac73df1c02816bde2508cdd3f69718d61b1f6124ce565ffed65d2dafd1",
+      "layers": {
+        "1": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.9375,
+          "individual_expert_agreement": 0.9959852430555556,
+          "router_logits_mean_abs": 0.0009661224580162929,
+          "router_logits_max_abs": 0.021157264709472656,
+          "stability_bound_violations": 0
+        },
+        "2": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.8697916666666666,
+          "individual_expert_agreement": 0.9917534722222222,
+          "router_logits_mean_abs": 0.005931135832118646,
+          "router_logits_max_abs": 0.07679271697998047,
+          "stability_bound_violations": 0
+        },
+        "3": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.8472222222222222,
+          "individual_expert_agreement": 0.990234375,
+          "router_logits_mean_abs": 0.006299171816256906,
+          "router_logits_max_abs": 0.07551336288452148,
+          "stability_bound_violations": 0
+        },
+        "4": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.7934027777777778,
+          "individual_expert_agreement": 0.9867621527777778,
+          "router_logits_mean_abs": 0.009596090926202628,
+          "router_logits_max_abs": 0.2609982490539551,
+          "stability_bound_violations": 0
+        },
+        "5": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.7152777777777778,
+          "individual_expert_agreement": 0.9806857638888888,
+          "router_logits_mean_abs": 0.012189785552739826,
+          "router_logits_max_abs": 0.23969507217407227,
+          "stability_bound_violations": 0
+        },
+        "6": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.6892361111111112,
+          "individual_expert_agreement": 0.9787326388888888,
+          "router_logits_mean_abs": 0.01475109555091573,
+          "router_logits_max_abs": 0.3014354705810547,
+          "stability_bound_violations": 0
+        },
+        "7": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.6510416666666666,
+          "individual_expert_agreement": 0.9762369791666666,
+          "router_logits_mean_abs": 0.015371509426283106,
+          "router_logits_max_abs": 0.260528564453125,
+          "stability_bound_violations": 0
+        },
+        "8": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.6111111111111112,
+          "individual_expert_agreement": 0.9721137152777778,
+          "router_logits_mean_abs": 0.016678133003021383,
+          "router_logits_max_abs": 0.2859349250793457,
+          "stability_bound_violations": 0
+        },
+        "9": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.5868055555555556,
+          "individual_expert_agreement": 0.9713541666666666,
+          "router_logits_mean_abs": 0.018102689724097825,
+          "router_logits_max_abs": 0.2943229675292969,
+          "stability_bound_violations": 0
+        },
+        "10": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.5885416666666666,
+          "individual_expert_agreement": 0.9713541666666666,
+          "router_logits_mean_abs": 0.019603511754111323,
+          "router_logits_max_abs": 0.2824573516845703,
+          "stability_bound_violations": 0
+        },
+        "11": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.6631944444444444,
+          "individual_expert_agreement": 0.9754774305555556,
+          "router_logits_mean_abs": 0.018976748517818325,
+          "router_logits_max_abs": 0.2498006820678711,
+          "stability_bound_violations": 0
+        },
+        "12": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.6006944444444444,
+          "individual_expert_agreement": 0.9712456597222222,
+          "router_logits_mean_abs": 0.018356680202284932,
+          "router_logits_max_abs": 0.2761197090148926,
+          "stability_bound_violations": 0
+        },
+        "13": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.5555555555555556,
+          "individual_expert_agreement": 0.9701605902777778,
+          "router_logits_mean_abs": 0.01914131993342178,
+          "router_logits_max_abs": 0.3029813766479492,
+          "stability_bound_violations": 0
+        },
+        "14": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.5729166666666666,
+          "individual_expert_agreement": 0.9692925347222222,
+          "router_logits_mean_abs": 0.023542772683008986,
+          "router_logits_max_abs": 0.4438130855560303,
+          "stability_bound_violations": 0
+        },
+        "15": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.5520833333333334,
+          "individual_expert_agreement": 0.9659288194444444,
+          "router_logits_mean_abs": 0.025529693335960876,
+          "router_logits_max_abs": 0.48917150497436523,
+          "stability_bound_violations": 0
+        },
+        "16": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.5329861111111112,
+          "individual_expert_agreement": 0.9636501736111112,
+          "router_logits_mean_abs": 0.024647631082795367,
+          "router_logits_max_abs": 0.40815210342407227,
+          "stability_bound_violations": 0
+        },
+        "17": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.5381944444444444,
+          "individual_expert_agreement": 0.9638671875,
+          "router_logits_mean_abs": 0.025431824557068064,
+          "router_logits_max_abs": 0.3177933692932129,
+          "stability_bound_violations": 0
+        },
+        "18": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.4236111111111111,
+          "individual_expert_agreement": 0.9506293402777778,
+          "router_logits_mean_abs": 0.0265859273503237,
+          "router_logits_max_abs": 0.5147228240966797,
+          "stability_bound_violations": 0
+        },
+        "19": {
+          "token_positions": 576,
+          "exact_top16_set_fraction": 0.3836805555555556,
+          "individual_expert_agreement": 0.9442274305555556,
+          "router_logits_mean_abs": 0.028398818739535474,
+          "router_logits_max_abs": 0.4331851005554199,
+          "stability_bound_violations": 0
+        }
+      }
+    },
+    "retained": {
+      "cases": 16,
+      "token_layer_observations": 43776,
+      "exact_top16_set_fraction": 0.6362618786549707,
+      "individual_expert_agreement": 0.9735100283260234,
+      "active_response_tokens": 31905,
+      "active_logprob_mean_abs": 0.020080427903704685,
+      "active_logprob_max_abs": 0.6992893218994141,
+      "payload_sha256": "74e69662d9b36c1c2bd223203ce582e96b96ce6a409bae13f73e0acfeecc1bc7",
+      "layers": {
+        "1": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.9105902777777778,
+          "individual_expert_agreement": 0.994384765625,
+          "router_logits_mean_abs": 0.0011912251928960257,
+          "router_logits_max_abs": 0.025827884674072266,
+          "stability_bound_violations": 0
+        },
+        "2": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.8346354166666666,
+          "individual_expert_agreement": 0.9894476996527778,
+          "router_logits_mean_abs": 0.006657250803982606,
+          "router_logits_max_abs": 0.12930631637573242,
+          "stability_bound_violations": 0
+        },
+        "3": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.8285590277777778,
+          "individual_expert_agreement": 0.9886881510416666,
+          "router_logits_mean_abs": 0.006517036464376563,
+          "router_logits_max_abs": 0.13641881942749023,
+          "stability_bound_violations": 0
+        },
+        "4": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.7621527777777778,
+          "individual_expert_agreement": 0.9846733940972222,
+          "router_logits_mean_abs": 0.008069010436682018,
+          "router_logits_max_abs": 0.16080617904663086,
+          "stability_bound_violations": 0
+        },
+        "5": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.72265625,
+          "individual_expert_agreement": 0.9810655381944444,
+          "router_logits_mean_abs": 0.01114643852392621,
+          "router_logits_max_abs": 0.20306015014648438,
+          "stability_bound_violations": 0
+        },
+        "6": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.6966145833333334,
+          "individual_expert_agreement": 0.9792751736111112,
+          "router_logits_mean_abs": 0.011915274172881456,
+          "router_logits_max_abs": 0.16939783096313477,
+          "stability_bound_violations": 0
+        },
+        "7": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.6458333333333334,
+          "individual_expert_agreement": 0.9760470920138888,
+          "router_logits_mean_abs": 0.01171677452768765,
+          "router_logits_max_abs": 0.18192291259765625,
+          "stability_bound_violations": 0
+        },
+        "8": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.6145833333333334,
+          "individual_expert_agreement": 0.972900390625,
+          "router_logits_mean_abs": 0.012602563370175327,
+          "router_logits_max_abs": 0.17989826202392578,
+          "stability_bound_violations": 0
+        },
+        "9": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.6059027777777778,
+          "individual_expert_agreement": 0.9732801649305556,
+          "router_logits_mean_abs": 0.01375592010425761,
+          "router_logits_max_abs": 0.1821136474609375,
+          "stability_bound_violations": 0
+        },
+        "10": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.5833333333333334,
+          "individual_expert_agreement": 0.9716796875,
+          "router_logits_mean_abs": 0.01406678226390391,
+          "router_logits_max_abs": 0.1877593994140625,
+          "stability_bound_violations": 0
+        },
+        "11": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.6627604166666666,
+          "individual_expert_agreement": 0.9767795138888888,
+          "router_logits_mean_abs": 0.014147497287568613,
+          "router_logits_max_abs": 0.1895904541015625,
+          "stability_bound_violations": 0
+        },
+        "12": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.6258680555555556,
+          "individual_expert_agreement": 0.9740397135416666,
+          "router_logits_mean_abs": 0.014539522100480755,
+          "router_logits_max_abs": 0.18793821334838867,
+          "stability_bound_violations": 0
+        },
+        "13": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.6202256944444444,
+          "individual_expert_agreement": 0.9745551215277778,
+          "router_logits_mean_abs": 0.014678323610007106,
+          "router_logits_max_abs": 0.2724623680114746,
+          "stability_bound_violations": 0
+        },
+        "14": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.5972222222222222,
+          "individual_expert_agreement": 0.9727647569444444,
+          "router_logits_mean_abs": 0.02029593546521053,
+          "router_logits_max_abs": 0.33636474609375,
+          "stability_bound_violations": 0
+        },
+        "15": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.5616319444444444,
+          "individual_expert_agreement": 0.9670138888888888,
+          "router_logits_mean_abs": 0.019989738873138978,
+          "router_logits_max_abs": 0.2888622283935547,
+          "stability_bound_violations": 0
+        },
+        "16": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.5147569444444444,
+          "individual_expert_agreement": 0.96337890625,
+          "router_logits_mean_abs": 0.021082041242215785,
+          "router_logits_max_abs": 0.30059337615966797,
+          "stability_bound_violations": 0
+        },
+        "17": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.46875,
+          "individual_expert_agreement": 0.9583875868055556,
+          "router_logits_mean_abs": 0.02125875124846112,
+          "router_logits_max_abs": 0.36566591262817383,
+          "stability_bound_violations": 0
+        },
+        "18": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.4375,
+          "individual_expert_agreement": 0.9518229166666666,
+          "router_logits_mean_abs": 0.0226586664398888,
+          "router_logits_max_abs": 0.33864307403564453,
+          "stability_bound_violations": 0
+        },
+        "19": {
+          "token_positions": 2304,
+          "exact_top16_set_fraction": 0.3953993055555556,
+          "individual_expert_agreement": 0.9465060763888888,
+          "router_logits_mean_abs": 0.022822521614431126,
+          "router_logits_max_abs": 0.3421306610107422,
+          "stability_bound_violations": 0
+        }
+      }
+    }
+  }
+}
