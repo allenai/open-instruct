@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+import datasets
 import torch
 from parameterized import parameterized
 from transformers import AutoTokenizer
@@ -86,6 +87,64 @@ class TestConfigHash(unittest.TestCase):
         hash1 = open_instruct.dataset_transformation.compute_config_hash(dcs1, tc)
         hash2 = open_instruct.dataset_transformation.compute_config_hash(dcs2, tc)
         self.assertNotEqual(hash1, hash2, "Different configs should have different hashes")
+
+    def test_config_hash_stable_across_tokenizer_access(self):
+        # Regression test for the numpy SFT cache mismatch: loading the tokenizer
+        # populates tc.tokenizer_files_hash, so the hash must not depend on whether
+        # tc.tokenizer was accessed before compute_config_hash was called.
+        def make_tc():
+            return open_instruct.dataset_transformation.TokenizerConfig(
+                tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
+            )
+
+        dcs = [
+            open_instruct.dataset_transformation.DatasetConfig(
+                dataset_name=os.path.join(TEST_DATA_DIR, "sft_sample.jsonl"),
+                dataset_split="train",
+                dataset_revision="main",
+                transform_fn=["sft_tokenize_v1"],
+                transform_fn_args=[{}],
+            )
+        ]
+
+        tc = make_tc()
+        hash_before_access = open_instruct.dataset_transformation.compute_config_hash(dcs, tc)
+        hash_after_access = open_instruct.dataset_transformation.compute_config_hash(dcs, tc)
+        self.assertEqual(hash_before_access, hash_after_access)
+
+        tc_preloaded = make_tc()
+        _ = tc_preloaded.tokenizer
+        hash_preloaded = open_instruct.dataset_transformation.compute_config_hash(dcs, tc_preloaded)
+        self.assertEqual(hash_preloaded, hash_before_access)
+
+    def test_dataset_commit_hash_resolved_after_download(self):
+        # get_commit_hash only looks in the local HF hub cache, so it must run
+        # after load_dataset has downloaded the dataset (which populates the
+        # cache); otherwise a fresh machine hashes dataset_commit_hash=None while
+        # a warm one hashes the real commit, producing different cache hashes.
+        calls = []
+        fake_dataset = datasets.Dataset.from_dict({"messages": [[{"role": "user", "content": "hi"}]]})
+
+        def fake_load_dataset(*args, **kwargs):
+            calls.append("load_dataset")
+            return fake_dataset
+
+        def fake_get_commit_hash(*args, **kwargs):
+            calls.append("get_commit_hash")
+            return "abc123"
+
+        with (
+            mock.patch.object(open_instruct.dataset_transformation, "load_dataset", side_effect=fake_load_dataset),
+            mock.patch.object(
+                open_instruct.dataset_transformation, "get_commit_hash", side_effect=fake_get_commit_hash
+            ),
+        ):
+            dc = open_instruct.dataset_transformation.DatasetConfig(
+                dataset_name="fake-org/fake-hub-dataset", dataset_split="train", dataset_revision="main"
+            )
+
+        self.assertEqual(calls, ["load_dataset", "get_commit_hash"])
+        self.assertEqual(dc.dataset_commit_hash, "abc123")
 
 
 class TestCachedDataset(unittest.TestCase):
