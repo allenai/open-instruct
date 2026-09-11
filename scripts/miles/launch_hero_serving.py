@@ -19,7 +19,7 @@ export HF_HOME=/tmp/hf-cache
 export SGLANG_EXTERNAL_MODEL_PACKAGE=olmo_sglang.models
 cp /opt/core-rl/sources/runtime.lock.json /output/
 python -c 'import torch; assert "B300" in torch.cuda.get_device_name(); print(torch.cuda.get_device_name())'
-python /opt/core-rl/sources/olmo-sglang/tools/qualify_hero_serving.py --model {shlex.quote(hf)} --output /output/serving.json --recurrent-hf-prefill --logprob-atol 0.1
+python /opt/core-rl/sources/olmo-sglang/tools/qualify_hero_serving.py --model {shlex.quote(hf)} --output /output/serving.json --recurrent-hf-prefill --logprob-atol 0.1 --core-reference --core-logprob-atol 0.1
 """
     return {
         "version": "v2",

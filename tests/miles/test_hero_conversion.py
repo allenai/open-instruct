@@ -12,7 +12,7 @@ from olmo_core.nn.moe.v2 import olmo3
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
 from safetensors.torch import save_file
-from scripts.miles.validate_hero_conversion import check_architecture, validate
+from scripts.miles.validate_hero_conversion import check_architecture, cpu_conversion_config, validate
 
 
 @pytest.mark.parametrize("width,experts", [(32, 4), (48, 8)])
@@ -109,3 +109,23 @@ def test_rejects_different_sliding_window():
     actual = Olmo3MoeConfig(num_hidden_layers=1, layer_types=["sliding_attention"], sliding_window=3)
     with pytest.raises(ValueError, match="sliding_window"):
         check_architecture(actual, expected)
+
+
+def test_cpu_conversion_changes_only_execution_settings():
+    original = {
+        "blocks": [
+            {"use_cute_kernel": True, "head_dim": 128},
+            {
+                "qk_norm": {"eps": 1e-5},
+                "backend": "flash_4",
+                "use_flash": True,
+                "qk_norm_per_head_gains": True,
+                "scalable_softmax": True,
+            },
+        ]
+    }
+    converted, overrides = cpu_conversion_config(original)
+    assert original["blocks"][0]["use_cute_kernel"]
+    assert converted["blocks"][0] == {"use_cute_kernel": False, "head_dim": 128}
+    assert converted["blocks"][1] == {**original["blocks"][1], "backend": "torch", "use_flash": False}
+    assert len(overrides) == 3

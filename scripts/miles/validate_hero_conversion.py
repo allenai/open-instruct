@@ -5,6 +5,7 @@ This checks architecture/weight interchange, not forward or cached-generation pa
 """
 
 import argparse
+import copy
 import gc
 import hashlib
 import json
@@ -121,10 +122,36 @@ def validate_native_parameter_sources(model, checkpoint):
     }
 
 
+def cpu_conversion_config(saved):
+    """Disable execution-only CUDA kernels while retaining all architecture fields."""
+    config = copy.deepcopy(saved)
+    overrides = []
+
+    def visit(value, path):
+        if isinstance(value, dict):
+            replacements = {}
+            if value.get("use_cute_kernel"):
+                replacements["use_cute_kernel"] = False
+            if "qk_norm" in value and "backend" in value:
+                replacements.update(backend="torch", use_flash=False)
+            for key, replacement in replacements.items():
+                if value.get(key) != replacement:
+                    overrides.append({"path": f"{path}.{key}", "saved": value.get(key), "conversion": replacement})
+                    value[key] = replacement
+            for key, child in value.items():
+                visit(child, f"{path}.{key}")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}.{index}")
+
+    visit(config, "model")
+    return config, overrides
+
+
 def validate(native_path, hf_path):
     started = time.monotonic()
     experiment = load_config(native_path)
-    config_dict = experiment["model"]
+    config_dict, execution_overrides = cpu_conversion_config(experiment["model"])
     _normalize_legacy_latent_moe_config(config_dict)
     config = TransformerConfig.from_dict(config_dict)
     model = config.build(init_device="meta")
@@ -169,6 +196,7 @@ def validate(native_path, hf_path):
         "native_config_sha256": hashlib.sha256((native_path / "config.json").read_bytes()).hexdigest(),
         "hf_config_sha256": hashlib.sha256((hf_path / "config.json").read_bytes()).hexdigest(),
         "architecture": {key: getattr(hf, key, None) for key in ARCHITECTURE_FIELDS},
+        "conversion_execution_overrides": execution_overrides,
         "dense_layers_use_shared_expert": {
             "native": native_hf.dense_layers_use_shared_expert,
             "reference_hf": hf.dense_layers_use_shared_expert,

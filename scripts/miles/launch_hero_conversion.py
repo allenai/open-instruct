@@ -7,8 +7,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-NATIVE = "/weka/olmo-3p5-checkpoints/production-hero-small/olmo35-small-hero-20260907/olmo35-small-hero-20260907-non-emo/step38000"
-HF = "/weka/olmo-3p5-checkpoints/scratch/hero-hf-20260909/non-emo/step38000/hf"
+NATIVE = "/weka/olmo-3p5-checkpoints/production-hero-small/olmo35-small-hero-20260907/olmo35-small-hero-20260907-non-emo/step75500"
+HF = "/weka/olmo-3p5-checkpoints/scratch/hero-hf-20260909/non-emo/step75500/hf"
 
 
 def specification(image, *, native=NATIVE, hf=HF, inspect_only=False):

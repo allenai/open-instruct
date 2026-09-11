@@ -35,10 +35,14 @@ flattened batch. The usual attention `1/sqrt(head_dim)` factor still applies.
 
 ## Conversion qualification
 
-The real checkpoint inputs are read without modifying either source:
+The initial step38000 native paths were absent: production had retained newer
+steps, and the archived native copy had been cleaned up. The read-only
+[inventory job](https://beaker.org/ex/01M26Y0F5XD5RPVFP28V52YX3K) found native
+steps 72000–80500 and an HF export directory for step75500. The conversion trial
+therefore uses the matched step75500 pair, without modifying either source:
 
-- Native: `/weka/olmo-3p5-checkpoints/production-hero-small/olmo35-small-hero-20260907/olmo35-small-hero-20260907-non-emo/step38000`
-- HF reference: `/weka/olmo-3p5-checkpoints/scratch/hero-hf-20260909/non-emo/step38000/hf`
+- Native: `/weka/olmo-3p5-checkpoints/production-hero-small/olmo35-small-hero-20260907/olmo35-small-hero-20260907-non-emo/step75500`
+- HF reference: `/weka/olmo-3p5-checkpoints/scratch/hero-hf-20260909/non-emo/step75500/hf`
 
 `scripts/miles/validate_hero_conversion.py` performs two exhaustive checks:
 
@@ -80,5 +84,49 @@ need their own qualification. EMO is outside this first non-EMO target.
 The existing SFT run is a separate experiment:
 [100-update GSM8K trial](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2),
 [W&B](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/un6so0cr).
-Its initial held-out score was 97/128, and the 20-update score was 101/128.
+Its held-out scores so far are 97/128 initially, 101/128 after 20 updates, and
+94/128 after 40. These fluctuate; they do not yet establish a learning improvement.
 Those measurements concern the older SFT architecture and do not qualify hero.
+
+
+## Standard Olmo 3 trainer
+
+`open_instruct/miles/models.py` is the shared actor-facing façade. The specialized
+OLMoDDP factory, optimizer, HF import/export, native checkpoint methods and router
+replay live in `moe_models.py`. Dense Olmo 3 uses `standard_models.py`, Core's
+`TransformerTrainModule`, AdamW and the standard FSDP path where applicable.
+Disabled replay does not load a backend; dense configurations reject replay and
+expert parallelism before allocating model weights.
+
+Actual tiny Olmo 3 full/sliding models pass HF logit checks and exact weight
+roundtrips. Both also pass a real MILES loss/update and exact next-update restore
+check on a local GPU, alongside Qwen3, KDA and latent KDA. The checks found and
+fixed a duplicated sliding-window decrement on this newer Core lineage. Full
+size dense Olmo 3 serving/training remains a separate qualification target.
+
+## Current local evidence
+
+- Core port: 33 focused factory/conversion/replay/objective/attention tests.
+- Existing integration: 91 CPU contracts on hero Core before the backend split.
+- Backend split: 27 conversion/factory checks and five GPU update/resume cases.
+- Replay isolation: 17 focused cases, including distributed malformed-input checks.
+- Conversion gate: 24 cases including shard-index mismatch, competing native/master
+  copies, actual flattened-master checkpoint reads, and multiple geometries.
+- SGLang: 85 tests plus tiny hybrid TP1 generation. All eight greedy tokens matched
+  HF; maximum conditional logprob error 0.02998. Chunked prefill and decode graphs
+  passed. Separate live gain/scale buckets changed outputs, then matched a fresh
+  changed-checkpoint engine with identical tokens and zero logprob difference.
+
+These are scoped results, not full hero RL acceptance. The pinned runtime lock
+records the exact Core and SGLang source revisions and patch checksums. SGLang's
+runtime patch covers `src`, `tools` and `docs`, because the compiled base image
+omits original test files; the full regression suite is retained in its local
+source commit.
+
+The optional three-way tiny check also exercises Core's native factory, imported
+weights and forced-prefix logits. With aligned tiny expert widths it passed:
+Core max/mean logprob error 0.03333/0.00358; SGLang max error 0.04115; all eight
+HF greedy tokens agreed in both serving modes. This explicitly uses semantic
+reference attention/KDA execution, not the production optimized training kernels.
+The full-checkpoint serving launcher enables the same comparison with a preset
+0.1 maximum absolute logprob error gate and records actual errors.
