@@ -115,7 +115,9 @@ def configuration(
     )
 
 
-def effective_settings(args, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, save_interval=None):
+def effective_settings(
+    args, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, save_interval=None, chunked_prefill_size=None
+):
     """Record actual parser defaults too, so implicit differences are visible."""
     expected = {
         "num_rollout": updates,
@@ -144,6 +146,14 @@ def effective_settings(args, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, sa
         "adam_eps": 1e-8,
         "clip_grad": 1.0,
         "save_interval": save_interval,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_max_total_tokens": 32768,
+        "sglang_chunked_prefill_size": chunked_prefill_size,
+        "sglang_max_running_requests": 4,
+        "sglang_max_mamba_cache_size": 8,
+        "sglang_disable_radix_cache": True,
+        "sglang_context_length": 6144,
+        "sglang_cuda_graph_max_bs_decode": 4,
     }
     actual = {name: getattr(args, name) for name in expected}
     differences = {name: (expected[name], actual[name]) for name in expected if expected[name] != actual[name]}
@@ -197,7 +207,13 @@ def run(
     )
     sys.argv = ["gsm8k-parity-core", *config.arguments()]
     args = arguments.parse_args()
-    effective = effective_settings(args, updates=updates, eval_interval=eval_interval, save_interval=save_interval)
+    effective = effective_settings(
+        args,
+        updates=updates,
+        eval_interval=eval_interval,
+        save_interval=save_interval,
+        chunked_prefill_size=chunked_prefill_size,
+    )
     if validate_only:
         print("GSM8K_PARITY_CONFIG_VALIDATED", json.dumps(effective), flush=True)
         return
