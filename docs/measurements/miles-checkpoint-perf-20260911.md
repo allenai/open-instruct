@@ -58,3 +58,23 @@ This avoids comparing two independently initialized/autotuned training trajector
 Acceptance requires exact correctness plus max rank save time <= 340 seconds on the full SFT
 model. Synthetic responses isolate the checkpoint contract; serving and GSM8K learning are
 outside this experiment. No candidate is promoted based only on the toy test.
+
+
+## Follow-up qualification
+
+The first Beaker attempt, `01M28SJFTT0H8K9WX3N270DE83` (image
+`01M28SJ1XWPY6HZJSZEA2WBBQ1`), passed GPU attention preflight and seven existing Core tests,
+but its two EP1-to-EP2 fixtures selected `rowwise_nvshmem`, whose optional extension is absent
+from this MILES image. Those cases failed before the EP2 restore, so no full-model saves ran.
+The checkpoint fixture now explicitly selects `sync_1d`, the MILES adapter's EP path; the
+rounded-gradient fixture's default remains unchanged.
+
+A separate opt-in `constant_memory_planning` candidate computes contiguous chunk metadata
+arithmetically. It falls back to PyTorch for strided, partial, symbolic or custom local tensors.
+Metadata matches PyTorch over more than 1,000 uneven/empty/repeated-shard layouts. The expanded
+CPU save/reshard suite passed 18 tests (six multi-GPU skips). A real toy CUDA MoE run also passed
+exact save/export/resume, including optimizer rolling histories, using this planner.
+
+Follow-up modes are baseline, balanced/compact, constant-memory metadata, and that same metadata
+mode with two writer processes. Each retains an independent checkpoint and two HF exports;
+full-model storage is approximately 300 GB per mode. None changes the production defaults.

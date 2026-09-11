@@ -11,7 +11,8 @@ from scripts.miles import launch_checkpoint_benchmark as launcher
 def reports():
     snapshot = {
         "model": {"weight": {"sha256": "model"}},
-        "optimizer": {"weight.main": {"sha256": "master"}},
+        "optimizer": {f"weight.{suffix}": {"sha256": "before"} for suffix in ("main", "exp_avg", "exp_avg_sq")},
+        "optimizer_history": {"losses": [], "grad_norms": [{"sha256": "norm"}]},
         "scheduler": {"step": 2},
         "clock": {"step": 2},
         "trainer_global_step": 2,
@@ -38,18 +39,26 @@ def reports():
         "pid": 2,
         "snapshots": {key: copy.deepcopy(snapshot) for key in ("restored2", "step4")},
     }
+    for report in (saved, resumed):
+        for value in report["snapshots"]["step4"]["optimizer"].values():
+            value["sha256"] = "after"
     return saved, resumed
 
 
-@pytest.mark.parametrize("changed", [None, "probabilities", "export", "optimizer", "rng", "source"])
+@pytest.mark.parametrize(
+    "changed", [None, "probabilities", "export", "optimizer", "optimizer_history", "rng", "source", "no_update"]
+)
 def test_audit_rejects_divergence_and_separates_speed(tmp_path, changed):
     saved, resumed = reports()
     if changed == "probabilities":
         resumed["score_hashes"]["4"] = ["different"]
     elif changed == "export":
         resumed["exports"]["boundary"]["weight"] = "different"
-    elif changed in ("optimizer", "rng"):
+    elif changed in ("optimizer", "optimizer_history", "rng"):
         resumed["snapshots"]["step4"][changed] = {}
+    elif changed == "no_update":
+        for report in (saved, resumed):
+            report["snapshots"]["step4"]["optimizer"] = copy.deepcopy(saved["snapshots"]["step2"]["optimizer"])
     elif changed == "source":
         resumed["harness_sha256"] = "different"
     for phase, report in (("split", saved), ("resumed", resumed)):

@@ -1,3 +1,101 @@
+diff --git a/src/olmo_core/distributed/checkpoint/contiguous_planner.py b/src/olmo_core/distributed/checkpoint/contiguous_planner.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c04efc850e27217fd2affbdebe728b1325a6a3f7
+--- /dev/null
++++ b/src/olmo_core/distributed/checkpoint/contiguous_planner.py
+@@ -0,0 +1,92 @@
++"""Constant-memory metadata for ordinary contiguous DTensor shards.
++
++Some PyTorch versions materialize an index vector per shard to find its first offset.
++These helpers avoid that allocation for concrete Shard/Replicate layouts only; all other
++layouts retain the default planner. No tensor data or global PyTorch state is changed.
++"""
++
++from typing import Any, Dict, Optional, Sequence, Tuple
++
++import torch
++from torch.distributed.checkpoint.default_planner import create_default_local_save_plan
++from torch.distributed.checkpoint.metadata import (
++    ChunkStorageMetadata,
++    MetadataIndex,
++    TensorProperties,
++)
++from torch.distributed.checkpoint.planner import (
++    SavePlan,
++    TensorWriteData,
++    WriteItem,
++    WriteItemType,
++)
++from torch.distributed.tensor import DTensor, Replicate, Shard
++from torch.distributed.tensor.placement_types import Placement
++
++
++def contiguous_shard_metadata(
++    shape: Sequence[int],
++    mesh_shape: Sequence[int],
++    coordinate: Sequence[int],
++    placements: Sequence[Placement],
++) -> Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]]:
++    """Return exact chunk sizes/offsets, or ``None`` for unsupported/symbolic layouts."""
++    if (
++        len(mesh_shape) != len(coordinate)
++        or len(mesh_shape) != len(placements)
++        or any(type(p) not in (Shard, Replicate) for p in placements)
++        or any(type(n) is not int or n < 0 for n in shape)
++        or any(type(n) is not int or n <= 0 for n in mesh_shape)
++        or any(type(c) is not int or not 0 <= c < n for c, n in zip(coordinate, mesh_shape))
++    ):
++        return None
++    sizes, offsets = list(shape), [0] * len(shape)
++    for chunks, rank, placement in zip(mesh_shape, coordinate, placements):
++        if type(placement) is Replicate:
++            continue
++        assert isinstance(placement, Shard)
++        dim = placement.dim
++        if type(dim) is not int or not 0 <= dim < len(shape):
++            return None
++        width = (sizes[dim] + chunks - 1) // chunks
++        offset = min(rank * width, sizes[dim])
++        sizes[dim] = min(width, sizes[dim] - offset)
++        # PyTorch uses the global dimension size as the offset for an empty shard,
++        # including when sharding the same dimension again on a second mesh axis.
++        offsets[dim] = offsets[dim] + offset if sizes[dim] else shape[dim]
++    return tuple(sizes), tuple(offsets)
++
++
++def create_contiguous_local_save_plan(state_dict: Dict[str, Any], is_coordinator: bool) -> SavePlan:
++    """Create an ordinary DCP plan, using bounded metadata arithmetic where applicable."""
++    items = []
++    for name, value in state_dict.items():
++        if isinstance(value, DTensor):
++            coordinate = value.device_mesh.get_coordinate()
++            if coordinate is None:
++                continue
++            metadata = contiguous_shard_metadata(
++                value.shape, value.device_mesh.shape, coordinate, value.placements
++            )
++            local = value.to_local()
++            # Nested/custom local tensors may define their own DCP metadata hooks.
++            if metadata is not None and type(local) is torch.Tensor:
++                sizes, offsets = map(torch.Size, metadata)
++                if sizes != local.size():
++                    raise ValueError(
++                        f"Checkpoint shard shape mismatch for {name}: {sizes} != {local.size()}"
++                    )
++                items.append(
++                    WriteItem(
++                        index=MetadataIndex(name, offsets),
++                        type=WriteItemType.SHARD,
++                        tensor_data=TensorWriteData(
++                            chunk=ChunkStorageMetadata(offsets=offsets, sizes=sizes),
++                            properties=TensorProperties.create_from_tensor(local),
++                            size=value.size(),
++                        ),
++                    )
++                )
++                continue
++        items.extend(create_default_local_save_plan({name: value}, is_coordinator).items)
++    return SavePlan(items)
 diff --git a/src/olmo_core/distributed/checkpoint/filesystem.py b/src/olmo_core/distributed/checkpoint/filesystem.py
 index 570f845f9e520dfd58fe385abbf8039c58b5b452..34e19df1001fd11135d4d69c6baaedb73b4e9f72 100644
 --- a/src/olmo_core/distributed/checkpoint/filesystem.py
@@ -1641,16 +1739,25 @@ index ca243909ce65f5fcfdcf0d2c33d48e366291b006..620e7f44ea1c47435851bbebb159aab6
                  if torch.is_grad_enabled():
                      self._recompute_cache = expert_indices.detach()  # save for recompute
 diff --git a/src/olmo_core/train/train_module/transformer/ddp_train_module.py b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421188f3c4a 100644
+index a855836be5a9c92ca67136acf6125861503f108d..c106f6b5687e8355967ce92533c63269b11ba376 100644
 --- a/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 +++ b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
  import contextlib
++import dataclasses
 +import json
  import logging
  import math
  import os
-@@ -88,6 +89,7 @@ from .config import (
+@@ -46,6 +48,7 @@ from olmo_core.distributed.checkpoint import (
+     RemoteFileSystemReader,
+     RemoteFileSystemWriter,
+     _prepare_env_for_save,
++    contiguous_planner,
+ )
+ from olmo_core.distributed.parallel import (
+     DataParallelType,
+@@ -88,6 +91,7 @@ from .config import (
      TransformerPipelineParallelConfig,
      TransformerTensorParallelConfig,
  )
@@ -1658,20 +1765,31 @@ index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421
  
  log = logging.getLogger(__name__)
  
-@@ -106,7 +108,23 @@ def cpu_mesh_like(gpu_mesh: DeviceMesh) -> DeviceMesh:
+@@ -106,7 +110,34 @@ def cpu_mesh_like(gpu_mesh: DeviceMesh) -> DeviceMesh:
  
  
  class FlatSavePlanner(DefaultSavePlanner):
 -    pass
 +    """Default planner with separately observable metadata planning cost."""
 +
-+    def __init__(self, **kwargs):
++    def __init__(self, *, constant_memory_planning=False, **kwargs):
 +        super().__init__(**kwargs)
++        if constant_memory_planning and self._enable_plan_caching:
++            raise ValueError("Constant-memory planner does not support plan caching")
++        self.constant_memory_planning = constant_memory_planning
 +        self.timings: Dict[str, float] = {}
 +
 +    def create_local_plan(self):
 +        start = time.perf_counter()
-+        result = super().create_local_plan()
++        if self.constant_memory_planning:
++            result = contiguous_planner.create_contiguous_local_save_plan(
++                self.state_dict, self.is_coordinator
++            )
++            if self.flatten_state_dict:
++                result = dataclasses.replace(result, planner_data=self.mappings)
++            self.plan = result
++        else:
++            result = super().create_local_plan()
 +        self.timings["local_plan_seconds"] = time.perf_counter() - start
 +        return result
 +
@@ -1683,7 +1801,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421
  
  
  class OLMoDDPTrainModule(TrainModule):
-@@ -1122,52 +1140,71 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -1122,52 +1153,77 @@ class OLMoDDPTrainModule(TrainModule):
          process_group: Optional[dist.ProcessGroup] = None,
          save_overwrite: bool = False,
          thread_count: Optional[int] = None,
@@ -1705,12 +1823,15 @@ index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421
 -        # assert main_param_sz == model_param_sz, f"Main param size {main_param_sz} != model param size {model_param_sz}"
 +        compact_storage: bool = False,
 +        dedup_save_to_lowest_rank: bool = True,
++        constant_memory_planning: bool = False,
 +        profile: bool = False,
 +    ) -> Dict[str, float]:
 +        """Save native optimizer/model state and restore the live optimizer's storage.
 +
 +        Defaults preserve the existing writer policy. ``compact_storage`` skips copies only
 +        for compact CPU storage; ``process_count`` selects the writer's existing spawn pool.
++        ``constant_memory_planning`` computes metadata for ordinary contiguous shards
++        arithmetically, with the default planner as fallback for other layouts.
 +        ``profile`` logs per-rank phases and summed worker time separately from wall time.
 +        Returned durations are seconds; writer byte and item counts are also included.
 +        """
@@ -1760,7 +1881,10 @@ index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421
 -        torch.cuda.empty_cache()
 -
 -        return
-+        planner = FlatSavePlanner(dedup_save_to_lowest_rank=dedup_save_to_lowest_rank)
++        planner = FlatSavePlanner(
++            dedup_save_to_lowest_rank=dedup_save_to_lowest_rank,
++            constant_memory_planning=constant_memory_planning,
++        )
 +        timings["prepare_seconds"] = timestamp() - start
 +        phase_start = timestamp()
 +        state_dict = optim.state_dict()
@@ -1795,7 +1919,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421
  
      def load_state_dict_direct(
          self,
-@@ -1282,7 +1319,10 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -1282,7 +1338,10 @@ class OLMoDDPTrainModule(TrainModule):
                              sd_to_load.pop(key)
  
              if not loaded_model_directly:
@@ -1807,7 +1931,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421
  
                  expansions = {}
                  if self.expand_shared_qk_norm_on_load:
-@@ -1520,6 +1560,10 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -1520,6 +1579,10 @@ class OLMoDDPTrainModule(TrainModule):
                  flush=True,
              )
  
@@ -1818,7 +1942,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421
      @nvtx.annotate("train_batch")
      def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
          self._require_optimizer()
-@@ -2271,12 +2315,12 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -2271,12 +2334,12 @@ class OLMoDDPTrainModule(TrainModule):
              "labels": None if labels is None else self._debug_tensor_payload(labels),
              "loss": self._debug_tensor_payload(lm_output.loss),
              "ce_loss": self._debug_tensor_payload(lm_output.ce_loss),
@@ -1914,11 +2038,68 @@ index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa974
      def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
          # Set model to train mode if it isn't already.
          self._set_model_mode("train")
+diff --git a/src/test/distributed/checkpoint/contiguous_planner_test.py b/src/test/distributed/checkpoint/contiguous_planner_test.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..93fa054745f9ebc9d7427c83b3cdced92a1968b1
+--- /dev/null
++++ b/src/test/distributed/checkpoint/contiguous_planner_test.py
+@@ -0,0 +1,51 @@
++"""Metadata parity includes uneven, empty and repeatedly sharded dimensions."""
++
++import itertools
++import random
++
++import pytest
++import torch
++from torch.distributed.tensor import Partial, Replicate, Shard
++from torch.distributed.tensor._utils import _compute_local_shape_and_global_offset
++from torch.distributed.tensor.placement_types import _StridedShard
++
++from olmo_core.distributed.checkpoint.contiguous_planner import (
++    contiguous_shard_metadata,
++)
++
++
++def test_metadata_matches_pytorch_for_contiguous_layouts():
++    rng = random.Random(17)
++    cases = 0
++    for shape in ((0,), (1,), (7,), (16,), (0, 7), (7, 0), (11, 9), (7, 5, 3)):
++        for mesh_shape in ((1,), (2,), (4,), (2, 2), (2, 3), (2, 2, 2)):
++            choices = [Replicate(), *(Shard(dim) for dim in range(len(shape)))]
++            for _ in range(8):
++                placements = tuple(rng.choice(choices) for _ in mesh_shape)
++                for coordinate in itertools.product(*(range(n) for n in mesh_shape)):
++                    expected = _compute_local_shape_and_global_offset(
++                        shape, mesh_shape, coordinate, placements
++                    )
++                    assert (
++                        contiguous_shard_metadata(shape, mesh_shape, coordinate, placements)
++                        == expected
++                    )
++                    cases += 1
++    assert cases >= 1000
++
++
++@pytest.mark.parametrize("placement", [Partial(), _StridedShard(0, split_factor=2), Shard(-1)])
++def test_unsupported_placements_fall_back(placement):
++    assert contiguous_shard_metadata((8,), (2,), (0,), (placement,)) is None
++
++
++def test_large_metadata_does_not_allocate_tensor_indices(monkeypatch):
++    def forbid(*args, **kwargs):
++        raise AssertionError("Metadata calculation allocated an index tensor")
++
++    monkeypatch.setattr(torch, "arange", forbid)
++    monkeypatch.setattr(torch, "tensor", forbid)
++    assert contiguous_shard_metadata((10**12,), (8, 4), (7, 3), (Shard(0), Shard(0))) == (
++        (31_250_000_000,),
++        (968_750_000_000,),
++    )
 diff --git a/src/test/distributed/checkpoint/filesystem_test.py b/src/test/distributed/checkpoint/filesystem_test.py
-index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..841c2eb4cc6cadaa4b89fb5241677f158bb0a5fd 100644
+index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..ef1855358c44c7b9ee1ebdd443a7f0d336339daa 100644
 --- a/src/test/distributed/checkpoint/filesystem_test.py
 +++ b/src/test/distributed/checkpoint/filesystem_test.py
-@@ -1,12 +1,20 @@
+@@ -1,20 +1,35 @@
 +import io
 +
  import pytest
@@ -1940,7 +2121,8 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..841c2eb4cc6cadaa4b89fb5241677f15
  )
  from olmo_core.io import dir_is_empty
  from olmo_core.testing import BACKENDS, run_distributed_test
-@@ -14,7 +22,12 @@ from olmo_core.utils import get_default_device
++from olmo_core.train.train_module.transformer.ddp_train_module import FlatSavePlanner
+ from olmo_core.utils import get_default_device
  
  
  def run_save_and_load_with_dtensors(
@@ -1951,10 +2133,11 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..841c2eb4cc6cadaa4b89fb5241677f15
 +    throttle: bool = False,
 +    compact_storage: bool = False,
 +    balanced: bool = False,
++    constant_memory: bool = False,
  ):
      mesh = init_device_mesh(get_default_device().type, (dist.get_world_size(),))
  
-@@ -28,23 +41,32 @@ def run_save_and_load_with_dtensors(
+@@ -28,23 +43,34 @@ def run_save_and_load_with_dtensors(
      x = distribute_tensor(x_full, mesh, [Shard(dim=0)])
      y = distribute_tensor(y_full, mesh, [Shard(dim=0)])
  
@@ -1973,8 +2156,10 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..841c2eb4cc6cadaa4b89fb5241677f15
              throttle_uploads=throttle,
 +            compact_storage=compact_storage,
 +            profile=True,
++        ),
++        planner=FlatSavePlanner(
++            dedup_save_to_lowest_rank=not balanced, constant_memory_planning=constant_memory
          ),
-+        planner=distcp.DefaultSavePlanner(dedup_save_to_lowest_rank=not balanced),
      )
  
      # Now create new sharded copies with a different sharding strategy and load the checkpoint.
@@ -1989,7 +2174,7 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..841c2eb4cc6cadaa4b89fb5241677f15
          checkpoint_id=dir,
          storage_reader=RemoteFileSystemReader(dir, thread_count=thread_count),
      )
-@@ -53,7 +75,8 @@ def run_save_and_load_with_dtensors(
+@@ -53,7 +79,8 @@ def run_save_and_load_with_dtensors(
      x_full_loaded = x_loaded.full_tensor()
      y_full_loaded = y_loaded.full_tensor()
      torch.testing.assert_close(x_full, x_full_loaded)
@@ -1999,24 +2184,35 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..841c2eb4cc6cadaa4b89fb5241677f15
  
  
  @pytest.mark.parametrize("backend", BACKENDS)
-@@ -61,11 +84,14 @@ def run_save_and_load_with_dtensors(
+@@ -61,11 +88,25 @@ def run_save_and_load_with_dtensors(
      "thread_count, process_count",
      [pytest.param(2, None, id="threads"), pytest.param(None, 2, id="processes")],
  )
 -def test_save_and_load_locally_with_dtensors(backend, tmp_path, thread_count, process_count):
-+@pytest.mark.parametrize("compact_storage, balanced", [(False, False), (True, True)])
++@pytest.mark.parametrize(
++    "compact_storage, balanced, constant_memory",
++    [(False, False, False), (True, True, False), (True, True, True)],
++)
 +def test_save_and_load_locally_with_dtensors(
-+    backend, tmp_path, thread_count, process_count, compact_storage, balanced
++    backend, tmp_path, thread_count, process_count, compact_storage, balanced, constant_memory
 +):
      run_distributed_test(
          run_save_and_load_with_dtensors,
          backend=backend,
 -        func_args=(tmp_path, thread_count, process_count),
-+        func_args=(tmp_path, thread_count, process_count, False, compact_storage, balanced),
++        func_args=(
++            tmp_path,
++            thread_count,
++            process_count,
++            False,
++            compact_storage,
++            balanced,
++            constant_memory,
++        ),
          start_method="spawn",
      )
  
-@@ -112,3 +138,32 @@ def test_save_and_load_remotely_to_gcs_with_dtensors(
+@@ -112,3 +153,32 @@ def test_save_and_load_remotely_to_gcs_with_dtensors(
          func_args=(gcs_checkpoint_dir, thread_count, process_count, throttle),
          start_method="spawn",  # NOTE: forking causes a crash with boto3
      )
@@ -2195,10 +2391,18 @@ index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a6
 +    (reference[:, :8] * F.silu(reference[:, 8:])).sum().backward()
 +    torch.testing.assert_close(x.grad, reference.grad, rtol=0, atol=0)
 diff --git a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
-index b98ed4185e41e9157f82bffad82522aeb00a1e95..d35c10fad7be71053661e7698425556d2bd3d9ca 100644
+index b98ed4185e41e9157f82bffad82522aeb00a1e95..04616adb4685818d55efe3415cdb86b5b94e6b0a 100644
 --- a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
 +++ b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
-@@ -20,7 +20,7 @@ from olmo_core.train.train_module.transformer import (
+@@ -11,6 +11,7 @@ from torch.distributed.tensor import Shard
+ 
+ from olmo_core.config import DType
+ from olmo_core.distributed.parallel import DataParallelType
++from olmo_core.nn.moe.v2.ep_config import ExpertParallelPath
+ from olmo_core.optim import OLMoDDPOptimizerConfig
+ from olmo_core.testing import run_distributed_test
+ from olmo_core.train.train_module import OLMoDDPTrainModuleConfig
+@@ -20,7 +21,7 @@ from olmo_core.train.train_module.transformer import (
  )
  
  
@@ -2207,7 +2411,17 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..d35c10fad7be71053661e7698425556d
      rank = dist.get_rank()
      torch.cuda.set_device(rank)
      for key in (
-@@ -69,7 +69,7 @@ def _run_reshard(save_root, ep_degree):
+@@ -52,7 +53,8 @@ def _run_reshard(save_root, ep_degree):
+             ),
+         )
+         return config.build(
+-            _build_model(512, 512, num_experts=16), device=torch.device("cuda", rank)
++            _build_model(512, 512, num_experts=16, ep_path=ExpertParallelPath.sync_1d),
++            device=torch.device("cuda", rank),
+         )
+ 
+     original = build(1)
+@@ -69,14 +71,14 @@ def _run_reshard(save_root, ep_degree):
              state.to_local().fill_(value)
              expected[name] = state.full_tensor().cpu()
      original.optim._copy_main_params_to_model_params()
@@ -2216,7 +2430,16 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..d35c10fad7be71053661e7698425556d
      for name, state in original.optim.states.items():
          torch.testing.assert_close(
              state.full_tensor().cpu(), expected[name], rtol=0, atol=0, msg=name
-@@ -107,7 +107,7 @@ def _run_reshard(save_root, ep_degree):
+         )
+ 
+-    # NVSHMEM has one bootstrap group per process. Each target EP degree is
+-    # parametrized into a fresh distributed process set, as in real launches.
++    # Each target EP degree is parametrized into a fresh distributed process set.
++    # The checkpoint layout is independent of the EP communication kernel.
+     for ep in (ep_degree,):
+         tm = build(ep)
+         tm.load_state_dict_direct(
+@@ -107,7 +109,7 @@ def _run_reshard(save_root, ep_degree):
  
          # The direct synchronous save temporarily changes EP checkpoint views and
          # then reloads live optimizer state. Check that all local shards survive.
@@ -2225,15 +2448,23 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..d35c10fad7be71053661e7698425556d
          tm.zero_grads()
          for name, state in tm.optim.states.items():
              torch.testing.assert_close(
-@@ -122,14 +122,19 @@ def _run_reshard(save_root, ep_degree):
+@@ -122,14 +124,27 @@ def _run_reshard(save_root, ep_degree):
  
  @pytest.mark.gpu
  @pytest.mark.parametrize("ep_degree", [2, 4, 8])
 -def test_ep1_checkpoint_reshards_and_preserves_live_states(tmp_path, ep_degree):
 +@pytest.mark.parametrize(
 +    "save_options",
-+    [{}, {"compact_storage": True, "dedup_save_to_lowest_rank": False}],
-+    ids=["legacy", "balanced-compact"],
++    [
++        {},
++        {"compact_storage": True, "dedup_save_to_lowest_rank": False},
++        {
++            "compact_storage": True,
++            "dedup_save_to_lowest_rank": False,
++            "constant_memory_planning": True,
++        },
++    ],
++    ids=["legacy", "balanced-compact", "constant-memory"],
 +)
 +def test_ep1_checkpoint_reshards_and_preserves_live_states(tmp_path, ep_degree, save_options):
      """Use node-local temporary checkpoints; never touch Weka or user checkpoints."""
@@ -2548,6 +2779,41 @@ index 0000000000000000000000000000000000000000..66c66c41e4d67c1e6378d40419aacfb2
 +    )
 +    assert reverse.sliding_window == 4
 +    assert reverse.layer_types == hf.layer_types
+diff --git a/src/test/nn/moe/v2/rounded_wgrad_ep_test.py b/src/test/nn/moe/v2/rounded_wgrad_ep_test.py
+index 21818dec0263c3c9e67c42b8195a7b031565d8ab..914e0471f16e204a13380a124e9c1b4a22f0587b 100644
+--- a/src/test/nn/moe/v2/rounded_wgrad_ep_test.py
++++ b/src/test/nn/moe/v2/rounded_wgrad_ep_test.py
+@@ -18,7 +18,11 @@ from olmo_core.nn.moe.emo import EmoRouterConfig
+ from olmo_core.nn.moe.v2.ep_config import ExpertParallelConfig, ExpertParallelPath
+ from olmo_core.nn.moe.v2.routed_experts import RoutedExpertsConfig
+ from olmo_core.nn.moe.v2.router import MoERouterConfigV2
+-from olmo_core.nn.transformer import OLMoDDPModelConfig, TransformerBlockType, TransformerType
++from olmo_core.nn.transformer import (
++    OLMoDDPModelConfig,
++    TransformerBlockType,
++    TransformerType,
++)
+ from olmo_core.optim import OLMoDDPOptimizerConfig
+ from olmo_core.testing import run_distributed_test
+ from olmo_core.train.train_module import OLMoDDPTrainModuleConfig
+@@ -28,7 +32,7 @@ from olmo_core.train.train_module.transformer import (
+ )
+ 
+ 
+-def _build_model(width, hidden, num_experts=512):
++def _build_model(width, hidden, num_experts=512, ep_path=ExpertParallelPath.rowwise_nvshmem):
+     norm = LayerNormConfig(name=LayerNormType.rms, bias=False, dtype=DType.float32)
+     return OLMoDDPModelConfig(
+         init_seed=12536,
+@@ -70,7 +74,7 @@ def _build_model(width, hidden, num_experts=512):
+                 ),
+             ),
+             ep=ExpertParallelConfig(
+-                path=ExpertParallelPath.rowwise_nvshmem,
++                path=ep_path,
+                 # Dropless correctness fixture; production timing retains1.25.
+                 capacity_factor=8.0,
+                 share_dispatch_out=False,
 diff --git a/src/test/train/train_module/custom_objective_test.py b/src/test/train/train_module/custom_objective_test.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..12a462001099b6d420d24a9c4e9cb3920260794a

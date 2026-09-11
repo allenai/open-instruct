@@ -47,7 +47,10 @@ if compgen -G "$RUN_ROOT/failed-*" > /dev/null; then exit 1; fi
 
 
 def specification(image, hf=HF, modes=("baseline", "balanced")):
-    if not modes or any(mode not in ("baseline", "compact", "balanced", "processes") for mode in modes):
+    if not modes or any(
+        mode not in ("baseline", "compact", "balanced", "metadata", "processes", "metadata_processes")
+        for mode in modes
+    ):
         raise ValueError("Unknown or empty checkpoint measurement modes")
     command = COMMAND.replace("__HF__", shlex.quote(hf)).replace("__MODES__", " ".join(map(shlex.quote, modes)))
     return {

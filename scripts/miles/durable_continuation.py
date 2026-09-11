@@ -90,6 +90,10 @@ def capture(worker, source):
     return {
         "model": model,
         "optimizer": optim,
+        "optimizer_history": {
+            "losses": [tensor_record(value) for value in worker.optimizer._losses],
+            "grad_norms": [tensor_record(value) for value in worker.optimizer._grad_norms],
+        },
         "scheduler": worker.lr_scheduler.state_dict(),
         "clock": worker.clock.as_dict(),
         "trainer_global_step": worker.train_module._trainer.global_step,
@@ -110,8 +114,8 @@ def compare_states(expected, actual):
         if set(left) != set(right):
             failures.append(f"{category}: state keys differ")
         failures.extend(f"{category}/{name}" for name in left.keys() & right.keys() if left[name] != right[name])
-    for category in ("scheduler", "clock", "trainer_global_step", "cursor", "rng"):
-        if expected[category] != actual[category]:
+    for category in ("scheduler", "clock", "trainer_global_step", "cursor", "rng", "optimizer_history"):
+        if expected.get(category) != actual.get(category):
             failures.append(category)
     return failures
 

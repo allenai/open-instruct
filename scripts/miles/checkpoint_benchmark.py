@@ -12,6 +12,12 @@ MODES = {
     "baseline": {"profile": True},
     "compact": {"profile": True, "compact_storage": True},
     "balanced": {"profile": True, "compact_storage": True, "dedup_save_to_lowest_rank": False},
+    "metadata": {
+        "profile": True,
+        "compact_storage": True,
+        "dedup_save_to_lowest_rank": False,
+        "constant_memory_planning": True,
+    },
     "processes": {
         "profile": True,
         "compact_storage": True,
@@ -20,6 +26,8 @@ MODES = {
         "thread_count": 2,
     },
 }
+
+MODES["metadata_processes"] = {**MODES["metadata"], "process_count": 2, "thread_count": 2}
 
 
 def audit(root, world):
@@ -38,6 +46,14 @@ def audit(root, world):
             (saved["snapshots"]["step4"], resumed["snapshots"]["step4"]),
         ):
             failures.extend(f"rank{rank}: {item}" for item in continuation.compare_states(left, right))
+        if saved["world"] != world or saved["rank"] != rank:
+            failures.append(f"rank{rank}: unexpected measurement topology")
+        for suffix in (".main", ".exp_avg", ".exp_avg_sq"):
+            first = saved["snapshots"]["step2"]["optimizer"]
+            last = saved["snapshots"]["step4"]["optimizer"]
+            names = [name for name in first if name.endswith(suffix)]
+            if not names or not any(first[name] != last.get(name) for name in names):
+                failures.append(f"rank{rank}: no continuing {suffix} update signal")
         for step in ("3", "4"):
             if not saved["score_hashes"].get(step) or saved["score_hashes"][step] != resumed["score_hashes"].get(step):
                 failures.append(f"rank{rank}: step {step} scoring log-probabilities differ")
