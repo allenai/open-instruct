@@ -1,10 +1,10 @@
 # Frozen100 GSM8K configuration and timing audit
 
-This compares the completed Core100 allocation with the still-running Megatron r3
-allocation. It describes their actual recipes, not a claim that the trainers implement
-identical mathematics. Final learning curves and completed-run timing belong in the
-[campaign ledger](miles-gsm8k-parity-20260910.json); partial Megatron timings below are
-explicitly identified. The new500 campaign is a separate experiment.
+Both100-update allocations exited successfully and passed the paired independent
+rollout/reward audit (`01M279KT4PQNC2HGZ7JVB1TDBJ`). This describes their actual recipes,
+not a claim that the trainers implement identical mathematics. Final learning curves
+and completed-run records are in the [campaign ledger](miles-gsm8k-parity-20260910.json).
+The new500 campaign is a separate experiment.
 
 ## Provenance
 
@@ -126,16 +126,16 @@ fills absent events or compares unequal coverage silently.
 
 | Phase | Defensible evidence / scope | Current observation |
 |---|---|---|
-| Generation | Native `perf/rollout_time`, matched warm indices; includes collection-side work measured by MILES | Core95 warm events mean36.7885s; final Megatron matched coverage pending |
-| Operational cycle | Consecutive native generation-end timestamps, excluding eval crossings | Core90 valid warm cycles mean91.065s, median90.3405s; early Megatron cycles4→5 through18→19 mean73.1585s, median69.782s (15 intervals, partial coverage only) |
+| Generation | Native `perf/rollout_time`, matched warm indices; includes collection-side work measured by MILES | 95 matched warm events: Core mean36.78847s; Megatron39.52733s |
+| Operational cycle | Consecutive native generation-end timestamps, excluding eval crossings | 90 matched warm cycles: Core mean91.06497s; Megatron68.24182s. Generation is included in these cycles, so do not add the generation row |
 | Core ingress/scoring | Same-rollout generation-end timestamp to rank0 score-contract timestamp |95 warm events mean44.32847s, median44.872s; includes dispatch, data conversion, preflight, forward/logprob work and score checks; not a pure model-forward timer |
-| Training | Core optimizer contract starts after scoring; Megatron `actor_train` also excludes its separately timed log-prob pass but has different instrumentation/reductions | Core recorded95-event mean6.1697s; not plotted as an equivalent trainer-speed comparison with Megatron |
-| Publication | Core explicit publication timer / optimizer-log to publication boundary; baseline `update_weights` timer | Core95-event recorded mean3.74132s; boundary mean3.76832s. Baseline final aggregate pending; export/communication/check scopes differ |
+| Training | Core optimizer contract starts after scoring; Megatron `actor_train` also excludes its separately timed log-prob pass but has different instrumentation/reductions | 95 warm events each: Core6.16966s; Megatron17.38376s. Diagnostic scopes differ; not an isolated backend compute-speed ratio |
+| Publication | Core explicit publication timer / optimizer-log to publication boundary; baseline `update_weights` timer | Core publications for completed updates6–100 mean3.74132s; boundary mean3.76832s. Megatron warm update_weights95-event mean5.89236s; export/communication/check scopes differ |
 | Orchestration | Requires explicit boundaries or a profiler | Do not obtain this by subtracting independently averaged generation/training phases |
 | Evaluation | Initial/final held-out generation and scoring logs, separated from warm training cycles | Same128 prompts, but response lengths/caps and therefore duration change with policy |
 | Startup | Beaker scheduled→started→first eval / first update | Megatron r3 cold DCP load consumed approximately22min; startup/checkpoint I/O excluded from warm throughput |
 | Save |100 runs disabled native saves | No save throughput measurement exists for this pair |
-| Allocated time | Beaker scheduled→exited; report started→exited separately | Final Megatron exit pending; multiply each allocated duration by3 GPUs for GPU-hours |
+| Allocated time | Beaker scheduled→exited; report started→exited separately | Core11922.131943s allocated /11845.799765s started→exit; Megatron10844.651858s /10773.821174s. Each allocation used3 GPUs |
 
 The Core score interval is genuinely large in observed wall time. An implicit entropy
 calculation is not its explanation: the actual MILES logprob helper defaults to
@@ -153,6 +153,37 @@ use this kernel. There is no autotuner in this wrapper and its valid-count scala
 on CUDA (loaded in-kernel), so this wrapper does not synchronize that count to the CPU.
 Count JIT misses, actual cache writes and cold-versus-identical-batch repeated timing
 before attributing latency to compilation; the future rounding fix retains this shape key.
+
+## Startup and held-out evaluation boundaries
+
+[Retained boundary evidence](miles-gsm8k-startup-eval-boundaries-20260911.json) includes
+source-log hashes, exact native timestamps and Beaker statuses. Core scheduled→process
+start took76.332s and Megatron70.831s. Process start→initial rank0 publication completion
+was652.715s for Core and1918.807s for Megatron; process start→initial evaluation summary
+was940.485s and2221.632s. These are observed end-to-end startup boundaries, including
+model loading, serving startup and setup. They do not isolate DCP reads or compiler time.
+
+| Completed updates | Core publication→eval summary (s) | Megatron publication→eval summary (s) | Core progress-bar collection elapsed (s) | Megatron progress-bar collection elapsed (s) |
+|---|---:|---:|---:|---:|
+|0 |287.770 |302.825 |267 |280 |
+|20 |269.335 |289.336 |269 |289 |
+|40 |280.570 |298.810 |280 |298 |
+|60 |260.271 |284.238 |260 |283 |
+|80 |230.524 |218.355 |230 |218 |
+|100 |254.025 |197.408 |253 |197 |
+
+The first two columns use direct native rank0 publication-end and held-out-summary
+markers. They include intervening driver/setup/checking, generation, reward processing
+and dump/log work. The last two columns are the printed128/128 progress elapsed,
+rounded down to whole seconds. These are different scopes, not components to subtract
+into a precise orchestration estimate. The initial evaluation also includes setup/check
+work absent from later evaluations. Changing response length and capped outcomes affects
+evaluation time; these durations are not fixed-output-token speed measurements.
+
+Megatron separately records95 warm `log_probs` events with mean4.18246s; the Core
+44.32847s boundary above includes more than scoring. The submitted frozen-image EP2
+profiler measures Core's actual `_score` without ingress and with explicit cache activity.
+No full-model profiler result is yet included here.
 
 ## Longer500 campaign
 

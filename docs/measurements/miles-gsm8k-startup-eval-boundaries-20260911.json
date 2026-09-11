@@ -1,0 +1,129 @@
+{
+  "scope": "Native rank0 publication-end to heldout-summary boundaries; progress elapsed is rounded to whole seconds",
+  "backends": {
+    "core": {
+      "log_sha256": "476287fae362898f55abbbb7be04bfed2a5a6ca297776ffe2a016faf53ab1976",
+      "status": {
+        "created": "2026-09-10T22:15:01.286109Z",
+        "scheduled": "2026-09-10T22:54:36.70958Z",
+        "started": "2026-09-10T22:55:53.041758Z",
+        "exited": "2026-09-11T02:13:18.841523Z",
+        "finalized": "2026-09-11T02:13:20.42292Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-11T02:13:18.783456Z",
+        "ready": "2026-09-10T22:55:52.350834Z"
+      },
+      "scheduled_to_started_seconds": 76.332178,
+      "started_to_initial_publication_seconds": 652.715242,
+      "started_to_initial_eval_summary_seconds": 940.485242,
+      "scheduled_to_exited_seconds": 11922.131943,
+      "started_to_exited_seconds": 11845.799765,
+      "evaluations": [
+        {
+          "completed_updates": 0,
+          "summary_at": "2026-09-10T23:11:33.527000+00:00",
+          "publication_end_at": "2026-09-10T23:06:45.757000+00:00",
+          "publication_to_summary_seconds": 287.77,
+          "progress_collection_elapsed_seconds_rounded": 267
+        },
+        {
+          "completed_updates": 20,
+          "summary_at": "2026-09-10T23:56:05.931000+00:00",
+          "publication_end_at": "2026-09-10T23:51:36.596000+00:00",
+          "publication_to_summary_seconds": 269.335,
+          "progress_collection_elapsed_seconds_rounded": 269
+        },
+        {
+          "completed_updates": 40,
+          "summary_at": "2026-09-11T00:32:30.306000+00:00",
+          "publication_end_at": "2026-09-11T00:27:49.736000+00:00",
+          "publication_to_summary_seconds": 280.57,
+          "progress_collection_elapsed_seconds_rounded": 280
+        },
+        {
+          "completed_updates": 60,
+          "summary_at": "2026-09-11T01:07:40.915000+00:00",
+          "publication_end_at": "2026-09-11T01:03:20.644000+00:00",
+          "publication_to_summary_seconds": 260.271,
+          "progress_collection_elapsed_seconds_rounded": 260
+        },
+        {
+          "completed_updates": 80,
+          "summary_at": "2026-09-11T01:41:46.234000+00:00",
+          "publication_end_at": "2026-09-11T01:37:55.710000+00:00",
+          "publication_to_summary_seconds": 230.524,
+          "progress_collection_elapsed_seconds_rounded": 230
+        },
+        {
+          "completed_updates": 100,
+          "summary_at": "2026-09-11T02:13:03.278000+00:00",
+          "publication_end_at": "2026-09-11T02:08:49.253000+00:00",
+          "publication_to_summary_seconds": 254.025,
+          "progress_collection_elapsed_seconds_rounded": 253
+        }
+      ]
+    },
+    "megatron": {
+      "log_sha256": "7397b73800f15e0e3220dcb6e71f659b3680736b195687a3476d86a367893d96",
+      "status": {
+        "created": "2026-09-11T00:42:53.486425Z",
+        "scheduled": "2026-09-11T00:49:37.064554Z",
+        "started": "2026-09-11T00:50:47.895238Z",
+        "exited": "2026-09-11T03:50:21.716412Z",
+        "finalized": "2026-09-11T03:50:23.817764Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-11T03:50:21.604418Z",
+        "ready": "2026-09-11T00:50:47.165759Z"
+      },
+      "scheduled_to_started_seconds": 70.830684,
+      "started_to_initial_publication_seconds": 1918.806762,
+      "started_to_initial_eval_summary_seconds": 2221.631762,
+      "scheduled_to_exited_seconds": 10844.651858,
+      "started_to_exited_seconds": 10773.821174,
+      "evaluations": [
+        {
+          "completed_updates": 0,
+          "summary_at": "2026-09-11T01:27:49.527000+00:00",
+          "publication_end_at": "2026-09-11T01:22:46.702000+00:00",
+          "publication_to_summary_seconds": 302.825,
+          "progress_collection_elapsed_seconds_rounded": 280
+        },
+        {
+          "completed_updates": 20,
+          "summary_at": "2026-09-11T02:03:31.006000+00:00",
+          "publication_end_at": "2026-09-11T01:58:41.670000+00:00",
+          "publication_to_summary_seconds": 289.336,
+          "progress_collection_elapsed_seconds_rounded": 289
+        },
+        {
+          "completed_updates": 40,
+          "summary_at": "2026-09-11T02:32:37.872000+00:00",
+          "publication_end_at": "2026-09-11T02:27:39.062000+00:00",
+          "publication_to_summary_seconds": 298.81,
+          "progress_collection_elapsed_seconds_rounded": 298
+        },
+        {
+          "completed_updates": 60,
+          "summary_at": "2026-09-11T03:01:09.174000+00:00",
+          "publication_end_at": "2026-09-11T02:56:24.936000+00:00",
+          "publication_to_summary_seconds": 284.238,
+          "progress_collection_elapsed_seconds_rounded": 283
+        },
+        {
+          "completed_updates": 80,
+          "summary_at": "2026-09-11T03:27:36.795000+00:00",
+          "publication_end_at": "2026-09-11T03:23:58.440000+00:00",
+          "publication_to_summary_seconds": 218.355,
+          "progress_collection_elapsed_seconds_rounded": 218
+        },
+        {
+          "completed_updates": 100,
+          "summary_at": "2026-09-11T03:49:58.813000+00:00",
+          "publication_end_at": "2026-09-11T03:46:41.405000+00:00",
+          "publication_to_summary_seconds": 197.408,
+          "progress_collection_elapsed_seconds_rounded": 197
+        }
+      ]
+    }
+  }
+}
