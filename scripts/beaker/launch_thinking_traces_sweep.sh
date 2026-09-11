@@ -172,6 +172,12 @@ cmd=(
     --propagate-failure --no-python
 )
 [ "$NO_AUTO_RESUME" = "1" ] && cmd+=(--no-auto-resume)
+# DCP_SIZE is consumed by run_thinking_traces_sweep_in_job.sh to pass
+# --decode-context-parallel-size. It must be forwarded explicitly: the banner
+# printed it while the env list omitted it, so every --dcp launch silently
+# served plain TP, which for an MLA model replicates the latent KV cache on
+# every rank and caps concurrency at a fraction of the intended value.
+[ -n "$DCP_SIZE" ] && cmd+=(--env "DCP_SIZE=${DCP_SIZE}")
 [ "$WEKA_MOUNT" != "none" ] && cmd+=(--weka "$WEKA_MOUNT")
 [ -n "$HF_TOKEN_SECRET_NAME" ] && cmd+=(--env-secret "HF_TOKEN=${HF_TOKEN_SECRET_NAME}")
 cmd+=(-- bash scripts/beaker/run_thinking_traces_sweep_in_job.sh)
