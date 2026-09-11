@@ -75,6 +75,30 @@ def compare_partition(path, hf, proofs):
     }
 
 
+def check_preparation(root, hf):
+    """Fail before engine startup unless frozen proofs match actual request IDs."""
+    preparation = json.loads((root / "preparation.json").read_text())
+    sources = {
+        "train": ("train.jsonl", preparation["partitions"]["train"]["rows"]),
+        "eval": ("eval.jsonl", preparation["partitions"]["eval"]["rows"]),
+        "offline": ("offline/prompts.jsonl", json.loads((root / "offline/token-proofs.json").read_text())),
+    }
+    report = {"hf_checkpoint": str(hf), "partitions": {}}
+    for name, (path, proofs) in sources.items():
+        partition = compare_partition(root / path, hf, proofs)
+        report["partitions"][name] = {
+            key: partition[key] for key in ("count", "mismatch_counts", "max_prompt_tokens", "pre_tokenizer_types")
+        }
+    report["valid"] = all(
+        part["mismatch_counts"]["checkpoint_json"]
+        == part["mismatch_counts"]["sglang"]
+        == part["mismatch_counts"]["old_proof"]
+        == 0
+        for part in report["partitions"].values()
+    )
+    return report
+
+
 def diagnose(root, output):
     output.mkdir(parents=True, exist_ok=True)
     fixture = output / "fixture"

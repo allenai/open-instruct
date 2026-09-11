@@ -29,6 +29,7 @@ python -m scripts.miles.light_sft_gsm8k validate --root "$RUN_ROOT"
 cp "$RUN_ROOT/preparation.json" /output/
 cp "$RUN_ROOT/historical.json" /output/
 cp "$RUN_ROOT/checkpoint-inventory.json" /output/
+cp "$RUN_ROOT/tokenization-preparation.json" /output/
 """
     elif stage == "tokenization":
         command += 'python -m scripts.miles.light_sft_tokenization "$RUN_ROOT" /output\n'
@@ -39,7 +40,7 @@ cp "$RUN_ROOT/core/audit.json" /output/
     else:
         command += """export WANDB_MODE=online
 copy_reports() {
-  for name in arguments.json effective.json preparation.json completion.json native-0.json native-200.json offline-0.json offline-200.json offline-raw-0.json offline-raw-200.json; do
+  for name in arguments.json effective.json preparation.json tokenization.json completion.json native-0.json native-200.json offline-0.json offline-200.json offline-raw-0.json offline-raw-200.json; do
     if [ -f "$RUN_ROOT/core/$name" ]; then cp "$RUN_ROOT/core/$name" /output/; fi
   done
   if [ -d "$RUN_ROOT/core/metrics" ]; then

@@ -59,15 +59,22 @@ def stage_hf(source, destination, *, timeout_seconds=1200):
 
 
 def prepare_retry(source_root, root, local_hf):
-    light_sft_gsm8k.verify(source_root)
-    root.mkdir()
-    # Preserve every frozen preparation artifact, but never inherit failed outputs.
-    for path in source_root.iterdir():
-        if path.name != "core":
-            (root / path.name).symlink_to(path.resolve(), target_is_directory=path.is_dir())
+    if root.exists():
+        if (root / "core").exists():
+            raise ValueError("Refusing to reuse an existing training attempt")
+        # An explicitly selected new preparation may carry corrected proofs.
+        # Verify it in place; never replace it with a prior attempt's proofs.
+        prepared_source = root
+    else:
+        light_sft_gsm8k.verify(source_root)
+        root.mkdir()
+        for path in source_root.iterdir():
+            if path.name != "core":
+                (root / path.name).symlink_to(path.resolve(), target_is_directory=path.is_dir())
+        prepared_source = source_root
     light_sft_gsm8k.verify(root)
     report = stage_hf(root / "hf", local_hf)
-    report["prepared_source_root"] = str(source_root)
+    report["prepared_source_root"] = str(prepared_source)
     report["retry_root"] = str(root)
     (root / "local-staging.json").write_bytes(json_bytes(report))
     print("LIGHT_SFT_STAGED", json.dumps(report), flush=True)

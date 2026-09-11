@@ -195,8 +195,8 @@ def prepare(root, historical_result):
     source = Path(old["manifest"]["model"]["hf_checkpoint"])
     descriptor = checkpoint_descriptor(root, source)
     write_immutable(root / "checkpoint-inventory.json", json_bytes(descriptor))
-    tokenizer = importlib.import_module("transformers").AutoTokenizer.from_pretrained(
-        root / "hf", trust_remote_code=True
+    tokenizer = importlib.import_module("miles.utils.processing_utils").load_tokenizer(
+        str(root / "hf"), trust_remote_code=True
     )
     if digest(tokenizer.chat_template.encode()) != old["manifest"]["model"]["chat_template_sha256"]:
         raise ValueError("Tokenizer selected a different instruction template")
@@ -425,14 +425,21 @@ def run(root, validate_only=False, local_hf=None):
             raise ValueError("Missing verified local checkpoint staging")
         config.miles["hf_checkpoint"] = str(local_hf)
         config.miles["sglang_log_level"] = "info"
+    tokenization = importlib.import_module("scripts.miles.light_sft_tokenization").check_preparation(
+        root, Path(config.miles["hf_checkpoint"])
+    )
+    if not tokenization["valid"]:
+        raise ValueError(f"Prepared token proofs disagree with runtime: {tokenization}")
     sys.argv = ["light-sft1000-core", *config.arguments()]
     args = importlib.import_module("miles.utils.arguments").parse_args()
     effective = effective_settings(args)
     if validate_only:
+        write_immutable(root / "tokenization-preparation.json", json_bytes(tokenization))
         print("LIGHT_SFT_CONFIG_VALIDATED", json.dumps(effective), flush=True)
         return
     output = root / "core"
     output.mkdir()
+    (output / "tokenization.json").write_bytes(json_bytes(tokenization))
     for name, value in (("arguments", config.arguments()), ("effective", effective), ("preparation", preparation)):
         (output / f"{name}.json").write_bytes(json_bytes(value))
     os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"

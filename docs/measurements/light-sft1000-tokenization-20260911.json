@@ -1,0 +1,110 @@
+{
+  "corrected": {
+    "hf_checkpoint": "/validation/light-sft-tokenization-fixture/hf",
+    "partitions": {
+      "eval": {
+        "count": 128,
+        "max_prompt_tokens": 253,
+        "mismatch_counts": {
+          "bare_transformers": 128,
+          "checkpoint_json": 0,
+          "old_proof": 0,
+          "sglang": 0
+        },
+        "pre_tokenizer_types": {
+          "bare": "ByteLevel",
+          "checkpoint": "Sequence",
+          "runtime": "Sequence"
+        }
+      },
+      "offline": {
+        "count": 1319,
+        "max_prompt_tokens": 189,
+        "mismatch_counts": {
+          "bare_transformers": 1319,
+          "checkpoint_json": 0,
+          "old_proof": 0,
+          "sglang": 0
+        },
+        "pre_tokenizer_types": {
+          "bare": "ByteLevel",
+          "checkpoint": "Sequence",
+          "runtime": "Sequence"
+        }
+      },
+      "train": {
+        "count": 7473,
+        "max_prompt_tokens": 300,
+        "mismatch_counts": {
+          "bare_transformers": 7473,
+          "checkpoint_json": 0,
+          "old_proof": 0,
+          "sglang": 0
+        },
+        "pre_tokenizer_types": {
+          "bare": "ByteLevel",
+          "checkpoint": "Sequence",
+          "runtime": "Sequence"
+        }
+      }
+    },
+    "valid": true
+  },
+  "old": {
+    "hf_checkpoint": "/validation/light-sft-tokenization-fixture/hf",
+    "partitions": {
+      "eval": {
+        "count": 128,
+        "max_prompt_tokens": 253,
+        "mismatch_counts": {
+          "bare_transformers": 128,
+          "checkpoint_json": 0,
+          "old_proof": 128,
+          "sglang": 0
+        },
+        "pre_tokenizer_types": {
+          "bare": "ByteLevel",
+          "checkpoint": "Sequence",
+          "runtime": "Sequence"
+        }
+      },
+      "offline": {
+        "count": 1319,
+        "max_prompt_tokens": 189,
+        "mismatch_counts": {
+          "bare_transformers": 1319,
+          "checkpoint_json": 0,
+          "old_proof": 1319,
+          "sglang": 0
+        },
+        "pre_tokenizer_types": {
+          "bare": "ByteLevel",
+          "checkpoint": "Sequence",
+          "runtime": "Sequence"
+        }
+      },
+      "train": {
+        "count": 7473,
+        "max_prompt_tokens": 300,
+        "mismatch_counts": {
+          "bare_transformers": 7473,
+          "checkpoint_json": 0,
+          "old_proof": 7473,
+          "sglang": 0
+        },
+        "pre_tokenizer_types": {
+          "bare": "ByteLevel",
+          "checkpoint": "Sequence",
+          "runtime": "Sequence"
+        }
+      }
+    },
+    "valid": false
+  },
+  "cpu_experiment": "01M27E93HCV63TXZMDDEMY8Z1F",
+  "cpu_result": "01M27E93HGQ6995SBAGGQ40K7K",
+  "failed_gpu_experiment": "01M27CRJHT06S0BQZRY4BHZE36",
+  "historical_runtime_also_restores_sequence": true,
+  "original_input_texts_changed": false,
+  "serving_tokenizer_changed": false
+}

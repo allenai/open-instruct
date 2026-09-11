@@ -294,3 +294,20 @@ def test_tokenization_probe_is_cpu_saturn_and_read_only():
     assert task["constraints"]["cluster"] == ["ai2/saturn"]
     assert "light_sft_tokenization" in task["arguments"][0]
     assert "light_sft_gsm8k run" not in task["arguments"][0]
+
+
+def test_existing_corrected_preparation_is_preserved_for_retry(monkeypatch, tmp_path):
+    module = importlib.import_module("scripts.miles.light_sft_retry")
+    root = tmp_path / "prepared"
+    (root / "hf").mkdir(parents=True)
+    (root / "hf/model.safetensors").write_bytes(b"weights")
+    (root / "preparation.json").write_text('{"corrected_proofs": true}')
+    checked = []
+    monkeypatch.setattr(module.light_sft_gsm8k, "verify", lambda path: checked.append(path))
+    report = module.prepare_retry(tmp_path / "old", root, tmp_path / "local")
+    assert checked == [root]
+    assert report["prepared_source_root"] == str(root)
+    assert (root / "preparation.json").read_text() == '{"corrected_proofs": true}'
+    (root / "core").mkdir()
+    with pytest.raises(ValueError, match="existing training attempt"):
+        module.prepare_retry(tmp_path / "old", root, tmp_path / "local2")
