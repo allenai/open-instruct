@@ -1,7 +1,9 @@
 # Native checkpoint performance qualification
 
 Isolated branches: `robertb/miles-checkpoint-perf` in open-instruct and OLMo-core.
-Bases: open-instruct `12235d54d`, Core `307d20590`. Parent worktrees remain untouched.
+Bases: open-instruct `12235d54d`, Core `307d20590`.
+The implementation is being integrated into `robertb/miles-hero-support` (open-instruct)
+and `robertb/miles-hero-adapter` (Core), with all performance options disabled by default.
 
 The initial trial preserves production defaults. Candidate save options are explicit harness
 arguments, not new run-profile defaults:
@@ -57,7 +59,8 @@ This avoids comparing two independently initialized/autotuned training trajector
 
 Acceptance requires exact correctness plus max rank save time <= 340 seconds on the full SFT
 model. Synthetic responses isolate the checkpoint contract; serving and GSM8K learning are
-outside this experiment. No candidate is promoted based only on the toy test.
+outside this experiment. Enabling a candidate by default requires the full-model gate. The implementation can be
+merged while opt-in so other work can exercise it without changing existing run profiles.
 
 
 ## Follow-up qualification
@@ -197,3 +200,33 @@ It passed the updated GPU topology gate (10 passed, six larger-topology skips,
 three deselections) and uses separate persistent caches for each global trainer rank.
 The local cold-cache toy qualification also passed with all 18 cache fingerprints
 unchanged across restart. Full-model exactness is pending.
+
+
+## Integration status and arithmetic planner measurement
+
+The implementation is available for opt-in integration; it is **not fully qualified for
+default enablement**. Existing production and pretraining defaults remain unchanged.
+The normal Core pretraining CheckpointerConfig does not yet expose the planner control.
+
+The full-model arithmetic save in `01M28YRXD7NGGTHWBZ2RY3R1XX` took **118.466 seconds**
+(max rank), versus baseline **437.128 seconds**. Local planning fell from **320.655 seconds**
+to **0.05654 seconds**; writer wall time remained **116.518 seconds**. The 222.18 GB
+checkpoint therefore meets the <=340-second save target.
+[Raw candidate save timings](miles-checkpoint-fast-profile-20260911.json).
+
+Its fresh-process native load completed in **144.307 seconds**, with 144.026 seconds
+in the DCP load pass. The strict subsequent-update comparison is still running.
+The baseline restored all captured state and HF export tensors exactly, but failed
+post-restart numerical continuation; that distinction remains an open qualification item.
+Per-rank persistent autotuning caches are enabled in this qualification launcher only.
+The ordinary production Ray launch path has not gained that cache policy.
+
+Local checks after incorporating the current parent branch: 66 selected integration tests
+passed and open-instruct `make style quality` passed. Core metadata, writer compatibility,
+failure restoration, and toy exact continuation checks passed as recorded above.
+Larger GPU topologies and the full-model process writer are still pending.
+
+To exercise the planner through an open-instruct run config, set
+`core.checkpoint_constant_memory_planning = true` and optionally
+`core.checkpoint_profile = true`. Writer compaction, ownership, and process settings
+remain separate options; they are not required to select arithmetic metadata planning.
