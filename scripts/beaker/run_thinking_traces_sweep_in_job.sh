@@ -120,6 +120,31 @@ if [ -d /weka/oe-adapt-default ]; then
     log "flashinfer JIT cache -> $_fi_cache"
 fi
 
+# Read throughput from the weka HF cache varies by roughly 8x across nodes on
+# the same cluster -- GLM-5.2 loaded all 141 shards in 7 minutes on one node and
+# managed 38 in 57 minutes on another, with prefetch enabled both times. That is
+# a larger effect than most of the serving knobs, and it is invisible until a
+# multi-hour load is already underway. Measure it in the first few seconds so a
+# bad node is obvious in the log rather than inferred later from a stalled
+# progress bar.
+probe_weka_read() {
+    local dir="${HF_CACHE_DIR:-}"
+    [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    local f
+    f="$(find "$dir" -name '*.safetensors' -size +1G -print -quit 2>/dev/null)" || true
+    [ -n "$f" ] || { log "weka read probe: no cached shard to sample yet"; return 0; }
+    local start end mb
+    start=$(date +%s%N)
+    dd if="$f" of=/dev/null bs=1M count=2048 iflag=skip_bytes,count_bytes 2>/dev/null || true
+    end=$(date +%s%N)
+    mb=$(awk -v s="$start" -v e="$end" 'BEGIN{d=(e-s)/1e9; if(d>0) printf "%.0f", 2048/d; else print "?"}')
+    log "weka read probe: ~${mb} MB/s from $(basename "$(dirname "$f")")"
+    if [ "$mb" != "?" ] && [ "$mb" -lt 300 ] 2>/dev/null; then
+        log "  WARNING: slow node. A 700 GB checkpoint would take >40 min to load here;"
+        log "  a healthy node on this cluster sustains 1500+ MB/s. Consider relaunching."
+    fi
+}
+
 log "sweep configuration"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv || true
 cat <<EOF
@@ -247,6 +272,7 @@ CUEOF
     return 1
 }
 ensure_nvcc || log "continuing without nvcc; JIT-dependent kernels may fail"
+probe_weka_read
 
 if ! command -v uv >/dev/null 2>&1; then
     log "installing uv"
