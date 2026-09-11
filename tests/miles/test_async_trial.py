@@ -21,7 +21,7 @@ def test_async_accepts_complete_reordered_groups_with_one_step_lag():
         rows, {str(i): {} for i in range(4)}, rollout=2, asynchronous=True, consumed=set()
     )
     assert set(ids) == {"0", "1", "2", "3"}
-    assert version == 1 and groups == [0, 1, 2, 3]
+    assert version == {str(i): 1 for i in range(4)} and groups == [0, 1, 2, 3]
 
 
 @pytest.mark.parametrize(
@@ -75,3 +75,27 @@ def test_scheduling_configs_preserve_shared_recipe_and_actual_budget():
         assert config.miles["sglang_cuda_graph_backend_decode"] == "disabled"
         assert not any(key.startswith("eval_") for key in config.miles)
     assert asynchronous.miles["async_unused_samples_handler"] == "retry"
+
+
+def test_async_accepts_different_homogeneous_groups_with_bounded_lag():
+    rows = samples()
+    for row in rows[8:]:
+        row["weight_versions"] = ["2"]
+    _, versions, _ = async_trial.batch_membership(
+        rows, {str(i): {} for i in range(4)}, rollout=2, asynchronous=True, consumed=set()
+    )
+    assert versions == {"0": 1, "1": 1, "2": 2, "3": 2}
+
+
+def test_async_rejects_one_response_spanning_versions():
+    rows = samples()
+    rows[0]["weight_versions"] = ["1", "2"]
+    with pytest.raises(ValueError, match="response mixes"):
+        async_trial.batch_membership(
+            rows, {str(i): {} for i in range(4)}, rollout=2, asynchronous=True, consumed=set()
+        )
+
+
+def test_rank_versions_preserve_actual_strided_membership():
+    rows = [{"metadata": {"prepared_sample_id": key}} for key in ["older", "current", "older", "current"]]
+    assert async_trial.rank_versions(rows, {"older": 1, "current": 2}) == {"0": [1], "1": [2]}

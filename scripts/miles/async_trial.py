@@ -49,7 +49,7 @@ def configuration(campaign, output, *, asynchronous):
 
 def batch_membership(samples, prepared, *, rollout, asynchronous, consumed):
     """Completion order may vary; identities and complete groups may not."""
-    counts, groups, versions = Counter(), {}, set()
+    counts, groups, versions = Counter(), {}, {}
     for sample in samples:
         key = evidence.identity(sample)
         group = sample.get("group_index")
@@ -62,15 +62,26 @@ def batch_membership(samples, prepared, *, rollout, asynchronous, consumed):
         raw_versions = sample.get("weight_versions")
         if not raw_versions or any(str(v) not in {str(i) for i in range(UPDATES + 1)} for v in raw_versions):
             raise ValueError("Missing or malformed policy version")
-        versions.update(int(v) for v in raw_versions)
+        sample_versions = {int(v) for v in raw_versions}
+        if len(sample_versions) != 1:
+            raise ValueError("A response mixes policy versions")
+        version = next(iter(sample_versions))
+        if key in versions and versions[key] != version:
+            raise ValueError("A prompt group mixes policy versions")
+        if not 0 <= rollout - version <= int(asynchronous):
+            raise ValueError("Training collection exceeds its policy-lag budget")
+        versions[key] = version
     if len(counts) != 4 or set(counts.values()) != {4} or len(groups) != 4 or len(set(groups.values())) != 4:
         raise ValueError("Expected four distinct four-response prompt groups")
-    if len(versions) != 1:
-        raise ValueError("Training collection mixes policy versions")
-    version = next(iter(versions))
-    if not 0 <= rollout - version <= int(asynchronous):
-        raise ValueError("Training collection exceeds its policy-lag budget")
-    return list(counts), version, sorted(groups)
+    return list(counts), versions, sorted(groups)
+
+
+def rank_versions(samples, versions, *, world=2):
+    """Pinned MILES unbalanced DP split preserves order and takes rank::world."""
+    return {
+        str(rank): sorted({versions[evidence.identity(sample)] for sample in samples[rank::world]})
+        for rank in range(world)
+    }
 
 
 def audit(campaign, output, *, asynchronous):
@@ -80,6 +91,10 @@ def audit(campaign, output, *, asynchronous):
         raise ValueError("Executed arguments differ from the scheduling protocol")
     prepared = {evidence.identity(row): row for row in evidence.read_rows(campaign / "train.jsonl")}
     proofs = {row["prepared_sample_id"]: row for row in preparation["partitions"]["train"]["rows"]}
+    # This fixture uses the pinned standard rank-strided split. Fail rather than
+    # silently infer membership for a different MILES balancing/custom schedule.
+    if config.miles.get("balance_data", False) or config.miles.get("custom_convert_samples_to_train_data_path"):
+        raise ValueError("Scheduling audit requires standard unbalanced DP partitioning")
     consumed, consumed_groups, reports = set(), set(), []
     if {p.name for p in (output / "rollouts").glob("*.pt")} != {f"{i}.pt" for i in range(UPDATES)}:
         raise ValueError("Missing or additional retained training collections")
@@ -96,7 +111,12 @@ def audit(campaign, output, *, asynchronous):
         )
         if not report["valid"]:
             raise ValueError(f"Rollout {rollout} failed independent audit: {report['errors']}")
-        report.update(optimizer_step_before=rollout, policy_lag=rollout - version, groups=groups)
+        report.update(
+            optimizer_step_before=rollout,
+            policy_lags={key: rollout - value for key, value in version.items()},
+            groups=groups,
+            rank_behavior_versions=rank_versions(payload["samples"], version),
+        )
         consumed.update(selected)
         consumed_groups.update(groups)
         reports.append(report)
@@ -112,7 +132,10 @@ def audit(campaign, output, *, asynchronous):
         ):
             raise ValueError("Missing, repeated, or skipped optimizer step")
         for row, rollout in zip(steps, reports, strict=True):
-            if row["local_behavior_versions"] != [rollout["policy_version"]] or row["normalization"]["samples"] != 16:
+            if (
+                row["local_behavior_versions"] != rollout["rank_behavior_versions"][str(rank)]
+                or row["normalization"]["samples"] != 16
+            ):
                 raise ValueError("Trainer consumed another policy version or batch size")
         contracts[str(rank)] = steps
     publications = [json.loads(line) for line in (output / "metrics/publication.jsonl").read_text().splitlines()]
@@ -168,8 +191,19 @@ def main():
     parser.add_argument("campaign", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--synchronous", action="store_true")
+    parser.add_argument("--audit-only", type=Path, metavar="FRESH_REPORT")
     args = parser.parse_args()
-    run(args.campaign, args.output, asynchronous=not args.synchronous)
+    if args.audit_only is not None:
+        if args.audit_only.exists() or args.audit_only.resolve().is_relative_to(args.output.resolve()):
+            raise ValueError("Audit-only evidence must use a fresh report outside the retained run")
+        report = audit(args.campaign, args.output, asynchronous=not args.synchronous)
+        report["retained_output"] = str(args.output)
+        args.audit_only.parent.mkdir(parents=True, exist_ok=True)
+        with args.audit_only.open("x") as stream:
+            stream.write(json.dumps(report, indent=2, allow_nan=False) + "\n")
+        print("SCHEDULING_REAUDIT_PASSED", args.audit_only)
+    else:
+        run(args.campaign, args.output, asynchronous=not args.synchronous)
 
 
 if __name__ == "__main__":
