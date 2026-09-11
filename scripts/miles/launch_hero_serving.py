@@ -10,7 +10,9 @@ from pathlib import Path
 from scripts.miles.launch_hero_conversion import HF
 
 
-def specification(image, *, hf=HF, diagnose_core=False):
+def specification(image, *, hf=HF, diagnose_core=False, mode_matrix=False):
+    if diagnose_core and mode_matrix:
+        raise ValueError("Choose one diagnostic at a time")
     tool = "diagnose_hero_core.py" if diagnose_core else "qualify_hero_serving.py"
     output = "diagnosis.json" if diagnose_core else "serving.json"
     extra = (
@@ -18,6 +20,8 @@ def specification(image, *, hf=HF, diagnose_core=False):
         if diagnose_core
         else "--core-reference --core-logprob-atol 0.1"
     )
+    if mode_matrix:
+        extra = "--diagnostic-mode-matrix"
     command = f"""set -euo pipefail
 cd /opt/core-rl
 mkdir -p /output
@@ -33,6 +37,8 @@ python /opt/core-rl/sources/olmo-sglang/tools/{tool} --model {shlex.quote(hf)} -
         "description": (
             "Hero layerwise HF/Core diagnosis after failed probability gate; no training"
             if diagnose_core
+            else "Hero SGLang graph/chunk matrix after failed probability gate; no training"
+            if mode_matrix
             else "Hero TP1 HF/SGLang short prefill/decode/graph parity; no training"
         ),
         "tasks": [
@@ -62,9 +68,17 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--hf", default=HF)
     parser.add_argument("--render-only", action="store_true")
-    parser.add_argument("--diagnose-core", action="store_true")
+    diagnostics = parser.add_mutually_exclusive_group()
+    diagnostics.add_argument("--diagnose-core", action="store_true")
+    diagnostics.add_argument("--mode-matrix", action="store_true")
     args = parser.parse_args()
-    document = json.dumps(specification(args.image, hf=args.hf, diagnose_core=args.diagnose_core), indent=2) + "\n"
+    document = (
+        json.dumps(
+            specification(args.image, hf=args.hf, diagnose_core=args.diagnose_core, mode_matrix=args.mode_matrix),
+            indent=2,
+        )
+        + "\n"
+    )
     if args.render_only:
         print(document, end="")
         return

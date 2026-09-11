@@ -126,10 +126,10 @@ index 0000000000000000000000000000000000000000..f946b980db1160d1b076f738c30bbe4c
 +[`measurements/hero-tiny-core-reference-20260910.json`](measurements/hero-tiny-core-reference-20260910.json).
 diff --git a/docs/hero-numerical-diagnosis.md b/docs/hero-numerical-diagnosis.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..4f472555d639efd08bef8786f2a735493bec497c
+index 0000000000000000000000000000000000000000..3a6027906ff9b27a97e640f527f752733c8663e6
 --- /dev/null
 +++ b/docs/hero-numerical-diagnosis.md
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,29 @@
 +# Hero numerical diagnosis
 +
 +The full step-75500 qualification failed its existing 0.1 absolute log-probability threshold. Eight greedy predictions matched in both serving modes, but the worst checked SGLang top-token error was 0.3118 with unchunked prefill and 0.5619 with chunked prefill plus decode graphs. Core/HF full-vocabulary error reached 0.5473 (mean 0.08255). Matching greedy tokens does not resolve these errors. Keep the failed report and threshold unchanged.
@@ -145,11 +145,20 @@ index 0000000000000000000000000000000000000000..4f472555d639efd08bef8786f2a73549
 +
 +The tool compares block inputs/outputs, attention input/output, all four peri-norm inputs/outputs, and combined MLP output (input to the post-FFN norm). It repeats each Core block on the exact captured HF block input. Compare accumulated errors against these same-input errors: this distinguishes divergence entering a layer from differences produced locally. It captures both original prompt prefixes, not all eight generated continuations. No kernel, accumulation dtype, router, weight, or gate is changed. Optional HF activation tensors support subsequent SGLang layer comparisons. This is a diagnostic and does not qualify training or serving.
 +
-+Next isolate SGLang chunking from graph execution, which the original two-mode gate varied together. Cross graph execution off/on with prefill chunks 128/32, retain exact forced-prefix token IDs and checked top-token log-probabilities, and keep the same threshold for every mode. This matrix is follow-up work. Compare identical prefix/token pairs; differing top-token sets require explicit intersection reporting rather than assuming missing entries match. The original 16-token prompt had identical forced-prefix error summaries in both modes; the longer prompt differed, making chunking the first serving variable to isolate. This observation is not proof that graphs are irrelevant.
++Next isolate SGLang chunking from graph execution, which the original two-mode gate varied together. Cross graph execution off/on with prefill chunks 128/32, retain exact forced-prefix token IDs and checked top-token log-probabilities, and keep the same threshold for every mode. Use the optional diagnostic matrix below; the normal two-mode qualification defaults are unchanged. Compare identical prefix/token pairs; differing top-token sets require explicit intersection reporting rather than assuming missing entries match. The original 16-token prompt had identical forced-prefix error summaries in both modes; the longer prompt differed, making chunking the first serving variable to isolate. This observation is not proof that graphs are irrelevant.
++
++```bash
++python tools/qualify_hero_serving.py --model /path/to/step75500/hf \
++  --recurrent-hf-prefill --diagnostic-mode-matrix \
++  --require-token-parity --logprob-atol 0.1 \
++  --output /path/to/serving-mode-matrix.json
++```
++
++The JSON includes direct comparisons varying one setting at a time. Those comparisons explicitly report the number of common top-token IDs and IDs missing from either set; disjoint sets produce no invented zero error. All mode outputs must still pass the original absolute threshold against HF. Diagnostic matrix and live-update testing require separate invocations.
 +
 +If a particular Core/HF boundary first diverges, compare that operation on identical inputs before making changes. For routing, record selected expert IDs and weights before attributing later discrepancies to GEMM order. For full attention, compare Q/K normalization, absolute-position scaling, and attention output separately. For KDA, compare projection/convolution, recurrent state, and output normalization. Only after Core/HF drift is understood should corresponding SGLang layer outputs on the saved HF activations be instrumented; that worker-level instrumentation remains follow-up work.
 +
-+Validation: four capture-helper tests pass (math unchanged, hook cleanup on success/error, exact boundary coverage, shape/non-finite rejection). The actual two-layer tiny hero GPU diagnostic passed with max full-vocabulary log-probability error 0.033332, matching the earlier semantic reference result. Full checkpoint layerwise diagnosis and the four-mode serving matrix have not yet run.
++Validation: four capture-helper tests pass (math unchanged, hook cleanup on success/error, exact boundary coverage, shape/non-finite rejection). The actual two-layer tiny hero GPU diagnostic passed with max full-vocabulary log-probability error 0.033332, matching the earlier semantic reference result. The tiny four-mode GPU matrix also passed at the existing tiny tolerance 0.05, with all eight predictions matching in every mode; exact errors and direct mode comparisons are recorded in `measurements/hero-tiny-mode-matrix-20260910.json`. Full checkpoint layerwise diagnosis and the full checkpoint four-mode matrix remain pending.
 diff --git a/docs/measurements/hero-tiny-core-reference-20260910.json b/docs/measurements/hero-tiny-core-reference-20260910.json
 new file mode 100644
 index 0000000000000000000000000000000000000000..d077bf4862b87455685d7e556e47fd19147f6950
@@ -3195,6 +3204,372 @@ index 0000000000000000000000000000000000000000..d077bf4862b87455685d7e556e47fd19
 +    "gpu": "RTX 4090",
 +    "command": "python tools/qualify_hero_serving.py --tiny-dir /tmp/hero-core-reference-aligned --hf-source /work/core-hero/src/olmo_core/nn/moe/v2/hf --recurrent-hf-prefill --require-token-parity --logprob-atol 0.05 --core-reference --output /tmp/hero-sglang-core-qualified.json"
 +  }
++}
+diff --git a/docs/measurements/hero-tiny-mode-matrix-20260910.json b/docs/measurements/hero-tiny-mode-matrix-20260910.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..fdd884518c99b701f919f298a24af2b246735436
+--- /dev/null
++++ b/docs/measurements/hero-tiny-mode-matrix-20260910.json
+@@ -0,0 +1,360 @@
++{
++  "model_path": "/tmp/hero-core-reference-aligned",
++  "hf_source_sha256": {
++    "configuration_olmo3moe.py": "49ed9aca7406dd62cc43f317ce81e13eaa26d94adb310f1af88c6e10dd2fd7ba",
++    "modeling_olmo3moe.py": "81c4427030be8a6e982d131ed7615d44c4f2747df6bc4c537cd2b9430703913a"
++  },
++  "logprob_atol": 0.05,
++  "max_logprob_error": 0.026047706604003906,
++  "max_cached_decode_logprob_error": 0.015728473663330078,
++  "token_parity": true,
++  "prefill_decode_graph_token_parity": true,
++  "passed": true,
++  "mode_differences": [
++    {
++      "variable": "chunk",
++      "first": {
++        "graphs": false,
++        "chunk": 128
++      },
++      "second": {
++        "graphs": false,
++        "chunk": 32
++      },
++      "records": [
++        {
++          "prompt_index": 0,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 1,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.003825664520263672
++        },
++        {
++          "prompt_index": 1,
++          "step": 1,
++          "compared_tokens": 19,
++          "first_only_tokens": [
++            36
++          ],
++          "second_only_tokens": [
++            29
++          ],
++          "max_abs_common_token_logprob_difference": 0.003037691116333008
++        },
++        {
++          "prompt_index": 1,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0055654048919677734
++        },
++        {
++          "prompt_index": 1,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0055615901947021484
++        }
++      ],
++      "interpretation": "Intersection of returned top-token sets only; not full-vocabulary parity"
++    },
++    {
++      "variable": "graphs",
++      "first": {
++        "graphs": false,
++        "chunk": 128
++      },
++      "second": {
++        "graphs": true,
++        "chunk": 128
++      },
++      "records": [
++        {
++          "prompt_index": 0,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 1,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 1,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        }
++      ],
++      "interpretation": "Intersection of returned top-token sets only; not full-vocabulary parity"
++    },
++    {
++      "variable": "graphs",
++      "first": {
++        "graphs": false,
++        "chunk": 32
++      },
++      "second": {
++        "graphs": true,
++        "chunk": 32
++      },
++      "records": [
++        {
++          "prompt_index": 0,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 1,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 1,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        }
++      ],
++      "interpretation": "Intersection of returned top-token sets only; not full-vocabulary parity"
++    },
++    {
++      "variable": "chunk",
++      "first": {
++        "graphs": true,
++        "chunk": 128
++      },
++      "second": {
++        "graphs": true,
++        "chunk": 32
++      },
++      "records": [
++        {
++          "prompt_index": 0,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 1,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 0,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0
++        },
++        {
++          "prompt_index": 1,
++          "step": 0,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.003825664520263672
++        },
++        {
++          "prompt_index": 1,
++          "step": 1,
++          "compared_tokens": 19,
++          "first_only_tokens": [
++            36
++          ],
++          "second_only_tokens": [
++            29
++          ],
++          "max_abs_common_token_logprob_difference": 0.003037691116333008
++        },
++        {
++          "prompt_index": 1,
++          "step": 2,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0055654048919677734
++        },
++        {
++          "prompt_index": 1,
++          "step": 3,
++          "compared_tokens": 20,
++          "first_only_tokens": [],
++          "second_only_tokens": [],
++          "max_abs_common_token_logprob_difference": 0.0055615901947021484
++        }
++      ],
++      "interpretation": "Intersection of returned top-token sets only; not full-vocabulary parity"
++    }
++  ],
++  "modes": [
++    {
++      "graphs": false,
++      "chunk": 128,
++      "max_forced_logprob_error": 0.0249631404876709
++    },
++    {
++      "graphs": false,
++      "chunk": 32,
++      "max_forced_logprob_error": 0.026047706604003906
++    },
++    {
++      "graphs": true,
++      "chunk": 128,
++      "max_forced_logprob_error": 0.0249631404876709
++    },
++    {
++      "graphs": true,
++      "chunk": 32,
++      "max_forced_logprob_error": 0.026047706604003906
++    }
++  ],
++  "runtime": "olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks; local RTX4090; explicit HF recurrent prefill",
++  "reference_model": "tiny hero hybrid, expert intermediate32; same fixture as hero-tiny-core-reference-20260910.json",
++  "evidence_note": "Actual four-mode GPU run used candidate script; direct pairwise summaries computed afterward from its recorded identical prefixes/top-token values using tested helper."
 +}
 diff --git a/docs/measurements/hero-tiny-serving-20260910.json b/docs/measurements/hero-tiny-serving-20260910.json
 new file mode 100644
@@ -7293,6 +7668,71 @@ index a1ce891a940cac38660119b9212545ca5bff5100..5ad1ec94e137b212ca94574c10b513e8
              )
          hidden_states = self.model.norm(hidden_states)
          logits = self.lm_head(hidden_states).float()
+diff --git a/src/olmo_sglang/validation/serving_diagnosis.py b/src/olmo_sglang/validation/serving_diagnosis.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..221370a813f1e08c8071ed592d5a5bf6b904d322
+--- /dev/null
++++ b/src/olmo_sglang/validation/serving_diagnosis.py
+@@ -0,0 +1,59 @@
++"""Describe mode differences on identical prefixes without changing gate tolerances."""
++
++from itertools import combinations
++
++
++def compare_modes(modes):
++    comparisons = []
++    for first, second in combinations(modes, 2):
++        same_graphs = first["graphs"] == second["graphs"]
++        same_chunk = first["chunk"] == second["chunk"]
++        if same_graphs == same_chunk:
++            continue
++        if len(first["forced"]) != len(second["forced"]):
++            raise ValueError("Mode prompt counts differ")
++        records = []
++        for prompt, (left, right) in enumerate(zip(first["forced"], second["forced"])):
++            if len(left) != len(right):
++                raise ValueError("Mode prediction counts differ")
++            for step, (a, b) in enumerate(zip(left, right)):
++                if a["input_ids"] != b["input_ids"]:
++                    raise ValueError(
++                        "Cannot compare modes on different forced prefixes"
++                    )
++                values_a = {
++                    row["token"]: row["sglang"] for row in a["checked_top_logprobs"]
++                }
++                values_b = {
++                    row["token"]: row["sglang"] for row in b["checked_top_logprobs"]
++                }
++                common = values_a.keys() & values_b.keys()
++                records.append(
++                    {
++                        "prompt_index": prompt,
++                        "step": step,
++                        "compared_tokens": len(common),
++                        "first_only_tokens": sorted(values_a.keys() - values_b.keys()),
++                        "second_only_tokens": sorted(values_b.keys() - values_a.keys()),
++                        "max_abs_common_token_logprob_difference": max(
++                            (
++                                abs(values_a[token] - values_b[token])
++                                for token in common
++                            ),
++                            default=None,
++                        ),
++                    }
++                )
++        comparisons.append(
++            {
++                "variable": "chunk" if same_graphs else "graphs",
++                "first": {key: first[key] for key in ("graphs", "chunk")},
++                "second": {key: second[key] for key in ("graphs", "chunk")},
++                "records": records,
++                "interpretation": (
++                    "Intersection of returned top-token sets only; "
++                    "not full-vocabulary parity"
++                ),
++            }
++        )
++    return comparisons
 diff --git a/tools/create_tiny_parity_checkpoint.py b/tools/create_tiny_parity_checkpoint.py
 index 9f1a2a003f58e283eb84624474a3df94ce973f4f..3870742303e874f9777ec1c16631ad54d56569cd 100644
 --- a/tools/create_tiny_parity_checkpoint.py
@@ -7595,10 +8035,10 @@ index 0000000000000000000000000000000000000000..6d5855a9c3139d4a0c13979e8e2b7f5d
 +    main()
 diff --git a/tools/qualify_hero_serving.py b/tools/qualify_hero_serving.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f65e3a473
+index 0000000000000000000000000000000000000000..62abf2b19f5e1d1023b5281c233e7feee8cf0ce3
 --- /dev/null
 +++ b/tools/qualify_hero_serving.py
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,386 @@
 +import argparse
 +import gc
 +import hashlib
@@ -7614,6 +8054,7 @@ index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f
 +
 +from olmo_sglang import register
 +from olmo_sglang.validation.core_reference import evaluate_core_reference
++from olmo_sglang.validation.serving_diagnosis import compare_modes
 +
 +
 +def main():
@@ -7640,6 +8081,11 @@ index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f
 +    )
 +    parser.add_argument("--core-logprob-atol", type=float, default=0.05)
 +    parser.add_argument(
++        "--diagnostic-mode-matrix",
++        action="store_true",
++        help="Cross graphs off/on with chunks 128/32 and retain top-token values",
++    )
++    parser.add_argument(
 +        "--check-live-update",
 +        action="store_true",
 +        help="For --tiny-dir: compare live updates with a fresh changed checkpoint",
@@ -7661,6 +8107,8 @@ index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f
 +        parser.error(
 +            "--check-live-update requires --tiny-dir to bound checkpoint copying"
 +        )
++    if args.diagnostic_mode_matrix and args.check_live_update:
++        parser.error("Use separate runs for mode diagnosis and live weight updates")
 +    ROOT = args.model or args.tiny_dir
 +    HF = args.hf_source or ROOT
 +    if args.tiny_dir is not None:
@@ -7778,7 +8226,11 @@ index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f
 +                continue
 +            update_tensors.append((name, weights[name]))
 +        save_file(weights, str(changed_root / "model.safetensors"))
-+    modes = [(False, 128, ROOT), (True, 32, ROOT)]
++    modes = (
++        [(graphs, chunk, ROOT) for graphs in (False, True) for chunk in (128, 32)]
++        if args.diagnostic_mode_matrix
++        else [(False, 128, ROOT), (True, 32, ROOT)]
++    )
 +    if changed_root is not None:
 +        modes.append((True, 32, changed_root))
 +    for graphs, chunk, serving_root in modes:
@@ -7864,9 +8316,21 @@ index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f
 +                        abs(value - ref["logprobs"][step][token])
 +                        for token, value in actual.items()
 +                    )
-+                    samples.append(
-+                        {"token": out["output_ids"][0], "max_logprob_error": max_error}
-+                    )
++                    record = {
++                        "token": out["output_ids"][0],
++                        "max_logprob_error": max_error,
++                    }
++                    if args.diagnostic_mode_matrix:
++                        record["input_ids"] = prompt + ref["tokens"][:step]
++                        record["checked_top_logprobs"] = [
++                            {
++                                "token": token,
++                                "sglang": value,
++                                "hf": ref["logprobs"][step][token],
++                            }
++                            for token, value in actual.items()
++                        ]
++                    samples.append(record)
 +                forced.append(samples)
 +            report["modes"].append(
 +                {"graphs": graphs, "chunk": chunk, "outputs": outputs, "forced": forced}
@@ -7900,7 +8364,7 @@ index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f
 +                graphs,
 +                chunk,
 +                [(o["output_ids"], r["tokens"]) for o, r in zip(outputs, references)],
-+                forced,
++                [[step["max_logprob_error"] for step in prompt] for prompt in forced],
 +                flush=True,
 +            )
 +        finally:
@@ -7925,9 +8389,13 @@ index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f
 +        for mode in report["modes"]
 +        for output, reference in zip(mode["outputs"], references)
 +    )
-+    mode_parity = [out["output_ids"] for out in report["modes"][0]["outputs"]] == [
-+        out["output_ids"] for out in report["modes"][1]["outputs"]
-+    ]
++    mode_parity = all(
++        [out["output_ids"] for out in mode["outputs"]]
++        == [out["output_ids"] for out in report["modes"][0]["outputs"]]
++        for mode in report["modes"]
++    )
++    if args.diagnostic_mode_matrix:
++        report["mode_differences"] = compare_modes(report["modes"])
 +    report.update(
 +        max_logprob_error=max(errors),
 +        token_parity=token_parity,
