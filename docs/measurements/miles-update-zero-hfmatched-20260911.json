@@ -1,0 +1,588 @@
+{
+  "schema_version": 1,
+  "comparison": "Independent same-image HF-only serving processes with matched settings and fresh compiler caches",
+  "full_protocol_complete": false,
+  "source": "1eed1cd70",
+  "participants": {
+    "left": {
+      "backend": "core",
+      "image": "01M26N80T0V9PREQTS87J849P8",
+      "campaign": "update-zero-20260911-hfmatched-a",
+      "directory": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-hfmatched-a/core"
+    },
+    "right": {
+      "backend": "core",
+      "image": "01M26N80T0V9PREQTS87J849P8",
+      "campaign": "update-zero-20260911-hfmatched-b",
+      "directory": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-hfmatched-b/core"
+    }
+  },
+  "jobs": {
+    "a": {
+      "experiment": "01M27GC5JWB8Z8TK9Z1WK5VFM8",
+      "job": "01M27GC5QH1QSN88A335A6773R",
+      "status": {
+        "created": "2026-09-11T05:52:15.964614Z",
+        "scheduled": "2026-09-11T06:01:08.012331Z",
+        "started": "2026-09-11T06:01:36.521812Z",
+        "exited": "2026-09-11T06:09:25.66941Z",
+        "finalized": "2026-09-11T06:09:30.019475Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-11T06:09:25.462977Z",
+        "ready": "2026-09-11T06:01:35.49597Z"
+      },
+      "result": {
+        "beaker": "01M27GC5K8HE5MQAEH1AYB2E6G"
+      },
+      "actual_allocation": {
+        "cpuCount": 30.5,
+        "gpus": [
+          "GPU-577a0df0-769a-fc78-81e0-29e850a02dc7"
+        ]
+      }
+    },
+    "b": {
+      "experiment": "01M27GCMH4D4T6X2C3X99XTFYA",
+      "job": "01M27GCMMZHSQW9RKXW0S50SJP",
+      "status": {
+        "created": "2026-09-11T05:52:31.267912Z",
+        "scheduled": "2026-09-11T06:01:08.001754Z",
+        "started": "2026-09-11T06:01:36.256365Z",
+        "exited": "2026-09-11T06:08:40.894576Z",
+        "finalized": "2026-09-11T06:08:43.903177Z",
+        "exitCode": 0,
+        "idleSince": "2026-09-11T06:08:40.690537Z",
+        "ready": "2026-09-11T06:01:35.302369Z"
+      },
+      "result": {
+        "beaker": "01M27GCMHHXF7HNY53H6NJW81V"
+      },
+      "actual_allocation": {
+        "cpuCount": 30.5,
+        "gpus": [
+          "GPU-4b0f849d-8dd9-acee-5254-a440624571f8"
+        ]
+      }
+    }
+  },
+  "full_report": {
+    "path": "/tmp/update-zero-hfmatched-compare.raw",
+    "sha256": "196f9997dc88bf611ce3df6ea4deb9a29a6a3fe1a4d93e4b80c05596c5453318"
+  },
+  "cases": [
+    {
+      "case_id": "q341-first-divergence",
+      "comparison": "cross_run",
+      "run": null,
+      "earliest_nonexact_activation": "model.layers.1.self_attn",
+      "earliest_changed_route_set": "model.layers.2.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          5629
+        ],
+        "right": [
+          5629
+        ]
+      },
+      "next_token_logits_max_abs": 0.6875,
+      "all_router_logits_exact": false,
+      "mean_assignment_agreement": 0.9769736842105263,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 0.00048828125,
+        "mean_abs": 1.3966586923035922e-07,
+        "relative_l2": 5.643744890464788e-05
+      }
+    },
+    {
+      "case_id": "q975-first-divergence",
+      "comparison": "cross_run",
+      "run": null,
+      "earliest_nonexact_activation": "model.layers.1.self_attn",
+      "earliest_changed_route_set": "model.layers.2.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          2011
+        ],
+        "right": [
+          2011
+        ]
+      },
+      "next_token_logits_max_abs": 0.4375,
+      "all_router_logits_exact": false,
+      "mean_assignment_agreement": 0.981267892534684,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 6.103515625e-05,
+        "mean_abs": 1.6291677537891599e-09,
+        "relative_l2": 3.7843837463374336e-06
+      }
+    },
+    {
+      "case_id": "q1039-first-divergence",
+      "comparison": "cross_run",
+      "run": null,
+      "earliest_nonexact_activation": "model.layers.1.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          358
+        ],
+        "right": [
+          358
+        ]
+      },
+      "next_token_logits_max_abs": 0.28125,
+      "all_router_logits_exact": false,
+      "mean_assignment_agreement": 0.9785945072697899,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 0.001953125,
+        "mean_abs": 2.671127397964786e-06,
+        "relative_l2": 0.00027765256472167765
+      }
+    },
+    {
+      "case_id": "q605-first-divergence",
+      "comparison": "cross_run",
+      "run": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          13
+        ],
+        "right": [
+          13
+        ]
+      },
+      "next_token_logits_max_abs": 0.5,
+      "all_router_logits_exact": false,
+      "mean_assignment_agreement": 0.9816574615551223,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 9.5367431640625e-07,
+        "mean_abs": 5.015721171730547e-11,
+        "relative_l2": 3.810237454755352e-05
+      }
+    }
+  ],
+  "repeats": [
+    {
+      "case_id": "q341-first-divergence",
+      "comparison": "repeated_prefix",
+      "run": "left",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          5629
+        ],
+        "right": [
+          5629
+        ]
+      },
+      "next_token_logits_max_abs": 0.0,
+      "all_router_logits_exact": true,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "case_id": "q341-first-divergence",
+      "comparison": "repeated_prefix",
+      "run": "right",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          5629
+        ],
+        "right": [
+          5629
+        ]
+      },
+      "next_token_logits_max_abs": 0.0,
+      "all_router_logits_exact": true,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    }
+  ],
+  "observer_controls": [
+    {
+      "phase": "hf",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "left"
+    },
+    {
+      "phase": "hf",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "right"
+    },
+    {
+      "phase": "hf",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "left"
+    },
+    {
+      "phase": "hf",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "right"
+    },
+    {
+      "phase": "hf",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "left"
+    },
+    {
+      "phase": "hf",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "right"
+    },
+    {
+      "phase": "hf",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "left"
+    },
+    {
+      "phase": "hf",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true,
+      "run": "right"
+    }
+  ],
+  "limitations": "Observed fixed-prefix prefill comparisons. Exact equality here does not establish equivalence of historical autoregressive decode, batching, CUDA graph execution, or training. Tracing introduces CPU synchronization; unarmed controls and repeated prefixes quantify only the observed cases.",
+  "pin_control": {
+    "profile": "configs/miles/diagnostics/autotune-reference-hfmatched-a.json",
+    "local_tests_passed": 30,
+    "b300_candidate_qualification": "Pending on-job guard; local original-image CPU/4090 fallback correctly rejected a hardware-specific B300 candidate. B300 SSH qualification attempt was rejected by automatic approval review before execution; not retried. Runtime validates all seven declared candidates before mutation."
+  },
+  "autotune_observations": {
+    "available_both": true,
+    "populated_cache_counts": {
+      "left": 7,
+      "right": 7
+    },
+    "changed_configs": {
+      "fla.modules.l2norm.l2norm_fwd_kernel": {
+        "left": {
+          "(128, 1, 'torch.bfloat16', 'torch.bfloat16', 'torch.float32')": {
+            "kwargs": {
+              "BT": 128
+            },
+            "num_warps": 16,
+            "num_stages": 3,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        },
+        "right": {
+          "(128, 1, 'torch.bfloat16', 'torch.bfloat16', 'torch.float32')": {
+            "kwargs": {
+              "BT": 8
+            },
+            "num_warps": 1,
+            "num_stages": 3,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        }
+      },
+      "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64": {
+        "left": {
+          "(16, 16, 128, 256, 64, True, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.int32', 'torch.int64')": {
+            "kwargs": {
+              "BV": 32
+            },
+            "num_warps": 2,
+            "num_stages": 3,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        },
+        "right": {
+          "(16, 16, 128, 256, 64, True, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.int32', 'torch.int64')": {
+            "kwargs": {
+              "BV": 32
+            },
+            "num_warps": 2,
+            "num_stages": 2,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        }
+      },
+      "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused": {
+        "left": {
+          "(16, 16, 128, 64, 16, 4, 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.int32', 'torch.int32')": {
+            "kwargs": {
+              "BK": 64
+            },
+            "num_warps": 4,
+            "num_stages": 3,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        },
+        "right": {
+          "(16, 16, 128, 64, 16, 4, 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.int32', 'torch.int32')": {
+            "kwargs": {
+              "BK": 32
+            },
+            "num_warps": 4,
+            "num_stages": 3,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        }
+      },
+      "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel": {
+        "left": {
+          "(128, 16, 16, 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.int32')": {
+            "kwargs": {
+              "BH": 4
+            },
+            "num_warps": 4,
+            "num_stages": 3,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        },
+        "right": {
+          "(128, 16, 16, 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.float32', 'torch.bfloat16', 'torch.float32', 'torch.int32')": {
+            "kwargs": {
+              "BH": 2
+            },
+            "num_warps": 1,
+            "num_stages": 3,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        }
+      },
+      "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel": {
+        "left": {
+          "(16, 16, 128, 256, 64, 64, 64, True, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.int32', 'torch.int32')": {
+            "kwargs": {},
+            "num_warps": 8,
+            "num_stages": 4,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        },
+        "right": {
+          "(16, 16, 128, 256, 64, 64, 64, True, 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.bfloat16', 'torch.bfloat16', 'torch.bfloat16', 'torch.float32', 'torch.int32', 'torch.int32')": {
+            "kwargs": {},
+            "num_warps": 4,
+            "num_stages": 4,
+            "num_ctas": 1,
+            "maxnreg": null
+          }
+        }
+      }
+    },
+    "left_policy": {
+      "cache_results": true,
+      "cache_mode": "disabled",
+      "environment": {
+        "TRITON_PTXAS_BLACKWELL_PATH": "/usr/local/cuda/bin/ptxas",
+        "TRITON_CACHE_DIR": "/tmp/zero-probe/compiler-cache/triton",
+        "CUDA_DEVICE_MAX_CONNECTIONS": "8",
+        "CUDA_MODULE_LOADING": "AUTO"
+      },
+      "interpretation": "Observed populated autotuner caches after this forward; includes earlier warmup choices and does not identify every kernel actually launched by this request."
+    },
+    "right_policy": {
+      "cache_results": true,
+      "cache_mode": "disabled",
+      "environment": {
+        "TRITON_PTXAS_BLACKWELL_PATH": "/usr/local/cuda/bin/ptxas",
+        "TRITON_CACHE_DIR": "/tmp/zero-probe/compiler-cache/triton",
+        "CUDA_DEVICE_MAX_CONNECTIONS": "8",
+        "CUDA_MODULE_LOADING": "AUTO"
+      },
+      "interpretation": "Observed populated autotuner caches after this forward; includes earlier warmup choices and does not identify every kernel actually launched by this request."
+    },
+    "interpretation": "Populated caches include warmup/history; equal or empty caches do not prove equal kernels for every launch."
+  },
+  "response_observations": [
+    {
+      "case": "q341-first-divergence",
+      "same_text": true,
+      "left_text": " First",
+      "right_text": " First",
+      "output_token_logprobs_exact": false,
+      "left_next": [
+        [
+          -1.0142186880111694,
+          5629,
+          null
+        ]
+      ],
+      "right_next": [
+        [
+          -1.0647836923599243,
+          5629,
+          null
+        ]
+      ],
+      "input_token_logprobs_exact": false
+    },
+    {
+      "case": "q975-first-divergence",
+      "same_text": true,
+      "left_text": " must",
+      "right_text": " must",
+      "output_token_logprobs_exact": false,
+      "left_next": [
+        [
+          -0.6671536564826965,
+          2011,
+          null
+        ]
+      ],
+      "right_next": [
+        [
+          -0.651803195476532,
+          2011,
+          null
+        ]
+      ],
+      "input_token_logprobs_exact": false
+    },
+    {
+      "case": "q1039-first-divergence",
+      "same_text": true,
+      "left_text": " I",
+      "right_text": " I",
+      "output_token_logprobs_exact": false,
+      "left_next": [
+        [
+          -1.4287923574447632,
+          358,
+          null
+        ]
+      ],
+      "right_next": [
+        [
+          -1.4251394271850586,
+          358,
+          null
+        ]
+      ],
+      "input_token_logprobs_exact": false
+    },
+    {
+      "case": "q605-first-divergence",
+      "same_text": true,
+      "left_text": ".",
+      "right_text": ".",
+      "output_token_logprobs_exact": false,
+      "left_next": [
+        [
+          -0.6916090846061707,
+          13,
+          null
+        ]
+      ],
+      "right_next": [
+        [
+          -0.6972286701202393,
+          13,
+          null
+        ]
+      ],
+      "input_token_logprobs_exact": false
+    }
+  ]
+}
