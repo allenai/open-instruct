@@ -828,13 +828,15 @@ class GatewayBackend(SandboxBackend):
     _REQUEST_ATTEMPTS = 4
     _RETRY_BASE_DELAY_S = 0.5
     _RETRY_MAX_DELAY_S = 8.0
-    # Strict affinity answers 503 with this text when the replica that owns the
-    # binding has dropped off the registry roster. A live replica reappears
-    # within one retry; a dead/rescheduled one stays off the roster until the
-    # binding TTL (~15 min) expires, so after this many such answers the
+    # Strict affinity answers 503 with these texts when the replica that owns
+    # the binding is gone: "no longer registered" once it has dropped off the
+    # registry roster, "server is unavailable" while it is still on the roster
+    # (heartbeat tolerance ~4 min) but refuses connections. A live replica
+    # recovers within one retry; a dead one keeps failing every request until
+    # the roster catches up, so after this many consecutive such answers the
     # session is treated as lost and re-handshaken instead of retried.
-    _OWNER_UNREGISTERED_MARKER = "no longer registered"
-    _OWNER_UNREGISTERED_ATTEMPTS = 2
+    _OWNER_LOST_MARKERS = ("no longer registered", "server is unavailable")
+    _OWNER_LOST_ATTEMPTS = 3
     _TIMING_LOGS = _env_flag("SWERL_SANDBOX_TIMING_LOGS", False)
     _TIMING_LOG_THRESHOLD_S = _env_float("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", 1.0)
 
@@ -905,16 +907,20 @@ class GatewayBackend(SandboxBackend):
         Retries cover connection errors, request timeouts, and 500/502/503/504
         (replica connection dropped mid-request / temporarily unreachable /
         gateway rediscovering) — safe because every exec this backend issues is
-        idempotent. 404 maps to :class:`GatewaySessionLostError` so callers can
-        re-handshake, as does a repeated 503 saying the binding's owner is no
-        longer registered (the replica died; waiting out the TTL would only
-        fail every request until then).
+        idempotent. 404 (binding expired) and 410 (gateway probed the binding's
+        owner and found it gone; literegistry >= 1.0.49 answers
+        ``{"code": "affinity_owner_lost", "recoverable": false}``) map to
+        :class:`GatewaySessionLostError` so callers can re-handshake, as do
+        consecutive 503s saying the owner is unavailable / no longer registered
+        (the replica died; the gateway only concludes that itself once the
+        roster heartbeat tolerance has passed, ~4 min, and waiting for that
+        would fail every request until then).
         """
         url = f"{self._gateway_url}/{endpoint.lstrip('/')}"
         max_attempts = attempts or self._REQUEST_ATTEMPTS
         session = http_session or self._session
         last_error: Exception | None = None
-        owner_unregistered_answers = 0
+        owner_lost_answers = 0
         for attempt in range(1, max_attempts + 1):
             self._last_request_monotonic = time.monotonic()
             try:
@@ -922,15 +928,16 @@ class GatewayBackend(SandboxBackend):
             except (requests.ConnectionError, requests.Timeout) as e:
                 last_error = GatewayBackendError(f"Gateway request to {endpoint} failed: {e}")
             else:
-                if response.status_code == 404:
+                if response.status_code in (404, 410):
                     raise GatewaySessionLostError(
-                        f"Gateway affinity session lost ({endpoint}): {response.text[:500]}", status_code=404
+                        f"Gateway affinity session lost ({endpoint}): {response.text[:500]}",
+                        status_code=response.status_code,
                     )
-                if response.status_code == 503 and self._OWNER_UNREGISTERED_MARKER in response.text:
-                    owner_unregistered_answers += 1
-                    if owner_unregistered_answers >= self._OWNER_UNREGISTERED_ATTEMPTS:
+                if response.status_code == 503 and any(m in response.text for m in self._OWNER_LOST_MARKERS):
+                    owner_lost_answers += 1
+                    if owner_lost_answers >= self._OWNER_LOST_ATTEMPTS:
                         raise GatewaySessionLostError(
-                            f"Gateway affinity owner unregistered ({endpoint}): {response.text[:500]}", status_code=503
+                            f"Gateway affinity owner gone ({endpoint}): {response.text[:500]}", status_code=503
                         )
                 if response.status_code in (500, 502, 503, 504, 408):
                     last_error = GatewayBackendError(

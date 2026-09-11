@@ -1,16 +1,21 @@
 #!/bin/bash
 
 # 4-node / 32 GPU DPPO prod run @ 64k on holmes (cu13/B300), sandboxes on the LiteRegistry
-# podman fleet behind $GATEWAY_URL instead of podman services colocated in the job.
+# podman fleet instead of podman services colocated in the job.
 # Training recipe is identical to qwen35_9b_dppo_repro_4node_64k_holmes_cu13.sh; the only
 # change is `"backend": "gateway"` in --tool_configs, which makes every SWERL_PODMAN_* /
 # MIRROR_URL / DOCKER_PAT / docker_login.sh / subcontainer setting unnecessary.
-# Preflight the deployment first:
-#   uv run python scripts/general_agent/terminal/rl/gateway/check_gateway_deployment.py --gateway_url $GATEWAY_URL
+# The gateway itself runs INSIDE the job (start_colocated_gateway.sh on the Ray head) and
+# finds the fleet's Redis through the head registry $LITEREGISTRY_REGISTRY on weka; the
+# sandbox backend reads SWERL_GATEWAY_URL exported by that script, so no gateway URL is
+# baked into --tool_configs.
+# Preflight the fleet first (uses the deployment's own gateway from the head file):
+#   uv run python scripts/general_agent/terminal/rl/gateway/check_gateway_deployment.py --gateway_url http://<gateway from `literegistry summary --registry=$LITEREGISTRY_REGISTRY`>
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
-GATEWAY_URL="${GATEWAY_URL:-http://jupiter-cs-aus-148.reviz.ai2.in:45216}"
+# Head registry of the fleet deployment (their /weka/gfaria/... is mounted here as /weka/oe-adapt-default/gfaria/...).
+LITEREGISTRY_REGISTRY="${LITEREGISTRY_REGISTRY:-head+sqlite:///weka/oe-adapt-default/gfaria/podman_deployments/lr1049-big-20260910/head.sqlite3}"
 
 MODEL=hamishivi/Qwen3.5-9B
 TOKENIZER=hamishivi/Qwen3.5-9B
@@ -20,7 +25,7 @@ EXP_NAME=swerl_qwen35_9b_dppo_prod_4node_64k_holmes_gateway
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; sandboxes via literegistry gateway jupiter-cs-aus-148:45216, redeployed w/ exec-wrapper fix (literegistry PR #3); fresh run for throughput benchmark vs podman twins)" \
+       --description "tmax-15k DPPO Qwen35 9b (repro; 4-node; 64k; holmes/cu13/B300; sandboxes via literegistry fleet lr1049-big-20260910 with the gateway co-located on the Ray head (head+sqlite registry on weka); client maps 410 affinity_owner_lost to re-handshake; fresh state dir _004)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents-holmes \
        --priority urgent \
@@ -38,9 +43,11 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
        --env SWERL_RESET_FAILURE_ZERO_REWARD=1 \
        --env SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S=1.0 \
+       --env LITEREGISTRY_REGISTRY="$LITEREGISTRY_REGISTRY" \
+       --env GATEWAY_WORKERS=8 \
        --gpus 8 \
        --no_auto_dataset_cache \
-       -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+       -- source scripts/general_agent/terminal/rl/gateway/start_colocated_gateway.sh \&\& source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list allenai/tmax-15k-open-instruct 1.0 \
     --dataset_mixer_list_splits train \
     --max_prompt_token_length 2048 \
@@ -76,7 +83,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --save_traces \
     --save_trainer_logprobs true \
     --tools swerl_vanillux_sandbox \
-    --tool_configs "{\"backend\": \"gateway\", \"gateway_url\": \"$GATEWAY_URL\", \"task_data_hf_repo\": \"allenai/tmax-15k-open-instruct\", \"test_timeout\": 120, \"image\": \"python:3.12-slim\"}" \
+    --tool_configs '{"backend": "gateway", "task_data_hf_repo": "allenai/tmax-15k-open-instruct", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 512 \
     --max_steps 64 \
     --verification_reward 1.0 \
@@ -85,7 +92,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
     --active_sampling \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/qwen35_9b_prod_4node_64k_holmes_gateway_002 \
+    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/qwen35_9b_prod_4node_64k_holmes_gateway_004 \
     --checkpoint_state_freq 5 \
     --inflight_updates true \
     --lm_head_fp32 true \
