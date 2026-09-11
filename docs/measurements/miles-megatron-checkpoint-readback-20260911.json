@@ -1,0 +1,7 @@
+{
+  "exact_canonical_model_readback": true,
+  "tensor_count": 56,
+  "bytes_read": 1527696,
+  "tensor_reads": 41,
+  "optimizer_masters": "not_mapped: bucket-space layout requires separate proof"
+}

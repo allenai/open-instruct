@@ -54,3 +54,7 @@ actual runtime before any tuner is changed. Local tests qualify that guard; B300
 candidate membership is checked in the GPU diagnostic before warmup. The observer
 records actual wrapped Python tuner calls during armed eager prefill, including
 unpinned calls. This does not claim to trace all GPU kernels or CUDA graph replay.
+
+### Native route comparison coordinates
+
+`compare_trainer_routes.py` compares full response log probabilities with explicit target-token alignment and compares routes at identical captured input positions. Megatron captures use physical MLP layer indices: odd layer `2*i+1` maps to HF logical block `i`. Core indices already use logical blocks. The comparator rejects even physical MLP indices and missing routed layers, and sorts expert IDs with their weights before weight comparisons. A measured mismatch is reported separately from failed capture validity. `miles_trainer_route_compare.sh` runs both comparisons on CPU/Saturn after both capture completion markers exist.

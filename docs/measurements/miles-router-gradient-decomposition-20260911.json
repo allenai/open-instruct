@@ -1,0 +1,53 @@
+{
+  "scope": "Tiny unequal-length fixture, EP1; native finalized preclip router gradients; fixed serving anchors rather than the original 100-update anchor mode. Not the full SFT checkpoint.",
+  "reports": {
+    "core": {
+      "path": "/tmp/miles-validation/gradient-decomposition-core-r6/report.json",
+      "sha256": "a11848f670dc6197be3234796fe4959bc224e5ec7e9a392bd1b7d332537c792a",
+      "report": {
+        "backend": "olmo_core",
+        "world_size": 1,
+        "rank": 0,
+        "optimizer_calls": 0,
+        "payload_sha256": "b96c702137cb5c5dba63bc895eec2c42cf1919538bbd57c2928178bd8db0a734",
+        "source_sha256": "402f7ebc6b5ae09aae451b007cd1c38e2476cce7820150a5c78b267cb6e18f58",
+        "state_unchanged": true,
+        "router_gradients": {
+          "module.blocks.1.routed_experts_router.weight": {
+            "policy_norm": 0.0020859516609552575,
+            "auxiliary_norm": 0.004114705537392149,
+            "combined_norm": 0.00491318103710768,
+            "policy_auxiliary_cosine": 0.16609287838865064,
+            "superposition_residual_norm": 9.236461065090583e-06,
+            "superposition_relative_to_combined": 0.001879935014673906
+          }
+        },
+        "scope": "Finalized, preclip native optimizer input; EP1 only; native auxiliary padding and normalization preserved"
+      }
+    },
+    "megatron": {
+      "path": "/tmp/miles-validation/gradient-decomposition-megatron-r2/report.json",
+      "sha256": "79fc2e5f73e2539325f6bb051fcbf0b1e14a283b80f80993d4ad9931c93f4dc4",
+      "report": {
+        "backend": "megatron",
+        "world_size": 1,
+        "rank": 0,
+        "optimizer_calls": 0,
+        "payload_sha256": "b96c702137cb5c5dba63bc895eec2c42cf1919538bbd57c2928178bd8db0a734",
+        "source_sha256": "402f7ebc6b5ae09aae451b007cd1c38e2476cce7820150a5c78b267cb6e18f58",
+        "state_unchanged": true,
+        "router_gradients": {
+          "module.module.decoder.layers.3.mlp.router.weight": {
+            "policy_norm": 0.0020840695090722505,
+            "auxiliary_norm": 0.007039561218648257,
+            "combined_norm": 0.007451418368900971,
+            "policy_auxiliary_cosine": 0.0550824083650341,
+            "superposition_residual_norm": 9.976828723973445e-06,
+            "superposition_relative_to_combined": 0.0013389167310229762
+          }
+        },
+        "scope": "Finalized, preclip native optimizer input; EP1 only; native auxiliary padding and normalization preserved"
+      }
+    }
+  }
+}

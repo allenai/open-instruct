@@ -1,6 +1,8 @@
 # GSM8K Core/Megatron discrepancy: investigation handoff
 
-As of 2026-09-11 05:25 UTC. The immediate problem is that **the two serving paths already generate different responses before training**. The completed 100-update learning comparison is useful operational evidence, but cannot yet isolate trainer learning behavior from inference differences. Investigate update-zero equality first. No cause has been established.
+As of 2026-09-11 06:55 UTC. **A cause of the measured process-to-process fixed-prefix inference divergence has been identified:** pinning seven FLA autotuner choices makes two fresh processes exactly match each other and the original reference on all captured activations, routes and final logits. This does not yet attribute the 100-update learning gap. See the [completed pinned-control report](measurements/miles-autotune-pinned-controls-20260911.md).
+
+The [native tiny EP1 gradient decomposition](measurements/miles-router-gradient-decomposition-20260911.md) also passed: auxiliary router gradients exceed policy gradients in both fixtures and differ between trainers. Full-SFT native scoring/serving route captures are running on Core (`01M27J5YARGEAV1RNQRYFGJT6T`, started 06:49 UTC) and queued on Megatron (`01M27J6E1FTNGJG9ECTE0FH58Q`). Both perform zero optimizer updates. The longer learning runs remain unchanged. The sections below retain the earlier investigation snapshots; later results supersede their pending/unknown status.
 
 ## Systems and immutable inputs
 

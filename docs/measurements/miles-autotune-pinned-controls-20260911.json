@@ -1,0 +1,375 @@
+{
+  "as_of_utc": "2026-09-11T06:55:00Z",
+  "comparison_experiment": "01M27K4Z7111KFVAMVQA0KJGKV",
+  "comparison_exit_code": 0,
+  "source": "255f3f4a806475c40e9cd1d135b5f9be2d1de2f2",
+  "pin_experiments": {
+    "a": "01M27J3Y2J4HSG1N163EN1JJ83",
+    "b": "01M27J4XKG5F72RW8ZXHCV54ZK"
+  },
+  "scope": "Four serial fixed-prefix eager prefill probes; no backward or optimizer step; seven B300 FLA autotuners pinned to matched reference A. Not decode/batching equivalence or attribution of the learning gap.",
+  "reports": {
+    "pinned-twins": {
+      "path": "/tmp/miles-pinned-comparison-results/pinned-twins.json",
+      "sha256": "54dcb8a6b1e8aebc5533ee84571190b165a0250725e0953b4d1a232858580041",
+      "validity_scope": "HF prefill only; full protocol incomplete",
+      "full_protocol_complete": false,
+      "comparisons": [
+        {
+          "comparison": "cross_run",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        },
+        {
+          "comparison": "repeated_prefix",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        },
+        {
+          "comparison": "repeated_prefix",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q975-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 239,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q1039-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 619,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q605-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 243,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        }
+      ]
+    },
+    "reference-vs-left": {
+      "path": "/tmp/miles-pinned-comparison-results/reference-vs-left.json",
+      "sha256": "8b56c288b9c0e363a1fb9aacc7148dc0db924fc8f15e97f0135eb07ba7acdb15",
+      "validity_scope": "HF prefill only; full protocol incomplete",
+      "full_protocol_complete": false,
+      "comparisons": [
+        {
+          "comparison": "cross_run",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "repeated_prefix",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "repeated_prefix",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q975-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 239,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q1039-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 619,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q605-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 243,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        }
+      ]
+    },
+    "reference-vs-right": {
+      "path": "/tmp/miles-pinned-comparison-results/reference-vs-right.json",
+      "sha256": "b37980079b9c6992ffe1f3ab3fb5097c4b54b05d978b7310b4d22a239591bf86",
+      "validity_scope": "HF prefill only; full protocol incomplete",
+      "full_protocol_complete": false,
+      "comparisons": [
+        {
+          "comparison": "cross_run",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "repeated_prefix",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "repeated_prefix",
+          "case_id": "q341-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 177,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": true,
+          "exact_invocation_sequence": true,
+          "invocations": {
+            "left": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            },
+            "right": {
+              "count": 128,
+              "distinct_pinned_tuners": 7,
+              "missing_pinned_tuners": []
+            }
+          }
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q975-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 239,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q1039-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 619,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        },
+        {
+          "comparison": "cross_run",
+          "case_id": "q605-first-divergence",
+          "phase": "hf",
+          "all_activation_values_exact": true,
+          "all_route_sets_exact": true,
+          "input_tokens": 243,
+          "router_logits_exact": true,
+          "router_weights_exact": true,
+          "router_slot_order_exact": true,
+          "final_vocabulary_logits_exact": true,
+          "invocations_available_both": false
+        }
+      ]
+    }
+  }
+}
