@@ -52,3 +52,14 @@ MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
 Artifacts are under `control-exercise/$BEAKER_EXPERIMENT_ID` on WEKA, with
 reports and logs copied to the Beaker result. Scoring tensor results are small;
 large native checkpoints remain on WEKA. A job exit alone is not an audit pass.
+
+Submitted experiment: [01M28PAQW8YCJ6P8M9F2343PYH](https://beaker.org/ex/01M28PAQW8YCJ6P8M9F2343PYH).
+Source: `d8beffb81`; immutable image: `01M28PAA65C3MQ0QWZRP3KK6Z7`.
+All three tasks were placed on `holmes-cs-aus-504`, using disjoint GPUs on the
+same host. Shared host/IO/fabric contention may affect the overlapping startup
+and early measurements; this is not an isolated hardware benchmark.
+
+Prelaunch validation: 30 runtime parser/audit tests and four paired KDA/latent
+GPU training parity cases passed; formatting/static checks passed. The scoring
+recipe guard subsequently passed 10 tests including an injected unrelated
+configuration difference. Results below must come from completed remote audits.

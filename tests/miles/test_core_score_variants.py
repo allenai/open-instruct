@@ -78,3 +78,24 @@ def test_non_kernel_or_input_differences_rejected(tmp_path, field):
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError):
         worker.compare_runs(tmp_path, manifest)
+
+
+def test_configured_modes_allow_only_the_expected_selector_difference(tmp_path):
+    _, worker, manifest = fixture_reports(tmp_path)
+    manifest["configured_modes"] = True
+    for arm, mode in (("parent", "static"), ("candidate", "dynamic")):
+        for rank in (0, 1):
+            path = tmp_path / arm / f"rank{rank}.json"
+            document = json.loads(path.read_text())
+            document["recipe_argv"] = [
+                "--olmo-core-config",
+                json.dumps({"row_specialization": mode, "expert_parallel_size": 2}),
+            ]
+            path.write_text(json.dumps(document))
+    assert worker.compare_runs(tmp_path, manifest)["valid"]
+    path = tmp_path / "candidate/rank1.json"
+    document = json.loads(path.read_text())
+    document["recipe_argv"][1] = json.dumps({"row_specialization": "dynamic", "expert_parallel_size": 1})
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="recipe arguments differ"):
+        worker.compare_runs(tmp_path, manifest)
