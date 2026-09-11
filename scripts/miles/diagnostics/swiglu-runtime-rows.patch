@@ -1,0 +1,45 @@
+diff --git a/src/olmo_core/kernels/swiglu.py b/src/olmo_core/kernels/swiglu.py
+index e78a9b54a..8fabeb174 100644
+--- a/src/olmo_core/kernels/swiglu.py
++++ b/src/olmo_core/kernels/swiglu.py
+@@ -22,7 +22,9 @@ _VALID_PREFIX_SWIGLU_NUM_STAGES = 1
+ 
+ if triton is not None:
+ 
+-    @triton.jit
++    # Capacity changes with routed token counts; it must not create a new binary.
++    # Grid size stays dynamic too, including capacities below the grid cap.
++    @triton.jit(do_not_specialize=["rows"])
+     def _swiglu_valid_prefix_kernel(
+         x_ptr,
+         x_stride_0,
+@@ -32,11 +34,10 @@ if triton is not None:
+         out_ptr,
+         out_stride_0,
+         out_stride_1,
+-        rows: tl.constexpr,
++        rows,
+         hidden: tl.constexpr,
+         BLOCK_M: tl.constexpr,
+         BLOCK_N: tl.constexpr,
+-        ROW_PROGRAMS: tl.constexpr,
+         HAS_START_TENSOR: tl.constexpr,
+         START_ROW: tl.constexpr,
+         MATCH_EAGER_ROUNDING: tl.constexpr,
+@@ -49,7 +50,7 @@ if triton is not None:
+         col_idx = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)[None, :]
+         col_mask = col_idx < hidden
+         row_start = start_row_base + pid_m * BLOCK_M
+-        row_stride: tl.constexpr = ROW_PROGRAMS * BLOCK_M
++        row_stride = tl.num_programs(0) * BLOCK_M
+ 
+         while row_start < end_row:
+             row_idx = row_start + tl.arange(0, BLOCK_M)[:, None]
+@@ -269,7 +270,6 @@ def swiglu_valid_prefix(
+         hidden,
+         BLOCK_M=int(block_m),
+         BLOCK_N=int(block_n),
+-        ROW_PROGRAMS=int(row_grid),
+         HAS_START_TENSOR=has_start_tensor,
+         START_ROW=start_row,
+         MATCH_EAGER_ROUNDING=match_eager_rounding,

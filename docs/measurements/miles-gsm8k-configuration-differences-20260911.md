@@ -215,3 +215,10 @@ while writing the replacement before deleting its predecessor. These are forecas
 not observed filesystem sizes. Save timers must include durable model/optimizer write
 and rollout cursor completion, and report pruning separately when available. Do not
 call a model-only write a complete resumable checkpoint.
+
+The500 serving adapters also differ: Core uses olmo-sglang11ae9f6 while Megatron
+uses81a312. Their source difference adds gated per-head QK-gain/scalable-softmax
+support plus validation tools. Both flags are false in this campaign's old SFT
+checkpoint, as verified from its actual HF configuration. These are different serving
+revisions even when the added architecture branches are inactive; no throughput or
+initial-evaluation difference is attributed to that revision change without evidence.

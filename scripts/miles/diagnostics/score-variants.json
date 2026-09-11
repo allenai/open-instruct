@@ -1,0 +1,8 @@
+{
+  "image": "01M279KKMX3RGXB6AYB273DE3C",
+  "parent_core": "290d2ca4521373bef0bf7fe4244673cc79dcc004",
+  "candidate_core": "5bfa0618f5843db37aa0326a3e8d55d19255e00c",
+  "parent_sha256": "edfaa30b2d2b9796289e83f0afb771770bcee01ae8258c338927f469a9db534c",
+  "candidate_sha256": "9e8c934017431bf386120b36b4282a5bfd3098538aab3b8d10a332e680f4e259",
+  "patch_sha256": "7f6227774559b3456dbb167e8a3e6f4ac8188df7b5b329c53dc0a2d8b22f1321"
+}
