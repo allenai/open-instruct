@@ -1,0 +1,126 @@
+# MILES run controls in open-instruct
+
+The public interface remains `python -m open_instruct.miles {plan,validate,train} run.toml`.
+`[miles]` expresses the native MILES/SGLang options using underscores. `[core]`
+expresses the settings owned by the OLMo-core adapter. TOML is our integration's
+format; it was not the preexisting open-instruct GRPO configuration format.
+The Python API is the same `RunConfig(CoreConfig(...), {...})` used by the trial harnesses.
+
+This audit compares `olmo-miles` revision `07887b783ab254577a6656168dc0e0d21aebfe3d`
+with the runtime pinned in this repository. The [complete field inventory](miles-knob-inventory.md)
+accounts for every `MilesSmokeConfig` field, including controls that belong to
+preparation, launch, or diagnostics rather than training arguments. Native parser
+acceptance does not establish backend support or GPU qualification.
+
+## Editing and inspecting a run
+
+```bash
+python -m open_instruct.miles plan run.toml \
+  --set miles.lr=1e-6 \
+  --set miles.num_rollout=100 \
+  --set 'miles.wandb_group="gsm8k-comparison"'
+```
+
+The same repeatable `--set SECTION.KEY=TOML_VALUE` works with `validate` and `train`.
+Overrides apply before validation; repeated assignments to the same key use the
+last value. String values need TOML quotes protected from the shell. Booleans,
+lists, and inline tables use normal TOML syntax. No implicit environment expansion
+or config inheritance is performed. Aliases for a single native setting cannot
+both appear in a config.
+
+`plan` reports argv, explicit MILES settings, resolved Core settings, and placement,
+collection size, optimizer batch size, and the number of updates per collection.
+Unspecified serving GPU counts and collection sizes are reported as null; the
+installed runtime resolves its own defaults. Planning imports no MILES, SGLang,
+CUDA, model code, or dataset. It checks option names, basic types, choices and the
+Core restrictions using a snapshot of the pinned parser. `runtime_validated=false`
+means installed-runtime checks and model-dependent checks have not run.
+`validate` invokes the real MILES parser and its argument/model checks; it does not
+start engines or certify GPU memory fit, numerical equivalence, or training.
+
+Native switches now behave correctly: `use_wandb=false` emits no switch instead
+of inventing `--no-use-wandb`. `offload_train=false` uses the real
+`--no-offload-train`. `grpo_std_normalization=false` emits
+`--disable-grpo-std-normalization`; the existing spelling
+`disable_grpo_std_normalization=true` still works. JSON-valued controls accept
+structured TOML, for example:
+
+```toml
+[miles]
+hf_checkpoint = "/data/hf"
+global_batch_size = 16
+rollout_batch_size = 4
+n_samples_per_prompt = 4
+train_env_vars = { NCCL_DEBUG = "WARN" }
+eval_prompt_data = ["gsm8k", "/data/gsm8k-heldout.jsonl"]
+sglang_cuda_graph_config = { decode = { backend = "full", max_bs = 4 }, prefill = { backend = "disabled" } }
+```
+
+JSON strings remain accepted. List-valued flags such as `eval_prompt_data` remain
+multiple CLI arguments; JSON lists become one JSON argument. Flags using native
+append actions accept a list of occurrences (nested lists for an occurrence that
+itself takes multiple values). Custom actions without an encoder fail explicitly.
+
+## The shape of a run
+
+All names below are under `[miles]` unless prefixed `core.`.
+
+| Dial from olmo-miles | open-instruct control and semantics |
+| --- | --- |
+| Placement | `colocate=false` gives separate trainer/serving GPU allocations; they need not be separate physical nodes. `colocate=true` shares GPUs. **Core stays resident**: trainer offload is unsupported, so this differs from the baseline's alternating offload recipe. |
+| Trainer GPUs / EP | `actor_num_nodes`, `actor_num_gpus_per_node`; `core.expert_parallel_size` must divide their product. Dense Olmo 3 uses its separate Core backend and EP=1. |
+| Inference GPUs / TP / EP | `rollout_num_gpus`, `num_gpus_per_node`, `rollout_num_gpus_per_engine` (TP), `sglang_ep_size`. GPU count per engine determines how many engines fit the allocation. |
+| Synchronous / bounded async | `fully_async`; async requires resident disaggregated engines and positive `core.max_policy_lag`. |
+| Staleness | `core.max_policy_lag` is measured in **optimizer steps**. If supplied, `max_weight_staleness` must agree; it no longer silently gets overwritten with a different value. |
+| Producer capacity | `async_data_buffer_capacity_factor`, `async_max_concurrent_samples`, `async_unused_samples_handler`, `rollout_submission_granularity`. The Core buffer enforces homogeneous policy versions within prompt groups. |
+| Collection / optimizer batch | `rollout_batch_size * n_samples_per_prompt` is samples per collection; `global_batch_size` is samples per optimizer step. Collections must contain whole steps and the lag budget must cover their final step. `num_rollout` counts collections. |
+| Microbatch / recomputation | `micro_batch_size=1`; `core.activation_checkpointing`. Core accumulates unpadded samples; `max_tokens_per_gpu` is rejected because it does not control Core batching. Megatron packing, selective recompute modules and dynamic microbatch selection do not translate directly. |
+| Lengths | Set `rollout_max_response_len`, `rollout_max_context_len`, `rollout_max_prompt_len`, `sglang_context_length`, and `core.max_sequence_length` consistently. The baseline's single context knob populated several of these. |
+| Admission / cache | `sglang_server_concurrency`, `sglang_max_running_requests`, `sglang_mem_fraction_static`, `sglang_max_total_tokens`, `sglang_max_mamba_cache_size`; `sglang_disable_radix_cache=false` enables radix cache. |
+| Serving optimizations | Native `sglang_*` graph, prefill, attention, page-size, speculative decoding and determinism options pass through. Prefer per-phase graph settings; serving compatibility still depends on the pinned SGLang build and architecture. |
+| Router policy | `use_miles_router`, `sglang_router_policy`, `router_cache_threshold`, `router_balance_abs_threshold`, `router_balance_rel_threshold`. |
+
+## Data and objective
+
+| Dial | open-instruct control and semantics |
+| --- | --- |
+| Training input | `prompt_data`, `input_key`, `label_key`, `metadata_key`; `custom_rm_path` selects the reward function. `core.reward_config` configures registered open-instruct verifiers. Prepare prompts with one chat-template application. |
+| Task catalog / recipe / manifest | These remain preparation workflows, not new implicit TOML run sections. Use the datasource harness and prepared immutable JSONL. An olmo-miles `rl_manifest` cannot just be passed to MILES as training data. |
+| Held-out in-loop eval | `eval_prompt_data=[name,path,...]`, `eval_interval`, `skip_eval_before_train=false`, `n_samples_per_eval_prompt`; explicit `eval_temperature`, `eval_top_p`, `eval_top_k`, `eval_max_response_len`, `eval_max_prompt_len`. Retain source indices and dataset hashes for comparisons. |
+| Learning rate / Adam | `lr`, `lr_decay_style`, `lr_decay_iters`, `lr_warmup_iters` or `lr_warmup_fraction`, `min_lr`, `weight_decay`, `adam_beta1`, `adam_beta2`, `adam_eps`, `clip_grad`. Core uses AdamW; changing `optimizer` to another family is rejected. |
+| Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. The baseline uses std normalization off and upper clipping 0.28; these are separate choices, not automatically applied defaults. |
+| Reference KL | Enable `use_kl_loss`, set `kl_loss_coef`, and provide the reference initialization through `ref_load` as required by MILES. This creates a frozen reference and adds scoring. Setting a coefficient alone is not the enable switch. |
+| Off-policy correction | `use_tis`, `tis_clip`, `tis_clip_low`; alternative corrections use `custom_tis_function_path` (the baseline ICEPOP helper is not bundled); explicitly choose the policy-ratio anchor. These are algorithm changes, not just async throughput controls. |
+| Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` requires `use_miles_router=true`. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. |
+
+## Checkpoints, reporting and operational controls
+
+| Dial | open-instruct control and semantics |
+| --- | --- |
+| Save / restart | `save`, `save_interval`, `load`. Saves are synchronous native Core checkpoints with completion manifests and a rollout/policy cursor. `async_save=true` is rejected. Baseline NVRX saves, retention and token-per-expert cadence are not ported. |
+| Final HF export | The actor has HF export support; the public driver does not provide olmo-miles' `export_hf` post-run lifecycle. Do not assume a native save produces a final standalone HF checkpoint. |
+| Auto resume / launch | Beaker placement, priority, min runtime, mounts, compiler caches and restart policy remain launch-script controls. Use `build_image_and_launch.sh --miles`. TOML training configuration does not submit or automatically resume a Beaker job. |
+| Weight publication | `update_weight_buffer_size`, `core.stream_moe_export`, `core.weight_sync_mode` (`flattened` / `per_tensor`); colocation uses IPC. Core publishes every collection (`update_weights_interval=1`); skipping publication is rejected. Megatron disk-delta/p2p/rdt transports and pipeline-depth=2 are rejected rather than silently ignored. |
+| W&B | `use_wandb`, `wandb_project`, `wandb_team`, `wandb_group`, `wandb_run_name`, `wandb_mode`, `wandb_dir`, `wandb_always_use_train_step`; the Core metrics adapter and rollout hooks determine reported metric definitions. |
+| Dashboard / generations | `use_miles_dashboard`, `save_debug_rollout_data` and the custom rollout/eval logging hooks. The existing harnesses retain generations; baseline's sample-count knob and `olmo-miles status` lifecycle are not automatically provided by this entrypoint. |
+| Contract measurements | `core.diagnostic_interval`, `check_weight_update_equal`, `core.max_train_rollout_logprob_abs_diff`. The last is the active-token **mean absolute** gap in the current implementation despite its legacy name; violations fail. Baseline's configurable warn/fail policy is not ported. |
+| Fault tolerance | MILES rollout health/recovery controls pass through (`use_fault_tolerance`, `ft_components`, health intervals/timeouts). The baseline custom retry budget and stage deadline wrapper are not ported. This is not evidence of Core train-actor recovery; fault-injected endurance qualification remains separate. |
+| Debugging | `debug_exit_after_rollout`, retained rollout loading, and scoring/diagnostic probes. `debug_disable_optimizer` and `debug_rollout_only` are rejected by the Core training entrypoint because its driver does not implement those shortcuts. |
+
+Inherited FSDP knobs `gradient_checkpointing`, `attn_implementation`, and
+`warmup_ratio` are rejected with pointers to the corresponding Core/shared settings,
+rather than accepted and ignored.
+
+The adapter owns `train_backend`, `olmo_core_config`, `data_source_path` and
+`custom_async_data_buffer_path`; conflicting overrides are rejected. Custom reward,
+generation and logging extension paths remain available through MILES. These are
+trusted Python objects, not a registration of legacy open-instruct GRPO flags.
+
+## Maintaining the parser contract
+
+`open_instruct/miles/options.json` records the pinned native argparse actions,
+including serving flags. Regenerate it inside the runtime with
+`scripts/miles/snapshot_options.py`, review the diff, and update it with the runtime
+pins. CPU tests check provenance and invalid values; runtime tests compare every
+record and round-trip boolean switches plus representative serving, objective,
+eval and JSON controls. A parser-only pass is not a new GPU training result.

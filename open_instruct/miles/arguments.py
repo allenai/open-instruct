@@ -1,6 +1,7 @@
 """Parse shared MILES optimizer settings and explicit Core backend options."""
 
 import json
+import sys
 
 from miles.backends.fsdp_utils.arguments import load_fsdp_args
 
@@ -37,6 +38,47 @@ def load_core_args(extra_args_provider):
         )
         and value is not None
     }
+    # Validate the same backend constraints for direct native CLI callers, including
+    # options that used to be accepted and silently ignored by this adapter.
+    for key in (
+        "rollout_batch_size",
+        "n_samples_per_prompt",
+        "offload",
+        "fsdp_cpu_offload",
+        "stream_optimizer_state_to_disk",
+        "check_weight_update_selector",
+        "ref_update_interval",
+        "colocate",
+        "offload_rollout",
+        "update_weights_interval",
+        "use_routing_replay",
+        "use_rollout_routing_replay",
+        "use_miles_router",
+        "optimizer",
+        "fp16",
+        "keep_fp32_master",
+        "async_save",
+        "debug_disable_optimizer",
+        "debug_skip_weight_update",
+        "debug_rollout_only",
+        "update_weight_transfer_mode",
+        "colocated_weight_update_pipeline_depth",
+    ):
+        value = getattr(args, key, None)
+        if value is not None:
+            fields[key] = value
+    supplied = {token.partition("=")[0] for token in sys.argv[1:] if token.startswith("--")}
+    for key in (
+        "max_weight_staleness",
+        "data_source_path",
+        "custom_async_data_buffer_path",
+        "gradient_checkpointing",
+        "attn_implementation",
+        "warmup_ratio",
+        "max_tokens_per_gpu",
+    ):
+        if "--" + key.replace("_", "-") in supplied:
+            fields[key] = getattr(args, key)
     RunConfig(core, fields).validate()
     args.olmo_core = core
     args.compress_ratios = None

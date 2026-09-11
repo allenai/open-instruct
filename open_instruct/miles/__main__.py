@@ -15,12 +15,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "validate", "train"))
     parser.add_argument("config", type=Path)
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=VALUE",
+        help="Override a setting with a TOML value; repeatable, quote strings",
+    )
     options = parser.parse_args()
-    config = RunConfig.load(options.config)
-    arguments = config.arguments()
+    config = RunConfig.load(options.config, options.overrides)
     if options.command == "plan":
-        print(json.dumps({"argv": arguments, "runtime_validated": False}, indent=2))
+        print(json.dumps(config.plan(), indent=2))
         return
+    arguments = config.arguments()
     # Runtime-only imports keep planning usable on CPU-only submitting hosts.
     native = importlib.import_module("miles.utils.arguments")
     sys.argv = [sys.argv[0], *arguments]

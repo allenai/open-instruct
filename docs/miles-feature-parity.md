@@ -1,5 +1,8 @@
 # MILES/Core defaults and feature parity
 
+For the current CLI/API surface, overrides and slide-level run controls, see the
+[run-control guide](miles-run-controls.md) and [complete knob inventory](miles-knob-inventory.md).
+
 Current experiment status and the restored matched Megatron comparison are tracked
 in [the active-work ledger](miles-active-work.md). The architecture-specific hero
 port is documented in [hero support](miles-hero-support.md).
