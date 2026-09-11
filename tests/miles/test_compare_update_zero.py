@@ -145,6 +145,14 @@ def test_separate_retry_roots_full_campaign(tmp_path):
     assert all(row["all_activation_values_exact"] for row in report["comparisons"])
     assert all(row["same_output_ids"] for row in report["observer_controls"])
 
+    (roots["core"] / "cleanup.json").write_text(json.dumps({"completed": False, "errors": ["TimeoutError()"]}))
+    with pytest.raises(ValueError, match="cleanup failed"):
+        compare.compare_campaign(tmp_path / "unused", core_root=roots["core"], megatron_root=roots["megatron"])
+    evidence = compare.compare_campaign(
+        tmp_path / "unused", core_root=roots["core"], megatron_root=roots["megatron"], evidence_only=True
+    )
+    assert evidence["valid"] and evidence["captured_phases_complete"] and not evidence["full_protocol_complete"]
+    assert not evidence["cleanup_results"]["core"]["completed"]
     for root in roots.values():
         (root / "probe-complete.json").unlink()
         (root / "cleanup.json").unlink()

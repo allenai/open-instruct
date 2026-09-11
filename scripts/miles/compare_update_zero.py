@@ -250,7 +250,8 @@ def response_control(directory, phase, case_id):
     }
 
 
-def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False):
+def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False, evidence_only=False):
+    require(not (hf_only and evidence_only), "Choose one limited evidence mode")
     root = Path(root)
     directories = {
         "core": Path(core_root) if core_root else root / "core",
@@ -263,6 +264,7 @@ def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False)
         len(cases) == 4 and len({case["case_id"] for case in cases}) == 4, "Expected four unique fixed-prefix cases"
     )
     phases = ("hf",) if hf_only else PHASES
+    cleanup_results = {}
     for backend in () if hf_only else BACKENDS:
         complete = json.loads((directories[backend] / "probe-complete.json").read_text())
         cleanup = json.loads((directories[backend] / "cleanup.json").read_text())
@@ -270,7 +272,9 @@ def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False)
             complete["completed"] and complete["optimizer_calls"] == 0 and complete["initial_publications"] == 1,
             f"{backend}: incomplete zero-update protocol",
         )
-        require(cleanup["completed"], f"{backend}: cleanup failed")
+        cleanup_results[backend] = cleanup
+        if not evidence_only:
+            require(cleanup["completed"], f"{backend}: cleanup failed")
     reports, observers = [], []
     # Load one case at a time to keep CPU memory bounded below full-model size.
     for case in cases:
@@ -317,8 +321,13 @@ def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False)
         "valid": True,
         "validity_scope": "HF prefill only; full protocol incomplete"
         if hf_only
+        else "Capture evidence only; cleanup failures retained and no clean-protocol success asserted"
+        if evidence_only
         else "Complete verified observations, not a numerical-equivalence verdict",
-        "full_protocol_complete": not hf_only,
+        "full_protocol_complete": not hf_only and not evidence_only,
+        "captured_phases_complete": not hf_only,
+        "evidence_only": evidence_only,
+        "cleanup_results": cleanup_results,
         "backend_directories": {name: str(path) for name, path in directories.items()},
         "interpretation": "Observed fixed-prefix prefill comparisons. Exact equality here does not establish equivalence of historical autoregressive decode, batching, CUDA graph execution, or training. Tracing introduces CPU synchronization; unarmed controls and repeated prefixes quantify only the observed cases.",
         "manifests": manifests,
@@ -353,9 +362,18 @@ def main():
         action="store_true",
         help="Strict limited scope: four HF cases and repeats; no full-protocol claim",
     )
+    parser.add_argument(
+        "--evidence-only",
+        action="store_true",
+        help="Require all captured phases but retain cleanup failures without claiming protocol success",
+    )
     args = parser.parse_args()
     report = compare_campaign(
-        args.root, core_root=args.core_root, megatron_root=args.megatron_root, hf_only=args.hf_only
+        args.root,
+        core_root=args.core_root,
+        megatron_root=args.megatron_root,
+        hf_only=args.hf_only,
+        evidence_only=args.evidence_only,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")

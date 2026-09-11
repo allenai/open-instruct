@@ -32,3 +32,18 @@ def test_limited_hf_mode_is_explicit_in_remote_command():
         launch.IMAGE, launch.ROOT / "update-zero-v2/core", launch.ROOT / "update-zero-v1/megatron", hf_only=True
     )["tasks"][0]
     assert "--hf-only" in task["arguments"][0]
+
+
+def test_evidence_only_cli_keeps_failure_scope_explicit():
+    task = launch.specification(
+        launch.IMAGE, launch.ROOT / "update-zero-v2/core", launch.ROOT / "update-zero-v3/megatron", evidence_only=True
+    )["tasks"][0]
+    assert "--evidence-only" in task["arguments"][0]
+    with pytest.raises(ValueError):
+        launch.specification(
+            launch.IMAGE,
+            launch.ROOT / "update-zero-v2/core",
+            launch.ROOT / "update-zero-v3/megatron",
+            hf_only=True,
+            evidence_only=True,
+        )

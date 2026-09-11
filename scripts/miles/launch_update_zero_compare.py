@@ -13,7 +13,9 @@ ROOT = Path("/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/202609
 IMAGE = "01M26N80T0V9PREQTS87J849P8"
 
 
-def specification(image, core_root, megatron_root, *, hf_only=False):
+def specification(image, core_root, megatron_root, *, hf_only=False, evidence_only=False):
+    if hf_only and evidence_only:
+        raise ValueError("Choose one limited evidence mode")
     if image != IMAGE:
         raise ValueError("Use the original qualified Core runtime for the CPU comparison")
     roots = {"core": Path(core_root), "megatron": Path(megatron_root)}
@@ -25,6 +27,7 @@ def specification(image, core_root, megatron_root, *, hf_only=False):
     provenance = {
         "image": image,
         "hf_only": hf_only,
+        "evidence_only": evidence_only,
         "compare_source_sha256": hashlib.sha256(source).hexdigest(),
         "backend_roots": {name: str(path) for name, path in roots.items()},
     }
@@ -51,6 +54,7 @@ def specification(image, core_root, megatron_root, *, hf_only=False):
                         "/output/comparison.json",
                     ]
                     + (["--hf-only"] if hf_only else [])
+                    + (["--evidence-only"] if evidence_only else [])
                 ),
             ]
         )
@@ -83,8 +87,11 @@ def main():
     parser.add_argument("--megatron-root", default=str(ROOT / "update-zero-20260911-v1/megatron"))
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument("--hf-only", action="store_true")
+    parser.add_argument("--evidence-only", action="store_true")
     args = parser.parse_args()
-    document = specification(args.image, args.core_root, args.megatron_root, hf_only=args.hf_only)
+    document = specification(
+        args.image, args.core_root, args.megatron_root, hf_only=args.hf_only, evidence_only=args.evidence_only
+    )
     if args.render_only:
         print(json.dumps(document, indent=2))
         return
