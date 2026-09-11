@@ -231,7 +231,7 @@ def response_control(directory, phase, case_id):
     }
 
 
-def compare_campaign(root, *, core_root=None, megatron_root=None):
+def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False):
     root = Path(root)
     directories = {
         "core": Path(core_root) if core_root else root / "core",
@@ -243,7 +243,8 @@ def compare_campaign(root, *, core_root=None, megatron_root=None):
     require(
         len(cases) == 4 and len({case["case_id"] for case in cases}) == 4, "Expected four unique fixed-prefix cases"
     )
-    for backend in BACKENDS:
+    phases = ("hf",) if hf_only else PHASES
+    for backend in () if hf_only else BACKENDS:
         complete = json.loads((directories[backend] / "probe-complete.json").read_text())
         cleanup = json.loads((directories[backend] / "cleanup.json").read_text())
         require(
@@ -258,9 +259,9 @@ def compare_campaign(root, *, core_root=None, megatron_root=None):
         loaded = {
             (backend, phase): load_capture(directories[backend], f"{phase}-{case_id}-capture", case["input_ids"])
             for backend in BACKENDS
-            for phase in PHASES
+            for phase in phases
         }
-        for phase in PHASES:
+        for phase in phases:
             reports.append(
                 {
                     "comparison": "cross_backend",
@@ -270,15 +271,16 @@ def compare_campaign(root, *, core_root=None, megatron_root=None):
                 }
             )
         for backend in BACKENDS:
-            reports.append(
-                {
-                    "comparison": "before_after_publication",
-                    "backend": backend,
-                    "case_id": case_id,
-                    **compare_captures(loaded[backend, "hf"], loaded[backend, "published"]),
-                }
-            )
-            for phase in PHASES:
+            if not hf_only:
+                reports.append(
+                    {
+                        "comparison": "before_after_publication",
+                        "backend": backend,
+                        "case_id": case_id,
+                        **compare_captures(loaded[backend, "hf"], loaded[backend, "published"]),
+                    }
+                )
+            for phase in phases:
                 observers.append({"backend": backend, **response_control(directories[backend], phase, case_id)})
                 if case is cases[0]:
                     repeated = load_capture(directories[backend], f"{phase}-{case_id}-repeat", case["input_ids"])
@@ -294,7 +296,10 @@ def compare_campaign(root, *, core_root=None, megatron_root=None):
     return {
         "schema_version": 1,
         "valid": True,
-        "validity_scope": "Complete verified observations, not a numerical-equivalence verdict",
+        "validity_scope": "HF prefill only; full protocol incomplete"
+        if hf_only
+        else "Complete verified observations, not a numerical-equivalence verdict",
+        "full_protocol_complete": not hf_only,
         "backend_directories": {name: str(path) for name, path in directories.items()},
         "interpretation": "Observed fixed-prefix prefill comparisons. Exact equality here does not establish equivalence of historical autoregressive decode, batching, CUDA graph execution, or training. Tracing introduces CPU synchronization; unarmed controls and repeated prefixes quantify only the observed cases.",
         "manifests": manifests,
@@ -311,6 +316,7 @@ def compare_campaign(root, *, core_root=None, megatron_root=None):
                     "probe-complete.json",
                     "cleanup.json",
                 )
+                if not hf_only or (directories[backend] / name).is_file()
             }
             for backend in BACKENDS
         },
@@ -323,8 +329,15 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--core-root", type=Path, help="Separate Core retry directory")
     parser.add_argument("--megatron-root", type=Path, help="Separate original Megatron directory")
+    parser.add_argument(
+        "--hf-only",
+        action="store_true",
+        help="Strict limited scope: four HF cases and repeats; no full-protocol claim",
+    )
     args = parser.parse_args()
-    report = compare_campaign(args.root, core_root=args.core_root, megatron_root=args.megatron_root)
+    report = compare_campaign(
+        args.root, core_root=args.core_root, megatron_root=args.megatron_root, hf_only=args.hf_only
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     print(json.dumps({"valid": True, "comparisons": len(report["comparisons"]), "output": str(args.output)}))

@@ -144,3 +144,15 @@ def test_separate_retry_roots_full_campaign(tmp_path):
     assert len(report["observer_controls"]) == 16
     assert all(row["all_activation_values_exact"] for row in report["comparisons"])
     assert all(row["same_output_ids"] for row in report["observer_controls"])
+
+    for root in roots.values():
+        (root / "probe-complete.json").unlink()
+        (root / "cleanup.json").unlink()
+    with pytest.raises(FileNotFoundError):
+        compare.compare_campaign(tmp_path / "unused", core_root=roots["core"], megatron_root=roots["megatron"])
+    limited = compare.compare_campaign(
+        tmp_path / "unused", core_root=roots["core"], megatron_root=roots["megatron"], hf_only=True
+    )
+    assert limited["valid"] and not limited["full_protocol_complete"]
+    assert len(limited["comparisons"]) == 6 and len(limited["observer_controls"]) == 8
+    assert all(row["comparison"] != "before_after_publication" for row in limited["comparisons"])

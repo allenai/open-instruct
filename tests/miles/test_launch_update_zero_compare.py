@@ -25,3 +25,10 @@ def test_rejects_changed_image_or_unrelated_paths():
         launch.specification(launch.IMAGE, "/tmp/unrelated/core", mega)
     with pytest.raises(ValueError):
         launch.specification(launch.IMAGE, core, launch.ROOT / "../outside/megatron")
+
+
+def test_limited_hf_mode_is_explicit_in_remote_command():
+    task = launch.specification(
+        launch.IMAGE, launch.ROOT / "update-zero-v2/core", launch.ROOT / "update-zero-v1/megatron", hf_only=True
+    )["tasks"][0]
+    assert "--hf-only" in task["arguments"][0]
