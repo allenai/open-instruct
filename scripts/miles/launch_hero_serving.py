@@ -10,7 +10,9 @@ from pathlib import Path
 from scripts.miles.launch_hero_conversion import HF
 
 
-def specification(image, *, hf=HF, diagnose_core=False, mode_matrix=False):
+def specification(image, *, hf=HF, diagnose_core=False, mode_matrix=False, hf_core_moe_reference=False):
+    if hf_core_moe_reference and not diagnose_core:
+        raise ValueError("The Core-compatible HF MoE control is only a layerwise diagnostic")
     if diagnose_core and mode_matrix:
         raise ValueError("Choose one diagnostic at a time")
     tool = "diagnose_hero_core.py" if diagnose_core else "qualify_hero_serving.py"
@@ -22,12 +24,14 @@ def specification(image, *, hf=HF, diagnose_core=False, mode_matrix=False):
     )
     if mode_matrix:
         extra = "--diagnostic-mode-matrix"
+    reference_environment = "export OLMO_HF_MOE_CORE_REFERENCE=1" if hf_core_moe_reference else ""
     command = f"""set -euo pipefail
 cd /opt/core-rl
 mkdir -p /output
 export TOKENIZERS_PARALLELISM=false
 export HF_HOME=/tmp/hf-cache
 export SGLANG_EXTERNAL_MODEL_PACKAGE=olmo_sglang.models
+{reference_environment}
 cp /opt/core-rl/sources/runtime.lock.json /output/
 python -c 'import torch; assert "B300" in torch.cuda.get_device_name(); print(torch.cuda.get_device_name())'
 python /opt/core-rl/sources/olmo-sglang/tools/{tool} --model {shlex.quote(hf)} --output /output/{output} --recurrent-hf-prefill --logprob-atol 0.1 {extra}
@@ -35,7 +39,11 @@ python /opt/core-rl/sources/olmo-sglang/tools/{tool} --model {shlex.quote(hf)} -
     return {
         "version": "v2",
         "description": (
-            "Hero layerwise HF/Core diagnosis after failed probability gate; no training"
+            (
+                "Hero layerwise Core-compatible HF MoE control; diagnosis only"
+                if hf_core_moe_reference
+                else "Hero layerwise HF/Core diagnosis after failed probability gate; no training"
+            )
             if diagnose_core
             else "Hero SGLang graph/chunk matrix after failed probability gate; no training"
             if mode_matrix
@@ -71,10 +79,17 @@ def main():
     diagnostics = parser.add_mutually_exclusive_group()
     diagnostics.add_argument("--diagnose-core", action="store_true")
     diagnostics.add_argument("--mode-matrix", action="store_true")
+    parser.add_argument("--hf-core-moe-reference", action="store_true")
     args = parser.parse_args()
     document = (
         json.dumps(
-            specification(args.image, hf=args.hf, diagnose_core=args.diagnose_core, mode_matrix=args.mode_matrix),
+            specification(
+                args.image,
+                hf=args.hf,
+                diagnose_core=args.diagnose_core,
+                mode_matrix=args.mode_matrix,
+                hf_core_moe_reference=args.hf_core_moe_reference,
+            ),
             indent=2,
         )
         + "\n"
