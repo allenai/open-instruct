@@ -44,7 +44,7 @@
     }
   },
   "outputs": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v1",
-  "next": "Compare Core v2 and Megatron v3 retained phases in explicit evidence-only mode; preserve cleanup failure separately from complete observations.",
+  "next": "Matched independent Core HF serving twins isolate fresh-process variability; no trainer-publication discrepancy observed in retained prefixes.",
   "core_attempt1": {
     "experiment": "01M27ENY7T955XE1W116D7M4BM",
     "status": "failed before model initialization",
@@ -84,10 +84,14 @@
     "job": "01M27GZKVMAGT19XHF614SVR4Q",
     "result": "01M27GZKRBPJ32PFQJK5092MNF",
     "source": "c7d288081",
-    "status": "scheduled at 2026-09-11T06:03:15.294108Z",
+    "status": "exited 0; all20 fixed-prefix comparisons and16 observer controls verified, Core cleanup failure retained",
     "mode": "evidence-only; all phases required, Core cleanup failure retained",
     "cluster": "ai2/saturn",
     "cpu_count": 8,
-    "memory": "32 GiB"
+    "memory": "32 GiB",
+    "exit_code": 0,
+    "full_protocol_complete": false,
+    "captured_phases_complete": true,
+    "summary": "miles-update-zero-full-comparison-20260911.json"
   }
 }

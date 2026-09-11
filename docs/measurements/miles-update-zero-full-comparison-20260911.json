@@ -1,0 +1,891 @@
+{
+  "schema_version": 1,
+  "experiment": "01M27GZKR2CXXZ7V0FBE2QCK07",
+  "job": "01M27GZKVMAGT19XHF614SVR4Q",
+  "result": "01M27GZKRBPJ32PFQJK5092MNF",
+  "job_status": {
+    "created": "2026-09-11T06:02:53.056912Z",
+    "scheduled": "2026-09-11T06:03:15.294108Z",
+    "started": "2026-09-11T06:06:55.784228Z",
+    "exited": "2026-09-11T06:07:21.357098Z",
+    "finalized": "2026-09-11T06:07:41.085Z",
+    "exitCode": 0,
+    "idleSince": "2026-09-11T06:07:21.238522Z",
+    "ready": "2026-09-11T06:06:54.599779Z"
+  },
+  "actual_allocation": {
+    "cpuCount": 30.375,
+    "gpus": [
+      "GPU-c4f52ec6-0ca8-ae62-302b-91e98db0c165"
+    ],
+    "memory": "125223628288 B"
+  },
+  "requested_resources": {
+    "cpuCount": 8,
+    "memory": "32 GiB",
+    "sharedMemory": "4 GiB"
+  },
+  "source": "c7d288081",
+  "compare_launch": {
+    "image": "01M26N80T0V9PREQTS87J849P8",
+    "hf_only": false,
+    "evidence_only": true,
+    "compare_source_sha256": "2aeb12caa7750d3a1b21a2fceb1d546d89c4db2c75d4c6dd594722c9a13e4b91",
+    "backend_roots": {
+      "core": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v2/core",
+      "megatron": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v3/megatron"
+    }
+  },
+  "valid": true,
+  "validity_scope": "Capture evidence only; cleanup failures retained and no clean-protocol success asserted",
+  "full_protocol_complete": false,
+  "captured_phases_complete": true,
+  "cleanup_results": {
+    "core": {
+      "completed": false,
+      "errors": [
+        "TimeoutError()"
+      ]
+    },
+    "megatron": {
+      "completed": true,
+      "errors": []
+    }
+  },
+  "participants": {
+    "left": {
+      "backend": "core",
+      "image": "01M26N80T0V9PREQTS87J849P8",
+      "campaign": "update-zero-20260911-v2",
+      "directory": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v2/core"
+    },
+    "right": {
+      "backend": "megatron",
+      "image": "01M26TT1EQTB84RV0MM650W0YE",
+      "campaign": "update-zero-20260911-v3",
+      "directory": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v3/megatron"
+    }
+  },
+  "report": {
+    "local_path": "/tmp/update-zero-full-compare-results/comparison.json",
+    "sha256": "9e3f58d2a651058ab80c273b8d3e5bfed38385e105f73e420c1080acef9ad1c3",
+    "bytes": 258673821
+  },
+  "comparisons": [
+    {
+      "comparison": "cross_backend",
+      "case_id": "q341-first-divergence",
+      "phase": "hf",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.25,
+      "mean_assignment_agreement": 0.9701717216770741,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 1.9073486328125e-06,
+        "mean_abs": 4.979281579646037e-10,
+        "relative_l2": 0.0001297125210557933
+      }
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q341-first-divergence",
+      "phase": "published",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.25,
+      "mean_assignment_agreement": 0.9701717216770741,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 1.9073486328125e-06,
+        "mean_abs": 4.979281579646037e-10,
+        "relative_l2": 0.0001297125210557933
+      }
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q341-first-divergence",
+      "phase": null,
+      "backend": "core",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "repeated_prefix",
+      "case_id": "q341-first-divergence",
+      "phase": "hf",
+      "backend": "core",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "repeated_prefix",
+      "case_id": "q341-first-divergence",
+      "phase": "published",
+      "backend": "core",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q341-first-divergence",
+      "phase": null,
+      "backend": "megatron",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "repeated_prefix",
+      "case_id": "q341-first-divergence",
+      "phase": "hf",
+      "backend": "megatron",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "repeated_prefix",
+      "case_id": "q341-first-divergence",
+      "phase": "published",
+      "backend": "megatron",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q975-first-divergence",
+      "phase": "hf",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          2011
+        ],
+        "right": [
+          706
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.5,
+      "mean_assignment_agreement": 0.9745650737722968,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 1.9073486328125e-06,
+        "mean_abs": 1.315421845523209e-10,
+        "relative_l2": 7.876880895042882e-05
+      }
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q975-first-divergence",
+      "phase": "published",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          2011
+        ],
+        "right": [
+          706
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.5,
+      "mean_assignment_agreement": 0.9745650737722968,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 1.9073486328125e-06,
+        "mean_abs": 1.315421845523209e-10,
+        "relative_l2": 7.876880895042882e-05
+      }
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q975-first-divergence",
+      "phase": null,
+      "backend": "core",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          2011
+        ],
+        "right": [
+          2011
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q975-first-divergence",
+      "phase": null,
+      "backend": "megatron",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          706
+        ],
+        "right": [
+          706
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q1039-first-divergence",
+      "phase": "hf",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          358
+        ],
+        "right": [
+          6227
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.859375,
+      "mean_assignment_agreement": 0.9764050675962928,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 9.5367431640625e-07,
+        "mean_abs": 1.178938823108587e-10,
+        "relative_l2": 6.70122878886587e-05
+      }
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q1039-first-divergence",
+      "phase": "published",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          358
+        ],
+        "right": [
+          6227
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.859375,
+      "mean_assignment_agreement": 0.9764050675962928,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 9.5367431640625e-07,
+        "mean_abs": 1.178938823108587e-10,
+        "relative_l2": 6.70122878886587e-05
+      }
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q1039-first-divergence",
+      "phase": null,
+      "backend": "core",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          358
+        ],
+        "right": [
+          358
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q1039-first-divergence",
+      "phase": null,
+      "backend": "megatron",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          6227
+        ],
+        "right": [
+          6227
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q605-first-divergence",
+      "phase": "hf",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          13
+        ],
+        "right": [
+          13
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.375,
+      "mean_assignment_agreement": 0.9726012562269872,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 9.5367431640625e-07,
+        "mean_abs": 1.7401925826258472e-10,
+        "relative_l2": 7.657519752681178e-05
+      }
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q605-first-divergence",
+      "phase": "published",
+      "backend": null,
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          13
+        ],
+        "right": [
+          13
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": false,
+      "next_token_logits_max_abs": 0.375,
+      "mean_assignment_agreement": 0.9726012562269872,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0,
+      "earliest_activation_error": {
+        "shape": [
+          144,
+          1280
+        ],
+        "left_dtype": "torch.bfloat16",
+        "right_dtype": "torch.bfloat16",
+        "dtype_equal": true,
+        "exact_values": false,
+        "max_abs": 9.5367431640625e-07,
+        "mean_abs": 1.7401925826258472e-10,
+        "relative_l2": 7.657519752681178e-05
+      }
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q605-first-divergence",
+      "phase": null,
+      "backend": "core",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          13
+        ],
+        "right": [
+          13
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    },
+    {
+      "comparison": "before_after_publication",
+      "case_id": "q605-first-divergence",
+      "phase": null,
+      "backend": "megatron",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "changed_source_hashes": {},
+      "changed_execution_controls": {},
+      "changed_parameter_dtype_or_shape": {},
+      "next_token_argmax": {
+        "left": [
+          13
+        ],
+        "right": [
+          13
+        ]
+      },
+      "autotune_observations": {
+        "available_both": false
+      },
+      "all_router_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "mean_assignment_agreement": 1.0,
+      "canonical_set_mismatches": 0,
+      "stability_bound_violations": 0
+    }
+  ],
+  "observer_controls": [
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "published",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "published",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "published",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "published",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "published",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "published",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "published",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "published",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    }
+  ],
+  "limitations": "Observed fixed-prefix prefill comparisons. Exact equality here does not establish equivalence of historical autoregressive decode, batching, CUDA graph execution, or training. Tracing introduces CPU synchronization; unarmed controls and repeated prefixes quantify only the observed cases."
+}
