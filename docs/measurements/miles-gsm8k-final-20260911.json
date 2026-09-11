@@ -12529,5 +12529,12 @@
     "summary": "miles-core-score-profile-20260911/summary.json",
     "report": "miles-core-score-profile-20260911.md",
     "scope": "Initial weights and one retained rollout; zero optimizer updates. Not an online timing attribution."
+  },
+  "aligned_weight_publication_measurements": {
+    "artifact": "miles-gsm8k-weight-sync-20260911.json",
+    "completed_optimizer_steps": "5..99",
+    "core_mean_seconds": 3.7278427042655253,
+    "megatron_mean_seconds": 5.8844085617285025,
+    "scope": "Core total_seconds versus Megatron export_post_pause_total_s; component scopes are retained in the artifact."
   }
 }

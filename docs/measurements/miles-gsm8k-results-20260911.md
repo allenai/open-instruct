@@ -69,7 +69,7 @@ There are no missing/conflicting timing records in either parser output.
 | Rollout collection, mean |36.788s |39.527s |Includes generation, reward work, debug dumping |
 | Pre-update scoring |44.328s |4.182s |Core is a broader collection-end→score-contract boundary; Megatron is its native log-prob timer |
 | Optimizer/training timer, mean |6.170s |17.384s |Both exclude preceding scoring; instrumentation/rank reductions differ |
-| Weight publication, mean |3.741s |5.892s |Core post-update publications for warm rollouts; backend-specific scopes |
+| Weight publication, mean |3.728s |5.884s |Matched completed steps5–99; backend-specific scopes |
 | Scheduled→exit allocation |198.70min |180.74min |Includes startup, evaluations, teardown; no queue time |
 | Allocated GPU-hours |9.935 |9.037 |Three GPUs throughout |
 
@@ -88,10 +88,10 @@ at initial weights, while training sees changing lengths and routes. The
 historical interval must not be labeled pure GPU time or pure orchestration time.
 Rank-local compilation durations also cannot be added across concurrent ranks.
 
-The structured comparison also retains the95 individual Core score/optimizer/
-publication boundaries. Its generic parser publication summary includes version5;
-the table uses corrected post-update versions6–100 for rollouts5–99, explicitly
-recorded in `corrected_publication_warm_indices`.
+The structured comparison retains the95 individual Core score/optimizer/
+publication boundaries. The publication table separately aligns completed optimizer
+steps5–99 in both systems, correcting their different policy-version conventions;
+[all aligned component measurements](miles-gsm8k-weight-sync-20260911.json) are retained.
 
 Phase means are diagnostic, not additive. They use different boundaries and some
 use different index conventions; subtracting them from a cycle mean does not
@@ -114,6 +114,36 @@ integrity on both ranks, with a222GB native checkpoint and about532s for the
 save/reload interval. That interval includes optimizer reload and is not pure disk
 write throughput. Independent fresh-start trajectories differed; see the
 [durability report](miles-core-durable-full-20260911.json).
+
+The instrumented warm trace further bounds scoring work: each rank made eight
+forward calls; log-prob helper CPU ranges totaled only7.7–8.2ms. Non-NCCL GPU
+activity occupied a union of about171ms per rank; NCCL kernel intervals were
+asymmetric (586ms versus25ms), which can include waiting for the other rank.
+The instrumented pass took1.752s versus1.243s without tracing, so its host gaps
+cannot be extrapolated directly into normal orchestration cost. Full interval
+unions and overlap definitions are in the scorer profile.
+
+## Weight synchronization detail
+
+Both arms published the same29,669 tensors, totaling37.03GB (34.49GiB), each time.
+They streamed tensors in HF-compatible names/layouts using flattened NCCL buckets
+of approximately1GiB. Core used35 transport buckets and Megatron36. This is live
+GPU weight publication; neither arm rewrote an HF checkpoint to disk per update.
+Both were on one node, so these timings do not qualify cross-node RDMA throughput.
+
+For matched completed updates5–99, Core's export/layout/gather interval averaged
+0.436s, and its combined bucket transport and serving-load interval3.222s. Megatron
+recorded1.103s gathering,0.252s conversion,0.259s metadata broadcast, and3.409s
+waiting for engine loading. Its0.019s NCCL broadcast timer measures the launch
+side, not complete transfer latency; the engine wait includes asynchronous work.
+The telemetry also reports9,762 trainer gather collectives versus36 serving
+transport collectives per publication. Those are different operations, and should
+not be described as9,762 network sends to SGLang. The remaining baseline component
+time is explicitly retained as unattributed, not relabeled as orchestration.
+
+Weight publication is faster in Core in this comparison and is a small part of
+its91s cycle. The measured mapping/conversion work provides no support for the
+concern that HF-format conversion is the dominant cost here.
 
 ## What was matched, and what was not
 
