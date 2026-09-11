@@ -127,7 +127,10 @@ async def train(args):
             except BaseException as error:
                 cleanup_error = cleanup_error or error
                 logger.exception("Core RL component cleanup failed")
-        await startup_cache.finish(args, success=failure is None and cleanup_error is None)
+        try:
+            await startup_cache.finish(args, success=failure is None and cleanup_error is None)
+        except Exception:
+            logger.exception("Optional compiler-cache finalization failed")
         finish_tracking()
         if failure is None and cleanup_error is not None:
             raise cleanup_error

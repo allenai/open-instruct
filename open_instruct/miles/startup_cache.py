@@ -79,6 +79,9 @@ def prepare(args):
             "update_weight_transfer_mode",
         }
     }
+    for key in tuple(miles):
+        if any(secret in key for secret in ("api_key", "password", "secret", "access_token", "auth_token")):
+            del miles[key]
     report_dir = shared / "runs" / uuid.uuid4().hex
     report_dir.mkdir(parents=True)
     args.olmo_core_startup_cache = dict(
@@ -102,10 +105,15 @@ def worker_runtime_env(args, slot, env_vars):
         return {"env_vars": env_vars}
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", slot):
         raise ValueError("Invalid cache worker slot")
-    return {
+    hook = "open_instruct.miles.startup_cache.setup_worker"
+    runtime_env = {
         "env_vars": {**env_vars, ENV: json.dumps({**policy, "slot": slot})},
-        "worker_process_setup_hook": "open_instruct.miles.startup_cache.setup_worker",
+        "worker_process_setup_hook": hook,
     }
+    # Ray 2.58 translates this option for ray.init(), but not actor.options().
+    # Use the pinned Ray helper to encode its worker-bootstrap environment key.
+    setup_hook = importlib.import_module("ray._private.runtime_env.setup_hook")
+    return setup_hook.export_setup_func_module(runtime_env, hook)
 
 
 def observe_triton(local):

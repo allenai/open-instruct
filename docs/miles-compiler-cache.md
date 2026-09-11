@@ -121,3 +121,11 @@ per arm. Other compiler families remain isolated. Both arms must complete, all
 three workers must consume restored Triton groups, and compiler writes must fall.
 HF read time is reported separately because filesystem page-cache warming is a
 confound in a same-allocation comparison.
+
+The real local Ray/spawn probe passed after adapting the pinned Ray 2.58
+actor-options setup-hook translation: exact vector-add output in both processes,
+nine compiler writes cold and zero restored, an actual restored group hit, and
+unchanged republished generation. See [the retained probe](measurements/miles-startup-ray-probe-20260911.json).
+This tests the actual actor environment and spawned-child observation boundary,
+not full-model speed. The first full-model submission `01M2954XAX1ETXNSQN14HT13KX`
+was stopped while queued, before allocation, to include this fix.

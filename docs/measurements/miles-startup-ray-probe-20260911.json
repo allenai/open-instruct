@@ -1,0 +1,84 @@
+{
+  "scope": "Real Ray actors and spawned Python children; tiny Triton vector-add, not training speedup",
+  "cache": {
+    "cold": {
+      "slot": "train-rank0",
+      "restore": {
+        "family": "triton",
+        "status": "cold"
+      },
+      "setup_seconds": 1.016065970994532,
+      "files_after": 9,
+      "activity": {
+        "put": 9,
+        "group_miss": 1
+      },
+      "publish": {
+        "family": "triton",
+        "status": "published",
+        "generation": "07f398ae30532da9a72764d6fca20b26af0a67eea4429131c7adfb345e8000b0",
+        "local_bytes": 83648,
+        "seconds": 0.0064201271161437035
+      }
+    },
+    "restored": {
+      "slot": "train-rank0",
+      "restore": {
+        "archive_bytes": 29258,
+        "family": "triton",
+        "generation": "07f398ae30532da9a72764d6fca20b26af0a67eea4429131c7adfb345e8000b0",
+        "local_bytes": 83648,
+        "relocated_groups": 1,
+        "seconds": 0.0029313801787793636,
+        "status": "hit"
+      },
+      "setup_seconds": 0.9873187732882798,
+      "files_after": 9,
+      "activity": {
+        "group_hit": 1
+      },
+      "publish": {
+        "family": "triton",
+        "status": "unchanged",
+        "generation": "07f398ae30532da9a72764d6fca20b26af0a67eea4429131c7adfb345e8000b0",
+        "local_bytes": 83648,
+        "seconds": 0.007402703166007996
+      }
+    }
+  },
+  "kernels": {
+    "cold": {
+      "schema_version": 1,
+      "numerically_exact": true,
+      "first_launch_seconds": 0.542683376930654,
+      "compiler_writes": [
+        "cuda_utils.cpython-312-x86_64-linux-gnu.so",
+        "add_kernel.source",
+        "add_kernel.ttir",
+        "add_kernel.ttgir",
+        "add_kernel.llir",
+        "add_kernel.ptx",
+        "add_kernel.cubin",
+        "add_kernel.json",
+        "__grp__add_kernel.json"
+      ],
+      "expected_compiler_writes": "present",
+      "triton_version": "3.7.1",
+      "torch_version": "2.13.0+cu130",
+      "gpu": "NVIDIA GeForce RTX 4090",
+      "valid": true
+    },
+    "restored": {
+      "schema_version": 1,
+      "numerically_exact": true,
+      "first_launch_seconds": 0.26078057987615466,
+      "compiler_writes": [],
+      "expected_compiler_writes": "absent",
+      "triton_version": "3.7.1",
+      "torch_version": "2.13.0+cu130",
+      "gpu": "NVIDIA GeForce RTX 4090",
+      "valid": true
+    }
+  },
+  "startup_cache_sha256": "9c10799c087b9074f7107d45f344101b6a22751df1df57f0cf4020d1f7ce9ccd"
+}

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from ray._private.ray_constants import WORKER_PROCESS_SETUP_HOOK_ENV_VAR
 from scripts.miles import launch_startup_trial
 
 from open_instruct.miles import startup_cache as startup
@@ -37,6 +38,7 @@ def test_explicit_worker_environment_preserves_existing_flags_and_separates_role
     serve = startup.worker_runtime_env(args, "serve-rank0", {})
     assert train["env_vars"]["NCCL_CUMEM_ENABLE"] == "1"
     assert train["worker_process_setup_hook"].endswith(".setup_worker")
+    assert train["env_vars"][WORKER_PROCESS_SETUP_HOOK_ENV_VAR] == train["worker_process_setup_hook"]
     assert json.loads(train["env_vars"][startup.ENV])["slot"] != json.loads(serve["env_vars"][startup.ENV])["slot"]
     args.olmo_core_startup_cache = None
     assert startup.worker_runtime_env(args, "unused", {"X": "1"}) == {"env_vars": {"X": "1"}}
