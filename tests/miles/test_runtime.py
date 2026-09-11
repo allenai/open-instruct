@@ -368,3 +368,191 @@ def test_row_specialization_training_parity(parsed_args, tmp_path, monkeypatch, 
         torch.testing.assert_close(results[0], results[1], rtol=0, atol=0)
     finally:
         dist.destroy_process_group()
+
+
+def _single_rank_worker(args, tmp_path, monkeypatch, name):
+    args = copy.deepcopy(args)
+    args.save = str(tmp_path / name)
+    monkeypatch.setattr(actor.distributed_utils, "get_gloo_group", lambda: dist.group.WORLD)
+    worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
+    worker.args = args
+    worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
+    worker.model = worker.train_module.model
+    worker.optimizer = worker.train_module.optim
+    worker.lr_scheduler = scheduler.CoreLRScheduler(args, worker.optimizer)
+    worker.clock = PolicyClock()
+    worker.clock.published()
+    worker.ref_module = None
+    worker._heartbeat = SimpleNamespace(bump=lambda: None)
+    return worker
+
+
+def _fixed_rollout():
+    lengths = [5, 13, 19, 25]
+    return {
+        "tokens": [torch.arange(1, length + 1, device="cuda") for length in lengths],
+        "total_lengths": lengths,
+        "response_lengths": [3] * 4,
+        "loss_masks": [torch.tensor([1, 0, 1], device="cuda") for _ in lengths],
+        "rewards": [1.0, -1.0, 1.0, -1.0],
+        "weight_versions": [["0"] for _ in lengths],
+        "rollout_log_probs": [torch.full((3,), -5.0, device="cuda") for _ in lengths],
+    }
+
+
+def _contract_records(args):
+    path = Path(args.save) / "training_contract_rank0.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_skipped_scoring_pass_matches_required_pass(parsed_args, tmp_path, monkeypatch):
+    """One optimizer step per collection: the training forward is the old policy."""
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/scoring-rendezvous", rank=0, world_size=1)
+    try:
+        group = GroupInfo(rank=0, size=1, group=dist.group.WORLD, gloo_group=dist.group.WORLD)
+        trivial = GroupInfo(rank=0, size=1, group=None)
+        parallel.set_parallel_state(
+            parallel.ParallelState(
+                intra_dp=group,
+                intra_dp_cp=group,
+                cp=trivial,
+                tp=trivial,
+                pp=trivial,
+                ep=trivial,
+                etp=trivial,
+                indep_dp=trivial,
+            )
+        )
+        results = []
+        for required in (True, False):
+            args = copy.deepcopy(parsed_args)
+            args.olmo_core = dataclasses.replace(
+                args.olmo_core, scoring_pass_required=required, scoring_check_interval=1000
+            )
+            worker = _single_rank_worker(args, tmp_path, monkeypatch, "required" if required else "auto")
+            rollout = _fixed_rollout()
+            monkeypatch.setattr(
+                actor.miles_data,
+                "get_rollout_data",
+                lambda *a, payload=rollout, **kw: (payload, contextlib.nullcontext()),
+            )
+            scored = []
+            original_score = worker._score
+
+            def counting_score(module, batches, *, use_replay, original=original_score, scored=scored):
+                scored.append(use_replay)
+                return original(module, batches, use_replay=use_replay)
+
+            monkeypatch.setattr(worker, "_score", counting_score)
+            worker.train(0, None)
+            worker.clock.published()
+            rollout["weight_versions"] = [["1"] for _ in rollout["tokens"]]
+            worker.train(1, None)
+            assert worker.clock.completed_steps == 2
+            records = _contract_records(worker.args)
+            modes = [record["scoring_pass"] for record in records if record["event"] == "optimizer"]
+            sources = [record["source"] for record in records if record["event"] == "scores"]
+            checks = [record for record in records if record["event"] == "scoring_check"]
+            if required:
+                assert modes == ["standalone", "standalone"] and sources == ["standalone", "standalone"]
+                assert scored == [True, True] and not checks
+            else:
+                assert modes == ["checked", "skipped"] and sources == ["standalone", "training_forward"]
+                assert scored == [True], "only the checked first update ran the standalone pass"
+                assert len(checks) == 1 and checks[0]["step"] == 0
+                assert checks[0]["active_tokens"] == 8 and checks[0]["mean_abs"] == 0.0
+            assert all(not record.get("skip_actor_forward_only") for record in records)
+            assert worker.args.skip_actor_forward_only is False
+            results.append(
+                {
+                    "weights": {k: v.detach().cpu().clone() for k, v in worker.model.state_dict().items()},
+                    "optimizer": copy.deepcopy(worker.optimizer.state_dict()),
+                }
+            )
+            del worker
+        torch.testing.assert_close(results[0], results[1], rtol=0, atol=0)
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_scoring_check_failure_stops_before_the_optimizer_step(parsed_args, tmp_path, monkeypatch):
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/check-rendezvous", rank=0, world_size=1)
+    try:
+        group = GroupInfo(rank=0, size=1, group=dist.group.WORLD, gloo_group=dist.group.WORLD)
+        trivial = GroupInfo(rank=0, size=1, group=None)
+        parallel.set_parallel_state(
+            parallel.ParallelState(
+                intra_dp=group,
+                intra_dp_cp=group,
+                cp=trivial,
+                tp=trivial,
+                pp=trivial,
+                ep=trivial,
+                etp=trivial,
+                indep_dp=trivial,
+            )
+        )
+        worker = _single_rank_worker(parsed_args, tmp_path, monkeypatch, "drift")
+        rollout = _fixed_rollout()
+        monkeypatch.setattr(actor.miles_data, "get_rollout_data", lambda *a, **kw: (rollout, contextlib.nullcontext()))
+        original_score = worker._score
+
+        def drifted_score(module, batches, *, use_replay):
+            # Emulate a no-grad kernel path that rounds differently from the gradient path.
+            return [value + 0.01 for value in original_score(module, batches, use_replay=use_replay)]
+
+        monkeypatch.setattr(worker, "_score", drifted_score)
+        before = {name: tensor.detach().clone() for name, tensor in worker.model.state_dict().items()}
+        with pytest.raises(RuntimeError, match="Standalone scoring differs"):
+            worker.train(0, None)
+        assert worker.clock.completed_steps == 0
+        for name, value in worker.model.state_dict().items():
+            torch.testing.assert_close(value, before[name], rtol=0, atol=0)
+        assert worker.args.skip_actor_forward_only is False
+        # A wider tolerance admits the same drift and the update proceeds.
+        worker.args.olmo_core = dataclasses.replace(worker.args.olmo_core, scoring_check_tolerance=0.05)
+        worker.train(0, None)
+        assert worker.clock.completed_steps == 1
+        checks = [record for record in _contract_records(worker.args) if record["event"] == "scoring_check"]
+        assert len(checks) == 1 and checks[0]["mean_abs"] == pytest.approx(0.01, abs=1e-6)
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_multiple_steps_per_collection_keep_the_standalone_pass(parsed_args, tmp_path, monkeypatch):
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/steps-rendezvous", rank=0, world_size=1)
+    try:
+        group = GroupInfo(rank=0, size=1, group=dist.group.WORLD, gloo_group=dist.group.WORLD)
+        trivial = GroupInfo(rank=0, size=1, group=None)
+        parallel.set_parallel_state(
+            parallel.ParallelState(
+                intra_dp=group,
+                intra_dp_cp=group,
+                cp=trivial,
+                tp=trivial,
+                pp=trivial,
+                ep=trivial,
+                etp=trivial,
+                indep_dp=trivial,
+            )
+        )
+        args = copy.deepcopy(parsed_args)
+        # Four collected samples, two optimizer steps; the config validator requires a
+        # lag budget covering the second step, so mirror that here.
+        args.global_batch_size = 2
+        args.olmo_core = dataclasses.replace(args.olmo_core, max_policy_lag=1)
+        worker = _single_rank_worker(args, tmp_path, monkeypatch, "two-steps")
+        assert worker._scoring_pass().standalone
+        assert worker._scoring_pass().optimizer_steps_per_collection == 2
+        rollout = _fixed_rollout()
+        monkeypatch.setattr(actor.miles_data, "get_rollout_data", lambda *a, **kw: (rollout, contextlib.nullcontext()))
+        worker.train(0, None)
+        assert worker.clock.completed_steps == 2
+        records = _contract_records(worker.args)
+        assert [r["scoring_pass"] for r in records if r["event"] == "optimizer"] == ["standalone", "standalone"]
+        assert not [r for r in records if r["event"] == "scoring_check"]
+    finally:
+        dist.destroy_process_group()

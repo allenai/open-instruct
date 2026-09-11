@@ -115,6 +115,59 @@ def probability_profile(rollout):
     }
 
 
+SCORING_CHECK_EDGE = 1e-3
+
+
+def scoring_check(standalone, training, masks):
+    """Local sums comparing standalone scoring to the training forward on active tokens.
+
+    Returns ``(sums, maximum)``: sums hold absolute error, token count and the
+    number of tokens above ``SCORING_CHECK_EDGE``; maximum is the largest error.
+    The caller reduces sums with SUM and maximum with MAX before validating.
+    """
+    device = masks[0].device
+    sums = torch.zeros(3, dtype=torch.float64, device=device)
+    maximum = torch.zeros((), dtype=torch.float64, device=device)
+    if len(standalone) != len(training) or len(standalone) != len(masks):
+        raise ValueError("Scoring check requires one standalone and one training score per sample")
+    for reference, current, mask in zip(standalone, training, masks, strict=True):
+        reference = torch.as_tensor(reference, device=device)
+        current = torch.as_tensor(current, device=device)
+        if reference.ndim != 1 or reference.shape != current.shape or reference.shape != mask.shape:
+            raise ValueError("Scoring check score and response-mask shapes differ")
+        errors = (reference.float() - current.float()).abs()[mask.bool()]
+        if not bool(torch.isfinite(errors).all()):
+            raise ValueError("Non-finite active-token log probability in scoring check")
+        if not errors.numel():
+            continue
+        sums[0] += errors.double().sum()
+        sums[1] += errors.numel()
+        sums[2] += (errors > SCORING_CHECK_EDGE).sum()
+        maximum = torch.maximum(maximum, errors.max().double())
+    return sums, maximum
+
+
+def validate_scoring_check(sums, maximum, tolerance):
+    """Fail on a globally reduced mean above tolerance; report the reduced statistics."""
+    tokens = int(sums[1])
+    if not tokens:
+        raise ValueError("No active tokens for scoring check")
+    mean_abs = float(sums[0] / tokens)
+    report = {
+        "active_tokens": tokens,
+        "mean_abs": mean_abs,
+        "max_abs": float(maximum),
+        "tokens_above_edge": int(sums[2]),
+        "edge": SCORING_CHECK_EDGE,
+        "tolerance": tolerance,
+    }
+    if mean_abs > tolerance:
+        raise ValueError(
+            f"Standalone scoring differs from the training forward: mean_abs {mean_abs:.6g} exceeds {tolerance:.6g}"
+        )
+    return report
+
+
 def _local(tensor):
     return tensor.to_local() if isinstance(tensor, DTensor) else tensor
 
