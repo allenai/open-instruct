@@ -39,20 +39,48 @@ python tests/miles/ep_contract.py compare /tmp/contract
 """
 
 
+STRESS_COMMAND = """set -euo pipefail
+cd /opt/core-rl
+export WANDB_MODE=disabled
+export NCCL_CUMEM_ENABLE=1
+export TOKENIZERS_PARALLELISM=false
+export OMP_NUM_THREADS=2
+mkdir -p /output
+# Retain the tiny fixture, gradients, optimizer states and reports on failure too.
+trap 'cp -r /tmp/stress /output/ 2>/dev/null || true' EXIT
+python tests/miles/ep_stress_contract.py bootstrap /tmp/stress
+for variant in token clipped; do
+  for world in 1 2; do
+    torchrun --nnodes=1 --master-addr=127.0.0.1 --master-port=29500 --nproc-per-node=$world tests/miles/ep_stress_contract.py run /tmp/stress --variant $variant
+  done
+done
+python tests/miles/ep_stress_contract.py compare /tmp/stress
+"""
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument(
+        "--stress",
+        action="store_true",
+        help="Unequal token averaging and active clipping with actual gradient/Adam checks",
+    )
     args = parser.parse_args()
     spec = dict(
         version="v2",
-        description="Core RL contract: matched EP1/EP2 moments, replay, auxiliary objectives and recomputation",
+        description=(
+            "Core RL EP1/EP2: unequal token averaging, active clipping, gradients and Adam moments"
+            if args.stress
+            else "Core RL contract: matched EP1/EP2 moments, replay, auxiliary objectives and recomputation"
+        ),
         tasks=[
             dict(
                 name="core-contract",
                 image={"beaker": args.image},
                 command=["bash", "-c"],
-                arguments=[COMMAND],
+                arguments=[STRESS_COMMAND if args.stress else COMMAND],
                 result={"path": "/output"},
                 resources={"gpuCount": 2, "sharedMemory": "16 GiB"},
                 constraints={"cluster": ["ai2/holmes"]},

@@ -87,14 +87,24 @@ def rollout_for(rank, world, mode):
     return result
 
 
-def full_optimizer_state(worker):
+def full_optimizer_state(worker, *, gradients=False):
     """Gather optimizer-DP shards, then expert-MP shards in native expert order."""
     result = {}
     for group in worker.optimizer.param_groups:
         for name in group["named_params"]:
             owner = worker.model.get_submodule(name.rsplit(".", 1)[0])
-            for suffix in ("exp_avg", "exp_avg_sq", "main"):
-                value = worker.optimizer.states[f"{name}.{suffix}"]
+            for suffix in ("grad",) if gradients else ("exp_avg", "exp_avg_sq", "main"):
+                if gradients:
+                    template = worker.optimizer.states[f"{name}.main"]
+                    value = DTensor.from_local(
+                        worker.optimizer.main_grad[name].detach().clone(),
+                        device_mesh=template.device_mesh,
+                        placements=template.placements,
+                        shape=template.shape,
+                        stride=template.stride(),
+                    )
+                else:
+                    value = worker.optimizer.states[f"{name}.{suffix}"]
                 value = value.full_tensor() if isinstance(value, DTensor) else value
                 value = value.detach().reshape(-1).contiguous()
                 if getattr(owner, "_ep_sharded", False):
@@ -106,7 +116,7 @@ def full_optimizer_state(worker):
     return result
 
 
-def run(root, mode, checkpointing):
+def run(root, mode, checkpointing, *, token_average=False, clip_grad=1e9, capture_gradients=False):
     rank, world = int(os.environ.get("RANK", 0)), int(os.environ.get("WORLD_SIZE", 1))
     torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", 0)))
     dist.init_process_group("nccl")
@@ -148,11 +158,13 @@ def run(root, mode, checkpointing):
                 rollout_global_dataset=True,
                 prompt_data=str(root / "prompts.jsonl"),
                 lr=1e-4,
-                clip_grad=1e9,
+                clip_grad=clip_grad,
                 use_rollout_routing_replay=True,
                 use_miles_router=True,
             ),
         )
+        if token_average:
+            config.miles["calculate_per_token_loss"] = True
         sys.argv = ["ep-contract", *config.arguments()]
         args = arguments.parse_args()
         worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
@@ -192,12 +204,38 @@ def run(root, mode, checkpointing):
         rollout["rollout_log_probs"] = worker._score(
             worker.train_module, data.sample_batches(rollout, 128), use_replay=True
         )
+        gradient_evidence = {}
+        original_clip = worker.optimizer._clip_grad
+
+        def capture_clip():
+            gradient_evidence["before"] = full_optimizer_state(worker, gradients=True)
+            norm = original_clip()
+            gradient_evidence["after"] = full_optimizer_state(worker, gradients=True)
+            gradient_evidence["norm"] = float(norm)
+            return norm
+
+        clip_context = (
+            mock.patch.object(worker.optimizer, "_clip_grad", side_effect=capture_clip)
+            if capture_gradients
+            else contextlib.nullcontext()
+        )
         with (
+            clip_context,
             mock.patch.object(actor.distributed_utils, "get_gloo_group", return_value=gloo),
             mock.patch.object(actor.miles_data, "get_rollout_data", return_value=(rollout, contextlib.nullcontext())),
         ):
             worker.train(0, None)
         state = full_optimizer_state(worker)
+        if capture_gradients:
+            gradient_evidence.update(
+                state=state,
+                clip_grad=clip_grad,
+                token_average=token_average,
+                betas=worker.optimizer.param_groups[0]["betas"],
+                rank=rank,
+                world=world,
+            )
+            torch.save(gradient_evidence, root / f"stress-ep{world}-rank{rank}.pt")
         if rank == 0:
             torch.save(state, root / f"ep{world}-{mode}-ac{int(checkpointing)}.pt")
     finally:
