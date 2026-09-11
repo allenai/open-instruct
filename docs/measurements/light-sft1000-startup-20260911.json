@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "experiment_id": "01M2794XP15PHQSWN6M499NQYS",
+  "job_id": "01M2794XSSEGE1A0338QTZEYH1",
+  "source_commit": "290f8abb1",
+  "status_at_recording": "serving_engines_healthy_before_first_evaluation",
+  "startup_failure": false,
+  "retry": false,
+  "model_or_training_configuration_changed": false,
+  "checkpoint": {
+    "resolved_path": "/weka/oe-training-default/robertb/olmo-miles/rl-sft1000/bootstrap-v2/hf-sft1000/model.safetensors",
+    "size_bytes": 37057064824,
+    "inode": 11967490965825585154,
+    "mapped_and_buffered_read_paths_same_inode": true,
+    "full_payload_hash_computed_by_diagnostic": false
+  },
+  "diagnosis": {
+    "python_stack": "buffered_multi_thread_safetensors_weights_iterator -> future.result; loader _load_file -> safe_open.get_tensor -> torch.UntypedStorage.__getitem__",
+    "loader_native_thread_state": "D (disk sleep)",
+    "loader_native_wait_channel": "folio_wait_bit_common",
+    "loader_thread_proc_io_bytes": 0,
+    "proc_io_limitation": "Mmap page faults are not reflected by this thread's read syscall counters.",
+    "bounded_64_mib_buffered_read_seconds": [4.22125, 4.44409],
+    "progress_confirmation": {
+      "first_tensor": "model.layers.5.mlp.experts.402.down_proj.weight",
+      "sorted_tensor_index": 22881,
+      "total_tensors": 29669,
+      "data_offsets": [28712352768, 28713571328],
+      "later_tensor": "model.layers.8.mlp.experts.326.down_proj.weight"
+    },
+    "mincore_resident_fraction_after_first_prefetch": 0.763998768670966,
+    "startup_timeout_review": "MILES waits for health while the child remains alive. SGLang's 1800-second timeout is a later PD warmup timeout, not the safetensors loading deadline."
+  },
+  "interventions": [
+    {
+      "kind": "manual_read_only_sequential_file_page_cache_warming",
+      "start_utc": "2026-09-11T04:19:21Z",
+      "end_utc": "2026-09-11T04:24:21Z",
+      "single_reader": true,
+      "block_bytes": 16777216,
+      "timeout_seconds": 300,
+      "start_offset_bytes": 0,
+      "last_reported_completed_bytes": 27128758272,
+      "ended_on_timeout": true
+    },
+    {
+      "kind": "manual_read_only_sequential_file_page_cache_warming",
+      "end_utc": "2026-09-11T04:29:56Z",
+      "single_reader": true,
+      "block_bytes": 16777216,
+      "timeout_seconds": 300,
+      "start_offset_bytes": 27128758272,
+      "completed_bytes": 9928306552,
+      "elapsed_seconds": 179.767,
+      "reached_eof": true
+    }
+  ],
+  "outcome": {
+    "engine_shard_load_seconds": [2074.96, 2050.4],
+    "engine_shard_complete_log_utc": ["2026-09-11T04:30:07Z", "2026-09-11T04:30:29Z"],
+    "both_engines_healthy_utc": "2026-09-11T04:33:42Z",
+    "graph_capture_completed": true,
+    "transient_initial_prefill_jit_health_warnings_cleared": true,
+    "historical_shard_load_seconds_approximate": [42, 45],
+    "interpretation": "The current allocation was preserved and progressed after the identical file was read sequentially. This establishes an I/O-bound startup event and a recorded cache-warming intervention, not a controlled estimate of its speedup or a steady-state training performance result."
+  },
+  "evidence_local_paths": [
+    "/tmp/light-sft1000-core.log",
+    "/tmp/light-sft1000-startup-diagnostic-0419.txt",
+    "/tmp/light-sft1000-manual-prefetch.log",
+    "/tmp/light-sft1000-manual-prefetch-tail.log",
+    "/tmp/light-sft1000-loader-locals.txt",
+    "/tmp/light-sft1000-loader-locals-2.txt",
+    "/tmp/light-sft1000-pagecache.txt",
+    "/tmp/light-sft1000-post-read-stacks.txt"
+  ]
+}
