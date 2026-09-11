@@ -20,6 +20,10 @@ class CoreConfig:
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     row_specialization: str = "static"
+    compiler_cache: bool = False
+    compiler_cache_root: str | None = None
+    compiler_cache_restore: bool = True
+    compiler_cache_diagnostics: bool = False
     checkpoint_profile: bool = False
     checkpoint_thread_count: int | None = None
     checkpoint_process_count: int | None = None
@@ -47,6 +51,9 @@ class CoreConfig:
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise ValueError("core.weight_sync_mode must be flattened or per_tensor")
         for name in (
+            "compiler_cache",
+            "compiler_cache_restore",
+            "compiler_cache_diagnostics",
             "replay_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",

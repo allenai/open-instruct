@@ -12,6 +12,8 @@ from olmo_core import config as core_config
 from olmo_core.nn import transformer
 from olmo_core.nn.transformer import config as transformer_config
 
+from open_instruct.miles.timing import startup_stage
+
 
 def _backend(kind):
     return import_module(f"open_instruct.miles.{kind}_models")
@@ -76,10 +78,14 @@ def build_train_module(args, source=None):
     optim = dict(
         lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), eps=args.adam_eps, weight_decay=args.weight_decay
     )
-    hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-        source, trust_remote_code=True, torch_dtype=torch.bfloat16
-    )
-    module = backend.build_train_module(args, common=common, optim=optim, hf_config=hf, hf_state=hf_model.state_dict())
+    with startup_stage(args, "hf_read"):
+        hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+            source, trust_remote_code=True, torch_dtype=torch.bfloat16
+        )
+    with startup_stage(args, "native_model_optimizer_build", device=torch.cuda):
+        module = backend.build_train_module(
+            args, common=common, optim=optim, hf_config=hf, hf_state=hf_model.state_dict()
+        )
     module._trainer = MetricSink()
     module._miles_model_backend = kind
     del hf_model

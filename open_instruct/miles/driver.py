@@ -11,21 +11,27 @@ from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 from open_instruct import logger_utils
+from open_instruct.miles import startup_cache
 from open_instruct.miles.timing import evaluation_stage, stage
 
 logger = logger_utils.setup_logger(__name__)
 
 
 async def train(args):
-    groups = placement_group.create_placement_groups(args)
+    with stage(args, "startup_cache_prepare"):
+        startup_cache.prepare(args)
+    with stage(args, "placement"):
+        groups = placement_group.create_placement_groups(args)
     object_store.init_instance(args, contribute_segment=False)
     init_tracking(args)
     manager = None
     learner = None
     failure = None
     try:
-        manager, rollouts_per_epoch = placement_group.create_rollout_manager(args, groups["rollout"])
-        learner, _ = await placement_group.create_training_models(args, groups, manager)
+        with stage(args, "serving_startup"):
+            manager, rollouts_per_epoch = placement_group.create_rollout_manager(args, groups["rollout"])
+        with stage(args, "trainer_startup"):
+            learner, _ = await placement_group.create_training_models(args, groups, manager)
 
         async def publish(rollout_id=None):
             if args.fully_async:
@@ -121,6 +127,7 @@ async def train(args):
             except BaseException as error:
                 cleanup_error = cleanup_error or error
                 logger.exception("Core RL component cleanup failed")
+        await startup_cache.finish(args, success=failure is None and cleanup_error is None)
         finish_tracking()
         if failure is None and cleanup_error is not None:
             raise cleanup_error

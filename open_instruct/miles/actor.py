@@ -23,6 +23,7 @@ from open_instruct import logger_utils
 from open_instruct.miles import checkpoint, contract, data, models, publication, replay_diagnostics, scheduler
 from open_instruct.miles import metrics as training_metrics
 from open_instruct.miles.state import PolicyClock
+from open_instruct.miles.timing import startup_stage
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -31,7 +32,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
     def init(self, args, role, *, with_ref=False, with_opd_teacher=False, recv_ckpt_src_rank=None, indep_dp_info=None):
         if role != "actor" or with_opd_teacher or recv_ckpt_src_rank is not None:
             raise ValueError("Core backend supports the policy actor without trainer-cell recovery")
-        super().init(args, role, with_ref=with_ref, with_opd_teacher=False)
+        with startup_stage(args, "distributed_init"):
+            super().init(args, role, with_ref=with_ref, with_opd_teacher=False)
         self._agree(lambda: training_metrics.init_tracking(args))
         torch.manual_seed(args.seed)
         world = dist.get_world_size()
@@ -60,7 +62,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         self.ref_module = models.build_train_module(args, source=args.ref_load)[0] if with_ref else None
         if self.ref_module is not None:
             self.ref_module.model.requires_grad_(False)
-        checkpoint.restore(self)
+        with startup_stage(args, "native_restore", device=torch.cuda):
+            checkpoint.restore(self)
         self.train_module._trainer.global_step = self.clock.completed_steps
         updater = (
             update_weight_utils.UpdateWeightFromTensor

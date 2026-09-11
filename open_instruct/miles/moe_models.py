@@ -1,5 +1,6 @@
 """Specialized OLMoDDP MoE training and Core-owned HF weight interchange."""
 
+import torch
 from olmo_core import config as core_config
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn import attention
@@ -10,6 +11,7 @@ from olmo_core.train.train_module import transformer as train_transformer
 from olmo_core.train.train_module.transformer import config as train_config
 
 from open_instruct.miles import data, fla_compat
+from open_instruct.miles.timing import startup_stage
 
 
 def register_hf_classes():
@@ -42,18 +44,21 @@ class HFInitializedMoETrainModule(train_transformer.OLMoDDPTrainModule):
 
     _miles_checkpoint_options: dict[str, bool | int]
 
-    def __init__(self, *, hf_config, hf_state, **kwargs):
+    def __init__(self, *, hf_config, hf_state, startup_args=None, **kwargs):
+        self._startup_args = startup_args
         self._initial_hf_config = hf_config
         self._initial_hf_state = hf_state
         super().__init__(**kwargs)
         self._initial_hf_state = None
 
     def init_model_weights(self, model_parts, max_sequence_length, rank_microbatch_size):
-        super().init_model_weights(model_parts, max_sequence_length, rank_microbatch_size)
+        with startup_stage(self._startup_args, "native_parameter_init", device=torch.cuda):
+            super().init_model_weights(model_parts, max_sequence_length, rank_microbatch_size)
         if len(model_parts) != 1:
             raise ValueError("HF import requires a non-pipeline model")
         assert self._initial_hf_state is not None
-        olmo3.load_olmo3_moe_hf_state(model_parts[0], self._initial_hf_config, self._initial_hf_state)
+        with startup_stage(self._startup_args, "hf_to_native", device=torch.cuda):
+            olmo3.load_olmo3_moe_hf_state(model_parts[0], self._initial_hf_config, self._initial_hf_state)
         model_parts[0].refresh_rowwise_fp8_cache()
 
 
@@ -61,6 +66,7 @@ def build_train_module(args, *, common, optim, hf_config, hf_state):
     module = HFInitializedMoETrainModule(
         hf_config=hf_config,
         hf_state=hf_state,
+        startup_args=args,
         **common,
         optim=OLMoDDPOptimizerConfig(**optim, max_grad_norm=args.clip_grad),
         dp_config=train_config.TransformerDataParallelConfig(name=DataParallelType.ddp),

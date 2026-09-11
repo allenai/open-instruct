@@ -59,3 +59,28 @@ def evaluation_stage(args, rollout_id, *, initial=False):
             "configured_serving": {key: getattr(args, key, None) for key in keys},
         },
     )
+
+
+@contextmanager
+def startup_stage(args, name, *, device=None):
+    """Per-rank initialization intervals; synchronize only explicitly GPU stages."""
+    started = time.perf_counter()
+    wall = time.time()
+    passed = False
+    try:
+        yield
+        if device is not None:
+            device.synchronize()
+        passed = True
+    finally:
+        if getattr(args, "save", None):
+            root = Path(args.save)
+            root.mkdir(parents=True, exist_ok=True)
+            rank = getattr(args, "rank", 0)
+            with (root / f"startup_rank{rank}.jsonl").open("a") as stream:
+                stream.write(
+                    json.dumps(
+                        dict(stage=name, started_unix=wall, seconds=time.perf_counter() - started, passed=passed)
+                    )
+                    + "\n"
+                )

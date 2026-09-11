@@ -544,11 +544,48 @@ index 2f74e4096fac39c2be9aaf948bde880fb7a4beab..ce181d9b37c92189eaa581ada7e7b3dd
  
      # -------------------------- data generation -----------------------------
  
+diff --git a/miles/ray/rollout/server_group.py b/miles/ray/rollout/server_group.py
+index 87d269ea81673845001c8d12b170dad609672363..af77b75000188e339075d7bd85c7df0f29928290 100644
+--- a/miles/ray/rollout/server_group.py
++++ b/miles/ray/rollout/server_group.py
+@@ -1,5 +1,6 @@
+ import asyncio
+ import dataclasses
++import importlib
+ import logging
+ import os
+ from typing import Any
+@@ -132,13 +133,17 @@ class ServerGroup:
+                     pg_bundles=[reordered_bundle_indices[gpu_index + k] for k in range(self.num_gpus_per_engine)],
+                 )
+ 
++            runtime_env = {"env_vars": env_vars}
++            if getattr(self.args, "olmo_core_startup_cache", None) and self.num_gpus_per_engine == 1:
++                startup_cache = importlib.import_module("open_instruct.miles.startup_cache")
++                runtime_env = startup_cache.worker_runtime_env(
++                    self.args, f"serve-{self.worker_type}-rank{global_rank}", env_vars
++                )
+             rollout_engine = RolloutRayActor.options(
+                 num_cpus=num_cpus,
+                 num_gpus=num_gpus,
+                 scheduling_strategy=scheduling_strategy,
+-                runtime_env={
+-                    "env_vars": env_vars,
+-                },
++                runtime_env=runtime_env,
+             ).remote(
+                 self.args,
+                 rank=global_rank,
 diff --git a/miles/ray/train/actor_factory.py b/miles/ray/train/actor_factory.py
-index 9afc33fdeeaaeaab6766bb17949ddfbbd02daf66..2ddf0efcddee2245ceb7824431808727a65a7290 100644
+index 9afc33fdeeaaeaab6766bb17949ddfbbd02daf66..282c4d08373f8c6c8710db6beaba9b996994dfb9 100644
 --- a/miles/ray/train/actor_factory.py
 +++ b/miles/ray/train/actor_factory.py
-@@ -76,6 +76,11 @@ def allocate_gpus_for_actor(
+@@ -1,3 +1,4 @@
++import importlib
+ import os
+ from pathlib import Path
+ 
+@@ -76,6 +77,11 @@ def allocate_gpus_for_actor(
  
          actor_impl = MegatronTrainRayActor
  
@@ -560,6 +597,18 @@ index 9afc33fdeeaaeaab6766bb17949ddfbbd02daf66..2ddf0efcddee2245ceb7824431808727
      else:
          from miles.backends.fsdp_utils import FSDPTrainRayActor
  
+@@ -108,6 +114,11 @@ def allocate_gpus_for_actor(
+         if args.offload_train_target == "disk" and args.offload_train and args.train_backend == "megatron":
+             rank_dir = os.path.join(args.offload_train_disk_dir, f"cell{cell_index}_rank{rank}")
+             options["runtime_env"] = {"env_vars": {**env_vars, "TMS_DISK_BACKUP_DIR": rank_dir}}
++        if backend == "olmo_core" and getattr(args, "olmo_core_startup_cache", None):
++            startup_cache = importlib.import_module("open_instruct.miles.startup_cache")
++            options["runtime_env"] = startup_cache.worker_runtime_env(
++                args, f"train-{role}-cell{cell_index}-rank{rank}", env_vars
++            )
+         actor = TrainRayActor.options(**options).remote(
+             args,
+             world_size,
 diff --git a/miles/ray/train/group.py b/miles/ray/train/group.py
 index 3cb62d9627affacaf4578d6b83fb445dfc33ceca..d194c5ca710a81065d4d1bff4342288f596829ba 100644
 --- a/miles/ray/train/group.py
