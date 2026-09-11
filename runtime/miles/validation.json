@@ -355,5 +355,6 @@
   ],
   "core_base_branch": "jacobm/moe-v2-core-gdn2",
   "core_base_revision": "169b8f9d06bce0276143876c82f630af483b03b7",
-  "core_development_commit": "b7f1e5296704779e7deb06de4c4242be9729d1a9"
+  "core_development_commit": "b7f1e5296704779e7deb06de4c4242be9729d1a9",
+  "scope_note": "Historical gdn2/SFT qualification ledger. Hero branch qualification is tracked separately in docs/miles-hero-support.md and docs/miles-active-work.md; historical successes do not automatically qualify the new runtime."
 }

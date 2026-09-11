@@ -1,5 +1,9 @@
 # MILES/Core defaults and feature parity
 
+Current experiment status and the restored matched Megatron comparison are tracked
+in [the active-work ledger](miles-active-work.md). The architecture-specific hero
+port is documented in [hero support](miles-hero-support.md).
+
 This compares the Core integration with **our customized `~/proj/olmo-miles`
 implementation**, including its Megatron adapters, serving optimizations and
 operational tooling. It does not compare against unmodified upstream MILES.

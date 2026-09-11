@@ -1,6 +1,6 @@
 {
   "campaign": "gsm8k-core-megatron-20260910-v1",
-  "status": "incomplete: first Megatron attempt failed during trainer initialization; retry source repair is being prepared",
+  "status": "in progress: Core100 running; matched Megatron r3 submitted after user re-enabled the paired comparison",
   "shared_root": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1",
   "preparation_sha256": "1d8a22500fffdd9a7461c445998815d5e85cf9dd79859d93313798472c0e76e0",
   "preparation_experiment": "01M26N8Q8BFN4887X2CKMDWEV2",
@@ -10,15 +10,34 @@
     "job": "01M26P6Y0QKZHMM77C9H3MM1CE",
     "result": "01M26P6XXDC0V5DJ3EZH6TP75H",
     "source": "c3a41598e434d50058f929e6c55b82e34aa4ff09",
-    "image": "01M26N80T0V9PREQTS87J849P8"
+    "image": "01M26N80T0V9PREQTS87J849P8",
+    "observed_heldout": [
+      {
+        "completed_updates": 0,
+        "correct": 97,
+        "total": 128,
+        "at_response_cap": 18
+      },
+      {
+        "completed_updates": 20,
+        "correct": 101,
+        "total": 128,
+        "at_response_cap": 18
+      },
+      {
+        "completed_updates": 40,
+        "correct": 94,
+        "total": 128,
+        "at_response_cap": 22
+      }
+    ]
   },
   "megatron": {
-    "experiment": "01M26P8G0X2EHG52KYGAXT3BFP",
-    "source": "31ec5b2a65c3a1567afbe2a07526dd41e83048d5",
-    "image": "01M24E7MSDGN2QFW1T8Z31BCKS",
-    "job": "01M26P8GB90N3XPTVBWZYM697S",
-    "result": "01M26P8G14ZHJJQMYSHK962GZX",
-    "exit_code": 1,
+    "experiment": "01M26YNP5E64YGNXR85TA2RP4Q",
+    "source": "0e648108c70c5d5256a9b93a88b4f8d610e44ea0",
+    "image": "01M26TT1EQTB84RV0MM650W0YE",
+    "job": "01M26YNPASPE6N946CCCEXA0K5",
+    "result": "01M26YNP5PRJ1P34X7GXS3GGW6",
     "failed_attempts": [
       {
         "experiment": "01M26P8G0X2EHG52KYGAXT3BFP",
@@ -45,13 +64,26 @@
         "source": "31ec5b2a65c3a1567afbe2a07526dd41e83048d5"
       }
     ],
-    "pending_retry": {
+    "precision_repair": {
       "artifact_directory": "megatron-r2",
       "olmo_miles_source": "7d56b23db0e6d442e601eb1a5f9145c37802120c",
       "olmo_megatron_source": "ba5615df741a24ba4aee678d0e853306b3502282",
       "repair": "Restore executable router precision checks and BF16 router model/checkpoint storage with FP32 torch-mm gating; rebuild MCore without obsolete FP32-storage patch0008.",
       "status": "pending rebuilt-image validation and new launch identity"
-    }
+    },
+    "artifact_directory": "megatron-r3",
+    "stopped_attempts": [
+      {
+        "experiment": "01M26TY4BWAVQRMR8GNT41M4CV",
+        "job": "01M26TY4FJV6Z3H44YPZE7GZVF",
+        "result": "01M26TY4C49V37NA26Y2ZY2EH7",
+        "artifact_directory": "megatron-r2",
+        "exit_code": 143,
+        "completed_updates": 0,
+        "heldout_evaluations": 0,
+        "reason": "User temporarily narrowed scope to Core-only; later explicitly re-enabled matched comparison."
+      }
+    ]
   },
   "scheduling": {
     "workspace": "ai2/open-instruct-dev",

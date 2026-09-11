@@ -1,5 +1,9 @@
 # Next MILES/Core qualification gates
 
+Current experiment status and the restored matched Megatron comparison are tracked
+in [the active-work ledger](miles-active-work.md). The architecture-specific hero
+port is documented in [hero support](miles-hero-support.md).
+
 This is a proposed experiment sequence, not a record of additional launches.
 It builds on the [feature inventory and profiles](miles-feature-parity.md) and
 [training contract](miles-core.md#training-contract-checks). Run the smallest
