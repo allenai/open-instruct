@@ -1,0 +1,315 @@
+{
+  "schema_version": 1,
+  "qualification": "tiny same-topology fresh-process durable continuation",
+  "passed": true,
+  "device": "NVIDIA GeForce RTX 4090",
+  "trainer_world": 1,
+  "expert_parallel_size": 1,
+  "runtime_image": "open-instruct-miles-core-f2f3fa2d81a6:latest",
+  "runtime_image_id": "sha256:d850bf7571c5c0b72167b5c76735bfbc6370ab70956b94af6bef9d1cdf5d372d",
+  "runtime_lock": {
+    "base_image": {
+      "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+      "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    },
+    "schema_version": 1,
+    "sources": {
+      "miles": {
+        "development_commit": "64ba71950c973e458f22a8d10541475940c911b0",
+        "patch": "patches/miles.patch",
+        "patch_sha256": "e85add303ee3b7b38f4571e66b7b364a769b32e0fb096ab35e32f1447c173579",
+        "repository": "https://github.com/radixark/miles.git",
+        "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6"
+      },
+      "olmo-core": {
+        "development_commit": "290d2ca4521373bef0bf7fe4244673cc79dcc004",
+        "patch": "patches/olmo-core.patch",
+        "patch_sha256": "37579d412e9d29460e69ab2602b52bf032a7441c74af55bd8331c23580072233",
+        "repository": "https://github.com/allenai/OLMo-core.git",
+        "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5"
+      },
+      "olmo-sglang": {
+        "development_commit": "150e0b3ed48c4c339bb92a9e0a45b198a3e72a1b",
+        "embedded_path": "/src/olmo-sglang",
+        "note": "Base image omits original test files; runtime delta covers src/tools/docs. Full tests live at development_commit.",
+        "patch": "patches/olmo-sglang.patch",
+        "patch_paths": [
+          "src",
+          "tools",
+          "docs"
+        ],
+        "patch_sha256": "dd3337105c2fbbf696e092e2ee7da9084f2a5792013742f3f1f09f3f1d75b2ec",
+        "repository": "https://github.com/allenai/olmo-sglang.git",
+        "revision": "81a312ee8326e279a4641e03542ef971a5ffb863"
+      }
+    },
+    "status": "experimental hero support; conversion and serving qualification in progress"
+  },
+  "horizon": 4,
+  "checkpoint_after_updates": 2,
+  "scheduler": "linear, fixed 4-update horizon, LR 1e-6 to 1e-7",
+  "sources_sha256": {
+    "scripts/miles/durable_continuation.py": "681b851b1a78f6263ecba8f6b025737f773f1905a04dee5d6db92bef7ebc673f",
+    "scripts/miles/launch_durable_continuation.py": "a037234ba783f66adecf4d43f4e0a3fc1f630167da663b50461b303fec457204",
+    "tests/miles/test_durable_continuation.py": "e72b76ae22be28aaaad5680b65aef066376d4390476d58aa608b5e13b0f090d3",
+    "scripts/train/debug/miles_core_durable_continuation.sh": "16e60c0b51f034e6a51d17c6be0f4779d0ba922fff6bb7cfa03e4bf188414e16"
+  },
+  "worker_harness_sha256": "e5ee3d295c206076c3779429e62867167fa9e552db7821235f02ac46fe1848ce",
+  "note": "GPU worker code was frozen for all phases. Audit-only checks were subsequently strengthened and rerun successfully on unchanged captures.",
+  "phases": {
+    "control": {
+      "pid": 56,
+      "elapsed_seconds": 76.07464665733278,
+      "score_checks": [
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 1
+        },
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 2
+        },
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 3
+        },
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 4
+        }
+      ],
+      "scheduler_horizon": 4,
+      "snapshots": {
+        "step2": {
+          "model_tensors": 43,
+          "optimizer_tensors": 172,
+          "model_bytes": 1527440,
+          "optimizer_bytes": 9164812,
+          "snapshot_sha256": "be2ca4c5febcd343010cfa011b2b60200386d932abc97d35647345a73606882b",
+          "clock": {
+            "completed_steps": 2,
+            "next_rollout_id": 2,
+            "published_step": 1
+          },
+          "cursor": {
+            "epoch_id": 0,
+            "metadata": {},
+            "sample_group_index": 2,
+            "sample_index": 8,
+            "sample_offset": 2
+          }
+        },
+        "step4": {
+          "model_tensors": 43,
+          "optimizer_tensors": 172,
+          "model_bytes": 1527440,
+          "optimizer_bytes": 9164812,
+          "snapshot_sha256": "88f3483427d8eba1623a6ca8ca8d0e858d6e6e9914143a83c60c52bf371b6f44",
+          "clock": {
+            "completed_steps": 4,
+            "next_rollout_id": 4,
+            "published_step": 3
+          },
+          "cursor": {
+            "epoch_id": 0,
+            "metadata": {},
+            "sample_group_index": 4,
+            "sample_index": 16,
+            "sample_offset": 4
+          }
+        }
+      }
+    },
+    "split": {
+      "pid": 440,
+      "elapsed_seconds": 2.366452149115503,
+      "score_checks": [
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 1
+        },
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 2
+        }
+      ],
+      "scheduler_horizon": 4,
+      "snapshots": {
+        "after_save2": {
+          "model_tensors": 43,
+          "optimizer_tensors": 172,
+          "model_bytes": 1527440,
+          "optimizer_bytes": 9164812,
+          "snapshot_sha256": "be2ca4c5febcd343010cfa011b2b60200386d932abc97d35647345a73606882b",
+          "clock": {
+            "completed_steps": 2,
+            "next_rollout_id": 2,
+            "published_step": 1
+          },
+          "cursor": {
+            "epoch_id": 0,
+            "metadata": {},
+            "sample_group_index": 2,
+            "sample_index": 8,
+            "sample_offset": 2
+          }
+        },
+        "step2": {
+          "model_tensors": 43,
+          "optimizer_tensors": 172,
+          "model_bytes": 1527440,
+          "optimizer_bytes": 9164812,
+          "snapshot_sha256": "be2ca4c5febcd343010cfa011b2b60200386d932abc97d35647345a73606882b",
+          "clock": {
+            "completed_steps": 2,
+            "next_rollout_id": 2,
+            "published_step": 1
+          },
+          "cursor": {
+            "epoch_id": 0,
+            "metadata": {},
+            "sample_group_index": 2,
+            "sample_index": 8,
+            "sample_offset": 2
+          }
+        }
+      }
+    },
+    "resumed": {
+      "pid": 589,
+      "elapsed_seconds": 2.287273035850376,
+      "score_checks": [
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 3
+        },
+        {
+          "active_tokens": 52,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "step": 4
+        }
+      ],
+      "scheduler_horizon": 4,
+      "snapshots": {
+        "restored2": {
+          "model_tensors": 43,
+          "optimizer_tensors": 172,
+          "model_bytes": 1527440,
+          "optimizer_bytes": 9164812,
+          "snapshot_sha256": "be2ca4c5febcd343010cfa011b2b60200386d932abc97d35647345a73606882b",
+          "clock": {
+            "completed_steps": 2,
+            "next_rollout_id": 2,
+            "published_step": 1
+          },
+          "cursor": {
+            "epoch_id": 0,
+            "metadata": {},
+            "sample_group_index": 2,
+            "sample_index": 8,
+            "sample_offset": 2
+          }
+        },
+        "step4": {
+          "model_tensors": 43,
+          "optimizer_tensors": 172,
+          "model_bytes": 1527440,
+          "optimizer_bytes": 9164812,
+          "snapshot_sha256": "88f3483427d8eba1623a6ca8ca8d0e858d6e6e9914143a83c60c52bf371b6f44",
+          "clock": {
+            "completed_steps": 4,
+            "next_rollout_id": 4,
+            "published_step": 3
+          },
+          "cursor": {
+            "epoch_id": 0,
+            "metadata": {},
+            "sample_group_index": 4,
+            "sample_index": 16,
+            "sample_offset": 4
+          }
+        }
+      }
+    }
+  },
+  "audit": {
+    "comparisons": [
+      {
+        "actual": "split/step2",
+        "differences": [],
+        "exact": true,
+        "rank": 0,
+        "reference": "control/step2"
+      },
+      {
+        "actual": "split/after_save2",
+        "differences": [],
+        "exact": true,
+        "rank": 0,
+        "reference": "split/step2"
+      },
+      {
+        "actual": "resumed/restored2",
+        "differences": [],
+        "exact": true,
+        "rank": 0,
+        "reference": "split/step2"
+      },
+      {
+        "actual": "resumed/step4",
+        "differences": [],
+        "exact": true,
+        "rank": 0,
+        "reference": "control/step4"
+      }
+    ],
+    "failures": [],
+    "limits": [
+      "Exact local tensor bytes at fixed topology; no SGLang transport tested",
+      "Synthetic responses and rewards; independent from the 100-update GSM8K run"
+    ],
+    "passed": true,
+    "world": 1
+  },
+  "checkpoint_bytes": 9518959,
+  "artifacts": {
+    "audit.json": "7689d6b2d663b40698ee757e907b2d1fa3725332cea706e1c3763e22c090b947",
+    "preparation.json": "3cf566f48fd92b0f3f096c68c5233a45fd4fada8fc73b5cbe9437655e682891a",
+    "control/rank0.json": "4225e150152af406dde1e648e5d3afa9b15e2726ed0188f3c63b5d2514424bb0",
+    "split/core-latest.json": "22f1fb2ad41528983b2fa16a7443550cfc62bac9d7334c4eccb59fd74e2e4b4c",
+    "split/rank0.json": "e5e9ab72c3da8c7bd06866ca65bed5bd03738e79b52ce8b2306f805b9613caf4",
+    "resumed/rank0.json": "b48f52f9a73dec039f8a7ff20c653a65652bbc5f8622621e34f975fe0dd6b875",
+    "split/core/rollout_0000001/complete.json": "41bbb9e86f3105be5db15df62ab5264566e6aa795f5f3ab9b7de432848676a0e",
+    "split/core/rollout_0000001/pending.json": "180a7cffb7a62194aa5e49e47c17bb84b58e57ec4cb5ea7985e7f12505e324be"
+  },
+  "full_model_trial": {
+    "status": "prepared_not_launched",
+    "gpu_count": 2,
+    "cluster": "ai2/holmes",
+    "priority": "urgent",
+    "min_runtime": "60m",
+    "timeout": "90m",
+    "conservative_disk_formula": "8 * HF tensor payload bytes + 2 GiB; reject insufficient free disk before loading/training"
+  },
+  "limits": [
+    "Tiny model and EP1 only; full-SFT EP2 remains unrun",
+    "Synthetic fixed responses and rewards; real MILES cursor and Core actor/native optimizer/checkpoint, no SGLang transport",
+    "Sequences are 16\u201340 tokens with masked response positions; not long-context memory qualification",
+    "The runtime includes the new SwiGLU no-grad fix and differs from frozen Core100 training image"
+  ]
+}
