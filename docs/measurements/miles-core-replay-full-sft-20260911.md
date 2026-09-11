@@ -1,8 +1,32 @@
 # Full-SFT Core rollout router replay qualification
 
-The earlier tiny-model live replay test passed three optimizer updates across a
-restart, but all rewards and policy advantages were zero. The full-model GSM8K
-learning comparisons ran with replay disabled. Neither qualifies full-model replay.
+Full-model router replay is qualified for synchronous Core EP2 with
+TP=PP=CP=1. Eight updates consumed 512 samples in 128 prompt groups, including
+38 mixed-reward groups. The independent retained-data audit passed.
+
+- Training: [01M2931SC4WNX57GB3AXWKV03W](https://beaker.org/ex/01M2931SC4WNX57GB3AXWKV03W),
+  source `44c6aff33`, image `01M2931KARFP3Y2W2FPADGRFEP`.
+- Passing independent CPU audit on Saturn:
+  [01M295HY6X4NMBGB8R0JW24EBQ](https://beaker.org/ex/01M295HY6X4NMBGB8R0JW24EBQ),
+  exit 0; auditor image `01M295B3XHQCP02ZHTKNQ4YSR3` (source `0de110f51`),
+  launcher source `8e0a709f3`.
+- [Machine-readable measurements](miles-core-replay-full-sft-20260911.json).
+
+There were zero expert-ID mismatches across all 19 routed layers: 9,728 scoring
+router calls and 19,456 training/recomputation router calls. Each training
+microbatch returned routes twice per layer, including backward recomputation.
+Captured routes covered 1,069,081 prediction-input tokens. Router gradient norms
+were finite and nonzero at every update (0.01068–0.01400), with nonzero sampled
+router parameter changes. Mean active-token train/serving log-probability gaps
+were 0.00645–0.00758.
+
+The GPU process completed training but exited 1 in its original post-run auditor,
+which expected nine publications and overlooked the eight extra same-version
+verification round trips. The corrected independent auditor checked all 17 in
+order, plus retained tokens, rewards, sample accounting, versions, and routes.
+This is completed training with a separately passing audit, not an exit-zero GPU
+job. No held-out evaluation or checkpoint was requested; this establishes replay
+mechanics, not learning benefit or unrestricted parallelism.
 
 This trial uses the frozen full-SFT GSM8K campaign, two B300 Core EP ranks and one
 TP1 SGLang engine, eight synchronous updates, 16 prompts × 4 generations per
@@ -38,15 +62,16 @@ Placement: urgent, `ai2/holmes`, `ai2/open-instruct-dev`, minimum runtime one ho
 three GPUs, two-hour timeout. Results are under
 `/weka/oe-training-default/robertb/open-instruct/control-exercise/$BEAKER_EXPERIMENT_ID/replay-admission64`.
 
-Status: first attempt failed before its first optimizer update in the new diagnostic hook.
+The first attempt failed before its first optimizer update in the new diagnostic hook.
 Captured IDs remained on CPU while returned router IDs were on GPU. The diagnostic
 now compares both on one device without changing the replay inputs. A local CUDA
 regression exercises CPU route payloads and GPU forward/backward, including
-intentional route corruption; all 27 targeted tests passed with no skips. Retry pending.
+intentional route corruption. The final targeted suite passed 33 tests with no
+skips; style, lint and type checks passed. The first CPU audit launch was canceled
+because its shell wrapper omitted the replay-only argument; the passing retry
+used the corrected wrapper without repeating GPU training.
 
 - Experiment: [01M291KSAXN8P2M0QCE26NE1TZ](https://beaker.org/ex/01M291KSAXN8P2M0QCE26NE1TZ)
 - Source: `9004a8cda`; immutable image: `01M291KK92RHGYEDN33N5F8BNR`.
 - Core development revision pinned by the image: `48bb6d7e1554`.
-- Local validation: 27 tests passed (real-router recomputation/gradient checks,
-  corruption rejection, trial parser and control audit tests); lint and type checks passed.
 - Submitted 2026-09-11 20:12:45 UTC; scheduled 20:13:05 UTC.

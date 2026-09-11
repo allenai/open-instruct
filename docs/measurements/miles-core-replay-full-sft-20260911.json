@@ -1,0 +1,510 @@
+{
+  "passed": true,
+  "replay": {
+    "passed": true,
+    "ranks": {
+      "0": {
+        "checked_microbatches": 512,
+        "routed_layers": 19
+      },
+      "1": {
+        "checked_microbatches": 512,
+        "routed_layers": 19
+      }
+    },
+    "synthetic_tail": "One unscored final token per sample; auxiliary semantics unchanged"
+  },
+  "updates": 8,
+  "samples": 512,
+  "publications": 17,
+  "elapsed": {
+    "seconds": 1817.4438398870407
+  },
+  "cycle_seconds": {
+    "count": 8,
+    "mean": 156.62794840949937,
+    "median": 106.2585102004814,
+    "min": 104.76890669506975,
+    "max": 508.9250755009707
+  },
+  "training": [
+    {
+      "update": 0,
+      "samples": 64,
+      "accuracy": 0.78125,
+      "mean_reward": 0.78125,
+      "mean_response_tokens": 1778.203125,
+      "truncation_rate": 0.078125,
+      "at_response_cap": 5,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 4,
+      "mixed_reward_group_fraction": 0.25
+    },
+    {
+      "update": 1,
+      "samples": 64,
+      "accuracy": 0.765625,
+      "mean_reward": 0.765625,
+      "mean_response_tokens": 1900.4375,
+      "truncation_rate": 0.203125,
+      "at_response_cap": 13,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 5,
+      "mixed_reward_group_fraction": 0.3125
+    },
+    {
+      "update": 2,
+      "samples": 64,
+      "accuracy": 0.75,
+      "mean_reward": 0.75,
+      "mean_response_tokens": 2137.625,
+      "truncation_rate": 0.171875,
+      "at_response_cap": 11,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 8,
+      "mixed_reward_group_fraction": 0.5
+    },
+    {
+      "update": 3,
+      "samples": 64,
+      "accuracy": 0.828125,
+      "mean_reward": 0.828125,
+      "mean_response_tokens": 1987.578125,
+      "truncation_rate": 0.1875,
+      "at_response_cap": 12,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 3,
+      "mixed_reward_group_fraction": 0.1875
+    },
+    {
+      "update": 4,
+      "samples": 64,
+      "accuracy": 0.921875,
+      "mean_reward": 0.921875,
+      "mean_response_tokens": 1916.75,
+      "truncation_rate": 0.109375,
+      "at_response_cap": 7,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 3,
+      "mixed_reward_group_fraction": 0.1875
+    },
+    {
+      "update": 5,
+      "samples": 64,
+      "accuracy": 0.84375,
+      "mean_reward": 0.84375,
+      "mean_response_tokens": 1911.5,
+      "truncation_rate": 0.140625,
+      "at_response_cap": 9,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 6,
+      "mixed_reward_group_fraction": 0.375
+    },
+    {
+      "update": 6,
+      "samples": 64,
+      "accuracy": 0.703125,
+      "mean_reward": 0.703125,
+      "mean_response_tokens": 1930.171875,
+      "truncation_rate": 0.203125,
+      "at_response_cap": 13,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 3,
+      "mixed_reward_group_fraction": 0.1875
+    },
+    {
+      "update": 7,
+      "samples": 64,
+      "accuracy": 0.796875,
+      "mean_reward": 0.796875,
+      "mean_response_tokens": 1914.4375,
+      "truncation_rate": 0.203125,
+      "at_response_cap": 13,
+      "prompt_groups": 16,
+      "mixed_reward_groups": 6,
+      "mixed_reward_group_fraction": 0.375
+    }
+  ],
+  "ranks": {
+    "0": {
+      "phases": {
+        "scoring": {
+          "microbatches": 256,
+          "mismatches": 0,
+          "captured_tokens": 544650,
+          "layers": [
+            "module.blocks.1.routed_experts_router",
+            "module.blocks.10.routed_experts_router",
+            "module.blocks.11.routed_experts_router",
+            "module.blocks.12.routed_experts_router",
+            "module.blocks.13.routed_experts_router",
+            "module.blocks.14.routed_experts_router",
+            "module.blocks.15.routed_experts_router",
+            "module.blocks.16.routed_experts_router",
+            "module.blocks.17.routed_experts_router",
+            "module.blocks.18.routed_experts_router",
+            "module.blocks.19.routed_experts_router",
+            "module.blocks.2.routed_experts_router",
+            "module.blocks.3.routed_experts_router",
+            "module.blocks.4.routed_experts_router",
+            "module.blocks.5.routed_experts_router",
+            "module.blocks.6.routed_experts_router",
+            "module.blocks.7.routed_experts_router",
+            "module.blocks.8.routed_experts_router",
+            "module.blocks.9.routed_experts_router"
+          ],
+          "returned_router_calls": 4864,
+          "min_returns_per_layer_per_microbatch": 1
+        },
+        "training": {
+          "microbatches": 256,
+          "mismatches": 0,
+          "captured_tokens": 544650,
+          "layers": [
+            "module.blocks.1.routed_experts_router",
+            "module.blocks.10.routed_experts_router",
+            "module.blocks.11.routed_experts_router",
+            "module.blocks.12.routed_experts_router",
+            "module.blocks.13.routed_experts_router",
+            "module.blocks.14.routed_experts_router",
+            "module.blocks.15.routed_experts_router",
+            "module.blocks.16.routed_experts_router",
+            "module.blocks.17.routed_experts_router",
+            "module.blocks.18.routed_experts_router",
+            "module.blocks.19.routed_experts_router",
+            "module.blocks.2.routed_experts_router",
+            "module.blocks.3.routed_experts_router",
+            "module.blocks.4.routed_experts_router",
+            "module.blocks.5.routed_experts_router",
+            "module.blocks.6.routed_experts_router",
+            "module.blocks.7.routed_experts_router",
+            "module.blocks.8.routed_experts_router",
+            "module.blocks.9.routed_experts_router"
+          ],
+          "returned_router_calls": 9728,
+          "min_returns_per_layer_per_microbatch": 2
+        }
+      },
+      "steps": [
+        {
+          "step": 1,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.012007475903237898,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 1.1893515715053328e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.18554851353168486,
+            "router_z": 8.545746151357889e-05
+          }
+        },
+        {
+          "step": 2,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.012930128798170806,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 1.903983136653627e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.19955188632011414,
+            "router_z": 9.367069385945798e-05
+          }
+        },
+        {
+          "step": 3,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.014003119469089971,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 1.8569388003294107e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.1837095272541046,
+            "router_z": 8.314888559281827e-05
+          }
+        },
+        {
+          "step": 4,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.011676320454446604,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 2.5973100120569354e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.20506392121315,
+            "router_z": 9.602491993457081e-05
+          }
+        },
+        {
+          "step": 5,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.010683093907754843,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 4.0782039049876224e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.20456706166267394,
+            "router_z": 9.398346558213235e-05
+          }
+        },
+        {
+          "step": 6,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.011973524612727738,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 3.072924745049944e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.20668879032135012,
+            "router_z": 8.830389309674502e-05
+          }
+        },
+        {
+          "step": 7,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.012063553527798991,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 2.711598658341439e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.1949236690998077,
+            "router_z": 9.117242109030486e-05
+          }
+        },
+        {
+          "step": 8,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.013555451058174075,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 6.368803710029115e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.20384665846824643,
+            "router_z": 9.028230406343937e-05
+          }
+        }
+      ]
+    },
+    "1": {
+      "phases": {
+        "scoring": {
+          "microbatches": 256,
+          "mismatches": 0,
+          "captured_tokens": 524431,
+          "layers": [
+            "module.blocks.1.routed_experts_router",
+            "module.blocks.10.routed_experts_router",
+            "module.blocks.11.routed_experts_router",
+            "module.blocks.12.routed_experts_router",
+            "module.blocks.13.routed_experts_router",
+            "module.blocks.14.routed_experts_router",
+            "module.blocks.15.routed_experts_router",
+            "module.blocks.16.routed_experts_router",
+            "module.blocks.17.routed_experts_router",
+            "module.blocks.18.routed_experts_router",
+            "module.blocks.19.routed_experts_router",
+            "module.blocks.2.routed_experts_router",
+            "module.blocks.3.routed_experts_router",
+            "module.blocks.4.routed_experts_router",
+            "module.blocks.5.routed_experts_router",
+            "module.blocks.6.routed_experts_router",
+            "module.blocks.7.routed_experts_router",
+            "module.blocks.8.routed_experts_router",
+            "module.blocks.9.routed_experts_router"
+          ],
+          "returned_router_calls": 4864,
+          "min_returns_per_layer_per_microbatch": 1
+        },
+        "training": {
+          "microbatches": 256,
+          "mismatches": 0,
+          "captured_tokens": 524431,
+          "layers": [
+            "module.blocks.1.routed_experts_router",
+            "module.blocks.10.routed_experts_router",
+            "module.blocks.11.routed_experts_router",
+            "module.blocks.12.routed_experts_router",
+            "module.blocks.13.routed_experts_router",
+            "module.blocks.14.routed_experts_router",
+            "module.blocks.15.routed_experts_router",
+            "module.blocks.16.routed_experts_router",
+            "module.blocks.17.routed_experts_router",
+            "module.blocks.18.routed_experts_router",
+            "module.blocks.19.routed_experts_router",
+            "module.blocks.2.routed_experts_router",
+            "module.blocks.3.routed_experts_router",
+            "module.blocks.4.routed_experts_router",
+            "module.blocks.5.routed_experts_router",
+            "module.blocks.6.routed_experts_router",
+            "module.blocks.7.routed_experts_router",
+            "module.blocks.8.routed_experts_router",
+            "module.blocks.9.routed_experts_router"
+          ],
+          "returned_router_calls": 9728,
+          "min_returns_per_layer_per_microbatch": 2
+        }
+      },
+      "steps": [
+        {
+          "step": 1,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.012007475903237898,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 1.1893515715053328e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.20227638006210327,
+            "router_z": 9.4912218041718e-05
+          }
+        },
+        {
+          "step": 2,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.012930128798170806,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 1.903983136653627e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.18984871685504917,
+            "router_z": 8.951193053275348e-05
+          }
+        },
+        {
+          "step": 3,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.014003119469089971,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 1.8569388003294107e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.20359657645225526,
+            "router_z": 9.206132832914592e-05
+          }
+        },
+        {
+          "step": 4,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.011676320454446604,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 2.5973100120569354e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.18354058980941773,
+            "router_z": 8.259437441825867e-05
+          }
+        },
+        {
+          "step": 5,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.010683093907754843,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 4.0782039049876224e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.18410300612449648,
+            "router_z": 8.572190336883068e-05
+          }
+        },
+        {
+          "step": 6,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.011973524612727738,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 3.072924745049944e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.18030098915100096,
+            "router_z": 7.854686807841064e-05
+          }
+        },
+        {
+          "step": 7,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.012063553527798991,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 2.711598658341439e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.1944111216068268,
+            "router_z": 9.330989919602872e-05
+          }
+        },
+        {
+          "step": 8,
+          "router_gradient": {
+            "elements": 12451840,
+            "local_l2": 0.013555451058174075,
+            "missing_parameters": 0
+          },
+          "router_update": {
+            "sampled_elements": 4864,
+            "sampled_update_l2": 6.368803710029115e-05
+          },
+          "auxiliary": {
+            "load_balancing": 0.18532566606998443,
+            "router_z": 8.383819546550513e-05
+          }
+        }
+      ]
+    }
+  }
+}
