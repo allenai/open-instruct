@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import json
 import os
+import sys
 from pathlib import Path
 
 import torch
@@ -119,6 +120,13 @@ class Recorder:
                 "positions": positions(len(case["input_ids"])),
                 "forward_token_count": tokens.numel(),
                 "routes": {},
+                "controls": {
+                    "grad_enabled": torch.is_grad_enabled(),
+                    "cuda_autocast_enabled": torch.is_autocast_enabled("cuda"),
+                    "float32_matmul_precision": torch.get_float32_matmul_precision(),
+                    "matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+                    "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+                },
             }
         )
 
@@ -250,6 +258,25 @@ def assert_scores(records, cases, control, observed):
         )
 
 
+def runtime_metadata():
+    """Read loaded source identities and populated tuner choices; never invoke a kernel."""
+    module_name = (
+        "update_zero_capture" if "update_zero_capture" in sys.modules else "scripts.miles.update_zero_capture"
+    )
+    capture = importlib.import_module(module_name)
+    sources = capture.source_manifest()
+    for name, module in list(sys.modules.items()):
+        if name.startswith(("olmo_core.", "megatron.", "miles.backends.", "open_instruct.miles.")):
+            filename = getattr(module, "__file__", None)
+            if filename and Path(filename).is_file():
+                sources[name] = {"file": filename, "sha256": hashlib.sha256(Path(filename).read_bytes()).hexdigest()}
+    return {
+        "autotune_configs": capture.snapshot_autotune_configs(),
+        "autotune_policy": capture.autotune_policy(),
+        "sources": sources,
+    }
+
+
 def diagnostic_score_probe(self, payload, output):
     """Ray-callable method added only by the diagnostic driver before actor registration."""
     backend = self.args.train_backend
@@ -332,6 +359,7 @@ def diagnostic_score_probe(self, payload, output):
         source=payload["source"],
         cases=recorder.records,
         router_parameters=recorder.router_parameters,
+        runtime=runtime_metadata(),
         scope="Actual production scorer; no replay, no backward, no optimizer call; canonical router observations",
     )
     path.parent.mkdir(parents=True, exist_ok=True)

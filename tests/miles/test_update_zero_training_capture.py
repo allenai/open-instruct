@@ -184,3 +184,16 @@ def test_missing_router_layer_is_rejected_after_scoring():
     del recorder.records[0]["routes"][0]
     with pytest.raises(ValueError, match="omitted"):
         recorder.validate()
+
+
+def test_runtime_metadata_reads_populated_tuners_without_invoking_kernels(monkeypatch):
+    observer = SimpleNamespace(
+        source_manifest=lambda: {},
+        snapshot_autotune_configs=lambda: {"kernel": {"key": {"num_warps": 4}}},
+        autotune_policy=lambda: {"cache_results": True},
+    )
+    monkeypatch.setitem(capture.sys.modules, "update_zero_capture", observer)
+    monkeypatch.setattr(capture.importlib, "import_module", lambda name: observer)
+    result = capture.runtime_metadata()
+    assert result["autotune_configs"]["kernel"]["key"]["num_warps"] == 4
+    assert result["autotune_policy"]["cache_results"] is True
