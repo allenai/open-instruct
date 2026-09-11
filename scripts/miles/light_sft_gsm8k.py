@@ -416,9 +416,15 @@ def effective_settings(args):
     return actual
 
 
-def run(root, validate_only=False):
+def run(root, validate_only=False, local_hf=None):
     preparation = verify(root)
     config = configuration(root)
+    if local_hf is not None:
+        staging = json.loads((root / "local-staging.json").read_text())
+        if staging["destination"] != str(local_hf) or not staging["verified_full_payload"]:
+            raise ValueError("Missing verified local checkpoint staging")
+        config.miles["hf_checkpoint"] = str(local_hf)
+        config.miles["sglang_log_level"] = "info"
     sys.argv = ["light-sft1000-core", *config.arguments()]
     args = importlib.import_module("miles.utils.arguments").parse_args()
     effective = effective_settings(args)
@@ -454,6 +460,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage", choices=("prepare", "validate", "run", "audit"))
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--local-hf", type=Path)
     parser.add_argument("--historical-result", type=Path, default=Path("/historical-offline"))
     args = parser.parse_args()
     if args.stage == "prepare":
@@ -485,7 +492,7 @@ def main():
         if not report["valid"]:
             raise ValueError("Light-SFT rollout audit failed")
     else:
-        run(args.root, validate_only=args.stage == "validate")
+        run(args.root, validate_only=args.stage == "validate", local_hf=args.local_hf)
 
 
 if __name__ == "__main__":

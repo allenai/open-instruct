@@ -9,10 +9,11 @@ from pathlib import Path
 from scripts.miles.light_sft_gsm8k import ROOT, history
 
 
-def specification(image, stage):
-    if stage not in ("prepare", "core", "audit"):
+def specification(image, stage, root=None):
+    if stage not in ("prepare", "core", "core-retry", "audit"):
         raise ValueError("Unknown light-SFT stage")
-    cpu = stage != "core"
+    cpu = stage not in ("core", "core-retry")
+    root = root or (Path(str(ROOT) + "-r2") if stage == "core-retry" else ROOT)
     command = f"""set -euo pipefail
 cd /opt/core-rl
 export TOKENIZERS_PARALLELISM=false
@@ -20,23 +21,23 @@ export NCCL_CUMEM_ENABLE=1
 export HF_HOME=/tmp/hf-cache
 export SGLANG_EXTERNAL_MODEL_PACKAGE=olmo_sglang.models
 mkdir -p /output
-export RUN_ROOT={ROOT}
+export RUN_ROOT={root}
 """
     if stage == "prepare":
-        command += """python -m scripts.miles.light_sft_gsm8k prepare
-python -m scripts.miles.light_sft_gsm8k validate
+        command += """python -m scripts.miles.light_sft_gsm8k prepare --root "$RUN_ROOT"
+python -m scripts.miles.light_sft_gsm8k validate --root "$RUN_ROOT"
 cp "$RUN_ROOT/preparation.json" /output/
 cp "$RUN_ROOT/historical.json" /output/
 cp "$RUN_ROOT/checkpoint-inventory.json" /output/
 """
     elif stage == "audit":
-        command += """python -m scripts.miles.light_sft_gsm8k audit
+        command += """python -m scripts.miles.light_sft_gsm8k audit --root "$RUN_ROOT"
 cp "$RUN_ROOT/core/audit.json" /output/
 """
     else:
         command += """export WANDB_MODE=online
 copy_reports() {
-  for name in arguments.json effective.json preparation.json completion.json offline-0.json offline-200.json; do
+  for name in arguments.json effective.json preparation.json completion.json native-0.json native-200.json offline-0.json offline-200.json; do
     if [ -f "$RUN_ROOT/core/$name" ]; then cp "$RUN_ROOT/core/$name" /output/; fi
   done
   if [ -d "$RUN_ROOT/core/metrics" ]; then
@@ -46,8 +47,18 @@ copy_reports() {
 trap copy_reports EXIT
 python -c 'import torch; assert torch.cuda.device_count() == 4; assert "B300" in torch.cuda.get_device_name()'
 python scripts/miles/preflight_attention.py --backend flash_4
-python -m scripts.miles.light_sft_gsm8k run
+python -m scripts.miles.light_sft_gsm8k run --root "$RUN_ROOT"
 """
+    if stage == "core-retry":
+        setup = (
+            f"python -m scripts.miles.light_sft_retry --source-root {ROOT} "
+            '--root "$RUN_ROOT" --local-hf /tmp/light-sft-hf\n'
+            'cp "$RUN_ROOT/local-staging.json" /output/\n'
+        )
+        command = command.replace(
+            "python scripts/miles/preflight_attention.py", setup + "python scripts/miles/preflight_attention.py"
+        )
+        command = command.replace('run --root "$RUN_ROOT"', 'run --root "$RUN_ROOT" --local-hf /tmp/light-sft-hf')
     mounts = [{"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}}]
     if stage == "prepare":
         mounts.append(
@@ -79,10 +90,11 @@ python -m scripts.miles.light_sft_gsm8k run
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
-    parser.add_argument("--stage", required=True, choices=("prepare", "core", "audit"))
+    parser.add_argument("--stage", required=True, choices=("prepare", "core", "core-retry", "audit"))
+    parser.add_argument("--root", type=Path)
     parser.add_argument("--render-only", action="store_true")
     args = parser.parse_args()
-    document = json.dumps(specification(args.image, args.stage), indent=2) + "\n"
+    document = json.dumps(specification(args.image, args.stage, args.root), indent=2) + "\n"
     if args.render_only:
         print(document, end="")
         return

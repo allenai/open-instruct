@@ -67,8 +67,15 @@ class HistoricalEvaluation:
         if getattr(input.args, "eval_uses_snapshots", False):
             raise ValueError("Historical evaluation requires the inline serving policy, not snapshots")
         self.native = InferenceRolloutFn(input)
+        self.constructor_input = input
         self.root = Path(input.args.prompt_data).parent
-        args = copy.deepcopy(input.args)
+
+    def offline_function(self):
+        # MILES assigns router endpoints after extension construction.
+        # Copy live transport arguments only when evaluating.
+        args = copy.deepcopy(self.constructor_input.args)
+        if not args.sglang_router_ip or not args.sglang_router_port:
+            raise ValueError("Historical evaluation requires a live router endpoint")
         args.rollout_stop = ["Question:", "\n\n"]
         args.eval_datasets = [
             EvalDatasetConfig(
@@ -84,7 +91,7 @@ class HistoricalEvaluation:
                 max_response_len=512,
             )
         ]
-        self.offline = InferenceRolloutFn(dataclasses.replace(input, args=args))
+        return InferenceRolloutFn(dataclasses.replace(self.constructor_input, args=args))
 
     async def __call__(self, input):
         if not input.evaluation:
@@ -95,8 +102,28 @@ class HistoricalEvaluation:
         if input.rollout_id not in (0, 199):
             return native
         step = 0 if input.rollout_id == 0 else 200
+        native_rows = native.data["gsm8k"]
+        native_report = {
+            "step": step,
+            "count": len(native_rows["samples"]),
+            "correct": sum(float(reward) for reward in native_rows["rewards"]),
+            "capped": sum(native_rows["truncated"]),
+            "samples": [
+                {
+                    "id": sample.metadata["prepared_sample_id"],
+                    "response": sample.response,
+                    "tokens": sample.tokens,
+                    "weight_versions": sample.weight_versions,
+                    "reward": reward,
+                }
+                for sample, reward in zip(native_rows["samples"], native_rows["rewards"], strict=True)
+            ],
+        }
+        write_immutable(self.root / f"core/native-{step}.json", json_bytes(native_report))
+        summary = {key: value for key, value in native_report.items() if key != "samples"}
+        print("LIGHT_SFT_NATIVE_EVAL", json.dumps(summary), flush=True)
         started = time.monotonic()
-        output = await self.offline(input)
+        output = await self.offline_function()(input)
         prompts = [json.loads(line) for line in (self.root / "offline/prompts.jsonl").read_text().splitlines()]
         proofs = json.loads((self.root / "offline/token-proofs.json").read_text())
         report = summarize(output.data["historical-full-test"]["samples"], prompts, proofs, step)

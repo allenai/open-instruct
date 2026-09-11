@@ -20,12 +20,18 @@
     "loader_native_wait_channel": "folio_wait_bit_common",
     "loader_thread_proc_io_bytes": 0,
     "proc_io_limitation": "Mmap page faults are not reflected by this thread's read syscall counters.",
-    "bounded_64_mib_buffered_read_seconds": [4.22125, 4.44409],
+    "bounded_64_mib_buffered_read_seconds": [
+      4.22125,
+      4.44409
+    ],
     "progress_confirmation": {
       "first_tensor": "model.layers.5.mlp.experts.402.down_proj.weight",
       "sorted_tensor_index": 22881,
       "total_tensors": 29669,
-      "data_offsets": [28712352768, 28713571328],
+      "data_offsets": [
+        28712352768,
+        28713571328
+      ],
       "later_tensor": "model.layers.8.mlp.experts.326.down_proj.weight"
     },
     "mincore_resident_fraction_after_first_prefetch": 0.763998768670966,
@@ -56,12 +62,21 @@
     }
   ],
   "outcome": {
-    "engine_shard_load_seconds": [2074.96, 2050.4],
-    "engine_shard_complete_log_utc": ["2026-09-11T04:30:07Z", "2026-09-11T04:30:29Z"],
+    "engine_shard_load_seconds": [
+      2074.96,
+      2050.4
+    ],
+    "engine_shard_complete_log_utc": [
+      "2026-09-11T04:30:07Z",
+      "2026-09-11T04:30:29Z"
+    ],
     "both_engines_healthy_utc": "2026-09-11T04:33:42Z",
     "graph_capture_completed": true,
     "transient_initial_prefill_jit_health_warnings_cleared": true,
-    "historical_shard_load_seconds_approximate": [42, 45],
+    "historical_shard_load_seconds_approximate": [
+      42,
+      45
+    ],
     "interpretation": "The current allocation was preserved and progressed after the identical file was read sequentially. This establishes an I/O-bound startup event and a recorded cache-warming intervention, not a controlled estimate of its speedup or a steady-state training performance result."
   },
   "evidence_local_paths": [
@@ -73,5 +88,14 @@
     "/tmp/light-sft1000-loader-locals-2.txt",
     "/tmp/light-sft1000-pagecache.txt",
     "/tmp/light-sft1000-post-read-stacks.txt"
-  ]
+  ],
+  "subsequent_terminal_failure": {
+    "exit_code": 1,
+    "time_utc": "2026-09-11T04:39:22Z",
+    "boundary": "Additional full-test endpoint after native128 returned, before any optimizer update",
+    "error": "httpx.InvalidURL: Invalid port: None",
+    "cause": "Full-test arguments copied before dynamic router initialization",
+    "audited_optimizer_updates": 0,
+    "completed_endpoint_aggregates": 0
+  }
 }

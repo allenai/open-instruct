@@ -160,3 +160,105 @@ def test_full_test_rejects_external_snapshot_sampling_state():
         request = SimpleNamespace(evaluation=True, generate_state=state, hf_dir=hf)
         with pytest.raises(ValueError, match="snapshot generation state"):
             asyncio.run(worker(request))
+
+
+def test_offline_state_binds_router_after_constructor_and_keeps_sampling(monkeypatch, tmp_path):
+    pytest.importorskip("miles")
+    module = importlib.import_module("scripts.miles.light_sft_eval")
+    types = importlib.import_module("miles.rollout.base_types")
+    captured = []
+    monkeypatch.setattr(module, "InferenceRolloutFn", lambda value: captured.append(value) or value)
+    args = SimpleNamespace(
+        prompt_data=str(tmp_path / "train.jsonl"),
+        sglang_router_ip=None,
+        sglang_router_port=None,
+        rollout_stop=None,
+        eval_datasets=["native"],
+    )
+    worker = module.HistoricalEvaluation(types.RolloutFnConstructorInput(args=args, data_source=None))
+    assert len(captured) == 1
+    with pytest.raises(ValueError, match="live router"):
+        worker.offline_function()
+    args.sglang_router_ip, args.sglang_router_port = "127.0.0.1", 12345
+    offline = worker.offline_function()
+    assert offline.args.sglang_router_port == 12345
+    assert offline.args.sglang_router_ip == "127.0.0.1"
+    assert offline.args.rollout_stop == ["Question:", "\n\n"]
+    assert offline.args.eval_datasets[0].temperature == 0
+    assert offline.args.eval_datasets[0].max_response_len == 512
+    assert args.rollout_stop is None and args.eval_datasets == ["native"]
+    args.sglang_router_port = 23456
+    assert worker.offline_function().args.sglang_router_port == 23456
+
+
+def test_retry_stages_full_identical_bytes_and_keeps_source(tmp_path):
+    module = importlib.import_module("scripts.miles.light_sft_retry")
+    source, destination = tmp_path / "source", tmp_path / "local"
+    source.mkdir()
+    payload = b"unchanged model bytes" * 1000
+    (source / "model.safetensors").write_bytes(payload)
+    (source / "config.json").write_text("{}")
+    report = module.stage_hf(source, destination)
+    assert report["verified_full_payload"]
+    assert report["files"]["model.safetensors"]["sha256"] == light_sft_gsm8k.digest(payload)
+    assert (destination / "model.safetensors").read_bytes() == payload
+    assert (source / "model.safetensors").read_bytes() == payload
+    with pytest.raises(FileExistsError):
+        module.stage_hf(source, destination)
+
+
+def test_retry_staging_rejects_insufficient_space(monkeypatch, tmp_path):
+    module = importlib.import_module("scripts.miles.light_sft_retry")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "model.safetensors").write_bytes(b"weights")
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _: SimpleNamespace(free=1))
+    with pytest.raises(ValueError, match="Insufficient"):
+        module.stage_hf(source, tmp_path / "local")
+    assert not (tmp_path / "local").exists()
+
+
+def test_retry_preserves_original_outputs_and_stages_before_driver():
+    task = launch_light_sft_gsm8k.specification("image", "core-retry")["tasks"][0]
+    command = task["arguments"][0]
+    assert "20260911-v1-r2" in command
+    assert "--source-root " + str(light_sft_gsm8k.ROOT) in command
+    assert command.index("light_sft_retry") < command.index("light_sft_gsm8k run")
+    assert "--local-hf /tmp/light-sft-hf" in command
+    assert task["resources"]["gpuCount"] == 4
+    assert task["constraints"]["cluster"] == ["ai2/holmes"]
+
+
+def test_native_endpoint_is_retained_if_full_test_fails(tmp_path):
+    pytest.importorskip("miles")
+    module = importlib.import_module("scripts.miles.light_sft_eval")
+    worker = object.__new__(module.HistoricalEvaluation)
+    worker.root = tmp_path
+    (tmp_path / "core").mkdir()
+    sample = SimpleNamespace(
+        metadata={"prepared_sample_id": "frozen-id"}, response="18", tokens=[2, 18], weight_versions=["0"]
+    )
+
+    async def native(_):
+        return SimpleNamespace(data={"gsm8k": {"samples": [sample], "rewards": [1.0], "truncated": [False]}})
+
+    def offline():
+        raise RuntimeError("transport failure")
+
+    worker.native = native
+    worker.offline_function = offline
+    request = SimpleNamespace(evaluation=True, generate_state=None, hf_dir=None, rollout_id=0)
+    with pytest.raises(RuntimeError, match="transport failure"):
+        asyncio.run(worker(request))
+    report = json.loads((tmp_path / "core/native-0.json").read_text())
+    assert report["correct"] == 1 and report["samples"][0]["id"] == "frozen-id"
+
+
+def test_retry_staging_rejects_corrupt_destination(monkeypatch, tmp_path):
+    module = importlib.import_module("scripts.miles.light_sft_retry")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "model.safetensors").write_bytes(b"weights")
+    monkeypatch.setattr(module.hashlib, "file_digest", lambda *args: SimpleNamespace(hexdigest=lambda: "wrong"))
+    with pytest.raises(ValueError, match="differs from the complete source"):
+        module.stage_hf(source, tmp_path / "local")
