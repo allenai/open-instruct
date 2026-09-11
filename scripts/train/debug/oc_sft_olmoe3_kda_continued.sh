@@ -132,8 +132,10 @@ DIST_TIMEOUT_HOURS="${DIST_TIMEOUT_HOURS:-4}"
 # W&B run name (entity ai2-llm, project open_instruct_internal). The entrypoint's default is
 # derived from the model path, so every run in this series would be called sft-step23607;
 # name them by mixture instead, e.g. kda-continued-sft-simfc-thinking-qwen35+tmax-sft-glm-52-seq65536.
+# A weight other than 1.0 is appended as x<weight> so reweighted mixes of the same datasets
+# stay distinguishable (…simfc-thinking-qwen35x3.0+nemotron-…).
 if [[ -z "${RUN_NAME:-}" ]]; then
-    MIXTURE_SLUG=$(echo "$MIXER" | awk '{for (i = 1; i <= NF; i += 2) {sub(".*/", "", $i); printf "%s%s", (i > 1 ? "+" : ""), $i}}')
+    MIXTURE_SLUG=$(echo "$MIXER" | awk '{for (i = 1; i <= NF; i += 2) {sub(".*/", "", $i); w = ($(i + 1) != "1.0") ? "x" $(i + 1) : ""; printf "%s%s%s", (i > 1 ? "+" : ""), $i, w}}')
     RUN_NAME="kda-continued-sft-${MIXTURE_SLUG}-seq${MAX_SEQ_LENGTH}"
 fi
 
