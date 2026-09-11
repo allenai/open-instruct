@@ -263,3 +263,34 @@ def test_retry_staging_rejects_corrupt_destination(monkeypatch, tmp_path):
     monkeypatch.setattr(module.hashlib, "file_digest", lambda *args: SimpleNamespace(hexdigest=lambda: "wrong"))
     with pytest.raises(ValueError, match="differs from the complete source"):
         module.stage_hf(source, tmp_path / "local")
+
+
+def test_actual_dataset_reader_and_serving_tokenizers_agree(tmp_path):
+    pytest.importorskip("miles")
+    module = importlib.import_module("scripts.miles.light_sft_tokenization")
+    tokenizers = importlib.import_module("tokenizers")
+    transformers = importlib.import_module("transformers")
+    raw = tokenizers.Tokenizer(tokenizers.models.WordLevel({"[UNK]": 0, "Question:": 1, "12": 2}, unk_token="[UNK]"))
+    raw.pre_tokenizer = tokenizers.pre_tokenizers.WhitespaceSplit()
+    tokenizer = transformers.PreTrainedTokenizerFast(tokenizer_object=raw, unk_token="[UNK]")
+    hf = tmp_path / "hf"
+    tokenizer.save_pretrained(hf)
+    path = tmp_path / "rows.jsonl"
+    path.write_text(
+        json.dumps({"input": "Question: 12", "label": "12", "metadata": {"prepared_sample_id": "x"}}) + "\n"
+    )
+    proof = {"prepared_sample_id": "x", "token_ids_sha256": "wrong", "prompt_tokens": 2}
+    report = module.compare_partition(path, hf, [proof])
+    assert report["valid"]
+    assert report["mismatch_counts"] == {"bare_transformers": 0, "checkpoint_json": 0, "sglang": 0, "old_proof": 1}
+    assert report["runtime_proofs"][0]["token_ids_sha256"] == light_sft_gsm8k.digest(
+        light_sft_gsm8k.json_bytes([1, 2])
+    )
+
+
+def test_tokenization_probe_is_cpu_saturn_and_read_only():
+    task = launch_light_sft_gsm8k.specification("image", "tokenization")["tasks"][0]
+    assert task["resources"]["gpuCount"] == 0
+    assert task["constraints"]["cluster"] == ["ai2/saturn"]
+    assert "light_sft_tokenization" in task["arguments"][0]
+    assert "light_sft_gsm8k run" not in task["arguments"][0]

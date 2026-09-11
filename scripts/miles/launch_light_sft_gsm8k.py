@@ -10,7 +10,7 @@ from scripts.miles.light_sft_gsm8k import ROOT, history
 
 
 def specification(image, stage, root=None):
-    if stage not in ("prepare", "core", "core-retry", "audit"):
+    if stage not in ("prepare", "core", "core-retry", "audit", "tokenization"):
         raise ValueError("Unknown light-SFT stage")
     cpu = stage not in ("core", "core-retry")
     root = root or (Path(str(ROOT) + "-r2") if stage == "core-retry" else ROOT)
@@ -30,6 +30,8 @@ cp "$RUN_ROOT/preparation.json" /output/
 cp "$RUN_ROOT/historical.json" /output/
 cp "$RUN_ROOT/checkpoint-inventory.json" /output/
 """
+    elif stage == "tokenization":
+        command += 'python -m scripts.miles.light_sft_tokenization "$RUN_ROOT" /output\n'
     elif stage == "audit":
         command += """python -m scripts.miles.light_sft_gsm8k audit --root "$RUN_ROOT"
 cp "$RUN_ROOT/core/audit.json" /output/
@@ -37,7 +39,7 @@ cp "$RUN_ROOT/core/audit.json" /output/
     else:
         command += """export WANDB_MODE=online
 copy_reports() {
-  for name in arguments.json effective.json preparation.json completion.json native-0.json native-200.json offline-0.json offline-200.json; do
+  for name in arguments.json effective.json preparation.json completion.json native-0.json native-200.json offline-0.json offline-200.json offline-raw-0.json offline-raw-200.json; do
     if [ -f "$RUN_ROOT/core/$name" ]; then cp "$RUN_ROOT/core/$name" /output/; fi
   done
   if [ -d "$RUN_ROOT/core/metrics" ]; then
@@ -90,7 +92,7 @@ python -m scripts.miles.light_sft_gsm8k run --root "$RUN_ROOT"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
-    parser.add_argument("--stage", required=True, choices=("prepare", "core", "core-retry", "audit"))
+    parser.add_argument("--stage", required=True, choices=("prepare", "core", "core-retry", "audit", "tokenization"))
     parser.add_argument("--root", type=Path)
     parser.add_argument("--render-only", action="store_true")
     args = parser.parse_args()

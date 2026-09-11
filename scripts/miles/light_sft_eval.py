@@ -25,9 +25,14 @@ def summarize(samples, prompts, proofs, step):
     for sample, prompt, proof in zip(samples, prompts, proofs, strict=True):
         if sample.metadata["prepared_sample_id"] != prompt["id"] or sample.prompt != prompt["input"]:
             raise ValueError("Full-test question identity or raw prompt changed")
-        ids = sample.tokens[: -sample.response_length]
+        ids = sample.tokens[: len(sample.tokens) - sample.response_length]
         if digest(json_bytes(ids)) != proof["token_ids_sha256"]:
-            raise ValueError("Full-test prompt tokenization differs from frozen requests")
+            raise ValueError(
+                "Full-test prompt tokenization differs from frozen requests: "
+                f"id={prompt['id']} response_length={sample.response_length} "
+                f"prompt_tokens={len(ids)} expected_tokens={proof['prompt_tokens']} "
+                f"actual_sha256={digest(json_bytes(ids))} expected_sha256={proof['token_ids_sha256']}"
+            )
         versions = sample.weight_versions
         if not versions or any(str(version) != str(step) for version in versions):
             raise ValueError("Full-test samples do not use the required published policy")
@@ -126,7 +131,12 @@ class HistoricalEvaluation:
         output = await self.offline_function()(input)
         prompts = [json.loads(line) for line in (self.root / "offline/prompts.jsonl").read_text().splitlines()]
         proofs = json.loads((self.root / "offline/token-proofs.json").read_text())
-        report = summarize(output.data["historical-full-test"]["samples"], prompts, proofs, step)
+        samples = output.data["historical-full-test"]["samples"]
+        write_immutable(
+            self.root / f"core/offline-raw-{step}.json",
+            json_bytes({"step": step, "samples": [sample.to_dict() for sample in samples]}),
+        )
+        report = summarize(samples, prompts, proofs, step)
         report["elapsed_seconds"] = time.monotonic() - started
         write_immutable(self.root / f"core/offline-{step}.json", json_bytes(report))
         native.metrics = {
