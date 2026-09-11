@@ -95,3 +95,9 @@ Start with:
 - `/home/robert/proj/open-instruct/.artifacts/miles-gsm8k-generations-20260911/comparison-reader.html`: offline searchable paired reader with all1,536 complete responses. CSV, original prepared data and verification report alongside it.
 
 Useful independent agent questions: where do update-zero captures first diverge; are stored parameters equal but execution controls/buffers different; do routes diverge before/after activation differences; does equal-input variable-length EP2 auxiliary math agree; how much does ordinary within-engine decode nondeterminism explain? Do not assume one-shot aggregate accuracy equality implies inference equivalence, or that probability drift itself proves a route mismatch.
+
+### Update at 05:29 UTC
+
+The Core-only update-zero retry was submitted as `01M27F1Q59128QKVBTMFW32JDD`, diagnostic source `ffeffe0f2`, on the same immutable original image. The actual original-image parser passed after omitting the unsupported negated W&B flag: zero rollouts, W&B disabled, original 100-step LR horizon retained. The failed first attempt remains recorded. Core retry tensors will be under `update-zero-20260911-v2/core`; Megatron remains under `update-zero-20260911-v1/megatron`, so comparison must accept separate backend roots. No trace result is claimed yet.
+
+The light-SFT third attempt is `01M27EWCG7P03CNY40E5WSXX1D`. Its separate observe-only terminal watcher is in `.artifacts/miles-light-r3-watch-20260911`, preserving both earlier failed runs and leaving the heavy pair's sole audit owner untouched.

@@ -2,14 +2,27 @@
   "schema_version": 1,
   "source": "f0bcf2f51",
   "core": {
-    "experiment": "01M27ENY7T955XE1W116D7M4BM",
-    "status": "failed before model initialization",
-    "error": "unsupported --no-use-wandb diagnostic argument; no optimizer steps"
+    "experiment": "01M27F1Q59128QKVBTMFW32JDD",
+    "source": "ffeffe0f2",
+    "status": "submitted at 2026-09-11T05:29:04Z",
+    "output": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v2/update-zero-20260911-v2/core",
+    "parser_qualification": {
+      "image_docker": "7c55472146e2",
+      "num_rollout": 0,
+      "use_wandb": false,
+      "lr_decay_iters": 100,
+      "local_log": "/tmp/update-zero-core-parser-proof.log"
+    }
   },
   "megatron": {
     "experiment": "01M27EPG7T5PKJ9B7P6J1GPASD",
     "status": "running; original source bootstrap and parser passed"
   },
   "outputs": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v1",
-  "next": "retry Core with omitted store_true tracking flag; collect paired prefill captures"
+  "next": "Monitor Core v2 and Megatron v1; compare retained fixed-prefix traces using separate backend roots",
+  "core_attempt1": {
+    "experiment": "01M27ENY7T955XE1W116D7M4BM",
+    "status": "failed before model initialization",
+    "error": "unsupported --no-use-wandb diagnostic argument; no optimizer steps"
+  }
 }
