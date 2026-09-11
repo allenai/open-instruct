@@ -45,7 +45,7 @@ def test_dense_options_rejected_before_loading_weights_or_using_cuda(tmp_path, r
 
 def test_actor_disabled_replay_does_not_load_any_backend(monkeypatch):
     worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
-    worker.args = SimpleNamespace(use_rollout_routing_replay=False)
+    worker.args = SimpleNamespace(use_rollout_routing_replay=False, olmo_core=CoreConfig())
     with (
         mock.patch.object(models, "_backend", side_effect=AssertionError("backend loaded")),
         worker._replay_context(SimpleNamespace(), {}),
@@ -68,7 +68,7 @@ def test_actor_moe_replay_preserves_router_gradients_and_cleans_up():
     model.add_module("blocks", torch.nn.ModuleList([block]))
     module = SimpleNamespace(model=model, _miles_model_backend="moe")
     worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
-    worker.args = SimpleNamespace(use_rollout_routing_replay=True)
+    worker.args = SimpleNamespace(use_rollout_routing_replay=True, olmo_core=CoreConfig())
     routes = torch.tensor([[[0, 2]], [[1, 3]], [[2, 3]]])
     batch = {"tokens": torch.zeros(1, 4, dtype=torch.long), "rollout_routed_experts": [routes]}
     x = torch.randn(1, 4, 8, requires_grad=True)

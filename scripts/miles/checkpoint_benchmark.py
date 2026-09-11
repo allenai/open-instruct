@@ -27,6 +27,12 @@ MODES = {
     },
 }
 
+# Pin each comparison arm independently of the RL defaults.
+MODES = {
+    name: {"compact_storage": False, "dedup_save_to_lowest_rank": True, "constant_memory_planning": False, **options}
+    for name, options in MODES.items()
+}
+
 MODES["metadata_processes"] = {**MODES["metadata"], "process_count": 2, "thread_count": 2}
 
 

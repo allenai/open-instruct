@@ -82,3 +82,14 @@ def test_launch_bounds_and_modes():
     assert "--no-python scripts/miles/checkpoint_rank.sh" in task["arguments"][0]
     with pytest.raises(ValueError):
         launcher.specification("image", modes=["bogus"])
+
+
+def test_benchmark_baseline_does_not_inherit_fast_rl_defaults():
+    assert gate.MODES["baseline"] == {
+        "profile": True,
+        "compact_storage": False,
+        "dedup_save_to_lowest_rank": True,
+        "constant_memory_planning": False,
+    }
+    assert gate.MODES["balanced"]["constant_memory_planning"] is False
+    assert gate.MODES["metadata"]["constant_memory_planning"] is True

@@ -21,8 +21,10 @@ baseline with shared rank caches had exact restored state but divergent continua
 the successful controlled-cache run supports execution reproducibility as the distinction,
 without isolating every possible cause.
 
-The implementation is merged into both working branches and remains opt-in. Normal
-pretraining configuration and production Ray cache handling remain unchanged.
+The validated arithmetic planner, compact storage, and balanced ownership are now the
+defaults in the MILES/Core MoE RL wrapper, with independent opt-outs documented in
+[run controls](../miles-run-controls.md). Profiling and process workers remain opt-in.
+Shared Core/pretraining defaults and production Ray cache handling remain unchanged.
 The additional same-node metadata and process-writer arms are still running.
 Earlier pending statements below describe intermediate measurements, superseded by this result.
 

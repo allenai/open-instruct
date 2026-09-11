@@ -23,9 +23,9 @@ class CoreConfig:
     checkpoint_profile: bool = False
     checkpoint_thread_count: int | None = None
     checkpoint_process_count: int | None = None
-    checkpoint_compact_storage: bool = False
-    checkpoint_dedup_save_to_lowest_rank: bool = True
-    checkpoint_constant_memory_planning: bool = False
+    checkpoint_compact_storage: bool = True
+    checkpoint_dedup_save_to_lowest_rank: bool = False
+    checkpoint_constant_memory_planning: bool = True
     model_config: str | None = None
     reward_config: str | None = None
     expert_parallel_size: int = 1

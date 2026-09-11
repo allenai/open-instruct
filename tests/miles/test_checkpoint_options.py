@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 
 from open_instruct.miles import models, standard_models
-from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.config import CoreConfig, RunConfig
 
 
 @pytest.mark.parametrize("field", ["checkpoint_thread_count", "checkpoint_process_count"])
@@ -30,12 +30,12 @@ def test_checkpoint_switches_are_booleans(field):
         CoreConfig(**{field: "false"})
 
 
-def test_default_checkpoint_policy_remains_legacy():
+def test_default_checkpoint_policy_uses_qualified_fast_path():
     assert CoreConfig().checkpoint_save_options() == {
         "profile": False,
-        "compact_storage": False,
-        "dedup_save_to_lowest_rank": True,
-        "constant_memory_planning": False,
+        "compact_storage": True,
+        "dedup_save_to_lowest_rank": False,
+        "constant_memory_planning": True,
     }
 
 
@@ -80,4 +80,35 @@ def test_resume_uses_only_qualified_read_controls(tmp_path, enabled):
     )
     models.load_native(module, tmp_path)
     expected = {"profile": True, "constant_memory_planning": True} if enabled else {}
+    module.load_state_dict_direct.assert_called_once_with(str(tmp_path), load_optim_state=True, **expected)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_profile_defaults_and_explicit_rollback_reach_save_and_load(tmp_path, legacy):
+    overrides = (
+        [
+            "core.checkpoint_constant_memory_planning=false",
+            "core.checkpoint_compact_storage=false",
+            "core.checkpoint_dedup_save_to_lowest_rank=true",
+        ]
+        if legacy
+        else []
+    )
+    config = RunConfig.load("configs/miles/profiles/sft-b300-ep2-sync.toml", overrides).core
+    module = SimpleNamespace(
+        _miles_model_backend="moe",
+        _miles_checkpoint_options=config.checkpoint_save_options(),
+        save_state_dict_direct=mock.Mock(),
+        load_state_dict_direct=mock.Mock(),
+    )
+    models.save_native(module, tmp_path)
+    module.save_state_dict_direct.assert_called_once_with(
+        str(tmp_path),
+        profile=False,
+        compact_storage=not legacy,
+        dedup_save_to_lowest_rank=legacy,
+        constant_memory_planning=not legacy,
+    )
+    models.load_native(module, tmp_path)
+    expected = {} if legacy else {"constant_memory_planning": True}
     module.load_state_dict_direct.assert_called_once_with(str(tmp_path), load_optim_state=True, **expected)
