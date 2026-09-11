@@ -1,0 +1,153 @@
+{
+  "source": "/weka/oe-training-default/robertb/open-instruct/control-exercise/01M28PAQW8YCJ6P8M9F2343PYH/controls/metrics/core/rollout_0000003/model/.metadata",
+  "metadata_sha256": "bda49227e70e1accad7027343476a9041bdb71d0ea1b25ea206372f2e14715b9",
+  "by_rank": {
+    "0": {
+      "written_bytes": 111089192982,
+      "items": 2014,
+      "files": 16
+    },
+    "1": {
+      "written_bytes": 111086027103,
+      "items": 1095,
+      "files": 16
+    }
+  },
+  "tensor_shape_counts": {
+    "(128355840,)": 6,
+    "()": 503,
+    "(1280,)": 246,
+    "(16,)": 48,
+    "(2048,)": 48,
+    "(2621440,)": 132,
+    "(5242880,)": 96,
+    "(327680,)": 96,
+    "(524288,)": 48,
+    "(20480,)": 48,
+    "(8192,)": 96,
+    "(16384,)": 48,
+    "(1048576,)": 48,
+    "(4096,)": 48,
+    "(256,)": 48,
+    "(21934080,)": 3,
+    "(10967040,)": 3,
+    "(819200,)": 114,
+    "(655360,)": 57,
+    "(2437120,)": 57,
+    "(1218560,)": 57,
+    "(1310720,)": 24,
+    "(128,)": 24,
+    "(623902720,)": 57,
+    "(311951360,)": 57
+  },
+  "planning_probe": [
+    {
+      "shape": [
+        623902720
+      ],
+      "mesh": [
+        2
+      ],
+      "legacy_seconds": 1.1681516349781305,
+      "candidate_seconds": 4.044153029099107e-06,
+      "metadata_exact": true
+    },
+    {
+      "shape": [
+        623902720
+      ],
+      "mesh": [
+        2,
+        1
+      ],
+      "legacy_seconds": 3.922556561883539,
+      "candidate_seconds": 5.1574730314314365e-06,
+      "metadata_exact": true
+    },
+    {
+      "shape": [
+        311951360
+      ],
+      "mesh": [
+        2
+      ],
+      "legacy_seconds": 0.5500265411101282,
+      "candidate_seconds": 2.764262026175857e-06,
+      "metadata_exact": true
+    },
+    {
+      "shape": [
+        311951360
+      ],
+      "mesh": [
+        2,
+        1
+      ],
+      "legacy_seconds": 2.1771257638465613,
+      "candidate_seconds": 5.073323845863342e-06,
+      "metadata_exact": true
+    },
+    {
+      "shape": [
+        128355840
+      ],
+      "mesh": [
+        2
+      ],
+      "legacy_seconds": 0.2425957159139216,
+      "candidate_seconds": 3.914852859452367e-06,
+      "metadata_exact": true
+    },
+    {
+      "shape": [
+        128355840
+      ],
+      "mesh": [
+        2,
+        1
+      ],
+      "legacy_seconds": 0.827504692832008,
+      "candidate_seconds": 5.168843083083629e-06,
+      "metadata_exact": true
+    }
+  ],
+  "runtime_lock": {
+    "schema_version": 1,
+    "status": "experimental hero support; conversion and serving qualification in progress",
+    "base_image": {
+      "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+      "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    },
+    "sources": {
+      "olmo-core": {
+        "repository": "https://github.com/allenai/OLMo-core.git",
+        "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5",
+        "development_commit": "f628ec4168023c13206ba27af8b90cdc984b2256",
+        "patch": "patches/olmo-core.patch",
+        "patch_sha256": "1270df94f8fe9b7bc6f699d04daf8df766dac5edb4c4e2e17d6a33a6f5e80012"
+      },
+      "miles": {
+        "repository": "https://github.com/radixark/miles.git",
+        "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
+        "development_commit": "64ba71950c973e458f22a8d10541475940c911b0",
+        "patch": "patches/miles.patch",
+        "patch_sha256": "e85add303ee3b7b38f4571e66b7b364a769b32e0fb096ab35e32f1447c173579"
+      },
+      "olmo-sglang": {
+        "repository": "https://github.com/allenai/olmo-sglang.git",
+        "revision": "81a312ee8326e279a4641e03542ef971a5ffb863",
+        "development_commit": "11ae9f6c4c131ded0ab67420e4f30ea67b924e99",
+        "embedded_path": "/src/olmo-sglang",
+        "patch": "patches/olmo-sglang.patch",
+        "patch_sha256": "e1bb9d06028986c754782a832b6a78d6313e80ccaf7f466200d8a7e8a12d9751",
+        "patch_paths": [
+          "src",
+          "tools",
+          "docs"
+        ],
+        "note": "Base image omits original test files; runtime delta covers src/tools/docs. Full tests live at development_commit."
+      }
+    }
+  },
+  "beaker_experiment": "01M28V8PAWD0BBX90136JKZGSZ"
+}

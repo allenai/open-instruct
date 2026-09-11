@@ -1,0 +1,51 @@
+{
+  "experiment": "01M28TFNGP78F24E6YNTTY4XMJ",
+  "mode": "baseline",
+  "save_timings": [
+    {
+      "rank": 0,
+      "prepare_seconds": 0.0040489002130925655,
+      "state_dict_seconds": 0.015561657026410103,
+      "buffers_seconds": 0.0011606658808887005,
+      "distributed_save_seconds": 436.8932814472355,
+      "resolve_seconds": 7.351525486912578,
+      "cpu_seconds": 1315.8396703614853,
+      "clone_seconds": 43.42379782535136,
+      "serialize_seconds": 152.9829290341586,
+      "tensor_bytes": 111086019548.0,
+      "written_bytes": 111089192982.0,
+      "items": 2014.0,
+      "flush_seconds": 273.9391777715646,
+      "publish_seconds": 0.38651588605716825,
+      "write_wall_seconds": 115.67745894100517,
+      "metadata_seconds": 0.04352379264310002,
+      "local_plan_seconds": 307.1914437012747,
+      "global_plan_seconds": 0.03736201301217079,
+      "optimizer_reload_seconds": 0.10046620713546872,
+      "empty_cache_seconds": 0.08599150506779552,
+      "total_seconds": 437.1006164480932
+    },
+    {
+      "rank": 1,
+      "prepare_seconds": 0.0037370221689343452,
+      "state_dict_seconds": 0.014249656815081835,
+      "buffers_seconds": 0.001075269654393196,
+      "distributed_save_seconds": 436.9177224198356,
+      "resolve_seconds": 6.270488069392741,
+      "cpu_seconds": 1286.4320427579805,
+      "clone_seconds": 41.96730037033558,
+      "serialize_seconds": 145.91347998194396,
+      "tensor_bytes": 111084300288.0,
+      "written_bytes": 111086027103.0,
+      "items": 1095.0,
+      "flush_seconds": 182.1531520523131,
+      "publish_seconds": 0.49712204467505217,
+      "write_wall_seconds": 110.1821642788127,
+      "local_plan_seconds": 320.65497401729226,
+      "optimizer_reload_seconds": 0.09886211203411222,
+      "empty_cache_seconds": 0.09222252992913127,
+      "total_seconds": 437.1279764850624
+    }
+  ],
+  "correctness": "pending full-model fresh-process resume"
+}

@@ -102,7 +102,52 @@ The real toy training/save/export/resume harness passed through this configurati
 68 option, topology, model-dispatch and audit tests also passed.
 
 Corrected full-model experiment: `01M28TFNGP78F24E6YNTTY4XMJ`, image
-`01M28TF7SDRPAFKQAH3EQ0E2Z9`, source `71d5cd206`, Core `f628ec416`. As of 18:18 UTC it was
-waiting for Holmes allocation slots (both budget and workspace-group caps had only one slot
-free; the job needs two). Its image predates the optional CLI forwarding, but exercises the
-same native save options directly. No completed full-model performance claim yet.
+`01M28TF7SDRPAFKQAH3EQ0E2Z9`, source `71d5cd206`, Core `f628ec416`. It started at 18:27 UTC after waiting for allocation slots. The corrected GPU topology gate
+passed 10 tests, with six larger-topology skips and three deselections. Its image predates
+the optional CLI forwarding, but exercises the same native save options directly.
+The first two full-model optimizer updates completed at 18:38 UTC. Live stack samples then
+observed PyTorch shard-offset planning followed by writer threads; phase timings are pending.
+No completed full-model performance or resume claim yet.
+
+
+## Existing checkpoint evidence (Saturn CPU probe)
+
+`01M28V8PAWD0BBX90136JKZGSZ` successfully read the completed controls checkpoint metadata.
+Raw structured evidence: [metadata profile](miles-checkpoint-metadata-20260911.json).
+
+- Rank 0: 111,089,192,982 bytes, 2,014 entries, 16 files.
+- Rank 1: 111,086,027,103 bytes, 1,095 entries, 16 files.
+- Total: 222,175,220,085 bytes. Rank byte ratio is 1.0000285; byte imbalance is not a
+  plausible large bottleneck for this checkpoint. Rank 0 owns more small entries.
+- The largest shape (623,902,720 elements) occurs 57 times. Ordinary two-way metadata
+  planning took 1.168 s, and a repeated-shard `(2,1)` mesh took 3.923 s, versus 4–5 us
+  for the arithmetic candidate. Returned sizes and offsets matched exactly.
+- The next large shape (311,951,360 elements), also repeated 57 times, took 0.550 s
+  or 2.177 s, versus 3–5 us.
+
+These are CPU probes of actual saved shapes, not the full GPU job's phase timings. DCP does
+not persist the original device mesh, so both canonical contiguous layouts were probed;
+do not add these durations and label the sum an observed production save time.
+
+
+## First full-model save profile
+
+The baseline save completed at 18:48 UTC.
+[Raw per-rank timers](miles-checkpoint-baseline-profile-20260911.json).
+
+| Phase | Rank 0 seconds | Rank 1 seconds |
+|---|---:|---:|
+| Total direct save | 437.10 | 437.13 |
+| Local metadata plan | 307.19 | 320.65 |
+| Writer wall | 115.68 | 110.18 |
+| Optimizer reload | 0.100 | 0.099 |
+| State dict construction | 0.016 | 0.014 |
+| Coordinator metadata write | 0.044 | — |
+
+The ranks synchronize between planning and writing, so the slowest planning rank and
+slowest writer determine the critical path. They wrote the same 222.18 GB total as
+the prior controls checkpoint. Aggregate throughput is about 0.51 GB/s including
+planning, or 1.92 GB/s for the writer phase alone. This run does not reproduce the
+reported 1,000-second save, but directly identifies metadata planning as its main
+checkpoint cost. Export, fingerprinting, and fresh-process initialization are measured
+by the harness separately from this direct-save timer. Exact resume is still pending.

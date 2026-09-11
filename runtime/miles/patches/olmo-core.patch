@@ -2391,7 +2391,7 @@ index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a6
 +    (reference[:, :8] * F.silu(reference[:, 8:])).sum().backward()
 +    torch.testing.assert_close(x.grad, reference.grad, rtol=0, atol=0)
 diff --git a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
-index b98ed4185e41e9157f82bffad82522aeb00a1e95..04616adb4685818d55efe3415cdb86b5b94e6b0a 100644
+index b98ed4185e41e9157f82bffad82522aeb00a1e95..3edbf474a08f2e3bec50007d25c3cdd9929800ae 100644
 --- a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
 +++ b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
 @@ -11,6 +11,7 @@ from torch.distributed.tensor import Shard
@@ -2448,7 +2448,7 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..04616adb4685818d55efe3415cdb86b5
          tm.zero_grads()
          for name, state in tm.optim.states.items():
              torch.testing.assert_close(
-@@ -122,14 +124,27 @@ def _run_reshard(save_root, ep_degree):
+@@ -122,14 +124,29 @@ def _run_reshard(save_root, ep_degree):
  
  @pytest.mark.gpu
  @pytest.mark.parametrize("ep_degree", [2, 4, 8])
@@ -2472,10 +2472,12 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..04616adb4685818d55efe3415cdb86b5
 -        pytest.skip("requires8 CUDA GPUs")
 +    if torch.cuda.device_count() < ep_degree:
 +        pytest.skip(f"requires {ep_degree} CUDA GPUs")
++    # Preserve the original eight-rank DP/EP coverage when a full node is available.
++    world_size = next(size for size in (8, 4, 2) if torch.cuda.device_count() >= size)
      run_distributed_test(
          _run_reshard,
 -        world_size=8,
-+        world_size=ep_degree,
++        world_size=world_size,
          backend="nccl",
          start_method="spawn",
 -        func_args=(str(tmp_path / "ep-reshard"), ep_degree),
