@@ -1,0 +1,62 @@
+{
+  "runtime": "core100",
+  "device": "NVIDIA GeForce RTX 4090",
+  "allow_tf32": false,
+  "core_router_source": "/opt/core-rl/sources/olmo-core/src/olmo_core/nn/moe/v2/router.py",
+  "core_router_sha256": "364816ec5f7598b594886f78a1ea35acf94282290654fdef335db9bd60936a95",
+  "core": [
+    {
+      "outer_autocast": false,
+      "storage_dtype": "torch.bfloat16",
+      "linear": [
+        {
+          "input_dtype": "torch.float32",
+          "weight_dtype": "torch.float32",
+          "output_dtype": "torch.float32",
+          "autocast_enabled": false
+        }
+      ],
+      "returned_logits_dtype": "torch.float32",
+      "weights_dtype": "torch.float32",
+      "aux_loss_dtype": "torch.float32",
+      "logits_equal_fp32_reference": true,
+      "max_logit_error": 0.0,
+      "different_selected_slots": 0,
+      "tokens_with_different_expert_set": 0
+    },
+    {
+      "outer_autocast": true,
+      "storage_dtype": "torch.bfloat16",
+      "linear": [
+        {
+          "input_dtype": "torch.float32",
+          "weight_dtype": "torch.float32",
+          "output_dtype": "torch.bfloat16",
+          "autocast_enabled": true
+        }
+      ],
+      "returned_logits_dtype": "torch.float32",
+      "weights_dtype": "torch.float32",
+      "aux_loss_dtype": "torch.float32",
+      "logits_equal_fp32_reference": false,
+      "max_logit_error": 0.008053302764892578,
+      "different_selected_slots": 472,
+      "tokens_with_different_expert_set": 28
+    }
+  ],
+  "megatron_gating": [
+    {
+      "outer_autocast": false,
+      "logits_dtype": "torch.float32",
+      "equal_fp32_reference": true,
+      "max_error": 0.0
+    },
+    {
+      "outer_autocast": true,
+      "logits_dtype": "torch.bfloat16",
+      "equal_fp32_reference": false,
+      "max_error": 0.008053302764892578
+    }
+  ],
+  "scope": "Standalone fixed BF16 router tensors; actual Core module and actual Megatron Router.gating. Outer autocast=true is a negative control, not actual specialized training configuration."
+}
