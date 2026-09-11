@@ -17,14 +17,14 @@ from miles.utils.ft_utils.process_group_utils import GroupInfo
 from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from torch import distributed as dist
-from transformers import AutoModelForCausalLM, Qwen3Config
+from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
 
 from open_instruct.miles import actor, checkpoint, models, scheduler
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.state import PolicyClock
 
 
-@pytest.fixture(params=["qwen3", "kda", "kda_latent"])
+@pytest.fixture(params=["qwen3", "kda", "kda_latent", "olmo3_full", "olmo3_sliding"])
 def parsed_args(tmp_path, monkeypatch, request):
     path = tmp_path / "hf"
     hf = Qwen3Config(
@@ -37,7 +37,22 @@ def parsed_args(tmp_path, monkeypatch, request):
         head_dim=64,
         max_position_embeddings=128,
     )
-    if request.param != "qwen3":
+    if request.param.startswith("olmo3_"):
+        hf = Olmo3Config(
+            vocab_size=256,
+            hidden_size=128,
+            intermediate_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+            head_dim=64,
+            max_position_embeddings=128,
+            sliding_window=3,
+            layer_types=["full_attention", "full_attention"]
+            if request.param == "olmo3_full"
+            else ["sliding_attention", "full_attention"],
+        )
+    elif request.param != "qwen3":
         _register_olmo3moe_auto_classes()
         hf = Olmo3MoeConfig(
             vocab_size=256,
@@ -124,7 +139,22 @@ def test_real_miles_loss_core_update_and_native_resume(parsed_args, tmp_path, mo
         monkeypatch.setattr(actor.distributed_utils, "get_gloo_group", lambda: dist.group.WORLD)
         worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
         worker.args = args
+        dense_olmo = json.loads((Path(args.hf_checkpoint) / "config.json").read_text())["model_type"] == "olmo3"
+        backend_kinds = []
+        original_backend = models._backend
+
+        def checked_backend(kind):
+            backend_kinds.append(kind)
+            if dense_olmo:
+                assert kind == "standard", "Dense Olmo 3 entered the MoE trainer backend"
+            return original_backend(kind)
+
+        monkeypatch.setattr(models, "_backend", checked_backend)
         worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
+        if worker.hf_config.model_type == "olmo3":
+            assert worker.train_module._miles_model_backend == "standard"
+            assert all(kind == "standard" for kind in backend_kinds)
+            assert not any("routed_experts" in name for name, _ in worker.train_module.model.named_modules())
         # Exercise publication from the actual wrapped train module, not just
         # conversion of an unwrapped standalone model.
         exported = models.export_state(worker.train_module, worker.hf_config)
