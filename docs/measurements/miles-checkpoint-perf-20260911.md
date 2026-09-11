@@ -1,5 +1,31 @@
 # Native checkpoint performance qualification
 
+## Latest result: full-model candidate passed
+
+At 20:03 UTC, [the fast save/read qualification](https://beaker.org/ex/01M28YRXD7NGGTHWBZ2RY3R1XX)
+finished successfully with **zero correctness failures** and both acceptance gates passed.
+[Retained final audit](miles-checkpoint-fast-audit-20260911.json).
+
+- Full-model save: **118.466 seconds**, versus baseline **437.128 seconds** (3.69x faster).
+- Fresh-process load: **144.307 seconds**.
+- Live state before/after save and restored boundary state: exact on both ranks.
+- Scoring log-probabilities for both subsequent updates: exact on both ranks.
+- Final model, optimizer, history, scheduler, RNG, clock, and data cursor: exact.
+- HF exports: exact across resume.
+
+This qualifies the arithmetic save/read candidate with compact storage and balanced
+replicated ownership on the tested two-B300 EP2 full-model configuration. It used fixed
+synthetic responses and a persistent Triton cache per global rank. It does not qualify
+SGLang transport/decode, every pretraining topology, or the process writer. The original
+baseline with shared rank caches had exact restored state but divergent continuation;
+the successful controlled-cache run supports execution reproducibility as the distinction,
+without isolating every possible cause.
+
+The implementation is merged into both working branches and remains opt-in. Normal
+pretraining configuration and production Ray cache handling remain unchanged.
+The additional same-node metadata and process-writer arms are still running.
+Earlier pending statements below describe intermediate measurements, superseded by this result.
+
 Isolated branches: `robertb/miles-checkpoint-perf` in open-instruct and OLMo-core.
 Bases: open-instruct `12235d54d`, Core `307d20590`.
 The implementation is integrated into `robertb/miles-hero-support` (open-instruct)

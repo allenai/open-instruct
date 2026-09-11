@@ -1,0 +1,56 @@
+{
+  "correctness_passed": true,
+  "failures": [],
+  "save_timings": [
+    {
+      "rank": 0,
+      "buffers_seconds": 0.0011821589432656765,
+      "clone_seconds": 0.010076262522488832,
+      "cpu_seconds": 1277.864626694005,
+      "distributed_save_seconds": 118.23333117133006,
+      "empty_cache_seconds": 0.055030744057148695,
+      "flush_seconds": 294.3713809638284,
+      "global_plan_seconds": 0.038189695216715336,
+      "items": 1095.0,
+      "local_plan_seconds": 0.051603264175355434,
+      "metadata_seconds": 0.042225454933941364,
+      "optimizer_reload_seconds": 0.1030756807886064,
+      "prepare_seconds": 0.004817735869437456,
+      "publish_seconds": 0.5450297114439309,
+      "resolve_seconds": 7.825984477065504,
+      "serialize_seconds": 150.8450865377672,
+      "state_dict_seconds": 0.01787968399003148,
+      "tensor_bytes": 111084300288.0,
+      "total_seconds": 118.41541619598866,
+      "write_wall_seconds": 116.5181475309655,
+      "written_bytes": 111086027103.0
+    },
+    {
+      "rank": 1,
+      "buffers_seconds": 0.0011945581063628197,
+      "clone_seconds": 0.01435810187831521,
+      "cpu_seconds": 1270.0036360751837,
+      "distributed_save_seconds": 118.2875636331737,
+      "empty_cache_seconds": 0.06034855684265494,
+      "flush_seconds": 334.88363358424976,
+      "items": 2014.0,
+      "local_plan_seconds": 0.05654209014028311,
+      "optimizer_reload_seconds": 0.09563943697139621,
+      "prepare_seconds": 0.0048392959870398045,
+      "publish_seconds": 0.2818949711509049,
+      "resolve_seconds": 8.678832623641938,
+      "serialize_seconds": 153.29648356419057,
+      "state_dict_seconds": 0.015937548130750656,
+      "tensor_bytes": 111086019548.0,
+      "total_seconds": 118.46562286186963,
+      "write_wall_seconds": 116.39243993163109,
+      "written_bytes": 111089192982.0
+    }
+  ],
+  "max_save_seconds": 118.46562286186963,
+  "performance_target_seconds": 340,
+  "limits": [
+    "Fixed synthetic responses, same EP topology; no SGLang transport or decode tested"
+  ],
+  "performance_passed": true
+}
