@@ -43,8 +43,7 @@ vllm serve <repo> --tensor-parallel-size 8 --decode-context-parallel-size 8 \
 Environment, on every model:
 
 ```bash
-export VLLM_USE_DEEP_GEMM=0 VLLM_MOE_USE_DEEP_GEMM=0   # JIT needs nvcc
-export VLLM_USE_FLASHINFER_SAMPLER=0                    # ditto
+export VLLM_USE_DEEP_GEMM=0 VLLM_MOE_USE_DEEP_GEMM=0   # see caveat below
 uvx --python 3.12 vllm==0.28.0 serve ...                # 3.11 breaks every TP>1 serve
 ```
 
@@ -99,6 +98,67 @@ four). NVLink domain size matters more than GPU generation: the same B200 silico
 differs 1.4-3.7x per GPU between HGX 8-GPU and NVL72.
 
 ---
+
+## Startup: install the prebuilt FlashInfer wheels
+
+`uvx vllm` pulls in `flashinfer-python` only. `flashinfer-cubin` is excluded from
+vLLM's wheel dependencies and `flashinfer-jit-cache` ships solely in the official
+Docker image -- so by default FlashInfer compiles **every kernel from source with
+nvcc** during vLLM's warmup run.
+
+Measured across five sequential boots on a single node, which removes the 8x
+node-to-node variance by construction (Beaker `01M28P2590XZZDYT2SQ4G8DGX0`,
+Qwen3.5-35B-A3B-FP8, 1 GPU):
+
+| | time to ready | warmup run | peak nvcc procs | NVIDIA CDN fetches |
+| --- | --- | --- | --- | --- |
+| without the wheels | 1790 s | 1450 s | 52 | 64 |
+| **with the wheels** | **290 s** | **11.5 s** | **0** | **0** |
+
+**~25 minutes per server start, an 8x speedup.** Weight loading, torch.compile and
+CUDA-graph capture are identical between arms -- the entire difference is the
+warmup run. The same backends are selected either way (FLASHINFER attention,
+FLASHINFER_TRTLLM FP8 MoE, trtllm-gen decode on sm_103a), so nothing is traded
+away.
+
+```bash
+uvx --python 3.12 \
+  --with flashinfer-cubin==0.6.16.post3 --with flashinfer-jit-cache==0.6.16.post3 \
+  --index-strategy unsafe-best-match \
+  --extra-index-url https://flashinfer.ai/whl/flashinfer-cubin/ \
+  --extra-index-url https://flashinfer.ai/whl/cu130/flashinfer-jit-cache/ \
+  vllm==0.28.0 serve ...
+```
+
+Neither wheel is on PyPI at this version; cu130 matches vLLM 0.28's own
+Dockerfile. About 2.4 GB, ~40 s incremental env build.
+
+Two consequences. `VLLM_USE_FLASHINFER_SAMPLER=0` is no longer needed -- it
+existed only because that sampler's JIT wanted nvcc. And the default path makes
+**64 runtime HTTPS calls to `edge.urm.nvidia.com`** mid-boot to fetch cubins,
+which the wheels remove: a reliability win on restricted-egress nodes,
+independent of speed. Relatedly, `has_nvidia_artifactory()` probes that host with
+a 5 s timeout and silently falls back to a slower attention path on failure.
+
+**Keep the in-job CUDA toolkit as a fallback.** Two boots served in under five
+minutes with no nvcc on PATH at all, so it is droppable in principle -- but the
+jit-cache wheel ships sm_103 builds of `fused_moe_103` and `fp4_quantization_103`
+while carrying only sm_100 of `gemm`, `fused_moe_trtllm` and `fmha_cutlass`.
+Qwen3.5 was fully covered; DeepSeek-V3.2 (MLA+DSA), Kimi-K2.6 (INT4/Marlin) and
+GLM-5.2 (MLA, FP8 KV) request different specialisations and were not tested. Drop
+the toolkit per model, and only once that model boots with zero compiler
+activity. The test also ran at TP=1; the saving should carry to TP>1 since the
+kernel set depends on architecture rather than parameter count, but that is
+untested.
+
+## Correction: `VLLM_USE_DEEP_GEMM=0` does not disable DeepGEMM
+
+For DeepSeek-V3.2 and GLM-5.2 it disables only the *warmup*. The DSA indexer
+raises without the DeepGEMM package present, and `has_deep_gemm()` is an import
+check rather than an env-var check, so the kernels are still built -- the JIT
+moves to the first real request, where it stops appearing in time-to-ready and
+instead shows up as a slow first batch. An earlier version of this document
+implied the flag switched DeepGEMM off; it does not.
 
 ## Reproducing this for a new model
 
