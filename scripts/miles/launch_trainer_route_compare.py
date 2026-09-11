@@ -12,7 +12,7 @@ from pathlib import Path
 from scripts.miles import launch_update_zero_compare
 
 
-def specification(image, core_root, megatron_root):
+def specification(image, core_root, megatron_root, *, wait_seconds=0):
     document = launch_update_zero_compare.specification(image, core_root, megatron_root, evidence_only=True)
     files = {"__init__.py": b""}
     for name in ("compare_trainer_routes.py", "compare_update_zero.py", "update_zero_capture.py"):
@@ -48,6 +48,8 @@ def specification(image, core_root, megatron_root):
                     backend,
                     "--output",
                     f"/output/{backend}.json",
+                    "--wait-seconds",
+                    str(wait_seconds),
                 ]
             )
         )
@@ -55,6 +57,9 @@ def specification(image, core_root, megatron_root):
     task["name"] = "compare-native-scorer-routes"
     task["arguments"] = ["\n".join(lines) + "\n"]
     task["resources"]["cpuCount"] = 2
+    if wait_seconds:
+        task["context"]["minRuntime"] = "1h"
+        task["timeout"] = f"{2 * wait_seconds + 1800}s"
     document["description"] = (
         "CPU verification of actual Core/Megatron scorer routes against same-token serving traces"
     )
@@ -66,10 +71,16 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--core-root", required=True)
     parser.add_argument("--megatron-root", required=True)
+    parser.add_argument("--wait-seconds", type=int, default=0)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="compare-native-routes-") as directory:
         path = Path(directory) / "experiment.json"
-        path.write_text(json.dumps(specification(args.image, args.core_root, args.megatron_root), indent=2) + "\n")
+        path.write_text(
+            json.dumps(
+                specification(args.image, args.core_root, args.megatron_root, wait_seconds=args.wait_seconds), indent=2
+            )
+            + "\n"
+        )
         subprocess.run(
             ["beaker", "experiment", "create", str(path), "--workspace", "ai2/open-instruct-dev", "--format", "json"],
             check=True,

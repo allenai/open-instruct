@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import time
 from pathlib import Path
 
 import torch
@@ -169,7 +170,15 @@ def main():
     parser.add_argument("root", type=Path)
     parser.add_argument("--backend", choices=("olmo_core", "megatron"), required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--wait-seconds", type=int, default=0)
     args = parser.parse_args()
+    deadline = time.monotonic() + args.wait_seconds
+    marker = args.root / "trainer-route-complete.json"
+    while not marker.is_file():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Native route completion marker not ready: {marker}")
+        print(json.dumps({"waiting_for": str(marker)}), flush=True)
+        time.sleep(min(30, max(0, deadline - time.monotonic())))
     torch.set_num_threads(1)
     args.output.write_text(json.dumps(collect(args.root, args.backend), indent=2, allow_nan=False) + "\n")
 
