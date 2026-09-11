@@ -420,6 +420,12 @@ def main() -> None:
         )
         if strat == "DP+EP":
             print(f"    --data-parallel-size {n} --enable-expert-parallel --enable-ep-weight-filter \\")
+        elif strat == "TP+DCP":
+            # The DCP degree is the rank count: the TP+DCP row above is modelled
+            # with kv_repl=1, i.e. the MLA latent fully sharded across all ranks.
+            # Emitting only --tensor-parallel-size here would reproduce the plain
+            # TP row instead, which is the slow config this table exists to avoid.
+            print(f"    --tensor-parallel-size {n} --decode-context-parallel-size {n} \\")
         else:
             print(f"    --tensor-parallel-size {n} \\")
         print(f"    --kv-cache-dtype fp8 --max-model-len {p['ctx']} --async-scheduling")
