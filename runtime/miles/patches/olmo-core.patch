@@ -1739,7 +1739,7 @@ index ca243909ce65f5fcfdcf0d2c33d48e366291b006..620e7f44ea1c47435851bbebb159aab6
                  if torch.is_grad_enabled():
                      self._recompute_cache = expert_indices.detach()  # save for recompute
 diff --git a/src/olmo_core/train/train_module/transformer/ddp_train_module.py b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-index a855836be5a9c92ca67136acf6125861503f108d..c106f6b5687e8355967ce92533c63269b11ba376 100644
+index a855836be5a9c92ca67136acf6125861503f108d..57afa6320bb942cccc0de160b60e96139eab51f8 100644
 --- a/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 +++ b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 @@ -1,4 +1,6 @@
@@ -1774,7 +1774,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..c106f6b5687e8355967ce92533c63269
 +
 +    def __init__(self, *, constant_memory_planning=False, **kwargs):
 +        super().__init__(**kwargs)
-+        if constant_memory_planning and self._enable_plan_caching:
++        if constant_memory_planning and getattr(self, "_enable_plan_caching", False):
 +            raise ValueError("Constant-memory planner does not support plan caching")
 +        self.constant_memory_planning = constant_memory_planning
 +        self.timings: Dict[str, float] = {}
@@ -1825,7 +1825,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..c106f6b5687e8355967ce92533c63269
 +        dedup_save_to_lowest_rank: bool = True,
 +        constant_memory_planning: bool = False,
 +        profile: bool = False,
-+    ) -> Dict[str, float]:
++    ) -> Optional[Dict[str, float]]:
 +        """Save native optimizer/model state and restore the live optimizer's storage.
 +
 +        Defaults preserve the existing writer policy. ``compact_storage`` skips copies only
@@ -1833,7 +1833,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..c106f6b5687e8355967ce92533c63269
 +        ``constant_memory_planning`` computes metadata for ordinary contiguous shards
 +        arithmetically, with the default planner as fallback for other layouts.
 +        ``profile`` logs per-rank phases and summed worker time separately from wall time.
-+        Returned durations are seconds; writer byte and item counts are also included.
++        Profiling returns durations in seconds plus writer byte/item counts; otherwise returns None.
 +        """
  
 -        # Persistent model buffers (e.g. the router's aux-loss-free score_bias) are not optimizer
@@ -1915,7 +1915,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..c106f6b5687e8355967ce92533c63269
 +            timings["total_seconds"] = timestamp() - start
 +            if profile:
 +                log.info("checkpoint_save %s", json.dumps(timings, sort_keys=True))
-+        return timings
++        return timings if profile else None
  
      def load_state_dict_direct(
          self,

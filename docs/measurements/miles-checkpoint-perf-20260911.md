@@ -78,3 +78,31 @@ exact save/export/resume, including optimizer rolling histories, using this plan
 Follow-up modes are baseline, balanced/compact, constant-memory metadata, and that same metadata
 mode with two writer processes. Each retains an independent checkpoint and two HF exports;
 full-model storage is approximately 300 GB per mode. None changes the production defaults.
+
+
+## Run configuration interface
+
+The normal `[core]` TOML interface now forwards these options to the MoE native save:
+
+```toml
+[core]
+checkpoint_profile = true
+checkpoint_compact_storage = true
+checkpoint_dedup_save_to_lowest_rank = false
+checkpoint_constant_memory_planning = true
+# Optional independent worker controls:
+# checkpoint_thread_count = 2
+# checkpoint_process_count = 2
+```
+
+Defaults preserve the legacy policy. Profiling also writes `save_metrics_rank_N.json` next to
+checkpoint manifests. These options do not change model geometry or resume compatibility.
+The standard dense trainer explicitly rejects overrides until its separate path is qualified.
+The real toy training/save/export/resume harness passed through this configuration interface;
+68 option, topology, model-dispatch and audit tests also passed.
+
+Corrected full-model experiment: `01M28TFNGP78F24E6YNTTY4XMJ`, image
+`01M28TF7SDRPAFKQAH3EQ0E2Z9`, source `71d5cd206`, Core `f628ec416`. As of 18:18 UTC it was
+waiting for Holmes allocation slots (both budget and workspace-group caps had only one slot
+free; the job needs two). Its image predates the optional CLI forwarding, but exercises the
+same native save options directly. No completed full-model performance claim yet.

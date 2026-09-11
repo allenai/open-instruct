@@ -105,7 +105,7 @@ def _module_backend(module):
 
 
 def save_native(module, path):
-    _module_backend(module).save_native(module, path)
+    return _module_backend(module).save_native(module, path)
 
 
 def load_native(module, path, *, optim=True):

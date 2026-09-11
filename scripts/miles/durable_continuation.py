@@ -241,6 +241,7 @@ def run(root, phase, backend, *, checkpoint_options=None, continue_after_save=Fa
                 max_sequence_length=128,
                 activation_checkpointing=True,
                 diagnostic_interval=0,
+                **{f"checkpoint_{key}": value for key, value in (checkpoint_options or {}).items()},
                 max_train_rollout_logprob_abs_diff=0.0,
             ),
             dict(
@@ -292,7 +293,9 @@ def run(root, phase, backend, *, checkpoint_options=None, continue_after_save=Fa
             original_save = worker.train_module.save_state_dict_direct
 
             def measured_save(path, **kwargs):
-                timings = original_save(path, **kwargs, **checkpoint_options)
+                if any(kwargs.get(key) != value for key, value in checkpoint_options.items()):
+                    raise ValueError("Checkpoint policy did not reach Core through the run configuration")
+                timings = original_save(path, **kwargs)
                 save_timings.append(timings)
                 atomic_json(output / f"save-rank{rank}.json", timings)
                 print("CHECKPOINT_PROFILE", json.dumps({"rank": rank, **timings}), flush=True)

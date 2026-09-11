@@ -19,6 +19,12 @@ class CoreConfig:
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     row_specialization: str = "static"
+    checkpoint_profile: bool = False
+    checkpoint_thread_count: int | None = None
+    checkpoint_process_count: int | None = None
+    checkpoint_compact_storage: bool = False
+    checkpoint_dedup_save_to_lowest_rank: bool = True
+    checkpoint_constant_memory_planning: bool = False
     model_config: str | None = None
     reward_config: str | None = None
     expert_parallel_size: int = 1
@@ -39,9 +45,20 @@ class CoreConfig:
             raise ValueError("core.max_train_rollout_logprob_abs_diff must be finite and nonnegative")
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise ValueError("core.weight_sync_mode must be flattened or per_tensor")
-        for name in ("stream_moe_export", "activation_checkpointing"):
+        for name in (
+            "stream_moe_export",
+            "activation_checkpointing",
+            "checkpoint_profile",
+            "checkpoint_compact_storage",
+            "checkpoint_dedup_save_to_lowest_rank",
+            "checkpoint_constant_memory_planning",
+        ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"core.{name} must be a boolean")
+        for name in ("checkpoint_thread_count", "checkpoint_process_count"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"core.{name} must be a positive integer or unset")
         for name in ("expert_parallel_size", "max_sequence_length"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
@@ -52,6 +69,14 @@ class CoreConfig:
             value = getattr(self, name)
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"core.{name} must be finite and nonnegative")
+
+    def checkpoint_save_options(self):
+        """Writer policy, kept separate from model geometry and resume compatibility."""
+        return {
+            field.name.removeprefix("checkpoint_"): getattr(self, field.name)
+            for field in dataclasses.fields(self)
+            if field.name.startswith("checkpoint_") and getattr(self, field.name) is not None
+        }
 
 
 @dataclasses.dataclass(frozen=True)

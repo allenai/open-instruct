@@ -14,6 +14,8 @@ from torch import distributed as dist
 from torch.distributed.checkpoint import state_dict as distributed_state
 from torch.distributed.tensor import DTensor
 
+from open_instruct.miles.config import CoreConfig
+
 
 def model_config_from_hf(hf: Any, options: Any) -> transformer.TransformerConfig:
     dtype = core_config.DType.bfloat16
@@ -69,6 +71,8 @@ def validate_training_options(args):
     """Reject MoE-only operations before model storage or checkpoint allocation."""
     if getattr(args, "use_rollout_routing_replay", False):
         raise ValueError("Router replay requires an OLMoDDP MoE model; standard dense trainers do not support replay")
+    if args.olmo_core.checkpoint_save_options() != CoreConfig().checkpoint_save_options():
+        raise ValueError("Checkpoint writer overrides currently require the OLMoDDP MoE trainer")
     if args.olmo_core.expert_parallel_size != 1:
         raise ValueError("Expert parallelism requires an OLMoDDP MoE model")
 

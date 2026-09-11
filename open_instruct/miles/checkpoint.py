@@ -30,7 +30,9 @@ def prepare_checkpoint_path(path):
 def save(actor, rollout_id):
     path = checkpoint_path(actor.args.save, rollout_id)
     actor._agree(lambda: prepare_checkpoint_path(path) if dist.get_rank() == 0 else None)
-    models.save_native(actor.train_module, path / "model")
+    save_metrics = models.save_native(actor.train_module, path / "model")
+    if save_metrics is not None and actor.args.olmo_core.checkpoint_profile:
+        atomic_json(path / f"save_metrics_rank_{dist.get_rank()}.json", save_metrics)
     torch.save(
         {
             "python": random.getstate(),

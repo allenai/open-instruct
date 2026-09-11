@@ -40,6 +40,8 @@ def prepare_model_config(config, hf, options):
 class HFInitializedMoETrainModule(train_transformer.OLMoDDPTrainModule):
     """Import weights after Core sharding but before optimizer master initialization."""
 
+    _miles_checkpoint_options: dict[str, bool | int]
+
     def __init__(self, *, hf_config, hf_state, **kwargs):
         self._initial_hf_config = hf_config
         self._initial_hf_state = hf_state
@@ -56,7 +58,7 @@ class HFInitializedMoETrainModule(train_transformer.OLMoDDPTrainModule):
 
 
 def build_train_module(args, *, common, optim, hf_config, hf_state):
-    return HFInitializedMoETrainModule(
+    module = HFInitializedMoETrainModule(
         hf_config=hf_config,
         hf_state=hf_state,
         **common,
@@ -67,6 +69,9 @@ def build_train_module(args, *, common, optim, hf_config, hf_state):
         else None,
     )
 
+    module._miles_checkpoint_options = args.olmo_core.checkpoint_save_options()
+    return module
+
 
 def iter_export_state(module, hf, *, stream_moe=True):
     if stream_moe:
@@ -76,7 +81,7 @@ def iter_export_state(module, hf, *, stream_moe=True):
 
 
 def save_native(module, path):
-    module.save_state_dict_direct(str(path))
+    return module.save_state_dict_direct(str(path), **getattr(module, "_miles_checkpoint_options", {}))
 
 
 def load_native(module, path, *, optim=True):
