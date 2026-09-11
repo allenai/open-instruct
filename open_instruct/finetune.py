@@ -785,6 +785,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     local_pred_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     start_time = time.perf_counter()
+    last_log_time = time.perf_counter()
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
@@ -896,6 +897,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         / args.gradient_accumulation_steps
                         / completed_steps
                     )
+                    sec_this_log_period = time.perf_counter() - last_log_time
+                    last_log_time = time.perf_counter()
                     metrics_to_log = {
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "total_tokens": total_tokens,
@@ -911,6 +914,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         "per_device_tps_including_padding": total_tokens_including_padding
                         / accelerator.num_processes
                         / (time.perf_counter() - start_time),
+                        "per_device_tps_this_log_period": total_tokens_this_log_period
+                        / accelerator.num_processes
+                        / sec_this_log_period,
                         "reserved_mem_GiB": torch.cuda.max_memory_reserved(device=torch.cuda.current_device()) / 2**30,
                         "allocated_mem_GiB": torch.cuda.max_memory_allocated(device=torch.cuda.current_device())
                         / 2**30,

@@ -23,7 +23,6 @@ uv run --active open_instruct/grpo.py \
     --apply_verifiable_reward true \
     --learning_rate 1e-6 \
     --total_episodes 128 \
-    --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \

@@ -36,7 +36,12 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 ### Key Flags
 
-Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the same flags.
+Both `grpo.py` and `grpo_fast.py` share the same config classes. Most flags apply
+to both trainers, but the DeepSpeed-only flags (`--deepspeed_stage`,
+`--deepspeed_zpg`, `--deepspeed_offload_param`, `--deepspeed_offload_optimizer`,
+`--deepspeed_checkpoint_load_universal`, `--sequence_parallel_size`,
+`--gather_whole_model`) are only read by `grpo_fast.py` — `grpo.py` rejects them
+at startup rather than silently ignoring them.
 
 | Group | Flag | Description | Default |
 |-------|------|-------------|---------|
@@ -63,8 +68,8 @@ Both `grpo.py` and `grpo_fast.py` share the same config classes and accept the s
 | **Reward** | `--apply_verifiable_reward` | Apply verifiable reward | `True` |
 | | `--verification_reward` | Verification reward value | `10.0` |
 | | `--apply_r1_style_format_reward` | Apply R1-style format reward | `False` |
-| **Infrastructure** | `--deepspeed_stage` | DeepSpeed stage (0, 2, or 3) | `0` |
-| | `--sequence_parallel_size` | Sequence parallel size across GPUs | `1` |
+| **Infrastructure** | `--deepspeed_stage` | DeepSpeed stage (0, 2, or 3); `grpo_fast.py` only | `0` |
+| | `--sequence_parallel_size` | Sequence parallel size across GPUs; `grpo_fast.py` only | `1` |
 | | `--num_learners_per_node` | GPUs per node for training | `[1]` |
 | | `--single_gpu_mode` | Collocate vLLM and actor on same node | `False` |
 | **vLLM** | `--vllm_num_engines` | Number of vLLM engines | `1` |
@@ -115,7 +120,7 @@ Now imagine there are cases where the model generates a really long response (8k
 | `scripts/train/debug/grpo_fast_3_gpu.sh` | 3 GPUs (2 train, 1 inference), local | `bash scripts/train/debug/grpo_fast_3_gpu.sh` |
 | `scripts/train/debug/grpo_integration_test.sh` | 1 GPU, Beaker | `./scripts/train/build_image_and_launch.sh scripts/train/debug/grpo_integration_test.sh` |
 
-`grpo_fast.py` accepts the same flags as `grpo.py`. See the [Key Flags table above](#key-flags).
+`grpo_fast.py` accepts the same flags as `grpo.py`, plus the DeepSpeed-only flags noted in the [Key Flags table above](#key-flags).
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (1 Nodes)
 
