@@ -1,6 +1,5 @@
 """Numerical disagreement remains evidence; incomplete or mismatched inputs fail."""
 
-import copy
 import json
 
 import pytest
@@ -110,7 +109,7 @@ def test_load_capture_checks_original_tensor_file_hash(tmp_path):
 def test_separate_retry_roots_full_campaign(tmp_path):
     cases = [{"case_id": str(case), "input_ids": [1, 2]} for case in (341, 975, 1039, 605)]
     roots = {backend: tmp_path / backend / "different-attempt" for backend in compare.BACKENDS}
-    for backend, root in roots.items():
+    for root in roots.values():
         root.mkdir(parents=True)
         (root / "manifest.json").write_text(json.dumps({"inputs": {"cases": cases}}))
         (root / "probe-complete.json").write_text(

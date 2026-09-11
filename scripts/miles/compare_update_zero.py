@@ -189,6 +189,8 @@ def load_capture(directory, capture_id, expected_ids):
         data["capture_id"] == capture_id and data["input_ids"] == expected_ids,
         f"{capture_id}: identity/input mismatch",
     )
+    expected_phase, expected_case = capture_id.rsplit("-", 1)[0].split("-", 1)
+    require(data["phase"] == expected_phase and data["case_id"] == expected_case, f"{capture_id}: phase/case mismatch")
     require(metadata["positions"] == data["positions"], f"{capture_id}: metadata positions differ")
     require(
         data["sources"] == metadata["sources"] and data["controls"] == metadata["controls"],
