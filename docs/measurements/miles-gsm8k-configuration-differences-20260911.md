@@ -231,3 +231,10 @@ of capacity (1.83893× real input length). All eight samples on each rank pad to
 rank's rollout-batch maximum, even with microbatch1 and effective pad multiple1. This
 counts sequence slots, not measured FLOPs or time; Core and Megatron also generated
 different responses, so it is not a direct total-work ratio between the two runs.
+
+The later [successive-batch scorer qualification](miles-core-score-variants-20260911.md)
+passed exact cross-arm scores while removing forward SwiGLU capacity specialization.
+On retained batches6–9 at initial weights, parent Core290 scorer time averaged63.283s
+and isolated candidate15.215s; no optimizer update or active runtime pin change occurred.
+This demonstrates recurring compilation cost in a controlled diagnostic, not a measured
+end-to-end training improvement or an explanation of the learning-curve difference.
