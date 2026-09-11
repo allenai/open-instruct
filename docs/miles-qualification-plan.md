@@ -39,11 +39,12 @@ not a pass. New infrastructure mentioned here still needs implementation.
 | **6. Resident colocation fit and parity** | Two Core EP ranks + **two** TP1 engines: two physical GPUs colocated versus four physical GPUs disaggregated. Match engine count and workload. Two updates initially; eager decode, no replay, trainer resident. At most 60 minutes per arm. | Measure peak memory after Adam state exists, then generation after the update. Fix total KV/recurrent capacity in both arms; do not copy the dedicated memory fraction. Require serving equality, probability checks, reward audit and complete teardown. A successful generation-only run is insufficient. Test rollout offload and decode graphs as separate subsequent changes. |
 | **7. Compiler-cache lifecycle** | Implement fingerprinted restore to node-local storage and immutable publish on success, following olmo-miles. Compare two fresh allocations of the same two-update workload, cold then restored; repeat with an intentionally incompatible key. | Same outputs/contracts within existing numerical tolerances; cache hit/miss and compilation phase timings recorded; incompatible cache rejected; concurrent writers cannot corrupt a generation. Separate startup savings from steady training throughput. No shared writable compiler hot directory. |
 
-Before extending the native contract to a new default, add two targeted EP1/EP2
-comparisons on the same tiny fixture: unequal-length **token averaging**, and
-**active gradient clipping** with the pre-clipping global norm and clip factor
-recorded. Check replicated dense/router optimizer states across ranks directly;
-category aggregation alone can hide replica disagreement. Use the full-model
+The targeted EP1/EP2 unequal-length **token averaging** and **active gradient
+clipping** follow-up now [passed](measurements/miles-core-ep-stress-20260910.json):
+canonical pre/post gradients, independently counted global norms, Adam moments,
+and exact reconstructed state agreement between both EP2 ranks were checked.
+This tiny fixed-route gate does not establish exact update agreement near zero
+gradients or cross-backend agreement. Use the full-model
 restart gate for native EP continuation. EP-plus-DP at world size four remains
 a later topology gate, not a prerequisite for the present EP2 default.
 The mixed-source manifest, cross-backend fixed-batch runner and cache lifecycle

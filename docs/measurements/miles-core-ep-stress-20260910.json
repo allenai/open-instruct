@@ -1,0 +1,297 @@
+{
+  "passed": true,
+  "scope": "Native tiny EP1/EP2 token reduction and active clipping; not Megatron parity",
+  "arms": [
+    {
+      "variant": "token",
+      "ranks": [
+        {
+          "world": 1,
+          "rank": 0,
+          "independent_grad_norm": 16.64155424128732,
+          "optimizer_grad_norm": 16.64155387878418,
+          "clip_factor": 1.0,
+          "parameter_tensors": 43
+        },
+        {
+          "world": 2,
+          "rank": 0,
+          "independent_grad_norm": 16.641554241369416,
+          "optimizer_grad_norm": 16.64155387878418,
+          "clip_factor": 1.0,
+          "parameter_tensors": 43
+        },
+        {
+          "world": 2,
+          "rank": 1,
+          "independent_grad_norm": 16.641554241369416,
+          "optimizer_grad_norm": 16.64155387878418,
+          "clip_factor": 1.0,
+          "parameter_tensors": 43
+        }
+      ],
+      "comparisons": [
+        {
+          "section": "before",
+          "errors": {
+            "dense/grad": {
+              "relative_l2_error": 1.6232352865465868e-11,
+              "difference_l2": 2.603189284373963e-10,
+              "reference_l2": 16.037042232566392,
+              "max_abs_error": 2.3283064365386963e-10
+            },
+            "expert/grad": {
+              "relative_l2_error": 4.835271953503404e-06,
+              "difference_l2": 2.1490862638014517e-05,
+              "reference_l2": 4.4446026706819,
+              "max_abs_error": 1.2516975402832031e-06
+            },
+            "router/grad": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 0.010540225670801377,
+              "max_abs_error": 0.0
+            }
+          },
+          "error": null
+        },
+        {
+          "section": "after",
+          "errors": {
+            "dense/grad": {
+              "relative_l2_error": 1.6232352865465868e-11,
+              "difference_l2": 2.603189284373963e-10,
+              "reference_l2": 16.037042232566392,
+              "max_abs_error": 2.3283064365386963e-10
+            },
+            "expert/grad": {
+              "relative_l2_error": 4.835271953503404e-06,
+              "difference_l2": 2.1490862638014517e-05,
+              "reference_l2": 4.4446026706819,
+              "max_abs_error": 1.2516975402832031e-06
+            },
+            "router/grad": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 0.010540225670801377,
+              "max_abs_error": 0.0
+            }
+          },
+          "error": null
+        },
+        {
+          "section": "state",
+          "errors": {
+            "dense/exp_avg": {
+              "relative_l2_error": 1.9381943075539554e-11,
+              "difference_l2": 3.10829045531774e-11,
+              "reference_l2": 1.6037042535949206,
+              "max_abs_error": 2.9103830456733704e-11
+            },
+            "dense/exp_avg_sq": {
+              "relative_l2_error": 3.656728428526215e-14,
+              "difference_l2": 2.909377595724546e-14,
+              "reference_l2": 0.7956230965987059,
+              "max_abs_error": 2.842170943040401e-14
+            },
+            "dense/main": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 39.36700906617291,
+              "max_abs_error": 0.0
+            },
+            "expert/exp_avg": {
+              "relative_l2_error": 4.835272051492572e-06,
+              "difference_l2": 2.1490863442885506e-06,
+              "reference_l2": 0.44446027470681027,
+              "max_abs_error": 1.2517193681560457e-07
+            },
+            "expert/exp_avg_sq": {
+              "relative_l2_error": 3.279794222270165e-08,
+              "difference_l2": 2.077125656161565e-10,
+              "reference_l2": 0.006333097491475692,
+              "max_abs_error": 4.106048834273679e-11
+            },
+            "expert/main": {
+              "relative_l2_error": 6.13706236741337e-05,
+              "difference_l2": 0.0006093632634642666,
+              "reference_l2": 9.929233678638647,
+              "max_abs_error": 0.00018452107906341553
+            },
+            "router/exp_avg": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 0.0010540225840923413,
+              "max_abs_error": 0.0
+            },
+            "router/exp_avg_sq": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 4.773055493303981e-07,
+              "max_abs_error": 0.0
+            },
+            "router/main": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 0.44852400061542264,
+              "max_abs_error": 0.0
+            }
+          },
+          "error": null
+        }
+      ]
+    },
+    {
+      "variant": "clipped",
+      "ranks": [
+        {
+          "world": 1,
+          "rank": 0,
+          "independent_grad_norm": 24.302192552267563,
+          "optimizer_grad_norm": 24.30219268798828,
+          "clip_factor": 4.11485486799599e-05,
+          "parameter_tensors": 43
+        },
+        {
+          "world": 2,
+          "rank": 0,
+          "independent_grad_norm": 24.30219255213651,
+          "optimizer_grad_norm": 24.30219268798828,
+          "clip_factor": 4.11485486799599e-05,
+          "parameter_tensors": 43
+        },
+        {
+          "world": 2,
+          "rank": 1,
+          "independent_grad_norm": 24.30219255213651,
+          "optimizer_grad_norm": 24.30219268798828,
+          "clip_factor": 4.11485486799599e-05,
+          "parameter_tensors": 43
+        }
+      ],
+      "comparisons": [
+        {
+          "section": "before",
+          "errors": {
+            "dense/grad": {
+              "relative_l2_error": 6.394348788778201e-11,
+              "difference_l2": 1.5134210464456455e-09,
+              "reference_l2": 23.668102827009253,
+              "max_abs_error": 9.313225746154785e-10
+            },
+            "expert/grad": {
+              "relative_l2_error": 5.001959618983572e-06,
+              "difference_l2": 2.7586773715664786e-05,
+              "reference_l2": 5.515193207671394,
+              "max_abs_error": 1.7285346984863281e-06
+            },
+            "router/grad": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 0.010737767959053728,
+              "max_abs_error": 0.0
+            }
+          },
+          "error": null
+        },
+        {
+          "section": "after",
+          "errors": {
+            "dense/grad": {
+              "relative_l2_error": 9.463593342050824e-11,
+              "difference_l2": 9.216670085477041e-14,
+              "reference_l2": 0.0009739080867436899,
+              "max_abs_error": 5.684341886080802e-14
+            },
+            "expert/grad": {
+              "relative_l2_error": 5.001957830917669e-06,
+              "difference_l2": 1.1351553018141311e-09,
+              "reference_l2": 0.00022694219747267907,
+              "max_abs_error": 7.112710420642543e-11
+            },
+            "router/grad": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 4.4184357065725265e-07,
+              "max_abs_error": 0.0
+            }
+          },
+          "error": null
+        },
+        {
+          "section": "state",
+          "errors": {
+            "dense/exp_avg": {
+              "relative_l2_error": 9.992852183310589e-11,
+              "difference_l2": 9.732119665163044e-15,
+              "reference_l2": 9.73908098172111e-05,
+              "max_abs_error": 7.105427357601002e-15
+            },
+            "dense/exp_avg_sq": {
+              "relative_l2_error": 1.0813263739676299e-12,
+              "difference_l2": 4.411499927863064e-21,
+              "reference_l2": 4.0797117633192266e-09,
+              "max_abs_error": 3.3881317890172014e-21
+            },
+            "dense/main": {
+              "relative_l2_error": 2.6614667335918307e-11,
+              "difference_l2": 1.0477378964424133e-09,
+              "reference_l2": 39.36693565312461,
+              "max_abs_error": 9.313225746154785e-10
+            },
+            "expert/exp_avg": {
+              "relative_l2_error": 5.001959270347287e-06,
+              "difference_l2": 1.1351556481578657e-10,
+              "reference_l2": 2.269422014064204e-05,
+              "max_abs_error": 7.112754829563528e-12
+            },
+            "expert/exp_avg_sq": {
+              "relative_l2_error": 6.342509714674052e-09,
+              "difference_l2": 6.342509714674052e-19,
+              "reference_l2": 1.7827360039069455e-11,
+              "max_abs_error": 1.346914735032346e-19
+            },
+            "expert/main": {
+              "relative_l2_error": 6.558046080673143e-07,
+              "difference_l2": 6.511556345408492e-06,
+              "reference_l2": 9.92911038639747,
+              "max_abs_error": 2.477318048477173e-07
+            },
+            "router/exp_avg": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 4.418435778996381e-08,
+              "max_abs_error": 0.0
+            },
+            "router/exp_avg_sq": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 8.37140246051472e-16,
+              "max_abs_error": 0.0
+            },
+            "router/main": {
+              "relative_l2_error": 0.0,
+              "difference_l2": 0.0,
+              "reference_l2": 0.4486152240724322,
+              "max_abs_error": 0.0
+            }
+          },
+          "error": null
+        }
+      ]
+    }
+  ],
+  "failures": [],
+  "experiment": "01M270A2J2E3WC60978EM8G5SV",
+  "job": "01M270A2NNJQM7KDBY1VAQW3GP",
+  "result": "01M270A2JDH2F688FB8XAZ6PDP",
+  "exit_code": 0,
+  "source": "3f74490e6",
+  "relative_l2_tolerance": 0.05,
+  "notes": [
+    "The auditor checked every reconstructed tensor for exact agreement between both EP2 ranks.",
+    "Independent norm counts every full parameter once; each Adam moment is checked against the actual post-clipping gradient.",
+    "Master-state L2 uses parameter magnitude, not update magnitude. This does not establish exact update agreement near zero gradients.",
+    "Tiny combined policy/auxiliary loss with fixed Core routes; no full-model, Megatron, hero, or non-replayed routing qualification."
+  ]
+}

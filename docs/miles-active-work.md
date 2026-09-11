@@ -13,7 +13,7 @@ separate authorization.
 | Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe | Initial evaluation and full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
 | Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis submitted](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
-| Native reduction/clipping stress | [EP1/EP2 job submitted](https://beaker.org/ex/01M270A2J2E3WC60978EM8G5SV); 15 CPU tests and both local EP1 variants passed | Compare reconstructed gradients on every rank, independently counted global norm, active clipping and both Adam moments. |
+| Native reduction/clipping stress | [EP1/EP2 passed](https://beaker.org/ex/01M270A2J2E3WC60978EM8G5SV); independent global norm, active clipping and Adam moments verified | [Evidence](measurements/miles-core-ep-stress-20260910.json); max gradient relative L2 difference 5.002e-6; does not establish exact update parity near zero gradients. |
 | Three-source mixture | [Two-update 8192-response trial submitted](https://beaker.org/ex/01M270TQ57VM13CMYAP8AYAZA8); 16 focused tests passed | Audit GSM8K/math/legacy-IF identities, rewards, four-response groups, cap hits and per-source policy signal. |
 | Standard dense Olmo3 | Isolated standard trainer plus local full/sliding HF math and real update/resume passed | Full-checkpoint serving and a bounded training trial when prioritized; no claim of a full recipe run yet. |
 
@@ -54,3 +54,7 @@ and performance conclusions separate.
 Held-out GSM8K evaluation uses temperature 0 and one response per question.
 Training uses temperature 1. The observed held-out score changes are greedy
 outputs on the same fixed set; they are not repeated stochastic eval samples.
+
+The [full hero graph/chunk matrix](https://beaker.org/ex/01M27118R2ER9QG0PYP3ARCHBE)
+is submitted independently of layerwise Core/HF diagnosis. It varies each setting
+separately; the original probability gate remains unchanged.
