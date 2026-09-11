@@ -24,9 +24,9 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from concurrent import futures
-from typing import Any, TypedDict
+from typing import Any
 
 import aiohttp
 import backoff
@@ -43,9 +43,15 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from vllm.config import WeightTransferConfig
-from vllm.distributed.weight_transfer.base import WeightTransferInitRequest, WeightTransferUpdateRequest
-from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
-from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerSendWeightsArgs, NCCLWeightTransferEngine
+from vllm.distributed.weight_transfer.base import (
+    ParamMeta,
+    WeightSource,
+    WeightTransferInitRequest,
+    WeightTransferUpdateRequest,
+    materialize_full_tensor,
+)
+from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerInitInfo, IPCTrainerWeightTransferEngine
+from vllm.distributed.weight_transfer.nccl_engine import NCCLTrainerInitInfo, NCCLTrainerWeightTransferEngine
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.entrypoints.openai.cli_args import make_arg_parser
 from vllm.utils.argparse_utils import FlexibleArgumentParser
@@ -121,17 +127,6 @@ def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.
         num_sliding_window_layers=num_sliding_window_layers,
         device_name=utils.get_device_name(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None,
     )
-
-
-class WeightUpdateInfo(TypedDict):
-    names: list[str]
-    dtype_names: list[str]
-    shapes: list[list[int]]
-    packed: bool
-
-
-class WeightUpdateRPCArgs(TypedDict):
-    update_info: WeightUpdateInfo
 
 
 @dataclasses.dataclass
@@ -791,15 +786,21 @@ class LLMRayActor:
     def wake_up(self) -> None:
         return self._run_async(self.llm_engine.wake_up(tags=["scheduling"]))
 
-    def update_weights(self, update_info: WeightUpdateRPCArgs, model_step: int | None = None) -> None:
-        # IPCWeightTransferEngine.trainer_send_weights (vllm) calls this RPC with
-        # `dict(update_info=...)` and no model_step; NCCL callers pass model_step explicitly.
+    def start_weight_update(self) -> None:
+        # vLLM's trainer engines call this before the transfer, so it is where we
+        # drain in-flight generation: the NCCL backend runs `update_weights`
+        # concurrently with the trainer-side broadcast, and blocking there would
+        # stall the rendezvous the trainer is already waiting on.
         while not self.inflight_updates and len(self.active_tasks) > 0:
             self.check_background_threads()
             time.sleep(DRAIN_ACTIVE_TASKS_SLEEP_S)
-        self._run_async(self.llm_engine.update_weights(WeightTransferUpdateRequest(**update_info)))
-        if model_step is not None:
-            self.current_model_step = model_step
+        self._run_async(self.llm_engine.start_weight_update())
+
+    def update_weights(self, request: WeightTransferUpdateRequest) -> None:
+        self._run_async(self.llm_engine.update_weights(request))
+
+    def finish_weight_update(self) -> None:
+        self._run_async(self.llm_engine.finish_weight_update())
 
     def reset_prefix_cache(self) -> None:
         return self._run_async(self.llm_engine.reset_prefix_cache())
@@ -809,6 +810,9 @@ class LLMRayActor:
 
     def set_model_step(self, model_step: int) -> None:
         self.current_model_step = model_step
+
+    def get_model_step(self) -> int:
+        return self.current_model_step
 
     def check_background_threads(self) -> None:
         if self._prefetch_future.done():
@@ -1322,159 +1326,192 @@ def _get_fsdp2_submodules(model: torch.nn.Module) -> list[tuple[str, FSDPModule]
     return fsdp_modules
 
 
-def _prepare_params_for_sync(
-    params: list[tuple[str, torch.nn.Parameter]], name_mapper: Callable[[str], str] | None
-) -> list[tuple[str, torch.Tensor]]:
-    """Map parameter names and clone into contiguous tensors for NCCL send.
+class TrainerWeightSource(WeightSource):
+    """vLLM `WeightSource` over a training model, applying open-instruct's name mapping.
 
-    DS3 gathered tensors may be non-contiguous or views into temporary buffers.
-    Cloning ensures we send independent, contiguous tensors over NCCL.
+    Iteration is a collective and runs on every trainer rank: FSDP2 shards are
+    gathered per parameter via `full_tensor()`, while DeepSpeed ZeRO-3 and FSDP1
+    gather for the duration of one pass. `metadata()` reads global shapes and
+    dtypes only, so it never triggers a gather.
     """
-    return [(name_mapper(n) if name_mapper else n, p.data.contiguous().clone()) for n, p in params]
+
+    def __init__(
+        self, model: torch.nn.Module, name_mapper: Callable[[str], str] | None = None, gather_whole_model: bool = True
+    ) -> None:
+        if isinstance(model, FSDP) and not gather_whole_model:
+            raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
+        self._model = model
+        self._name_mapper = name_mapper
+        self._gather_whole_model = gather_whole_model
+
+    def _map(self, name: str) -> str:
+        return self._name_mapper(name) if self._name_mapper else name
+
+    @property
+    def _deepspeed_stage_3(self) -> bool:
+        return any(hasattr(p, "ds_id") for p in self._model.parameters())
+
+    def metadata(self) -> list[ParamMeta]:
+        return [
+            ParamMeta(name=self._map(name), dtype=param.dtype, shape=tuple(getattr(param, "ds_shape", param.shape)))
+            for name, param in self._model.named_parameters()
+        ]
+
+    def _materialize(self, params: list[tuple[str, torch.nn.Parameter]]) -> Iterator[tuple[str, torch.Tensor]]:
+        for name, param in params:
+            source = param.data
+            tensor = materialize_full_tensor(source)
+            if tensor is source:
+                # Not gathered into a fresh buffer, so this is either the live
+                # parameter or a view into a gather buffer that is released when
+                # the surrounding context exits. NCCL only *enqueues* the send,
+                # so hand it storage we own for the whole round.
+                tensor = tensor.contiguous().clone()
+            elif not tensor.is_contiguous():
+                tensor = tensor.contiguous()
+            yield self._map(name), tensor
+
+    def __iter__(self) -> Iterator[tuple[str, torch.Tensor]]:
+        params = list(self._model.named_parameters())
+        if isinstance(self._model, FSDP):
+            with FSDP.summon_full_params(self._model, writeback=False, rank0_only=False):
+                yield from self._materialize(params)
+        elif self._deepspeed_stage_3 and not self._gather_whole_model:
+            for name, param in params:
+                with deepspeed.zero.GatheredParameters([param], enabled=True):
+                    yield from self._materialize([(name, param)])
+        elif self._deepspeed_stage_3:
+            with deepspeed.zero.GatheredParameters(self._model.parameters(), enabled=True):
+                yield from self._materialize(params)
+        else:
+            # Dense modules and FSDP2: `materialize_full_tensor` all-gathers each
+            # DTensor shard and passes regular tensors through unchanged.
+            yield from self._materialize(params)
 
 
-def _collect_weight_metadata(
-    model: torch.nn.Module, name_mapper: Callable[[str], str] | None
-) -> tuple[list[str], list[str], list[list[int]]]:
-    """Collect weight metadata (names, dtypes, shapes) without full parameter gathering.
+class RayEngineWeightSyncClient:
+    """vLLM `VLLMWeightSyncClient` over open-instruct's `LLMRayActor` handles.
 
-    For DeepSpeed stage 3, uses ds_shape. For FSDP2 DTensors, .shape returns global shape.
-    For FSDP1, param.shape returns full shape when parameters are registered (not flat).
+    Equivalent to vLLM's own `RayVLLMWeightSyncClient`, with two differences that
+    our topology requires:
+
+    * Each `LLMRayActor` is a separate single-deployment vLLM engine, so every
+      engine's workers would compute the same transfer ranks from the one
+      `rank_offset` vLLM's trainer engine emits. We re-stamp a per-engine offset
+      so engine `i` occupies ranks `[1 + i*TP, 1 + (i+1)*TP)`.
+    * `model_step` is stamped onto each engine once the update lands, so rollouts
+      can be attributed to the policy version that produced them.
     """
-    names: list[str] = []
-    dtype_names: list[str] = []
-    shapes: list[list[int]] = []
-    for name, param in model.named_parameters():
-        mapped_name = name_mapper(name) if name_mapper else name
-        names.append(mapped_name)
-        dtype_names.append(str(param.dtype).split(".")[-1])
-        shape = getattr(param, "ds_shape", param.shape)
-        shapes.append(list(shape))
-    return names, dtype_names, shapes
+
+    def __init__(self, engines: list[ray.actor.ActorHandle], model_step: int, tensor_parallel_size: int = 1) -> None:
+        self.engines = engines
+        self.model_step = model_step
+        self.tensor_parallel_size = tensor_parallel_size
+
+    def init_weight_transfer_engine(self, init_info: dict[str, Any]) -> None:
+        infos = [dict(init_info) for _ in self.engines]
+        if "rank_offset" in init_info:
+            for i, info in enumerate(infos):
+                info["rank_offset"] = 1 + i * self.tensor_parallel_size
+        utils.ray_get_with_progress(
+            [
+                engine.init_weight_transfer_engine.remote(WeightTransferInitRequest(init_info=info))
+                for engine, info in zip(self.engines, infos)
+            ],
+            desc="Initializing vLLM weight transfer engines",
+            timeout=600,
+        )
+
+    def start_weight_update(self) -> None:
+        ray.get([engine.start_weight_update.remote() for engine in self.engines])
+
+    def update_weights(self, update_info: dict[str, Any]) -> None:
+        ray.get(
+            [
+                engine.update_weights.remote(WeightTransferUpdateRequest(update_info=update_info))
+                for engine in self.engines
+            ]
+        )
+
+    def finish_weight_update(self, weight_version: str | None = None) -> None:
+        ray.get([engine.finish_weight_update.remote() for engine in self.engines])
+        ray.get([engine.set_model_step.remote(self.model_step) for engine in self.engines])
 
 
-def _broadcast_weights_ipc(
-    model: torch.nn.Module,
-    vllm_engines: list[ray.actor.ActorHandle],
-    name_mapper: Callable[[str], str] | None,
-    gather_whole_model: bool,
-    model_step: int,
-) -> list[ray.ObjectRef]:
-    """Broadcast weights using IPC backend (same-GPU / single_gpu_mode)."""
-    is_rank_0 = torch.distributed.get_rank() == 0
-    params = list(model.named_parameters())
-    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
+@dataclasses.dataclass
+class WeightSyncRendezvous:
+    """Rendezvous parameters for the trainer-side weight transfer engine.
 
-    if isinstance(model, FSDP):
-        ctx = FSDP.summon_full_params(model, writeback=False, rank0_only=False)
-    else:
-        ctx = deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3)
+    Built once by `setup_model_update_group` on every trainer rank and consumed
+    by `broadcast_weights_to_vllm`, which builds the engine on first use and
+    caches it. `master_*`/`world_size` are only read on the sender (rank 0), so
+    other ranks leave them at their defaults.
+    """
 
-    with ctx:
-        if is_rank_0:
-            mapped_params = [(name_mapper(n) if name_mapper else n, p.data) for n, p in params]
-            for engine in vllm_engines:
-                trainer_args = IPCTrainerSendWeightsArgs(mode="ray", llm_handle=engine)
-                IPCWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-            return [engine.set_model_step.remote(model_step) for engine in vllm_engines]
-    return []
+    backend: str
+    rank: int
+    tensor_parallel_size: int = 1
+    master_address: str = ""
+    master_port: int = 0
+    world_size: int = 0
+    _engine: Any | None = dataclasses.field(default=None, init=False, repr=False)
+
+    def trainer_engine(self, source: WeightSource, client: RayEngineWeightSyncClient) -> Any:
+        """Return the trainer-side transfer engine, rendezvousing on first call."""
+        if self._engine is None:
+            if self.backend == "ipc":
+                init_info: Any = IPCTrainerInitInfo(rank=self.rank)
+                engine_cls: Any = IPCTrainerWeightTransferEngine
+            else:
+                init_info = NCCLTrainerInitInfo(
+                    master_address=self.master_address,
+                    master_port=self.master_port,
+                    world_size=self.world_size,
+                    packed=False,
+                    rank=self.rank,
+                )
+                engine_cls = NCCLTrainerWeightTransferEngine
+            self._engine = engine_cls.trainer_init(init_info, client=client, source=source)
+        else:
+            # The engine caches both from the rendezvous; refresh them so this
+            # step's `model_step` is the one stamped onto the engines and the
+            # source reflects the caller's current mapping options.
+            self._engine.client = client
+            self._engine.source = source
+        return self._engine
 
 
 def broadcast_weights_to_vllm(
     model: torch.nn.Module,
     vllm_engines: list[ray.actor.ActorHandle],
-    model_update_group: Any | None,
+    model_update_group: WeightSyncRendezvous | None,
     model_step: int,
     name_mapper: Callable[[str], str] | None = None,
     gather_whole_model: bool = True,
 ) -> list[ray.ObjectRef]:
-    """Broadcast model weights to vLLM engines using the native weight transfer API.
+    """Broadcast model weights to vLLM engines using vLLM's trainer transfer engine.
 
-    Must be called on ALL ranks when using DeepSpeed stage 3 or FSDP,
-    since gathering is a collective operation. Only rank 0 sends weights.
+    Must be called on ALL trainer ranks: gathering (DeepSpeed ZeRO-3, FSDP1
+    `summon_full_params`, FSDP2 `full_tensor()`) is collective, so every rank
+    iterates the weight source in lockstep even though only rank 0 sends.
 
-    When model_update_group is None, uses IPC backend (single GPU mode).
-    Otherwise uses NCCL backend.
+    `model_step` is stamped onto each vLLM engine as the update completes.
 
-    `model_step` is stamped onto each vLLM engine as part of the weight-update RPC,
-    so no separate `set_model_step` call is needed.
+    Returns an empty list: vLLM's `send_weights` drives the engine-side RPCs to
+    completion itself, so there is nothing left for the caller to await. The
+    return type is kept so callers can keep feeding `perform_weight_sync`.
     """
-    if isinstance(model, FSDP) and not gather_whole_model:
-        raise ValueError("FSDP1 does not support per-parameter gathering. Set gather_whole_model=True.")
+    if model_update_group is None:
+        raise ValueError("broadcast_weights_to_vllm requires a WeightSyncRendezvous; call setup_model_update_group.")
 
-    is_rank_0 = not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
-    if is_rank_0:
+    # Rank comes from the rendezvous rather than torch.distributed so the sender
+    # here is exactly the sender the transfer engine resolves (`rank == 0`).
+    if model_update_group.rank == 0:
         ray.get([engine.sleep.remote() for engine in vllm_engines])
 
-    if model_update_group is None and is_rank_0:
-        return _broadcast_weights_ipc(model, vllm_engines, name_mapper, gather_whole_model, model_step)
-
-    fsdp_submodules = _get_fsdp2_submodules(model) if isinstance(model, FSDPModule) else None
-    use_packed = False
-    trainer_args = NCCLTrainerSendWeightsArgs(group=model_update_group, packed=use_packed)
-
-    if isinstance(model, FSDPModule):
-        if not fsdp_submodules:
-            raise ValueError("FSDP2 model has no FSDP submodules.")
-        if not gather_whole_model:
-            raise ValueError(
-                "FSDP2 weight sync requires gather_whole_model=True. "
-                "Per-block iteration deadlocks on the CUDA stream because reshard/unshard "
-                "collectives interleave with the trainer->vLLM NCCL sends."
-            )
-        for _, block in fsdp_submodules:
-            block.unshard()
-        # The root FSDPModule wraps params not inside any submodule (e.g. model.norm,
-        # lm_head). _get_fsdp2_submodules excludes the root, so unshard it explicitly
-        # or those root-level DTensor params will fail NCCL broadcast with an illegal
-        # memory access (their `.contiguous().clone()` produces a buffer with global
-        # stride backed by only the local shard).
-        model.unshard()
-        torch.cuda.synchronize()
-        try:
-            if is_rank_0:
-                mapped_params = _prepare_params_for_sync(list(model.named_parameters()), name_mapper)
-                names = [n for n, _ in mapped_params]
-                dtype_names = [str(t.dtype).split(".")[-1] for _, t in mapped_params]
-                shapes = [list(t.shape) for _, t in mapped_params]
-                update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
-                refs = [
-                    engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines
-                ]
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-            else:
-                refs = []
-        finally:
-            for _, block in fsdp_submodules:
-                block.reshard()
-            model.reshard()
-        return refs
-
-    names, dtype_names, shapes = _collect_weight_metadata(model, name_mapper)
-
-    if is_rank_0:
-        update_info = {"names": names, "dtype_names": dtype_names, "shapes": shapes, "packed": use_packed}
-        refs = [engine.update_weights.remote({"update_info": update_info}, model_step) for engine in vllm_engines]
-    else:
-        refs = []
-
-    params = list(model.named_parameters())
-    deepspeed_stage_3 = any(hasattr(p, "ds_id") for p in model.parameters())
-
-    if isinstance(model, FSDP):
-        batches = [(FSDP.summon_full_params(model, writeback=False, rank0_only=False), params)]
-    elif gather_whole_model:
-        batches = [(deepspeed.zero.GatheredParameters(model.parameters(), enabled=deepspeed_stage_3), params)]
-    else:
-        batches = [
-            (deepspeed.zero.GatheredParameters([param], enabled=deepspeed_stage_3), [(name, param)])
-            for name, param in params
-        ]
-
-    for ctx, batch_params in batches:
-        with ctx:
-            if is_rank_0:
-                mapped_params = _prepare_params_for_sync(batch_params, name_mapper)
-                NCCLWeightTransferEngine.trainer_send_weights(iterator=iter(mapped_params), trainer_args=trainer_args)
-
-    return refs
+    source = TrainerWeightSource(model, name_mapper=name_mapper, gather_whole_model=gather_whole_model)
+    client = RayEngineWeightSyncClient(
+        vllm_engines, model_step=model_step, tensor_parallel_size=model_update_group.tensor_parallel_size
+    )
+    model_update_group.trainer_engine(source, client).send_weights()
+    return []

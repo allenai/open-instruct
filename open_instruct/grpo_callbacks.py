@@ -148,7 +148,7 @@ class VLLMWeightSyncCallback(Callback):
 
     vllm_engines: list[ray.actor.ActorHandle]
     actor_manager: ray.actor.ActorHandle
-    model_update_group: Any | None = None
+    model_update_group: vllm_utils.WeightSyncRendezvous | None = None
     sync_interval: int = 1
     name_mapper: Callable[[str], str] | None = None
 

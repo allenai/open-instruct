@@ -13,7 +13,7 @@ Support for NVIDIA DGX Spark (GB10 Blackwell, CUDA 13, aarch64) is experimental.
 
 ## Known Limitations
 
-1. **vLLM**: Uses cu130 wheel (v0.13.0) pinned to specific commit
+1. **vLLM**: Uses the cu130 wheel (v0.28.0) from the version-specific vLLM wheel index
 2. **Flash Attention**: Not available - uses PyTorch SDPA instead
 3. **PyTorch**: Shows sm_121 warning (safe to ignore - binary compatible with sm_120)
 
