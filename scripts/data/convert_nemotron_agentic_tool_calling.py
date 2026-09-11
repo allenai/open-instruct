@@ -16,8 +16,12 @@ serialized as JSON strings. Along the way it applies two filters chosen for the 
 * rows whose full render under the Olmo 3.5 chat template exceeds --max-tokens are dropped
   (about 1% of the split, almost all of it giant tool lists: one sampled row was 102,823 tokens,
   99,857 of them schemas);
-* system messages with empty content are removed, so the template's own default applies instead
-  of an empty system line before the tools block.
+* every conversation gets the system prompt given by --system-prompt (default: the one simfc
+  uses, "You are a helpful function-calling AI assistant."). The source's system messages are all
+  empty strings, and a handful of rows have none; left alone, the chat template would substitute
+  its own default prompt, which makes the system-prompt distribution differ from datasets that
+  carry an explicit one. Pass --system-prompt "" to keep the source's (empty) prompts removed
+  instead.
 
 Row order is preserved. Usage (0 GPUs, many CPUs):
 
@@ -47,6 +51,7 @@ logger = logger_utils.setup_logger(__name__)
 SOURCE_REPO = "nvidia/Nemotron-SFT-Agentic-v2"
 SOURCE_FILE = "data/tool_calling.jsonl"
 DEFAULT_TOKENIZER = "allenai/dolma2-tokenizer-olmo35"
+DEFAULT_SYSTEM_PROMPT = "You are a helpful function-calling AI assistant."
 
 TOOL_CALL = pa.struct(
     [
@@ -138,8 +143,8 @@ def _render_for_count(messages: list[dict[str, Any]], tools: list | None, tokeni
     return len(tokenizer(text, add_special_tokens=False)["input_ids"])
 
 
-def process_chunk(args: tuple[list[str], str, str, int]) -> tuple[list[dict[str, Any]], Counter]:
-    lines, tokenizer_name, tokenizer_revision, max_tokens = args
+def process_chunk(args: tuple[list[str], str, str, int, str | None]) -> tuple[list[dict[str, Any]], Counter]:
+    lines, tokenizer_name, tokenizer_revision, max_tokens, system_prompt = args
     tokenizer = _get_tokenizer(tokenizer_name, tokenizer_revision)
     out, stats = [], Counter()
     for line in lines:
@@ -149,7 +154,20 @@ def process_chunk(args: tuple[list[str], str, str, int]) -> tuple[list[dict[str,
         row = json.loads(line)
         stats["rows_in"] += 1
         messages = [_clean_message(m) for m in row["messages"]]
-        if messages and messages[0]["role"] == "system" and not (messages[0]["content"] or "").strip():
+        has_system = bool(messages) and messages[0]["role"] == "system"
+        if system_prompt is not None:
+            if has_system:
+                key = (
+                    "system_replaced_empty"
+                    if not (messages[0]["content"] or "").strip()
+                    else "system_replaced_nonempty"
+                )
+                stats[key] += 1
+                messages[0] = {**messages[0], "content": system_prompt}
+            else:
+                stats["system_inserted"] += 1
+                messages.insert(0, _clean_message({"role": "system", "content": system_prompt}))
+        elif has_system and not (messages[0]["content"] or "").strip():
             messages = messages[1:]
             stats["empty_system_removed"] += 1
         tools = row.get("tools") or None
@@ -200,10 +218,26 @@ def _limit_chunks(chunks, limit: int):
         budget -= len(chunk)
 
 
+def _system_note(stats: Counter, system_prompt: str | None) -> str:
+    if system_prompt is None:
+        return (
+            f"System messages with empty content are removed ({stats['empty_system_removed']:,} rows) so a chat "
+            "template's default system prompt applies."
+        )
+    return (
+        f'Every conversation starts with the system prompt "{system_prompt}": it replaced the source\'s '
+        f"system message in {stats['system_replaced_empty'] + stats['system_replaced_nonempty']:,} rows "
+        f"({stats['system_replaced_empty']:,} of them empty in the source) and was inserted in "
+        f"{stats['system_inserted']:,} rows that had none. Without it the chat template would substitute "
+        "its own default prompt, a different distribution from datasets that carry an explicit one."
+    )
+
+
 def write_readme(
     out_dir: pathlib.Path, stats: Counter, args: argparse.Namespace, source_sha: str, tokenizer_sha: str
 ) -> None:
     data_size = sum(p.stat().st_size for p in (out_dir / "data").glob("*.parquet"))
+    system_note = _system_note(stats, args.system_prompt)
     readme = f"""---
 license: cc-by-4.0
 dataset_info:
@@ -266,8 +300,7 @@ Derived from [{SOURCE_REPO}](https://huggingface.co/datasets/{SOURCE_REPO}) (rev
   ([{args.tokenizer}](https://huggingface.co/{args.tokenizer}) @ `{tokenizer_sha}`) exceeds
   {args.max_tokens:,} tokens are dropped: {stats["dropped_over_length"]:,} rows, almost all of them
   giant tool lists. `n_tokens` is that render length for the rows kept.
-- System messages with empty content are removed ({stats["empty_system_removed"]:,} rows) so a chat
-  template's default system prompt applies.
+- {system_note}
 - `messages` fields are `role`, `content`, `reasoning_content` (assistant only), `tool_calls`
   (assistant only; `arguments` is a JSON string, as in the source, except that the JSON string
   `null` becomes `{{}}` so templates that iterate arguments as a mapping accept it) and
@@ -291,6 +324,11 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--max-tokens", type=int, default=65536)
+    parser.add_argument(
+        "--system-prompt",
+        default=DEFAULT_SYSTEM_PROMPT,
+        help='System prompt every conversation starts with; "" keeps the source\'s (empty) prompts removed instead.',
+    )
     parser.add_argument("--rows-per-shard", type=int, default=50_000)
     parser.add_argument("--chunk-lines", type=int, default=500)
     parser.add_argument(
@@ -305,6 +343,8 @@ def main() -> None:
     parser.add_argument("--push-to", default=None, help="HF dataset repo to upload the result to.")
     parser.add_argument("--private", action="store_true")
     args = parser.parse_args()
+    if args.system_prompt == "":
+        args.system_prompt = None
 
     api = HfApi()
     source_sha = api.dataset_info(SOURCE_REPO).sha
@@ -332,7 +372,7 @@ def main() -> None:
     chunks = iter_chunks(path, args.chunk_lines)
     if args.limit is not None:
         chunks = _limit_chunks(chunks, args.limit)
-    tasks = ((c, args.tokenizer, tokenizer_sha, args.max_tokens) for c in chunks)
+    tasks = ((c, args.tokenizer, tokenizer_sha, args.max_tokens, args.system_prompt) for c in chunks)
     with multiprocessing.get_context("spawn").Pool(args.num_proc) as pool:
         for i, (rows, chunk_stats) in enumerate(pool.imap(process_chunk, tasks, chunksize=1)):
             pending.extend(rows)
@@ -355,7 +395,14 @@ def main() -> None:
             repo_id=args.push_to,
             repo_type="dataset",
             folder_path=str(out_dir),
-            commit_message=f"{SOURCE_REPO} tool_calling split for open-instruct SFT (max {args.max_tokens} tokens, empty system messages removed)",
+            commit_message=(
+                f"{SOURCE_REPO} tool_calling split for open-instruct SFT (max {args.max_tokens} tokens; "
+                + (
+                    f'system prompt "{args.system_prompt}")'
+                    if args.system_prompt
+                    else "empty system messages removed)"
+                )
+            ),
         )
         logger.info(f"pushed to {info.commit_url}")
 
