@@ -55,6 +55,8 @@ dump_vllm_failure() {
 
 : "${MODELS:?set MODELS}"
 : "${VLLM_PKG_VERSION:=0.28.0}"
+: "${FLASHINFER_WHEELS:=1}"          # prebuilt kernels; set empty to disable
+: "${FLASHINFER_VERSION:=0.6.16.post3}"
 : "${SERVE_PORT:=8008}"
 : "${GPU_COUNT:=4}"
 : "${TP_SIZE:=$GPU_COUNT}"
@@ -91,7 +93,9 @@ export VLLM_MOE_USE_DEEP_GEMM="${VLLM_MOE_USE_DEEP_GEMM:-0}"
 #   /usr/local/cuda/bin/nvcc: not found ... ninja: build stopped
 # There is no CUDA 13 *dev* Beaker image to get nvcc from, so route sampling
 # through vLLM's native PyTorch path instead.
-export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
+# Previously disabled because its JIT needed nvcc. With flashinfer-cubin the
+# sampler is prebuilt and free, so leave vLLM's default in place.
+export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-1}"
 
 REPO_ROOT="$(pwd)"
 mkdir -p "$RESULTS_DIR"
@@ -157,7 +161,8 @@ cat <<EOF
   sampling      : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples, T=${TEMPERATURE} top_p=${TOP_P} seed=${SEED}
   concurrency   : ${CONCURRENCY}
   trace store   : ${TRACE_STORE}
-  JIT paths off : DEEP_GEMM=${VLLM_USE_DEEP_GEMM} MOE_DEEP_GEMM=${VLLM_MOE_USE_DEEP_GEMM} FLASHINFER_SAMPLER=${VLLM_USE_FLASHINFER_SAMPLER}
+  flashinfer    : prebuilt wheels=${FLASHINFER_WHEELS:-off} v${FLASHINFER_VERSION} sampler=${VLLM_USE_FLASHINFER_SAMPLER}
+  JIT paths off : DEEP_GEMM=${VLLM_USE_DEEP_GEMM} MOE_DEEP_GEMM=${VLLM_MOE_USE_DEEP_GEMM}
                   (image has no nvcc, so every JIT path must fall back to precompiled kernels)
   HF_HOME       : ${HF_HOME:-<default>}
   hub repo      : ${HF_REPO_ID:-<none: push skipped>}
@@ -402,7 +407,25 @@ run_one_model() {
     [ -n "$extra" ] && log "recipe flags for ${served}: ${extra}"
 
     # shellcheck disable=SC2086  # $extra must word-split into separate flags
-    uvx --python 3.12 "vllm==${VLLM_PKG_VERSION}" serve "$model" \
+    # flashinfer-cubin and flashinfer-jit-cache carry prebuilt kernels. vLLM's
+    # wheel deps pull in flashinfer-python ONLY -- jit-cache ships just in the
+    # official Docker image -- so without these, FlashInfer compiles every kernel
+    # from source with nvcc during vLLM's warmup run.
+    #
+    # Measured on one node, five sequential boots (exp 01M28P2590XZZDYT2SQ4G8DGX0):
+    #   without: time-to-ready 1790s, warmup 1450s, 52 concurrent nvcc at peak,
+    #            64 runtime HTTPS fetches to edge.urm.nvidia.com for cubins
+    #   with:    time-to-ready  290s, warmup 11.5s, zero compiler processes,
+    #            zero CDN fetches
+    # Same attention/MoE backends selected either way, so nothing is degraded.
+    # Neither wheel is on PyPI at this version; they come from flashinfer.ai.
+    uvx --python 3.12 \
+        ${FLASHINFER_WHEELS:+--with flashinfer-cubin==${FLASHINFER_VERSION} \
+          --with flashinfer-jit-cache==${FLASHINFER_VERSION} \
+          --index-strategy unsafe-best-match \
+          --extra-index-url https://flashinfer.ai/whl/flashinfer-cubin/ \
+          --extra-index-url https://flashinfer.ai/whl/cu130/flashinfer-jit-cache/} \
+        "vllm==${VLLM_PKG_VERSION}" serve "$model" \
         ${extra} \
         --served-model-name "$served" \
         --port "$SERVE_PORT" \

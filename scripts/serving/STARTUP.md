@@ -467,3 +467,1054 @@ All **[R]**, all on different storage than yours — use them for shape, not for
 | `OMP_NUM_THREADS=56` vs unset | Kimi-K2-Thinking-NVFP4, 4x B200, DP=4 | **1822 s -> 118 s (15x)** | vLLM issue #52330 |
 
 **[I] The EP-filter numbers need one correction for your topology.** Those are *multi-node DP/EP* measurements. On a single TP=8 node with a shared page cache, the union of what your 8 ranks read is still the whole checkpoint, so the network-byte saving is small; what you actually save is per-rank `get_tensor()` work, copies and RSS — which is the 1.4x single-node figure, not the 2.5x one. The filter also does **not** apply to `runai_streamer`, `fastsafetensors`, `instanttensor`, `sharded_state`, or `enable_multithread_load` (`local_expert_ids` is only threaded into `safetensors_weights_iterator`). Look for the log line `EP weight filter: ep_size=%d, ep_rank=%d, loading %d/%d experts` to confirm it engaged.
+
+---
+
+## 5. Per-model startup notes
+
+> **Provenance for this section.** Unless marked **[R]**, every code claim below was
+> read out of an unpacked `v0.28.0` source tree (`github.com/vllm-project/vllm`,
+> tag `v0.28.0`), and every model claim out of the live
+> `huggingface.co/api/models/<repo>` listing and `raw/main/config.json`. Line
+> numbers are from that tree. **[R]** items are GitHub issues/PRs — note that
+> several are *open*, i.e. the bug is in the version you are running.
+
+### 5.0 The four at a glance
+
+| | Qwen3.5-397B-A17B-FP8 | Kimi-K2.6 | DeepSeek-V3.2-Exp | GLM-5.2-FP8 |
+|---|---|---|---|---|
+| `architectures` | `Qwen3_5MoeForConditionalGeneration` | `KimiK25ForConditionalGeneration` | `DeepseekV32ForCausalLM` | `GlmMoeDsaForCausalLM` |
+| `model_type` | `qwen3_5_moe` | `kimi_k25` | `deepseek_v32` | `glm_moe_dsa` |
+| vLLM module | `models/qwen3_5.py` | `models/kimi_k25.py` | `models/deepseek_v2.py` | `models/deepseek_v2.py` |
+| layers / routed experts | 60 / 512 (top-10) | 61 / 384 (top-8) | 61 / 256 (top-8) | 78 / 256 (top-8) |
+| safetensors shards | **94** | **64** | **163** | **141** |
+| quant | FP8 blockwise `[128,128]`, dynamic | compressed-tensors `pack-quantized` 4-bit, **group 32, symmetric** | FP8 `[128,128]`, **`scale_fmt: ue8m0`** | FP8 `[128,128]` e4m3 |
+| MTP head in ckpt | yes (`mtp.fc`, `mtp.layers.0.*`) | **no** (`num_nextn_predict_layers: 0`) | yes (`=1`) | yes (`=1`) |
+| sparse-attention indexer | no | no | yes (`index_topk: 2048`, `index_n_heads: 64`) | yes (`index_topk: 2048`) |
+| `--trust-remote-code` needed? | **no** (no `.py` in repo) | **no** for config (vLLM bundles `KimiK25Config`); repo *does* ship 9 `.py` files + `auto_map` | **no** (the `.py` files are a standalone `inference/` reference impl, not `auto_map`) | **no** (no `.py` in repo) |
+| `@support_torch_compile` | **yes**, `qwen3_5.py:206` | LM: no decorator found; ViT: bare `@torch.compile` (`kimi_k25_vit.py:64`) | yes, `deepseek_v2.py:1360` | yes, same decorator (subclass) |
+| unique startup JIT | GDN Triton trio + **FlashInfer GDN prefill** + vision tower | Marlin repack *or* trtllm-gen INT4 cubins | DeepGEMM indexer + sparse-MLA Triton metadata + CuTe-DSL | same as DeepSeek **+ SM103-only CuTe-DSL skinny GEMMs** |
+
+**[D] None of the four needs `--trust-remote-code` on 0.28.0.** vLLM ships bundled
+config classes for all of them —
+`transformers_utils/config.py:88` (`deepseek_v32="DeepseekV3Config"`),
+`:104` (`kimi_k25="KimiK25Config"`),
+`:135` (`qwen3_5_moe="Qwen3_5MoeConfig"`),
+and GLM is handled by `_PATCH_HF_ALLOWED_LAYER_TYPES = {"glm_moe_dsa": ("deepseek_sparse_attention",)}`
+(`transformers_utils/config.py:151-154`), which extends transformers' strict
+`ALLOWED_LAYER_TYPES` so the checkpoint validates without remote code.
+Our current recipe in `README.md` passes `--trust-remote-code` for DeepSeek, GLM
+and Kimi. **[I]** Dropping it removes an HF hub round-trip and an `exec` of
+downloaded Python on every rank at import; for Kimi it avoids `exec`-ing nine
+files including a tiktoken-based `tokenization_kimi.py`. Drop it, keep
+`HF_HUB_OFFLINE=1` set, and if something breaks it will break loudly at config
+load, not 40 minutes in.
+
+**[D] Two more redundancies in the current recipe.** `--tokenizer-mode deepseek_v32`
+is now automatic: `config/model.py:683` sets `tokenizer_mode = "deepseek_v32"`
+whenever `tokenizer_mode == "auto"` and the model calls for it (and logs
+`Defaulting to tokenizer_mode=...`). And see §5.3 for why `VLLM_USE_DEEP_GEMM=0`
+does **not** do what the recipe comment claims for the two DSA models.
+
+---
+
+### 5.1 Qwen/Qwen3.5-397B-A17B-FP8 — the only one that really pays for torch.compile
+
+**What it is.** 60 layers, of which 15 are full attention (every 4th) and 45 are
+Gated DeltaNet; 512 routed + 1 shared expert, top-10; a 27-block vision tower; an
+MTP head living *inside* the main checkpoint (the FP8 `modules_to_not_convert`
+list names `mtp.fc`, `mtp.layers.0.mlp.gate`, `mtp.layers.0.mlp.shared_expert_gate`);
+94 safetensors shards, the fewest bytes of the four.
+
+#### 5.1.1 It is the one model whose compile cache is worth warming
+
+**[D]** `Qwen3_5Model` carries `@support_torch_compile(dynamic_arg_dims={...})`
+at `vllm/model_executor/models/qwen3_5.py:206`. Everything in §1 — the AOT
+artifact, `VLLM_FORCE_AOT_LOAD=1` as a canary, `--load-format dummy` warm-builds
+— applies to Qwen with full force. The DSA pair (§5.3/§5.4) compile too but are
+one config flip away from not compiling at all; Kimi's language model has no
+decorator at all.
+
+**[D]** `language_model_only` is a `ModelConfig.compute_hash` factor
+(`config/model.py:457`), so `--language-model-only` — which our recipe passes —
+**is part of the compile-cache key**. Fix it across the sweep or accept a cold
+compile when you toggle it.
+
+#### 5.1.2 GDN forces three Triton kernels and one FlashInfer JIT, and only three are warmed
+
+**[D]** `vllm/model_executor/warmup/qwen_triton_warmup.py` is model-family-gated:
+
+```python
+_QWEN_MODEL_TYPES = frozenset(
+    {"qwen3_next", "qwen3_5", "qwen3_5_text", "qwen3_5_moe", "qwen3_5_moe_text"}
+)
+_FLA_POST_CONV_WARMUP_LENGTHS = (1, 2, 16)   # L=1 constexpr, non-divisible L, divisible L
+```
+
+It compiles exactly three kernels, all of which the other three models never touch:
+
+1. `causal_conv1d_fn` — `model_executor/layers/mamba/ops/causal_conv1d.py`
+2. `fused_post_conv_prep` — vendored FLA, `vllm/third_party/flash_linear_attention/ops/fused_gdn_prefill_post_conv.py`, at **three** lengths (three Triton specialisations)
+3. `fused_sigmoid_gating_delta_rule_update` — `vllm/third_party/flash_linear_attention/ops/fused_sigmoid_gating.py`
+
+**[D] The chunked *prefill* GDN kernel is not in that list.** The prefill path is
+selected separately by `_resolve_gdn_prefill_backend`
+(`model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py:93-141`), and on a B300
+it resolves to **FlashInfer**, not Triton:
+
+```python
+elif (current_platform.is_device_capability_family(100)   # SM10.x — B200/B300
+      and head_k_dim == 128
+      and current_platform.get_cuda_runtime_major() >= 13):
+    supports_flashinfer = True
+    supports_cutedsl = True
+if backend in ["flashinfer", "auto"] and supports_flashinfer:
+    return backend, "flashinfer"
+```
+
+Our stack satisfies all three conditions (`linear_key_head_dim: 128`, CUDA 13.1),
+so the default `auto` gives us the FlashInfer GDN prefill kernel — **which is
+JIT-compiled**. Worse, the warning that says so is gated on SM90:
+
+```python
+if active_backend == "flashinfer" and current_platform.is_device_capability(90):
+    logger.warning_once("FlashInfer GDN prefill is JIT-compiled; first run may "
+                        "take a while. Set --gdn-prefill-backend triton to skip JIT.")
+```
+
+**[D] On Blackwell you get the JIT and not the warning.** The only line you see is
+`Using FlashInfer GDN prefill kernel (requested=auto, head_k_dim=128).`
+
+**[R]** vLLM PR #46764 ("[GDN] Improve UX when FlashInfer JIT compilation is
+happening") logs the real-world shape of this:
+`Warming up FlashInfer GDN prefill kernel (cold cache JIT-compile may take several minutes; cached under .../cached_ops)`
+and recommends `--additional-config '{"gdn_prefill_backend":"triton"}'` for
+"faster cold startup, potentially slower steady-state."
+
+**Actions, in order:**
+
+```bash
+# (a) make the FlashInfer JIT a file read — this is §2.1's fix, and it is the
+#     one that matters most for Qwen because the GDN prefill kernel is FlashInfer:
+#     install flashinfer-cubin + flashinfer-jit-cache, persist FLASHINFER_JIT_DIR.
+# (b) if you want a deterministic, JIT-free cold boot for config-search runs:
+--additional-config '{"gdn_prefill_backend":"triton"}'
+```
+
+**[I]** `gdn_prefill_backend` lives in `additional_config`, which *is* hashed into
+the compile key, so pin one value per cache lineage rather than sweeping it.
+**[R]** Note also issue #56125: the vendored FLA `fused_recurrent_gated_delta_rule`
+non-packed path is ~3x slower than upstream `flash-linear-attention` 0.5.2
+(bit-identical), so the Triton fallback costs more steady-state than you would
+guess from the upstream kernel.
+
+#### 5.1.3 DeepGEMM is *auto-disabled* for this model on Blackwell
+
+**[D]** `vllm/utils/deep_gemm.py:27-46`:
+
+```python
+_DEEPGEMM_BLACKWELL_EXCLUDED_MODEL_TYPES: set[str] = {"qwen3_5_text", "qwen3_5_moe_text"}
+
+def should_auto_disable_deep_gemm(model_type: str | None) -> bool:
+    """Returns True if the model is known to have accuracy degradation with
+    DeepGemm's E8M0 scale format on Blackwell GPUs (SM100+)."""
+```
+
+The text submodel of our checkpoint is `qwen3_5_moe_text`, and B300 is
+`is_device_capability_family(100)`, so the E8M0 scale format is dropped back to
+`FLOAT32`. **[I]** Consequence for startup: Qwen is the one model of the four
+where our `VLLM_USE_DEEP_GEMM=0` is close to a no-op anyway — the FP8 MoE lands
+on FlashInfer trtllm-gen or CUTLASS, not DeepGEMM. **[R]** This exclusion list
+exists because of issue #47130 (DeepGEMM `"Unknown recipe"` assertion during FP8
+kernel warmup on Blackwell for a `qwen3_5` FP8 checkpoint) — i.e. for this model
+DeepGEMM was not slow, it *crashed* the warmup.
+
+#### 5.1.4 The multimodal wrapper: two separate skips, and a way to prove they worked
+
+**[D]** Startup runs a dummy forward through the vision tower during
+`profile_run` unless you stop it. Three levers, all real in 0.28.0:
+
+| Flag | Effect | Hash-neutral? |
+|---|---|---|
+| `--language-model-only` | vision tower not built at all (`config/multimodal.py:492`) | **No** — `ModelConfig.compute_hash` factor (`config/model.py:457`) |
+| `--limit-mm-per-prompt '{"image":0,"video":0}'` | drives `mm_max_toks_per_item` to 0; `gpu_model_runner.py` then logs *"Skipping encoder profiling for embedding-only mode"* | **No** (MultiModalConfig field) |
+| `--skip-mm-profiling` | skips the encoder profiling forward pass unconditionally (`config/multimodal.py:217`, used at `gpu_model_runner.py:6562`) | **No** — it is in `ModelConfig.compute_hash`'s init-var list (`config/model.py:445`) |
+
+**[D] Verification signal.** Encoder compile time is tracked separately
+(`compilation_config.encoder_compilation_time`, `config/compilation.py:750`) and
+printed by the engine:
+
+```
+init engine (profile, create kv cache, warmup model) took %.2f s
+    (compilation: %.2f s — language_model: %.2f s, encoder: %.2f s)
+```
+(`vllm/v1/engine/core.py:336-345`). **If `--language-model-only` really took
+effect, the three-term form of this line disappears entirely** and you get the
+`(compilation: %.2f s)` form. That is a one-grep regression test that our
+text-only serving is actually text-only.
+
+#### 5.1.5 MTP: a second model, a second capture set — and currently broken
+
+**[D]** The MTP head is registered as its own architecture
+(`registry.py:682-683`: `Qwen3_5MTP`/`Qwen3_5MoeMTP` → `qwen3_5_mtp`) and the
+runner treats the drafter as a separate model: `gpu_model_runner.py:7339-7353`
+initialises a *drafter* cudagraph dispatcher, and the capture loop calls the
+drafter's dummy run for every shape in the target's capture list. The code
+comment at `:2678` is explicit that "the drafter still only uses piecewise
+cudagraphs." **[I]** So enabling MTP adds: one more weight-load pass, one more
+Dynamo/Inductor compile, and one more piecewise capture set on top of the
+target's `FULL_AND_PIECEWISE` — budget 1.3–1.5x the §3 capture time.
+
+**[R] Do not enable it on 0.28.0 for this model.** Issue #55533 (open) and its
+WIP fix #55617: *"Hybrid GDN (Qwen3.5/Qwen3.8 27B-class) + MTP: scheduler runs
+only ~3 concurrent sequences at batch >= 4 — acceptance/throughput collapse."*
+**[R]** #55369 (merged) was needed just to resolve `n_predict` from `text_config`
+for Qwen3.5 *multimodal* MTP. **[R]** vLLM's own CI runs the
+`qwen3_next_mtp_async_eplb` scheduled test with `VLLM_ENGINE_READY_TIMEOUT_S=1800`
+— three times the default — which is the clearest available statement of how long
+GDN+MTP cold start takes.
+
+#### 5.1.6 Hybrid KV cache: constraints that bite at startup
+
+- **[D]** `mamba_cache_mode == "all"` is rejected outright for this model:
+  `qwen3_5.py:322-325` raises and tells you to use `--mamba-cache-mode=align`.
+- **[R]** Issue #55766 (open, filed against v0.28.0): *"Qwen3.5/3.8 hybrid GDN:
+  NaN logits after a prefix-cache hit when the previous prefill ended 4-10 tokens
+  past a block boundary (mamba cache mode align)."* Our recipe passes
+  `--enable-prefix-caching`. **[I]** Validate output correctness on this model
+  before trusting a prefix-cached run; #51198/#51250 additionally report prefix
+  caching being a silent 0%-hit no-op on this family, so you may be carrying the
+  risk for no benefit.
+- **[R]** Issue #37121: KV-cache capacity is over-estimated ~7x for hybrid
+  Mamba/attention models because `unify_kv_cache_spec_page_size` pads the small
+  Mamba state to the attention page size. **[I] This interacts directly with
+  §3.4's startup plan**: `VLLM_ENABLE_STARTUP_PLAN=1` persists the *profiled*
+  number, so it will faithfully persist the wrong one. It is still correct to use
+  — it reproduces what a cold boot would have done — but do not read a persisted
+  plan as validation of the number.
+- **[R]** The vLLM recipes page for this family documents a hard failure,
+  `cuda graph capture size is larger than mamba cache size`, whose fix is to lower
+  `--max-cudagraph-capture-size` from the default. **[I]** That is the same knob
+  §3.3 recommends for startup, so for Qwen the startup optimisation and the
+  stability workaround are the same flag.
+
+---
+
+### 5.2 moonshotai/Kimi-K2.6 — the weight-processing model
+
+**What it is.** `KimiK25ForConditionalGeneration` / `model_type: kimi_k25` — a
+*multimodal* wrapper (27-layer MoonViT tower, patch-merger projector) around a
+text backbone whose own `text_config` is `DeepseekV3ForCausalLM` / `kimi_k2`:
+61 layers (1 dense + 60 MoE), 384 routed + 1 shared expert, top-8, MLA
+(`kv_lora_rank 512`, `q_lora_rank 1536`, `qk_nope 128`, `qk_rope 64`, `v 128`,
+64 heads). Moonshot's README says K2.6 "has the same architecture as Kimi-K2.5,
+and the deployment method can be directly reused."
+
+**[D] `num_nextn_predict_layers: 0` — it is the only one of the four with no MTP
+head.** No drafter load, no second compile, no second capture set. Whatever
+startup budget the others spend on speculative decoding, Kimi does not.
+
+**[D] Checkpoint shape from `model.safetensors.index.json`:** `total_size`
+595,148,192,736 B (~595 GB) across **64 shards**, and the weight map holds
+**208,550 tensor entries**. That is the single most important number in this
+subsection — see §4.8: the OMP-oversubscription pathology scales with *tensor
+count*, not bytes, and 208 k tensors is the worst case in this fleet by an order
+of magnitude. Set `OMP_NUM_THREADS` explicitly for this model even at DP=1.
+
+#### 5.2.1 The INT4 backend actually selected is Marlin — because of a default-off env var
+
+**[D]** `quantization_config` under `text_config`: `compressed-tensors`,
+`format: pack-quantized`, `num_bits: 4`, `group_size: 32`, `strategy: group`,
+`symmetric: true`, `dynamic: false`, and an `ignore` list of
+`self_attn.*`, `shared_experts.*`, `mlp.(gate|up|gate_up|down)_proj.*`,
+`lm_head.*`, `vision_tower.*`, `mm_projector.*` — i.e. **only the routed-expert
+Linears are INT4**; everything else is BF16.
+
+Symmetric + no bias means the WNA16 oracle's *only* disqualifier for
+`FLASHINFER_TRTLLM` does not fire, and it is first in `_get_priority_backends()`
+(`fused_moe/oracle/int_wna16.py`). **But it never gets a chance**:
+
+```python
+# vllm/model_executor/layers/quantization/utils/flashinfer_mxint4_moe.py:24-31
+def is_flashinfer_mxint4_moe_available() -> bool:
+    return (envs.VLLM_USE_FLASHINFER_MOE_INT4        # <- envs.py:213, default False
+            and has_flashinfer_trtllm_fused_moe()
+            and current_platform.is_cuda()
+            and current_platform.is_device_capability_family(100))
+```
+
+**[D] `VLLM_USE_FLASHINFER_MOE_INT4` defaults to `0` (`envs.py:213, 1624-1625`),
+so out of the box Kimi-K2.6 lands on `MARLIN`, not trtllm-gen.** §4.6's warning
+about a long silent gap after "Loading safetensors checkpoint shards 100%" is
+therefore the *expected* behaviour for this model, not an edge case.
+
+The checkpoint *is* format-compatible with the trtllm path — the kernel requires
+`QuantKey(INT4, scale group_shape (1,32), symmetric=True)`, which is exactly
+`group_size: 32, symmetric: true`. **[I]** So `VLLM_USE_FLASHINFER_MOE_INT4=1`
+is worth one A/B, with two caveats: (a) it is a `VLLM_*` var and therefore
+**re-keys the compile cache** (§1.2); (b) it is a default-off path for this
+checkpoint shape, so validate output quality, not just speed.
+
+#### 5.2.2 Why the Marlin repack is slow: it is a Python loop over 384 experts
+
+**[D]** Three separate per-expert Python loops, each launching one tiny CUDA op
+per expert:
+
+```python
+# vllm/_custom_ops.py — gptq_marlin_moe_repack (and awq_marlin_moe_repack)
+for e in range(num_experts):
+    output[e] = torch.ops._C.gptq_marlin_repack(b_q_weight[e], perm[e], size_k, size_n, num_bits, ...)
+```
+and `marlin_moe_permute_scales` / `moe_packed_to_marlin_zero_points` in
+`quantization/utils/marlin_utils.py` are the same shape. `_process_weights_marlin`
+in `fused_moe/oracle/int_wna16.py` calls the repack twice (w13, w2) and the
+scale-permute twice per MoE layer.
+
+**[D]** Because `symmetric: true`, `compressed_tensors_moe_wna16.py:517-520`
+never registers zero-point parameters, so the zero-point loop is skipped.
+
+**[I]** That leaves **4 per-expert loops x 384 experts x 60 MoE layers ≈ 92,000
+launch-bound iterations per rank**, running concurrently across the 8 worker
+processes but serially within each. This is launch-overhead-dominated, not
+compute-dominated, which is why it does not get faster on a bigger GPU.
+
+**[D] There is no on-disk cache of repacked weights.** Nothing in
+`oracle/int_wna16.py`, `compressed_tensors_moe_wna16.py` or the loader persists
+the post-`process_weights_after_loading` tensors. Every boot redoes it. **[I] The
+only way to amortise it in 0.28.0 is `--load-format sharded_state`** (§4.5),
+which dumps the *post*-processing state dict — at the cost of locking the dump to
+one TP degree and one vLLM build. For a fixed production config that is a real
+option; for a sweep it is not.
+
+**[R] Measured anchor:** issue **#50968** (open) — Kimi-K2.6, 4x GB200 ARM64,
+TP=4, vLLM 0.26.0: `Loading safetensors checkpoint shards: 100% | 64/64` then
+**`Loading weights took 1228.97 seconds`** (~20.5 min) *before* the repack begins
+— and then all four workers **segfault inside `gptq_marlin_repack`**
+(`cuLibraryLoadData` → `cudaFuncSetAttribute` → `gptq_marlin_repack`), a
+regression from 0.25.1 specific to ARM64/GB200. **[I]** If our nodes are x86 HGX
+B300 this specific crash should not apply; if they are Grace-Blackwell GB300
+(ARM64), test before trusting Marlin at all. The trace is also evidence that
+Marlin's cubin is **lazily loaded into the CUDA context on first launch**, so
+Marlin's "no JIT" property is about compilation, not about being free at startup.
+
+**[R]** Same failure class historically: PRs #38669 / #46601 ("Fix Marlin repack
+PTX incompatibility on H100/H200"). **[I]** Whether the published vLLM wheel ships
+a native `sm_103a` cubin slice for Marlin or relies on PTX forward-compat from
+`sm_100` is a build-configuration question we should answer by inspection of the
+wheel (`cuobjdump --list-elf`) rather than assumption; our own `README.md` already
+records one research pass concluding "Marlin has no SM100 SASS target, so on
+Blackwell it JITs Ampere PTX." If that is right, **first-launch PTX JIT of the
+Marlin kernels is an unlisted startup cost for Kimi only**, and it is *not*
+covered by any of the caches in §1 or §2 — it is the CUDA driver's own JIT cache,
+`CUDA_CACHE_PATH` (default `~/.nv/ComputeCache`, `CUDA_CACHE_MAXSIZE` default
+256 MiB). **Persist `CUDA_CACHE_PATH` on weka and raise `CUDA_CACHE_MAXSIZE`** —
+see §6.2.
+
+#### 5.2.3 Kimi's warmups are mostly no-ops — and its ViT is not
+
+**[D]** Two of the warmup steps whose names suggest Kimi relevance do nothing here:
+
+- `kimi_k3_triton_warmup` returns immediately unless a `KimiK3DeltaAttention`
+  layer is present (`warmup/kimi_k3_triton_warmup.py:22-40`). That is Kimi-**K3**'s
+  KDA linear attention, a different model family (`vllm/models/kimi_k3/`).
+  K2.6 is dense MLA. **No-op.**
+- `sparse_mla_triton_warmup` only fires for the sparse backend names listed in
+  `warmup/sparse_mla_triton_warmup.py:17-33`. Dense MLA matches none. **No-op.**
+- Likewise `flashinfer_sparse_mla_decode_autotune_warmup` acts only on
+  `FLASHINFER_MLA_SPARSE_SM120` / `FLASHINFER_MLA_SPARSE_DSV4`
+  (`warmup/flashinfer_sparse_mla_warmup.py:35-41`). **No-op** — and note this is
+  also a **correction to §2.2 for B300 generally**: that step is an SM120/DSv4
+  path, not something our B300 boots pay.
+
+What Kimi *does* pay is the generic `flashinfer_autotune()` step — a full
+`_dummy_run` at `max_num_batched_tokens` through all 61 layers under
+`AutoTuner(tune_mode=True)` — plus:
+
+**[R] Issue #52965** (open): *"bare `@torch.compile` in `kimi_k25_vit` compiles
+outside the compilation lifecycle and pins `TRITON_CACHE_DIR` process-wide."*
+**[D]** I confirmed the decorator: `models/kimi_k25_vit.py:64` is a bare
+`@torch.compile(dynamic=True, ...)`, not `@support_torch_compile`. Two
+consequences: the ViT's Inductor output is **not** in the AOT artifact (so §1's
+`VLLM_FORCE_AOT_LOAD=1` canary will not cover it), and it can seize
+`TRITON_CACHE_DIR` for the process. **[I] This is the concrete reason §1.6's fix
+(export `TRITON_CACHE_DIR` explicitly) is mandatory rather than nice-to-have for
+Kimi.**
+
+#### 5.2.4 `--trust-remote-code`: not for the config, possibly for the processor
+
+**[D]** The repo ships 9 `.py` files (`configuration_kimi_k25.py`,
+`modeling_kimi_k25.py`, `configuration_deepseek.py`, `modeling_deepseek.py`,
+`tokenization_kimi.py`, `kimi_k25_processor.py`, `kimi_k25_vision_processing.py`,
+`media_utils.py`, `tool_declaration_ts.py`) and an `auto_map` pointing at them.
+vLLM bundles `KimiK25Config` (`transformers_utils/config.py:104`) and registers
+the architecture in-tree (`registry.py:475`), so the **config** path does not need
+remote code. **[D]** The tokenizer's tiktoken BPE vocab is bundled in the repo as
+`tiktoken.model` (2.79 MB), so there is **no live network call** in the tokenizer
+path once the snapshot is local. **[I]** The multimodal *processor* may still pull
+`kimi_k25_processor.py` through `auto_map`; if you serve text-only, combine
+`--limit-mm-per-prompt '{"image":0,"video":0}'` with dropping
+`--trust-remote-code` and see whether it still boots. Moonshot's own
+`deploy_guidance.md` passes `--trust-remote-code`, but their reference stack is
+vLLM 0.19.1, well behind ours.
+
+**[D] Moonshot's published command** (`docs/deploy_guidance.md`, 8xH200):
+`vllm serve $MODEL -tp 8 --mm-encoder-tp-mode data --trust-remote-code --tool-call-parser kimi_k2 --reasoning-parser kimi_k2`.
+It contains **no startup-time guidance whatsoever** — neither Moonshot's docs nor
+the vLLM recipes page for K2.5 mention weight-load time, the Marlin repack, or
+the INT4 path on NVIDIA hardware. That is a documentation gap, not a solved
+problem.
+
+---
+
+### 5.3 deepseek-ai/DeepSeek-V3.2-Exp — DeepGEMM is not optional, and we did not turn it off
+
+**What it is.** `DeepseekV32ForCausalLM` → `deepseek_v2.DeepseekV3ForCausalLM`
+(`registry.py:95`). 61 layers, 256 routed experts top-8, MLA plus the DSA
+lightning indexer (`index_topk: 2048`, `index_n_heads: 64`, `index_head_dim: 128`),
+FP8 block-scale `[128,128]` with **`scale_fmt: ue8m0`**, `num_nextn_predict_layers: 1`.
+**163 safetensors shards** — the most of the four, so the most exposure to the
+per-file convoy of §4.7.
+
+**[D]** No `auto_map`; the `.py` files in the repo live under `inference/` and are
+DeepSeek's standalone reference implementation, not remote code vLLM loads.
+`--trust-remote-code` is unnecessary. **[D]** `--tokenizer-mode deepseek_v32` is
+selected automatically (`config/model.py:683`).
+
+#### 5.3.1 `VLLM_USE_DEEP_GEMM=0` does not do what our recipe comment says
+
+This is the most consequential finding in §5.
+
+**[D]** The DSA indexer's CUDA custom op **hard-requires the DeepGEMM package at
+construction time**:
+
+```python
+# vllm/model_executor/layers/sparse_attn_indexer.py:774-778
+if current_platform.is_cuda() and not has_deep_gemm():
+    raise RuntimeError(
+        "Sparse Attention Indexer CUDA op requires DeepGEMM support in "
+        "the current vLLM environment.")
+```
+
+**[D] `has_deep_gemm()` is an import check** (`vllm/utils/import_utils.py`), not
+the env var. The env var appears only in
+`is_deep_gemm_supported() = envs.VLLM_USE_DEEP_GEMM and has_deep_gemm() and support_deep_gemm()`
+(`utils/deep_gemm.py:105-110`), which is what gates the **warmup**:
+
+```python
+# vllm/model_executor/warmup/kernel_warmup.py
+do_deep_gemm_warmup = (envs.VLLM_USE_DEEP_GEMM
+                       and is_deep_gemm_supported()
+                       and envs.VLLM_DEEP_GEMM_WARMUP != "skip")
+```
+
+**[D] So on DeepSeek-V3.2 and GLM-5.2, `VLLM_USE_DEEP_GEMM=0` does not disable
+DeepGEMM. It disables the *warmup* of DeepGEMM.** The indexer still calls
+`fp8_mqa_logits` (prefill) and `fp8_paged_mqa_logits` (decode) through
+`vllm/v1/attention/backends/mla/indexer.py`, and DeepGEMM still JIT-compiles them
+— on the **first real request** instead of during startup.
+
+**[I] Practical consequence for us.** Our current recipe is, unintentionally, the
+"fast start, slow first request" configuration for the two DSA models. That is
+arguably the right choice for a throughput sweep and the wrong one for a latency
+measurement, but either way the cost is real and currently invisible in our
+time-to-ready number. Two coherent positions:
+
+```bash
+# A. Honest fast-start (what we have, but make it explicit and keep the cache):
+VLLM_DEEP_GEMM_WARMUP=skip   DG_JIT_CACHE_DIR=/weka/.../dg-jit
+#    ...then send one synthetic prefill + one decode before declaring "ready".
+# B. Pay it once at boot, then never again (better for a served endpoint):
+VLLM_USE_DEEP_GEMM=1  VLLM_DEEP_GEMM_WARMUP=relax  DG_JIT_CACHE_DIR=/weka/.../dg-jit
+```
+Note `VLLM_USE_DEEP_GEMM` and `VLLM_DEEP_GEMM_WARMUP` are both compile-hash
+factors (§1.2), so pick one and freeze it.
+
+#### 5.3.2 How bad is the DeepGEMM warmup, and is its cache portable?
+
+**[R] vLLM issue #32116** (open): DeepSeek-V3.2, 4x8 H200, `-tp 2 -dp 16`:
+`DeepGEMM warmup: 100%|████| 8181/8181 [19:02<00:00, 7.16it/s]` — **19 minutes**,
+long enough that the API server's handshake with the engine core timed out and
+the API server exited while the engine cores kept warming. The 0.28.0 source is
+blunt about it: the `VLLM_DEEP_GEMM_WARMUP` docstring says this warmup "increases
+the engine startup time by a couple of minutes."
+
+**[D]** DeepGEMM ships **no precompiled cubins for the GEMM/MQA kernels** — its
+README states all kernels are compiled at runtime through DeepJIT. There is no
+`flashinfer-cubin` equivalent. The only levers are the warmup mode and the cache.
+
+**[R] Two cache hazards worth testing before trusting a shared weka cache:**
+
+1. DeepGEMM's C++ `init()` reads `DG_JIT_CACHE_DIR` **at import time**; if it is
+   unset or the directory does not exist then, the persistent cache is disabled
+   for the life of the process (in-memory only). vLLM sets it in
+   `utils/deep_gemm.py:261-263` inside `_lazy_init()`, which runs *later* than
+   some quantization code paths that `import deep_gemm`. vLLM PR **#39913**
+   ("create DeepGEMM JIT cache directory before import", moving it to
+   `env_override.py`) was **never merged**, and I confirmed `DG_JIT_CACHE_DIR`
+   does not appear in `vllm/env_override.py` at v0.28.0. **Mitigation: export
+   `DG_JIT_CACHE_DIR` yourself in the job script and `mkdir -p` it first.** It is
+   not a `VLLM_*` var, so it is hash-neutral.
+2. DeepGEMM upstream PRs **#388/#398** (cache key embedded the absolute
+   `-I{include_path}`, so a renamed venv or a different container path re-JITs
+   everything) and **#301/#302** (multi-process JIT cache race). Whether these are
+   in the DeepGEMM version vLLM 0.28.0 pins is **unverified**. **[I] Until it is:
+   keep the install prefix byte-identical across jobs** (see §6.1), and treat a
+   suddenly-large `DG_JIT_CACHE_DIR` as the symptom of a path-dependent key.
+
+#### 5.3.3 The rest of the DSA startup surface
+
+- **[D] Triton metadata kernels.** The V3.2 backend name is `DEEPSEEK_V32_INDEXER`;
+  `sparse_mla_triton_warmup` compiles only `_BUILD_PREFILL_CHUNK_METADATA_KERNEL`
+  for it (`warmup/sparse_mla_triton_warmup.py:34,106-113`). The sparse-SWA and
+  combine-topk kernels are DeepSeek-V4-only and are skipped. This step *is* behind
+  `--kernel-config.enable_jit_warmup`.
+- **[D] CuTe-DSL.** `fused_q_cutedsl.py` (fused Q + indexer-Q) and, when DCP>1,
+  `dcp_indexer_cutedsl` via `_merge_dcp_topk_global` (`sparse_attn_indexer.py:102`).
+  Our recipe runs `--decode-context-parallel-size 8`, so we are on the DCP CuTe-DSL
+  path. These compile under `cutedsl_warmup()`; watch for the tqdm bar
+  `Compiling CuTeDSL kernels` and the line
+  `Warming up CuTeDSL compile_units=%d names=%s.`
+- **[D] FlashMLA sparse kernels are precompiled**, shipped as a built extension by
+  the `flash-mla` wheel, with SM90 and SM100 sparse decode/prefill targets listed
+  in its support matrix. They are not a JIT cost.
+- **[D] A second KV cache group.** `DeepseekV32IndexerCache` returns an
+  `MLAAttentionSpec(num_kv_heads=1, head_size=132, dtype=torch.uint8)` alongside
+  the main MLA latent cache, so the hybrid KV-cache coordinator has to size and
+  allocate two heterogeneous groups during memory profiling. **[I]** More moving
+  parts in exactly the phase that `VLLM_ENABLE_STARTUP_PLAN=1` lets you skip — a
+  further reason to turn that on for this model.
+- **[R] `--block-size 64` is effectively mandatory.** Issue **#48286**:
+  *"DeepseekV32IndexerBackend requires `--block-size 64` — not documented or
+  auto-detected."* FlashMLA's sparse kernels expect block size 64. Leave the
+  default; do not sweep block size on this model.
+- **[D] MTP disables CUDA graphs entirely.** `vllm/config/speculative.py:759-765`:
+  ```python
+  if self.method == "mtp":
+      if self.target_model_config.hf_text_config.model_type == "deepseek_v32":
+          # FIXME(luccafong): cudagraph with v32 MTP is not supported,
+          # remove this when the issue is fixed.
+          self.enforce_eager = True
+  ```
+  **[I] So for DeepSeek-V3.2, `--speculative-config '{"method":"mtp",...}'` is
+  simultaneously the largest startup *saving* available (all of §3 disappears) and
+  a large steady-state loss.** It is also a silent one — nothing in the log says
+  "your CUDA graphs were turned off by your speculative config." If you enable MTP
+  on this model, expect a boot several minutes faster and decode meaningfully
+  slower, and do not attribute either to anything else.
+
+**[D] Published guidance.** DeepSeek's own repo points at the vLLM recipe, which
+recommends `-dp 8 --enable-expert-parallel` over `-tp 8` ("the kernels are mainly
+optimized for TP=1"), `--max-num-seqs 256` if you hit CUDA config errors, and
+`VLLM_USE_DEEP_GEMM=0` as an H20 workaround — note that recommendation is about
+the *MoE* path on H20 and, per §5.3.1, does not remove the indexer's DeepGEMM use.
+
+---
+
+### 5.4 zai-org/GLM-5.2-FP8 — DeepSeek's code path, plus B300-only kernels, minus a working compile story
+
+**What it is.** `GlmMoeDsaForCausalLM` / `glm_moe_dsa`: 78 layers, 256 routed +
+1 shared expert top-8, MLA (`q_lora_rank 2048`, `kv_lora_rank 512`,
+`qk_nope 192`, `qk_rope 64`, `v_head_dim 256`), DSA with `index_topk: 2048`,
+`index_n_heads: 32`, **`index_topk_freq: 4`** and `index_share_for_mtp_iteration: true`
+(one real indexer computed per 4 layers; the other three share it),
+`num_nextn_predict_layers: 1`, FP8 e4m3 `[128,128]`, vocab 154,880, 141 shards,
+no remote code.
+
+**[D] It is DeepSeek-V3.2's implementation.** In v0.28.0: `registry.py:118` maps
+`GlmMoeDsaForCausalLM → ("deepseek_v2", "GlmMoeDsaForCausalLM")`, and
+`deepseek_v2.py:1931` is literally `class GlmMoeDsaForCausalLM(DeepseekV2ForCausalLM)`.
+Every word of §5.3 — the DeepGEMM hard dependency, `VLLM_USE_DEEP_GEMM=0` being a
+warmup switch only, the indexer Triton metadata kernel, the CuTe-DSL DCP merge,
+the second KV group — applies verbatim, scaled by 78/61 layers. `deepseek_v2.py:127`
+even special-cases `model_type == "glm_moe_dsa"` inline.
+
+#### 5.4.1 The V1/V2 model-runner fork is the thing to watch
+
+**[D]** There are two implementations. The V1 one (`model_executor/models/deepseek_v2.py`)
+carries `@support_torch_compile` (`:1360`). The V2-model-runner one lives in the
+separate `vllm/models/deepseek_v32/` tree, whose `__init__.py` says the same code
+"serves any DSA checkpoint, including GLM-5.2 (`glm_moe_dsa`), which reuses this
+architecture", and which on CUDA aliases `GlmMoeDsaForCausalLM = DeepseekV32ForCausalLM`.
+**[D] There is no `support_torch_compile` anywhere under `vllm/models/` in
+v0.28.0** (`grep -rln support_torch_compile vllm/models/` → nothing).
+
+**[D] Which one you get in 0.28.0:** `DEFAULT_V2_MODEL_RUNNER_ARCHITECTURES`
+(`config/vllm.py:69-80`) contains `DeepseekV2ForCausalLM`, `DeepseekV4ForCausalLM`,
+`GraniteMoeForCausalLM`, `Inkling*`, `KimiK3ForConditionalGeneration`,
+`LongcatFlashNgramForCausalLM`, `Qwen2MoeForCausalLM` — **not**
+`GlmMoeDsaForCausalLM` and **not** `DeepseekV32ForCausalLM`. And
+`_is_default_v2_model_runner_model` (`config/vllm.py:690-716`) ends
+`return is_default_v2_architecture or not model_config.is_moe`. Both models are
+MoE and neither name is in the set, so **on stock v0.28.0 both route to the V1
+runner and both compile.**
+
+**[R] That changes on main.** Issue **#54197** (open, filed 2026-08-28 against
+`main`): GlmMoeDsa default-routes to V2, `vllm/models/deepseek_v32/nvidia/model.py`
+has no `@support_torch_compile`, and the engine prints
+`torch.compile is turned on, but the model ... does not support it` and **silently
+runs eager**. Force-enabling it then fails Dynamo `fullgraph` on
+`is_fused_q_cutedsl_supported` (an `@lru_cache`d `has_device_capability`) and on a
+`ContextVar.get()` in `v1/worker/workspace.py`. PR **#49790** ("Route DSA models
+to the SM100 implementation") is the change that moves `GlmMoeDsaForCausalLM`
+onto `vllm.models.deepseek_v32`.
+
+**[I] Two things follow.** (1) Do not set `VLLM_USE_V2_MODEL_RUNNER=1` for GLM on
+0.28.0 expecting a win — you trade a compiled model for an eager one and your
+compile cache becomes dead weight. (2) **When we upgrade past 0.28.0, GLM's
+startup will get faster and its decode slower, for reasons that appear in the log
+only as one `warning_once`.** Grep for `does not support it` in §6.6's checklist.
+
+#### 5.4.2 GLM-5.2 has kernels that exist for no other model, targeting exactly our GPU
+
+**[D]** `vllm/models/deepseek_v32/nvidia/glm52_low_latency_gemm.py` — docstring:
+*"GLM-5.2 decode GEMM selection for unquantized BF16 on SM103."* It hard-codes
+CuTe-DSL `SkinnyGemmConfig`s for three projections — `GLM52_QKV_A_PROJECTION`
+(n=2624, k=6144), `GLM52_Q_B_PROJECTION` (2048x2048) and `GLM52_EH_PROJECTION` —
+selected per token count, with a `dsv3_fused_a` fallback for M in 3..16 and a
+comment that "cuBLAS wins from M=4". It is wired in at `nvidia/model.py:399-400`
+and `nvidia/mtp.py:244-245` via `enable_glm52_low_latency_gemm`. **[R]** vLLM
+v0.28.0 release notes list PR **#49791** "CuTe DSL skinny GEMM extended to GLM-5.2".
+
+**[D]** SM103 is B300. `is_device_capability_family(100)` buckets `10.x` together,
+so B300 gets the SM100 path.
+
+**[I] Two consequences.** (a) GLM pays a CuTe-DSL compile surface on B300 that it
+does not pay on H200 — CuTe-DSL compiles through NVRTC/nvJitLink at process start
+and has no vLLM-managed on-disk cache, so this cost recurs every boot. (b) These
+kernels live in the `vllm/models/deepseek_v32/` (V2-runner) tree, so on stock
+0.28.0 — where GLM routes to V1 (§5.4.1) — **we are probably not getting them at
+all.** Confirm from the log: the `Warming up CuTeDSL compile_units=%d names=%s.`
+line names the providers; if `skinny_gemm` is absent, the SM103 path is not active.
+
+#### 5.4.3 GLM-specific landmines that overlap with startup
+
+- **[R] #54300 (open):** *"[Regression 0.27→0.28+]: GlmMoeDsa (GLM-5.3) +
+  decode-context-parallel: crashes on 0.28.0, silently returns random tokens on
+  0.29.0."* **Our `README.md` recommends `--decode-context-parallel-size 8` for
+  GLM and reports a measured DCP run as validation of the whole planner.** The
+  issue is against GLM-5.3, but the arch is the same class. This needs an explicit
+  output-correctness check on our exact build before the DCP result is trusted.
+- **[R] #52150 (open):** GLM-5.2-FP8, first request after GPU idle emits garbage;
+  piecewise CUDA-graph cold replay corrupts the request's own prefill; documented
+  workaround `cudagraph_mode=FULL_DECODE_ONLY`. **[I] That is the same flag §3.3
+  recommends for cutting capture time ~2x. For GLM the startup optimisation and the
+  correctness workaround coincide — take it.**
+- **[R] #49844 (open):** PP=2 + GlmMoeDsa: Inductor compile *combined with* CUDA
+  graph capture produces garbage; either alone is clean.
+- **[R] #53134 (open):** DCP unavailable for GlmMoeDsa on SM90 because the sparse
+  MLA backend lacks decode-LSE support — not our arch, but it shows DCP
+  availability is backend- and arch-conditional, not a property of the flag.
+- **[R] B300/sm_103 toolchain risks, not GLM-specific but they surface during the
+  profiling/autotune phase of startup:** #30245 (`PTXAS error: gpu-name sm_103a not
+  defined` — Triton's ptxas too old), #30441 (Triton JIT autotune failing to build
+  `cuda_utils.c` during `determine_available_memory` on B300 SXM6, CUDA 13.0),
+  #30630 (`SymmMemCommunicator: Device capability 10.3 not supported`). **[I]
+  Validate `ptxas --version` knows `sm_103a` in the image before blaming the model.**
+
+**[D] Published guidance.** The vLLM recipe for GLM-5.2 gives
+`--kv-cache-dtype fp8 -tp 8 --speculative-config.method mtp
+--speculative-config.num_speculative_tokens 5 --tool-call-parser glm47
+--reasoning-parser glm45 --enable-auto-tool-choice`, and offers an explicit
+**"faster startup"** variant that is just `VLLM_DEEP_GEMM_WARMUP=skip` in front of
+the same command, annotated *"skips DeepGEMM JIT warmup for a faster startup; the
+first few requests compile kernels on demand instead."* Its troubleshooting
+section notes FP8 performance *requires* DeepGEMM, installed from source via
+`install_deepgemm.sh` — i.e. a build step that is not in the pip install and must
+be in the image.
+
+---
+
+### 5.5 What this changes in our current launch recipe
+
+| Current (`scripts/serving/README.md`) | Change | Why |
+|---|---|---|
+| `--trust-remote-code` on DeepSeek, GLM, Kimi | **Drop it** for DeepSeek and GLM; test dropping it for Kimi | §5.0 — vLLM bundles all four config classes; DeepSeek/GLM repos contain no `auto_map` at all |
+| `--tokenizer-mode deepseek_v32` | Drop (redundant) | `config/model.py:683` auto-selects it |
+| `VLLM_USE_DEEP_GEMM=0 VLLM_MOE_USE_DEEP_GEMM=0  # JIT needs nvcc` | **The comment is wrong for DeepSeek and GLM.** Keep the flag if you want a fast boot, but say what it does: it moves DeepGEMM's JIT to the first request | §5.3.1 — `has_deep_gemm()` is an import check; the indexer raises without the package |
+| (nothing) | Add `DG_JIT_CACHE_DIR=<weka>` and `mkdir -p` it **before** `vllm serve` | §5.3.2 — DeepGEMM disables its persistent cache if the dir is missing at import |
+| (nothing) | Add `CUDA_CACHE_PATH=<weka>` + `CUDA_CACHE_MAXSIZE=4294967296` | §5.2.2 — driver-level PTX JIT cache, the only cache covering Marlin on a new arch |
+| `--enable-prefix-caching` on Qwen | Verify correctness first | §5.1.6 — #55766 NaN after prefix-cache hit; #51198/#51250 0% hit rate |
+| `--decode-context-parallel-size 8` on GLM | Verify output correctness on our build | §5.4.3 — #54300 |
+| (nothing) | `--kernel-config.enable_flashinfer_autotune=false` for config-search runs | §2.2/§2.4 — hash-neutral, and the autotune is a full max-batch dummy run through 61–78 layers |
+| Qwen `--language-model-only` | Keep, and **assert** the `init engine ... (compilation: ...)` line has no `encoder:` term | §5.1.4 |
+| (nothing) | For Qwen config-search runs: `--additional-config '{"gdn_prefill_backend":"triton"}'` | §5.1.2 — the B300 default silently JITs FlashInfer GDN prefill |
+
+---
+
+## 6. A concrete warm-start procedure for Beaker/gantry
+
+**Premise.** The container filesystem is destroyed between jobs. `/weka/oe-adapt-default`
+and `/weka/oe-training-default` persist (`mason.py:355-362`). Several jobs may run
+concurrently on different nodes against the same weka paths. Nothing below assumes
+a privileged image or a patched vLLM.
+
+Paths in this section are written against a single root you set once:
+
+```bash
+export VLLM_WARM=/weka/oe-adapt-default/allennlp/vllm-warm
+```
+
+### 6.0 The three classes of state
+
+1. **Portable and shareable.** Derived from (model config, vLLM build, torch build,
+   GPU arch) and written with atomic rename. Safe to share read-write between
+   concurrent jobs. This is the torch.compile/AOT cache, the Inductor cache, the
+   startup plan, the FlashInfer autotune cache.
+2. **Portable but lock-serialised.** Correct to share, but concurrent writers
+   *serialise on a file lock* or risk a half-written build tree. FlashInfer's JIT
+   dir and DeepGEMM's JIT cache are here. Share them **read-only** at steady state;
+   write to them only from the warm-up job.
+3. **Not persistable at all.** Must be rebuilt every job: CUDA graphs, the NCCL/EP
+   communicator setup, the OS page cache, Marlin-repacked weights, CuTe-DSL
+   compilation, and any `@torch.compile` that runs outside vLLM's lifecycle
+   (§5.2.3).
+
+### 6.1 What goes on weka, and what must not be shared
+
+| Path under `$VLLM_WARM` | Set via | Contents | Concurrency |
+|---|---|---|---|
+| `vllm-cache/` | `VLLM_CACHE_ROOT` | `torch_compile_cache/`, `startup_plan/`, `deep_gemm/`, `flashinfer_autotune_cache/` | **Shared RW.** vLLM writes every one of these with `os.replace` after a temp write (`decorators.py:702-706`, `startup_plan.py:186-189`, `flashinfer_autotune_cache.py:44-58`, `compiler_interface.py:210-248` patches `CompiledArtifact.save` for atomicity). POSIX rename on wekafs is atomic, so a concurrent reader sees old-or-new, never torn. |
+| `triton/` | `TRITON_CACHE_DIR` | Triton JIT + autotune results (`TRITON_CACHE_AUTOTUNING=1` is forced, `env_override.py:113`) | **Shared RW.** Not set by vLLM on the AOT path (§1.6) — you must export it. |
+| `inductor/` | *(do not set)* | — | **Leave it alone.** vLLM sets `TORCHINDUCTOR_CACHE_DIR` itself, per compile-hash, inside `VLLM_CACHE_ROOT` (`decorators.py:550-559`). Setting it yourself fights that. |
+| `flashinfer-home/` | `FLASHINFER_WORKSPACE_BASE` | `.cache/flashinfer/{version}/{arch}/cached_ops`, `generated`, `cubins` | **Warm-up job writes; serving jobs read.** See §6.1.1. |
+| `dg-jit/` | `DG_JIT_CACHE_DIR` | DeepGEMM DeepJIT kernels | **Warm-up job writes; serving jobs read.** See §6.1.2. |
+| `nv-compute-cache/` | `CUDA_CACHE_PATH` (+ `CUDA_CACHE_MAXSIZE`) | driver-level PTX→SASS JIT cache | **Per-job copy.** See §6.1.3. |
+| `hf/` | `HF_HOME`, `HF_HUB_CACHE` | model snapshots | Shared RO. `mason.py:319-323` already points these at `/weka/oe-adapt-default/allennlp/.cache/...`; keep those, and add `HF_HUB_OFFLINE=1` once the snapshot exists. |
+| `logs/` | — | one `startup-<jobid>.jsonl` per job | append-only, per-job filename |
+
+#### 6.1.1 FlashInfer's JIT dir is the one real corruption/serialisation hazard
+
+**[D]** FlashInfer guards every build with `filelock.FileLock`, and the lock lives
+*inside the cache tree*: `JitSpec.lock_path = get_tmpdir() / f"{name}.lock"` where
+`get_tmpdir()` is `FLASHINFER_JIT_DIR / "tmp"` (`flashinfer/jit/core.py:387-388,
+633-637`). The build itself takes a second, coarser lock,
+`FileLock(tmpdir / "flashinfer_jit.lock")`, around the whole ninja invocation
+(`core.py:662-665`). FlashInfer's own source carries the comment:
+
+```python
+def get_tmpdir() -> Path:
+    # TODO(lequn): Try /dev/shm first. This should help Lock on NFS.
+    tmpdir = jit_env.FLASHINFER_JIT_DIR / "tmp"
+```
+
+**[I] Two hazards follow, and they are different.**
+- *Serialisation:* if eight jobs on eight nodes share `FLASHINFER_JIT_DIR` and all
+  need to build the same module, they queue on one `flock` over wekafs. With a warm
+  cache this never triggers (the fast path returns before the lock matters for
+  loading), but on a cold cache your eight-way parallel sweep becomes serial.
+- *Destruction:* `flashinfer.jit.core.clear_cache_dir()` does
+  `shutil.rmtree(FLASHINFER_JIT_DIR)` unconditionally (`core.py:122-126`). Anything
+  that calls it — a CLI command, a teardown path — wipes the shared tree out from
+  under every concurrent job.
+
+**Mitigation:** the warm-up job (§6.4) is the only writer. Serving jobs get the
+same tree, and the ninja/lock path never activates because
+`flashinfer-jit-cache`'s AOT modules are found first (`core.py:375-380,417-424`).
+If you want belt-and-braces, `cp -a` the tree into the job's own scratch and point
+`FLASHINFER_WORKSPACE_BASE` there — it is version+arch keyed, so a copy is valid.
+
+#### 6.1.2 DeepGEMM: set the dir *before* anything imports it
+
+**[D]** vLLM sets `DG_JIT_CACHE_DIR` only inside `_lazy_init()`
+(`utils/deep_gemm.py:260-266`), which can run after a quantization path has already
+`import deep_gemm`. DeepGEMM reads the variable at import and, if it is unset or
+the directory does not exist, **silently drops to an in-memory-only cache for the
+life of the process** — a warm weka cache then buys nothing and you will not be
+told. The fix (PR #39913, moving it to `env_override.py`) was never merged; I
+confirmed `DG_JIT_CACHE_DIR` is absent from `vllm/env_override.py` at v0.28.0.
+
+```bash
+export DG_JIT_CACHE_DIR="$VLLM_WARM/dg-jit"
+mkdir -p "$DG_JIT_CACHE_DIR"     # must exist BEFORE the python process starts
+```
+
+**[R] Unverified risk, test before sharing RW:** DeepGEMM upstream PRs #301/#302
+(multi-process JIT-cache race) and #388/#398 (cache key embedded the absolute
+include path, so a different install prefix re-JITs everything). Whether they are
+in the version vLLM 0.28.0 pins is unknown. **[I]** Therefore: warm-up job writes,
+serving jobs read; and keep the install prefix byte-identical across jobs (§6.2).
+
+#### 6.1.3 `CUDA_CACHE_PATH` — per-job copy, never shared
+
+The driver's PTX→SASS cache is the only thing that covers kernels shipped as PTX
+and JIT-compiled by the driver on first launch — which, if our earlier finding
+that Marlin has no SM100 SASS target holds, is exactly Kimi's MoE kernels (§5.2.2).
+**[I]** The driver's cache is an opaque, driver-version-keyed store with its own
+locking that is not designed for a shared network filesystem. Treat it as
+warm-once, copy-per-job:
+
+```bash
+export CUDA_CACHE_MAXSIZE=4294967296          # 4 GiB; default is 256 MiB
+export CUDA_CACHE_PATH=/scratch/nv-cache      # node-local
+mkdir -p "$CUDA_CACHE_PATH"
+cp -a "$VLLM_WARM/nv-compute-cache/." "$CUDA_CACHE_PATH/" 2>/dev/null || true
+```
+and in the warm-up job only, copy it back at the end.
+
+### 6.2 The environment block
+
+Paste this **before** any `python`/`uvx` invocation. Order matters: everything that
+another library reads at *import* time must be set first, and the directories must
+already exist.
+
+```bash
+set -euo pipefail
+export VLLM_WARM=/weka/oe-adapt-default/allennlp/vllm-warm
+
+# --- 1. cache locations (all hash-neutral: none is a compile factor) ---------
+export VLLM_CACHE_ROOT="$VLLM_WARM/vllm-cache"
+export TRITON_CACHE_DIR="$VLLM_WARM/triton"
+export FLASHINFER_WORKSPACE_BASE="$VLLM_WARM/flashinfer-home"
+export DG_JIT_CACHE_DIR="$VLLM_WARM/dg-jit"
+export CUDA_CACHE_PATH=/scratch/nv-cache
+export CUDA_CACHE_MAXSIZE=4294967296
+mkdir -p "$VLLM_CACHE_ROOT" "$TRITON_CACHE_DIR" "$FLASHINFER_WORKSPACE_BASE" \
+         "$DG_JIT_CACHE_DIR" "$CUDA_CACHE_PATH"
+cp -a "$VLLM_WARM/nv-compute-cache/." "$CUDA_CACHE_PATH/" 2>/dev/null || true
+
+# --- 2. things that must be identical across every job in a cache lineage ----
+#     (each of these IS a torch.compile hash factor; changing one = cold compile)
+export VLLM_ENABLE_STARTUP_PLAN=1        # ignored by the hash, but set it once anyway
+export VLLM_ENGINE_READY_TIMEOUT_S=3600  # IS hashed -- pick one value forever
+export VLLM_USE_DEEP_GEMM=1              # IS hashed -- see 5.3.1; pick a side
+export VLLM_MOE_USE_DEEP_GEMM=1
+export VLLM_DEEP_GEMM_WARMUP=relax       # IS hashed
+export VLLM_USE_FLASHINFER_MOE_INT4=0    # IS hashed; flip only for a Kimi A/B lineage
+
+# --- 3. correctness / non-hashed hygiene -------------------------------------
+export HF_HUB_OFFLINE=1
+export OMP_NUM_THREADS=$(( $(nproc) / 8 ))   # TP=8 -> one engine core per GPU; see 4.8
+export TOKENIZERS_PARALLELISM=false
+
+# --- 4. a stable install prefix (DeepGEMM & the legacy compile path key on paths)
+export UV_CACHE_DIR="$VLLM_WARM/uv"
+export VIRTUAL_ENV="$VLLM_WARM/venv-0.28.0"   # created once by the warm-up job
+export PATH="$VIRTUAL_ENV/bin:$PATH"
+```
+
+**[D] Why the prefix must be stable.** The AOT compile key does not contain
+absolute paths (`decorators.py:255-262`) — but the *legacy* compile path's
+`code_hash` does (`backends.py:1040-1054`), and DeepGEMM's key did until
+upstream #398. A fixed `VIRTUAL_ENV` on weka costs nothing and removes a whole
+class of silent cache misses. It also removes the `uvx` resolve step from every
+boot.
+
+### 6.3 What must be rebuilt every job, and why
+
+| Rebuilt each job | Cost | Why it cannot be cached |
+|---|---|---|
+| **CUDA graph capture** | **[R]** measured **80 s and 4.88 GiB/GPU** on B300 SXM6 to capture up to 1024 (vLLM PR #49390, the PR that made 1024 the Blackwell default) — for one descriptor set on a DeepSeek-class model | §3.2 — graphs hold device pointers into the live memory pool; CUDA has no portable serialisation |
+| **NCCL / EP communicator setup** | seconds to tens of seconds; grows with `--enable-expert-parallel` (DeepEP buffer allocation) | per-process, per-topology |
+| **OS page cache** | this is the §4 weight-load phase | node-local, dropped at container exit |
+| **`process_weights_after_loading`** (Marlin repack, FP8 requant) | dominant for Kimi (§5.2.2); small for the FP8 three | no on-disk cache exists in 0.28.0; only `--load-format sharded_state` sidesteps it, at the cost of TP-locking |
+| **CuTe-DSL compilation** | GLM's SM103 skinny GEMMs, DeepSeek's fused-Q and DCP merge (§5.3.3/§5.4.2) | compiled via NVRTC/nvJitLink at process start; no vLLM-managed on-disk cache |
+| **Memory profiling + CUDA-graph memory estimation** | one full `_dummy_run` | **cacheable** — this is exactly what `VLLM_ENABLE_STARTUP_PLAN=1` removes (§3.4) |
+| **FlashInfer autotune** | one `_dummy_run` at `max_num_batched_tokens` | **cacheable**, with the TP>1 deadlock caveat of §2.4 |
+
+### 6.4 Order of operations at job start
+
+The ordering is not cosmetic — steps 1-3 must precede any Python import, and step 5
+must precede step 6 or the loader outruns the prefetcher (§4.3).
+
+```
+1.  Export the §6.2 block; mkdir every cache dir.        # DeepGEMM reads DG_JIT_CACHE_DIR at import
+2.  cp -a the driver PTX cache from weka to node-local.  # §6.1.3
+3.  Sanity-check the toolchain, fail fast:
+       ptxas --version | grep -q . && ptxas --list-gpu-arch 2>/dev/null | grep -q sm_103
+       python -c "import flashinfer, deep_gemm"          # both must import
+       flashinfer show-config                            # must list Sm103a cubins
+    # §5.4.3: vLLM issues #30245/#30441/#30630 are all "ptxas/Triton does not know
+    # sm_103", and they surface 20 minutes in, during memory profiling.
+4.  Pre-warm the page cache SYNCHRONOUSLY and time it separately:
+       find "$MODEL_DIR" -name '*.safetensors' -print0 \
+         | xargs -0 -P 32 -I{} dd if={} of=/dev/null bs=64M status=none
+    # This is §4.3's hardening. It also gives you a clean per-node storage
+    # benchmark: if this phase is slow, fail the job before touching a GPU.
+5.  Launch vllm serve with the per-model flags from §5.5 and
+       --safetensors-load-strategy=prefetch
+       --safetensors-prefetch-num-threads=32
+       --safetensors-prefetch-block-size=67108864
+6.  Poll /health. On first 200, send ONE synthetic request with a long prompt and
+    a short generation, then one with a short prompt.  # §5.1.2 / §5.3.1: the
+    # prefill-path GDN kernel and the DeepGEMM indexer kernels JIT on first use,
+    # AFTER "ready". Declare readiness only after this completes.
+7.  Emit the §6.6 grep summary to $VLLM_WARM/logs/startup-$BEAKER_JOB_ID.jsonl.
+```
+
+### 6.5 The warm-up job
+
+Run this **once per (vLLM build, model, TP, DCP, max-model-len,
+max-num-batched-tokens, cudagraph config, VLLM_\* environment)** tuple. It is the
+only job that writes to the class-2 caches.
+
+```bash
+#!/usr/bin/env bash
+# warm.sh -- populate $VLLM_WARM for one configuration. One GPU node, ~1 hour.
+set -euo pipefail
+source ./env_block.sh                 # exactly §6.2, unchanged
+
+# (0) build the venv on weka, once, at a fixed prefix
+if [ ! -d "$VIRTUAL_ENV" ]; then
+  uv venv --python 3.12 "$VIRTUAL_ENV"
+  uv pip install vllm==0.28.0
+  CU=$(python -c "import torch;print('cu'+torch.version.cuda.replace('.',''))")
+  uv pip install flashinfer-cubin==0.6.16.post3     --index-url https://flashinfer.ai/whl/
+  uv pip install flashinfer-jit-cache==0.6.16.post3 --index-url https://flashinfer.ai/whl/$CU
+  # DeepGEMM is a from-source build, not a pip package -- the vLLM GLM-5.2 recipe
+  # points at install_deepgemm.sh. Do it here, not in the serving job.
+fi
+
+# (1) compile-cache warm build: weights do not affect compilation (see 1.4)
+vllm serve "$MODEL" --load-format dummy \
+  --tensor-parallel-size 8 --decode-context-parallel-size 8 \
+  --kv-cache-dtype fp8 --max-model-len 131072 \
+  -cc.cudagraph_mode=FULL_DECODE_ONLY -cc.max_cudagraph_capture_size=256 \
+  ... &                                # identical to the serving command except --load-format
+curl --retry 200 --retry-delay 5 --retry-all-errors -sf localhost:8000/health
+kill %1
+
+# (2) real-weights pass: populates the startup plan, the FlashInfer autotune
+#     cache, the DeepGEMM JIT cache and the Marlin/driver PTX cache, none of
+#     which a dummy-weight boot can produce correctly.
+vllm serve "$MODEL" <exact serving flags> &
+curl --retry 400 --retry-delay 5 --retry-all-errors -sf localhost:8000/health
+curl -s localhost:8000/v1/completions -d '{"model":"'"$MODEL"'","prompt":"'"$(head -c 40000 /usr/share/dict/words | tr '\n' ' ')"'","max_tokens":8}'
+kill %2
+
+# (3) publish the driver cache back to weka
+mkdir -p "$VLLM_WARM/nv-compute-cache"
+cp -a "$CUDA_CACHE_PATH/." "$VLLM_WARM/nv-compute-cache/"
+
+# (4) prove it: this boot MUST NOT recompile
+VLLM_FORCE_AOT_LOAD=1 vllm serve "$MODEL" <exact serving flags>   # fails loudly on a miss
+```
+
+**[I] Why two passes.** Pass (1) is cheap (no 600 GB read) and produces the
+torch.compile/AOT artifacts, which are weight-independent. Pass (2) cannot be
+skipped because the startup plan records a *profiled* memory number, the
+FlashInfer autotune cache records tactics chosen against real shapes, and
+DeepGEMM/Marlin/driver-PTX caches only fill on real kernel launches. Pass (4) is
+the regression gate: `VLLM_FORCE_AOT_LOAD=1` turns a silent recompile into a
+startup failure (`decorators.py:326-327`).
+
+**[D] One caveat on pass (1):** `--load-format dummy` is a `LoadConfig` change and
+`LoadConfig.compute_hash` returns a constant (`config/load.py`), so the key is
+right. What is *not* proven is that no quantization path specialises the graph on
+values read from the checkpoint; pass (4) is what proves it, per config.
+
+### 6.6 Detecting a cold or invalidated cache from the log
+
+Every line below is a literal format string from the v0.28.0 tree. Grep for them
+and emit a one-line verdict; a regression then shows up in the job log within
+seconds instead of as an unexplained 40 minutes.
+
+| Grep for | Source | Verdict |
+|---|---|---|
+| `Directly load AOT compilation from path` | `compilation/decorators.py:312` | **HIT** — AOT artifact reused, Dynamo skipped |
+| `Dynamo bytecode transform time: ` | `compilation/backends.py:1156` | **MISS** — you are tracing from scratch |
+| `Compiling a graph for compile range` | `backends.py:394` | **MISS** — Inductor is running |
+| `Directly load the compiled graph(s) for compile range` | `backends.py:293` | partial hit (legacy path) |
+| `Using cache directory: %s for vLLM's torch.compile` | `backends.py:1095` | prints the key dir — log it, diff it between jobs to see *what* changed |
+| `Applying persisted startup plan (fingerprint %s)` | `v1/worker/startup_plan.py:154` | **HIT** — profiling skipped |
+| `Startup plan not applied: current free memory` | `startup_plan.py:124` | plan rejected by the free-memory gate — a co-tenant or a leak |
+| `Saved startup plan to %s` | `startup_plan.py:189` | first boot of this fingerprint |
+| `Using FlashInfer autotune cache file: %s` | `warmup/kernel_warmup.py` | autotune cache located. **If the log stops here, you have hit the §2.4 TP>1 deadlock** |
+| `Warming up CuTeDSL compile_units=%d names=%s.` | `warmup/cutedsl_warmup.py:108` | lists which CuTe-DSL providers are active — for GLM this is how you tell whether the SM103 skinny GEMMs (§5.4.2) are in play |
+| `Compiling CuTeDSL kernels` (tqdm) | `cutedsl_warmup.py:85` | CuTe-DSL compile in progress |
+| `DeepGEMM warmup` (tqdm) + `Deep GEMM warmup` span | `warmup/deep_gemm_warmup.py` | the §5.3.2 19-minute risk |
+| `Warming up Qwen Triton kernels for model_type=%s.` | `warmup/qwen_triton_warmup.py` | Qwen GDN warmup ran |
+| `Skipping Qwen GDN Triton warmup: no Qwen GDN layer found.` | same | it did **not** — check the model type |
+| `Using %s GDN prefill kernel (requested=%s, head_k_dim=%s).` | `qwen_gdn_linear_attn.py:159` | `FlashInfer` here on a cold FlashInfer cache = a multi-minute silent JIT (§5.1.2) |
+| `` `torch.compile` is turned on, but the model `` ... `does not support it` | `config/vllm.py:2635-2640` | **your compile cache is dead weight** — the §5.4.1 V2-runner trap |
+| `Prefetching checkpoint files into page cache started (in background, num_threads=%d, block_size=%d bytes)` | `weight_utils.py:821-825` | confirms the flags took effect |
+| `Prefetching checkpoint files into page cache finished in %.2fs` | `weight_utils.py:816-818` | time this against step 4 of §6.4 |
+| `Auto-prefetch is disabled because the filesystem` | `weight_utils.py` | you forgot `--safetensors-load-strategy` (§4.1) |
+| `EP weight filter: ep_size=%d, ep_rank=%d, loading %d/%d experts` | `default_loader.py:407` | EP filter engaged |
+| `Graph capturing finished in %.0f secs, took %.2f GiB` | `gpu_model_runner.py:7049` | the irreducible §3 floor |
+| `init engine (profile, create kv cache, warmup model) took %.2f s (compilation: %.2f s)` | `v1/engine/core.py:347-352` | the headline number. The three-term variant with `encoder:` means the vision tower compiled (§5.1.4) |
+
+**A stronger instrument than grep.** vLLM 0.28.0 is OpenTelemetry-instrumented with
+named spans covering exactly the phases in question — `Overall Loading`
+(`v1/engine/core_client.py:115`), `Prepare model` (`core.py:252`), `Worker init`,
+`Init device`, `Load weights` (`default_loader.py:414`), `Initialize model`
+(`model_loader/utils.py:36`), `Loading (GPU)` (`gpu_model_runner.py:5413`),
+`Compile graph` (`backends.py:263`), `Inductor compilation` (`backends.py:726`),
+`DeepGemm warmup`, `CuTeDSL warmup`, `Allocate KV cache`, `Warmup (GPU)`,
+`Capture model` (`gpu_model_runner.py:6948`). Install
+`opentelemetry-sdk opentelemetry-exporter-otlp`, run a collector as a sidecar and
+pass `--otlp-traces-endpoint`; workers self-register
+(`multiproc_executor.py:902`, `core.py:1289`). **[I]** One afternoon of setup
+turns "startup took 40 minutes" into a waterfall that says which phase, per rank.
+
+**And a purpose-built benchmark.** `vllm bench startup` exists
+(`vllm/benchmarks/startup.py`, CLI `entrypoints/cli/benchmark/startup.py`). Its
+docstring: *"measures total startup time ... for both cold and warm scenarios —
+Cold startup: Fresh start with no caches (temporary cache directories); Warm
+startup: Using cached compilation and model info."* Options
+`--num-iters-cold` (3), `--num-iters-warmup` (1), `--num-iters-warm` (3),
+`--output-json`. It reports `cold_startup` / `warm_startup` /
+`{cold,warm}_compilation` / `{cold,warm}_encoder_compilation` with percentiles.
+**Use this to produce the numbers in §6.7 for real, rather than trusting the
+estimates below.**
+
+### 6.7 Expected best-case time-to-ready after warming
+
+**[I] Everything in this table is an estimate, not a measurement.** It is built
+from: our own measured ~5 min prefetch + ~7 min load for a 400-750 GB checkpoint;
+the one published B300 capture measurement (80 s / 4.88 GiB for `max_capture=1024`,
+one descriptor set, PR #49390); and the per-model structure established in §5. The
+band is wide on purpose. **Replace it with `vllm bench startup --output-json`
+output as soon as the warm caches exist.**
+
+Assumed warm configuration: all §6.2 caches populated, `VLLM_ENABLE_STARTUP_PLAN=1`
+applied, `flashinfer-cubin` + `flashinfer-jit-cache` installed, page cache
+pre-warmed synchronously (§6.4 step 4), `-cc.cudagraph_mode=FULL_DECODE_ONLY`,
+`-cc.max_cudagraph_capture_size=256`.
+
+| Phase | Qwen3.5-397B | Kimi-K2.6 | DeepSeek-V3.2 | GLM-5.2 |
+|---|---|---|---|---|
+| process + import + config | 20–40 s | 30–60 s (9 remote-code files if `--trust-remote-code` kept) | 20–40 s | 20–40 s |
+| weight read (page cache warm) | 60–120 s (406 GB, 94 shards) | 90–180 s (532–595 GB, 64 shards, 208 k tensors) | 100–200 s (689 GB, 163 shards) | 100–200 s (755 GB, 141 shards) |
+| `process_weights_after_loading` | 10–30 s | **300–900 s** (§5.2.2, ~92 k launch-bound iterations/rank) | 20–60 s | 30–80 s |
+| compile (AOT cache hit) | 10–30 s | n/a (LM not decorated) | 10–30 s | 10–40 s |
+| kernel JIT (all caches warm) | 20–60 s | 30–90 s (FlashInfer autotune dummy run) | 30–90 s | 40–120 s (+ CuTe-DSL, uncached) |
+| memory profiling | ~0 (startup plan) | ~0 | ~0 | ~0 |
+| CUDA graph capture | 40–90 s | 40–90 s | 40–90 s | 50–110 s (78 layers) |
+| **Estimated time-to-ready** | **3–6 min** | **9–22 min** | **4–8 min** | **4–10 min** |
+| **vs. our current 40–55 min** | ~10x | ~3x | ~7x | ~6x |
+
+**[I] Reading this table.**
+- **Kimi is a different problem from the other three.** Its floor is set by a
+  Python loop, not by a cache you can warm. Nothing in §1, §2 or §6 moves it. The
+  only levers are `VLLM_USE_FLASHINFER_MOE_INT4=1` (§5.2.1, unproven), a
+  `sharded_state` dump for a frozen config (§4.5), or the NVFP4 checkpoint our
+  `README.md` already recommends for B300 — `nvidia/Kimi-K2.6-NVFP4` sidesteps the
+  Marlin path entirely. **If Kimi startup matters, changing the checkpoint is the
+  highest-leverage move available.**
+- **The biggest single win for the other three is §2.1**, not anything in this
+  section: installing `flashinfer-cubin` and `flashinfer-jit-cache` converts the
+  dominant 40–55 min term into a file read. Everything in §6 is about making sure
+  that file read keeps happening on the next job.
+- **The floor is capture + load.** Once the caches hit, the irreducible cost is
+  the weight read and the CUDA graph capture, and the only remaining lever on
+  either is a smaller capture list or a faster loader (`instanttensor`, §4.5).
+
+### 6.8 The one-line regression gate
+
+Put this at the end of every serving job. If it prints anything, a cache broke.
+
+```bash
+grep -E 'Dynamo bytecode transform time|Compiling a graph for compile range|does not support it|Auto-prefetch is disabled|Startup plan not applied|Skipping Qwen GDN Triton warmup|Failed to connect to NVIDIA artifactory' \
+     "$LOGFILE" || echo "OK: all caches hit"
+```
+
+The last pattern is the sleeper: **[D]** `has_nvidia_artifactory()`
+(`vllm/utils/flashinfer.py:367-391`) does a live `requests.get` with a 5 s timeout
+against `https://edge.urm.nvidia.com/artifactory/...` and, on failure, logs
+`Failed to connect to NVIDIA artifactory: %s` and **silently drops the trtllm-gen
+attention path**. It short-circuits to `True` only when the `flashinfer_cubin`
+package is installed (`:373-375`). A Beaker node with restricted egress and no
+`flashinfer-cubin` therefore degrades to a different — slower — attention backend
+without failing, which is precisely the kind of regression that looks like noise
+in a throughput sweep. Installing the cubin wheel (§2.1) fixes the startup cost
+*and* removes the network dependency *and* removes this failure mode.
