@@ -137,6 +137,11 @@ done
 
 [ -n "$TP_SIZE" ] || TP_SIZE="$GPU_COUNT"
 [ -n "$REPO_GIT_REF" ] || REPO_GIT_REF="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+# Gantry clones with `git fetch --depth 1 origin <ref>`, and GitHub will serve
+# a fetch for a full 40-character commit id but not an abbreviated one, which
+# fails as "fatal: couldn't find remote ref". Normalise whatever was passed --
+# short sha, tag, or branch name -- to the full commit id before handing it over.
+REPO_GIT_REF="$(git -C "$REPO_ROOT" rev-parse "${REPO_GIT_REF}^{commit}" 2>/dev/null || echo "$REPO_GIT_REF")"
 if ! git -C "$REPO_ROOT" branch -r --contains "$REPO_GIT_REF" 2>/dev/null | grep -q .; then
     echo "warning: $REPO_GIT_REF is not on any remote branch; the job will fail to clone it." >&2
 fi
