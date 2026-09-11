@@ -56,6 +56,29 @@ def core_arguments(root, output):
     return arguments.parse_args()
 
 
+def apply_probe_mode(args, output):
+    mode = os.environ.get("OI_UPDATE_ZERO_MODE", "original")
+    if mode not in ("original", "hf-matched"):
+        raise ValueError(f"Unknown diagnostic mode: {mode}")
+    if mode == "hf-matched":
+        overrides = {
+            "debug_rollout_only": True,
+            "sglang_max_total_tokens": 32768,
+            "sglang_sampling_backend": "pytorch",
+            "sglang_mamba_radix_cache_strategy": "auto",
+        }
+        missing = sorted(name for name in overrides if not hasattr(args, name))
+        if missing:
+            raise ValueError(f"Original runtime lacks matched-serving arguments: {missing}")
+        write_json(
+            output / "serving-overrides.json",
+            {name: {"original": getattr(args, name), "diagnostic": value} for name, value in overrides.items()},
+        )
+        for name, value in overrides.items():
+            setattr(args, name, value)
+    return mode
+
+
 def phase_probe(url, phase, inputs, output):
     trace = Path(os.environ["OI_UPDATE_ZERO_TRACE_DIR"])
     marker = trace / "capture-request.json"
@@ -111,6 +134,7 @@ async def probe(args, inputs, output):
         raise ValueError("Only a synchronous resident actor, zero updates, and no critic are supported")
     if not args.check_weight_update_equal:
         raise ValueError("The full initial serving-weight comparison must remain enabled")
+    mode = apply_probe_mode(args, output)
     write_json(output / "resolved-arguments.json", vars(args))
     groups = placement_group.create_placement_groups(args)
     manager = learner = None
@@ -132,6 +156,21 @@ async def probe(args, inputs, output):
         write_json(output / "serving-topology.json", topology)
         write_json(output / "serving-resolved.json", await engine.get_server_info.remote())
         await asyncio.to_thread(phase_probe, topology["url"], "hf", inputs, output)
+
+        if mode == "hf-matched":
+            write_json(
+                output / "hf-only-complete.json",
+                dict(
+                    completed=True,
+                    full_protocol_complete=False,
+                    optimizer_calls=0,
+                    initial_publications=0,
+                    phases=["hf"],
+                    cases=len(inputs["cases"]),
+                    interpretation="Independent HF process with matched serving settings and fresh compiler caches; no trainer initialized.",
+                ),
+            )
+            return
 
         await manager.check_weights.remote(action="snapshot")
         await manager.check_weights.remote(action="reset_tensors", skip_list=args.check_weight_update_skip_list)
@@ -207,7 +246,13 @@ def main():
     )
     runtime_env["env_vars"]["PYTHONPATH"] = os.environ["PYTHONPATH"]
     runtime_env["env_vars"]["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
-    ray.init(num_gpus=3, num_cpus=16, include_dashboard=False, object_store_memory=1024**3, runtime_env=runtime_env)
+    ray.init(
+        num_gpus=1 if os.environ.get("OI_UPDATE_ZERO_MODE") == "hf-matched" else 3,
+        num_cpus=16,
+        include_dashboard=False,
+        object_store_memory=1024**3,
+        runtime_env=runtime_env,
+    )
     try:
         asyncio.run(probe(args, inputs, output))
     finally:

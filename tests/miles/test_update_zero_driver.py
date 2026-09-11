@@ -192,3 +192,46 @@ def test_original_source_hash_gate_before_runtime(driver, tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="Original source hash mismatch"):
         driver.verify_original_sources(tmp_path)
     assert (tmp_path / "original-source-verification.json").exists()
+
+
+def test_matched_hf_mode_never_initializes_or_resets_trainer(driver, tmp_path, monkeypatch):
+    args, events = protocol(driver, tmp_path, monkeypatch)
+    args.debug_rollout_only = False
+    args.sglang_max_total_tokens = None
+    args.sglang_sampling_backend = "flashinfer"
+    args.sglang_mamba_radix_cache_strategy = "extra_buffer"
+    monkeypatch.setenv("OI_UPDATE_ZERO_MODE", "hf-matched")
+    asyncio.run(driver.probe(args, {"cases": [{}] * 4}, tmp_path))
+    assert events == [
+        "groups",
+        "store",
+        "tracking.init",
+        "manager.init",
+        "engines",
+        "topology",
+        "settings",
+        "hf",
+        "manager.dispose",
+        "tracking.finish",
+    ]
+    assert args.debug_rollout_only and args.sglang_max_total_tokens == 32768
+    assert args.sglang_sampling_backend == "pytorch"
+    assert args.sglang_mamba_radix_cache_strategy == "auto"
+    assert not (tmp_path / "probe-complete.json").exists()
+    result = json.loads((tmp_path / "hf-only-complete.json").read_text())
+    assert result["initial_publications"] == result["optimizer_calls"] == 0
+    assert result["full_protocol_complete"] is False
+    changes = json.loads((tmp_path / "serving-overrides.json").read_text())
+    assert changes["sglang_sampling_backend"] == {"original": "flashinfer", "diagnostic": "pytorch"}
+
+
+def test_matched_mode_rejects_unrecognized_runtime_argument(driver, tmp_path, monkeypatch):
+    monkeypatch.setenv("OI_UPDATE_ZERO_MODE", "hf-matched")
+    with pytest.raises(ValueError, match="lacks matched-serving"):
+        driver.apply_probe_mode(SimpleNamespace(), tmp_path)
+
+
+def test_unknown_mode_rejected(driver, tmp_path, monkeypatch):
+    monkeypatch.setenv("OI_UPDATE_ZERO_MODE", "typo")
+    with pytest.raises(ValueError, match="Unknown diagnostic mode"):
+        driver.apply_probe_mode(SimpleNamespace(), tmp_path)

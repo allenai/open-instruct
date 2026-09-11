@@ -26,3 +26,14 @@ MILES_EXISTING_IMAGE=01M26TT1EQTB84RV0MM650W0YE ./scripts/train/build_image_and_
 Jobs use urgent priority, `ai2/open-instruct-dev`, `ai2/holmes`, a one-hour minimum runtime and a 90-minute timeout. The default output is a new `update-zero-20260911-v1/{core,megatron}` directory under the original GSM8K campaign. Existing outputs are rejected. Raw tensor captures remain on WEKA; compact JSON manifests, request results, capture metadata and cleanup status are copied to Beaker results.
 
 The frozen inputs include original source dump hashes and both original next-token IDs. The capture helper rejects nonmatching input tokens, missing layers/routes, and overwrites. Tests cover protocol ordering, zero optimizer calls, failure preservation/cleanup, import-hook behavior, full-prefix routes and bounded activation rows, exact source hashes, immutable images, original Megatron flags/bootstrap, and placement. The live scheduler capture remains an experimental gate until the short jobs complete.
+
+The `--mode hf-matched` diagnostic is an independent inference-only control. It
+uses the original image and checkpoint with a single rollout GPU, PyTorch sampling,
+a 32,768-token pool, the `auto` Mamba cache strategy (radix caching remains disabled),
+and explicitly fresh compiler cache directories. It performs the same fixed-prefix
+controls, captures, and repeat, then exits before any trainer construction, tensor
+reset, or publication. Its `hf-only-complete.json` explicitly records zero publications
+and `full_protocol_complete=false`. Two separate invocations with distinct campaign
+names can measure process-to-process variation in the same immutable image. Captures
+include populated autotuner choices; these include prior warmup history and do not
+by themselves prove which configuration every kernel invocation used.

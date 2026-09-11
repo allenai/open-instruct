@@ -16,11 +16,13 @@ ROOT = "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-co
 IMAGES = {"core": "01M26N80T0V9PREQTS87J849P8", "megatron": update_zero_megatron.IMAGE}
 
 
-def specification(image, backend, *, campaign="update-zero-20260911-v1"):
+def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="original"):
     if backend not in IMAGES or image != IMAGES[backend]:
         raise ValueError("The selected backend requires its immutable original 100-update image")
     if not re.fullmatch(r"update-zero-[A-Za-z0-9_-]+", campaign):
         raise ValueError("Use a distinct update-zero campaign directory")
+    if mode not in ("original", "hf-matched"):
+        raise ValueError("Unknown diagnostic mode")
     source = Path(__file__).parent
     output = ROOT + "/" + campaign + "/" + backend
     probe_dir = "/tmp/zero-probe"
@@ -33,7 +35,7 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1"):
         "install_import_hook()\n"
     )
     runtime_env = {}
-    provenance = {"image": image, "backend": backend, "inputs": json.loads(files["inputs.json"])}
+    provenance = {"image": image, "backend": backend, "mode": mode, "inputs": json.loads(files["inputs.json"])}
     if backend == "megatron":
         manifest = json.loads((source / "diagnostics/update-zero-megatron.json").read_text())
         prepared = update_zero_megatron.prepare(
@@ -51,6 +53,7 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1"):
     env = dict(runtime_env.get("env_vars", {}))
     env.update(
         OI_UPDATE_ZERO_ROOT=ROOT,
+        OI_UPDATE_ZERO_MODE=mode,
         OI_UPDATE_ZERO_BACKEND=backend,
         OI_UPDATE_ZERO_OUTPUT=output,
         OI_UPDATE_ZERO_TRACE_DIR=output + "/trace",
@@ -63,6 +66,19 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1"):
         HF_HOME="/tmp/hf-cache",
         PYTHONUNBUFFERED="1",
     )
+    if mode == "hf-matched":
+        caches = {
+            "TRITON_CACHE_DIR": probe_dir + "/compiler-cache/triton",
+            "TORCHINDUCTOR_CACHE_DIR": probe_dir + "/compiler-cache/inductor",
+            "FLASH_ATTENTION_CUTE_DSL_CACHE_DIR": probe_dir + "/compiler-cache/fa4",
+            "TILELANG_CACHE_DIR": probe_dir + "/compiler-cache/tilelang",
+            "EP_JIT_CACHE_DIR": probe_dir + "/compiler-cache/deepep",
+            "DG_JIT_CACHE_DIR": probe_dir + "/compiler-cache/deep-gemm",
+        }
+        env.update(caches)
+        runtime_env.setdefault("env_vars", {}).update(caches)
+        env["OI_UPDATE_ZERO_RAY_ENV"] = json.dumps(runtime_env)
+        provenance["fresh_compiler_caches"] = caches
     provenance["diagnostic_file_sha256"] = {
         name: hashlib.sha256(value.encode()).hexdigest() for name, value in files.items()
     }
@@ -74,6 +90,8 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1"):
         " q=dest/p.relative_to(root); q.parent.mkdir(parents=True,exist_ok=True); shutil.copyfile(p,q)\n"
     )
     lines = ["set -euo pipefail", f"cd {shlex.quote(working_directory)}", f"test ! -e {shlex.quote(output)}"]
+    if mode == "hf-matched":
+        lines.append(f"test ! -e {probe_dir}/compiler-cache")
     lines.append(f"mkdir -p {shlex.quote(output + '/trace')} {probe_dir} /output")
     for name, contents in files.items():
         encoded = base64.b64encode(contents.encode()).decode()
@@ -92,7 +110,7 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1"):
     lines.append(shlex.join(command))
     return {
         "version": "v2",
-        "description": f"Original {backend}100 update-zero: identical prefixes, expert IDs/activations, HF vs initial publication; zero updates",
+        "description": f"Original {backend}100 update-zero ({mode}): identical prefixes, expert IDs/activations; zero updates",
         "tasks": [
             {
                 "name": "update-zero-" + backend,
@@ -104,7 +122,7 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1"):
                 "arguments": ["\n".join(lines) + "\n"],
                 "datasets": [{"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}}],
                 "result": {"path": "/output"},
-                "resources": {"gpuCount": 3, "sharedMemory": "100 GiB"},
+                "resources": {"gpuCount": 1 if mode == "hf-matched" else 3, "sharedMemory": "100 GiB"},
                 "context": {"priority": "urgent", "minRuntime": "1h", "autoResume": False},
                 "constraints": {"cluster": ["ai2/holmes"]},
                 "timeout": "90m",
@@ -118,9 +136,10 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--backend", choices=IMAGES, required=True)
     parser.add_argument("--campaign", default="update-zero-20260911-v1")
+    parser.add_argument("--mode", choices=("original", "hf-matched"), default="original")
     parser.add_argument("--render-only", action="store_true")
     args = parser.parse_args()
-    document = specification(args.image, args.backend, campaign=args.campaign)
+    document = specification(args.image, args.backend, campaign=args.campaign, mode=args.mode)
     if args.render_only:
         print(json.dumps(document, indent=2))
         return

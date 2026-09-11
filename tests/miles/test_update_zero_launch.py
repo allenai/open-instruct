@@ -54,3 +54,16 @@ def test_wrong_runtime_rejected(backend):
 def test_output_must_be_distinct_campaign(campaign):
     with pytest.raises(ValueError, match="distinct"):
         launch_update_zero.specification(launch_update_zero.IMAGES["core"], "core", campaign=campaign)
+
+
+@pytest.mark.parametrize("backend", ["core", "megatron"])
+def test_hf_matched_launch_uses_one_gpu_and_fresh_explicit_caches(backend):
+    spec = launch_update_zero.specification(launch_update_zero.IMAGES[backend], backend, mode="hf-matched")
+    task = spec["tasks"][0]
+    assert task["resources"]["gpuCount"] == 1
+    command = task["arguments"][0]
+    subprocess.run(["bash", "-n"], input=command, text=True, check=True)
+    assert "export OI_UPDATE_ZERO_MODE=hf-matched" in command
+    assert "test ! -e /tmp/zero-probe/compiler-cache" in command
+    for name in ("TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR", "FLASH_ATTENTION_CUTE_DSL_CACHE_DIR"):
+        assert f"export {name}=/tmp/zero-probe/compiler-cache/" in command
