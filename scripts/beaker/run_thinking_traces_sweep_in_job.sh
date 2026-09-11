@@ -60,6 +60,14 @@ dump_vllm_failure() {
 : "${SERVE_PORT:=8008}"
 : "${GPU_COUNT:=4}"
 : "${TP_SIZE:=$GPU_COUNT}"
+# Data parallelism is the fallback capacity lever for models that cannot use
+# DCP. Under plain TP an MLA-style latent KV cache is replicated on every
+# rank, so concurrency at full context is a fraction of what the memory could
+# hold; under DP each rank owns its own cache and --enable-expert-parallel
+# shards the MoE experts so the weights still fit. TP_SIZE * DP_SIZE must
+# equal GPU_COUNT.
+: "${DP_SIZE:=}"
+: "${ENABLE_EP:=}"
 : "${MAX_MODEL_LEN:=131072}"
 : "${MAX_TOKENS:=128000}"
 : "${MAX_PROMPT_TOKENS:=1536}"
@@ -165,7 +173,7 @@ log "sweep configuration"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv || true
 cat <<EOF
   models        : ${MODELS}
-  vLLM          : ${VLLM_PKG_VERSION}   TP=${TP_SIZE}${DCP_SIZE:+ DCP=${DCP_SIZE}} over ${GPU_COUNT} GPUs
+  vLLM          : ${VLLM_PKG_VERSION}   TP=${TP_SIZE}${DCP_SIZE:+ DCP=${DCP_SIZE}}${DP_SIZE:+ DP=${DP_SIZE}}${ENABLE_EP:+ EP=on} over ${GPU_COUNT} GPUs
   context       : max_model_len=${MAX_MODEL_LEN}  max_tokens=${MAX_TOKENS}
   sampling      : ${NUM_PROMPTS} prompts x ${NUM_SAMPLES} samples, T=${TEMPERATURE} top_p=${TOP_P} seed=${SEED}
   concurrency   : ${CONCURRENCY}
@@ -443,6 +451,8 @@ run_one_model() {
         --max-num-seqs "$VLLM_MAX_NUM_SEQS" \
         --enable-prefix-caching \
         ${DCP_SIZE:+--decode-context-parallel-size "$DCP_SIZE"} \
+        ${DP_SIZE:+--data-parallel-size "$DP_SIZE"} \
+        ${ENABLE_EP:+--enable-expert-parallel} \
         --trust-remote-code \
         --safetensors-load-strategy "${SAFETENSORS_LOAD_STRATEGY:-prefetch}" \
         >"$vllm_log" 2>&1 &
