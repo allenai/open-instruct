@@ -2,8 +2,11 @@
 
 import json
 import os
+import shlex
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from parameterized import parameterized
 
@@ -122,3 +125,50 @@ class TestCheckpointerDefaults(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WriteProvenanceReadmeTest(unittest.TestCase):
+    def test_writes_readme_with_tracking_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            olmo_core_utils.write_provenance_readme(
+                output_dir=tmp,
+                run_name="my-run",
+                model_name_or_path="/weka/some/base/step63802",
+                tracking_url="https://github.com/allenai/open-instruct/issues/1859",
+                wandb_project="open_instruct_internal",
+            )
+            with open(os.path.join(tmp, "README.md")) as f:
+                content = f.read()
+            self.assertIn("# my-run", content)
+            self.assertIn("https://github.com/allenai/open-instruct/issues/1859", content)
+            self.assertIn("/weka/some/base/step63802", content)
+            self.assertIn("ai2-llm/open_instruct_internal", content)
+
+    def test_command_is_shell_quoted(self) -> None:
+        """A pasted command must re-parse to the original argv, even with spaces or `;`."""
+        argv = ["olmo_core_finetune.py", "--run_name", "kda think; seed 1", "--output_dir", "/weka/a b/out"]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(sys, "argv", argv):
+            olmo_core_utils.write_provenance_readme(
+                output_dir=tmp, run_name="r", model_name_or_path="base", tracking_url=None
+            )
+            with open(os.path.join(tmp, "README.md")) as f:
+                content = f.read()
+        command = content.split("```")[1].strip()
+        self.assertEqual(shlex.split(command), argv)
+        self.assertNotIn("\n" + " ".join(argv) + "\n", content)
+
+    def test_does_not_overwrite_existing_readme(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "README.md")
+            with open(path, "w") as f:
+                f.write("hand-written notes\n")
+            olmo_core_utils.write_provenance_readme(
+                output_dir=tmp, run_name="my-run", model_name_or_path="base", tracking_url=None
+            )
+            with open(path) as f:
+                self.assertEqual(f.read(), "hand-written notes\n")
+
+    def test_unwritable_output_dir_does_not_raise(self) -> None:
+        olmo_core_utils.write_provenance_readme(
+            output_dir="/nonexistent-dir/for-sure", run_name="r", model_name_or_path="b", tracking_url=None
+        )
