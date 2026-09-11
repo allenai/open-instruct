@@ -42,7 +42,9 @@ SCHEMA = pa.schema(
 BATCH_ROWS = 2000
 ROLE_HEADER = re.compile(r"<\|im_start\|>[a-z_]+\n?")
 LITERALS = ("<|im_end|>", "<|endoftext|>", "<think>", "</think>")
-LEFTOVER = re.compile(r"<\|[a-z_]+\|>|</?think>")
+LEFTOVER = re.compile(r"<\|im_start\|>|<\|im_end\|>|<\|endoftext\|>|</?think>")
+# Other <|…|> strings are content (one simfc row quotes <|endoffile|>); they are kept and counted.
+OTHER_SPECIAL = re.compile(r"<\|[^|<>\s]+\|>")
 
 _tokenizer = None
 
@@ -61,11 +63,11 @@ def strip_chat_tokens(text: str) -> str:
     return text.strip("\n")
 
 
-def process_shard(args: tuple[str, str, str, str, int | None]) -> tuple[str, int, int, int, int]:
+def process_shard(args: tuple[str, str, str, str, int | None]) -> tuple[str, int, int, int, int, int]:
     path, out_dir, tokenizer_name, tokenizer_revision, limit = args
     tokenizer = _get_tokenizer(tokenizer_name, tokenizer_revision)
     dst = os.path.join(out_dir, "data", os.path.basename(path))
-    n_rows = n_tokens_total = n_tokens_max = n_tokens_before = 0
+    n_rows = n_tokens_total = n_tokens_max = n_tokens_before = n_other_special = 0
     with pq.ParquetWriter(dst, SCHEMA, compression="zstd") as writer:
         for batch in pq.ParquetFile(path).iter_batches(batch_size=BATCH_ROWS):
             out: dict[str, list] = {"id": [], "dataset_source": [], "text": [], "n_tokens": []}
@@ -75,6 +77,8 @@ def process_shard(args: tuple[str, str, str, str, int | None]) -> tuple[str, int
                 text = strip_chat_tokens(row["text"])
                 if LEFTOVER.search(text):
                     raise ValueError(f"chat markup survived in row {row['id']}: {LEFTOVER.search(text).group(0)!r}")
+                if OTHER_SPECIAL.search(text):
+                    n_other_special += 1
                 n = len(tokenizer(text, add_special_tokens=False)["input_ids"])
                 out["id"].append(row["id"])
                 out["dataset_source"].append(row["dataset_source"])
@@ -88,7 +92,7 @@ def process_shard(args: tuple[str, str, str, str, int | None]) -> tuple[str, int
                 writer.write_table(pa.table(out, schema=SCHEMA))
             if limit is not None and n_rows >= limit:
                 break
-    return dst, n_rows, n_tokens_total, n_tokens_max, n_tokens_before
+    return dst, n_rows, n_tokens_total, n_tokens_max, n_tokens_before, n_other_special
 
 
 def write_readme(out_dir: pathlib.Path, prov: dict[str, Any]) -> None:
@@ -144,7 +148,9 @@ out of `text`; everything else is verbatim, in the same order, with the same `id
 The tool-calling markup the model is meant to learn: the `<tools>` block in the system prompt,
 `<tool_call>` / `<function=…>` / `<parameter=…>` blocks in assistant turns and `<tool_response>`
 wrappers around tool results. Turns therefore follow one another separated by a newline, with no
-role labels. `n_tokens` was recomputed after the removal.
+role labels. `n_tokens` was recomputed after the removal. Other `<|…|>`-shaped strings that occur
+inside message content ({prov["rows_with_other_special_strings"]:,} rows) are content, not chat
+markup, and are kept.
 
 Produced by `scripts/data/strip_chat_tokens_text.py` in [allenai/open-instruct](https://github.com/allenai/open-instruct).
 """
@@ -187,12 +193,14 @@ def main() -> None:
         "tokens": sum(r[2] for r in results),
         "max_tokens": max(r[3] for r in results),
         "tokens_before": sum(r[4] for r in results),
+        "rows_with_other_special_strings": sum(r[5] for r in results),
         "removed": ["<|im_start|>{role}\\n", "<|im_end|>", "<|endoftext|>", "<think>", "</think>"],
     }
     (out_dir / "provenance.json").write_text(json.dumps(prov, indent=1))
     write_readme(out_dir, prov)
     logger.info(
-        f"{prov['rows']:,} rows, {prov['tokens']:,} tokens (source {prov['tokens_before']:,}), max {prov['max_tokens']:,}"
+        f"{prov['rows']:,} rows, {prov['tokens']:,} tokens (source {prov['tokens_before']:,}), max {prov['max_tokens']:,}; "
+        f"{prov['rows_with_other_special_strings']:,} rows keep other <|…|> strings that are content, not markup"
     )
     if args.push_to:
         if args.limit is not None:
