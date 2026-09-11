@@ -44,6 +44,7 @@ The main things we are looking for are:
 """
 
 import copy
+import functools
 import hashlib
 import json
 import multiprocessing
@@ -945,7 +946,10 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # Cache version: increment this when transformation logic changes significantly
 # to invalidate old caches. v7: SFT tokenization passes the tools column to the chat
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
-DATASET_CACHE_VERSION = "v7"
+# v8: assistant label spans start where the turn's own text begins rather than after the whole
+# generation prompt (think templates append `<think>` to it), spans are verified against the
+# rendered turn, and JSON-string tool-call arguments are parsed before rendering.
+DATASET_CACHE_VERSION = "v8"
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
@@ -976,6 +980,48 @@ def _normalize_tools_for_chat_template(tools: Any) -> list | None:
         raise TypeError(f"{TOOLS_COLUMN_KEY} must contain JSON-schema dictionaries, got: {tools!r}")
 
     return tools
+
+
+def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse JSON-string ``tool_calls[].function.arguments`` into mappings.
+
+    Chat templates iterate arguments as a mapping, which is also how transformers documents the
+    field. Datasets store it as a JSON string instead whenever the argument names or value types
+    vary across rows, since no Arrow struct can hold that. Strings that are not JSON objects are
+    left alone for templates that render arguments verbatim. Messages are copied, not mutated.
+    """
+    normalized = []
+    for message in messages:
+        tool_calls = message.get("tool_calls")
+        if not tool_calls:
+            normalized.append(message)
+            continue
+        message = dict(message)
+        message["tool_calls"] = [_normalize_tool_call(tool_call) for tool_call in tool_calls]
+        normalized.append(message)
+    return normalized
+
+
+def _normalize_tool_call(tool_call: Any) -> Any:
+    if not isinstance(tool_call, dict):
+        return tool_call
+    function = tool_call.get("function")
+    holder = function if isinstance(function, dict) else tool_call
+    arguments = holder.get("arguments")
+    if not isinstance(arguments, str):
+        return tool_call
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        return tool_call
+    if not isinstance(parsed, dict):
+        return tool_call
+    tool_call = dict(tool_call)
+    if holder is function:
+        tool_call["function"] = {**function, "arguments": parsed}
+    else:
+        tool_call["arguments"] = parsed
+    return tool_call
 
 
 def _normalize_env_config_column(row: dict[str, Any]) -> None:
@@ -1215,44 +1261,125 @@ def _trainable_assistant_indices(messages: list[dict[str, Any]], last_turn_only:
     return assistant_indices
 
 
+def _common_prefix_length(left: str, right: str) -> int:
+    limit = min(len(left), len(right))
+    idx = 0
+    while idx < limit and left[idx] == right[idx]:
+        idx += 1
+    return idx
+
+
+def _assistant_turn_boundaries(
+    messages: list[dict[str, Any]], tokenizer: PreTrainedTokenizer, tools: list | None, message_idx: int
+) -> tuple[str, str, str | None]:
+    """Render the boundaries of one assistant turn.
+
+    Returns ``(header, through, body)``: ``through`` is the render of the conversation up to and
+    including the turn, ``header`` is what the model is shown before it starts generating, and
+    ``body`` is the text the turn itself contributed (``through`` minus ``header``), or None when
+    the header could not be established from the renders and the caller must fall back to the
+    message content as its reference.
+
+    The header is normally the generation-prompt render of the preceding messages. That render is
+    not always a pure header: think templates end it with an opening ``<think>`` tag, so the model
+    starts generating inside the reasoning block. When the turn reproduces that text (reasoning
+    present) the tag stays in the header and masked, matching inference where the template forces
+    it. When the turn does not (a plain reply under a think template, or a template that only
+    emits the tag at inference) the header instead ends where the message's own text begins,
+    rather than subtracting characters the turn never contained -- which is what used to shift
+    the span start past the first token(s) of every such turn.
+    """
+    render = functools.partial(tokenizer.apply_chat_template, tools=tools, tokenize=False)
+    through = render(conversation=messages[: message_idx + 1], add_generation_prompt=False)
+    assert isinstance(through, str)
+    # ``messages[:0]`` is empty for an assistant opening turn, so the header is taken as empty.
+    if message_idx == 0:
+        return "", through, through
+    generation_prompt = render(conversation=messages[:message_idx], add_generation_prompt=True)
+    assert isinstance(generation_prompt, str)
+    without_prompt = render(conversation=messages[:message_idx], add_generation_prompt=False)
+    assert isinstance(without_prompt, str)
+    # A template that ignores add_generation_prompt emits the role marker only inside the turn,
+    # so no render can separate header from content: the marker would land in the body and be
+    # trained. Such templates are handed to the token-count derivation and the content-anchored
+    # verifier to adjudicate, exactly as before.
+    prompt_stem = _strip_trailing_eos(without_prompt, tokenizer)
+    if not (generation_prompt.startswith(prompt_stem) and len(generation_prompt) > len(prompt_stem)):
+        return generation_prompt, through, None
+    if through.startswith(generation_prompt):
+        # The generation prompt is the whole header by construction. Whatever the template emits
+        # between it and the message's text -- an empty `<think></think>` for a turn whose
+        # reasoning field is present but empty, say -- is the turn's own output and is trained.
+        return generation_prompt, through, through[len(generation_prompt) :]
+    # The turn does not reproduce the tail of the generation prompt. The header then ends where
+    # the message's own text starts, provided that lies inside the region both renders agree on
+    # and past everything the preceding messages rendered. A boundary at or before that point
+    # means the prefix renders diverge inside the *prompt* (the template special-cases the final
+    # turn and the previous turn is also an assistant turn), and the common prefix says nothing
+    # about where the header ends.
+    agreed = _common_prefix_length(generation_prompt, through)
+    if agreed <= len(without_prompt):
+        return generation_prompt, through, None
+    anchors = _message_text_anchors(messages[message_idx])
+    starts = [through.find(anchor, len(without_prompt)) for anchor in anchors]
+    starts = [start for start in starts if 0 <= start <= agreed]
+    if not starts:
+        return generation_prompt, through, None
+    header_len = min(starts)
+    return through[:header_len], through, through[header_len:]
+
+
+def _message_text_anchors(message: dict[str, Any]) -> list[str]:
+    """Text the message itself supplied, in the order a template renders it."""
+    anchors = [str(message.get(key) or "").strip() for key in ("reasoning_content", "content")]
+    return [anchor for anchor in anchors if anchor]
+
+
 def _assistant_token_spans_from_prefix_lengths(
-    messages: list[dict[str, Any]],
-    tokenizer: PreTrainedTokenizer,
-    tools: list | None,
-    max_seq_length: int | None,
-    trainable_indices: list[int],
-) -> list[tuple[int, int, int]]:
+    tokenizer: PreTrainedTokenizer, max_seq_length: int | None, boundaries: list[tuple[int, str, str, str | None]]
+) -> list[tuple[int, int, int, str | None, int]]:
     """Derive per-assistant-turn token spans from prefix token counts.
 
-    Unlike char offsets this does not require prefix-stable rendering, since it only counts
-    how many tokens each prefix produced. `tools` must be passed through: its absence is what
-    made this method wrong for tool-using conversations.
+    Unlike char offsets this does not require prefix-stable rendering, since it only counts how
+    many tokens each prefix produced. ``boundaries`` carries ``(message_idx, header, through,
+    body)`` per trainable turn as returned by ``_assistant_turn_boundaries``.
 
-    Returns (message_idx, start_token, end_token) per trainable assistant turn.
+    Returns ``(message_idx, start_token, end_token, body, header_chars_in_span)`` per trainable
+    assistant turn, the last being how many leading characters of the span's first token belong
+    to the header because that token straddles the boundary.
     """
-    chat_template_kwargs: dict[str, Any] = {
-        "tokenize": True,
-        "return_tensors": "pt",
-        "return_dict": False,
-        "padding": False,
-        "truncation": max_seq_length is not None,
-        "max_length": max_seq_length,
-        "tools": tools,
-    }
     spans = []
-    for message_idx in trainable_indices:
-        # add_generation_prompt=True so the assistant header itself stays masked.
-        if message_idx == 0:
-            start = 0
+    for message_idx, header, through, body in boundaries:
+        tokenized = tokenizer(
+            through,
+            add_special_tokens=False,
+            return_offsets_mapping=True,
+            truncation=max_seq_length is not None,
+            max_length=max_seq_length,
+        )
+        end = len(tokenized[INPUT_IDS_KEY])
+        header_chars_in_span = 0
+        if body is None:
+            # The header is not a prefix of the through render, so count its tokens on their own.
+            start = len(tokenizer(header, add_special_tokens=False)[INPUT_IDS_KEY]) if header else 0
         else:
-            start = tokenizer.apply_chat_template(
-                conversation=messages[:message_idx], add_generation_prompt=True, **chat_template_kwargs
-            ).shape[1]
-        end = tokenizer.apply_chat_template(
-            conversation=messages[: message_idx + 1], add_generation_prompt=False, **chat_template_kwargs
-        ).shape[1]
-        spans.append((message_idx, start, end))
+            # The header is a prefix of ``through``: the span starts at the first token that
+            # reaches past it, so a token straddling the boundary is trained, not masked (e.g.
+            # the `><` of `<think></think>` when `<think>` is not a special token). The verifier
+            # is told how many of that token's characters belong to the header.
+            offsets = tokenized["offset_mapping"]
+            start = sum(1 for _, token_end in offsets if token_end <= len(header))
+            if start < len(offsets) and offsets[start][0] < len(header):
+                header_chars_in_span = len(header) - offsets[start][0]
+        spans.append((message_idx, start, end, body, header_chars_in_span))
     return spans
+
+
+def _strip_trailing_eos(text: str, tokenizer: PreTrainedTokenizer) -> str:
+    eos = tokenizer.eos_token
+    if eos and text.endswith(eos):
+        return text[: -len(eos)]
+    return text
 
 
 def _verify_assistant_spans_cover_content(
@@ -1260,49 +1387,62 @@ def _verify_assistant_spans_cover_content(
     tokenizer: PreTrainedTokenizer,
     input_ids: torch.Tensor,
     rendered: str,
-    spans: list[tuple[int, int, int]],
+    spans: list[tuple[int, int, int, str | None, int]],
 ) -> None:
-    """Raise if a derived span does not line up with its assistant turn's content.
+    """Raise if a derived span does not line up with its assistant turn.
 
     Catches the three ways the token-count derivation goes wrong: a span too narrow (drops
-    content from the loss), one starting inside the assistant header (leaks header tokens),
-    or one running past the turn (trains on the prompt). Turns whose content the template
-    rewrites are skipped, since there is nothing to compare against.
+    content from the loss), one starting inside the assistant header (leaks header tokens), or
+    one running past the turn (trains on the prompt).
+
+    Each span is checked against the text its own turn rendered (``body``): reasoning fields,
+    structured tool calls and think tags are then compared as the template emits them rather
+    than as the raw ``content`` string. A span whose header could not be established from the
+    renders (``body`` None) is checked against the message content instead, as before.
     """
     sequence_end = input_ids.shape[1]
-    for message_idx, start, end in spans:
+    for message_idx, start, end, body, header_chars_in_span in spans:
         content = messages[message_idx].get("content")
-        if not content or content not in rendered:
-            continue
+        if body is not None:
+            expected = _strip_trailing_eos(body, tokenizer).strip()
+            if not expected:
+                continue
+        else:
+            if not content or content not in rendered:
+                continue
+            expected = content
         truncated_tail = end >= sequence_end
         start, end = max(0, start), min(end, sequence_end)
         if start >= end:
             continue
         decoded = tokenizer.decode(input_ids[0, start:end], clean_up_tokenization_spaces=False)
+        if header_chars_in_span:
+            # Discount the header characters of a token straddling the header/body edge.
+            decoded = decoded[header_chars_in_span:]
         # Truncated final span is fine if what survived is a prefix; checked first because the
         # tests below assume the whole turn is present.
-        if truncated_tail and decoded.lstrip() and content.startswith(decoded.lstrip()):
+        if truncated_tail and decoded.lstrip() and expected.startswith(decoded.lstrip()):
             continue
-        if content not in decoded:
+        if expected not in decoded:
             raise AssistantSpanDerivationError(
                 f"Assistant label span for message {message_idx} does not cover its content: the span "
-                f"decodes to {decoded[:80]!r} but the message content starts {content[:40]!r}. The chat "
+                f"decodes to {decoded[:80]!r} but the turn renders as {expected[:40]!r}. The chat "
                 f"template renders turns in a way neither the offset nor the token-count derivation can "
                 f"follow, so labels would be silently misaligned."
             )
-        # Must start at the content, not inside the header: a template without a generation
+        # Must start at the turn's own text, not inside the header: a template without a generation
         # prompt puts the boundary early, leaking header text that containment cannot see.
         # Leading whitespace is allowed since a tokenizer may merge it into the first token.
-        if not decoded.lstrip().startswith(content):
+        if not decoded.lstrip().startswith(expected):
             raise AssistantSpanDerivationError(
                 f"Assistant label span for message {message_idx} starts inside the assistant header: "
-                f"the span decodes to {decoded[:80]!r}, which does not begin with the message content "
-                f"{content[:40]!r}. Header tokens would be included in the loss. This usually means the "
+                f"the span decodes to {decoded[:80]!r}, which does not begin with the turn's own text "
+                f"{expected[:40]!r}. Header tokens would be included in the loss. This usually means the "
                 f"template does not support add_generation_prompt."
             )
-        # Only look past this turn's own content: a short later turn ("Yes.") can otherwise
+        # Only look past this turn's own text: a short later turn ("Yes.") can otherwise
         # collide with text inside a legitimate span.
-        tail = decoded[decoded.index(content) + len(content) :]
+        tail = decoded[decoded.index(expected) + len(expected) :]
         for later_idx in range(message_idx + 1, len(messages)):
             later_content = messages[later_idx].get("content")
             if later_content and later_content in tail:
@@ -1351,38 +1491,20 @@ def _tokenize_tulu_sft_with_assistant_labels(
 
     trainable_indices = _trainable_assistant_indices(messages, last_turn_only)
 
-    # Set when a prefix render is not a literal prefix of the full render, making char offsets
-    # meaningless. Templates that special-case the final turn hit this routinely, so fall back
-    # to token counts rather than refusing the conversation.
-    prefix_unstable = False
-
-    trainable_char_spans: list[tuple[int, int]] = []
+    # The trainable span of each assistant turn runs from the end of its header to the end of
+    # the turn (its text plus closing tokens). Both ends come from partial renders; see
+    # ``_assistant_turn_boundaries`` for how the header is located.
+    #
+    # Rendering a partial conversation is itself template-dependent: some templates
+    # (e.g. Qwen3.5) raise when handed a prefix containing only system/tool turns and
+    # no user turn, which happens when the first assistant turn is not preceded by a
+    # user turn (``[system, assistant, ...]``). We cannot derive the span boundary
+    # without that render, so surface an actionable error rather than the template's
+    # opaque one.
+    boundaries: list[tuple[int, str, str, str | None]] = []
     for message_idx in trainable_indices:
-        # The trainable span runs from the end of the assistant header (the generation
-        # prompt the template emits before the assistant's content) to the end of the
-        # assistant turn, i.e. content + closing tokens. ``header`` and ``through`` are
-        # taken as char offsets into the full ``rendered`` string (which is what we
-        # tokenize), so both must be a prefix of it; if not, the template/conversation
-        # is not prefix-stable (e.g. eos appended only on the final turn) and we fall
-        # back to token-count derivation below. ``messages[:0]`` is empty for an
-        # assistant opening turn, so the header is taken as empty there.
-        #
-        # Rendering a partial conversation is itself template-dependent: some templates
-        # (e.g. Qwen3.5) raise when handed a prefix containing only system/tool turns and
-        # no user turn, which happens when the first assistant turn is not preceded by a
-        # user turn (``[system, assistant, ...]``). We cannot derive the span boundary
-        # without that render, so surface an actionable error rather than the template's
-        # opaque one.
         try:
-            if message_idx == 0:
-                header = ""
-            else:
-                header = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx], tools=tools, tokenize=False, add_generation_prompt=True
-                )
-            through = tokenizer.apply_chat_template(
-                conversation=messages[: message_idx + 1], tools=tools, tokenize=False, add_generation_prompt=False
-            )
+            header, through, body = _assistant_turn_boundaries(messages, tokenizer, tools, message_idx)
         except Exception as exc:
             roles = [m["role"] for m in messages[: message_idx + 1]]
             raise AssistantSpanDerivationError(
@@ -1391,24 +1513,25 @@ def _tokenize_tulu_sft_with_assistant_labels(
                 f"templates reject prefixes that contain no user turn; such conversations are not "
                 f"supported by this tokenization path."
             ) from exc
-        assert isinstance(header, str)
-        assert isinstance(through, str)
-        if not (len(header) <= len(through) and rendered.startswith(header) and rendered.startswith(through)):
-            prefix_unstable = True
-            break
-        trainable_char_spans.append((len(header), len(through)))
+        boundaries.append((message_idx, header, through, body))
 
-    if prefix_unstable:
-        token_spans = _assistant_token_spans_from_prefix_lengths(
-            messages, tokenizer, tools, max_seq_length, trainable_indices
-        )
-        for _, start, end in token_spans:
+    # Char offsets into ``rendered`` are only meaningful while every partial render is a literal
+    # prefix of it. Templates that special-case the final turn (e.g. eos appended only there)
+    # break this routinely, so fall back to token counts rather than refusing the conversation.
+    prefix_stable = all(
+        len(header) <= len(through) and rendered.startswith(header) and rendered.startswith(through)
+        for _, header, through, _ in boundaries
+    )
+    if not prefix_stable:
+        token_spans = _assistant_token_spans_from_prefix_lengths(tokenizer, max_seq_length, boundaries)
+        for _, start, end, _, _ in token_spans:
             start, end = max(0, start), min(end, input_ids.shape[1])
             if start < end:
                 labels[0, start:end] = input_ids[0, start:end]
         _verify_assistant_spans_cover_content(messages, tokenizer, input_ids, rendered, token_spans)
         return input_ids, attention_mask, labels, truncated
 
+    trainable_char_spans = [(len(header), len(through)) for _, header, through, _ in boundaries]
     for token_idx, (token_start, token_end) in enumerate(offsets):
         if token_start == token_end:
             continue
@@ -1503,6 +1626,7 @@ def _tokenize_row_or_mask_out(
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
+    messages = _normalize_tool_call_arguments(messages)
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     try:
         input_ids, attention_mask, labels, truncated = _tokenize_tulu_sft_with_assistant_labels(

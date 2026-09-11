@@ -684,13 +684,23 @@ CONVERSATION_SHAPES = {
 # sweep exists to catch, and no combination is allowed to do it.
 #
 # Growing this set is the goal of the P1 work in
-# https://github.com/allenai/open-instruct/issues/1800: templates that rewrite assistant
-# content as they render (`*_thinker*` inject or split on <think>) cannot be located by either
-# the char-offset or the token-count derivation, and need `{% generation %}` markers instead.
-# Consecutive assistant turns are underivable for the same underlying reason -- every
-# derivation must render a prefix ending in an assistant turn, which templates that
-# special-case the final turn render differently from the full conversation.
+# https://github.com/allenai/open-instruct/issues/1800. The `*_thinker*` templates end their
+# generation prompt with `<think>`; the header boundary is the common prefix of that render and
+# the turn's own render, so a turn that does not open with the tag is located correctly (see
+# TestThinkTemplateLabelSpans for the reasoning-bearing shapes). Consecutive assistant turns
+# remain underivable under templates that special-case the final turn -- every derivation must
+# render a prefix ending in an assistant turn, which those templates render differently from the
+# full conversation -- and `simple_chat` emits its role marker only inside the turn, so no render
+# can separate header from content.
 DERIVABLE_COMBINATIONS = {
+    ("tulu_thinker", "native_eos", "alternating"),
+    ("tulu_thinker", "im_end_eos", "alternating"),
+    ("tulu_thinker_r1_style", "native_eos", "alternating"),
+    ("tulu_thinker_r1_style", "im_end_eos", "alternating"),
+    ("olmo_thinker", "native_eos", "alternating"),
+    ("olmo_thinker", "im_end_eos", "alternating"),
+    ("olmo_thinker_remove_intermediate_thinking", "native_eos", "alternating"),
+    ("olmo_thinker_remove_intermediate_thinking", "im_end_eos", "alternating"),
     ("tulu", "native_eos", "alternating"),
     ("tulu", "im_end_eos", "alternating"),
     ("olmo", "native_eos", "alternating"),
@@ -839,7 +849,7 @@ class TestChatTemplateAssistantLabelSweep(unittest.TestCase):
         tokenized = tokenizer(rendered, add_special_tokens=False, return_tensors="pt")
         input_ids = tokenized[open_instruct.dataset_transformation.INPUT_IDS_KEY]
         # Message 1 is the first assistant turn; run its span to the end of the conversation.
-        over_wide = [(1, self._first_assistant_token(tokenizer, messages, input_ids), input_ids.shape[1])]
+        over_wide = [(1, self._first_assistant_token(tokenizer, messages, input_ids), input_ids.shape[1], None, 0)]
         with self.assertRaisesRegex(
             open_instruct.dataset_transformation.AssistantSpanDerivationError, "extends past its turn"
         ):
@@ -1083,3 +1093,234 @@ class TestOverLengthStrategy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _trained_text(tokenizer, out):
+    input_ids = out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist()
+    labels = out[open_instruct.dataset_transformation.LABELS_KEY].tolist()
+    return tokenizer.decode([tid for tid, lab in zip(input_ids, labels) if lab != -100])
+
+
+class TestThinkTemplateLabelSpans(unittest.TestCase):
+    """Templates whose generation prompt ends with `<think>` must locate every assistant turn.
+
+    The generation prompt is not a pure header for these templates: the model is started
+    inside the reasoning block. Multi-turn conversations route through the token-count
+    fallback (the templates swap `<|im_end|>` for eos on the final turn), which is where the
+    boundary used to land past the first token(s) of every turn and the verifier dropped the
+    row. Every shape here was dropped before; each must now train exactly the assistant text.
+    """
+
+    THINK_CONTENT = [
+        {"role": "user", "content": "USERONE"},
+        {"role": "assistant", "content": "<think>REASONONE</think>ANSWERONE"},
+        {"role": "user", "content": "USERTWO"},
+        {"role": "assistant", "content": "<think>REASONTWO</think>ANSWERTWO"},
+    ]
+    REASONING_FIELD = [
+        {"role": "user", "content": "USERONE"},
+        {"role": "assistant", "reasoning_content": "REASONONE", "content": "ANSWERONE"},
+        {"role": "user", "content": "USERTWO"},
+        {"role": "assistant", "reasoning_content": "REASONTWO", "content": "ANSWERTWO"},
+    ]
+
+    def _tokenizer(self, template):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = template
+        return tokenizer
+
+    def _tokenize(self, tokenizer, messages):
+        return open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            {"messages": [dict(m) for m in messages]}, tokenizer, max_seq_length=4096
+        )
+
+    def _assert_only_assistant_text(self, tokenizer, out, *, expected, forbidden):
+        self.assertTrue(open_instruct.dataset_transformation.sft_tulu_filter_v1(out, tokenizer), "row was dropped")
+        trained = _trained_text(tokenizer, out)
+        for text in expected:
+            self.assertIn(text, trained, f"{text!r} missing from the loss ({trained!r})")
+        for text in forbidden:
+            self.assertNotIn(text, trained, f"{text!r} leaked into the loss ({trained!r})")
+        return trained
+
+    def test_plain_reply_under_think_template_is_trained(self):
+        # A turn without reasoning does not reproduce the generation prompt's `<think>`, so the
+        # header must stop at the role marker rather than subtracting a tag the turn never had.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        out = self._tokenize(tokenizer, CONVERSATION_SHAPES["alternating"])
+        self._assert_only_assistant_text(
+            tokenizer,
+            out,
+            expected=["ASSISTONE", "ASSISTTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant", "<think>"],
+        )
+
+    def test_inline_think_multi_turn_masks_the_forced_tag_and_trains_the_rest(self):
+        # The turn reproduces the generation prompt's `<think>`, so the tag is header (the
+        # template forces it at inference) and everything after it is trained.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        out = self._tokenize(tokenizer, self.THINK_CONTENT)
+        trained = self._assert_only_assistant_text(
+            tokenizer,
+            out,
+            expected=["REASONONE</think>ANSWERONE", "REASONTWO</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant", "<think>"],
+        )
+        self.assertEqual(trained.count("</think>"), 2)
+
+    def test_reasoning_content_field_multi_turn_is_trained(self):
+        # Reasoning supplied as a separate field renders as `<think>reasoning</think>content`, so
+        # the span legitimately starts with text that is not `content`. The verifier must compare
+        # against the rendered turn, not the raw content string.
+        base = open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"]
+        content_block = "{% if message.get('content', none) is not none %}{{ message['content'] }}{% endif %}"
+        self.assertIn(content_block, base)
+        template = base.replace(
+            content_block,
+            "{% if message.get('reasoning_content', none) is not none %}"
+            "{{ '<think>' + message['reasoning_content'] + '</think>' }}{% endif %}" + content_block,
+        )
+        tokenizer = self._tokenizer(template)
+        self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, self.REASONING_FIELD),
+            expected=["REASONONE</think>ANSWERONE", "REASONTWO</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant", "<think>"],
+        )
+
+    def test_empty_reasoning_field_renders_an_empty_think_block_that_is_trained(self):
+        # Arrow-backed datasets cannot omit a struct field, so a turn without reasoning carries
+        # reasoning_content == "" and the template emits `<think></think>` before the content. That
+        # markup is the turn's own output: the span must start right after the forced `<think>`
+        # and cover the closing tag, even when the tokenizer merges `>` and `<` across the edge.
+        base = open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"]
+        content_block = "{% if message.get('content', none) is not none %}{{ message['content'] }}{% endif %}"
+        template = base.replace(
+            content_block,
+            "{% if message.get('reasoning_content', none) is not none %}"
+            "{{ '<think>' + message['reasoning_content'] + '</think>' }}{% endif %}" + content_block,
+        )
+        tokenizer = self._tokenizer(template)
+        messages = [
+            {"role": "user", "content": "USERONE"},
+            {"role": "assistant", "reasoning_content": "", "content": "ANSWERONE"},
+            {"role": "user", "content": "USERTWO"},
+            {"role": "assistant", "reasoning_content": "", "content": "ANSWERTWO"},
+        ]
+        trained = self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, messages),
+            expected=["</think>ANSWERONE", "</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant"],
+        )
+        # `<think>` itself is header (forced at inference); at most the `>` of a straddling token
+        # may precede the closing tag, never the whole opening tag.
+        self.assertNotIn("<think>", trained)
+
+    def test_generation_prompt_without_think_trains_the_tag(self):
+        # With no `<think>` in the generation prompt the tag is the turn's first token and must be
+        # trained: the model has to learn to emit it.
+        tokenizer = self._tokenizer(
+            open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker_no_think_sft_tokenization"]
+        )
+        trained = self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, self.THINK_CONTENT),
+            expected=["<think>REASONONE</think>ANSWERONE", "<think>REASONTWO</think>ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant"],
+        )
+        self.assertEqual(trained.count("<think>"), 2)
+
+    def test_header_boundary_never_splits_a_token(self):
+        # Content that shares a partial prefix with the generation prompt's tail (`<thinking`
+        # vs `<think>`) must not leave a half-token in the header.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        messages = [
+            {"role": "user", "content": "USERONE"},
+            {"role": "assistant", "content": "<thinking aloud> ANSWERONE"},
+            {"role": "user", "content": "USERTWO"},
+            {"role": "assistant", "content": "ANSWERTWO"},
+        ]
+        self._assert_only_assistant_text(
+            tokenizer,
+            self._tokenize(tokenizer, messages),
+            expected=["<thinking aloud> ANSWERONE", "ANSWERTWO"],
+            forbidden=["USERONE", "USERTWO", "<|im_start|>assistant"],
+        )
+
+    def test_single_turn_matches_multi_turn_labelling(self):
+        # Single-turn conversations take the char-offset path and multi-turn ones the fallback;
+        # the same turn must be labelled the same way on both.
+        tokenizer = self._tokenizer(open_instruct.dataset_transformation.CHAT_TEMPLATES["olmo_thinker"])
+        single = self._tokenize(tokenizer, self.THINK_CONTENT[:2])
+        self.assertEqual(_trained_text(tokenizer, single).strip(), "REASONONE</think>ANSWERONE" + tokenizer.eos_token)
+
+
+class TestToolCallArgumentNormalization(unittest.TestCase):
+    TEMPLATE = (
+        "{% for m in messages %}<|{{ m['role'] }}|>\n{{ m['content'] }}"
+        "{% for tc in m.get('tool_calls', []) %}<call>{{ tc['function']['name'] }}("
+        "{% for k, v in tc['function']['arguments'].items() %}{{ k }}={{ v | tojson }}{% endfor %})</call>"
+        "{% endfor %}{% if m['role'] == 'assistant' %}{{ eos_token }}{% endif %}\n{% endfor %}"
+        "{% if add_generation_prompt %}<|assistant|>\n{% endif %}"
+    )
+
+    def _call(self, arguments):
+        return {"id": "call_0", "type": "function", "function": {"name": "lookup", "arguments": arguments}}
+
+    def test_json_string_arguments_are_parsed_to_a_mapping(self):
+        messages = [{"role": "assistant", "content": "", "tool_calls": [self._call('{"city": "Paris", "days": 5}')]}]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(messages)
+        self.assertEqual(out[0]["tool_calls"][0]["function"]["arguments"], {"city": "Paris", "days": 5})
+        # The input row is left untouched.
+        self.assertEqual(messages[0]["tool_calls"][0]["function"]["arguments"], '{"city": "Paris", "days": 5}')
+
+    def test_mapping_arguments_and_non_object_strings_pass_through(self):
+        calls = [self._call({"city": "Paris"}), self._call("not json"), self._call("[1, 2]")]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(
+            [{"role": "assistant", "content": "", "tool_calls": calls}]
+        )
+        self.assertEqual(
+            [c["function"]["arguments"] for c in out[0]["tool_calls"]], [{"city": "Paris"}, "not json", "[1, 2]"]
+        )
+
+    def test_flat_tool_calls_are_parsed_too(self):
+        flat = {"name": "lookup", "arguments": '{"city": "Paris"}'}
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(
+            [{"role": "assistant", "content": "", "tool_calls": [flat]}]
+        )
+        self.assertEqual(out[0]["tool_calls"][0]["arguments"], {"city": "Paris"})
+
+    def test_string_and_mapping_arguments_tokenize_identically(self):
+        # Templates iterate arguments as a mapping; a dataset that stores them as JSON strings
+        # (unavoidable when argument names vary across rows) must render exactly like one that
+        # stores dicts, rather than crash inside the template.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = self.TEMPLATE
+
+        def row(arguments):
+            return {
+                "messages": [
+                    {"role": "user", "content": "weather?"},
+                    {"role": "assistant", "content": "Checking.", "tool_calls": [self._call(arguments)]},
+                    {"role": "tool", "content": "sunny"},
+                    {"role": "assistant", "content": "Sunny in Paris."},
+                ]
+            }
+
+        as_string = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            row('{"city": "Paris", "days": 5}'), tokenizer, max_seq_length=4096
+        )
+        as_dict = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            row({"city": "Paris", "days": 5}), tokenizer, max_seq_length=4096
+        )
+        for key in (
+            open_instruct.dataset_transformation.INPUT_IDS_KEY,
+            open_instruct.dataset_transformation.LABELS_KEY,
+        ):
+            self.assertEqual(as_string[key].tolist(), as_dict[key].tolist())
+        trained = _trained_text(tokenizer, as_string)
+        self.assertIn('<call>lookup(city="Paris"days=5)</call>', trained)
+        self.assertIn("Sunny in Paris.", trained)
+        self.assertNotIn("sunny\n", trained)
+        self.assertNotIn("weather?", trained)
