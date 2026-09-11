@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "source": "f0bcf2f51",
+  "core": {
+    "experiment": "01M27ENY7T955XE1W116D7M4BM",
+    "status": "failed before model initialization",
+    "error": "unsupported --no-use-wandb diagnostic argument; no optimizer steps"
+  },
+  "megatron": {
+    "experiment": "01M27EPG7T5PKJ9B7P6J1GPASD",
+    "status": "running; original source bootstrap and parser passed"
+  },
+  "outputs": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v1",
+  "next": "retry Core with omitted store_true tracking flag; collect paired prefill captures"
+}

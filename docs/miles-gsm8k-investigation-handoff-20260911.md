@@ -65,7 +65,7 @@ Existing replay gates test forced IDs, differentiable router weights, auxiliary/
 
 - Core: `01M27ENY7T955XE1W116D7M4BM`, job `01M27ENYCQJMJNXTJ8MPMQMTWN`.
 - Megatron: `01M27EPG7T5PKJ9B7P6J1GPASD`, job `01M27EPGBAVD31VD3GHJ5XB7DX`.
-- Launcher source `f0bcf2f51`; immutable original images and original Megatron source bootstrap preserved. Both allocated, no model trace results yet at this snapshot.
+- Launcher source `f0bcf2f51`; immutable original images and original Megatron source bootstrap preserved. Core first attempt failed before model initialization because the diagnostic serialized unsupported `--no-use-wandb`; a tested retry is being prepared. Megatron passed its exact source bootstrap and parser and is starting the runtime. No model trace results yet at this snapshot.
 - Each runs zero optimizer steps. Four frozen prefixes end immediately before original divergent next tokens (test IDs341,975,1039,605).
 - Stages: direct-HF serving controls/captures/repeat → full weight snapshot/reset → actual native trainer initialization/publication → full weight equality check → same controls/captures/repeat.
 - Captures: all-prefix router logits, selected expert IDs/weights/margins; bounded embedding, layer inputs, attention/MLP/layer outputs, final norm/logits; dtypes, execution controls and loaded source hashes.
