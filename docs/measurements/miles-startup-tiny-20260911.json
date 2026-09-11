@@ -1,0 +1,682 @@
+{
+  "scope": "Local RTX 4090, tiny two-block hybrid MoE, EP1/TP1 resident colocation; two updates through public CLI; no full-SFT speedup claim.",
+  "source_commit": "8229cc33d454c44bbd748fd206ee9b40900e103e",
+  "source_command": "/tmp/startup-ray-test python /validation/startup-tiny.py",
+  "artifacts": "/tmp/miles-validation/startup-tiny-v2",
+  "arms": {
+    "cold": {
+      "driver_to_first_update_seconds": 173.57489562034607,
+      "driver_stages": [
+        {
+          "stage": "startup_cache_prepare",
+          "rollout_id": null,
+          "started_unix": 1789162674.3368802,
+          "seconds": 0.04619650403037667,
+          "passed": true
+        },
+        {
+          "stage": "placement",
+          "rollout_id": null,
+          "started_unix": 1789162674.3830953,
+          "seconds": 0.09301012987270951,
+          "passed": true
+        },
+        {
+          "stage": "serving_startup",
+          "rollout_id": null,
+          "started_unix": 1789162674.4761975,
+          "seconds": 82.69880908308551,
+          "passed": true
+        },
+        {
+          "stage": "trainer_startup",
+          "rollout_id": null,
+          "started_unix": 1789162757.1750574,
+          "seconds": 12.307306192815304,
+          "passed": true
+        },
+        {
+          "stage": "initial_publication",
+          "rollout_id": null,
+          "started_unix": 1789162769.482403,
+          "seconds": 0.05114884115755558,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 0,
+          "started_unix": 1789162769.533594,
+          "seconds": 0.8791795819997787,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 0,
+          "started_unix": 1789162770.4128044,
+          "seconds": 77.49897149205208,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 0,
+          "started_unix": 1789162847.9118545,
+          "seconds": 0.06817319989204407,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 1,
+          "started_unix": 1789162847.9801042,
+          "seconds": 0.08109968295320868,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 1,
+          "started_unix": 1789162848.0612288,
+          "seconds": 0.09071980183944106,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 1,
+          "started_unix": 1789162848.1520073,
+          "seconds": 0.06149594113230705,
+          "passed": true
+        }
+      ],
+      "cache": {
+        "report_dir": "/validation/startup-tiny-v2/cache/tmp-7d/runs/8c1d5f4ce69a4473b56bdb218a12fda1",
+        "success": true,
+        "workers": [
+          {
+            "activity": {
+              "group_miss": 120,
+              "put": 968
+            },
+            "files_after": 968,
+            "publish": {
+              "family": "triton",
+              "generation": "47aa22f3c688d03df34a4a852bfcffe1f979f69aadf71a187e24b9c812a66559",
+              "local_bytes": 46738954,
+              "seconds": 0.6527460101060569,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "status": "cold"
+            },
+            "setup_seconds": 0.7964920783415437,
+            "slot": "serve-regular-rank0"
+          },
+          {
+            "activity": {
+              "group_miss": 234,
+              "put": 1891
+            },
+            "files_after": 1891,
+            "publish": {
+              "family": "triton",
+              "generation": "0a3ecea33b7bd56e8a731e2ca00297220eda62f51965573b049abcd0e123357d",
+              "local_bytes": 83930998,
+              "seconds": 1.2960854931734502,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "status": "cold"
+            },
+            "setup_seconds": 0.8223917889408767,
+            "slot": "train-actor-cell0-rank0"
+          }
+        ]
+      },
+      "rank_stages": [
+        {
+          "stage": "distributed_init",
+          "started_unix": 1789162764.1573513,
+          "seconds": 0.08575669396668673,
+          "passed": true
+        },
+        {
+          "stage": "hf_read",
+          "started_unix": 1789162764.444816,
+          "seconds": 0.022997009102255106,
+          "passed": true
+        },
+        {
+          "stage": "native_parameter_init",
+          "started_unix": 1789162764.468566,
+          "seconds": 0.031849983148276806,
+          "passed": true
+        },
+        {
+          "stage": "hf_to_native",
+          "started_unix": 1789162764.5004656,
+          "seconds": 0.0049243588000535965,
+          "passed": true
+        },
+        {
+          "stage": "native_model_optimizer_build",
+          "started_unix": 1789162764.467835,
+          "seconds": 0.2175052617676556,
+          "passed": true
+        },
+        {
+          "stage": "native_restore",
+          "started_unix": 1789162764.6862001,
+          "seconds": 5.560507997870445e-05,
+          "passed": true
+        }
+      ],
+      "publication_versions": [
+        [
+          0,
+          false
+        ],
+        [
+          1,
+          false
+        ],
+        [
+          1,
+          true
+        ],
+        [
+          2,
+          false
+        ],
+        [
+          2,
+          true
+        ]
+      ]
+    },
+    "restored": {
+      "driver_to_first_update_seconds": 67.34068179130554,
+      "driver_stages": [
+        {
+          "stage": "startup_cache_prepare",
+          "rollout_id": null,
+          "started_unix": 1789162867.5367503,
+          "seconds": 0.05173498811200261,
+          "passed": true
+        },
+        {
+          "stage": "placement",
+          "rollout_id": null,
+          "started_unix": 1789162867.5885117,
+          "seconds": 0.10409290716052055,
+          "passed": true
+        },
+        {
+          "stage": "serving_startup",
+          "rollout_id": null,
+          "started_unix": 1789162867.6926954,
+          "seconds": 42.1252266978845,
+          "passed": true
+        },
+        {
+          "stage": "trainer_startup",
+          "rollout_id": null,
+          "started_unix": 1789162909.817959,
+          "seconds": 13.478899941779673,
+          "passed": true
+        },
+        {
+          "stage": "initial_publication",
+          "rollout_id": null,
+          "started_unix": 1789162923.2969027,
+          "seconds": 0.05438499804586172,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 0,
+          "started_unix": 1789162923.351354,
+          "seconds": 0.300470685120672,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 0,
+          "started_unix": 1789162923.651864,
+          "seconds": 11.225567961111665,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 0,
+          "started_unix": 1789162934.8775027,
+          "seconds": 0.061730205081403255,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 1,
+          "started_unix": 1789162934.939282,
+          "seconds": 0.08101958688348532,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 1,
+          "started_unix": 1789162935.0203288,
+          "seconds": 0.07529321731999516,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 1,
+          "started_unix": 1789162935.095674,
+          "seconds": 0.055501129012554884,
+          "passed": true
+        }
+      ],
+      "cache": {
+        "report_dir": "/validation/startup-tiny-v2/cache/tmp-7d/runs/acf569f2431b45f7aa6367188fc8d4ac",
+        "success": true,
+        "workers": [
+          {
+            "activity": {
+              "group_hit": 21
+            },
+            "files_after": 968,
+            "publish": {
+              "family": "triton",
+              "generation": "47aa22f3c688d03df34a4a852bfcffe1f979f69aadf71a187e24b9c812a66559",
+              "local_bytes": 46738954,
+              "seconds": 0.8273799470625818,
+              "status": "unchanged"
+            },
+            "restore": {
+              "archive_bytes": 8980651,
+              "family": "triton",
+              "generation": "47aa22f3c688d03df34a4a852bfcffe1f979f69aadf71a187e24b9c812a66559",
+              "local_bytes": 46738954,
+              "relocated_groups": 120,
+              "seconds": 0.22048637177795172,
+              "status": "hit"
+            },
+            "setup_seconds": 1.1732710688374937,
+            "slot": "serve-regular-rank0"
+          },
+          {
+            "activity": {
+              "group_hit": 23
+            },
+            "files_after": 1891,
+            "publish": {
+              "family": "triton",
+              "generation": "0a3ecea33b7bd56e8a731e2ca00297220eda62f51965573b049abcd0e123357d",
+              "local_bytes": 83930998,
+              "seconds": 1.567181773018092,
+              "status": "unchanged"
+            },
+            "restore": {
+              "archive_bytes": 16680047,
+              "family": "triton",
+              "generation": "0a3ecea33b7bd56e8a731e2ca00297220eda62f51965573b049abcd0e123357d",
+              "local_bytes": 83930998,
+              "relocated_groups": 234,
+              "seconds": 0.400458796415478,
+              "status": "hit"
+            },
+            "setup_seconds": 1.4218446598388255,
+            "slot": "train-actor-cell0-rank0"
+          }
+        ]
+      },
+      "rank_stages": [
+        {
+          "stage": "distributed_init",
+          "started_unix": 1789162918.0327413,
+          "seconds": 0.08061341196298599,
+          "passed": true
+        },
+        {
+          "stage": "hf_read",
+          "started_unix": 1789162918.3110096,
+          "seconds": 0.024615899194031954,
+          "passed": true
+        },
+        {
+          "stage": "native_parameter_init",
+          "started_unix": 1789162918.3364327,
+          "seconds": 0.03115957695990801,
+          "passed": true
+        },
+        {
+          "stage": "hf_to_native",
+          "started_unix": 1789162918.3676405,
+          "seconds": 0.004773546010255814,
+          "passed": true
+        },
+        {
+          "stage": "native_model_optimizer_build",
+          "started_unix": 1789162918.3356524,
+          "seconds": 0.20082831103354692,
+          "passed": true
+        },
+        {
+          "stage": "native_restore",
+          "started_unix": 1789162918.5373795,
+          "seconds": 4.612607881426811e-05,
+          "passed": true
+        }
+      ],
+      "publication_versions": [
+        [
+          0,
+          false
+        ],
+        [
+          1,
+          false
+        ],
+        [
+          1,
+          true
+        ],
+        [
+          2,
+          false
+        ],
+        [
+          2,
+          true
+        ]
+      ]
+    }
+  },
+  "generations": [
+    {
+      "update": 0,
+      "samples": 4,
+      "prompts_rewards_status_versions_exact": true,
+      "generation_and_logprob_multiset_exact": true,
+      "token_differences": [
+        {
+          "sample": 0,
+          "response_position": 31,
+          "cold": 47761,
+          "restored": 34306
+        },
+        {
+          "sample": 2,
+          "response_position": 31,
+          "cold": 34306,
+          "restored": 47761
+        }
+      ],
+      "logprob_count": 128,
+      "paired_logprob_max_abs_diff": 0.0078105926513671875,
+      "matching_target_logprob_max_abs_diff": 0.0078105926513671875
+    },
+    {
+      "update": 1,
+      "samples": 4,
+      "prompts_rewards_status_versions_exact": true,
+      "generation_and_logprob_multiset_exact": true,
+      "token_differences": [],
+      "logprob_count": 128,
+      "paired_logprob_max_abs_diff": 0.0,
+      "matching_target_logprob_max_abs_diff": 0.0
+    }
+  ],
+  "training_diagnostics_exact": true,
+  "cache_and_training_contract_passed": true,
+  "limits": [
+    "Per-sample IDs are not bit-exact: final tokens swap between two identical-prompt samples at update zero. Compare generation/logprob multisets separately; assignment cause unassigned.",
+    "Tiny random model gives zero task reward; these two updates exercise auxiliary gradients, not learning quality.",
+    "Driver-to-first-update excludes initial Python imports and ray.init; HF import is tiny here."
+  ],
+  "script_sha256": "45c90f8bb1d4733b72e54ae31c34eaf138cad1f815e33b7ef8175ddcc933c846",
+  "worker_identities": {
+    "serve-regular-rank0": [
+      {
+        "fingerprint": "ebfa69da8784c12a81ff861b841acc9429e8663345a78fcb3b2f6c1ba5ed6dde",
+        "restore": {
+          "family": "triton",
+          "status": "cold"
+        }
+      },
+      {
+        "fingerprint": "ebfa69da8784c12a81ff861b841acc9429e8663345a78fcb3b2f6c1ba5ed6dde",
+        "restore": {
+          "archive_bytes": 8980651,
+          "family": "triton",
+          "generation": "47aa22f3c688d03df34a4a852bfcffe1f979f69aadf71a187e24b9c812a66559",
+          "local_bytes": 46738954,
+          "relocated_groups": 120,
+          "seconds": 0.22048637177795172,
+          "status": "hit"
+        }
+      }
+    ],
+    "train-actor-cell0-rank0": [
+      {
+        "fingerprint": "5b2d39ac45a00c03e05f40c551b7f7351b5aa4bc2cdb7327de59801f404016ab",
+        "restore": {
+          "family": "triton",
+          "status": "cold"
+        }
+      },
+      {
+        "fingerprint": "5b2d39ac45a00c03e05f40c551b7f7351b5aa4bc2cdb7327de59801f404016ab",
+        "restore": {
+          "archive_bytes": 16680047,
+          "family": "triton",
+          "generation": "0a3ecea33b7bd56e8a731e2ca00297220eda62f51965573b049abcd0e123357d",
+          "local_bytes": 83930998,
+          "relocated_groups": 234,
+          "seconds": 0.400458796415478,
+          "status": "hit"
+        }
+      }
+    ]
+  },
+  "runtime_identity": {
+    "image": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629",
+    "runtime_lock": {
+      "base_image": {
+        "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+        "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+      },
+      "schema_version": 1,
+      "sources": {
+        "miles": {
+          "development_commit": "78958e07823d69168467cc49114fc608c5248f92",
+          "patch": "patches/miles.patch",
+          "patch_sha256": "46ff6b13dcc9ab2c1250dfa2fb499bb96701ac499d20b117cd6788b18c3e734f",
+          "repository": "https://github.com/radixark/miles.git",
+          "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6"
+        },
+        "olmo-core": {
+          "development_commit": "48bb6d7e155462cd496ecc5095bf0ebecac4a5b7",
+          "patch": "patches/olmo-core.patch",
+          "patch_sha256": "d64b20a7537d7722543eed5621bfc600e059f125bf3167a5c66a4c19c069316e",
+          "repository": "https://github.com/allenai/OLMo-core.git",
+          "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5"
+        },
+        "olmo-sglang": {
+          "development_commit": "11ae9f6c4c131ded0ab67420e4f30ea67b924e99",
+          "embedded_path": "/src/olmo-sglang",
+          "note": "Base image omits original test files; runtime delta covers src/tools/docs. Full tests live at development_commit.",
+          "patch": "patches/olmo-sglang.patch",
+          "patch_paths": [
+            "src",
+            "tools",
+            "docs"
+          ],
+          "patch_sha256": "e1bb9d06028986c754782a832b6a78d6313e80ccaf7f466200d8a7e8a12d9751",
+          "repository": "https://github.com/allenai/olmo-sglang.git",
+          "revision": "81a312ee8326e279a4641e03542ef971a5ffb863"
+        }
+      },
+      "status": "experimental hero support; conversion and serving qualification in progress"
+    },
+    "sources": {
+      "miles": {
+        "files": 379,
+        "sha256": "4e27d3dc138b6de9cbc01c1767a496b99cf1340f44b248db62543fa86fc03952"
+      },
+      "olmo-core": {
+        "files": 289,
+        "sha256": "1948fa0c7b6f13930c0057f5dc298093e596140dcf17f9dd821e5ff63bed087a"
+      },
+      "olmo-sglang": {
+        "files": 20,
+        "sha256": "74b83f334d117fd3f02886aee4c3d5da79fcc844b3ab9ddbdad99d9011600ba9"
+      },
+      "open-instruct": {
+        "files": 153,
+        "sha256": "a82b8da7abc3cb0b75d6a580be7ace046351290088b9c0f2e123e1c2799ae198"
+      }
+    },
+    "model_config": {
+      "architectures": [
+        "Olmo3MoeForCausalLM"
+      ],
+      "attention_bias": false,
+      "attention_dropout": 0.0,
+      "attention_gate_full_precision": true,
+      "attention_gate_type": "elementwise",
+      "attention_hidden_size": 128,
+      "auto_map": {
+        "AutoConfig": "configuration_olmo3moe.Olmo3MoeConfig",
+        "AutoModelForCausalLM": "modeling_olmo3moe.Olmo3MoeForCausalLM"
+      },
+      "bos_token_id": 50256,
+      "dense_layers_indices": [
+        0
+      ],
+      "dense_mlp_intermediate_size": 256,
+      "dense_mlp_uses_shared_experts": true,
+      "dtype": "bfloat16",
+      "embed_norm": false,
+      "embed_scale": 1.0,
+      "eos_token_id": 50256,
+      "gating_function": "softmax",
+      "head_dim": 32,
+      "hidden_act": "silu",
+      "hidden_size": 128,
+      "initializer_range": 0.02,
+      "latent_moe_bias": false,
+      "latent_moe_dim": 64,
+      "latent_moe_up_proj_input_norm": false,
+      "layer_types": [
+        "linear_attention",
+        "full_attention"
+      ],
+      "linear_allow_neg_eigval": false,
+      "linear_conv_kernel_dim": 4,
+      "linear_key_head_dim": 64,
+      "linear_norm_eps": 1e-05,
+      "linear_num_key_heads": 8,
+      "linear_num_value_heads": 8,
+      "linear_value_head_dim": 64,
+      "max_position_embeddings": 512,
+      "model_type": "olmo3moe",
+      "moe_intermediate_size": 256,
+      "n_routed_experts": 4,
+      "normalize_expert_weights": 1.0,
+      "num_attention_heads": 4,
+      "num_experts_per_tok": 2,
+      "num_hidden_layers": 2,
+      "num_key_value_heads": 2,
+      "number_of_conv_states": 3,
+      "original_num_experts_per_tok": null,
+      "pad_token_id": 50256,
+      "restore_weight_scale": true,
+      "rms_norm_eps": 1e-05,
+      "rope_parameters": {
+        "rope_theta": 10000.0,
+        "rope_type": "default"
+      },
+      "rope_theta": 10000.0,
+      "shared_expert_intermediate_size": 128,
+      "sliding_window": 512,
+      "tie_word_embeddings": false,
+      "transformers_version": "5.12.1",
+      "use_cache": true,
+      "use_head_qk_norm": true,
+      "use_peri_ln": true,
+      "use_rope": false,
+      "vocab_size": 50304
+    },
+    "toolchain": {
+      "cc": {
+        "returncode": 0,
+        "text": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+      },
+      "cxx": {
+        "returncode": 0,
+        "text": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+      },
+      "driver": {
+        "returncode": 0,
+        "text": "580.173.02"
+      },
+      "libc": [
+        "glibc",
+        "2.39"
+      ],
+      "machine": "x86_64",
+      "nvcc": {
+        "returncode": 0,
+        "text": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Wed_Aug_20_01:58:59_PM_PDT_2025\nCuda compilation tools, release 13.0, V13.0.88\nBuild cuda_13.0.r13.0/compiler.36424714_0"
+      },
+      "packages": {
+        "fla-core": null,
+        "flash-attn": null,
+        "flash-attn-4": "4.0.0b27",
+        "flash-linear-attention": "0.5.2",
+        "sglang": "0.5.19.dev49+g3145136",
+        "tilelang": "0.1.9",
+        "torch": "2.13.0+cu130",
+        "transformer-engine": "2.17.0",
+        "triton": "3.7.1"
+      },
+      "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]",
+      "torch_hardware": {
+        "gpus": [
+          {
+            "major": 8,
+            "memory": 25250627584,
+            "minor": 9,
+            "name": "NVIDIA GeForce RTX 4090",
+            "sm_count": 128
+          }
+        ],
+        "torch_cuda": "13.0",
+        "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb"
+      }
+    },
+    "compiler_env": {
+      "CUTE_DSL_LIBS": "74cf1ba3878d70b595d4514ea6152d58c9350c7b02a2cab1904cd1e54c70bd83",
+      "OLMO_MILES_CODE_SERVICE_PYTHON": "3db69d59f81777c9f14b4c5c00546efba8c51ee7dc6546037937a176475d0eba",
+      "OLMO_MILES_COMPILE_CACHE_ENABLED": "076de6e730df0b4c3860877a0f619c6ac11f8aefd78313ac793a2a703c026869",
+      "OLMO_MILES_COMPILE_CACHE_LOCAL_ROOT": "b89e2889ec5ec49d0a2286d79c4db6883d1efbcba477bb588f57359568e65bf2",
+      "OLMO_MILES_IFEVAL_PYTHON": "3db69d59f81777c9f14b4c5c00546efba8c51ee7dc6546037937a176475d0eba",
+      "OLMO_MILES_MATH_PYTHON": "3db69d59f81777c9f14b4c5c00546efba8c51ee7dc6546037937a176475d0eba",
+      "OLMO_MILES_RUNTIME_PROFILE": "90910b8e4736cbf60f0e464902f5eb1372452562d4a01f8ce7eda4b0d34dfaf6",
+      "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_FALLBACK_VARIANT": "18d10c7d2b4b04aaf04254d1ae5d655a5dc0407cbcdd5a8c3986e985370f36ee",
+      "SGLANG_DG_CACHE_DIR": "7856eeb329975c998b84a5c820d1995d2bce0333571220d36b4e16175842246c",
+      "SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION": "076de6e730df0b4c3860877a0f619c6ac11f8aefd78313ac793a2a703c026869",
+      "SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE": "076de6e730df0b4c3860877a0f619c6ac11f8aefd78313ac793a2a703c026869",
+      "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "076de6e730df0b4c3860877a0f619c6ac11f8aefd78313ac793a2a703c026869",
+      "SGLANG_EXTERNAL_MODEL_PACKAGE": "364713d0638ecc17cb280203f7e1be419a42366222ba580745246d61dd31fa69",
+      "SGLANG_JIT_DEEPGEMM_PRECOMPILE": "076de6e730df0b4c3860877a0f619c6ac11f8aefd78313ac793a2a703c026869",
+      "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "18d10c7d2b4b04aaf04254d1ae5d655a5dc0407cbcdd5a8c3986e985370f36ee",
+      "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": "391552c099c101b131feaf24c5795a6a15bc8ec82015424e0d2b4274a369a0bf",
+      "TORCH_CUDA_ARCH_LIST": "06b61d18d6b7a8822dc466102ff41084eb22b0cd928a68074d6894abcff7490c",
+      "TRITON_LIBCUDA_PATH": "881d370a37adebbd370e1e38ceb3f3172a7c099311a5451d5976fb8f299a1b00",
+      "TRITON_PTXAS_BLACKWELL_PATH": "2a6952b6fcfdca75845d44da4c572418743e8b3144239af9c94cc801302b91e3"
+    }
+  },
+  "run_configs": {
+    "cold": "[core]\nmax_train_rollout_logprob_abs_diff = 0.05\ndiagnostic_interval = 1\nreplay_diagnostics = false\nstream_moe_export = true\nweight_sync_mode = \"flattened\"\nrow_specialization = \"dynamic\"\ncompiler_cache = true\ncompiler_cache_root = \"/validation/startup-tiny-v2/cache/tmp-7d\"\ncompiler_cache_restore = false\ncompiler_cache_diagnostics = true\ncheckpoint_profile = false\ncheckpoint_compact_storage = true\ncheckpoint_dedup_save_to_lowest_rank = false\ncheckpoint_constant_memory_planning = true\nreward_config = \"/validation/public-hybrid-moe/verifiers.json\"\nexpert_parallel_size = 1\nattention_backend = \"torch\"\nactivation_checkpointing = true\nmax_sequence_length = 512\nmax_policy_lag = 0\nrouter_aux_loss_weight = 0.01\nrouter_z_loss_weight = 1e-05\n[miles]\nhf_checkpoint = \"/validation/public-hybrid-moe/hf\"\nprompt_data = \"/validation/public-hybrid-moe/prompts.jsonl\"\ninput_key = \"input\"\nlabel_key = \"label\"\nmetadata_key = \"metadata\"\ncustom_rm_path = \"open_instruct.miles.rewards.registered_reward\"\nactor_num_nodes = 1\nactor_num_gpus_per_node = 1\nnum_gpus_per_node = 1\nrollout_num_gpus = 1\nrollout_num_gpus_per_engine = 1\ncolocate = true\noffload_rollout = false\nmicro_batch_size = 1\nrollout_batch_size = 1\nn_samples_per_prompt = 4\nglobal_batch_size = 4\nnum_rollout = 2\nrollout_temperature = 0.0\nrollout_seed = 17\nrollout_max_prompt_len = 256\nrollout_max_response_len = 32\nrollout_max_context_len = 512\nsglang_context_length = 512\nsglang_max_total_tokens = 4096\nsglang_max_running_requests = 4\nsglang_server_concurrency = 4\nsglang_mem_fraction_static = 0.2\nsglang_disable_radix_cache = true\nsglang_max_mamba_cache_size = 16\nsglang_cuda_graph_backend_decode = \"disabled\"\nsglang_cuda_graph_backend_prefill = \"disabled\"\nsglang_sampling_backend = \"pytorch\"\nsglang_attention_backend = \"torch_native\"\nsglang_log_level = \"info\"\ncheck_weight_update_equal = true\nupdate_weight_buffer_size = 1073741824\nupdate_weights_interval = 1\nloss_type = \"policy_loss\"\nadvantage_estimator = \"grpo\"\nlr = 1e-06\nlr_decay_iters = 3\nseed = 17\nsave = \"/validation/startup-tiny-v2/cold/metrics\"\nsave_debug_rollout_data = \"/validation/startup-tiny-v2/cold/rollouts/{rollout_id}.pt\"\n",
+    "restored": "[core]\nmax_train_rollout_logprob_abs_diff = 0.05\ndiagnostic_interval = 1\nreplay_diagnostics = false\nstream_moe_export = true\nweight_sync_mode = \"flattened\"\nrow_specialization = \"dynamic\"\ncompiler_cache = true\ncompiler_cache_root = \"/validation/startup-tiny-v2/cache/tmp-7d\"\ncompiler_cache_restore = true\ncompiler_cache_diagnostics = true\ncheckpoint_profile = false\ncheckpoint_compact_storage = true\ncheckpoint_dedup_save_to_lowest_rank = false\ncheckpoint_constant_memory_planning = true\nreward_config = \"/validation/public-hybrid-moe/verifiers.json\"\nexpert_parallel_size = 1\nattention_backend = \"torch\"\nactivation_checkpointing = true\nmax_sequence_length = 512\nmax_policy_lag = 0\nrouter_aux_loss_weight = 0.01\nrouter_z_loss_weight = 1e-05\n[miles]\nhf_checkpoint = \"/validation/public-hybrid-moe/hf\"\nprompt_data = \"/validation/public-hybrid-moe/prompts.jsonl\"\ninput_key = \"input\"\nlabel_key = \"label\"\nmetadata_key = \"metadata\"\ncustom_rm_path = \"open_instruct.miles.rewards.registered_reward\"\nactor_num_nodes = 1\nactor_num_gpus_per_node = 1\nnum_gpus_per_node = 1\nrollout_num_gpus = 1\nrollout_num_gpus_per_engine = 1\ncolocate = true\noffload_rollout = false\nmicro_batch_size = 1\nrollout_batch_size = 1\nn_samples_per_prompt = 4\nglobal_batch_size = 4\nnum_rollout = 2\nrollout_temperature = 0.0\nrollout_seed = 17\nrollout_max_prompt_len = 256\nrollout_max_response_len = 32\nrollout_max_context_len = 512\nsglang_context_length = 512\nsglang_max_total_tokens = 4096\nsglang_max_running_requests = 4\nsglang_server_concurrency = 4\nsglang_mem_fraction_static = 0.2\nsglang_disable_radix_cache = true\nsglang_max_mamba_cache_size = 16\nsglang_cuda_graph_backend_decode = \"disabled\"\nsglang_cuda_graph_backend_prefill = \"disabled\"\nsglang_sampling_backend = \"pytorch\"\nsglang_attention_backend = \"torch_native\"\nsglang_log_level = \"info\"\ncheck_weight_update_equal = true\nupdate_weight_buffer_size = 1073741824\nupdate_weights_interval = 1\nloss_type = \"policy_loss\"\nadvantage_estimator = \"grpo\"\nlr = 1e-06\nlr_decay_iters = 3\nseed = 17\nsave = \"/validation/startup-tiny-v2/restored/metrics\"\nsave_debug_rollout_data = \"/validation/startup-tiny-v2/restored/rollouts/{rollout_id}.pt\"\n"
+  }
+}

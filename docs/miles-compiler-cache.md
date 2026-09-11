@@ -129,3 +129,49 @@ unchanged republished generation. See [the retained probe](measurements/miles-st
 This tests the actual actor environment and spawned-child observation boundary,
 not full-model speed. The first full-model submission `01M2954XAX1ETXNSQN14HT13KX`
 was stopped while queued, before allocation, to include this fix.
+
+
+### Complete local hybrid-MoE screen
+
+A local RTX 4090 run exercised two fresh Ray lifetimes through the public
+`open_instruct.miles train` command, with the existing tiny two-block hybrid-MoE
+fixture, one resident trainer and one TP1 serving engine sharing the GPU. Each
+arm completed two optimizer updates, initial all-weight equality, and repeated
+publication/reset/equality checks after each update. The cache configuration and
+runtime identity are retained in [the measurement](measurements/miles-startup-tiny-20260911.json).
+
+| Interval | Cold | Restored |
+| --- | ---: | ---: |
+| Driver entry through first optimizer update | 173.57 s | 67.34 s |
+| Serving startup, including health/warmup and initial snapshot/reset | 82.70 s | 42.13 s |
+| Trainer startup | 12.31 s | 13.48 s |
+| First training call, including scoring | 77.50 s | 11.23 s |
+| Second training call | 0.091 s | 0.075 s |
+
+The serving cache contained 46.7 MB and the trainer cache 83.9 MB. Both restored
+workers consumed actual Triton groups, wrote **zero** new compiler artifacts,
+and republished unchanged generations. Combined restore time was 0.62 s;
+combined cold publication time was 1.95 s. HF read/conversion was negligible
+for this tiny fixture, so these numbers do not estimate full-SFT startup.
+The first-update interval starts inside the driver and excludes earlier Python
+imports and `ray.init`; nested intervals must not be added to it.
+
+Generation sequences **and their log-probabilities matched as multisets** in both
+updates. Two final tokens exchanged sample IDs between duplicate prompts at
+update zero; per-request ordering was not exact. Gradient diagnostics, sampled
+update norms, and auxiliary/policy objective diagnostics matched. The random
+tiny model earned zero task reward, so the updates exercise auxiliary gradients
+and the startup contract, not task learning. TileLang and other compiler families
+remained cold/separate; CUDA graphs were disabled in this local profile.
+
+The first local attempt lacked the external-model registration environment
+variable and failed before trainer startup; it published no cache. The corrected
+run set `SGLANG_EXTERNAL_MODEL_PACKAGE=olmo_sglang.models`, already supplied by
+the Beaker launcher.
+
+The full SFT EP2/TP1 comparison is submitted as
+[Beaker 01M295M9QNN2ME018S25WM6P40](https://beaker.org/ex/01M295M9QNN2ME018S25WM6P40)
+using image `01M295M38BD4W67Q5P6FV5FXT6` and source `4936986ce`.
+At 2026-09-11 21:45 UTC it remained queued on Holmes (urgent, minimum runtime
+one hour). Full-model timing and WEKA archive qualification remain pending;
+automatic persistence stays off by default until that gate passes.
