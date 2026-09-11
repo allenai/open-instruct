@@ -57,6 +57,7 @@ import logging
 import math
 import random
 import shutil
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -181,14 +182,57 @@ WEIGHT_SYNC_TIMEOUT_S = 7200.0
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
-def _build_vlm_name_mapper(model_name: str):
+def _hf_attention_functions():
+    """The CURRENT ``ALL_ATTENTION_FUNCTIONS`` registry, resolved at call time.
+
+    Inside the ray actor the ``transformers.modeling_utils.ALL_ATTENTION_FUNCTIONS``
+    attribute gets replaced after import (import-order dependent), so an
+    import-time ``from … import`` binding can point at a stale instance that the
+    modeling code no longer consults — writes to it are silently invisible.
+    DeepSpeed's Ulysses registration works only because it imports the attribute
+    late, inside the registering function. Always go through ``sys.modules``.
+    """
+    return sys.modules["transformers.modeling_utils"].ALL_ATTENTION_FUNCTIONS
+
+
+def _attention_geometry(config) -> tuple:
+    """Attention-shape fingerprint used to decide whether a frozen scorer (the
+    OPD teacher) can share the policy's Ulysses SP attention wrapper. The
+    wrapper is registered once with the policy's head layout and asserts on
+    mismatched query shapes, and the FLA CP contexts bake in the policy's
+    linear-attention conv kernel — so any difference here forces full-sequence
+    (unsplit) teacher scoring under SP."""
+    text_config = getattr(config, "text_config", None) or config
+    return tuple(
+        getattr(text_config, field, None)
+        for field in (
+            "num_attention_heads",
+            "num_key_value_heads",
+            "head_dim",
+            "linear_num_value_heads",
+            "linear_num_key_heads",
+            "linear_key_head_dim",
+            "linear_value_head_dim",
+            "linear_conv_kernel_dim",
+        )
+    )
+
+
+def _build_vlm_name_mapper(model_name: str, model_type: str | None = None):
     """Sometimes we have different weight names btw vLLM and HF, so we build
     a mapping. E.g., Qwen3.5/3.6 have 'language_model.' prefixed in vLLM but not HF.
-    Match the "qwen35"/"qwen3_5" spellings too — local checkpoint dirs (e.g.
-    warm-start paths like .../swerl_qwen35_9b_..._cg) drop the dot, and missing the
-    mapper makes the trainer->vLLM weight sync fail with 'no module named model'."""
+    The authoritative signal is the loaded model's ``config.model_type``
+    ("qwen3_5"/"qwen3_5_text"/"qwen3_6"...) — path spellings alone miss
+    checkpoints whose names carry no qwen marker (e.g. allenai/tmax-4b), and
+    missing the mapper makes the trainer->vLLM weight sync fail with
+    'no module or parameter named model'. The path heuristics (including the
+    dot-less "qwen35" spelling of warm-start dirs like .../swerl_qwen35_9b_..._cg)
+    are kept as a fallback for callers without a config."""
     name = model_name.lower()
-    if any(v in name for v in ("qwen3.5", "qwen3.6", "qwen35", "qwen36", "qwen3_5", "qwen3_6")):
+    mtype = (model_type or "").lower()
+    if mtype.startswith(("qwen3_5", "qwen3_6")) or any(
+        v in name for v in ("qwen3.5", "qwen3.6", "qwen35", "qwen36", "qwen3_5", "qwen3_6")
+    ):
         return lambda weight_name: f"language_model.{weight_name}"
     return None
 
@@ -306,6 +350,18 @@ class PolicyTrainerRayProcess(RayProcess):
             local_files_only=True,
             **({"device_map": {"": self.local_rank}} if args.deepspeed_stage != 3 else {}),
         )
+        # Ulysses SP registration below overwrites EVERY entry in transformers'
+        # ALL_ATTENTION_FUNCTIONS with a wrapper sized for the policy's head
+        # layout. Snapshot the originals first so a frozen scorer with a
+        # different geometry (the OPD teacher) can temporarily restore plain
+        # attention for its full-sequence forwards.
+        self._original_attention_functions: dict | None = None
+        if args.sequence_parallel_size > 1:
+            attention_functions = _hf_attention_functions()
+            self._original_attention_functions = {
+                key: attention_functions[key]
+                for key in attention_functions.keys()  # noqa: SIM118 — AttentionInterface, not a dict
+            }
         self.mpu = UlyssesSPAttentionHF.register_with_transformers(
             model_name_or_path=self.policy,
             core_attn_implementation=model_utils.olmo_core_attn_to_hf(model_config.attn_implementation),
@@ -439,6 +495,54 @@ class PolicyTrainerRayProcess(RayProcess):
             register_qwen3_5_zero3_external_parameters(self.ref_policy)
             if args.lm_head_fp32:
                 patch_hf_lm_head_fp32(self.ref_policy)
+
+        # On-policy distillation teacher: a frozen model that scores rollouts
+        # learner-side, loaded with the same eval config as the reference
+        # policy. Unlike the reference policy it is never polyak-updated and
+        # never checkpointed — it is reloaded from its path on restart.
+        self.teacher_model: PreTrainedModel | None = None
+        if args.opd_teacher_model_name_or_path is not None:
+            teacher_ds_config, self.teacher_hf_ds_config = get_eval_ds_config(
+                offload=False,
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
+                per_device_train_batch_size=args.per_device_train_batch_size,
+            )
+            teacher_model_config = dataclasses.replace(
+                model_config,
+                model_name_or_path=args.opd_teacher_model_name_or_path,
+                model_revision=args.opd_teacher_model_revision,
+            )
+            self.teacher_model = load_ref_policy(
+                model_config=teacher_model_config,
+                ds_config=teacher_ds_config,
+                deepspeed_stage=args.deepspeed_stage,
+                local_rank=self.local_rank,
+                device=self.device,
+                rank=self.rank,
+                checkpoint_path=None,
+                mpu=self.mpu,
+            )
+            register_qwen3_5_zero3_external_parameters(self.teacher_model)
+            if args.lm_head_fp32:
+                patch_hf_lm_head_fp32(self.teacher_model)
+        # A teacher whose attention geometry differs from the policy cannot run
+        # on SP-split sequence shards (the shared Ulysses wrapper and FLA CP
+        # contexts are sized for the policy), so it scores the full pre-split
+        # sequences instead — replicated across SP ranks, which ZeRO-3 requires
+        # anyway since every rank must join the parameter allgathers.
+        self._teacher_full_sequence_scoring = False
+        if self.teacher_model is not None and args.sequence_parallel_size > 1:
+            teacher_module = getattr(self.teacher_model, "module", self.teacher_model)
+            self._teacher_full_sequence_scoring = _attention_geometry(self.policy.config) != _attention_geometry(
+                teacher_module.config
+            )
+            if self._teacher_full_sequence_scoring:
+                logger.info(
+                    "OPD teacher attention geometry differs from the policy; "
+                    "using full-sequence (unsplit) teacher scoring under SP "
+                    "with Ulysses attention disabled around the teacher forward."
+                )
         self.local_metrics = utils.MetricsTracker(max_metrics=512, device=self.device)
         self.value_model = None
         if args.use_value_model:
@@ -715,7 +819,9 @@ class PolicyTrainerRayProcess(RayProcess):
             vllm_engines=self.vllm_engines,
             model_update_group=self.model_update_group,
             gather_whole_model=self.args.gather_whole_model,
-            name_mapper=_build_vlm_name_mapper(self._model_name_or_path),
+            name_mapper=_build_vlm_name_mapper(
+                self._model_name_or_path, getattr(self.model.module.config, "model_type", None)
+            ),
         )
 
     def update_ref_policy(self):
@@ -854,6 +960,70 @@ class PolicyTrainerRayProcess(RayProcess):
             cp_contexts=cp_contexts_BT,
         )
 
+    @contextlib.contextmanager
+    def _ulysses_attention_disabled(self):
+        """Temporarily restore transformers' original attention functions.
+
+        Ulysses SP registration replaces every ``ALL_ATTENTION_FUNCTIONS`` entry
+        process-wide with a wrapper sized for the policy's head layout, so a
+        differently-shaped teacher asserts inside it even on full (unsplit)
+        sequences. The learner step is single-threaded, so swapping the mapping
+        around the teacher's forward is safe; the wrapped functions are
+        restored on exit for the policy's own forwards.
+        """
+        if self._original_attention_functions is None:
+            yield
+            return
+        attention_functions = _hf_attention_functions()
+        wrapped = {key: attention_functions[key] for key in self._original_attention_functions}
+        for key, fn in self._original_attention_functions.items():
+            attention_functions[key] = fn
+        try:
+            yield
+        finally:
+            for key, fn in wrapped.items():
+                attention_functions[key] = fn
+
+    def _compute_teacher_logprobs_full_sequence(
+        self, full_data_BT: data_types.CollatedBatchData, data_BT: data_types.CollatedBatchData, shards: int
+    ) -> list[torch.Tensor]:
+        """Score full (pre-SP-split) sequences under the OPD teacher, then
+        re-shard the logprobs to this rank's SP slice.
+
+        Used when the teacher's attention geometry differs from the policy's:
+        every SP rank runs the identical full-sequence no-grad forward (all
+        ranks must participate in the ZeRO-3 allgathers regardless), with plain
+        packed attention (``cp_contexts=None`` and Ulysses disabled) exactly
+        like the SP=1 path. The ``[B, T-1]`` logprobs are padded back to
+        ``[B, T]`` and pushed through ``split_collated_batch`` — the same
+        transformation the batch itself underwent — so shard alignment is
+        correct by construction.
+        """
+        full_data_gpu = full_data_BT.to(self.device)
+        with self._ulysses_attention_disabled():
+            logprobs_full = grpo_utils.compute_logprobs_tiled(
+                self.teacher_model,
+                full_data_gpu,
+                self.pad_token_id,
+                self.streaming_config.temperature,
+                shards=shards,
+                lm_head_fp32=self.args.lm_head_fp32,
+                cp_contexts=None,
+            )
+        padded = [torch.cat([lp.new_zeros(lp.shape[0], 1), lp], dim=1).cpu() for lp in logprobs_full]
+        resharded = self.splitter.split_collated_batch(dataclasses.replace(full_data_BT, vllm_logprobs=padded))
+        teacher_logprobs_BT: list[torch.Tensor] = []
+        for i, teacher_logprobs in enumerate(resharded.vllm_logprobs):
+            teacher_logprobs = teacher_logprobs.to(self.device)[:, 1:]
+            expected_shape = data_BT.vllm_logprobs[i][:, 1:].shape
+            if teacher_logprobs.shape != expected_shape:
+                raise RuntimeError(
+                    f"OPD full-sequence teacher shard misaligned for sample {i}: "
+                    f"{tuple(teacher_logprobs.shape)} vs expected {tuple(expected_shape)}"
+                )
+            teacher_logprobs_BT.append(teacher_logprobs)
+        return teacher_logprobs_BT
+
     def step(self, training_step: int | None = None):
         """Execute one training step: fetch data from the dataloader and train on it.
 
@@ -875,6 +1045,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if len(data_BT) == 0:
             logger.warning("[Training] Empty batch received, skipping training step")
             return [], {}
+
+        # Keep the pre-split (full-sequence) batch around when the OPD teacher
+        # cannot consume SP shards; it is re-sharded after scoring.
+        teacher_full_data_BT: data_types.CollatedBatchData | None = None
+        if self.teacher_model is not None and self._teacher_full_sequence_scoring and self.splitter is not None:
+            teacher_full_data_BT = data_BT
 
         # split batch for sequence parallelism. Do before moving data to GPU.
         if self.splitter is not None:
@@ -901,6 +1077,54 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.args.load_ref_policy:
             with Timer("Inference Calculation", noop=self.rank != 0):
                 ref_logprobs_BT = self._compute_logprobs(self.ref_policy, data_BT, cp_contexts_BT)
+
+        # On-policy distillation: score the rollout tokens under the frozen
+        # teacher and fold the sampled reverse KL into the advantages before
+        # the minibatch loop. The distillation term uses the vLLM (behavior)
+        # logprobs on the student side, so it is constant w.r.t. the trainer
+        # policy and composes with every loss_fn / trust-region mask downstream.
+        if self.teacher_model is not None:
+            with Timer("OPD teacher logprobs", noop=self.rank != 0):
+                teacher_shards = max(1, int(self.args.liger_grpo_loss_chunk_size))
+                if teacher_full_data_BT is not None:
+                    teacher_logprobs_BT = self._compute_teacher_logprobs_full_sequence(
+                        teacher_full_data_BT, data_BT, teacher_shards
+                    )
+                else:
+                    teacher_logprobs_BT = grpo_utils.compute_logprobs_tiled(
+                        self.teacher_model,
+                        data_BT,
+                        self.pad_token_id,
+                        self.streaming_config.temperature,
+                        shards=teacher_shards,
+                        lm_head_fp32=self.args.lm_head_fp32,
+                        cp_contexts=cp_contexts_BT,
+                    )
+            with torch.no_grad():
+                opd_kl_sum = torch.zeros((), device=self.device)
+                opd_teacher_logprob_sum = torch.zeros((), device=self.device)
+                opd_token_count = torch.zeros((), device=self.device)
+                for i in range(len(data_BT.query_responses)):
+                    opd_response_mask = data_BT.response_masks[i][:, 1:].bool()
+                    behavior_logprobs = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], opd_response_mask)
+                    data_BT.advantages[i], reverse_kl = grpo_utils.compute_opd_advantages(
+                        advantages=data_BT.advantages[i],
+                        behavior_logprobs=behavior_logprobs,
+                        teacher_logprobs=teacher_logprobs_BT[i],
+                        response_mask=opd_response_mask,
+                        kl_coef=self.args.opd_kl_coef,
+                        pure=self.args.opd_pure,
+                    )
+                    opd_kl_sum += reverse_kl.sum()
+                    opd_teacher_logprob_sum += torch.where(
+                        opd_response_mask, teacher_logprobs_BT[i].float(), torch.zeros_like(reverse_kl)
+                    ).sum()
+                    opd_token_count += opd_response_mask.sum()
+                opd_token_count = opd_token_count.clamp(min=1)
+                self.local_metrics["objective/opd_reverse_kl"] = (opd_kl_sum / opd_token_count).item()
+                self.local_metrics["objective/opd_teacher_logprob"] = (
+                    opd_teacher_logprob_sum / opd_token_count
+                ).item()
 
         # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
         # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
@@ -3218,6 +3442,9 @@ def main(
         # utils.ensure_hf_repo_cached (utils.py:990).
         if not os.path.exists(model_config.model_name_or_path):
             snapshot_download(model_config.model_name_or_path, revision=model_config.model_revision)
+        if args.opd_teacher_model_name_or_path is not None and not os.path.exists(args.opd_teacher_model_name_or_path):
+            logger.info(f"Pre-downloading OPD teacher model {args.opd_teacher_model_name_or_path}...")
+            snapshot_download(args.opd_teacher_model_name_or_path, revision=args.opd_teacher_model_revision)
         open(barrier_file, "w").close()
         logger.info("Model pre-download complete.")
     else:
@@ -3227,6 +3454,13 @@ def main(
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args, streaming_config, tools_config)
     validate_configs(streaming_config, vllm_config, tuple(args.num_learners_per_node), args.sequence_parallel_size)
+
+    if args.opd_teacher_model_name_or_path is not None and args.opd_pure and streaming_config.filter_zero_std_samples:
+        logger.warning(
+            "Pure OPD is enabled but `filter_zero_std_samples=True` (implied by `active_sampling`): groups whose "
+            "rewards all match get dropped, even though pure distillation can still learn from them. Consider "
+            "`--filter_zero_std_samples False` (and dropping `--active_sampling`) to train on every rollout."
+        )
 
     # Patch Qwen3.5 GatedDeltaNet to support packing (seq_idx/cu_seqlens).
     patch_qwen3_5_packing()
