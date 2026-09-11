@@ -1,0 +1,528 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-09-11T05:41:52.630252+00:00",
+  "scope": "HF-loaded serving before native trainer initialization or initial publication",
+  "full_protocol_complete": false,
+  "comparison_source": "265ed890c",
+  "comparison_execution": "CPU-only subprocess in own live Core diagnostic container, 8 OpenMP/MKL threads; input tensors read without modification",
+  "core_experiment": "01M27F1Q59128QKVBTMFW32JDD",
+  "megatron_experiment": "01M27EPG7T5PKJ9B7P6J1GPASD",
+  "backend_directories": {
+    "core": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v2/core",
+    "megatron": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v1/megatron"
+  },
+  "full_report": {
+    "local_path": "/tmp/update-zero-hf-comparison.json",
+    "sha256": "3bde3975dd8b85f289def3f4851b4e57bffdebc87b85d83576c31376bfae2b8e",
+    "bytes": 85802339
+  },
+  "cases": [
+    {
+      "comparison": "cross_backend",
+      "case_id": "q341-first-divergence",
+      "earliest_nonexact_activation": "model.layers.1.self_attn",
+      "earliest_changed_route_set": "model.layers.2.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          5629
+        ]
+      },
+      "backend": null,
+      "next_token_logit_max_abs": 0.5625,
+      "changed_source_hash_count": 0,
+      "changed_parameter_dtype_or_shape_count": 0,
+      "changed_execution_controls": {},
+      "stability_bound_violations": 0,
+      "canonical_set_mismatches": {
+        "left": 0,
+        "right": 0
+      },
+      "mean_expert_assignment_agreement_over_layers": 0.9742417484388938,
+      "first_observed_activation_difference": {
+        "max_abs": 0.00048828125,
+        "relative_l2": 5.6771077151055586e-05,
+        "changed_captured_token_positions": [
+          50,
+          52,
+          62,
+          63,
+          64,
+          66,
+          69,
+          71,
+          72,
+          73,
+          74,
+          76,
+          77,
+          78,
+          80,
+          82,
+          83,
+          84,
+          85,
+          86,
+          89,
+          90,
+          91,
+          92,
+          93,
+          95,
+          97,
+          100,
+          102,
+          103,
+          104,
+          105,
+          108,
+          109,
+          110,
+          114,
+          116,
+          118,
+          121,
+          122,
+          124,
+          126,
+          127,
+          128,
+          129,
+          131,
+          133,
+          134,
+          136,
+          140,
+          142,
+          144,
+          145,
+          146,
+          147,
+          148,
+          149,
+          150,
+          151,
+          152,
+          153,
+          155,
+          156,
+          157,
+          158,
+          159,
+          160,
+          161,
+          162,
+          163,
+          164,
+          165,
+          167,
+          168,
+          169,
+          170,
+          171,
+          173,
+          176
+        ]
+      }
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q975-first-divergence",
+      "earliest_nonexact_activation": "model.layers.1.self_attn",
+      "earliest_changed_route_set": "model.layers.2.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "next_token_argmax": {
+        "left": [
+          2011
+        ],
+        "right": [
+          2011
+        ]
+      },
+      "backend": null,
+      "next_token_logit_max_abs": 0.5,
+      "changed_source_hash_count": 0,
+      "changed_parameter_dtype_or_shape_count": 0,
+      "changed_execution_controls": {},
+      "stability_bound_violations": 0,
+      "canonical_set_mismatches": {
+        "left": 0,
+        "right": 0
+      },
+      "mean_expert_assignment_agreement_over_layers": 0.9797951992953094,
+      "first_observed_activation_difference": {
+        "max_abs": 6.103515625e-05,
+        "relative_l2": 3.7843838697675672e-06,
+        "changed_captured_token_positions": [
+          155,
+          222
+        ]
+      }
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q1039-first-divergence",
+      "earliest_nonexact_activation": "model.layers.1.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "next_token_argmax": {
+        "left": [
+          358
+        ],
+        "right": [
+          358
+        ]
+      },
+      "backend": null,
+      "next_token_logit_max_abs": 0.568359375,
+      "changed_source_hash_count": 0,
+      "changed_parameter_dtype_or_shape_count": 0,
+      "changed_execution_controls": {},
+      "stability_bound_violations": 0,
+      "canonical_set_mismatches": {
+        "left": 0,
+        "right": 0
+      },
+      "mean_expert_assignment_agreement_over_layers": 0.978387254485163,
+      "first_observed_activation_difference": {
+        "max_abs": 0.001953125,
+        "relative_l2": 0.00028464620051083385,
+        "changed_captured_token_positions": [
+          9,
+          491,
+          492,
+          493,
+          494,
+          495,
+          496,
+          497,
+          498,
+          499,
+          500,
+          501,
+          502,
+          503,
+          504,
+          505,
+          506,
+          507,
+          508,
+          509,
+          510,
+          511,
+          512,
+          513,
+          514,
+          515,
+          516,
+          517,
+          518,
+          519,
+          520,
+          521,
+          522,
+          523,
+          524,
+          525,
+          526,
+          527,
+          528,
+          529,
+          530,
+          531,
+          532,
+          533,
+          534,
+          535,
+          536,
+          537,
+          538,
+          539,
+          540,
+          541,
+          542,
+          543,
+          544,
+          545,
+          546,
+          547,
+          548,
+          549,
+          550,
+          551,
+          552,
+          553,
+          554,
+          555,
+          556,
+          557,
+          558,
+          559,
+          560,
+          561,
+          562,
+          563,
+          564,
+          565,
+          566,
+          567,
+          568,
+          569,
+          570,
+          571,
+          572,
+          573,
+          574,
+          575,
+          576,
+          577,
+          578,
+          579,
+          580,
+          581,
+          582,
+          583,
+          584,
+          585,
+          586,
+          587,
+          588,
+          589,
+          590,
+          591,
+          592,
+          593,
+          594,
+          595,
+          596,
+          597,
+          598,
+          599,
+          600,
+          601,
+          602,
+          603,
+          604,
+          605,
+          606,
+          607,
+          608,
+          609,
+          610,
+          611,
+          612,
+          613,
+          614,
+          615,
+          616,
+          617,
+          618
+        ]
+      }
+    },
+    {
+      "comparison": "cross_backend",
+      "case_id": "q605-first-divergence",
+      "earliest_nonexact_activation": "model.layers.0.self_attn",
+      "earliest_changed_route_set": "model.layers.1.mlp.topk",
+      "all_activation_values_exact": false,
+      "all_route_sets_exact": false,
+      "next_token_argmax": {
+        "left": [
+          13
+        ],
+        "right": [
+          13
+        ]
+      },
+      "backend": null,
+      "next_token_logit_max_abs": 0.5,
+      "changed_source_hash_count": 0,
+      "changed_parameter_dtype_or_shape_count": 0,
+      "changed_execution_controls": {},
+      "stability_bound_violations": 0,
+      "canonical_set_mismatches": {
+        "left": 0,
+        "right": 0
+      },
+      "mean_expert_assignment_agreement_over_layers": 0.9797352176738141,
+      "first_observed_activation_difference": {
+        "max_abs": 9.5367431640625e-07,
+        "relative_l2": 3.863806584798157e-05,
+        "changed_captured_token_positions": [
+          197,
+          204
+        ]
+      }
+    }
+  ],
+  "repeat_controls": [
+    {
+      "comparison": "repeated_prefix",
+      "case_id": "q341-first-divergence",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "next_token_argmax": {
+        "left": [
+          6914
+        ],
+        "right": [
+          6914
+        ]
+      },
+      "backend": "core",
+      "next_token_logit_max_abs": 0.0,
+      "changed_source_hash_count": 0,
+      "changed_parameter_dtype_or_shape_count": 0,
+      "changed_execution_controls": {},
+      "stability_bound_violations": 0,
+      "canonical_set_mismatches": {
+        "left": 0,
+        "right": 0
+      },
+      "mean_expert_assignment_agreement_over_layers": 1.0
+    },
+    {
+      "comparison": "repeated_prefix",
+      "case_id": "q341-first-divergence",
+      "earliest_nonexact_activation": null,
+      "earliest_changed_route_set": null,
+      "all_activation_values_exact": true,
+      "all_route_sets_exact": true,
+      "next_token_argmax": {
+        "left": [
+          5629
+        ],
+        "right": [
+          5629
+        ]
+      },
+      "backend": "megatron",
+      "next_token_logit_max_abs": 0.0,
+      "changed_source_hash_count": 0,
+      "changed_parameter_dtype_or_shape_count": 0,
+      "changed_execution_controls": {},
+      "stability_bound_violations": 0,
+      "canonical_set_mismatches": {
+        "left": 0,
+        "right": 0
+      },
+      "mean_expert_assignment_agreement_over_layers": 1.0
+    }
+  ],
+  "observer_controls": [
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q341-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q975-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q1039-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "core",
+      "phase": "hf",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    },
+    {
+      "backend": "megatron",
+      "phase": "hf",
+      "case_id": "q605-first-divergence",
+      "same_output_text": true,
+      "same_output_ids": true,
+      "exact_logprob_fields": true
+    }
+  ],
+  "serving_settings": {
+    "core": {
+      "sampling_backend": "pytorch",
+      "max_total_tokens": 32768,
+      "max_total_num_tokens": 32768,
+      "chunked_prefill_size": 16384,
+      "max_prefill_tokens": 16384,
+      "max_running_requests": 4,
+      "max_mamba_cache_size": 8,
+      "mamba_radix_cache_strategy": "auto",
+      "uses_mamba_radix_cache": false,
+      "cuda_graph_backend_decode": "full",
+      "cuda_graph_backend_prefill": "disabled",
+      "mem_fraction_static": 0.6,
+      "attention_backend": "triton",
+      "linear_attn_backend": "triton"
+    },
+    "megatron": {
+      "sampling_backend": "flashinfer",
+      "max_total_tokens": null,
+      "max_total_num_tokens": 8210212,
+      "chunked_prefill_size": 16384,
+      "max_prefill_tokens": 16384,
+      "max_running_requests": 4,
+      "max_mamba_cache_size": 8,
+      "mamba_radix_cache_strategy": "extra_buffer",
+      "uses_mamba_radix_cache": false,
+      "cuda_graph_backend_decode": "full",
+      "cuda_graph_backend_prefill": "disabled",
+      "mem_fraction_static": 0.6,
+      "attention_backend": "triton",
+      "linear_attn_backend": "triton"
+    }
+  },
+  "limitations": [
+    "Activation rows are first16 union last128 tokens; routing covers every prefix token. Earliest difference means earliest observed boundary among captured rows.",
+    "No publication or full-protocol success claim: original Megatron attempt failed scheduler construction after HF captures.",
+    "Matching q341 repeats and unarmed controls establish stability in these observations, not determinism across fresh processes or devices.",
+    "Source hashes and parameter dtype/shape inventories match; this report does not hash all loaded parameter values.",
+    "Fixed-prefix prefill does not reproduce historical autoregressive decode/batching/graph execution."
+  ]
+}
