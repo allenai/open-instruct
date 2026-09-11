@@ -282,3 +282,11 @@ mechanism in these runs. Separate replay qualification covers tiny live serving 
 native EP1/EP2 gradient/recomputation checks; full-SFT replay remains unqualified, and
 the final unscored token's synthetic IDs are a known auxiliary-loss limitation when
 replay is enabled. No active-run settings were changed during this review.
+
+Replay being off does **not** establish that serving and training naturally choose the
+same experts. Router IDs were not captured in these comparison runs; a future fixed-prefix
+routing comparison is needed to measure that potential disagreement. The current CPU
+replay subset (`test_model_backend_dispatch.py` plus `test_contract.py -k replay`) passed
+6 tests with11 deselected, covering the disabled no-op path and replay contexts, router
+gradients and recomputation behavior. These tests qualify the mechanism at their stated
+scope; they do not replace full-checkpoint serving/training route comparison.
