@@ -12523,5 +12523,11 @@
         "aggregate_response_tokens_per_collection_second": 762.3868008003951
       }
     }
+  },
+  "separate_frozen_scorer_profile": {
+    "experiment": "01M279F38FPRHMTYQQYWQ17GSN",
+    "summary": "miles-core-score-profile-20260911/summary.json",
+    "report": "miles-core-score-profile-20260911.md",
+    "scope": "Initial weights and one retained rollout; zero optimizer updates. Not an online timing attribution."
   }
 }

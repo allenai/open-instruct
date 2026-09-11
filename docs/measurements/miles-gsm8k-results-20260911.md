@@ -76,10 +76,17 @@ There are no missing/conflicting timing records in either parser output.
 The wall-clock result is clear: Core's overall warm cadence is slower, despite its
 shorter recorded optimizer phase. It would be misleading to claim that Core is
 faster from its6.17s training timer alone. The large pre-update interval is the main
-observed difference. A frozen-runtime, same-batch profiler has been launched to
-separate forward kernels, EP communication, log-prob extraction, and compilation.
-Until that report exists,44.328s must not be described as pure GPU forward time,
-nor as pure Python/Ray orchestration time.
+observed difference. The completed [frozen-runtime scorer profile](miles-core-score-profile-20260911.md)
+found230.458s for the first score pass and a1.243s mean across three identical
+warm repeats, with bitwise-identical log probabilities. Cold SwiGLU specialization
+alone consumed about41.4s of host JIT time per rank across150–151 variants; FLA
+kernels added85.9–93.2s. Warm repeats had zero JIT misses or artifact writes.
+This supplies a concrete compilation optimization target and shows that warm
+model scoring itself can be cheap. It does not prove that compilation accounts
+for the entire historical44.328s interval: the diagnostic uses one retained batch
+at initial weights, while training sees changing lengths and routes. The
+historical interval must not be labeled pure GPU time or pure orchestration time.
+Rank-local compilation durations also cannot be added across concurrent ranks.
 
 The structured comparison also retains the95 individual Core score/optimizer/
 publication boundaries. Its generic parser publication summary includes version5;
@@ -125,7 +132,9 @@ The differences most likely to affect interpretation are:
    We have not established that this explains the learning gap.
 2. **Router auxiliary objectives differ for unequal sequence lengths and padding.**
    Core weights real-token counts; Megatron's sequence objective and padded forward
-   include different weights/positions. Identical coefficients do not make these
+   include different weights/positions. MILES pads each microbatch to the maximum
+   sequence length across that trainer rank's rollout shard, even with microbatch1
+   and padding multiple1. This is separate from the old DeepEP alignment hack. Identical coefficients do not make these
    losses identical. Fixed equal-length tests validate each implementation, while
    deliberately removing this online difference.
 3. **Serving sampler and token-pool settings differed.** Core100 explicitly used
@@ -158,8 +167,8 @@ the outcome difference.
 Separate fixed-token optimizer, EP, and auxiliary-loss checks support the adapter
 contract. They retain measured finite-precision differences rather than asserting
 bitwise equality. The frozen Core100 rounding issue remains explicitly visible in
-this result. Subsequent fixes, profiler measurements, and longer-run outcomes must
-be reported as new evidence.
+this result. The separate profiler supplies timing evidence, not a retrospective change to
+the completed run. Subsequent fixes and longer-run outcomes remain new evidence.
 
 ## Follow-up comparisons
 
