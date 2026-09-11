@@ -124,6 +124,32 @@ index 0000000000000000000000000000000000000000..f946b980db1160d1b076f738c30bbe4c
 +maximum-error gates were 0.05. Exact input IDs, forced-prefix hashes, per-case
 +errors, and backend/source evidence are retained in
 +[`measurements/hero-tiny-core-reference-20260910.json`](measurements/hero-tiny-core-reference-20260910.json).
+diff --git a/docs/hero-numerical-diagnosis.md b/docs/hero-numerical-diagnosis.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4f472555d639efd08bef8786f2a735493bec497c
+--- /dev/null
++++ b/docs/hero-numerical-diagnosis.md
+@@ -0,0 +1,20 @@
++# Hero numerical diagnosis
++
++The full step-75500 qualification failed its existing 0.1 absolute log-probability threshold. Eight greedy predictions matched in both serving modes, but the worst checked SGLang top-token error was 0.3118 with unchunked prefill and 0.5619 with chunked prefill plus decode graphs. Core/HF full-vocabulary error reached 0.5473 (mean 0.08255). Matching greedy tokens does not resolve these errors. Keep the failed report and threshold unchanged.
++
++First isolate Core/HF drift using native BF16 weights, HF eager attention, Core torch SDPA, native Core experts, and the same explicitly selected recurrent KDA reference helper used for the failed gate:
++
++```bash
++python tools/diagnose_hero_core.py --model /path/to/step75500/hf \
++  --recurrent-hf-prefill --reference-report /path/to/failed-serving.json \
++  --logprob-atol 0.1 --output /path/to/core-layerwise.json \
++  --save-activations /path/to/hf-layerwise.pt
++```
++
++The tool compares block inputs/outputs, attention input/output, all four peri-norm inputs/outputs, and combined MLP output (input to the post-FFN norm). It repeats each Core block on the exact captured HF block input. Compare accumulated errors against these same-input errors: this distinguishes divergence entering a layer from differences produced locally. It captures both original prompt prefixes, not all eight generated continuations. No kernel, accumulation dtype, router, weight, or gate is changed. Optional HF activation tensors support subsequent SGLang layer comparisons. This is a diagnostic and does not qualify training or serving.
++
++Next isolate SGLang chunking from graph execution, which the original two-mode gate varied together. Cross graph execution off/on with prefill chunks 128/32, retain exact forced-prefix token IDs and checked top-token log-probabilities, and keep the same threshold for every mode. This matrix is follow-up work. Compare identical prefix/token pairs; differing top-token sets require explicit intersection reporting rather than assuming missing entries match. The original 16-token prompt had identical forced-prefix error summaries in both modes; the longer prompt differed, making chunking the first serving variable to isolate. This observation is not proof that graphs are irrelevant.
++
++If a particular Core/HF boundary first diverges, compare that operation on identical inputs before making changes. For routing, record selected expert IDs and weights before attributing later discrepancies to GEMM order. For full attention, compare Q/K normalization, absolute-position scaling, and attention output separately. For KDA, compare projection/convolution, recurrent state, and output normalization. Only after Core/HF drift is understood should corresponding SGLang layer outputs on the saved HF activations be instrumented; that worker-level instrumentation remains follow-up work.
++
++Validation: four capture-helper tests pass (math unchanged, hook cleanup on success/error, exact boundary coverage, shape/non-finite rejection). The actual two-layer tiny hero GPU diagnostic passed with max full-vocabulary log-probability error 0.033332, matching the earlier semantic reference result. Full checkpoint layerwise diagnosis and the four-mode serving matrix have not yet run.
 diff --git a/docs/measurements/hero-tiny-core-reference-20260910.json b/docs/measurements/hero-tiny-core-reference-20260910.json
 new file mode 100644
 index 0000000000000000000000000000000000000000..d077bf4862b87455685d7e556e47fd19147f6950
@@ -7042,6 +7068,95 @@ index 0000000000000000000000000000000000000000..c7e8b14118822fa86172a42b7baad9df
 +        "logprob_atol": logprob_atol,
 +        "passed": maximum <= logprob_atol,
 +    }
+diff --git a/src/olmo_sglang/validation/layerwise.py b/src/olmo_sglang/validation/layerwise.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c91f4ce547dc7c1da6924e624267691a6a250dd8
+--- /dev/null
++++ b/src/olmo_sglang/validation/layerwise.py
+@@ -0,0 +1,83 @@
++"""Diagnostic activation capture; never changes model math or qualification gates."""
++
++from __future__ import annotations
++
++from contextlib import contextmanager
++
++import torch
++
++# Both implementations use peri-norm; post-FFN norm inputs expose combined MLP
++# outputs even though Core's fused MoE does not call a single MLP module.
++BOUNDARIES = {
++    "attention": ("self_attn", "attention"),
++    "attention_pre_norm": ("pre_attention_layernorm", "attention_input_norm"),
++    "attention_post_norm": ("post_attention_layernorm", "attention_norm"),
++    "ffn_pre_norm": ("pre_feedforward_layernorm", "feed_forward_input_norm"),
++    "ffn_post_norm": ("post_feedforward_layernorm", "feed_forward_norm"),
++}
++
++
++def tensor_value(value):
++    if isinstance(value, (tuple, list)):
++        value = value[0]
++    if not isinstance(value, torch.Tensor):
++        raise TypeError("Expected a tensor activation")
++    return value.detach().cpu().clone()
++
++
++@contextmanager
++def capture_block(block, *, backend):
++    if backend not in ("hf", "core"):
++        raise ValueError("backend must be hf or core")
++    captures, handles = {}, []
++
++    def attach(module, name):
++        def before(_module, args, kwargs):
++            value = args[0] if args else kwargs["hidden_states"]
++            captures[name + ".input"] = tensor_value(value)
++
++        def after(_module, _args, output):
++            captures[name + ".output"] = tensor_value(output)
++
++        handles.append(module.register_forward_pre_hook(before, with_kwargs=True))
++        handles.append(module.register_forward_hook(after))
++
++    attach(block, "block")
++    for label, names in BOUNDARIES.items():
++        module = getattr(block, names[backend == "core"], None)
++        if module is None:
++            raise ValueError(f"Missing required peri-norm boundary: {label}")
++        attach(module, label)
++    try:
++        yield captures
++    finally:
++        for handle in handles:
++            handle.remove()
++
++
++def tensor_error(actual, expected):
++    if actual.shape != expected.shape:
++        raise ValueError(
++            f"Activation shape mismatch: {actual.shape} != {expected.shape}"
++        )
++    a, b = actual.float(), expected.float()
++    if not torch.isfinite(a).all() or not torch.isfinite(b).all():
++        raise ValueError("Non-finite activation")
++    error = (a - b).abs()
++    return {
++        "shape": list(a.shape),
++        "actual_dtype": str(actual.dtype),
++        "reference_dtype": str(expected.dtype),
++        "max_abs": float(error.max()),
++        "mean_abs": float(error.mean()),
++        "relative_l2": float(torch.linalg.vector_norm(a - b))
++        / max(float(torch.linalg.vector_norm(b)), 1e-30),
++        "reference_rms": float(b.square().mean().sqrt()),
++        "equal_fraction": float((a == b).float().mean()),
++    }
++
++
++def compare_captures(actual, expected):
++    if actual.keys() != expected.keys():
++        raise ValueError("Captured boundaries differ; refusing partial comparison")
++    return {name: tensor_error(actual[name], value) for name, value in expected.items()}
 diff --git a/src/olmo_sglang/validation/reference.py b/src/olmo_sglang/validation/reference.py
 index a1ce891a940cac38660119b9212545ca5bff5100..5ad1ec94e137b212ca94574c10b513e8ea077d12 100644
 --- a/src/olmo_sglang/validation/reference.py
@@ -7274,6 +7389,210 @@ index 9f1a2a003f58e283eb84624474a3df94ce973f4f..3870742303e874f9777ec1c16631ad54
              )
      save_file(weights, output_dir / "model.safetensors")
      LOGGER.info("profile=%s output=%s tensors=%d", profile, output_dir, len(weights))
+diff --git a/tools/diagnose_hero_core.py b/tools/diagnose_hero_core.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d5855a9c3139d4a0c13979e8e2b7f5dcfe594fa
+--- /dev/null
++++ b/tools/diagnose_hero_core.py
+@@ -0,0 +1,198 @@
++"""Locate native Core/HF drift before investigating serving cache/chunk differences."""
++
++import argparse
++import gc
++import hashlib
++import importlib.util
++import json
++import os
++from contextlib import ExitStack
++from importlib import import_module
++from pathlib import Path
++
++import torch
++from transformers import AutoModelForCausalLM
++
++from olmo_sglang.validation.layerwise import (
++    capture_block,
++    compare_captures,
++    tensor_error,
++)
++
++
++def release():
++    gc.collect()
++    torch.cuda.empty_cache()
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--model", type=Path, required=True)
++    parser.add_argument("--output", type=Path, required=True)
++    parser.add_argument("--recurrent-hf-prefill", action="store_true")
++    parser.add_argument("--reference-report", type=Path)
++    parser.add_argument("--logprob-atol", type=float, default=0.1)
++    parser.add_argument("--save-activations", type=Path)
++    args = parser.parse_args()
++    if args.logprob_atol <= 0:
++        parser.error("Log-probability threshold must be positive")
++    if args.recurrent_hf_prefill:
++        spec = importlib.util.spec_from_file_location(
++            "hero_reference_settings", args.model / "inference_settings.py"
++        )
++        module = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(module)
++        module.install(recurrent=True)
++    previous = (
++        json.loads(args.reference_report.read_text()) if args.reference_report else None
++    )
++    prompts = (
++        previous["prompt_ids"]
++        if previous
++        else [[5 + index % 30 for index in range(length)] for length in (16, 81)]
++    )
++    model, load_info = AutoModelForCausalLM.from_pretrained(
++        args.model,
++        trust_remote_code=True,
++        dtype=torch.bfloat16,
++        attn_implementation="eager",
++        output_loading_info=True,
++    )
++    if load_info["missing_keys"] or load_info["unexpected_keys"]:
++        raise ValueError(f"Incomplete HF state: {load_info}")
++    model = model.cuda().eval()
++    config = model.config
++    if not config.use_peri_ln or config.use_rope:
++        raise ValueError("This bounded diagnostic requires hero peri-norm and no RoPE")
++    state = {name: value.detach().cpu() for name, value in model.state_dict().items()}
++    hf_runs, hf_logits = [], []
++    with torch.no_grad():
++        for prompt in prompts:
++            with ExitStack() as stack:
++                captures = [
++                    stack.enter_context(capture_block(block, backend="hf"))
++                    for block in model.model.layers
++                ]
++                logits = model(
++                    torch.tensor([prompt], device="cuda"), use_cache=False
++                ).logits
++                hf_logits.append(logits[0, -1].detach().cpu())
++                hf_runs.append(captures)
++    del model, logits
++    release()
++    core_config = import_module("olmo_core.config")
++    attention = import_module("olmo_core.nn.attention")
++    factory = import_module("olmo_core.nn.moe.v2.olmo3")
++    experts = import_module("olmo_core.nn.moe.v2.routed_experts")
++    model_config = factory.build_olmo3_moe_config_from_hf_config(
++        config,
++        dtype=core_config.DType.bfloat16,
++        attention_backend=attention.AttentionBackendName.torch,
++        router_aux_loss_weight=0.0,
++        router_z_loss_weight=0.0,
++    )
++    model = model_config.build(init_device="meta")
++    longest = max(map(len, prompts))
++    model.init_weights(
++        max_seq_len=longest,
++        max_local_microbatch_size=longest,
++        device=torch.device("cuda"),
++    )
++    factory.load_olmo3_moe_hf_state(model, config, state)
++    del state
++    model.eval()
++    results = []
++    with torch.no_grad():
++        for prompt_index, prompt in enumerate(prompts):
++            with ExitStack() as stack:
++                captures = [
++                    stack.enter_context(capture_block(block, backend="core"))
++                    for block in model.blocks.values()
++                ]
++                logits = model(torch.tensor([prompt], device="cuda"))[0, -1].cpu()
++            layers = []
++            for index, block in enumerate(model.blocks.values()):
++                reference = hf_runs[prompt_index][index]
++                with capture_block(block, backend="core") as isolated:
++                    block(reference["block.input"].cuda())
++                layers.append(
++                    {
++                        "layer": index,
++                        "type": config.layer_types[index],
++                        "accumulated": compare_captures(captures[index], reference),
++                        "same_hf_block_input": compare_captures(isolated, reference),
++                    }
++                )
++            reference_logits = hf_logits[prompt_index].float()
++            lp = tensor_error(
++                logits.float().log_softmax(-1), reference_logits.log_softmax(-1)
++            )
++            results.append(
++                {
++                    "prompt_ids": prompt,
++                    "layers": layers,
++                    "last_logits": tensor_error(logits, hf_logits[prompt_index]),
++                    "last_logprobs": lp,
++                    "within_existing_threshold": lp["max_abs"] <= args.logprob_atol,
++                }
++            )
++    report = {
++        "diagnosis_only": True,
++        "model": str(args.model),
++        "dtype": "bfloat16",
++        "attention": {"hf": "eager", "core": "torch_sdpa"},
++        "kda": "shared_explicit_hf_recurrent_helper"
++        if args.recurrent_hf_prefill
++        else "native_chunk",
++        "core_experts": "torch_grouped_mm"
++        if experts.use_torch_grouped_mm()
++        else "grouped_gemm",
++        "environment": {
++            name: os.getenv(name)
++            for name in (
++                "OLMO_USE_TORCH_GROUPED_MM",
++                "OLMO_HF_MOE_REFERENCE_LOOP",
++                "OLMO_HF_MOE_CORE_REFERENCE",
++            )
++        },
++        "core_factory_sha256": hashlib.sha256(
++            Path(factory.__file__).read_bytes()
++        ).hexdigest(),
++        "hf_source_sha256": {
++            name: hashlib.sha256((args.model / name).read_bytes()).hexdigest()
++            for name in ("configuration_olmo3moe.py", "modeling_olmo3moe.py")
++        },
++        "reference_report_sha256": hashlib.sha256(
++            args.reference_report.read_bytes()
++        ).hexdigest()
++        if previous
++        else None,
++        "logprob_atol": args.logprob_atol,
++        "results": results,
++        "limitations": (
++            "Initial forced prefixes only; same-input blocks isolate local drift, "
++            "not individual kernels. No serving, EP, backward, optimizer, "
++            "or threshold promotion."
++        ),
++    }
++    args.output.parent.mkdir(parents=True, exist_ok=True)
++    args.output.write_text(json.dumps(report, indent=2) + "\n")
++    if args.save_activations:
++        torch.save(
++            {"prompts": prompts, "hf": hf_runs, "hf_logits": hf_logits},
++            args.save_activations,
++        )
++    print(
++        json.dumps(
++            {
++                "output": str(args.output),
++                "max_logprob_error": max(
++                    r["last_logprobs"]["max_abs"] for r in results
++                ),
++            }
++        )
++    )
++
++
++if __name__ == "__main__":
++    main()
 diff --git a/tools/qualify_hero_serving.py b/tools/qualify_hero_serving.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..abc89527df4f4b7acf39d54bfa702d3f65e3a473

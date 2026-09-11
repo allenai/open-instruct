@@ -261,3 +261,25 @@ def test_source_contract_rejects_incompatible_preparation(tmp_path, monkeypatch,
     path.write_bytes(mixture.encoded(manifest))
     with pytest.raises(ValueError):
         trial.prepare(tmp_path / "rejected", sources, tmp_path / "hf", local=True)
+
+
+def test_longer_response_budget_updates_training_serving_and_admission(tmp_path, monkeypatch):
+    root, _ = prepare_fixture(tmp_path, monkeypatch)
+    report = json.loads((root / "preparation.json").read_text())
+    report.update(profile="sft", response_cap=8192)
+    (root / "preparation.json").write_bytes(mixture.encoded(report))
+    config = trial.configuration(root)
+    assert config.core.max_sequence_length == 10240
+    assert config.miles["rollout_max_context_len"] == config.miles["sglang_context_length"] == 10240
+    assert config.miles["rollout_max_response_len"] == config.miles["eval_max_response_len"] == 8192
+    assert config.miles["sglang_max_total_tokens"] >= 4 * 10240
+    assert config.miles["global_batch_size"] == 24
+
+
+def test_bad_prepared_response_budget_rejected(tmp_path, monkeypatch):
+    root, _ = prepare_fixture(tmp_path, monkeypatch)
+    report = json.loads((root / "preparation.json").read_text())
+    report["response_cap"] = -1
+    (root / "preparation.json").write_bytes(mixture.encoded(report))
+    with pytest.raises(ValueError, match="response cap"):
+        trial.configuration(root)

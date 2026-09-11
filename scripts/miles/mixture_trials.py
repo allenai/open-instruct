@@ -6,6 +6,7 @@ contains two independent prompts per source and four samples per prompt.
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import math
 import os
@@ -33,9 +34,12 @@ REGISTRY = {
 }
 
 
-def prepare(root, sources, hf, *, seed=17, local=False):
+def prepare(root, sources, hf, *, seed=17, local=False, response_cap=None):
+    if response_cap is not None and (type(response_cap) is not int or response_cap <= 0):
+        raise ValueError("response_cap must be a positive integer")
     tokenizer = AutoTokenizer.from_pretrained(hf, trust_remote_code=True)
     report = mixture.materialize(root, sources, hf, tokenizer, seed=seed, local=local)
+    report["response_cap"] = response_cap if response_cap is not None else (32 if local else 4096)
     registry = mixture.encoded(REGISTRY)
     (root / "verifiers.json").write_bytes(registry)
     report["registry_sha256"] = mixture.digest(registry)
@@ -65,6 +69,18 @@ def configuration(root):
         eval_prompt_data=["mixture", str(root / "eval.jsonl")],
         n_samples_per_eval_prompt=1,
         rollout_max_prompt_len=480 if config.miles.get("colocate") else 2048,
+    )
+    cap = report.get("response_cap", config.miles["rollout_max_response_len"])
+    if type(cap) is not int or cap <= 0:
+        raise ValueError("Prepared response cap must be a positive integer")
+    context = config.miles["rollout_max_prompt_len"] + cap
+    config = dataclasses.replace(config, core=dataclasses.replace(config.core, max_sequence_length=context))
+    config.miles.update(
+        rollout_max_response_len=cap,
+        eval_max_response_len=cap,
+        rollout_max_context_len=context,
+        sglang_context_length=context,
+        sglang_max_total_tokens=max(config.miles["sglang_max_total_tokens"], 4 * context),
     )
     return config
 
@@ -233,12 +249,17 @@ def main():
     parser.add_argument("--hf", type=Path)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--local", action="store_true")
+    parser.add_argument(
+        "--response-cap", type=int, help="Freeze a different response budget with matching context and KV capacity"
+    )
     args = parser.parse_args()
     if args.command == "prepare":
         sources = {source: getattr(args, f"{source}_root") for source in mixture.SOURCES}
         if args.hf is None or any(root is None for root in sources.values()):
             parser.error("prepare requires --hf and all three --SOURCE-root arguments")
-        result = prepare(args.output, sources, args.hf, seed=args.seed, local=args.local)
+        result = prepare(
+            args.output, sources, args.hf, seed=args.seed, local=args.local, response_cap=args.response_cap
+        )
     elif args.command == "audit":
         result = audit(args.output)
     else:
