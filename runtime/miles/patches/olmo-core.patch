@@ -1,8 +1,8 @@
 diff --git a/src/olmo_core/nn/attention/__init__.py b/src/olmo_core/nn/attention/__init__.py
-index 174b6c0b7f8e7cd988e47a480fac0df5166ab16c..a102cfe720a33302f87890830a7553fe92e81c00 100644
+index 050b1e0bc30e06a119c8726735e754178f84a010..7cb0bba538fbb035bbcab104d492c5ebd7f12114 100644
 --- a/src/olmo_core/nn/attention/__init__.py
 +++ b/src/olmo_core/nn/attention/__init__.py
-@@ -339,6 +339,8 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+@@ -336,6 +336,8 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
      n_kv_heads: Optional[int] = None
      head_dim: Optional[int] = None
      bias: Optional[bool] = None
@@ -11,7 +11,7 @@ index 174b6c0b7f8e7cd988e47a480fac0df5166ab16c..a102cfe720a33302f87890830a7553fe
      gate: Optional[GateConfig] = None
      rope: Optional[RoPEConfig] = None
      clip_qkv: Optional[float] = None
-@@ -394,16 +396,17 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+@@ -393,16 +395,17 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
          head_dim = self.head_dim or d_model // n_heads
          bias = self.bias if self.bias is not None else self.name != AttentionType.normalized
  
@@ -31,17 +31,24 @@ index 174b6c0b7f8e7cd988e47a480fac0df5166ab16c..a102cfe720a33302f87890830a7553fe
              params += 2 * n_kv_heads * head_dim
  
          # Block attention QK norm.
-@@ -478,6 +481,9 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
+@@ -485,6 +488,16 @@ class AttentionConfig(SequenceMixerConfig["SequenceMixer"]):
              cache=cache,
          )
  
 +        if kwargs.get("qkv_bias") is not None and self.name != AttentionType.default:
 +            raise OLMoConfigurationError("qkv_bias is only supported by default attention")
 +
++        # These features currently live in the default attention constructor. Disabled
++        # flags must not break the other constructors when a config is serialized.
++        if self.name != AttentionType.default:
++            for key in ("scalable_softmax", "qk_norm_per_head_gains"):
++                if kwargs.pop(key, False):
++                    raise OLMoConfigurationError(f"'{key}' is only supported by default attention")
++
          # Attention sinks are only wired up for the default attention; drop the flag otherwise so
          # the other implementations don't see an unexpected keyword argument.
          if not kwargs.get("attention_sinks", False):
-@@ -593,6 +599,7 @@ class Attention(SequenceMixer):
+@@ -605,6 +618,7 @@ class Attention(SequenceMixer):
          n_kv_heads: Optional[int] = None,
          head_dim: Optional[int] = None,
          bias: bool = True,
@@ -49,7 +56,7 @@ index 174b6c0b7f8e7cd988e47a480fac0df5166ab16c..a102cfe720a33302f87890830a7553fe
          gate: Optional[GateConfig] = None,
          rope: Optional[RoPEConfig] = None,
          clip_qkv: Optional[float] = None,
-@@ -625,13 +632,25 @@ class Attention(SequenceMixer):
+@@ -643,13 +657,25 @@ class Attention(SequenceMixer):
          else:
              self.head_dim = d_model // n_heads
          self.w_q = nn.Linear(
@@ -79,7 +86,7 @@ index 174b6c0b7f8e7cd988e47a480fac0df5166ab16c..a102cfe720a33302f87890830a7553fe
          self.w_out = nn.Linear(
              n_heads * self.head_dim, d_model, bias=bias, dtype=dtype, device=init_device
 diff --git a/src/olmo_core/nn/hf/convert.py b/src/olmo_core/nn/hf/convert.py
-index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265cd99809a 100644
+index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18539da513 100644
 --- a/src/olmo_core/nn/hf/convert.py
 +++ b/src/olmo_core/nn/hf/convert.py
 @@ -1,6 +1,6 @@
@@ -149,18 +156,7 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
      "llama": {
          f"blocks.{LAYER}.attention_norm.weight": StateMappingTemplate(
              f"blocks.{LAYER}.attention_norm.weight",
-@@ -804,9 +828,7 @@ def convert_olmo3moe_state_from_hf(
-     dense_indices = _olmo3moe_dense_layer_indices(config)
-     has_shared = getattr(config, "shared_expert_intermediate_size", None) is not None
-     latent_dim = getattr(config, "latent_moe_dim", None)
--    dense_mlp_uses_shared_experts = getattr(
--        config, "dense_mlp_uses_shared_experts", False
--    )
-+    dense_mlp_uses_shared_experts = getattr(config, "dense_mlp_uses_shared_experts", False)
-     peri_ln = getattr(config, "use_peri_ln", False)
-     used: set[str] = set()
- 
-@@ -937,11 +959,21 @@ def convert_olmo3moe_state_from_hf(
+@@ -934,11 +958,21 @@ def convert_olmo3moe_state_from_hf(
  
  @beta_feature
  def convert_olmo3moe_state_to_hf(
@@ -185,14 +181,7 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
  
      Inverse of :func:`convert_olmo3moe_state_from_hf`. Splits the fused
      ``w_up_gate`` routed-expert weight into per-expert HF ``up_proj``/``gate_proj``
-@@ -959,26 +991,22 @@ def convert_olmo3moe_state_to_hf(
-     has_shared = getattr(config, "shared_expert_intermediate_size", None) is not None
-     shared_hidden = getattr(config, "shared_expert_intermediate_size", None)
-     latent_dim = getattr(config, "latent_moe_dim", None)
--    dense_mlp_uses_shared_experts = getattr(
--        config, "dense_mlp_uses_shared_experts", False
--    )
-+    dense_mlp_uses_shared_experts = getattr(config, "dense_mlp_uses_shared_experts", False)
+@@ -960,20 +994,18 @@ def convert_olmo3moe_state_to_hf(
      peri_ln = getattr(config, "use_peri_ln", False)
      used: set[str] = set()
  
@@ -218,9 +207,9 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
          else:
              attention_map = {
                  "w_q.weight": "q_proj.weight",
-@@ -991,38 +1019,42 @@ def convert_olmo3moe_state_to_hf(
-             if getattr(config, "attention_gate_type", None) is not None:
-                 attention_map["w_g.weight"] = "g_proj.weight"
+@@ -988,38 +1020,42 @@ def convert_olmo3moe_state_to_hf(
+             if getattr(config, "scalable_softmax", False):
+                 attention_map["ssmax_scale"] = "ssmax_scale"
              for olmo_suffix, hf_suffix in attention_map.items():
 -                hf_state[f"{prefix}self_attn.{hf_suffix}"] = _take(
 -                    olmo_core_state,
@@ -260,7 +249,7 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
              )
  
          if layer_idx in dense_indices:
-             if not dense_mlp_uses_shared_experts:
+             if not dense_layers_use_shared_expert:
 -                hf_state[f"{prefix}mlp.gate_proj.weight"] = _take(
 -                    olmo_core_state, used, f"{olmo_prefix}feed_forward.w1.weight"
 +                yield (
@@ -281,7 +270,7 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
                  )
              else:
                  dense_hidden = config.dense_mlp_intermediate_size
-@@ -1031,20 +1063,22 @@ def convert_olmo3moe_state_to_hf(
+@@ -1028,20 +1064,22 @@ def convert_olmo3moe_state_to_hf(
                      used,
                      f"{olmo_prefix}shared_experts.w_up_gate",
                  ).reshape(d_model, 2 * dense_hidden)
@@ -313,7 +302,7 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
  
          w_up_gate = _take(olmo_core_state, used, f"{olmo_prefix}routed_experts.w_up_gate").reshape(
              n_experts, 2 * moe_hidden, routed_d_model
-@@ -1055,29 +1089,34 @@ def convert_olmo3moe_state_to_hf(
+@@ -1052,29 +1090,34 @@ def convert_olmo3moe_state_to_hf(
              n_experts, moe_hidden, routed_d_model
          )
          for e in range(n_experts):
@@ -363,7 +352,7 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
                  )
  
          if has_shared:
-@@ -1087,15 +1126,14 @@ def convert_olmo3moe_state_to_hf(
+@@ -1084,15 +1127,14 @@ def convert_olmo3moe_state_to_hf(
              ).reshape(d_model, 2 * shared_hidden)
              shared_up = shared_up_gate[:, :shared_hidden]
              shared_gate = shared_up_gate[:, shared_hidden:]
@@ -384,10 +373,10 @@ index 5c9e38b525775a900559066fa0a9b58da69440df..a367aa29d1c3fc0623572edf532f2265
  def _convert_state(
 diff --git a/src/olmo_core/nn/moe/v2/olmo3.py b/src/olmo_core/nn/moe/v2/olmo3.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a2886fdf6939
+index 0000000000000000000000000000000000000000..7c07f9a6888e970f398a67099ff0135527cfff6f
 --- /dev/null
 +++ b/src/olmo_core/nn/moe/v2/olmo3.py
-@@ -0,0 +1,623 @@
+@@ -0,0 +1,740 @@
 +"""Olmo3Moe builders and correctness-first OLMoDDP/HF weight interchange."""
 +
 +from __future__ import annotations
@@ -465,17 +454,23 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +        raise NotImplementedError("Olmo3Moe export requires at least one routed MoE block.")
 +
 +    representative = moe_blocks[0]
-+    attention = representative.sequence_mixer
++    attention_blocks = [b for b in typed_blocks if isinstance(b.sequence_mixer, AttentionConfig)]
++    kda_blocks = [b for b in typed_blocks if isinstance(b.sequence_mixer, KimiDeltaAttentionConfig)]
++    if len(attention_blocks) + len(kda_blocks) != len(typed_blocks) or not attention_blocks:
++        raise NotImplementedError("Olmo3Moe export requires full attention, optionally with KDA.")
++    attention = attention_blocks[0].sequence_mixer
 +    router = representative.routed_experts_router
 +    routed_experts = representative.routed_experts
 +    if not isinstance(attention, AttentionConfig):
 +        raise NotImplementedError("Olmo3Moe export requires attention sequence mixers.")
 +    if router is None or routed_experts is None:
 +        raise NotImplementedError("Olmo3Moe blocks require routed experts and a router.")
++    if any(b.routed_experts_router.emo is not None for b in moe_blocks):
++        raise NotImplementedError("The MILES factory does not support EMo.")
 +    if representative.layer_norm is None:
 +        raise NotImplementedError("Olmo3Moe export requires RMS layer norms.")
-+    if attention.rope is None or attention.rope.scaling is not None:
-+        raise NotImplementedError("Olmo3Moe export requires unscaled RoPE.")
++    if attention.rope is not None and attention.rope.scaling is not None:
++        raise NotImplementedError("Olmo3Moe export requires unscaled RoPE or disabled RoPE.")
 +    if attention.bias:
 +        raise NotImplementedError("Olmo3Moe export does not support attention bias.")
 +    if not attention.use_head_qk_norm or attention.qk_norm is None:
@@ -497,13 +492,63 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +            block_attention.bias,
 +            block_attention.dropout,
 +            block_attention.use_head_qk_norm,
++            bool(block_attention.qk_norm_per_head_gains),
++            block_attention.scalable_softmax,
++            block_attention.gate,
++            block_attention.qk_norm,
 +            block_attention.rope.theta if block_attention.rope is not None else None,
 +            block.layer_norm.eps if block.layer_norm is not None else None,
 +        )
 +
-+    expected_attention = architecture_signature(representative)
-+    if any(architecture_signature(block) != expected_attention for block in typed_blocks):
++    expected_attention = architecture_signature(attention_blocks[0])
++    if any(architecture_signature(block) != expected_attention for block in attention_blocks):
 +        raise ValueError("Olmo3Moe attention architecture must be consistent across layers.")
++
++    if any(block.layer_norm != representative.layer_norm for block in typed_blocks):
++        raise ValueError("Olmo3Moe layer norms must be consistent across layers.")
++    latent = representative.latent_moe
++    if any(block.latent_moe != latent for block in moe_blocks):
++        raise ValueError("Latent expert settings must be consistent across MoE layers.")
++    if any(block.latent_moe is not None for block in typed_blocks if block.routed_experts is None):
++        raise NotImplementedError("Dense layers cannot use latent experts.")
++    if latent is not None and latent.up_proj_input_norm is not None:
++        if (
++            latent.resolved_up_proj_input_norm()
++            != LatentMoEConfig(latent_dim=latent.latent_dim).resolved_up_proj_input_norm()
++        ):
++            raise NotImplementedError("HF latent up-projection norm requires the default RMS norm.")
++    kda_fields: dict[str, Any] = {}
++    if kda_blocks:
++        kda = kda_blocks[0].sequence_mixer
++        assert isinstance(kda, KimiDeltaAttentionConfig)
++
++        def kda_signature(mixer: KimiDeltaAttentionConfig) -> tuple[Any, ...]:
++            head_dim = mixer.head_dim or model_config.d_model // mixer.n_heads
++            return (
++                mixer.n_heads,
++                mixer.n_v_heads or mixer.n_heads,
++                head_dim,
++                int(head_dim * mixer.expand_v),
++                mixer.conv_size,
++                mixer.conv_bias,
++                mixer.allow_neg_eigval,
++                mixer.norm_eps,
++            )
++
++        if any(kda_signature(b.sequence_mixer) != kda_signature(kda) for b in kda_blocks):
++            raise ValueError("KDA architecture must be consistent across layers.")
++        if kda.conv_bias:
++            raise NotImplementedError("HF KDA conversion does not support convolution bias.")
++        nh, nv, dk, dv, conv, _, neg, eps = kda_signature(kda)
++        kda_fields = dict(
++            linear_num_key_heads=nh,
++            linear_num_value_heads=nv,
++            linear_key_head_dim=dk,
++            linear_value_head_dim=dv,
++            linear_conv_kernel_dim=conv,
++            linear_allow_neg_eigval=neg,
++            linear_norm_eps=eps,
++        )
 +
 +    routed_signature = (
 +        routed_experts.hidden_size,
@@ -517,6 +562,7 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +        router.normalize_expert_weights,
 +        router.restore_weight_scale,
 +        router.original_top_k,
++        router.global_load_balancing,
 +    )
 +    for block in moe_blocks[1:]:
 +        block_router = block.routed_experts_router
@@ -535,6 +581,7 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +            block_router.normalize_expert_weights,
 +            block_router.restore_weight_scale,
 +            block_router.original_top_k,
++            block_router.global_load_balancing,
 +        ) != routed_signature:
 +            raise ValueError("Routed expert architecture must be consistent across MoE layers.")
 +
@@ -590,6 +637,9 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +    window_sizes: set[int] = set()
 +    for layer_idx, block in enumerate(typed_blocks):
 +        block_attention = block.sequence_mixer
++        if isinstance(block_attention, KimiDeltaAttentionConfig):
++            layer_types.append(OLMO3_LINEAR_ATTENTION)
++            continue
 +        assert isinstance(block_attention, AttentionConfig)
 +        sliding = block_attention.sliding_window
 +        if sliding is not None and sliding.should_use_swa(layer_idx, model_config.n_layers):
@@ -618,6 +668,7 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +        n_routed_experts=routed_experts.num_experts,
 +        num_experts_per_tok=router.top_k,
 +        original_num_experts_per_tok=router.original_top_k,
++        global_load_balancing=router.global_load_balancing,
 +        num_hidden_layers=model_config.n_layers,
 +        num_attention_heads=attention.n_heads,
 +        num_key_value_heads=attention.n_kv_heads,
@@ -631,12 +682,26 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +        bos_token_id=bos_token_id,
 +        eos_token_id=eos_token_id,
 +        tie_word_embeddings=model_config.tie_word_embeddings,
-+        rope_theta=attention.rope.theta,
++        rope_theta=attention.rope.theta if attention.rope is not None else 10_000,
++        use_rope=attention.rope is not None,
 +        attention_bias=False,
 +        attention_dropout=attention.dropout or 0.0,
 +        rms_norm_eps=representative.layer_norm.eps,
 +        sliding_window=(next(iter(window_sizes)) + 1 if window_sizes else max_position_embeddings),
 +        use_head_qk_norm=True,
++        qk_norm_per_head_gains=bool(attention.qk_norm_per_head_gains),
++        scalable_softmax=attention.scalable_softmax,
++        attention_gate_type=str(attention.gate.granularity) if attention.gate is not None else None,
++        attention_gate_full_precision=(
++            attention.gate.full_precision if attention.gate is not None else True
++        ),
++        latent_moe_dim=latent.latent_dim if latent is not None else None,
++        latent_moe_bias=latent.bias if latent is not None else False,
++        latent_moe_up_proj_input_norm=(
++            latent.up_proj_input_norm_enabled if latent is not None else False
++        ),
++        dense_layers_use_shared_expert=True,
++        **kda_fields,
 +        layer_types=layer_types,
 +        dense_layers_indices=dense_layers_indices,
 +        embed_scale=(model_config.embed_scale if model_config.embed_scale is not None else 1.0),
@@ -665,6 +730,15 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +    config = _as_mapping(hf_config)
 +    if config.get("model_type") != "olmo3moe":
 +        raise ValueError(f"Expected model_type='olmo3moe', got {config.get('model_type')!r}.")
++    if any(
++        config.get(key) is not None
++        for key in (
++            "emo_min_document_expert_pool",
++            "emo_max_document_expert_pool",
++            "emo_eval_document_expert_pool",
++        )
++    ):
++        raise NotImplementedError("The MILES factory does not support EMo.")
 +    rope_parameters = config.get("rope_parameters") or config.get("rope_scaling") or {}
 +    if rope_parameters and rope_parameters.get("rope_type", "default") != "default":
 +        raise NotImplementedError("Scaled RoPE is not supported by this stage-one factory.")
@@ -737,7 +811,12 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +        original_top_k=config.get("original_num_experts_per_tok"),
 +        lb_loss_weight=router_aux_loss_weight,
 +        z_loss_weight=router_z_loss_weight,
-+        lb_loss_granularity=MoELoadBalancingLossGranularity.instance,
++        global_load_balancing=bool(config.get("global_load_balancing", False)),
++        lb_loss_granularity=(
++            MoELoadBalancingLossGranularity.local_batch
++            if config.get("global_load_balancing", False)
++            else MoELoadBalancingLossGranularity.instance
++        ),
 +        dtype=dtype,
 +    )
 +    shared_hidden = config.get("shared_expert_intermediate_size")
@@ -779,21 +858,27 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +            head_dim=int(config["head_dim"]),
 +            bias=False,
 +            dropout=float(config.get("attention_dropout", 0.0)),
-+            rope=RoPEConfig(
-+                name=RoPEType.default,
-+                theta=float(config.get("rope_theta", 10_000)),
-+                full_precision=True,
-+            )
-+            if config.get("use_rope", True)
-+            else None,
-+            gate=GateConfig(
-+                granularity=GateGranularity(config["attention_gate_type"]),
-+                full_precision=bool(config.get("attention_gate_full_precision", True)),
-+            )
-+            if config.get("attention_gate_type")
-+            else None,
++            rope=(
++                RoPEConfig(
++                    name=RoPEType.default,
++                    theta=float(config.get("rope_theta", 10_000)),
++                    full_precision=True,
++                )
++                if config.get("use_rope", True)
++                else None
++            ),
++            gate=(
++                GateConfig(
++                    granularity=GateGranularity(config["attention_gate_type"]),
++                    full_precision=bool(config.get("attention_gate_full_precision", True)),
++                )
++                if config.get("attention_gate_type")
++                else None
++            ),
 +            qk_norm=layer_norm,
 +            use_head_qk_norm=True,
++            qk_norm_per_head_gains=bool(config.get("qk_norm_per_head_gains", False)),
++            scalable_softmax=bool(config.get("scalable_softmax", False)),
 +            backend=attention_backend,
 +            dtype=dtype,
 +            sliding_window=(
@@ -883,11 +968,31 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +    return wrapped if isinstance(wrapped, torch.nn.Module) else model
 +
 +
++def _config_for_native_dense_layout(
++    model: torch.nn.Module, config: PretrainedConfig
++) -> PretrainedConfig:
++    # This HF field describes the source Core tensor layout. Both layouts export
++    # exactly the same HF MLP. The adapter always builds shared-expert dense blocks,
++    # but can import HF files originally exported from ordinary dense blocks.
++    layouts = {
++        hasattr(model.get_submodule(f"blocks.{index}"), "shared_experts")
++        and model.get_submodule(f"blocks.{index}").shared_experts is not None
++        for index in (config.dense_layers_indices or [])
++    }
++    if len(layouts) > 1:
++        raise NotImplementedError("Mixed native dense tensor layouts are unsupported.")
++    if layouts and next(iter(layouts)) != config.dense_layers_use_shared_expert:
++        config = deepcopy(config)
++        config.dense_layers_use_shared_expert = next(iter(layouts))
++    return config
++
++
 +def load_olmo3_moe_hf_state(
 +    model: torch.nn.Module, hf_config: PretrainedConfig, hf_state: Mapping[str, torch.Tensor]
 +) -> None:
 +    """Load a full HF state into an unsharded or EP-sharded OLMoDDP model."""
 +    model = _unwrap_model(model)
++    hf_config = _config_for_native_dense_layout(model, hf_config)
 +    native_state = convert_state_from_hf(hf_config, dict(hf_state), model_type="olmo3moe")
 +    parameters = dict(model.named_parameters())
 +    for layer_idx in range(hf_config.num_hidden_layers):
@@ -956,7 +1061,7 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +            native_state[f"{prefix}w_k.weight"] = k
 +            native_state[f"{prefix}w_v.weight"] = v
 +
-+    return convert_state_to_hf(hf_config, native_state)
++    return convert_state_to_hf(_config_for_native_dense_layout(model, hf_config), native_state)
 +
 +
 +class _GatheredMoEState(Mapping[str, torch.Tensor]):
@@ -1010,6 +1115,7 @@ index 0000000000000000000000000000000000000000..22fdfdd2de65f7147c467198a137a288
 +    CPU replica is staged. The current expert slabs and consumer's output bucket
 +    still need device memory; this is not an arbitrarily small-memory exporter.
 +    """
++    hf_config = _config_for_native_dense_layout(_unwrap_model(model), hf_config)
 +    yield from iter_olmo3moe_state_to_hf(hf_config, _GatheredMoEState(model, hf_config))
 diff --git a/src/olmo_core/nn/moe/v2/replay.py b/src/olmo_core/nn/moe/v2/replay.py
 new file mode 100644
@@ -1064,23 +1170,32 @@ index 0000000000000000000000000000000000000000..07a0fd9ae8a5eed4dac0bb6523d82f02
 +        for name, router in routers.items():
 +            router.replay_expert_indices = previous[name]
 diff --git a/src/olmo_core/nn/moe/v2/router.py b/src/olmo_core/nn/moe/v2/router.py
-index 67d8a17acdb176b0637dffcbfbf8051bdd738066..69cc8bfeed8ea774cc91cd54baa0b8f9a509cc5d 100644
+index ca243909ce65f5fcfdcf0d2c33d48e366291b006..620e7f44ea1c47435851bbebb159aab6cd993c8a 100644
 --- a/src/olmo_core/nn/moe/v2/router.py
 +++ b/src/olmo_core/nn/moe/v2/router.py
-@@ -62,9 +62,9 @@ class MoERouterConfigV2(Config):
+@@ -62,12 +62,16 @@ class MoERouterConfigV2(Config):
+     )
+     z_loss_weight: Optional[float] = None
      orth_loss_weight: Optional[float] = None
-     restore_weight_scale: bool = False  # if True, multiply the router weights by topK so that the scores have similar scale as dense models.
+-    restore_weight_scale: bool = False  # if True, multiply the router weights by topK so that the scores have similar scale as dense models.
++    restore_weight_scale: bool = (
++        False  # if True, multiply the router weights by topK so that the scores have similar scale as dense models.
++    )
      expert_weight_scale: Optional[float] = None
 -    original_top_k: Optional[
 -        int
 -    ] = None  # for restoring weight scales to match a model trained with a different top_k
+-    use_recompute_fp32_cast: bool = False  # whether to use an OutputDiscardCheckpoint to save the fp32 cast of the router input for recomputation in backward, which can save memory at the cost of extra compute in backward.
 +    original_top_k: Optional[int] = (
 +        None  # for restoring weight scales to match a model trained with a different top_k
 +    )
-     use_recompute_fp32_cast: bool = False  # whether to use an OutputDiscardCheckpoint to save the fp32 cast of the router input for recomputation in backward, which can save memory at the cost of extra compute in backward.
++    use_recompute_fp32_cast: bool = (
++        False  # whether to use an OutputDiscardCheckpoint to save the fp32 cast of the router input for recomputation in backward, which can save memory at the cost of extra compute in backward.
++    )
      score_correction_bias: bool = False
      n_group: Optional[int] = None
-@@ -604,8 +604,20 @@ class MoERouterV2(nn.Module):
+     topk_group: Optional[int] = None
+@@ -663,8 +667,20 @@ class MoERouterV2(nn.Module):
              # If we only need the scores, return them directly.
              return scores, None, None, None
  
@@ -1102,17 +1217,17 @@ index 67d8a17acdb176b0637dffcbfbf8051bdd738066..69cc8bfeed8ea774cc91cd54baa0b8f9
              # TODO: merge into get_top_k
              scores_sel = self._quantize_scores(scores)
              scores_sel = self._break_ties(scores_sel)
-@@ -632,7 +644,7 @@ class MoERouterV2(nn.Module):
+@@ -691,7 +707,7 @@ class MoERouterV2(nn.Module):
  
-         # TODO: check
-         # WARN: does not work with PP
+         # TODO: verify the recompute-index cache is correct under activation checkpointing;
+         # known-broken under pipeline parallelism (the cached indices don't survive PP microbatching).
 -        if self.use_recompute_cache:
 +        if self.use_recompute_cache and replay_indices is None:
              if self._recompute_cache is None:  # first forward
                  if torch.is_grad_enabled():
                      self._recompute_cache = expert_indices.detach()  # save for recompute
 diff --git a/src/olmo_core/train/train_module/transformer/ddp_train_module.py b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-index 0dc7eb7dcceba2851efe40052f9f755f3d4a569d..c4a82b1021e210e0cfab4f00d22ea6ce7861ac6d 100644
+index a855836be5a9c92ca67136acf6125861503f108d..70474f2157f4d10a91322297296dd1aa18e3ce0b 100644
 --- a/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 +++ b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 @@ -80,6 +80,7 @@ from olmo_core.utils import get_default_device, log_once, move_to_device
@@ -1123,7 +1238,7 @@ index 0dc7eb7dcceba2851efe40052f9f755f3d4a569d..c4a82b1021e210e0cfab4f00d22ea6ce
  from .config import (
      TransformerActivationCheckpointingConfig,
      TransformerContextParallelConfig,
-@@ -1504,6 +1505,10 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -1520,6 +1521,10 @@ class OLMoDDPTrainModule(TrainModule):
                  flush=True,
              )
  
@@ -1213,17 +1328,24 @@ index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa974
          self._set_model_mode("train")
 diff --git a/src/test/nn/moe/v2/olmo3_factory_test.py b/src/test/nn/moe/v2/olmo3_factory_test.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..496d21c0ebe3dc0e6e1f25eb83701a6975eefd72
+index 0000000000000000000000000000000000000000..05ba66473c2fad3731e08ee1f28f0e3686a3bd13
 --- /dev/null
 +++ b/src/test/nn/moe/v2/olmo3_factory_test.py
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,272 @@
 +"""Exercise the adapter factory against gdn2's real hybrid modules and HF tensors."""
++
++from copy import deepcopy
 +
 +import pytest
 +import torch
 +
 +from olmo_core.config import DType
-+from olmo_core.nn.attention import AttentionBackendName, AttentionType, KimiDeltaAttention
++from olmo_core.exceptions import OLMoConfigurationError
++from olmo_core.nn.attention import (
++    AttentionBackendName,
++    AttentionType,
++    KimiDeltaAttention,
++)
 +from olmo_core.nn.moe.v2 import olmo3
 +from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 +from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
@@ -1236,7 +1358,7 @@ index 0000000000000000000000000000000000000000..496d21c0ebe3dc0e6e1f25eb83701a69
 +        attention_hidden_size=32,
 +        head_dim=8,
 +        dense_mlp_intermediate_size=24,
-+        dense_mlp_uses_shared_experts=True,
++        dense_layers_use_shared_expert=True,
 +        moe_intermediate_size=12,
 +        shared_expert_intermediate_size=16,
 +        n_routed_experts=4,
@@ -1333,24 +1455,174 @@ index 0000000000000000000000000000000000000000..496d21c0ebe3dc0e6e1f25eb83701a69
 +    assert actual.keys() == expected.keys()
 +    for name in expected:
 +        torch.testing.assert_close(actual[name], expected[name], rtol=0, atol=0)
++
++
++@pytest.mark.parametrize("hidden,heads,kv,latent", [(32, 4, 2, 16), (48, 6, 3, 24)])
++@pytest.mark.parametrize("head_gains,ssmax", [(False, False), (True, False), (True, True)])
++def test_hero_config_and_streaming_state_roundtrip(hidden, heads, kv, latent, head_gains, ssmax):
++    hf = hybrid_config(latent)
++    hf.hidden_size = hidden
++    hf.attention_hidden_size = hidden
++    hf.num_attention_heads = heads
++    hf.num_key_value_heads = kv
++    hf.qk_norm_per_head_gains = head_gains
++    hf.scalable_softmax = ssmax
++    hf.latent_moe_bias = True
++    hf.latent_moe_up_proj_input_norm = True
++    hf.layer_types = ["linear_attention", "full_attention", "linear_attention"]
++    hf.num_hidden_layers = 3
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf, dtype=DType.bfloat16, attention_backend=AttentionBackendName.torch
++    )
++    reverse = olmo3.build_olmo3_moe_hf_config_from_native_config(
++        config,
++        max_position_embeddings=hf.max_position_embeddings,
++        pad_token_id=hf.pad_token_id,
++        bos_token_id=hf.bos_token_id,
++        eos_token_id=hf.eos_token_id,
++    )
++    fields = [
++        "hidden_size",
++        "num_attention_heads",
++        "num_key_value_heads",
++        "head_dim",
++        "qk_norm_per_head_gains",
++        "scalable_softmax",
++        "use_rope",
++        "attention_gate_type",
++        "attention_gate_full_precision",
++        "layer_types",
++        "dense_layers_indices",
++        "dense_layers_use_shared_expert",
++        "linear_num_key_heads",
++        "linear_num_value_heads",
++        "linear_key_head_dim",
++        "linear_value_head_dim",
++        "linear_allow_neg_eigval",
++        "linear_conv_kernel_dim",
++        "linear_norm_eps",
++        "latent_moe_dim",
++        "latent_moe_bias",
++        "latent_moe_up_proj_input_norm",
++        "n_routed_experts",
++        "num_experts_per_tok",
++    ]
++    assert {k: getattr(reverse, k) for k in fields} == {k: getattr(hf, k) for k in fields}
++    native = config.build(init_device="cpu")
++    attention = native.blocks["1"].attention
++    assert tuple(attention.q_norm.weight.shape) == ((heads, 8) if head_gains else (8,))
++    assert tuple(attention.k_norm.weight.shape) == ((kv, 8) if head_gains else (8,))
++    if ssmax:
++        assert tuple(attention.ssmax_scale.shape) == (heads,)
++    reference = Olmo3MoeForCausalLM(hf).to(torch.bfloat16)
++    with torch.no_grad():
++        for name, parameter in reference.named_parameters():
++            if name.endswith(("A_log", "dt_bias")):
++                parameter.zero_()
++            elif name.endswith(("q_norm.weight", "k_norm.weight", "ssmax_scale")):
++                parameter.copy_(torch.arange(parameter.numel()).reshape(parameter.shape) / 32 + 1)
++    expected = reference.state_dict()
++    olmo3.load_olmo3_moe_hf_state(native, reverse, expected)
++    actual = dict(olmo3.iter_olmo3_moe_hf_state(native, reverse))
++    assert actual.keys() == expected.keys()
++    for key in expected:
++        torch.testing.assert_close(actual[key], expected[key], rtol=0, atol=0, check_dtype=False)
++    if ssmax:
++        del native.blocks["1"].attention.ssmax_scale
++        with pytest.raises(KeyError, match="ssmax_scale"):
++            dict(olmo3.iter_olmo3_moe_hf_state(native, reverse))
++
++
++def test_reverse_config_rejects_heterogeneous_attention_features():
++    hf = hybrid_config()
++    hf.num_hidden_layers = 3
++    hf.layer_types = ["linear_attention", "full_attention", "full_attention"]
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf, attention_backend=AttentionBackendName.torch
++    )
++    config.block["other_full"] = deepcopy(config.block["full_attention"])
++    config.block["other_full"].sequence_mixer.scalable_softmax = True
++    config.block_pattern[-1] = "other_full"
++    with pytest.raises(ValueError, match="consistent across layers"):
++        olmo3.build_olmo3_moe_hf_config_from_native_config(
++            config,
++            max_position_embeddings=32,
++            pad_token_id=0,
++            bos_token_id=None,
++            eos_token_id=1,
++        )
++
++
++@pytest.mark.parametrize("feature", ["qk_norm_per_head_gains", "scalable_softmax"])
++def test_fused_attention_rejects_unsupported_hero_features(feature):
++    hf = hybrid_config()
++    setattr(hf, feature, True)
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf,
++        attention_backend=AttentionBackendName.torch,
++        attention_type=AttentionType.fused_v2,
++    )
++    with pytest.raises(
++        OLMoConfigurationError, match=f"'{feature}' is only supported by default attention"
++    ):
++        config.build(init_device="meta")
++
++
++@pytest.mark.parametrize("global_lb", [False, True])
++def test_hf_ordinary_dense_layout_imports_without_mutating_config(global_lb):
++    hf = hybrid_config()
++    hf.dense_layers_use_shared_expert = False
++    hf.global_load_balancing = global_lb
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf,
++        dtype=DType.bfloat16,
++        attention_backend=AttentionBackendName.torch,
++    )
++    model = config.build(init_device="cpu")
++    assert model.blocks["1"].routed_experts_router.global_load_balancing == global_lb
++    reference = Olmo3MoeForCausalLM(hf).to(torch.bfloat16)
++    with torch.no_grad():
++        for name, value in reference.named_parameters():
++            if name.endswith(("A_log", "dt_bias")):
++                value.zero_()
++    expected = reference.state_dict()
++    olmo3.load_olmo3_moe_hf_state(model, hf, expected)
++    assert hf.dense_layers_use_shared_expert is False
++    streamed = dict(olmo3.iter_olmo3_moe_hf_state(model, hf))
++    gathered = olmo3.gather_olmo3_moe_hf_state(model, hf)
++    assert hf.dense_layers_use_shared_expert is False
++    assert streamed.keys() == gathered.keys() == expected.keys()
++    for key in expected:
++        torch.testing.assert_close(streamed[key], expected[key], rtol=0, atol=0, check_dtype=False)
++        torch.testing.assert_close(gathered[key], expected[key], rtol=0, atol=0, check_dtype=False)
++    reverse = olmo3.build_olmo3_moe_hf_config_from_native_config(
++        config,
++        max_position_embeddings=32,
++        pad_token_id=0,
++        bos_token_id=None,
++        eos_token_id=1,
++    )
++    assert reverse.dense_layers_use_shared_expert is True
++    assert reverse.global_load_balancing == global_lb
 diff --git a/src/test/train/train_module/custom_objective_test.py b/src/test/train/train_module/custom_objective_test.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..2dfca24d5f06a8ec52d3753c128bd80871a5dd56
+index 0000000000000000000000000000000000000000..12a462001099b6d420d24a9c4e9cb3920260794a
 --- /dev/null
 +++ b/src/test/train/train_module/custom_objective_test.py
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,73 @@
 +"""Numerical checks against real Core modules and HF reference models."""
 +
 +import contextlib
 +
 +import pytest
 +import torch
-+from olmo_core.nn.moe.v2.replay import replay_routes
-+from olmo_core.nn.moe.v2.router import MoERouterConfigV2
-+from olmo_core.train.train_module.transformer.objective import train_batch_with_loss
 +from torch import nn
 +from torch.nn import functional as F
 +from torch.utils.checkpoint import checkpoint
++
++from olmo_core.nn.moe.v2.replay import replay_routes
++from olmo_core.nn.moe.v2.router import MoERouterConfigV2
++from olmo_core.train.train_module.transformer.objective import train_batch_with_loss
 +
 +
 +class ObjectiveModule:
@@ -1389,8 +1661,10 @@ index 0000000000000000000000000000000000000000..2dfca24d5f06a8ec52d3753c128bd808
 +@pytest.mark.parametrize("recompute", [False, True])
 +def test_router_replay_keeps_experts_and_router_gradients(recompute):
 +    router = MoERouterConfigV2(d_model=8, num_experts=4, top_k=2).build()
-+    router.reset_parameters() if hasattr(router, "reset_parameters") else nn.init.normal_(
-+        router.weight, std=0.1
++    (
++        router.reset_parameters()
++        if hasattr(router, "reset_parameters")
++        else nn.init.normal_(router.weight, std=0.1)
 +    )
 +    model = nn.Module()
 +    model.add_module("routed_experts_router", router)

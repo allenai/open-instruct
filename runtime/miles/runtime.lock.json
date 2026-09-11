@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "experimental; full GRPO replacement acceptance incomplete",
+  "status": "experimental hero support; conversion and serving qualification in progress",
   "base_image": {
     "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
@@ -8,10 +8,10 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/OLMo-core.git",
-      "revision": "169b8f9d06bce0276143876c82f630af483b03b7",
-      "development_commit": "b7f1e5296704779e7deb06de4c4242be9729d1a9",
+      "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5",
+      "development_commit": "3a643bc1c0762df867824ef617ac450751f00b74",
       "patch": "patches/olmo-core.patch",
-      "patch_sha256": "4d7cdf74ff9f25aa2d030af9ffb27d90c4c747dcf73436df54cea8e33cd2e954"
+      "patch_sha256": "9177358424465d58442228c7c2ca80c1064dc7f9d6a6f760d2581e6944ebded6"
     },
     "miles": {
       "repository": "https://github.com/radixark/miles.git",

@@ -37,6 +37,14 @@ cp "$RUN_ROOT/preparation.json" /output/
         )
         resources = {"cpuCount": 8, "memory": "32 GiB", "gpuCount": 0, "sharedMemory": "4 GiB"}
         cluster, timeout, env = "ai2/saturn", "30m", []
+    elif stage == "audit-core":
+        command = (
+            common
+            + 'python scripts/miles/analyze_gsm8k_parity.py audit "$RUN_ROOT" --backend core\n'
+            + 'cp "$RUN_ROOT/core/audit.json" /output/core-audit.json\n'
+        )
+        resources = {"cpuCount": 8, "memory": "32 GiB", "gpuCount": 0, "sharedMemory": "4 GiB"}
+        cluster, timeout, env = "ai2/saturn", "30m", []
     elif stage == "audit":
         command = (
             common
@@ -100,7 +108,7 @@ python scripts/miles/gsm8k_parity.py "$RUN_ROOT"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
-    parser.add_argument("--stage", choices=("prepare", "core", "audit"), required=True)
+    parser.add_argument("--stage", choices=("prepare", "core", "audit", "audit-core"), required=True)
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument("--megatron-directory", default="megatron")
     args = parser.parse_args()

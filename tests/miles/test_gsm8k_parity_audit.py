@@ -366,3 +366,11 @@ def test_retry_directory_must_stay_beneath_campaign_root(directory):
         audit.arm_directory("megatron", directory)
     with pytest.raises(ValueError, match="one directory name"):
         launch_gsm8k_parity.specification("test-image", "audit", megatron_directory=directory)
+
+
+def test_core_only_audit_does_not_require_comparison_arm():
+    task = launch_gsm8k_parity.specification("image", "audit-core")["tasks"][0]
+    assert "--backend core" in task["arguments"][0]
+    assert "--backend megatron" not in task["arguments"][0]
+    assert "analyze_gsm8k_parity.py compare" not in task["arguments"][0]
+    assert task["constraints"]["cluster"] == ["ai2/saturn"]
