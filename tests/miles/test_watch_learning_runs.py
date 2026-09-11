@@ -254,3 +254,33 @@ def test_submission_discards_inherited_existing_image_override(tmp_path, monkeyp
     w.poll()
     _, kwargs = next((argv, kw) for argv, kw in runner.calls if argv[0].endswith("build_image_and_launch.sh"))
     assert "MILES_EXISTING_IMAGE" not in kwargs["env"]
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_observe_only_light_retry_preserves_original_audit_owner(tmp_path, exit_code):
+    runner = Commands()
+    original_config = configuration(tmp_path)
+    original = watch.Watcher(tmp_path / "original", original_config, runner)
+    original.poll()
+    assert runner.submissions == 1
+    original_bytes = original.path.read_bytes()
+    retry_id = "explicit-light-retry"
+    runner.exits[retry_id] = exit_code
+    retry_config = {
+        **original_config,
+        "observe_only": True,
+        "experiments": {"light": retry_id},
+        "previous_watch_output": str(original.output),
+    }
+    retry = watch.Watcher(tmp_path / "retry", retry_config, runner)
+    assert retry.poll()
+    assert retry.state["jobs"]["light"]["captured"]
+    assert not retry.state["audit"]
+    assert set(retry.state["jobs"]) == {"light"}
+    assert bool(retry.state["attention"]) == bool(exit_code)
+    restarted = watch.Watcher(retry.output, retry_config, runner)
+    assert restarted.poll()
+    with pytest.raises(ValueError, match="Observe-only"):
+        restarted.submit_audit()
+    assert runner.submissions == 1
+    assert original.path.read_bytes() == original_bytes

@@ -48,3 +48,10 @@ is rejected instead of silently replacing recorded provenance.
 This process needs the local host, Docker, Beaker credentials, and filesystem to
 remain available. Its PID and last successful poll are inspectable locally. It is
 not a remote service and cannot survive host shutdown without an explicit restart.
+
+An explicitly authorized light retry uses a separate output directory and
+`--observe-only --light-experiment RETRY_ID --previous-watch-output ORIGINAL_OUTPUT`.
+This sidecar captures only that experiment and cannot submit an audit, including
+after restart. The original watcher remains the sole paired-audit owner, retaining
+its immutable configuration and the failed original light run's evidence. The
+sidecar records the original output path as provenance; it never edits that history.

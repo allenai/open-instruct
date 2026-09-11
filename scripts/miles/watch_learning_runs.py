@@ -214,6 +214,8 @@ class Watcher:
             raise ValueError("Pinned checkout is dirty")
 
     def submit_audit(self):
+        if self.config.get("observe_only"):
+            raise ValueError("Observe-only watchers cannot submit audits")
         self.state["audit"] = {"status": "submitting", "attempted_at": now()}
         self.save()  # The durable intent precedes every possible external side effect.
         command = [
@@ -353,7 +355,11 @@ class Watcher:
                 except Exception as error:
                     self.state["last_poll_error"] = {"at": now(), "arm": name, "error": str(error)}
             self.capture_terminal(name)
-        if all(self.successful(name) for name in ("core", "megatron")) and not self.state["audit"]:
+        if (
+            not self.config.get("observe_only")
+            and all(self.successful(name) for name in ("core", "megatron"))
+            and not self.state["audit"]
+        ):
             self.submit_audit()
         audit = self.state["audit"]
         if audit.get("status") == "submitted":
@@ -384,7 +390,7 @@ class Watcher:
             or self.state["jobs"].get(name, {}).get("capture_attempts", 0) >= 3
             for name in captured_names
         )
-        return arms_done and captures_done and (failed_arm or audit_done)
+        return arms_done and captures_done and (self.config.get("observe_only") or failed_arm or audit_done)
 
 
 def main():
@@ -397,6 +403,12 @@ def main():
         "--light-experiment", required=True, help="Explicit approved light-run identity; never replaced automatically"
     )
     parser.add_argument("--score-experiment", default=EXPERIMENTS["score_variants"])
+    parser.add_argument(
+        "--observe-only", action="store_true", help="Capture only the explicit light experiment; never submit an audit"
+    )
+    parser.add_argument(
+        "--previous-watch-output", type=Path, help="Preserved original watcher history for a light retry"
+    )
     args = parser.parse_args()
     if not args.analysis_image.startswith("sha256:"):
         parser.error("Pin the local analyzer Docker image by sha256 ID")
@@ -411,6 +423,12 @@ def main():
         base_image=args.base_image,
         experiments={**EXPERIMENTS, "light": args.light_experiment, "score_variants": args.score_experiment},
     )
+    if args.observe_only:
+        config.update(observe_only=True, experiments={"light": args.light_experiment})
+    if args.previous_watch_output:
+        if not args.observe_only:
+            parser.error("--previous-watch-output requires --observe-only")
+        config["previous_watch_output"] = str(args.previous_watch_output.resolve())
     output.mkdir(parents=True, exist_ok=True)
     with (output / "watch.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
