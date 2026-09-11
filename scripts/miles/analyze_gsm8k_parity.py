@@ -112,7 +112,7 @@ def audit_dump(path, prepared_rows, *, version, multiplicity, response_cap=4096,
         # bridge and the sample's possibly corrupted target entirely.
         score = verifier([], sample["response"], row["label"]).score
         stored = sample["reward"]
-        if not isinstance(stored, (int, float)) or not math.isfinite(stored) or score != stored:
+        if not isinstance(stored, int | float) or not math.isfinite(stored) or score != stored:
             errors.append(f"{prefix}: stored reward differs from direct GSM8K verification")
         records.append(
             dict(
@@ -137,21 +137,97 @@ def audit_dump(path, prepared_rows, *, version, multiplicity, response_cap=4096,
     )
 
 
-def publication_summary(path):
+def evidence_rows(path):
     if not path.is_file():
-        return {"available": False}
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    durations = [row["total_seconds"] for row in rows]
+        return None, [f"missing {path.name}"]
+    try:
+        rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    except (OSError, ValueError) as error:
+        return None, [f"cannot read {path.name}: {error}"]
+    if not all(isinstance(row, dict) for row in rows):
+        return None, [f"{path.name} records must be objects"]
+    return rows, []
+
+
+def publication_summary(path):
+    rows, errors = evidence_rows(path)
+    if rows is None:
+        return {"available": path.is_file(), "valid": False, "errors": errors}
+    versions = [row.get("version") for row in rows]
+    if versions != list(range(UPDATES + 1)) or any(type(version) is not int for version in versions):
+        errors.append(f"publication versions must be exactly 0..{UPDATES} in order")
+    repeated = sum(bool(row.get("repeated_version", False)) for row in rows)
+    if repeated:
+        errors.append("unexpected repeated-version publications")
+    durations = [row.get("total_seconds") for row in rows]
+    valid_durations = all(type(value) in (int, float) and math.isfinite(value) and value >= 0 for value in durations)
+    if not valid_durations:
+        errors.append("publication durations must be finite and nonnegative")
     return {
         "available": True,
+        "valid": not errors,
+        "errors": errors,
         "sha256": digest(path),
         "count": len(rows),
-        "versions": [row["version"] for row in rows],
-        "total_seconds": sum(durations),
-        "mean_seconds": sum(durations) / len(durations) if durations else None,
-        "max_seconds": max(durations, default=None),
-        "repeated_versions": sum(row.get("repeated_version", False) for row in rows),
+        "versions": versions,
+        "total_seconds": sum(durations) if valid_durations else None,
+        "mean_seconds": sum(durations) / len(durations) if durations and valid_durations else None,
+        "max_seconds": max(durations, default=None) if valid_durations else None,
+        "repeated_versions": repeated,
     }
+
+
+def optimizer_summary(path):
+    rows, errors = evidence_rows(path)
+    if rows is None:
+        return {"available": path.is_file(), "valid": False, "errors": errors}
+    steps = [row.get("step") for row in rows if row.get("event") == "optimizer"]
+    if steps != list(range(1, UPDATES + 1)) or any(type(step) is not int for step in steps):
+        errors.append(f"optimizer records must be exactly 1..{UPDATES} in order")
+    return {
+        "available": True,
+        "valid": not errors,
+        "errors": errors,
+        "sha256": digest(path),
+        "count": len(steps),
+        "steps": steps,
+    }
+
+
+def check_core_completion(root, directory, report):
+    for key, filename, summarizer in (
+        ("publication", "publication.jsonl", publication_summary),
+        ("optimizer", "training_contract_rank0.jsonl", optimizer_summary),
+    ):
+        report[key] = summarizer(root / "metrics" / filename)
+        report["errors"].extend(f"{key}: {error}" for error in report[key]["errors"])
+    expected_names = {f"{step}.pt" for step in range(UPDATES)} | {
+        f"eval_{step - 1 if step else 0}.pt" for step in EVAL_STEPS
+    }
+    actual_names = {path.name for path in directory.glob("*.pt")}
+    report["rollout_file_count"] = len(actual_names)
+    if actual_names != expected_names:
+        report["errors"].append("Core rollout file set differs from the frozen protocol")
+    completion = root / "completion.json"
+    if not completion.is_file():
+        report["errors"].append("missing Core completion.json")
+        return
+    try:
+        record = json.loads(completion.read_text())
+    except (OSError, ValueError) as error:
+        report["errors"].append(f"cannot read Core completion.json: {error}")
+        return
+    report["completion"] = record
+    if not isinstance(record, dict) or record.get("completed") is not True:
+        report["errors"].append("Core completion must explicitly report completed=true")
+    expected = {
+        "optimizer_steps": UPDATES,
+        "publication_count": UPDATES + 1,
+        "rollout_files": UPDATES + len(EVAL_STEPS),
+    }
+    for key, count in expected.items():
+        if not isinstance(record, dict) or type(record.get(key)) is not int or record.get(key) != count:
+            report["errors"].append(f"Core completion {key} must equal {count}")
 
 
 def arm_directory(backend, megatron_directory="megatron"):
@@ -220,12 +296,66 @@ def audit(root, backend, *, megatron_directory="megatron"):
         report["training_summary"]["mixed_reward_groups"] / groups if groups else None
     )
     if backend == "core":
-        report["publication"] = publication_summary(root / selected_directory / "metrics/publication.jsonl")
-    completion = root / selected_directory / "completion.json"
-    if completion.is_file():
-        report["completion"] = json.loads(completion.read_text())
+        check_core_completion(root / selected_directory, directory, report)
+    else:
+        report["completion_evidence"] = (
+            "Rollout/evaluation evidence only; confirm final training log and Beaker exit status separately. "
+            "Megatron does not emit the Core completion manifest."
+        )
     report["valid"] = not report["errors"] and all(row["valid"] for row in report["training"] + report["evaluation"])
     return report
+
+
+def within_backend_transitions(report):
+    endpoints = []
+    for step in (0, UPDATES):
+        matches = [entry for entry in report["evaluation"] if entry["completed_steps"] == step]
+        if len(matches) != 1:
+            return None, [f"{report['backend']}: missing unique transition endpoint {step}"]
+        rows = matches[0]["samples"]
+        index = {row["id"]: row for row in rows}
+        if len(index) != len(rows):
+            return None, [f"{report['backend']}: duplicate transition prompt IDs at {step}"]
+        endpoints.append(index)
+    initial, final = endpoints
+    if initial.keys() != final.keys() or not initial:
+        return None, [f"{report['backend']}: transition endpoint membership differs or is empty"]
+    pairs = [
+        {
+            "id": key,
+            "initial_correct": initial[key]["correct"],
+            "final_correct": final[key]["correct"],
+            "initial_at_response_cap": initial[key]["at_response_cap"],
+            "final_at_response_cap": final[key]["at_response_cap"],
+            "initial_response_tokens": initial[key]["response_tokens"],
+            "final_response_tokens": final[key]["response_tokens"],
+        }
+        for key in sorted(initial)
+    ]
+    scores = Counter((pair["initial_correct"], pair["final_correct"]) for pair in pairs)
+    caps = Counter((pair["initial_at_response_cap"], pair["final_at_response_cap"]) for pair in pairs)
+    return {
+        "initial_step": 0,
+        "final_step": UPDATES,
+        "questions": len(pairs),
+        "correctness": {
+            "correct_to_correct": scores[1, 1],
+            "correct_to_incorrect": scores[1, 0],
+            "incorrect_to_correct": scores[0, 1],
+            "incorrect_to_incorrect": scores[0, 0],
+            "net_correct_change": scores[0, 1] - scores[1, 0],
+        },
+        "response_cap": {
+            "initial_count": caps[True, True] + caps[True, False],
+            "final_count": caps[True, True] + caps[False, True],
+            "at_cap_both": caps[True, True],
+            "left_cap": caps[True, False],
+            "entered_cap": caps[False, True],
+            "below_cap_both": caps[False, False],
+        },
+        "pairs": pairs,
+        "interpretation": "Within-run paired question transitions; descriptive counts, without a significance claim.",
+    }, []
 
 
 def compare(core, megatron):
@@ -271,8 +401,14 @@ def compare(core, megatron):
                 pairs=pairs,
             )
         )
+    transitions = {}
+    for report in (core, megatron):
+        transition, transition_errors = within_backend_transitions(report)
+        errors.extend(transition_errors)
+        if transition is not None:
+            transitions[report["backend"]] = transition
     gains = {}
-    if curves and curves[0]["completed_steps"] == 0 and curves[-1]["completed_steps"] == 100:
+    if curves and curves[0]["completed_steps"] == 0 and curves[-1]["completed_steps"] == UPDATES:
         gains = {
             backend: curves[-1][backend]["accuracy"] - curves[0][backend]["accuracy"]
             for backend in ("core", "megatron")
@@ -283,6 +419,7 @@ def compare(core, megatron):
         errors=errors,
         learning_curves=curves,
         accuracy_gain_0_to_100=gains,
+        within_backend_0_to_100=transitions,
         artifact_directories={
             "core": core.get("artifact_directory", "core"),
             "megatron": megatron.get("artifact_directory", "megatron"),
@@ -388,7 +525,7 @@ def parse_timing_log(path, *, warmup_updates=5):
             completion_seconds = data.get("elapsed_seconds")
         for phase, index, seconds, source in additions:
             key = (phase, index)
-            if not isinstance(seconds, (float, int)) or not math.isfinite(seconds) or seconds < 0:
+            if not isinstance(seconds, float | int) or not math.isfinite(seconds) or seconds < 0:
                 warnings.append(f"line {number}: invalid {phase} duration")
                 continue
             point = dict(index=index, seconds=seconds, source=source)

@@ -98,7 +98,7 @@ def _campaign(root):
     )
     for backend, offset in (("core", 0), ("megatron", 1)):
         folder = root / backend / ("rollouts" if backend == "core" else "rollout_data")
-        for index in range(100):
+        for index in range(audit.UPDATES):
             samples = [
                 _sample(row, correct=i % 2 == 0, version=index + offset)
                 for row in train[index * 4 : (index + 1) * 4]
@@ -116,7 +116,24 @@ def _campaign(root):
             _write_dump(folder / f"eval_{step - 1 if step else 0}.pt", samples)
     publication = root / "core/metrics/publication.jsonl"
     publication.parent.mkdir()
-    publication.write_text("".join(json.dumps({"version": step, "total_seconds": 0.5}) + "\n" for step in range(101)))
+    publication.write_text(
+        "".join(json.dumps({"version": step, "total_seconds": 0.5}) + "\n" for step in range(audit.UPDATES + 1))
+    )
+    (publication.parent / "training_contract_rank0.jsonl").write_text(
+        json.dumps({"event": "initialize"})
+        + "\n"
+        + "".join(json.dumps({"event": "optimizer", "step": step}) + "\n" for step in range(1, audit.UPDATES + 1))
+    )
+    (root / "core/completion.json").write_text(
+        json.dumps(
+            {
+                "completed": True,
+                "optimizer_steps": audit.UPDATES,
+                "publication_count": audit.UPDATES + 1,
+                "rollout_files": audit.UPDATES + len(audit.EVAL_STEPS),
+            }
+        )
+    )
 
 
 def test_full_100_update_audits_and_id_paired_learning_curves(tmp_path):
@@ -130,9 +147,25 @@ def test_full_100_update_audits_and_id_paired_learning_curves(tmp_path):
     assert core["training_summary"]["samples"] == 1600
     assert core["training_summary"]["mixed_reward_groups"] == 400
     assert core["publication"]["total_seconds"] == 50.5
+    assert core["optimizer"]["steps"] == list(range(1, audit.UPDATES + 1))
+    assert core["rollout_file_count"] == audit.UPDATES + len(audit.EVAL_STEPS)
+    assert core["completion"]["completed"] is True
+    assert "completion" not in megatron
+    assert "Beaker exit status" in megatron["completion_evidence"]
     compared = audit.compare(core, megatron)
     assert compared["valid"]
     assert compared["learning_curves"][0]["core_minus_megatron_accuracy"] == 0
+    transitions = compared["within_backend_0_to_100"]
+    assert transitions["core"]["correctness"] == {
+        "correct_to_correct": 1,
+        "correct_to_incorrect": 0,
+        "incorrect_to_correct": 1,
+        "incorrect_to_incorrect": 0,
+        "net_correct_change": 1,
+    }
+    assert transitions["megatron"]["correctness"]["correct_to_incorrect"] == 1
+    assert transitions["megatron"]["correctness"]["incorrect_to_correct"] == 1
+    assert [pair["id"] for pair in transitions["megatron"]["pairs"]] == ["test-0", "test-1"]
     final = compared["learning_curves"][-1]
     assert final["core_minus_megatron_accuracy"] == 0.5
     assert (final["both_correct"], final["core_only_correct"], final["megatron_only_correct"]) == (1, 1, 0)
@@ -323,25 +356,26 @@ def test_cadence_comparison_uses_common_indices_and_omits_diagnostic_training_sc
     assert compared["collection_boundary_cycle"]["core"]["count"] == 0
 
 
-def test_retry_directory_is_explicit_and_failed_attempt_stays_untouched(tmp_path, monkeypatch):
+@pytest.mark.parametrize("directory", ["megatron-r2", "megatron-r3"])
+def test_retry_directory_is_explicit_and_failed_attempt_stays_untouched(tmp_path, monkeypatch, directory):
     _campaign(tmp_path)
-    (tmp_path / "megatron").rename(tmp_path / "megatron-r2")
+    (tmp_path / "megatron").rename(tmp_path / directory)
     (tmp_path / "megatron").mkdir()
     failure = tmp_path / "megatron/failure.json"
     failure.write_text('{"completed_updates": 0, "failure": "missing router API"}\n')
     before = failure.read_bytes()
     assert not audit.audit(tmp_path, "megatron")["valid"]
-    retry = audit.audit(tmp_path, "megatron", megatron_directory="megatron-r2")
+    retry = audit.audit(tmp_path, "megatron", megatron_directory=directory)
     assert retry["valid"]
-    assert retry["artifact_directory"] == "megatron-r2"
+    assert retry["artifact_directory"] == directory
     core = audit.audit(tmp_path, "core")
     (tmp_path / "core/audit.json").write_text(json.dumps(core))
-    (tmp_path / "megatron-r2/audit.json").write_text(json.dumps(retry))
-    monkeypatch.setattr(sys, "argv", ["audit", "compare", str(tmp_path), "--megatron-directory", "megatron-r2"])
+    (tmp_path / f"{directory}/audit.json").write_text(json.dumps(retry))
+    monkeypatch.setattr(sys, "argv", ["audit", "compare", str(tmp_path), "--megatron-directory", directory])
     audit.main()
     compared = json.loads((tmp_path / "comparison.json").read_text())
     assert compared["valid"]
-    assert compared["artifact_directories"] == {"core": "core", "megatron": "megatron-r2"}
+    assert compared["artifact_directories"] == {"core": "core", "megatron": directory}
     assert failure.read_bytes() == before
     assert not (tmp_path / "megatron/audit.json").exists()
 
@@ -374,3 +408,118 @@ def test_core_only_audit_does_not_require_comparison_arm():
     assert "--backend megatron" not in task["arguments"][0]
     assert "analyze_gsm8k_parity.py compare" not in task["arguments"][0]
     assert task["constraints"]["cluster"] == ["ai2/saturn"]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "publication_missing",
+        "publication_short",
+        "publication_duplicate",
+        "publication_reordered",
+        "publication_malformed",
+        "optimizer_missing",
+        "optimizer_short",
+        "optimizer_duplicate",
+        "optimizer_reordered",
+        "completion_missing",
+        "completion_false",
+        "completion_truthy",
+        "completion_optimizer_steps",
+        "completion_publication_count",
+        "completion_rollout_files",
+        "completion_count_type",
+        "rollout_extra",
+    ],
+)
+def test_core_audit_requires_complete_run_evidence(tmp_path, fault):
+    _campaign(tmp_path)
+    if fault.startswith(("publication_", "optimizer_")):
+        kind, change = fault.split("_", 1)
+        path = (
+            tmp_path
+            / "core/metrics"
+            / ("publication.jsonl" if kind == "publication" else "training_contract_rank0.jsonl")
+        )
+        if change == "missing":
+            path.unlink()
+        elif change == "malformed":
+            path.write_text("null\n")
+        else:
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            if change == "short":
+                rows.pop()
+            elif change == "duplicate":
+                rows[-1] = rows[-2]
+            elif change == "reordered":
+                rows[-1], rows[-2] = rows[-2], rows[-1]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    elif fault.startswith("completion_"):
+        path = tmp_path / "core/completion.json"
+        if fault == "completion_missing":
+            path.unlink()
+        else:
+            record = json.loads(path.read_text())
+            if fault == "completion_false":
+                record["completed"] = False
+            elif fault == "completion_truthy":
+                record["completed"] = 1
+            elif fault == "completion_count_type":
+                record["optimizer_steps"] = str(audit.UPDATES)
+            else:
+                record[fault.removeprefix("completion_")] -= 1
+            path.write_text(json.dumps(record))
+    elif fault == "rollout_extra":
+        (tmp_path / "core/rollouts/unexpected.pt").write_bytes(b"unused")
+    result = audit.audit(tmp_path, "core")
+    assert not result["valid"]
+    assert result["errors"]
+    # Core-only manifests do not become requirements for the Megatron backend.
+    assert not (tmp_path / "megatron/completion.json").exists()
+
+
+def test_within_backend_cap_transitions_pair_ids_and_preserve_correctness():
+    initial = [
+        {"id": str(i), "correct": i % 2, "at_response_cap": i < 2, "response_tokens": 4096 if i < 2 else 20}
+        for i in range(4)
+    ]
+    final = [
+        {"id": str(i), "correct": 1, "at_response_cap": i % 2 == 0, "response_tokens": 4096 if i % 2 == 0 else 30}
+        for i in reversed(range(4))
+    ]
+    report = {
+        "backend": "core",
+        "evaluation": [
+            {"completed_steps": 0, "samples": initial},
+            {"completed_steps": audit.UPDATES, "samples": final},
+        ],
+    }
+    transitions, errors = audit.within_backend_transitions(report)
+    assert not errors
+    assert transitions["questions"] == 4
+    assert transitions["response_cap"] == {
+        "initial_count": 2,
+        "final_count": 2,
+        "at_cap_both": 1,
+        "left_cap": 1,
+        "entered_cap": 1,
+        "below_cap_both": 1,
+    }
+    assert transitions["correctness"]["incorrect_to_correct"] == 2
+    assert transitions["pairs"][1]["initial_response_tokens"] == 4096
+    assert transitions["pairs"][1]["final_response_tokens"] == 30
+    final.pop()
+    _, errors = audit.within_backend_transitions(report)
+    assert errors and "membership" in errors[0]
+
+
+def test_compare_rejects_shared_change_of_membership_between_endpoints(tmp_path):
+    _campaign(tmp_path)
+    core, megatron = [audit.audit(tmp_path, backend) for backend in ("core", "megatron")]
+    for report in (core, megatron):
+        report["evaluation"][-1]["samples"] = [
+            sample for sample in report["evaluation"][-1]["samples"] if sample["id"] == "test-0"
+        ]
+    result = audit.compare(core, megatron)
+    assert not result["valid"]
+    assert any("transition endpoint membership" in error for error in result["errors"])
