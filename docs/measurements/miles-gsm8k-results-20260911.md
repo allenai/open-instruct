@@ -187,7 +187,13 @@ The differences most likely to affect interpretation are:
 The complete inventory records immutable application/trainer/image revisions,
 software versions, optimizer and loss settings, layout, publication, and known
 unknowns. We do not describe the new500 pair as a pure horizon extension: Core also
-contains the scoring correction and Megatron has aligned serving settings.
+contains the scoring correction and Megatron has aligned serving settings. Core500
+also carries the later olmo-sglang adapter11ae9f6, versus81a312 in Megatron500.
+Its new per-head QK gain and scalable-softmax branches are disabled by this old
+checkpoint's configuration; the source revision difference remains recorded.
+The new initial scores are Core99/128 and Megatron98/128. Their future gains must
+use those baselines, and the cause of the small cross-allocation initial changes
+is not established.
 
 ## Correctness evidence and limits
 
