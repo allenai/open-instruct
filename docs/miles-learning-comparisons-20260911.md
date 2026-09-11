@@ -30,7 +30,7 @@ fix at OLMo-core290d2ca; this difference from Core100 is explicit.
   submission with12h minimum before creating an experiment: the service maximum
   is8h. Both arms therefore use8h minimum; Megatron's18h budget requires external
   monitoring because its current public launch schema has no deadline field.
-- Full-sized Core restart qualification runs separately before the long launch.
+- Full-sized native save and fresh-process restore were exact on both ranks before launch. Independent fresh-start trajectories differed, so the broader bitwise reproducibility gate remains failed; see [durability evidence](measurements/miles-core-durable-full-20260911.json).
 
 `extended_gsm8k.py` verifies the old preparation before linking it into a separate
 campaign. The parameterized runner and auditor preserve100-update defaults.
@@ -50,7 +50,7 @@ Preserve separate historical evaluation tracks: in-loop128 questions used sample
 temperature1 chat prompts; offline full-test1,319 used greedy raw Question/Answer
 prompts and512-token responses. Offline correct counts230→274 are not the same
 measurement as in-loop26→77 out of128. Recover and hash exact source artifacts
-before launching the Core reproduction. Detailed source recovery is in progress.
+before launching the Core reproduction. Source recovery and preparation passed; the historical settings and detected precision/topology differences are recorded in [the light-SFT protocol](miles-light-sft1000-gsm8k.md).
 
 ## Required final analysis
 
@@ -75,3 +75,17 @@ before launching the Core reproduction. Detailed source recovery is in progress.
   512-token workload is not a throughput control for4096-token Dolci-Think runs.
    Report detected configuration differences before attributing performance to
    a backend. The small held-out subset and single seed bound the conclusions.
+
+## Submitted runs and completed reference
+
+| Run | Beaker | Source | W&B |
+|---|---|---|---|
+| Abhishek Core500 |[01M279ZFM6RBC223RJJ6QHN9MP](https://beaker.org/ex/01M279ZFM6RBC223RJJ6QHN9MP) |OI1ceaf0d35; Core290d2ca |Pending startup |
+| Abhishek Megatron500 |[01M278B5E9HME181B04HT6391P](https://beaker.org/ex/01M278B5E9HME181B04HT6391P) |olmo-miles aa114a1; explicit8h override |[bhyj1mec](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/bhyj1mec) |
+| Light SFT Core200 |[01M2794XP15PHQSWN6M499NQYS](https://beaker.org/ex/01M2794XP15PHQSWN6M499NQYS) |OI290f8abb1; Core290d2ca |[jb8bzz71](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/jb8bzz71) |
+| Original Core100 scorer profile |[01M279F38FPRHMTYQQYWQ17GSN](https://beaker.org/ex/01M279F38FPRHMTYQQYWQ17GSN) |Worker1ceaf0d35; frozen image01M26N80T0V9PREQTS87J849P8 |No training run |
+
+The original100-update pair is complete and independently audited: Core97→93/128,
+Megatron96→107/128. [Final learning/performance report](measurements/miles-gsm8k-results-20260911.md).
+These are completed results; the three new learning allocations above do not yet
+have final results. Status snapshot:2026-09-11 approximately04:02UTC.

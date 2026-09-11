@@ -1,6 +1,6 @@
 {
   "campaign": "gsm8k-core-megatron-20260910-v1",
-  "status": "Core100 completed and independently audited; Megatronr3 running",
+  "status": "Both100 completed, exit0, and independent paired audit passed",
   "shared_root": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1",
   "preparation_sha256": "1d8a22500fffdd9a7461c445998815d5e85cf9dd79859d93313798472c0e76e0",
   "preparation_experiment": "01M26N8Q8BFN4887X2CKMDWEV2",
@@ -16,39 +16,48 @@
         "completed_updates": 0,
         "correct": 97,
         "total": 128,
-        "at_response_cap": 18
+        "at_response_cap": 18,
+        "mean_response_tokens": 1782.0078125,
+        "policy_version": 0
       },
       {
         "completed_updates": 20,
         "correct": 101,
         "total": 128,
-        "at_response_cap": 18
+        "at_response_cap": 18,
+        "mean_response_tokens": 1798.625,
+        "policy_version": 20
       },
       {
         "completed_updates": 40,
         "correct": 94,
         "total": 128,
-        "at_response_cap": 22
+        "at_response_cap": 22,
+        "mean_response_tokens": 1856.25,
+        "policy_version": 40
       },
       {
         "completed_updates": 60,
         "correct": 102,
         "total": 128,
-        "at_response_cap": 19
+        "at_response_cap": 19,
+        "mean_response_tokens": 1709.5078125,
+        "policy_version": 60
       },
       {
         "completed_updates": 80,
         "correct": 97,
         "total": 128,
         "at_response_cap": 16,
-        "mean_response_tokens": 1501.2
+        "mean_response_tokens": 1501.203125,
+        "policy_version": 80
       },
       {
         "completed_updates": 100,
         "correct": 93,
         "total": 128,
         "at_response_cap": 24,
-        "mean_response_tokens": 1664.35,
+        "mean_response_tokens": 1664.3515625,
         "policy_version": 100
       }
     ],
@@ -62,10 +71,13 @@
     },
     "exit_code": 0,
     "audit": {
-      "experiment": "01M273WX44116N75JM210NKX9G",
+      "experiment": "01M279KT4PQNC2HGZ7JVB1TDBJ",
+      "result": "01M279KT4ZT6EE7Q69REEJFDS5",
       "valid": true,
-      "evidence": "miles-gsm8k-core-final-20260910.json"
-    }
+      "evidence": "miles-gsm8k-final-20260911.json"
+    },
+    "allocated_seconds": 11922.131943,
+    "allocated_gpu_hours": 9.9351099525
   },
   "megatron": {
     "experiment": "01M26YNP5E64YGNXR85TA2RP4Q",
@@ -134,10 +146,51 @@
         "correct": 93,
         "total": 128,
         "at_response_cap": 22,
-        "mean_response_tokens": 1867.039,
+        "mean_response_tokens": 1867.0390625,
         "policy_version": 21
+      },
+      {
+        "completed_updates": 40,
+        "correct": 98,
+        "total": 128,
+        "at_response_cap": 20,
+        "mean_response_tokens": 1907.1796875,
+        "policy_version": 41
+      },
+      {
+        "completed_updates": 60,
+        "correct": 99,
+        "total": 128,
+        "at_response_cap": 20,
+        "mean_response_tokens": 1812.578125,
+        "policy_version": 61
+      },
+      {
+        "completed_updates": 80,
+        "correct": 105,
+        "total": 128,
+        "at_response_cap": 21,
+        "mean_response_tokens": 1360.796875,
+        "policy_version": 81
+      },
+      {
+        "completed_updates": 100,
+        "correct": 107,
+        "total": 128,
+        "at_response_cap": 18,
+        "mean_response_tokens": 1217.9140625,
+        "policy_version": 101
       }
-    ]
+    ],
+    "exit_code": 0,
+    "allocated_seconds": 10844.651858,
+    "allocated_gpu_hours": 9.037209881666666,
+    "audit": {
+      "experiment": "01M279KT4PQNC2HGZ7JVB1TDBJ",
+      "result": "01M279KT4ZT6EE7Q69REEJFDS5",
+      "valid": true,
+      "evidence": "miles-gsm8k-final-20260911.json"
+    }
   },
   "scheduling": {
     "workspace": "ai2/open-instruct-dev",
@@ -221,5 +274,17 @@
     },
     "tokenization": "native chat tokenize=True equals rendered encode(add_special_tokens=False) for every row"
   },
-  "results": null
+  "results": null,
+  "final_comparison": {
+    "report": "miles-gsm8k-results-20260911.md",
+    "data": "miles-gsm8k-final-20260911.json",
+    "figure": "miles-gsm8k-final-20260911.png",
+    "audit_source": "1ceaf0d35",
+    "audit_exit_code": 0,
+    "evidence_sha256": {
+      "core-audit.json": "4464fbb9f6e2e1f52698351cc222403ea0b0533e13cabbf73da71be825f84034",
+      "megatron-audit.json": "24b8ef05db281d094f344d73f46da20f89145707c8672efb207cb1b8138f302c",
+      "comparison.json": "3557c8918c81c67be2ebd40fe2caf98a1438f474774645bd114a406a562500db"
+    }
+  }
 }
