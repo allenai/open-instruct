@@ -197,6 +197,7 @@ def status(spec):
     if not jobs:
         jobs = [job for task in experiment.get("tasks", []) for job in task.get("jobs", [])]
     jobs.sort(key=lambda job: (job.get("status", {}).get("created", job.get("created", "")), job.get("id", "")))
+    jobs = [{key: job[key] for key in ("id", "name", "status", "node", "requests") if key in job} for job in jobs]
     return dict(
         receipt=str(target),
         experiment_id=receipt["experiment_id"],
@@ -204,5 +205,4 @@ def status(spec):
         config_matches_submission=receipt["spec_sha256"] == workflow.fingerprint(spec.to_dict()),
         latest_job=jobs[-1] if jobs else None,
         attempts=jobs,
-        experiment=experiment,
     )
