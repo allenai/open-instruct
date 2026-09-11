@@ -11,7 +11,9 @@ NATIVE = "/weka/olmo-3p5-checkpoints/production-hero-small/olmo35-small-hero-202
 HF = "/weka/olmo-3p5-checkpoints/scratch/hero-hf-20260909/non-emo/step38000/hf"
 
 
-def specification(image, *, native=NATIVE, hf=HF):
+def specification(image, *, native=NATIVE, hf=HF, inspect_only=False):
+    script = "inspect_hero_checkpoint.py" if inspect_only else "validate_hero_conversion.py"
+    report = "inventory.json" if inspect_only else "conversion.json"
     command = f"""set -euo pipefail
 cd /opt/core-rl
 mkdir -p /output
@@ -20,7 +22,7 @@ export MKL_NUM_THREADS=8
 export TOKENIZERS_PARALLELISM=false
 export OLMO_USE_TORCH_GROUPED_MM=0
 cp /opt/core-rl/sources/runtime.lock.json /output/
-python scripts/miles/validate_hero_conversion.py --native {shlex.quote(native)} --hf {shlex.quote(hf)} --report /output/conversion.json
+python scripts/miles/{script} --native {shlex.quote(native)} --hf {shlex.quote(hf)} --report /output/{report}
 """
     return {
         "version": "v2",
@@ -33,10 +35,15 @@ python scripts/miles/validate_hero_conversion.py --native {shlex.quote(native)} 
                 "arguments": [command],
                 "datasets": [{"mountPath": "/weka/olmo-3p5-checkpoints", "source": {"weka": "olmo-3p5-checkpoints"}}],
                 "result": {"path": "/output"},
-                "resources": {"cpuCount": 16, "memory": "256 GiB", "gpuCount": 0, "sharedMemory": "8 GiB"},
-                "context": {"priority": "urgent", "minRuntime": "30m", "autoResume": False},
+                "resources": {
+                    "cpuCount": 2 if inspect_only else 16,
+                    "memory": "4 GiB" if inspect_only else "256 GiB",
+                    "gpuCount": 0,
+                    "sharedMemory": "1 GiB" if inspect_only else "8 GiB",
+                },
+                "context": {"priority": "urgent", "minRuntime": "10m" if inspect_only else "30m", "autoResume": False},
                 "constraints": {"cluster": ["ai2/saturn"]},
-                "timeout": "90m",
+                "timeout": "15m" if inspect_only else "90m",
             }
         ],
     }
@@ -48,8 +55,12 @@ def main():
     parser.add_argument("--native", default=NATIVE)
     parser.add_argument("--hf", default=HF)
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--inspect-only", action="store_true")
     args = parser.parse_args()
-    document = json.dumps(specification(args.image, native=args.native, hf=args.hf), indent=2) + "\n"
+    document = (
+        json.dumps(specification(args.image, native=args.native, hf=args.hf, inspect_only=args.inspect_only), indent=2)
+        + "\n"
+    )
     if args.render_only:
         print(document, end="")
         return

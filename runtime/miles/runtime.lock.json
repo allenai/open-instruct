@@ -9,9 +9,9 @@
     "olmo-core": {
       "repository": "https://github.com/allenai/OLMo-core.git",
       "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5",
-      "development_commit": "3a643bc1c0762df867824ef617ac450751f00b74",
+      "development_commit": "7cc24015238711d364097c101b8e3f1189ce05f2",
       "patch": "patches/olmo-core.patch",
-      "patch_sha256": "9177358424465d58442228c7c2ca80c1064dc7f9d6a6f760d2581e6944ebded6"
+      "patch_sha256": "38a6f765dbe249373de499dd372cde479afe9f30565f50e83ebd7afb4c98b475"
     },
     "miles": {
       "repository": "https://github.com/radixark/miles.git",
@@ -19,6 +19,14 @@
       "development_commit": "64ba71950c973e458f22a8d10541475940c911b0",
       "patch": "patches/miles.patch",
       "patch_sha256": "e85add303ee3b7b38f4571e66b7b364a769b32e0fb096ab35e32f1447c173579"
+    },
+    "olmo-sglang": {
+      "repository": "https://github.com/allenai/olmo-sglang.git",
+      "revision": "81a312ee8326e279a4641e03542ef971a5ffb863",
+      "development_commit": "b1a7743035794040c1632f83e9ebc013d8c94d1e",
+      "embedded_path": "/src/olmo-sglang",
+      "patch": "patches/olmo-sglang.patch",
+      "patch_sha256": "9ab54e50fd124d412261b581ccc04572023ccb2f56288e3ec7a6185ccd157359"
     }
   }
 }

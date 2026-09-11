@@ -7,12 +7,40 @@ No packages are installed or existing checkouts modified.
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 
 def run(*args, cwd=None):
     return subprocess.run(args, cwd=cwd, check=True, text=True, capture_output=True).stdout.strip()
+
+
+def copy_embedded_source(source, target):
+    """Reconstruct a private source overlay from the checksum-pinned base image.
+
+    The base-image digest authenticates the tree; its marker must also match the
+    requested source revision. A local Git baseline lets the normal full-index
+    patch verification validate every touched file without network credentials.
+    """
+    embedded = Path(source["embedded_path"])
+    if (embedded / ".source-revision").read_text().strip() != source["revision"]:
+        raise ValueError(f"Embedded source revision mismatch: {embedded}")
+    shutil.copytree(embedded, target, ignore=shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache"))
+    run("git", "init", str(target))
+    run("git", "add", "--all", cwd=target)
+    run(
+        "git",
+        "-c",
+        "user.name=Runtime source snapshot",
+        "-c",
+        "user.email=runtime@localhost",
+        "commit",
+        "--quiet",
+        "-m",
+        f"Base image source {source['revision']}",
+        cwd=target,
+    )
 
 
 def main():
@@ -37,11 +65,14 @@ def main():
             # A runtime image must not depend on the cache's Git alternates file.
             run("git", "repack", "-a", "-d", cwd=target)
             (target / ".git/objects/info/alternates").unlink(missing_ok=True)
+        elif "embedded_path" in source:
+            copy_embedded_source(source, target)
         else:
             run("git", "init", str(target))
             run("git", "fetch", "--depth=1", source["repository"], source["revision"], cwd=target)
             run("git", "checkout", "--detach", "FETCH_HEAD", cwd=target)
-        assert run("git", "rev-parse", "HEAD", cwd=target) == source["revision"]
+        if name in caches or "embedded_path" not in source:
+            assert run("git", "rev-parse", "HEAD", cwd=target) == source["revision"]
         run("git", "apply", "--check", str(patch), cwd=target)
         run("git", "apply", "--index", str(patch), cwd=target)
         actual = subprocess.check_output(["git", "diff", "--cached", "--binary", "--full-index", "HEAD"], cwd=target)

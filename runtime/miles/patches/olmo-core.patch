@@ -373,7 +373,7 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
  def _convert_state(
 diff --git a/src/olmo_core/nn/moe/v2/olmo3.py b/src/olmo_core/nn/moe/v2/olmo3.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..7c07f9a6888e970f398a67099ff0135527cfff6f
+index 0000000000000000000000000000000000000000..4980964a5a85b5a85044db334b70699806237d71
 --- /dev/null
 +++ b/src/olmo_core/nn/moe/v2/olmo3.py
 @@ -0,0 +1,740 @@
@@ -687,7 +687,7 @@ index 0000000000000000000000000000000000000000..7c07f9a6888e970f398a67099ff01355
 +        attention_bias=False,
 +        attention_dropout=attention.dropout or 0.0,
 +        rms_norm_eps=representative.layer_norm.eps,
-+        sliding_window=(next(iter(window_sizes)) + 1 if window_sizes else max_position_embeddings),
++        sliding_window=(next(iter(window_sizes)) if window_sizes else max_position_embeddings),
 +        use_head_qk_norm=True,
 +        qk_norm_per_head_gains=bool(attention.qk_norm_per_head_gains),
 +        scalable_softmax=attention.scalable_softmax,
@@ -838,7 +838,7 @@ index 0000000000000000000000000000000000000000..7c07f9a6888e970f398a67099ff01355
 +    ep.validate()
 +
 +    def make_block(layer_type: str, *, dense: bool) -> OLMoDDPTransformerBlockConfig:
-+        window = int(config["sliding_window"]) - 1
++        window = int(config["sliding_window"])
 +        block_shared_experts: SharedExpertsConfig | None
 +        if dense:
 +            assert dense_hidden is not None
@@ -1328,10 +1328,10 @@ index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa974
          self._set_model_mode("train")
 diff --git a/src/test/nn/moe/v2/olmo3_factory_test.py b/src/test/nn/moe/v2/olmo3_factory_test.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..05ba66473c2fad3731e08ee1f28f0e3686a3bd13
+index 0000000000000000000000000000000000000000..66c66c41e4d67c1e6378d40419aacfb2c4b74d1b
 --- /dev/null
 +++ b/src/test/nn/moe/v2/olmo3_factory_test.py
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,292 @@
 +"""Exercise the adapter factory against gdn2's real hybrid modules and HF tensors."""
 +
 +from copy import deepcopy
@@ -1604,6 +1604,26 @@ index 0000000000000000000000000000000000000000..05ba66473c2fad3731e08ee1f28f0e36
 +    )
 +    assert reverse.dense_layers_use_shared_expert is True
 +    assert reverse.global_load_balancing == global_lb
++
++
++def test_sliding_window_size_matches_hf_in_both_config_directions():
++    hf = hybrid_config()
++    hf.layer_types = ["linear_attention", "sliding_attention"]
++    hf.sliding_window = 4
++    config = olmo3.build_olmo3_moe_config_from_hf_config(
++        hf, attention_backend=AttentionBackendName.torch
++    )
++    native = config.build(init_device="cpu")
++    assert native.blocks["1"].attention.backend.window_size == (3, 0)
++    reverse = olmo3.build_olmo3_moe_hf_config_from_native_config(
++        config,
++        max_position_embeddings=32,
++        pad_token_id=0,
++        bos_token_id=None,
++        eos_token_id=1,
++    )
++    assert reverse.sliding_window == 4
++    assert reverse.layer_types == hf.layer_types
 diff --git a/src/test/train/train_module/custom_objective_test.py b/src/test/train/train_module/custom_objective_test.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..12a462001099b6d420d24a9c4e9cb3920260794a
