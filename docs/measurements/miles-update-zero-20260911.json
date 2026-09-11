@@ -59,7 +59,35 @@
     "experiment": "01M27FJAG1YP5V889QNC3FBA5Z",
     "job": "01M27FJAMK5K1KESPX25Q8GZFF",
     "output": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v3/megatron",
-    "status": "running; all HF observations completed at 05:56:38 UTC; native snapshot then trainer initialization pending",
-    "diagnostic_fix": "Explicit lr-decay-iters=100 preserves nonzero scheduler horizon with zero optimizer calls."
+    "status": "exited 0; complete HF/published observations and cleanup",
+    "diagnostic_fix": "Explicit lr-decay-iters=100 preserves nonzero scheduler horizon with zero optimizer calls.",
+    "exit_code": 0,
+    "exited": "2026-09-11T06:00:53.716Z",
+    "observations_complete": true,
+    "full_protocol_complete": true,
+    "optimizer_calls": 0,
+    "initial_publications": 1,
+    "hf_vs_published": {
+      "cases": 4,
+      "all_captured_activations_exact": true,
+      "all_route_logits_exact": true,
+      "all_route_sets_exact": true,
+      "all_next_token_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "parameter_dtype_shape_changes": {},
+      "local_check_log": "/tmp/update-zero-mega-publication-check.log",
+      "limitation": "Exact captured fixed-prefix prefill observations and native full weight comparison; does not establish historical decode equivalence."
+    }
+  },
+  "comparison": {
+    "experiment": "01M27GZKR2CXXZ7V0FBE2QCK07",
+    "job": "01M27GZKVMAGT19XHF614SVR4Q",
+    "result": "01M27GZKRBPJ32PFQJK5092MNF",
+    "source": "c7d288081",
+    "status": "scheduled at 2026-09-11T06:03:15.294108Z",
+    "mode": "evidence-only; all phases required, Core cleanup failure retained",
+    "cluster": "ai2/saturn",
+    "cpu_count": 8,
+    "memory": "32 GiB"
   }
 }
