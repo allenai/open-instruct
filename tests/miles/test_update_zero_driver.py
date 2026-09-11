@@ -167,13 +167,16 @@ def test_missing_capture_preserves_http_response_and_disarms(driver, tmp_path, m
 
 
 def test_core_override_keeps_frozen_lr_horizon(driver, tmp_path, monkeypatch):
-    config = SimpleNamespace(miles={"num_rollout": 100, "lr_decay_iters": 100}, arguments=lambda: ["--frozen"])
+    config = SimpleNamespace(
+        miles={"num_rollout": 100, "lr_decay_iters": 100, "use_wandb": True}, arguments=lambda: ["--frozen"]
+    )
     monkeypatch.setattr(
         driver.importlib, "import_module", lambda name: SimpleNamespace(configuration=lambda root: config)
     )
     driver.arguments.parse_args = lambda: config.miles.copy()
     resolved = driver.core_arguments(tmp_path, tmp_path)
     assert resolved["num_rollout"] == 0 and resolved["lr_decay_iters"] == 100
+    assert "use_wandb" not in resolved
 
 
 def test_original_source_hash_gate_before_runtime(driver, tmp_path, monkeypatch):

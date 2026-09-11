@@ -45,12 +45,13 @@ def core_arguments(root, output):
     config = gsm8k_parity.configuration(root)
     config.miles.update(
         num_rollout=0,
-        use_wandb=False,
         wandb_mode="disabled",
         save=str(output / "metrics"),
         save_debug_rollout_data=str(output / "unused-rollouts/{rollout_id}.pt"),
         wandb_dir=str(output / "unused-wandb"),
     )
+    # Native MILES declares --use-wandb as store_true, with no --no-use-wandb flag.
+    config.miles.pop("use_wandb", None)
     sys.argv = [sys.argv[0], *config.arguments()]
     return arguments.parse_args()
 
