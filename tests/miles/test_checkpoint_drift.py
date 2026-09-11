@@ -10,6 +10,7 @@ from olmo_core.nn.moe.v2 import olmo3
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from olmo_core.nn.moe.v2.hf.modeling_olmo3moe import Olmo3MoeForCausalLM
 from scripts.miles.checkpoint_drift import DriftAccumulator, compare, parameter_group
+from scripts.miles.compare_native_small_drift import read_core_subset, selected
 from scripts.miles.core_checkpoint_stream import CoreCheckpointState
 from torch.distributed import checkpoint as dcp
 
@@ -117,3 +118,12 @@ def test_actual_flat_dcp_stream_roundtrip_preserves_experts_and_master_precision
     storage = dict(CoreCheckpointState(tmp_path, hf, category="reconstructed_model_storage").stream())
     assert any(value.dtype == torch.bfloat16 for value in storage.values())
     assert all(torch.equal(value, reference[name].to(value.dtype)) for name, value in storage.items())
+
+    subset, inventory, reads = read_core_subset(
+        CoreCheckpointState(tmp_path, hf, category="reconstructed_model_storage")
+    )
+    assert inventory == set(reference)
+    assert set(subset) == {name for name in reference if selected(name)}
+    assert all(torch.equal(value, storage[name]) for name, value in subset.items())
+    assert all(selected(name) for name in reads["native_keys"])
+    assert reads["master_payload_bytes"] < sum(value.numel() * 4 for value in native.values())

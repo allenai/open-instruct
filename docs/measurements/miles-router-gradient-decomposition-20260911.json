@@ -49,5 +49,37 @@
         "scope": "Finalized, preclip native optimizer input; EP1 only; native auxiliary padding and normalization preserved"
       }
     }
+  },
+  "cross_backend_directions": {
+    "policy": {
+      "source_sha256": [
+        "b3589cdf4bc445f6c4fdb3eea9c3a1b2dd50fda8c932cd93a5fbf906a04e70e7",
+        "d007f2409f047f4b1a74d4a9f35fa8e3bd26c06acf6e1ce1767ed862f37aa081"
+      ],
+      "same_router_parameter_sha256": "c8e0521959d55f3e982ced28a5c33a1c14e85cff794ee3d7e70418bcb0b13593",
+      "cosine": 0.9994407981871682,
+      "relative_l2_to_core": 0.03343962671150717,
+      "relative_l2_to_megatron": 0.033469826499042156
+    },
+    "auxiliary": {
+      "source_sha256": [
+        "6c6df7560b404ae962f4c1f7247c9d6a27336ac4d4df6967962dd45b468af7bc",
+        "c9b429c66eb2359baadb64d5be11cf2bf690f1f32670e406a417f5e334dfe7d0"
+      ],
+      "same_router_parameter_sha256": "c8e0521959d55f3e982ced28a5c33a1c14e85cff794ee3d7e70418bcb0b13593",
+      "cosine": 0.6180197279853538,
+      "relative_l2_to_core": 1.3462115971443926,
+      "relative_l2_to_megatron": 0.7868763607876139
+    },
+    "combined": {
+      "source_sha256": [
+        "245372015e5a3dfeb88fb96921572842ad80db3c1f0c92123a6baa59d340ef85",
+        "27f65f881086244f58db3e51fd3db4a3a51f10e542a28ade7f55bd9168be4a75"
+      ],
+      "same_router_parameter_sha256": "c8e0521959d55f3e982ced28a5c33a1c14e85cff794ee3d7e70418bcb0b13593",
+      "cosine": 0.6683436565166322,
+      "relative_l2_to_core": 1.1282224826641354,
+      "relative_l2_to_megatron": 0.7439068688719398
+    }
   }
 }

@@ -25,3 +25,9 @@ The first complete run should use a 32-GiB CPU allocation on Saturn with WEKA ac
 ### Megatron reader qualification at 06:55 UTC
 
 `megatron_checkpoint_stream.py` now reads named DCP model keys with the native exporter and a bounded LRU cache. An actual tiny native checkpoint after one update was read back through this adapter: all 56 canonical HF tensors exactly matched the live exported model, with 41 native reads and 1,527,696 bytes read. [Readback result](measurements/miles-megatron-checkpoint-readback-20260911.json). This qualifies that tiny model layout; full-checkpoint metadata and dtype checks remain required. Optimizer masters are still excluded because the flat bucket-to-parameter layout has not been proved. Do not infer it from model sizes.
+
+### Bounded update-100 subset
+
+`compare_native_small_drift.py` verifies both completion boundaries and Core's committed cursor, then compares routers, normalization weights and KDA `A_log`/`dt_bias` against the shared initial HF checkpoint. It also verifies the full canonical name inventory. Core uses the ordinary converter with meta tensors for excluded inputs; selected tensors must be real CPU tensors and excluded outputs must remain meta. A real tiny DCP test proves the subset equals the ordinary full conversion while reading only selected native payloads. Megatron uses its qualified model reader. Reports include per-tensor dtypes, both directional denominators, payload byte counts, source/metadata hashes, time and peak RSS.
+
+This first stage intentionally excludes expert/attention matrices and Megatron optimizer masters. It uses reconstructed Core model storage, not Core masters compared against Megatron model storage. The CPU/Saturn launcher uses the Core500 image, explicit source hashes for the existing Megatron exporter, 2 CPUs/32 GiB, and waits up to two hours for both completed snapshots. It never reads partially written snapshots or changes the training jobs.
