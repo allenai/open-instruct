@@ -23,7 +23,10 @@ def specification(image, stage):
         )
         command = command.replace(
             "--validate-only",
-            options + " --save-interval 100 --campaign " + extended_gsm8k.CAMPAIGN + " --validate-only",
+            options
+            + " --save-interval 100 --chunked-prefill-size 16384 --campaign "
+            + extended_gsm8k.CAMPAIGN
+            + " --validate-only",
         )
         command += 'cp "$RUN_ROOT/extension.json" /output/\n'
     elif stage == "core":
@@ -31,7 +34,7 @@ def specification(image, stage):
             'python scripts/miles/gsm8k_parity.py "$RUN_ROOT"',
             'python scripts/miles/gsm8k_parity.py "$RUN_ROOT" '
             + options
-            + " --save-interval 100 --campaign "
+            + " --save-interval 100 --chunked-prefill-size 16384 --campaign "
             + extended_gsm8k.CAMPAIGN,
         )
         task["timeout"] = "18h"

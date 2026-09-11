@@ -4,12 +4,14 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
 
 import ray
 from miles.utils import arguments
+from scripts.miles.check_gsm8k_checkpoints import check_boundaries
 from scripts.miles.prepare_gsm8k_parity import verify_preparation
 
 from open_instruct.miles.config import CoreConfig, RunConfig
@@ -21,7 +23,15 @@ UPDATES = 100
 EVAL_INTERVAL = 20
 
 
-def configuration(root, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, campaign=CAMPAIGN, save_interval=None):
+def configuration(
+    root,
+    *,
+    updates=UPDATES,
+    eval_interval=EVAL_INTERVAL,
+    campaign=CAMPAIGN,
+    save_interval=None,
+    chunked_prefill_size=None,
+):
     output = root / "core"
     return RunConfig(
         CoreConfig(
@@ -63,6 +73,7 @@ def configuration(root, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, campaig
             custom_rm_path="open_instruct.miles.rewards.registered_reward",
             sglang_context_length=6144,
             sglang_attention_backend="triton",
+            **({"sglang_chunked_prefill_size": chunked_prefill_size} if chunked_prefill_size is not None else {}),
             sglang_max_total_tokens=32768,
             sglang_max_running_requests=4,
             sglang_server_concurrency=4,
@@ -162,7 +173,14 @@ def check_completion(root, *, updates=UPDATES, eval_interval=EVAL_INTERVAL):
 
 
 def run(
-    root, validate_only=False, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, campaign=CAMPAIGN, save_interval=None
+    root,
+    validate_only=False,
+    *,
+    updates=UPDATES,
+    eval_interval=EVAL_INTERVAL,
+    campaign=CAMPAIGN,
+    save_interval=None,
+    chunked_prefill_size=None,
 ):
     if updates <= 0 or eval_interval <= 0 or updates % eval_interval:
         raise ValueError("Update horizon must be positive and divisible by evaluation interval")
@@ -170,7 +188,12 @@ def run(
         raise ValueError("Save interval must divide the update horizon")
     preparation = verify_preparation(root)
     config = configuration(
-        root, updates=updates, eval_interval=eval_interval, campaign=campaign, save_interval=save_interval
+        root,
+        updates=updates,
+        eval_interval=eval_interval,
+        campaign=campaign,
+        save_interval=save_interval,
+        chunked_prefill_size=chunked_prefill_size,
     )
     sys.argv = ["gsm8k-parity-core", *config.arguments()]
     args = arguments.parse_args()
@@ -179,7 +202,23 @@ def run(
         print("GSM8K_PARITY_CONFIG_VALIDATED", json.dumps(effective), flush=True)
         return
     output = root / "core"
+    storage = None
+    if save_interval is not None:
+        shard_bytes = sum(path.stat().st_size for path in (root / "hf").glob("*.safetensors"))
+        if shard_bytes <= 0:
+            raise ValueError("Cannot budget native checkpoints without HF weight shards")
+        required = (updates // save_interval) * (8 * shard_bytes + 2 * 1024**3)
+        free = shutil.disk_usage(root).free
+        storage = {
+            "checkpoint_count": updates // save_interval,
+            "required_bytes": required,
+            "filesystem_free_bytes": free,
+        }
+        if free < required:
+            raise ValueError(f"Insufficient free storage for retained native checkpoints: {storage}")
     output.mkdir()  # Never overwrite a prior comparison arm.
+    if storage is not None:
+        (output / "storage-preflight.json").write_text(json.dumps(storage, indent=2) + "\n")
     (output / "arguments.json").write_text(json.dumps(config.arguments(), indent=2) + "\n")
     (output / "effective.json").write_text(json.dumps(effective, indent=2) + "\n")
     (output / "preparation.json").write_text(json.dumps(preparation, indent=2) + "\n")
@@ -195,6 +234,8 @@ def run(
         "elapsed_seconds": time.monotonic() - started,
         "completed": True,
     }
+    if save_interval is not None:
+        report["checkpoints"] = check_boundaries(output / "metrics", updates=updates, save_interval=save_interval)
     (output / "completion.json").write_text(json.dumps(report, indent=2) + "\n")
     print("GSM8K_PARITY_CORE_COMPLETED", json.dumps(report), flush=True)
 
@@ -207,6 +248,7 @@ def main():
     parser.add_argument("--eval-interval", type=int, default=EVAL_INTERVAL)
     parser.add_argument("--campaign", default=CAMPAIGN)
     parser.add_argument("--save-interval", type=int)
+    parser.add_argument("--chunked-prefill-size", type=int)
     args = parser.parse_args()
     run(
         args.root,
@@ -215,6 +257,7 @@ def main():
         eval_interval=args.eval_interval,
         campaign=args.campaign,
         save_interval=args.save_interval,
+        chunked_prefill_size=args.chunked_prefill_size,
     )
 
 

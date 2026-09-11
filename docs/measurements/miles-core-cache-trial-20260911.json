@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "passed": false,
+  "failures": [
+    "Numerical mismatch: final_model",
+    "Numerical mismatch: scored_log_probabilities",
+    "Numerical mismatch: before",
+    "Numerical mismatch: after",
+    "Numerical mismatch: state",
+    "Actual Triton reuse was not demonstrated by both restore and compiler activity"
+  ],
+  "scope": "Native Core EP1 fixed combined update: exact numerical invariance and observed Triton reuse",
+  "tolerance": "Exact tensor equality; no inherited EP2 or cross-backend tolerance",
+  "limitations": [
+    "One tiny update per process",
+    "No serving, Ray, remote worker propagation or full SFT",
+    "Other cache families reported individually, not presumed warm"
+  ],
+  "fingerprint": "3528b42ac94de71c00b1231a0d8b085d4a19edddc944e7b54c85a13693498206",
+  "triton_reuse": {
+    "cold_put_calls": 1962,
+    "restored_put_calls": 1962,
+    "restored_group_hits": 0
+  },
+  "experiment": "01M2771YNM12R6ADFMBJQF8Z0F",
+  "job": "01M2771YV0PBBYX20M7BZT5EAD",
+  "result": "01M2771YNW9Z6B6SZ0H66ZKSR8",
+  "exit_code": 1,
+  "source": "1d66074ab046363a2c8c1fb8e364d1be1eeb47a6",
+  "report_sha256": "8b84d48677dfc66e73ac5e03dbae888885abe0d983904ca3767e30a1708f3f94",
+  "comparisons": {
+    "initial_model": {
+      "exact": true,
+      "tensor_count": 43,
+      "max_abs_error": 0.0
+    },
+    "final_model": {
+      "exact": false,
+      "tensor_count": 43,
+      "max_abs_error": 0.000244140625
+    },
+    "scored_log_probabilities": {
+      "exact": false,
+      "tensor_count": 12,
+      "max_abs_error": 0.0011515617370605469
+    },
+    "before": {
+      "exact": false,
+      "tensor_count": 43,
+      "max_abs_error": 0.0029296875
+    },
+    "after": {
+      "exact": false,
+      "tensor_count": 43,
+      "max_abs_error": 0.0029296875
+    },
+    "state": {
+      "exact": false,
+      "tensor_count": 129,
+      "max_abs_error": 0.0002929689362645149
+    },
+    "routing_ids": {
+      "exact": true,
+      "tensor_count": 4,
+      "max_abs_error": 0.0
+    }
+  },
+  "cache_reports": {
+    "cold": {
+      "child_returncode": 0,
+      "command_seconds": 329.96982001001015,
+      "publish": [
+        {
+          "family": "triton",
+          "reason": "Unqualified embedded private-cache path: triton/triton_poi_fused__to_copy_clamp_exp_gt_logical_and_maximum_mul_nan_to_num_neg_0.ptx",
+          "status": "rejected"
+        },
+        {
+          "family": "tilelang",
+          "generation": "d47fc73f7bcb9744eb9432e2f88a41375fb7ad5587bd25e293ce429b4ee0cba2",
+          "local_bytes": 874879,
+          "seconds": 0.23861353425309062,
+          "status": "published"
+        },
+        {
+          "family": "torchinductor",
+          "reason": "Unqualified embedded private-cache path: torchinductor/cl7qfw37yrxikyi4ap7vif7ql4dmoqtp2tdze4epzez7o7sh554x.py",
+          "status": "rejected"
+        },
+        {
+          "family": "fa4",
+          "seconds": 0.25690606608986855,
+          "status": "empty"
+        },
+        {
+          "family": "deepep",
+          "seconds": 0.026024692226201296,
+          "status": "empty"
+        },
+        {
+          "family": "deepgemm",
+          "seconds": 0.029559042770415545,
+          "status": "empty"
+        }
+      ],
+      "restore": [
+        {
+          "family": "triton",
+          "status": "cold"
+        },
+        {
+          "family": "tilelang",
+          "status": "cold"
+        },
+        {
+          "family": "torchinductor",
+          "status": "cold"
+        },
+        {
+          "family": "fa4",
+          "status": "cold"
+        },
+        {
+          "family": "deepep",
+          "status": "cold"
+        },
+        {
+          "family": "deepgemm",
+          "status": "cold"
+        }
+      ],
+      "status": "completed",
+      "total_seconds": 363.5212862081826
+    },
+    "restored": {
+      "child_returncode": 0,
+      "command_seconds": 161.86829581903294,
+      "publish": [
+        {
+          "family": "triton",
+          "reason": "Unqualified embedded private-cache path: triton/triton_poi_fused_abs_add_clamp_div_eq_exp_ge_gt_le_logical_and_lt_masked_fill_mul_nan_to_num_ne_neg_where_0.source",
+          "status": "rejected"
+        },
+        {
+          "family": "tilelang",
+          "generation": "d47fc73f7bcb9744eb9432e2f88a41375fb7ad5587bd25e293ce429b4ee0cba2",
+          "local_bytes": 874879,
+          "seconds": 0.2661125250160694,
+          "status": "unchanged"
+        },
+        {
+          "family": "torchinductor",
+          "reason": "Unqualified embedded private-cache path: torchinductor/c3wc2l2vujbut6tl7vvneylz26e5zb47rifaxnnpvry6q3qsmkhg.py",
+          "status": "rejected"
+        },
+        {
+          "family": "fa4",
+          "seconds": 0.17673769081011415,
+          "status": "empty"
+        },
+        {
+          "family": "deepep",
+          "seconds": 0.022608650382608175,
+          "status": "empty"
+        },
+        {
+          "family": "deepgemm",
+          "seconds": 0.029474944807589054,
+          "status": "empty"
+        }
+      ],
+      "restore": [
+        {
+          "family": "triton",
+          "seconds": 0.0049192337319254875,
+          "status": "miss"
+        },
+        {
+          "archive_bytes": 141778,
+          "family": "tilelang",
+          "generation": "d47fc73f7bcb9744eb9432e2f88a41375fb7ad5587bd25e293ce429b4ee0cba2",
+          "local_bytes": 874879,
+          "relocated_groups": 0,
+          "seconds": 0.01066525373607874,
+          "status": "hit"
+        },
+        {
+          "family": "torchinductor",
+          "seconds": 0.004399421159178019,
+          "status": "miss"
+        },
+        {
+          "family": "fa4",
+          "seconds": 0.0008955327793955803,
+          "status": "miss"
+        },
+        {
+          "family": "deepep",
+          "seconds": 0.001938407775014639,
+          "status": "miss"
+        },
+        {
+          "family": "deepgemm",
+          "seconds": 0.0012277555651962757,
+          "status": "miss"
+        }
+      ],
+      "status": "completed",
+      "total_seconds": 191.03683539526537
+    }
+  },
+  "interpretation": "Both updates executed, but exact numerical invariance and Triton reuse failed. Numerical differences are not causally attributed. Cache reuse remains opt-in and unqualified for learning runs."
+}

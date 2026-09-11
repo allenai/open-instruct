@@ -10,7 +10,7 @@ separate authorization.
 | Track | State | Next evidence needed |
 | --- | --- | --- |
 | Old SFT, Core,100 GSM8K updates | [Completed, exit0](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/101/94/102/97/93 out of128 at0/20/40/60/80/100 | [Independent audit passed](measurements/miles-gsm8k-core-final-20260910.json):1,600training and768held-out responses;100steps/101publications. User notified. |
-| Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe; held-out96/128→93/128 at0/20; Core97/128→101/128 | Full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
+| Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe; held-out96/93/98/99 out of128 at0/20/40/60;76 updates observed03:20UTC | Full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
 | Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis completed](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
 | Native reduction/clipping stress | [EP1/EP2 passed](https://beaker.org/ex/01M270A2J2E3WC60978EM8G5SV); independent global norm, active clipping and Adam moments verified | [Evidence](measurements/miles-core-ep-stress-20260910.json); max gradient relative L2 difference 5.002e-6; does not establish exact update parity near zero gradients. |
@@ -108,3 +108,32 @@ input. Remaining first drift begins at full-attention block7. An explicit
 [HF SDPA control](https://beaker.org/ex/01M274P8Z2D9A6FQ0BSHGBX6NK) is running to
 separate attention implementation arithmetic; the original serving gate is not
 being widened.
+
+## September11 learning extension and qualification updates
+
+The user authorized a historical lightly-SFT-trained Core comparison and a fresh
+500-update pair on Abhishek's SFT checkpoint, plus full effective-configuration
+and phase-by-phase performance analysis. The detailed plan is
+[miles-learning-comparisons-20260911.md](miles-learning-comparisons-20260911.md).
+Shared500 preparation passed on Saturn: experiment`01M277CCDPHQDBXBETS04X77YP`,
+source`58cfd1a7f`, exit0. Core500 remains gated on full-sized native continuation;
+Megatron500 configuration and aligned sampler/token-pool preflight are ready.
+
+The controlled full-hero HF/Core comparison now matches final logits and
+logprobs exactly at both16/81-token prefixes when using the same grouped-MoE
+and SDPA paths. This isolates the remaining default-HF discrepancy to execution
+arithmetic; it does not qualify ordinary SGLang probabilities or hero training.
+[Evidence](measurements/miles-hero-controlled-forward-20260911.json).
+
+Actual Core compiler-cache qualification failed: both tiny updates ran, but
+Triton/Inductor artifacts containing private paths were rejected, so Triton
+recompiled in both processes; scores/gradients/updates also differed. Cache reuse
+remains opt-in and unqualified. [Evidence](measurements/miles-core-cache-trial-20260911.json).
+
+The async four-update job completed training but its original audit incorrectly
+required a single version across the entire batch. The runtime contract instead
+requires homogeneous prompt groups and bounded lag per group. A corrected strict
+per-group/rank-consumption audit is running on retained data on Saturn:
+`01M277SGJZ0YMSZHK6DY2NWE4H`. The synchronous eager control hit its45-minute timeout
+at`03:14:57UTC` (exit143); do not report it as a completed scheduling comparison.
+Full native EP2 durable-continuation trial`01M276Y2J577FPD6G6JYMS9NV6` is running.
