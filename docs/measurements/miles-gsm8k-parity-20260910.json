@@ -91,7 +91,17 @@
         "reason": "User temporarily narrowed scope to Core-only; later explicitly re-enabled matched comparison."
       }
     ],
-    "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/toyl0tx0"
+    "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/toyl0tx0",
+    "observed_heldout": [
+      {
+        "completed_updates": 0,
+        "correct": 96,
+        "total": 128,
+        "at_response_cap": 20,
+        "mean_response_tokens": 1747.765625,
+        "policy_version": 1
+      }
+    ]
   },
   "scheduling": {
     "workspace": "ai2/open-instruct-dev",

@@ -1,0 +1,379 @@
+{
+  "diagnosis_only": true,
+  "model": "/weka/olmo-3p5-checkpoints/scratch/hero-hf-20260909/non-emo/step75500/hf",
+  "dtype": "bfloat16",
+  "attention": {
+    "hf": "eager",
+    "core": "torch_sdpa"
+  },
+  "kda": "shared_explicit_hf_recurrent_helper",
+  "core_experts": "torch_grouped_mm",
+  "environment": {
+    "OLMO_USE_TORCH_GROUPED_MM": null,
+    "OLMO_HF_MOE_REFERENCE_LOOP": null,
+    "OLMO_HF_MOE_CORE_REFERENCE": null
+  },
+  "core_factory_sha256": "27898e1c2fda95a6c5b1abe09da9f075e87ca35cfd0417cc7e58665f8516c14d",
+  "hf_source_sha256": {
+    "configuration_olmo3moe.py": "49ed9aca7406dd62cc43f317ce81e13eaa26d94adb310f1af88c6e10dd2fd7ba",
+    "modeling_olmo3moe.py": "81c4427030be8a6e982d131ed7615d44c4f2747df6bc4c537cd2b9430703913a"
+  },
+  "reference_report_sha256": "bc1c63eedfeacb455d004fd8d1228df602b42adcc33317f05295e644085d91b9",
+  "logprob_atol": 0.1,
+  "limitations": "Initial forced prefixes only; same-input blocks isolate local drift, not individual kernels. No serving, EP, backward, optimizer, or threshold promotion.",
+  "experiment": "01M270S3NYZE11QW0H03NHQGP7",
+  "job": "01M270S3TATXKP5CWY1K9BADA3",
+  "result": "01M270S3P7WY092EG706RZ9H21",
+  "source": "abcf7e516bebc0fd1826f8222159d17d3e6549b4",
+  "full_artifact": "diagnosis.json and hf-activations.pt in result dataset",
+  "results": [
+    {
+      "prompt_length": 16,
+      "last_logits": {
+        "shape": [
+          100278
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "max_abs": 0.4375,
+        "mean_abs": 0.0788758173584938,
+        "relative_l2": 0.01345560084111324,
+        "reference_rms": 7.461640357971191,
+        "equal_fraction": 0.16376473009586334
+      },
+      "last_logprobs": {
+        "shape": [
+          100278
+        ],
+        "actual_dtype": "torch.float32",
+        "reference_dtype": "torch.float32",
+        "max_abs": 0.4601268768310547,
+        "mean_abs": 0.07661306858062744,
+        "relative_l2": 0.00549419388964479,
+        "reference_rms": 17.460168838500977,
+        "equal_fraction": 0.0
+      },
+      "within_existing_threshold": false,
+      "layers": [
+        {
+          "layer": 0,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": null,
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0,
+          "same_input_block_output_relative_l2": 0.0,
+          "accumulated_block_output_relative_l2": 0.0
+        },
+        {
+          "layer": 1,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004676432555389359,
+          "same_input_block_output_relative_l2": 0.004059401786303357,
+          "accumulated_block_output_relative_l2": 0.004059401786303357
+        },
+        {
+          "layer": 2,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0040029427773525675,
+          "same_input_block_output_relative_l2": 0.003639479413960957,
+          "accumulated_block_output_relative_l2": 0.006023674629787661
+        },
+        {
+          "layer": 3,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004323028347230684,
+          "same_input_block_output_relative_l2": 0.003820155055884295,
+          "accumulated_block_output_relative_l2": 0.02354109285899748
+        },
+        {
+          "layer": 4,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.00449061192378971,
+          "same_input_block_output_relative_l2": 0.003695605982904859,
+          "accumulated_block_output_relative_l2": 0.02147307365138135
+        },
+        {
+          "layer": 5,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0055570998099198216,
+          "same_input_block_output_relative_l2": 0.003432554371838613,
+          "accumulated_block_output_relative_l2": 0.024167852643044094
+        },
+        {
+          "layer": 6,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0043750151367708415,
+          "same_input_block_output_relative_l2": 0.0022971035942836423,
+          "accumulated_block_output_relative_l2": 0.01860802347328363
+        },
+        {
+          "layer": 7,
+          "type": "full_attention",
+          "first_nonexact_boundary_same_input": "attention.output",
+          "same_input_attention_relative_l2": 0.0031966044539173885,
+          "same_input_mlp_relative_l2": 0.007431574523090895,
+          "same_input_block_output_relative_l2": 0.005009092461228665,
+          "accumulated_block_output_relative_l2": 0.02874770314087709
+        },
+        {
+          "layer": 8,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.005264908809131787,
+          "same_input_block_output_relative_l2": 0.0034476616046807277,
+          "accumulated_block_output_relative_l2": 0.03221771104681892
+        },
+        {
+          "layer": 9,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.005401021032831779,
+          "same_input_block_output_relative_l2": 0.004050344251205766,
+          "accumulated_block_output_relative_l2": 0.0315462771242675
+        },
+        {
+          "layer": 10,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.005013489157381498,
+          "same_input_block_output_relative_l2": 0.003580337387787614,
+          "accumulated_block_output_relative_l2": 0.030014406194975026
+        },
+        {
+          "layer": 11,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0045346993701614,
+          "same_input_block_output_relative_l2": 0.0036340363565434087,
+          "accumulated_block_output_relative_l2": 0.03013300174472862
+        },
+        {
+          "layer": 12,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004897607030112855,
+          "same_input_block_output_relative_l2": 0.00379362508632369,
+          "accumulated_block_output_relative_l2": 0.03541751919440553
+        },
+        {
+          "layer": 13,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004488920060233571,
+          "same_input_block_output_relative_l2": 0.0035207814292070993,
+          "accumulated_block_output_relative_l2": 0.03596840774761551
+        },
+        {
+          "layer": 14,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004487743463367873,
+          "same_input_block_output_relative_l2": 0.0031456651898257894,
+          "accumulated_block_output_relative_l2": 0.031868107292019415
+        },
+        {
+          "layer": 15,
+          "type": "full_attention",
+          "first_nonexact_boundary_same_input": "attention.output",
+          "same_input_attention_relative_l2": 0.0019388635223949685,
+          "same_input_mlp_relative_l2": 0.016404172252951064,
+          "same_input_block_output_relative_l2": 0.008550451302428588,
+          "accumulated_block_output_relative_l2": 0.03455948179653389
+        }
+      ]
+    },
+    {
+      "prompt_length": 81,
+      "last_logits": {
+        "shape": [
+          100278
+        ],
+        "actual_dtype": "torch.bfloat16",
+        "reference_dtype": "torch.bfloat16",
+        "max_abs": 0.375,
+        "mean_abs": 0.1243061050772667,
+        "relative_l2": 0.009034355991278189,
+        "reference_rms": 15.366694450378418,
+        "equal_fraction": 0.08743692189455032
+      },
+      "last_logprobs": {
+        "shape": [
+          100278
+        ],
+        "actual_dtype": "torch.float32",
+        "reference_dtype": "torch.float32",
+        "max_abs": 0.31041526794433594,
+        "mean_abs": 0.07184191793203354,
+        "relative_l2": 0.003971155929413709,
+        "reference_rms": 21.683359146118164,
+        "equal_fraction": 0.0
+      },
+      "within_existing_threshold": false,
+      "layers": [
+        {
+          "layer": 0,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": null,
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0,
+          "same_input_block_output_relative_l2": 0.0,
+          "accumulated_block_output_relative_l2": 0.0
+        },
+        {
+          "layer": 1,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0040549248910095636,
+          "same_input_block_output_relative_l2": 0.003660903532617991,
+          "accumulated_block_output_relative_l2": 0.003660903532617991
+        },
+        {
+          "layer": 2,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.003483754558055208,
+          "same_input_block_output_relative_l2": 0.003126537977563428,
+          "accumulated_block_output_relative_l2": 0.008145227833690495
+        },
+        {
+          "layer": 3,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004075939507214843,
+          "same_input_block_output_relative_l2": 0.0033751928876258144,
+          "accumulated_block_output_relative_l2": 0.0139042210384703
+        },
+        {
+          "layer": 4,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004306927872584434,
+          "same_input_block_output_relative_l2": 0.003524122661422879,
+          "accumulated_block_output_relative_l2": 0.015029728356638702
+        },
+        {
+          "layer": 5,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.005145491848318449,
+          "same_input_block_output_relative_l2": 0.003230423225894191,
+          "accumulated_block_output_relative_l2": 0.019804764821561956
+        },
+        {
+          "layer": 6,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004775996602927264,
+          "same_input_block_output_relative_l2": 0.0029718322686464373,
+          "accumulated_block_output_relative_l2": 0.019561826842248307
+        },
+        {
+          "layer": 7,
+          "type": "full_attention",
+          "first_nonexact_boundary_same_input": "attention.output",
+          "same_input_attention_relative_l2": 0.004035664350642005,
+          "same_input_mlp_relative_l2": 0.010207735603261504,
+          "same_input_block_output_relative_l2": 0.0062173366000053115,
+          "accumulated_block_output_relative_l2": 0.02434353338379412
+        },
+        {
+          "layer": 8,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.005317156340005768,
+          "same_input_block_output_relative_l2": 0.00314581130273849,
+          "accumulated_block_output_relative_l2": 0.03376767855748001
+        },
+        {
+          "layer": 9,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.0047528837745053525,
+          "same_input_block_output_relative_l2": 0.0032322523187451346,
+          "accumulated_block_output_relative_l2": 0.033154932389617815
+        },
+        {
+          "layer": 10,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.005306547989648442,
+          "same_input_block_output_relative_l2": 0.0033077398662693025,
+          "accumulated_block_output_relative_l2": 0.0333367959108168
+        },
+        {
+          "layer": 11,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004306240476588149,
+          "same_input_block_output_relative_l2": 0.0032746101148357584,
+          "accumulated_block_output_relative_l2": 0.03335744661329268
+        },
+        {
+          "layer": 12,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.005128047401715643,
+          "same_input_block_output_relative_l2": 0.0034539273243031827,
+          "accumulated_block_output_relative_l2": 0.04164291268833697
+        },
+        {
+          "layer": 13,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004614077354830632,
+          "same_input_block_output_relative_l2": 0.003323236626491258,
+          "accumulated_block_output_relative_l2": 0.040019638892045885
+        },
+        {
+          "layer": 14,
+          "type": "linear_attention",
+          "first_nonexact_boundary_same_input": "ffn_post_norm.input",
+          "same_input_attention_relative_l2": 0.0,
+          "same_input_mlp_relative_l2": 0.004355880870303508,
+          "same_input_block_output_relative_l2": 0.0030893689622923893,
+          "accumulated_block_output_relative_l2": 0.04010521706268338
+        },
+        {
+          "layer": 15,
+          "type": "full_attention",
+          "first_nonexact_boundary_same_input": "attention.output",
+          "same_input_attention_relative_l2": 0.0027924903880995216,
+          "same_input_mlp_relative_l2": 0.010529202841668276,
+          "same_input_block_output_relative_l2": 0.005946709194371543,
+          "accumulated_block_output_relative_l2": 0.03924322878146006
+        }
+      ]
+    }
+  ]
+}

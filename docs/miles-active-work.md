@@ -10,7 +10,7 @@ separate authorization.
 | Track | State | Next evidence needed |
 | --- | --- | --- |
 | Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128→102/128 at0/20/40/60 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
-| Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe | Initial evaluation and full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
+| Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe; initial held-out96/128 versus Core97/128 | Full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
 | Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis submitted](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
 | Native reduction/clipping stress | [EP1/EP2 passed](https://beaker.org/ex/01M270A2J2E3WC60978EM8G5SV); independent global norm, active clipping and Adam moments verified | [Evidence](measurements/miles-core-ep-stress-20260910.json); max gradient relative L2 difference 5.002e-6; does not establish exact update parity near zero gradients. |
@@ -58,3 +58,9 @@ outputs on the same fixed set; they are not repeated stochastic eval samples.
 The [full hero graph/chunk matrix](https://beaker.org/ex/01M27118R2ER9QG0PYP3ARCHBE)
 is submitted independently of layerwise Core/HF diagnosis. It varies each setting
 separately; the original probability gate remains unchanged.
+
+The [hero layerwise report](measurements/miles-hero-layerwise-20260910.json)
+found exact dense-block and same-input KDA attention outputs. The first mismatch
+is in the first latent MoE block. A [Core-compatible HF MoE control](https://beaker.org/ex/01M271KNVXQ7N0EKK99MFHMHHX)
+is submitted to test arithmetic-layout differences; it is a diagnostic and cannot
+promote the default HF/SGLang implementation by itself.
