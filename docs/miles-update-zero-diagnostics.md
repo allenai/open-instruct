@@ -37,3 +37,20 @@ and `full_protocol_complete=false`. Two separate invocations with distinct campa
 names can measure process-to-process variation in the same immutable image. Captures
 include populated autotuner choices; these include prior warmup history and do not
 by themselves prove which configuration every kernel invocation used.
+
+`--mode trainer-routes` extends the original three-GPU protocol after its full
+initial-weight comparison. Both native scorers process the same four prefixes and
+the16 frozen responses from original Core rollout0; the retained artifact hash is
+checked before a restricted `weights_only=True` load. SGLang also processes those
+same16 sequences. These are rank-strided diagnostic cohorts, not a reconstruction
+of historical rank assignment. Route positions refer to processed input tokens;
+log-probability checks explicitly align target token t with vocabulary logits t−1.
+The diagnostic performs no backward or optimizer call and preserves the original
+Ray worker setup hook before adding its actor method.
+
+`--mode hf-matched --pin-autotune-a` tests the seven observed tuner configurations
+from the first matched control. Each is required to be a declared candidate in the
+actual runtime before any tuner is changed. Local tests qualify that guard; B300
+candidate membership is checked in the GPU diagnostic before warmup. The observer
+records actual wrapped Python tuner calls during armed eager prefill, including
+unpinned calls. This does not claim to trace all GPU kernels or CUDA graph replay.

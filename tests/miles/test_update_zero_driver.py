@@ -16,6 +16,7 @@ def driver(monkeypatch):
     for name in (
         "ray",
         "requests",
+        "torch",
         "miles",
         "miles.ray",
         "miles.utils",
@@ -235,3 +236,26 @@ def test_unknown_mode_rejected(driver, tmp_path, monkeypatch):
     monkeypatch.setenv("OI_UPDATE_ZERO_MODE", "typo")
     with pytest.raises(ValueError, match="Unknown diagnostic mode"):
         driver.apply_probe_mode(SimpleNamespace(), tmp_path)
+
+
+def test_trainer_probe_runs_after_initial_weight_comparison(driver, tmp_path, monkeypatch):
+    args, events = protocol(driver, tmp_path, monkeypatch)
+    monkeypatch.setenv("OI_UPDATE_ZERO_MODE", "trainer-routes")
+
+    async def capture(*unused):
+        events.append("trainer.routes")
+
+    driver.trainer_route_probe = capture
+    asyncio.run(driver.probe(args, {"cases": [{}] * 4}, tmp_path))
+    assert events.index("compare") < events.index("published") < events.index("trainer.routes")
+    assert events.index("trainer.routes") < events.index("learner.dispose")
+
+
+def test_retained_training_payload_rejects_changed_bytes_before_loading(driver, tmp_path):
+    path = tmp_path / "core/rollouts/0.pt"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"wrong retained artifact")
+    driver.importlib.import_module = lambda name: SimpleNamespace()
+    driver.torch.load = lambda *args, **kwargs: pytest.fail("Changed artifact must not be loaded")
+    with pytest.raises(ValueError, match="artifact hash changed"):
+        driver.trainer_route_payloads(tmp_path, {})

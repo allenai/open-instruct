@@ -67,3 +67,36 @@ def test_hf_matched_launch_uses_one_gpu_and_fresh_explicit_caches(backend):
     assert "test ! -e /tmp/zero-probe/compiler-cache" in command
     for name in ("TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR", "FLASH_ATTENTION_CUTE_DSL_CACHE_DIR"):
         assert f"export {name}=/tmp/zero-probe/compiler-cache/" in command
+
+
+def test_trainer_route_mode_embeds_qualified_probe_with_original_resources():
+    spec = launch_update_zero.specification(launch_update_zero.IMAGES["core"], "core", mode="trainer-routes")
+    task = spec["tasks"][0]
+    assert task["resources"]["gpuCount"] == 3
+    command = task["arguments"][0]
+    assert "export OI_UPDATE_ZERO_MODE=trainer-routes" in command
+    assert "/tmp/zero-probe/update_zero_training_capture.py" in command
+    assert "export TRITON_CACHE_DIR=" not in command
+    subprocess.run(["bash", "-n"], input=command, text=True, check=True)
+
+
+def test_pin_profile_is_only_allowed_for_hf_control():
+    with pytest.raises(ValueError, match="independent HF control"):
+        launch_update_zero.specification(launch_update_zero.IMAGES["core"], "core", pin_autotune_a=True)
+
+
+def test_pin_profile_is_embedded_with_provenance():
+    spec = launch_update_zero.specification(
+        launch_update_zero.IMAGES["core"], "core", mode="hf-matched", pin_autotune_a=True
+    )
+    command = spec["tasks"][0]["arguments"][0]
+    assert "export OI_UPDATE_ZERO_AUTOTUNE_REFERENCE=/tmp/zero-probe/autotune-reference.json" in command
+    assert "/tmp/zero-probe/update_zero_autotune.py" in command
+    embedded = {}
+    for line in command.splitlines():
+        if line.startswith("printf %s "):
+            fields = shlex.split(line)
+            embedded[fields[-1].rsplit("/", 1)[-1]] = base64.b64decode(fields[2])
+    manifest = json.loads(embedded["manifest.json"])
+    for name in ("update_zero_autotune.py", "autotune-reference.json"):
+        assert hashlib.sha256(embedded[name]).hexdigest() == manifest["diagnostic_file_sha256"][name]

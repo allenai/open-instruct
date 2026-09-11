@@ -52,7 +52,9 @@ One seed per trainer does not establish a systematic backend effect. Neither
 response-length association nor larger router parameter drift establishes which
 objective caused an outcome.
 
-Adam's approximate invariance to uniform gradient scaling is not sufficient to
+The earlier1.132% figure is relative L2 error between gradient tensors (cosine
+0.999937), not simply a1.132% difference in their overall magnitudes. Adam's
+approximate invariance to uniform gradient scaling is not sufficient to
 exclude optimizer effects: its epsilon, gradient mixtures, clipping, and state
 history matter. Likewise, scoring-rounding error need not be zero-mean or merely
 blur learning. Those mechanisms require measurements rather than a presumed sign.

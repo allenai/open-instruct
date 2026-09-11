@@ -16,17 +16,26 @@ ROOT = "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-co
 IMAGES = {"core": "01M26N80T0V9PREQTS87J849P8", "megatron": update_zero_megatron.IMAGE}
 
 
-def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="original"):
+def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="original", pin_autotune_a=False):
     if backend not in IMAGES or image != IMAGES[backend]:
         raise ValueError("The selected backend requires its immutable original 100-update image")
     if not re.fullmatch(r"update-zero-[A-Za-z0-9_-]+", campaign):
         raise ValueError("Use a distinct update-zero campaign directory")
-    if mode not in ("original", "hf-matched"):
+    if mode not in ("original", "hf-matched", "trainer-routes"):
         raise ValueError("Unknown diagnostic mode")
+    if pin_autotune_a and mode != "hf-matched":
+        raise ValueError("Pinning is only supported by the independent HF control")
     source = Path(__file__).parent
     output = ROOT + "/" + campaign + "/" + backend
     probe_dir = "/tmp/zero-probe"
     files = {name: (source / name).read_text() for name in ("update_zero_driver.py", "update_zero_capture.py")}
+    if mode == "trainer-routes":
+        files["update_zero_training_capture.py"] = (source / "update_zero_training_capture.py").read_text()
+    if pin_autotune_a:
+        files["update_zero_autotune.py"] = (source / "update_zero_autotune.py").read_text()
+        files["autotune-reference.json"] = (
+            source.parents[1] / "configs/miles/diagnostics/autotune-reference-hfmatched-a.json"
+        ).read_text()
     files["inputs.json"] = (source.parents[1] / "configs/miles/reference/gsm8k-update-zero-inputs.json").read_text()
     files["sitecustomize.py"] = (
         "import runpy\n"
@@ -35,7 +44,13 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="o
         "install_import_hook()\n"
     )
     runtime_env = {}
-    provenance = {"image": image, "backend": backend, "mode": mode, "inputs": json.loads(files["inputs.json"])}
+    provenance = {
+        "image": image,
+        "backend": backend,
+        "mode": mode,
+        "pin_autotune_a": pin_autotune_a,
+        "inputs": json.loads(files["inputs.json"]),
+    }
     if backend == "megatron":
         manifest = json.loads((source / "diagnostics/update-zero-megatron.json").read_text())
         prepared = update_zero_megatron.prepare(
@@ -66,6 +81,8 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="o
         HF_HOME="/tmp/hf-cache",
         PYTHONUNBUFFERED="1",
     )
+    if pin_autotune_a:
+        env["OI_UPDATE_ZERO_AUTOTUNE_REFERENCE"] = probe_dir + "/autotune-reference.json"
     if mode == "hf-matched":
         caches = {
             "TRITON_CACHE_DIR": probe_dir + "/compiler-cache/triton",
@@ -110,7 +127,7 @@ def specification(image, backend, *, campaign="update-zero-20260911-v1", mode="o
     lines.append(shlex.join(command))
     return {
         "version": "v2",
-        "description": f"Original {backend}100 update-zero ({mode}): identical prefixes, expert IDs/activations; zero updates",
+        "description": f"Original {backend}100 update-zero ({mode}{'; pinned tuner A' if pin_autotune_a else ''}): identical prefixes, expert IDs/activations; zero updates",
         "tasks": [
             {
                 "name": "update-zero-" + backend,
@@ -136,10 +153,13 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--backend", choices=IMAGES, required=True)
     parser.add_argument("--campaign", default="update-zero-20260911-v1")
-    parser.add_argument("--mode", choices=("original", "hf-matched"), default="original")
+    parser.add_argument("--mode", choices=("original", "hf-matched", "trainer-routes"), default="original")
+    parser.add_argument("--pin-autotune-a", action="store_true")
     parser.add_argument("--render-only", action="store_true")
     args = parser.parse_args()
-    document = specification(args.image, args.backend, campaign=args.campaign, mode=args.mode)
+    document = specification(
+        args.image, args.backend, campaign=args.campaign, mode=args.mode, pin_autotune_a=args.pin_autotune_a
+    )
     if args.render_only:
         print(json.dumps(document, indent=2))
         return
