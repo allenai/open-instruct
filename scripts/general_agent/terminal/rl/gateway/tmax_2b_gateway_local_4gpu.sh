@@ -2,14 +2,18 @@
 
 # Local 4-GPU terminal RL through the LiteRegistry gateway backend — no Beaker/mason.py,
 # and no podman anywhere on this machine: every sandbox container runs on the remote
-# replica fleet behind $GATEWAY_URL.
+# replica fleet. The gateway runs locally too (start_colocated_gateway.sh), resolving the
+# fleet's Redis through the head registry $LITEREGISTRY_REGISTRY on weka; set
+# LITEREGISTRY_GATEWAY_VENV to a venv with `pip install literegistry==1.0.49`.
 # Layout: 2 learner GPUs (ZeRO-3 + liger loss) + 2 vLLM engine GPUs. Sized for 4x L40S 46GB
 # (Qwen3.5-4B OOMs in the ZeRO-3 dummy optimizer step on 44GB cards even with 3 learners;
 # allenai/tmax-2b keeps the Qwen3.5 tokenizer/tool format and fits).
 # Same training args as qwen35_4b_gateway_smoke.sh with a short response length so a
 # handful of steps finishes quickly; this validates the plumbing, not model quality.
 
-export GATEWAY_URL="${GATEWAY_URL:-http://jupiter-cs-aus-148.reviz.ai2.in:45216}"
+export LITEREGISTRY_REGISTRY="${LITEREGISTRY_REGISTRY:-head+sqlite:///weka/oe-adapt-default/gfaria/podman_deployments/lr1049-big-20260910/head.sqlite3}"
+export LITEREGISTRY_GATEWAY_VENV="${LITEREGISTRY_GATEWAY_VENV:-/opt/literegistry-gateway-venv}"
+export GATEWAY_WORKERS="${GATEWAY_WORKERS:-4}"
 MODEL=allenai/tmax-2b
 EXP_NAME="${EXP_NAME:-tmax_2b_gateway_local_4gpu}"
 
@@ -21,6 +25,8 @@ export RAY_ENABLE_UV_RUN_RUNTIME_ENV=0   # ray workers crash re-wrapping themsel
 export SWERL_SANDBOX_TIMING_LOGS=1
 
 mkdir -p "$HOME/.triton/autotune"
+
+source scripts/general_agent/terminal/rl/gateway/start_colocated_gateway.sh || exit 1
 
 ray stop --force
 ray start --head --port=8888 --dashboard-host=0.0.0.0
@@ -60,7 +66,7 @@ uv run python open_instruct/grpo_fast.py \
     --wandb_project oe-general-agents \
     --save_traces \
     --tools swerl_vanillux_sandbox \
-    --tool_configs "{\"backend\": \"gateway\", \"gateway_url\": \"$GATEWAY_URL\", \"task_data_hf_repo\": \"allenai/tmax-15k-open-instruct\", \"test_timeout\": 120, \"image\": \"python:3.12-slim\"}" \
+    --tool_configs '{"backend": "gateway", "task_data_hf_repo": "allenai/tmax-15k-open-instruct", "test_timeout": 120, "image": "python:3.12-slim"}' \
     --pool_size 64 \
     --max_steps 32 \
     --verification_reward 1.0 \

@@ -193,27 +193,67 @@ def test_run_command_retries_single_owner_unregistered_503(backend_and_gateway):
     assert backend._affinity_id == first_container
 
 
-def test_run_command_rehandshakes_on_repeated_owner_unregistered_503(backend_and_gateway):
-    # A replica that died/rescheduled stays off the roster until the binding
-    # TTL expires (~15 min); a repeated "no longer registered" 503 must be
-    # treated like a lost session (re-handshake + retry once), not retried
-    # to exhaustion.
+@pytest.mark.parametrize(
+    "body",
+    [
+        "strict affinity server is no longer registered",
+        '{"error":"strict affinity server is unavailable","status":"failed"}',
+    ],
+)
+def test_run_command_rehandshakes_on_repeated_owner_gone_503(backend_and_gateway, body):
+    # A replica that died keeps failing every request: "server is unavailable"
+    # while the roster still lists it (~4 min heartbeat tolerance), then "no
+    # longer registered" until the binding TTL expires (~15 min). Consecutive
+    # such 503s must be treated like a lost session (re-handshake + retry
+    # once), not retried to exhaustion and surfaced as a tool error.
     backend, fake = backend_and_gateway
     first_container = backend._affinity_id
-    fake.fail_next_posts.extend([(503, "strict affinity server is no longer registered")] * 2)
+    fake.fail_next_posts.extend([(503, body)] * GatewayBackend._OWNER_LOST_ATTEMPTS)
     fake.scripted_results.append((0, "recovered\n", ""))
     result = backend.run_command("echo recovered")
     assert result.stdout == "recovered\n"
     assert fake.handshakes == 2
     assert backend._affinity_id != first_container
-    # The dead binding saw exactly the launcher exec and its single quick retry.
+    # The dead binding saw exactly the launcher exec and its quick retries.
     dead_binding_posts = [payload for _, payload in fake.requests if payload.get("affinity_id") == first_container]
-    assert len(dead_binding_posts) == 2
+    assert len(dead_binding_posts) == GatewayBackend._OWNER_LOST_ATTEMPTS
+
+
+_OWNER_LOST_410 = (
+    410,
+    '{"error":"strict affinity server is no longer registered","code":"affinity_owner_lost","recoverable":false}',
+)
+
+
+def test_run_command_rehandshakes_on_410_owner_lost(backend_and_gateway):
+    # literegistry >= 1.0.49: the gateway probes the bound replica and answers
+    # 410 affinity_owner_lost when it is gone. Not retryable -- re-handshake at
+    # once, without burning the 503 retry budget first.
+    backend, fake = backend_and_gateway
+    first_container = backend._affinity_id
+    fake.fail_next_posts.append(_OWNER_LOST_410)
+    fake.scripted_results.append((0, "recovered\n", ""))
+    result = backend.run_command("echo recovered")
+    assert result.stdout == "recovered\n"
+    assert fake.handshakes == 2
+    assert backend._affinity_id != first_container
+    dead_binding_posts = [payload for _, payload in fake.requests if payload.get("affinity_id") == first_container]
+    assert len(dead_binding_posts) == 1
+
+
+def test_close_tolerates_410_owner_lost(backend_and_gateway):
+    backend, fake = backend_and_gateway
+    fake.fail_next_posts.append(_OWNER_LOST_410)
+    backend.close()  # container died with its replica; nothing left to release
+    assert backend._affinity_id is None
+    assert fake.closed == []
 
 
 def test_close_tolerates_owner_unregistered_503(backend_and_gateway):
     backend, fake = backend_and_gateway
-    fake.fail_next_posts.extend([(503, "strict affinity server is no longer registered")] * 2)
+    fake.fail_next_posts.extend(
+        [(503, "strict affinity server is no longer registered")] * GatewayBackend._OWNER_LOST_ATTEMPTS
+    )
     backend.close()  # must not raise; container is gone with its replica
     assert backend._affinity_id is None
     assert fake.closed == []
