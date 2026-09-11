@@ -65,6 +65,8 @@ def test_scheduling_configs_preserve_shared_recipe_and_actual_budget():
     asynchronous = async_trial.configuration(Path("/prepared"), Path("/async"), asynchronous=True)
     assert sync.core.max_policy_lag == 0 and asynchronous.core.max_policy_lag == 1
     for config in (sync, asynchronous):
+        assert "--no-use-wandb" not in config.arguments()
+        assert "--no-fully-async" not in config.arguments()
         assert config.miles["num_rollout"] == config.miles["lr_decay_iters"] == 4
         assert config.miles["rollout_max_response_len"] == 4096
         assert config.miles["global_batch_size"] == 16

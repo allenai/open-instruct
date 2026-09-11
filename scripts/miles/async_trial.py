@@ -27,20 +27,19 @@ def configuration(campaign, output, *, asynchronous):
         config, core=dataclasses.replace(config.core, max_policy_lag=int(asynchronous), diagnostic_interval=1)
     )
     for key in list(config.miles):
-        if key.startswith(("eval_", "wandb_")) or key == "n_samples_per_eval_prompt":
+        if key.startswith(("eval_", "wandb_")) or key in ("n_samples_per_eval_prompt", "use_wandb"):
             del config.miles[key]
     config.miles.update(
-        fully_async=asynchronous,
         use_rollout_logprobs=True,
         num_rollout=UPDATES,
         lr_decay_iters=UPDATES,
-        use_wandb=False,
         sglang_cuda_graph_backend_decode="disabled",
         save=str(output / "metrics"),
         save_debug_rollout_data=str(output / "rollouts/{rollout_id}.pt"),
     )
     if asynchronous:
         config.miles.update(
+            fully_async=True,
             async_data_buffer_capacity_factor=1.0,
             async_unused_samples_handler="retry",
             rollout_submission_granularity="group",

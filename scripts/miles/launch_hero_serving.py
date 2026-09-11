@@ -11,8 +11,17 @@ from scripts.miles.launch_hero_conversion import HF
 
 
 def specification(
-    image, *, hf=HF, diagnose_core=False, mode_matrix=False, hf_core_moe_reference=False, diagnose_moe=False
+    image,
+    *,
+    hf=HF,
+    diagnose_core=False,
+    mode_matrix=False,
+    hf_core_moe_reference=False,
+    diagnose_moe=False,
+    hf_attention="eager",
 ):
+    if hf_attention not in ("eager", "sdpa") or (hf_attention != "eager" and not diagnose_core):
+        raise ValueError("HF attention control requires a layerwise diagnosis")
     if hf_core_moe_reference and not diagnose_core:
         raise ValueError("The Core-compatible HF MoE control is only a layerwise diagnostic")
     if sum((diagnose_core, mode_matrix, diagnose_moe)) > 1:
@@ -26,6 +35,8 @@ def specification(
     )
     if mode_matrix:
         extra = "--diagnostic-mode-matrix"
+    if diagnose_core:
+        extra += " --hf-attention " + hf_attention
     reference_dataset = "01M26ZBDKYP9E2N7QC7NXN1B09" if diagnose_core else None
     common_options = "--recurrent-hf-prefill --logprob-atol 0.1"
     if diagnose_moe:
@@ -90,6 +101,7 @@ def main():
     diagnostics.add_argument("--mode-matrix", action="store_true")
     diagnostics.add_argument("--diagnose-moe", action="store_true")
     parser.add_argument("--hf-core-moe-reference", action="store_true")
+    parser.add_argument("--hf-attention", choices=("eager", "sdpa"), default="eager")
     args = parser.parse_args()
     document = (
         json.dumps(
@@ -100,6 +112,7 @@ def main():
                 mode_matrix=args.mode_matrix,
                 diagnose_moe=args.diagnose_moe,
                 hf_core_moe_reference=args.hf_core_moe_reference,
+                hf_attention=args.hf_attention,
             ),
             indent=2,
         )
