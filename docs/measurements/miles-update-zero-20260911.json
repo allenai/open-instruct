@@ -4,15 +4,17 @@
   "core": {
     "experiment": "01M27F1Q59128QKVBTMFW32JDD",
     "source": "ffeffe0f2",
-    "status": "submitted at 2026-09-11T05:29:04Z",
-    "output": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v2/update-zero-20260911-v2/core",
+    "status": "running; original parser passed, SGLang graph capture completed, prefill kernel warmup active at 05:35 UTC",
+    "output": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v2/core",
     "parser_qualification": {
       "image_docker": "7c55472146e2",
       "num_rollout": 0,
       "use_wandb": false,
       "lr_decay_iters": 100,
       "local_log": "/tmp/update-zero-core-parser-proof.log"
-    }
+    },
+    "job": "01M27F1Q95CMY6SDDMNW1T0MYE",
+    "result": "01M27F1Q5NTWDFHNHE9NFDSF7P"
   },
   "megatron": {
     "experiment": "01M27EPG7T5PKJ9B7P6J1GPASD",
