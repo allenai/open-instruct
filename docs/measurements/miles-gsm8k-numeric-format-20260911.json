@@ -1,0 +1,368 @@
+{
+  "interpretation": "Counterfactual last-number numeric comparison only; original rewards and active runs unchanged. Does not validate reasoning or recover truncated answers.",
+  "rows": [
+    {
+      "backend": "core",
+      "completed_steps": 0,
+      "strict_correct": 97.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:1223:gsm8k-test-001223",
+          "extracted": "8.00",
+          "label": "8",
+          "response_tokens": 1444,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 1327,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:507:gsm8k-test-000507",
+          "extracted": "2.00",
+          "label": "2",
+          "response_tokens": 681,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 1770,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "core",
+      "completed_steps": 20,
+      "strict_correct": 101.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 985,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 1044,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "core",
+      "completed_steps": 40,
+      "strict_correct": 94.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 788,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:507:gsm8k-test-000507",
+          "extracted": "2.00",
+          "label": "2",
+          "response_tokens": 1008,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:1070:gsm8k-test-001070",
+          "extracted": "18.00",
+          "label": "18",
+          "response_tokens": 3162,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 1626,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:358:gsm8k-test-000358",
+          "extracted": "20.00",
+          "label": "20",
+          "response_tokens": 911,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "core",
+      "completed_steps": 60,
+      "strict_correct": 102.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:1223:gsm8k-test-001223",
+          "extracted": "8.00",
+          "label": "8",
+          "response_tokens": 1504,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 901,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:358:gsm8k-test-000358",
+          "extracted": "20.00",
+          "label": "20",
+          "response_tokens": 908,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "core",
+      "completed_steps": 80,
+      "strict_correct": 97.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 1087,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 776,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "core",
+      "completed_steps": 100,
+      "strict_correct": 93.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:1223:gsm8k-test-001223",
+          "extracted": "8.00",
+          "label": "8",
+          "response_tokens": 1062,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 1221,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 773,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "megatron",
+      "completed_steps": 0,
+      "strict_correct": 96.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:1223:gsm8k-test-001223",
+          "extracted": "8.00",
+          "label": "8",
+          "response_tokens": 1797,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 1617,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:507:gsm8k-test-000507",
+          "extracted": "2.00",
+          "label": "2",
+          "response_tokens": 1303,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:605:gsm8k-test-000605",
+          "extracted": "42.00",
+          "label": "42",
+          "response_tokens": 656,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 1138,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "megatron",
+      "completed_steps": 20,
+      "strict_correct": 93.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 974,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:507:gsm8k-test-000507",
+          "extracted": "2.00",
+          "label": "2",
+          "response_tokens": 994,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:1070:gsm8k-test-001070",
+          "extracted": "18.00",
+          "label": "18",
+          "response_tokens": 2684,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:919:gsm8k-test-000919",
+          "extracted": "90.00",
+          "label": "90",
+          "response_tokens": 1545,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 939,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "megatron",
+      "completed_steps": 40,
+      "strict_correct": 98.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:1223:gsm8k-test-001223",
+          "extracted": "8.00",
+          "label": "8",
+          "response_tokens": 1811,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 1069,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:507:gsm8k-test-000507",
+          "extracted": "2.00",
+          "label": "2",
+          "response_tokens": 1112,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 1699,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:358:gsm8k-test-000358",
+          "extracted": "20.00",
+          "label": "20",
+          "response_tokens": 1227,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "megatron",
+      "completed_steps": 60,
+      "strict_correct": 99.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 1740,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:507:gsm8k-test-000507",
+          "extracted": "2.00",
+          "label": "2",
+          "response_tokens": 1240,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:1070:gsm8k-test-001070",
+          "extracted": "18.00",
+          "label": "18",
+          "response_tokens": 3340,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 1107,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "megatron",
+      "completed_steps": 80,
+      "strict_correct": 105.0,
+      "numeric_equivalent_additions": [
+        {
+          "id": "gsm8k-eval:872:gsm8k-test-000872",
+          "extracted": "13.00",
+          "label": "13",
+          "response_tokens": 430,
+          "status": "completed"
+        },
+        {
+          "id": "gsm8k-eval:710:gsm8k-test-000710",
+          "extracted": "45.00",
+          "label": "45",
+          "response_tokens": 772,
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "backend": "megatron",
+      "completed_steps": 100,
+      "strict_correct": 107.0,
+      "numeric_equivalent_additions": []
+    }
+  ]
+}

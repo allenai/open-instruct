@@ -1,0 +1,1292 @@
+{
+  "counts": {
+    "exact_text": 7,
+    "same_outcome": 111,
+    "core_only": 9,
+    "mega_only": 8,
+    "both_correct": 88,
+    "both_wrong": 23
+  },
+  "rows": [
+    {
+      "id": "gsm8k-eval:667:gsm8k-test-000667",
+      "exact_response": false,
+      "prefix_characters": 875,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 793,
+      "megatron_tokens": 665,
+      "target": "53"
+    },
+    {
+      "id": "gsm8k-eval:1005:gsm8k-test-001005",
+      "exact_response": false,
+      "prefix_characters": 2379,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2198,
+      "megatron_tokens": 1599,
+      "target": "1490"
+    },
+    {
+      "id": "gsm8k-eval:762:gsm8k-test-000762",
+      "exact_response": true,
+      "prefix_characters": 1479,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 477,
+      "megatron_tokens": 477,
+      "target": "85"
+    },
+    {
+      "id": "gsm8k-eval:491:gsm8k-test-000491",
+      "exact_response": false,
+      "prefix_characters": 210,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 485,
+      "megatron_tokens": 671,
+      "target": "16"
+    },
+    {
+      "id": "gsm8k-eval:827:gsm8k-test-000827",
+      "exact_response": false,
+      "prefix_characters": 112,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "11"
+    },
+    {
+      "id": "gsm8k-eval:463:gsm8k-test-000463",
+      "exact_response": false,
+      "prefix_characters": 824,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 831,
+      "megatron_tokens": 914,
+      "target": "18"
+    },
+    {
+      "id": "gsm8k-eval:184:gsm8k-test-000184",
+      "exact_response": false,
+      "prefix_characters": 716,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "25"
+    },
+    {
+      "id": "gsm8k-eval:1223:gsm8k-test-001223",
+      "exact_response": false,
+      "prefix_characters": 839,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1444,
+      "megatron_tokens": 1797,
+      "target": "8"
+    },
+    {
+      "id": "gsm8k-eval:878:gsm8k-test-000878",
+      "exact_response": false,
+      "prefix_characters": 657,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1894,
+      "megatron_tokens": 1934,
+      "target": "5"
+    },
+    {
+      "id": "gsm8k-eval:872:gsm8k-test-000872",
+      "exact_response": false,
+      "prefix_characters": 1025,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1327,
+      "megatron_tokens": 1617,
+      "target": "13"
+    },
+    {
+      "id": "gsm8k-eval:1318:gsm8k-test-001318",
+      "exact_response": false,
+      "prefix_characters": 1188,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 966,
+      "megatron_tokens": 921,
+      "target": "14"
+    },
+    {
+      "id": "gsm8k-eval:547:gsm8k-test-000547",
+      "exact_response": false,
+      "prefix_characters": 1644,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1937,
+      "megatron_tokens": 2119,
+      "target": "81"
+    },
+    {
+      "id": "gsm8k-eval:708:gsm8k-test-000708",
+      "exact_response": false,
+      "prefix_characters": 1701,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 712,
+      "megatron_tokens": 662,
+      "target": "168"
+    },
+    {
+      "id": "gsm8k-eval:975:gsm8k-test-000975",
+      "exact_response": false,
+      "prefix_characters": 399,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1785,
+      "megatron_tokens": 4096,
+      "target": "20"
+    },
+    {
+      "id": "gsm8k-eval:92:gsm8k-test-000092",
+      "exact_response": false,
+      "prefix_characters": 180,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 419,
+      "megatron_tokens": 700,
+      "target": "4"
+    },
+    {
+      "id": "gsm8k-eval:903:gsm8k-test-000903",
+      "exact_response": false,
+      "prefix_characters": 363,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2319,
+      "megatron_tokens": 1967,
+      "target": "16"
+    },
+    {
+      "id": "gsm8k-eval:998:gsm8k-test-000998",
+      "exact_response": false,
+      "prefix_characters": 658,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 597,
+      "megatron_tokens": 463,
+      "target": "50"
+    },
+    {
+      "id": "gsm8k-eval:1071:gsm8k-test-001071",
+      "exact_response": false,
+      "prefix_characters": 399,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2089,
+      "megatron_tokens": 891,
+      "target": "251"
+    },
+    {
+      "id": "gsm8k-eval:408:gsm8k-test-000408",
+      "exact_response": false,
+      "prefix_characters": 108,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 1824,
+      "target": "20"
+    },
+    {
+      "id": "gsm8k-eval:1029:gsm8k-test-001029",
+      "exact_response": false,
+      "prefix_characters": 103,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 3099,
+      "megatron_tokens": 4096,
+      "target": "34"
+    },
+    {
+      "id": "gsm8k-eval:293:gsm8k-test-000293",
+      "exact_response": false,
+      "prefix_characters": 355,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2418,
+      "megatron_tokens": 1700,
+      "target": "83"
+    },
+    {
+      "id": "gsm8k-eval:449:gsm8k-test-000449",
+      "exact_response": false,
+      "prefix_characters": 679,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1048,
+      "megatron_tokens": 1136,
+      "target": "112"
+    },
+    {
+      "id": "gsm8k-eval:507:gsm8k-test-000507",
+      "exact_response": false,
+      "prefix_characters": 552,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 681,
+      "megatron_tokens": 1303,
+      "target": "2"
+    },
+    {
+      "id": "gsm8k-eval:1183:gsm8k-test-001183",
+      "exact_response": false,
+      "prefix_characters": 232,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "11"
+    },
+    {
+      "id": "gsm8k-eval:795:gsm8k-test-000795",
+      "exact_response": false,
+      "prefix_characters": 1184,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1003,
+      "megatron_tokens": 913,
+      "target": "20"
+    },
+    {
+      "id": "gsm8k-eval:278:gsm8k-test-000278",
+      "exact_response": false,
+      "prefix_characters": 495,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 908,
+      "megatron_tokens": 897,
+      "target": "40"
+    },
+    {
+      "id": "gsm8k-eval:452:gsm8k-test-000452",
+      "exact_response": false,
+      "prefix_characters": 975,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 623,
+      "megatron_tokens": 637,
+      "target": "50"
+    },
+    {
+      "id": "gsm8k-eval:518:gsm8k-test-000518",
+      "exact_response": false,
+      "prefix_characters": 138,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2533,
+      "megatron_tokens": 905,
+      "target": "32"
+    },
+    {
+      "id": "gsm8k-eval:34:gsm8k-test-000034",
+      "exact_response": false,
+      "prefix_characters": 774,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1062,
+      "megatron_tokens": 993,
+      "target": "23"
+    },
+    {
+      "id": "gsm8k-eval:406:gsm8k-test-000406",
+      "exact_response": false,
+      "prefix_characters": 334,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 2353,
+      "megatron_tokens": 4096,
+      "target": "200"
+    },
+    {
+      "id": "gsm8k-eval:1039:gsm8k-test-001039",
+      "exact_response": false,
+      "prefix_characters": 1614,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 871,
+      "target": "160"
+    },
+    {
+      "id": "gsm8k-eval:1016:gsm8k-test-001016",
+      "exact_response": false,
+      "prefix_characters": 1424,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "138"
+    },
+    {
+      "id": "gsm8k-eval:1082:gsm8k-test-001082",
+      "exact_response": false,
+      "prefix_characters": 1269,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 3598,
+      "megatron_tokens": 1907,
+      "target": "2"
+    },
+    {
+      "id": "gsm8k-eval:945:gsm8k-test-000945",
+      "exact_response": false,
+      "prefix_characters": 341,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1606,
+      "megatron_tokens": 1057,
+      "target": "17"
+    },
+    {
+      "id": "gsm8k-eval:191:gsm8k-test-000191",
+      "exact_response": false,
+      "prefix_characters": 1670,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 818,
+      "megatron_tokens": 1921,
+      "target": "5"
+    },
+    {
+      "id": "gsm8k-eval:932:gsm8k-test-000932",
+      "exact_response": false,
+      "prefix_characters": 1324,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 3164,
+      "target": "24"
+    },
+    {
+      "id": "gsm8k-eval:25:gsm8k-test-000025",
+      "exact_response": false,
+      "prefix_characters": 1437,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1863,
+      "megatron_tokens": 1788,
+      "target": "2"
+    },
+    {
+      "id": "gsm8k-eval:527:gsm8k-test-000527",
+      "exact_response": false,
+      "prefix_characters": 795,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 2118,
+      "target": "48"
+    },
+    {
+      "id": "gsm8k-eval:233:gsm8k-test-000233",
+      "exact_response": false,
+      "prefix_characters": 295,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 2706,
+      "target": "12"
+    },
+    {
+      "id": "gsm8k-eval:177:gsm8k-test-000177",
+      "exact_response": false,
+      "prefix_characters": 1671,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 829,
+      "megatron_tokens": 1151,
+      "target": "350"
+    },
+    {
+      "id": "gsm8k-eval:809:gsm8k-test-000809",
+      "exact_response": true,
+      "prefix_characters": 1050,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 317,
+      "megatron_tokens": 317,
+      "target": "50"
+    },
+    {
+      "id": "gsm8k-eval:1070:gsm8k-test-001070",
+      "exact_response": false,
+      "prefix_characters": 535,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "18"
+    },
+    {
+      "id": "gsm8k-eval:1162:gsm8k-test-001162",
+      "exact_response": true,
+      "prefix_characters": 1167,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 428,
+      "megatron_tokens": 428,
+      "target": "3"
+    },
+    {
+      "id": "gsm8k-eval:312:gsm8k-test-000312",
+      "exact_response": false,
+      "prefix_characters": 677,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 467,
+      "megatron_tokens": 467,
+      "target": "32"
+    },
+    {
+      "id": "gsm8k-eval:702:gsm8k-test-000702",
+      "exact_response": false,
+      "prefix_characters": 1473,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1633,
+      "megatron_tokens": 1626,
+      "target": "2800"
+    },
+    {
+      "id": "gsm8k-eval:1239:gsm8k-test-001239",
+      "exact_response": false,
+      "prefix_characters": 832,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1283,
+      "megatron_tokens": 4096,
+      "target": "50"
+    },
+    {
+      "id": "gsm8k-eval:499:gsm8k-test-000499",
+      "exact_response": false,
+      "prefix_characters": 219,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 2227,
+      "megatron_tokens": 4096,
+      "target": "10"
+    },
+    {
+      "id": "gsm8k-eval:537:gsm8k-test-000537",
+      "exact_response": false,
+      "prefix_characters": 1819,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1330,
+      "megatron_tokens": 2032,
+      "target": "188"
+    },
+    {
+      "id": "gsm8k-eval:771:gsm8k-test-000771",
+      "exact_response": false,
+      "prefix_characters": 1124,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 608,
+      "megatron_tokens": 603,
+      "target": "3"
+    },
+    {
+      "id": "gsm8k-eval:1229:gsm8k-test-001229",
+      "exact_response": false,
+      "prefix_characters": 462,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 942,
+      "megatron_tokens": 1787,
+      "target": "36"
+    },
+    {
+      "id": "gsm8k-eval:1317:gsm8k-test-001317",
+      "exact_response": false,
+      "prefix_characters": 573,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1426,
+      "megatron_tokens": 1383,
+      "target": "5"
+    },
+    {
+      "id": "gsm8k-eval:589:gsm8k-test-000589",
+      "exact_response": false,
+      "prefix_characters": 789,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2058,
+      "megatron_tokens": 1913,
+      "target": "15"
+    },
+    {
+      "id": "gsm8k-eval:9:gsm8k-test-000009",
+      "exact_response": false,
+      "prefix_characters": 961,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 803,
+      "megatron_tokens": 886,
+      "target": "460"
+    },
+    {
+      "id": "gsm8k-eval:607:gsm8k-test-000607",
+      "exact_response": false,
+      "prefix_characters": 767,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 2497,
+      "megatron_tokens": 1262,
+      "target": "10"
+    },
+    {
+      "id": "gsm8k-eval:1100:gsm8k-test-001100",
+      "exact_response": false,
+      "prefix_characters": 792,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1083,
+      "megatron_tokens": 893,
+      "target": "5"
+    },
+    {
+      "id": "gsm8k-eval:362:gsm8k-test-000362",
+      "exact_response": false,
+      "prefix_characters": 1093,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 989,
+      "megatron_tokens": 1321,
+      "target": "23"
+    },
+    {
+      "id": "gsm8k-eval:341:gsm8k-test-000341",
+      "exact_response": false,
+      "prefix_characters": 51,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 2140,
+      "megatron_tokens": 2475,
+      "target": "260"
+    },
+    {
+      "id": "gsm8k-eval:1049:gsm8k-test-001049",
+      "exact_response": true,
+      "prefix_characters": 1923,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 652,
+      "megatron_tokens": 652,
+      "target": "20"
+    },
+    {
+      "id": "gsm8k-eval:973:gsm8k-test-000973",
+      "exact_response": false,
+      "prefix_characters": 614,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2160,
+      "megatron_tokens": 1172,
+      "target": "79"
+    },
+    {
+      "id": "gsm8k-eval:390:gsm8k-test-000390",
+      "exact_response": false,
+      "prefix_characters": 263,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "12"
+    },
+    {
+      "id": "gsm8k-eval:664:gsm8k-test-000664",
+      "exact_response": false,
+      "prefix_characters": 313,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 1366,
+      "target": "32"
+    },
+    {
+      "id": "gsm8k-eval:714:gsm8k-test-000714",
+      "exact_response": false,
+      "prefix_characters": 587,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 896,
+      "megatron_tokens": 4096,
+      "target": "10"
+    },
+    {
+      "id": "gsm8k-eval:869:gsm8k-test-000869",
+      "exact_response": false,
+      "prefix_characters": 400,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 781,
+      "megatron_tokens": 1563,
+      "target": "500"
+    },
+    {
+      "id": "gsm8k-eval:571:gsm8k-test-000571",
+      "exact_response": false,
+      "prefix_characters": 1545,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 622,
+      "megatron_tokens": 737,
+      "target": "308"
+    },
+    {
+      "id": "gsm8k-eval:159:gsm8k-test-000159",
+      "exact_response": false,
+      "prefix_characters": 1193,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 857,
+      "megatron_tokens": 979,
+      "target": "15"
+    },
+    {
+      "id": "gsm8k-eval:1118:gsm8k-test-001118",
+      "exact_response": false,
+      "prefix_characters": 1328,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1172,
+      "megatron_tokens": 1745,
+      "target": "5"
+    },
+    {
+      "id": "gsm8k-eval:750:gsm8k-test-000750",
+      "exact_response": false,
+      "prefix_characters": 1666,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2220,
+      "megatron_tokens": 2694,
+      "target": "4000"
+    },
+    {
+      "id": "gsm8k-eval:886:gsm8k-test-000886",
+      "exact_response": false,
+      "prefix_characters": 1497,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1958,
+      "megatron_tokens": 4096,
+      "target": "20"
+    },
+    {
+      "id": "gsm8k-eval:919:gsm8k-test-000919",
+      "exact_response": false,
+      "prefix_characters": 1283,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1132,
+      "megatron_tokens": 1502,
+      "target": "90"
+    },
+    {
+      "id": "gsm8k-eval:1196:gsm8k-test-001196",
+      "exact_response": false,
+      "prefix_characters": 301,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 3282,
+      "target": "75"
+    },
+    {
+      "id": "gsm8k-eval:385:gsm8k-test-000385",
+      "exact_response": false,
+      "prefix_characters": 445,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1918,
+      "megatron_tokens": 1441,
+      "target": "16"
+    },
+    {
+      "id": "gsm8k-eval:308:gsm8k-test-000308",
+      "exact_response": false,
+      "prefix_characters": 528,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 3676,
+      "megatron_tokens": 4096,
+      "target": "6"
+    },
+    {
+      "id": "gsm8k-eval:292:gsm8k-test-000292",
+      "exact_response": false,
+      "prefix_characters": 350,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1671,
+      "megatron_tokens": 1805,
+      "target": "75"
+    },
+    {
+      "id": "gsm8k-eval:759:gsm8k-test-000759",
+      "exact_response": false,
+      "prefix_characters": 835,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1235,
+      "megatron_tokens": 1007,
+      "target": "60000"
+    },
+    {
+      "id": "gsm8k-eval:467:gsm8k-test-000467",
+      "exact_response": false,
+      "prefix_characters": 1085,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1347,
+      "megatron_tokens": 1506,
+      "target": "1200"
+    },
+    {
+      "id": "gsm8k-eval:1245:gsm8k-test-001245",
+      "exact_response": false,
+      "prefix_characters": 1174,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 746,
+      "megatron_tokens": 740,
+      "target": "96"
+    },
+    {
+      "id": "gsm8k-eval:536:gsm8k-test-000536",
+      "exact_response": true,
+      "prefix_characters": 1396,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 468,
+      "megatron_tokens": 468,
+      "target": "8"
+    },
+    {
+      "id": "gsm8k-eval:826:gsm8k-test-000826",
+      "exact_response": false,
+      "prefix_characters": 492,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1224,
+      "megatron_tokens": 661,
+      "target": "27"
+    },
+    {
+      "id": "gsm8k-eval:915:gsm8k-test-000915",
+      "exact_response": false,
+      "prefix_characters": 1122,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 643,
+      "megatron_tokens": 648,
+      "target": "23"
+    },
+    {
+      "id": "gsm8k-eval:77:gsm8k-test-000077",
+      "exact_response": false,
+      "prefix_characters": 881,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 994,
+      "megatron_tokens": 767,
+      "target": "100"
+    },
+    {
+      "id": "gsm8k-eval:1112:gsm8k-test-001112",
+      "exact_response": false,
+      "prefix_characters": 132,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1762,
+      "megatron_tokens": 1800,
+      "target": "5"
+    },
+    {
+      "id": "gsm8k-eval:700:gsm8k-test-000700",
+      "exact_response": false,
+      "prefix_characters": 36,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 2319,
+      "megatron_tokens": 2760,
+      "target": "135"
+    },
+    {
+      "id": "gsm8k-eval:590:gsm8k-test-000590",
+      "exact_response": false,
+      "prefix_characters": 201,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2874,
+      "megatron_tokens": 2918,
+      "target": "319"
+    },
+    {
+      "id": "gsm8k-eval:1080:gsm8k-test-001080",
+      "exact_response": false,
+      "prefix_characters": 2349,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1402,
+      "megatron_tokens": 1313,
+      "target": "72000"
+    },
+    {
+      "id": "gsm8k-eval:785:gsm8k-test-000785",
+      "exact_response": false,
+      "prefix_characters": 349,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 713,
+      "megatron_tokens": 1482,
+      "target": "155"
+    },
+    {
+      "id": "gsm8k-eval:346:gsm8k-test-000346",
+      "exact_response": false,
+      "prefix_characters": 536,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1490,
+      "megatron_tokens": 727,
+      "target": "9"
+    },
+    {
+      "id": "gsm8k-eval:325:gsm8k-test-000325",
+      "exact_response": false,
+      "prefix_characters": 706,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2903,
+      "megatron_tokens": 1492,
+      "target": "224000"
+    },
+    {
+      "id": "gsm8k-eval:494:gsm8k-test-000494",
+      "exact_response": false,
+      "prefix_characters": 1262,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "21"
+    },
+    {
+      "id": "gsm8k-eval:1168:gsm8k-test-001168",
+      "exact_response": false,
+      "prefix_characters": 1006,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2744,
+      "megatron_tokens": 1178,
+      "target": "20"
+    },
+    {
+      "id": "gsm8k-eval:274:gsm8k-test-000274",
+      "exact_response": false,
+      "prefix_characters": 1058,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 916,
+      "megatron_tokens": 1630,
+      "target": "3200"
+    },
+    {
+      "id": "gsm8k-eval:605:gsm8k-test-000605",
+      "exact_response": false,
+      "prefix_characters": 285,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1515,
+      "megatron_tokens": 656,
+      "target": "42"
+    },
+    {
+      "id": "gsm8k-eval:956:gsm8k-test-000956",
+      "exact_response": false,
+      "prefix_characters": 985,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 479,
+      "megatron_tokens": 625,
+      "target": "1"
+    },
+    {
+      "id": "gsm8k-eval:62:gsm8k-test-000062",
+      "exact_response": false,
+      "prefix_characters": 668,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 2509,
+      "megatron_tokens": 2263,
+      "target": "25000"
+    },
+    {
+      "id": "gsm8k-eval:265:gsm8k-test-000265",
+      "exact_response": false,
+      "prefix_characters": 589,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1143,
+      "megatron_tokens": 1210,
+      "target": "9500"
+    },
+    {
+      "id": "gsm8k-eval:545:gsm8k-test-000545",
+      "exact_response": false,
+      "prefix_characters": 999,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 856,
+      "megatron_tokens": 715,
+      "target": "30"
+    },
+    {
+      "id": "gsm8k-eval:211:gsm8k-test-000211",
+      "exact_response": false,
+      "prefix_characters": 542,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1621,
+      "megatron_tokens": 1656,
+      "target": "4"
+    },
+    {
+      "id": "gsm8k-eval:1156:gsm8k-test-001156",
+      "exact_response": false,
+      "prefix_characters": 266,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 661,
+      "megatron_tokens": 746,
+      "target": "120"
+    },
+    {
+      "id": "gsm8k-eval:332:gsm8k-test-000332",
+      "exact_response": false,
+      "prefix_characters": 918,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 849,
+      "megatron_tokens": 739,
+      "target": "44"
+    },
+    {
+      "id": "gsm8k-eval:949:gsm8k-test-000949",
+      "exact_response": false,
+      "prefix_characters": 692,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 693,
+      "megatron_tokens": 918,
+      "target": "42"
+    },
+    {
+      "id": "gsm8k-eval:209:gsm8k-test-000209",
+      "exact_response": false,
+      "prefix_characters": 1074,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 3674,
+      "target": "145"
+    },
+    {
+      "id": "gsm8k-eval:1104:gsm8k-test-001104",
+      "exact_response": false,
+      "prefix_characters": 664,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2433,
+      "megatron_tokens": 2039,
+      "target": "24"
+    },
+    {
+      "id": "gsm8k-eval:288:gsm8k-test-000288",
+      "exact_response": false,
+      "prefix_characters": 870,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 3714,
+      "megatron_tokens": 2155,
+      "target": "3"
+    },
+    {
+      "id": "gsm8k-eval:1304:gsm8k-test-001304",
+      "exact_response": false,
+      "prefix_characters": 930,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 902,
+      "megatron_tokens": 777,
+      "target": "1000"
+    },
+    {
+      "id": "gsm8k-eval:731:gsm8k-test-000731",
+      "exact_response": false,
+      "prefix_characters": 977,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1179,
+      "megatron_tokens": 1281,
+      "target": "1"
+    },
+    {
+      "id": "gsm8k-eval:647:gsm8k-test-000647",
+      "exact_response": false,
+      "prefix_characters": 874,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 816,
+      "megatron_tokens": 1433,
+      "target": "10"
+    },
+    {
+      "id": "gsm8k-eval:133:gsm8k-test-000133",
+      "exact_response": false,
+      "prefix_characters": 932,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 579,
+      "megatron_tokens": 1068,
+      "target": "13"
+    },
+    {
+      "id": "gsm8k-eval:895:gsm8k-test-000895",
+      "exact_response": true,
+      "prefix_characters": 1150,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 391,
+      "megatron_tokens": 391,
+      "target": "74"
+    },
+    {
+      "id": "gsm8k-eval:562:gsm8k-test-000562",
+      "exact_response": false,
+      "prefix_characters": 1284,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "82"
+    },
+    {
+      "id": "gsm8k-eval:710:gsm8k-test-000710",
+      "exact_response": false,
+      "prefix_characters": 227,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1770,
+      "megatron_tokens": 1138,
+      "target": "45"
+    },
+    {
+      "id": "gsm8k-eval:610:gsm8k-test-000610",
+      "exact_response": false,
+      "prefix_characters": 887,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2281,
+      "megatron_tokens": 2483,
+      "target": "65960"
+    },
+    {
+      "id": "gsm8k-eval:253:gsm8k-test-000253",
+      "exact_response": false,
+      "prefix_characters": 931,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 454,
+      "megatron_tokens": 430,
+      "target": "18"
+    },
+    {
+      "id": "gsm8k-eval:198:gsm8k-test-000198",
+      "exact_response": false,
+      "prefix_characters": 1124,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1204,
+      "megatron_tokens": 793,
+      "target": "320"
+    },
+    {
+      "id": "gsm8k-eval:246:gsm8k-test-000246",
+      "exact_response": false,
+      "prefix_characters": 401,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 855,
+      "megatron_tokens": 842,
+      "target": "27000"
+    },
+    {
+      "id": "gsm8k-eval:381:gsm8k-test-000381",
+      "exact_response": false,
+      "prefix_characters": 774,
+      "core_correct": 0.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "67"
+    },
+    {
+      "id": "gsm8k-eval:1277:gsm8k-test-001277",
+      "exact_response": false,
+      "prefix_characters": 687,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 572,
+      "megatron_tokens": 583,
+      "target": "48"
+    },
+    {
+      "id": "gsm8k-eval:711:gsm8k-test-000711",
+      "exact_response": false,
+      "prefix_characters": 859,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 4096,
+      "megatron_tokens": 4096,
+      "target": "6"
+    },
+    {
+      "id": "gsm8k-eval:781:gsm8k-test-000781",
+      "exact_response": false,
+      "prefix_characters": 1184,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 628,
+      "megatron_tokens": 761,
+      "target": "17"
+    },
+    {
+      "id": "gsm8k-eval:260:gsm8k-test-000260",
+      "exact_response": false,
+      "prefix_characters": 1172,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1140,
+      "megatron_tokens": 1011,
+      "target": "11"
+    },
+    {
+      "id": "gsm8k-eval:805:gsm8k-test-000805",
+      "exact_response": false,
+      "prefix_characters": 506,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1264,
+      "megatron_tokens": 706,
+      "target": "1170"
+    },
+    {
+      "id": "gsm8k-eval:540:gsm8k-test-000540",
+      "exact_response": false,
+      "prefix_characters": 857,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 1737,
+      "megatron_tokens": 4096,
+      "target": "39"
+    },
+    {
+      "id": "gsm8k-eval:609:gsm8k-test-000609",
+      "exact_response": false,
+      "prefix_characters": 1031,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 927,
+      "megatron_tokens": 881,
+      "target": "7"
+    },
+    {
+      "id": "gsm8k-eval:358:gsm8k-test-000358",
+      "exact_response": false,
+      "prefix_characters": 1172,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2198,
+      "megatron_tokens": 1052,
+      "target": "20"
+    },
+    {
+      "id": "gsm8k-eval:561:gsm8k-test-000561",
+      "exact_response": true,
+      "prefix_characters": 1879,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 590,
+      "megatron_tokens": 590,
+      "target": "180"
+    },
+    {
+      "id": "gsm8k-eval:3:gsm8k-test-000003",
+      "exact_response": false,
+      "prefix_characters": 895,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 808,
+      "megatron_tokens": 589,
+      "target": "540"
+    },
+    {
+      "id": "gsm8k-eval:241:gsm8k-test-000241",
+      "exact_response": false,
+      "prefix_characters": 282,
+      "core_correct": 0.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 3645,
+      "megatron_tokens": 2633,
+      "target": "6"
+    },
+    {
+      "id": "gsm8k-eval:600:gsm8k-test-000600",
+      "exact_response": false,
+      "prefix_characters": 288,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 1077,
+      "megatron_tokens": 1075,
+      "target": "10"
+    },
+    {
+      "id": "gsm8k-eval:1137:gsm8k-test-001137",
+      "exact_response": false,
+      "prefix_characters": 482,
+      "core_correct": 1.0,
+      "megatron_correct": 1.0,
+      "core_tokens": 2224,
+      "megatron_tokens": 2065,
+      "target": "68"
+    },
+    {
+      "id": "gsm8k-eval:707:gsm8k-test-000707",
+      "exact_response": false,
+      "prefix_characters": 558,
+      "core_correct": 1.0,
+      "megatron_correct": 0.0,
+      "core_tokens": 2214,
+      "megatron_tokens": 4096,
+      "target": "8"
+    }
+  ]
+}

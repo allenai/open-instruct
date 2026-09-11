@@ -1,0 +1,1162 @@
+{
+  "prompt_tokens_identical_all": true,
+  "identical_generated_token_sequences": 7,
+  "median_common_generated_prefix_tokens": 232.5,
+  "shared_prefix_tokens_compared": 33137,
+  "shared_prefix_logprob_max_abs": 0.30377197265625,
+  "shared_prefix_logprob_mean_abs": 0.004326823129210952,
+  "rows": [
+    {
+      "id": "gsm8k-eval:667:gsm8k-test-000667",
+      "common_generated_token_prefix": 235,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1422797441482544,
+      "shared_prefix_logprob_mean_abs": 0.012631318028188423,
+      "core_next_token": 320,
+      "megatron_next_token": 220
+    },
+    {
+      "id": "gsm8k-eval:1005:gsm8k-test-001005",
+      "common_generated_token_prefix": 695,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09574925899505615,
+      "shared_prefix_logprob_mean_abs": 0.0025268746725310627,
+      "core_next_token": 31094,
+      "megatron_next_token": 682
+    },
+    {
+      "id": "gsm8k-eval:762:gsm8k-test-000762",
+      "common_generated_token_prefix": 477,
+      "identical_response_tokens": true,
+      "shared_prefix_logprob_max_abs": 0.0,
+      "shared_prefix_logprob_mean_abs": 0.0,
+      "core_next_token": null,
+      "megatron_next_token": null
+    },
+    {
+      "id": "gsm8k-eval:491:gsm8k-test-000491",
+      "common_generated_token_prefix": 60,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.25609174370765686,
+      "shared_prefix_logprob_mean_abs": 0.015269487889797043,
+      "core_next_token": 1855,
+      "megatron_next_token": 568
+    },
+    {
+      "id": "gsm8k-eval:827:gsm8k-test-000827",
+      "common_generated_token_prefix": 32,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.053401291370391846,
+      "shared_prefix_logprob_mean_abs": 0.004869092546186948,
+      "core_next_token": 1364,
+      "megatron_next_token": 3966
+    },
+    {
+      "id": "gsm8k-eval:463:gsm8k-test-000463",
+      "common_generated_token_prefix": 230,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.17955905199050903,
+      "shared_prefix_logprob_mean_abs": 0.010108687099006166,
+      "core_next_token": 2728,
+      "megatron_next_token": 400
+    },
+    {
+      "id": "gsm8k-eval:184:gsm8k-test-000184",
+      "common_generated_token_prefix": 208,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07500466704368591,
+      "shared_prefix_logprob_mean_abs": 0.004609878097914825,
+      "core_next_token": 2533,
+      "megatron_next_token": 433
+    },
+    {
+      "id": "gsm8k-eval:1223:gsm8k-test-001223",
+      "common_generated_token_prefix": 262,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11936938762664795,
+      "shared_prefix_logprob_mean_abs": 0.0063821527452935225,
+      "core_next_token": 279,
+      "megatron_next_token": 1884
+    },
+    {
+      "id": "gsm8k-eval:878:gsm8k-test-000878",
+      "common_generated_token_prefix": 170,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11521661281585693,
+      "shared_prefix_logprob_mean_abs": 0.009319499534448742,
+      "core_next_token": 1403,
+      "megatron_next_token": 13305
+    },
+    {
+      "id": "gsm8k-eval:872:gsm8k-test-000872",
+      "common_generated_token_prefix": 370,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08191198110580444,
+      "shared_prefix_logprob_mean_abs": 0.002466756366088457,
+      "core_next_token": 279,
+      "megatron_next_token": 42338
+    },
+    {
+      "id": "gsm8k-eval:1318:gsm8k-test-001318",
+      "common_generated_token_prefix": 357,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1084977388381958,
+      "shared_prefix_logprob_mean_abs": 0.0016355156428929222,
+      "core_next_token": 27410,
+      "megatron_next_token": 832
+    },
+    {
+      "id": "gsm8k-eval:547:gsm8k-test-000547",
+      "common_generated_token_prefix": 467,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.12361568212509155,
+      "shared_prefix_logprob_mean_abs": 0.004398764616016277,
+      "core_next_token": 1781,
+      "megatron_next_token": 1518
+    },
+    {
+      "id": "gsm8k-eval:708:gsm8k-test-000708",
+      "common_generated_token_prefix": 531,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.18793940544128418,
+      "shared_prefix_logprob_mean_abs": 0.0073734128567381485,
+      "core_next_token": 3160,
+      "megatron_next_token": 11
+    },
+    {
+      "id": "gsm8k-eval:975:gsm8k-test-000975",
+      "common_generated_token_prefix": 102,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07144129276275635,
+      "shared_prefix_logprob_mean_abs": 0.003371673405305117,
+      "core_next_token": 2011,
+      "megatron_next_token": 706
+    },
+    {
+      "id": "gsm8k-eval:92:gsm8k-test-000092",
+      "common_generated_token_prefix": 51,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.04010254144668579,
+      "shared_prefix_logprob_mean_abs": 0.0012968473201551971,
+      "core_next_token": 1243,
+      "megatron_next_token": 323
+    },
+    {
+      "id": "gsm8k-eval:903:gsm8k-test-000903",
+      "common_generated_token_prefix": 92,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08416101336479187,
+      "shared_prefix_logprob_mean_abs": 0.007158852901699467,
+      "core_next_token": 220,
+      "megatron_next_token": 279
+    },
+    {
+      "id": "gsm8k-eval:998:gsm8k-test-000998",
+      "common_generated_token_prefix": 202,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11315369606018066,
+      "shared_prefix_logprob_mean_abs": 0.005432490277220639,
+      "core_next_token": 791,
+      "megatron_next_token": 40
+    },
+    {
+      "id": "gsm8k-eval:1071:gsm8k-test-001071",
+      "common_generated_token_prefix": 105,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08812445402145386,
+      "shared_prefix_logprob_mean_abs": 0.0025833377587592362,
+      "core_next_token": 323,
+      "megatron_next_token": 2085
+    },
+    {
+      "id": "gsm8k-eval:408:gsm8k-test-000408",
+      "common_generated_token_prefix": 32,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.05126240849494934,
+      "shared_prefix_logprob_mean_abs": 0.004958150347988521,
+      "core_next_token": 279,
+      "megatron_next_token": 704
+    },
+    {
+      "id": "gsm8k-eval:1029:gsm8k-test-001029",
+      "common_generated_token_prefix": 31,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.021826446056365967,
+      "shared_prefix_logprob_mean_abs": 0.0029072504433814528,
+      "core_next_token": 5112,
+      "megatron_next_token": 5629
+    },
+    {
+      "id": "gsm8k-eval:293:gsm8k-test-000293",
+      "common_generated_token_prefix": 103,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.0332677960395813,
+      "shared_prefix_logprob_mean_abs": 0.0013956008729772433,
+      "core_next_token": 2100,
+      "megatron_next_token": 11519
+    },
+    {
+      "id": "gsm8k-eval:449:gsm8k-test-000449",
+      "common_generated_token_prefix": 188,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08346009254455566,
+      "shared_prefix_logprob_mean_abs": 0.002334469552105223,
+      "core_next_token": 8223,
+      "megatron_next_token": 220
+    },
+    {
+      "id": "gsm8k-eval:507:gsm8k-test-000507",
+      "common_generated_token_prefix": 174,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.05280953645706177,
+      "shared_prefix_logprob_mean_abs": 0.0016272512653844828,
+      "core_next_token": 1271,
+      "megatron_next_token": 791
+    },
+    {
+      "id": "gsm8k-eval:1183:gsm8k-test-001183",
+      "common_generated_token_prefix": 62,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.02680516242980957,
+      "shared_prefix_logprob_mean_abs": 0.000796009091690423,
+      "core_next_token": 3686,
+      "megatron_next_token": 13
+    },
+    {
+      "id": "gsm8k-eval:795:gsm8k-test-000795",
+      "common_generated_token_prefix": 370,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09413003921508789,
+      "shared_prefix_logprob_mean_abs": 0.0037099719796318625,
+      "core_next_token": 279,
+      "megatron_next_token": 922
+    },
+    {
+      "id": "gsm8k-eval:278:gsm8k-test-000278",
+      "common_generated_token_prefix": 156,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.049218177795410156,
+      "shared_prefix_logprob_mean_abs": 0.000904721212085254,
+      "core_next_token": 220,
+      "megatron_next_token": 356
+    },
+    {
+      "id": "gsm8k-eval:452:gsm8k-test-000452",
+      "common_generated_token_prefix": 287,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.19682687520980835,
+      "shared_prefix_logprob_mean_abs": 0.009727021123460505,
+      "core_next_token": 1051,
+      "megatron_next_token": 574
+    },
+    {
+      "id": "gsm8k-eval:518:gsm8k-test-000518",
+      "common_generated_token_prefix": 39,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09848511219024658,
+      "shared_prefix_logprob_mean_abs": 0.007232700851977241,
+      "core_next_token": 25,
+      "megatron_next_token": 11
+    },
+    {
+      "id": "gsm8k-eval:34:gsm8k-test-000034",
+      "common_generated_token_prefix": 229,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.15681740641593933,
+      "shared_prefix_logprob_mean_abs": 0.0043243718756858516,
+      "core_next_token": 330,
+      "megatron_next_token": 358
+    },
+    {
+      "id": "gsm8k-eval:406:gsm8k-test-000406",
+      "common_generated_token_prefix": 102,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.053766727447509766,
+      "shared_prefix_logprob_mean_abs": 0.003635871440997553,
+      "core_next_token": 14068,
+      "megatron_next_token": 279
+    },
+    {
+      "id": "gsm8k-eval:1039:gsm8k-test-001039",
+      "common_generated_token_prefix": 465,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.2558344006538391,
+      "shared_prefix_logprob_mean_abs": 0.006554445216115514,
+      "core_next_token": 6227,
+      "megatron_next_token": 358
+    },
+    {
+      "id": "gsm8k-eval:1016:gsm8k-test-001016",
+      "common_generated_token_prefix": 627,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.22834843397140503,
+      "shared_prefix_logprob_mean_abs": 0.0030941497892338714,
+      "core_next_token": 10895,
+      "megatron_next_token": 868
+    },
+    {
+      "id": "gsm8k-eval:1082:gsm8k-test-001082",
+      "common_generated_token_prefix": 334,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1552446484565735,
+      "shared_prefix_logprob_mean_abs": 0.005898519061461257,
+      "core_next_token": 3575,
+      "megatron_next_token": 892
+    },
+    {
+      "id": "gsm8k-eval:945:gsm8k-test-000945",
+      "common_generated_token_prefix": 113,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07981246709823608,
+      "shared_prefix_logprob_mean_abs": 0.0018424520763254105,
+      "core_next_token": 12487,
+      "megatron_next_token": 6153
+    },
+    {
+      "id": "gsm8k-eval:191:gsm8k-test-000191",
+      "common_generated_token_prefix": 559,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09124648571014404,
+      "shared_prefix_logprob_mean_abs": 0.0027448879910099452,
+      "core_next_token": 22559,
+      "megatron_next_token": 198
+    },
+    {
+      "id": "gsm8k-eval:932:gsm8k-test-000932",
+      "common_generated_token_prefix": 370,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.14492428302764893,
+      "shared_prefix_logprob_mean_abs": 0.004712161290592883,
+      "core_next_token": 872,
+      "megatron_next_token": 220
+    },
+    {
+      "id": "gsm8k-eval:25:gsm8k-test-000025",
+      "common_generated_token_prefix": 526,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.12553507089614868,
+      "shared_prefix_logprob_mean_abs": 0.0027203261733228234,
+      "core_next_token": 11,
+      "megatron_next_token": 198
+    },
+    {
+      "id": "gsm8k-eval:527:gsm8k-test-000527",
+      "common_generated_token_prefix": 216,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.034554243087768555,
+      "shared_prefix_logprob_mean_abs": 0.0004493104800581528,
+      "core_next_token": 279,
+      "megatron_next_token": 4478
+    },
+    {
+      "id": "gsm8k-eval:233:gsm8k-test-000233",
+      "common_generated_token_prefix": 77,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.06839394569396973,
+      "shared_prefix_logprob_mean_abs": 0.0029023299855482462,
+      "core_next_token": 18255,
+      "megatron_next_token": 1694
+    },
+    {
+      "id": "gsm8k-eval:177:gsm8k-test-000177",
+      "common_generated_token_prefix": 572,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.13597619533538818,
+      "shared_prefix_logprob_mean_abs": 0.00406816802129685,
+      "core_next_token": 220,
+      "megatron_next_token": 304
+    },
+    {
+      "id": "gsm8k-eval:809:gsm8k-test-000809",
+      "common_generated_token_prefix": 317,
+      "identical_response_tokens": true,
+      "shared_prefix_logprob_max_abs": 0.18894517421722412,
+      "shared_prefix_logprob_mean_abs": 0.0057579032450078265,
+      "core_next_token": null,
+      "megatron_next_token": null
+    },
+    {
+      "id": "gsm8k-eval:1070:gsm8k-test-001070",
+      "common_generated_token_prefix": 140,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08758214116096497,
+      "shared_prefix_logprob_mean_abs": 0.002453017969024326,
+      "core_next_token": 31123,
+      "megatron_next_token": 323
+    },
+    {
+      "id": "gsm8k-eval:1162:gsm8k-test-001162",
+      "common_generated_token_prefix": 428,
+      "identical_response_tokens": true,
+      "shared_prefix_logprob_max_abs": 0.10781842470169067,
+      "shared_prefix_logprob_mean_abs": 0.0035822920981551597,
+      "core_next_token": null,
+      "megatron_next_token": null
+    },
+    {
+      "id": "gsm8k-eval:312:gsm8k-test-000312",
+      "common_generated_token_prefix": 221,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.058462560176849365,
+      "shared_prefix_logprob_mean_abs": 0.0009835514592089472,
+      "core_next_token": 482,
+      "megatron_next_token": 28382
+    },
+    {
+      "id": "gsm8k-eval:702:gsm8k-test-000702",
+      "common_generated_token_prefix": 587,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.2032313346862793,
+      "shared_prefix_logprob_mean_abs": 0.005472243097740797,
+      "core_next_token": 1550,
+      "megatron_next_token": 2751
+    },
+    {
+      "id": "gsm8k-eval:1239:gsm8k-test-001239",
+      "common_generated_token_prefix": 236,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.023477643728256226,
+      "shared_prefix_logprob_mean_abs": 0.0006982111419262565,
+      "core_next_token": 2030,
+      "megatron_next_token": 2100
+    },
+    {
+      "id": "gsm8k-eval:499:gsm8k-test-000499",
+      "common_generated_token_prefix": 49,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09349474310874939,
+      "shared_prefix_logprob_mean_abs": 0.009424864137497711,
+      "core_next_token": 3691,
+      "megatron_next_token": 5764
+    },
+    {
+      "id": "gsm8k-eval:537:gsm8k-test-000537",
+      "common_generated_token_prefix": 683,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1212073564529419,
+      "shared_prefix_logprob_mean_abs": 0.006351571143817781,
+      "core_next_token": 374,
+      "megatron_next_token": 2795
+    },
+    {
+      "id": "gsm8k-eval:771:gsm8k-test-000771",
+      "common_generated_token_prefix": 355,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07256299257278442,
+      "shared_prefix_logprob_mean_abs": 0.0006456030938992831,
+      "core_next_token": 3830,
+      "megatron_next_token": 3645
+    },
+    {
+      "id": "gsm8k-eval:1229:gsm8k-test-001229",
+      "common_generated_token_prefix": 124,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.027389347553253174,
+      "shared_prefix_logprob_mean_abs": 0.0004392649626102103,
+      "core_next_token": 15,
+      "megatron_next_token": 1490
+    },
+    {
+      "id": "gsm8k-eval:1317:gsm8k-test-001317",
+      "common_generated_token_prefix": 178,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.008750170469284058,
+      "shared_prefix_logprob_mean_abs": 0.00017147946364863008,
+      "core_next_token": 7184,
+      "megatron_next_token": 40
+    },
+    {
+      "id": "gsm8k-eval:589:gsm8k-test-000589",
+      "common_generated_token_prefix": 213,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09566175937652588,
+      "shared_prefix_logprob_mean_abs": 0.003238927124591139,
+      "core_next_token": 369,
+      "megatron_next_token": 2860
+    },
+    {
+      "id": "gsm8k-eval:9:gsm8k-test-000009",
+      "common_generated_token_prefix": 289,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1373671293258667,
+      "shared_prefix_logprob_mean_abs": 0.008669977482587365,
+      "core_next_token": 1274,
+      "megatron_next_token": 39599
+    },
+    {
+      "id": "gsm8k-eval:607:gsm8k-test-000607",
+      "common_generated_token_prefix": 230,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11281567811965942,
+      "shared_prefix_logprob_mean_abs": 0.007795729237600228,
+      "core_next_token": 1396,
+      "megatron_next_token": 43875
+    },
+    {
+      "id": "gsm8k-eval:1100:gsm8k-test-001100",
+      "common_generated_token_prefix": 253,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1663687825202942,
+      "shared_prefix_logprob_mean_abs": 0.00788779440360644,
+      "core_next_token": 17,
+      "megatron_next_token": 6153
+    },
+    {
+      "id": "gsm8k-eval:362:gsm8k-test-000362",
+      "common_generated_token_prefix": 345,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1119534969329834,
+      "shared_prefix_logprob_mean_abs": 0.005747155080175419,
+      "core_next_token": 16997,
+      "megatron_next_token": 617
+    },
+    {
+      "id": "gsm8k-eval:341:gsm8k-test-000341",
+      "common_generated_token_prefix": 14,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.016169220209121704,
+      "shared_prefix_logprob_mean_abs": 0.002771286586071905,
+      "core_next_token": 6914,
+      "megatron_next_token": 5629
+    },
+    {
+      "id": "gsm8k-eval:1049:gsm8k-test-001049",
+      "common_generated_token_prefix": 652,
+      "identical_response_tokens": true,
+      "shared_prefix_logprob_max_abs": 0.1955397129058838,
+      "shared_prefix_logprob_mean_abs": 0.008058521257454892,
+      "core_next_token": null,
+      "megatron_next_token": null
+    },
+    {
+      "id": "gsm8k-eval:973:gsm8k-test-000973",
+      "common_generated_token_prefix": 201,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.06840771436691284,
+      "shared_prefix_logprob_mean_abs": 0.004823851120947248,
+      "core_next_token": 13,
+      "megatron_next_token": 6089
+    },
+    {
+      "id": "gsm8k-eval:390:gsm8k-test-000390",
+      "common_generated_token_prefix": 87,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.136590838432312,
+      "shared_prefix_logprob_mean_abs": 0.006917739376264251,
+      "core_next_token": 5829,
+      "megatron_next_token": 7612
+    },
+    {
+      "id": "gsm8k-eval:664:gsm8k-test-000664",
+      "common_generated_token_prefix": 78,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07525694370269775,
+      "shared_prefix_logprob_mean_abs": 0.006640576465694418,
+      "core_next_token": 3842,
+      "megatron_next_token": 568
+    },
+    {
+      "id": "gsm8k-eval:714:gsm8k-test-000714",
+      "common_generated_token_prefix": 160,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.05919787287712097,
+      "shared_prefix_logprob_mean_abs": 0.004112190239499114,
+      "core_next_token": 13061,
+      "megatron_next_token": 8
+    },
+    {
+      "id": "gsm8k-eval:869:gsm8k-test-000869",
+      "common_generated_token_prefix": 115,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.038395702838897705,
+      "shared_prefix_logprob_mean_abs": 0.0003811016282744949,
+      "core_next_token": 2100,
+      "megatron_next_token": 3011
+    },
+    {
+      "id": "gsm8k-eval:571:gsm8k-test-000571",
+      "common_generated_token_prefix": 478,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.14282876253128052,
+      "shared_prefix_logprob_mean_abs": 0.005246414830227181,
+      "core_next_token": 3350,
+      "megatron_next_token": 7838
+    },
+    {
+      "id": "gsm8k-eval:159:gsm8k-test-000159",
+      "common_generated_token_prefix": 331,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11093497276306152,
+      "shared_prefix_logprob_mean_abs": 0.0032726393744768843,
+      "core_next_token": 11,
+      "megatron_next_token": 26
+    },
+    {
+      "id": "gsm8k-eval:1118:gsm8k-test-001118",
+      "common_generated_token_prefix": 435,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.12167656421661377,
+      "shared_prefix_logprob_mean_abs": 0.0014705711140233961,
+      "core_next_token": 369,
+      "megatron_next_token": 25
+    },
+    {
+      "id": "gsm8k-eval:750:gsm8k-test-000750",
+      "common_generated_token_prefix": 499,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.10641509294509888,
+      "shared_prefix_logprob_mean_abs": 0.0033457929377704375,
+      "core_next_token": 198,
+      "megatron_next_token": 9220
+    },
+    {
+      "id": "gsm8k-eval:886:gsm8k-test-000886",
+      "common_generated_token_prefix": 381,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.05256560444831848,
+      "shared_prefix_logprob_mean_abs": 0.0018116442626677329,
+      "core_next_token": 31993,
+      "megatron_next_token": 6857
+    },
+    {
+      "id": "gsm8k-eval:919:gsm8k-test-000919",
+      "common_generated_token_prefix": 405,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09421873092651367,
+      "shared_prefix_logprob_mean_abs": 0.004833451247774109,
+      "core_next_token": 1527,
+      "megatron_next_token": 5269
+    },
+    {
+      "id": "gsm8k-eval:1196:gsm8k-test-001196",
+      "common_generated_token_prefix": 79,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.030274927616119385,
+      "shared_prefix_logprob_mean_abs": 0.0024729865426131336,
+      "core_next_token": 7782,
+      "megatron_next_token": 2317
+    },
+    {
+      "id": "gsm8k-eval:385:gsm8k-test-000385",
+      "common_generated_token_prefix": 125,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.023891806602478027,
+      "shared_prefix_logprob_mean_abs": 0.0005531642216374166,
+      "core_next_token": 2804,
+      "megatron_next_token": 1304
+    },
+    {
+      "id": "gsm8k-eval:308:gsm8k-test-000308",
+      "common_generated_token_prefix": 161,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.06558799743652344,
+      "shared_prefix_logprob_mean_abs": 0.004599370407106209,
+      "core_next_token": 1032,
+      "megatron_next_token": 806
+    },
+    {
+      "id": "gsm8k-eval:292:gsm8k-test-000292",
+      "common_generated_token_prefix": 104,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.024838566780090332,
+      "shared_prefix_logprob_mean_abs": 0.0011859934318356235,
+      "core_next_token": 990,
+      "megatron_next_token": 892
+    },
+    {
+      "id": "gsm8k-eval:759:gsm8k-test-000759",
+      "common_generated_token_prefix": 225,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.06925487518310547,
+      "shared_prefix_logprob_mean_abs": 0.0019768127101714426,
+      "core_next_token": 11,
+      "megatron_next_token": 931
+    },
+    {
+      "id": "gsm8k-eval:467:gsm8k-test-000467",
+      "common_generated_token_prefix": 345,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08016286790370941,
+      "shared_prefix_logprob_mean_abs": 0.0028853514738329976,
+      "core_next_token": 1490,
+      "megatron_next_token": 868
+    },
+    {
+      "id": "gsm8k-eval:1245:gsm8k-test-001245",
+      "common_generated_token_prefix": 413,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.10464811325073242,
+      "shared_prefix_logprob_mean_abs": 0.00225578344258339,
+      "core_next_token": 220,
+      "megatron_next_token": 1148
+    },
+    {
+      "id": "gsm8k-eval:536:gsm8k-test-000536",
+      "common_generated_token_prefix": 468,
+      "identical_response_tokens": true,
+      "shared_prefix_logprob_max_abs": 0.06768035888671875,
+      "shared_prefix_logprob_mean_abs": 0.0014556808542291243,
+      "core_next_token": null,
+      "megatron_next_token": null
+    },
+    {
+      "id": "gsm8k-eval:826:gsm8k-test-000826",
+      "common_generated_token_prefix": 152,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.05513662099838257,
+      "shared_prefix_logprob_mean_abs": 0.001480995909233977,
+      "core_next_token": 527,
+      "megatron_next_token": 25
+    },
+    {
+      "id": "gsm8k-eval:915:gsm8k-test-000915",
+      "common_generated_token_prefix": 323,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.16855812072753906,
+      "shared_prefix_logprob_mean_abs": 0.005436821303582104,
+      "core_next_token": 323,
+      "megatron_next_token": 430
+    },
+    {
+      "id": "gsm8k-eval:77:gsm8k-test-000077",
+      "common_generated_token_prefix": 251,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.16241216659545898,
+      "shared_prefix_logprob_mean_abs": 0.007069992177085656,
+      "core_next_token": 12487,
+      "megatron_next_token": 30287
+    },
+    {
+      "id": "gsm8k-eval:1112:gsm8k-test-001112",
+      "common_generated_token_prefix": 34,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.031042277812957764,
+      "shared_prefix_logprob_mean_abs": 0.0027936360955423236,
+      "core_next_token": 323,
+      "megatron_next_token": 7043
+    },
+    {
+      "id": "gsm8k-eval:700:gsm8k-test-000700",
+      "common_generated_token_prefix": 10,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.002664383500814438,
+      "shared_prefix_logprob_mean_abs": 0.0005822740495204926,
+      "core_next_token": 48361,
+      "megatron_next_token": 38714
+    },
+    {
+      "id": "gsm8k-eval:590:gsm8k-test-000590",
+      "common_generated_token_prefix": 54,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11295035481452942,
+      "shared_prefix_logprob_mean_abs": 0.011809292406387275,
+      "core_next_token": 1884,
+      "megatron_next_token": 1521
+    },
+    {
+      "id": "gsm8k-eval:1080:gsm8k-test-001080",
+      "common_generated_token_prefix": 681,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11137878894805908,
+      "shared_prefix_logprob_mean_abs": 0.008502604579246037,
+      "core_next_token": 15398,
+      "megatron_next_token": 23692
+    },
+    {
+      "id": "gsm8k-eval:785:gsm8k-test-000785",
+      "common_generated_token_prefix": 99,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09891438484191895,
+      "shared_prefix_logprob_mean_abs": 0.00803034758343593,
+      "core_next_token": 1505,
+      "megatron_next_token": 11294
+    },
+    {
+      "id": "gsm8k-eval:346:gsm8k-test-000346",
+      "common_generated_token_prefix": 155,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07375472784042358,
+      "shared_prefix_logprob_mean_abs": 0.0026815341681926397,
+      "core_next_token": 824,
+      "megatron_next_token": 927
+    },
+    {
+      "id": "gsm8k-eval:325:gsm8k-test-000325",
+      "common_generated_token_prefix": 176,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.30377197265625,
+      "shared_prefix_logprob_mean_abs": 0.003919644006993456,
+      "core_next_token": 8323,
+      "megatron_next_token": 3392
+    },
+    {
+      "id": "gsm8k-eval:494:gsm8k-test-000494",
+      "common_generated_token_prefix": 353,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1348259449005127,
+      "shared_prefix_logprob_mean_abs": 0.01056394137213074,
+      "core_next_token": 16997,
+      "megatron_next_token": 17303
+    },
+    {
+      "id": "gsm8k-eval:1168:gsm8k-test-001168",
+      "common_generated_token_prefix": 362,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.12502729892730713,
+      "shared_prefix_logprob_mean_abs": 0.0032443642111563966,
+      "core_next_token": 5332,
+      "megatron_next_token": 717
+    },
+    {
+      "id": "gsm8k-eval:274:gsm8k-test-000274",
+      "common_generated_token_prefix": 330,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1392802596092224,
+      "shared_prefix_logprob_mean_abs": 0.006209150250339063,
+      "core_next_token": 649,
+      "megatron_next_token": 1436
+    },
+    {
+      "id": "gsm8k-eval:605:gsm8k-test-000605",
+      "common_generated_token_prefix": 75,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07003343105316162,
+      "shared_prefix_logprob_mean_abs": 0.006134043282108905,
+      "core_next_token": 13,
+      "megatron_next_token": 323
+    },
+    {
+      "id": "gsm8k-eval:956:gsm8k-test-000956",
+      "common_generated_token_prefix": 319,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1983175277709961,
+      "shared_prefix_logprob_mean_abs": 0.007731998609584953,
+      "core_next_token": 13,
+      "megatron_next_token": 264
+    },
+    {
+      "id": "gsm8k-eval:62:gsm8k-test-000062",
+      "common_generated_token_prefix": 219,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07577359676361084,
+      "shared_prefix_logprob_mean_abs": 0.0027223013176563286,
+      "core_next_token": 11,
+      "megatron_next_token": 13
+    },
+    {
+      "id": "gsm8k-eval:265:gsm8k-test-000265",
+      "common_generated_token_prefix": 203,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.04386168718338013,
+      "shared_prefix_logprob_mean_abs": 0.00147223803895685,
+      "core_next_token": 374,
+      "megatron_next_token": 369
+    },
+    {
+      "id": "gsm8k-eval:545:gsm8k-test-000545",
+      "common_generated_token_prefix": 288,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08172571659088135,
+      "shared_prefix_logprob_mean_abs": 0.0038871661909227998,
+      "core_next_token": 902,
+      "megatron_next_token": 779
+    },
+    {
+      "id": "gsm8k-eval:211:gsm8k-test-000211",
+      "common_generated_token_prefix": 134,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.10489434003829956,
+      "shared_prefix_logprob_mean_abs": 0.004721820027898773,
+      "core_next_token": 4595,
+      "megatron_next_token": 2579
+    },
+    {
+      "id": "gsm8k-eval:1156:gsm8k-test-001156",
+      "common_generated_token_prefix": 80,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.022709563374519348,
+      "shared_prefix_logprob_mean_abs": 0.0013385804152449055,
+      "core_next_token": 1884,
+      "megatron_next_token": 7159
+    },
+    {
+      "id": "gsm8k-eval:332:gsm8k-test-000332",
+      "common_generated_token_prefix": 331,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.10931533575057983,
+      "shared_prefix_logprob_mean_abs": 0.003719159062886177,
+      "core_next_token": 323,
+      "megatron_next_token": 902
+    },
+    {
+      "id": "gsm8k-eval:949:gsm8k-test-000949",
+      "common_generated_token_prefix": 205,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.22952204942703247,
+      "shared_prefix_logprob_mean_abs": 0.004613065721277075,
+      "core_next_token": 36783,
+      "megatron_next_token": 4376
+    },
+    {
+      "id": "gsm8k-eval:209:gsm8k-test-000209",
+      "common_generated_token_prefix": 305,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.10216045379638672,
+      "shared_prefix_logprob_mean_abs": 0.005256619470912751,
+      "core_next_token": 705,
+      "megatron_next_token": 570
+    },
+    {
+      "id": "gsm8k-eval:1104:gsm8k-test-001104",
+      "common_generated_token_prefix": 189,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.10501718521118164,
+      "shared_prefix_logprob_mean_abs": 0.00818728568043856,
+      "core_next_token": 11,
+      "megatron_next_token": 1667
+    },
+    {
+      "id": "gsm8k-eval:288:gsm8k-test-000288",
+      "common_generated_token_prefix": 260,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.18078339099884033,
+      "shared_prefix_logprob_mean_abs": 0.006708120753035893,
+      "core_next_token": 1243,
+      "megatron_next_token": 323
+    },
+    {
+      "id": "gsm8k-eval:1304:gsm8k-test-001304",
+      "common_generated_token_prefix": 266,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08930134773254395,
+      "shared_prefix_logprob_mean_abs": 0.007761525132318091,
+      "core_next_token": 433,
+      "megatron_next_token": 430
+    },
+    {
+      "id": "gsm8k-eval:731:gsm8k-test-000731",
+      "common_generated_token_prefix": 331,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.10549551248550415,
+      "shared_prefix_logprob_mean_abs": 0.005990377775463229,
+      "core_next_token": 11,
+      "megatron_next_token": 13
+    },
+    {
+      "id": "gsm8k-eval:647:gsm8k-test-000647",
+      "common_generated_token_prefix": 243,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.039000868797302246,
+      "shared_prefix_logprob_mean_abs": 0.0009485166513077799,
+      "core_next_token": 892,
+      "megatron_next_token": 4212
+    },
+    {
+      "id": "gsm8k-eval:133:gsm8k-test-000133",
+      "common_generated_token_prefix": 319,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.14223766326904297,
+      "shared_prefix_logprob_mean_abs": 0.0027112555421994113,
+      "core_next_token": 2795,
+      "megatron_next_token": 5764
+    },
+    {
+      "id": "gsm8k-eval:895:gsm8k-test-000895",
+      "common_generated_token_prefix": 391,
+      "identical_response_tokens": true,
+      "shared_prefix_logprob_max_abs": 0.14662647247314453,
+      "shared_prefix_logprob_mean_abs": 0.001170895688682545,
+      "core_next_token": null,
+      "megatron_next_token": null
+    },
+    {
+      "id": "gsm8k-eval:562:gsm8k-test-000562",
+      "common_generated_token_prefix": 324,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.062382280826568604,
+      "shared_prefix_logprob_mean_abs": 0.0011094917054373424,
+      "core_next_token": 1781,
+      "megatron_next_token": 9855
+    },
+    {
+      "id": "gsm8k-eval:710:gsm8k-test-000710",
+      "common_generated_token_prefix": 61,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.1170128583908081,
+      "shared_prefix_logprob_mean_abs": 0.006614309182563762,
+      "core_next_token": 198,
+      "megatron_next_token": 25
+    },
+    {
+      "id": "gsm8k-eval:610:gsm8k-test-000610",
+      "common_generated_token_prefix": 320,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08745384216308594,
+      "shared_prefix_logprob_mean_abs": 0.005910077009427539,
+      "core_next_token": 55915,
+      "megatron_next_token": 6393
+    },
+    {
+      "id": "gsm8k-eval:253:gsm8k-test-000253",
+      "common_generated_token_prefix": 281,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11864244937896729,
+      "shared_prefix_logprob_mean_abs": 0.007481423485625388,
+      "core_next_token": 3563,
+      "megatron_next_token": 25639
+    },
+    {
+      "id": "gsm8k-eval:198:gsm8k-test-000198",
+      "common_generated_token_prefix": 327,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.15777528285980225,
+      "shared_prefix_logprob_mean_abs": 0.009623964701678436,
+      "core_next_token": 258,
+      "megatron_next_token": 10924
+    },
+    {
+      "id": "gsm8k-eval:246:gsm8k-test-000246",
+      "common_generated_token_prefix": 106,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.050456106662750244,
+      "shared_prefix_logprob_mean_abs": 0.004556144858175891,
+      "core_next_token": 824,
+      "megatron_next_token": 68063
+    },
+    {
+      "id": "gsm8k-eval:381:gsm8k-test-000381",
+      "common_generated_token_prefix": 223,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.0690414309501648,
+      "shared_prefix_logprob_mean_abs": 0.003289091520294649,
+      "core_next_token": 198,
+      "megatron_next_token": 33680
+    },
+    {
+      "id": "gsm8k-eval:1277:gsm8k-test-001277",
+      "common_generated_token_prefix": 212,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 4.754401743412018e-07,
+      "shared_prefix_logprob_mean_abs": 4.557979030683988e-08,
+      "core_next_token": 4325,
+      "megatron_next_token": 6811
+    },
+    {
+      "id": "gsm8k-eval:711:gsm8k-test-000711",
+      "common_generated_token_prefix": 280,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.03815722465515137,
+      "shared_prefix_logprob_mean_abs": 0.0003535907289460738,
+      "core_next_token": 25661,
+      "megatron_next_token": 1949
+    },
+    {
+      "id": "gsm8k-eval:781:gsm8k-test-000781",
+      "common_generated_token_prefix": 320,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.0249636173248291,
+      "shared_prefix_logprob_mean_abs": 0.000263633961859,
+      "core_next_token": 31439,
+      "megatron_next_token": 433
+    },
+    {
+      "id": "gsm8k-eval:260:gsm8k-test-000260",
+      "common_generated_token_prefix": 382,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.11955326795578003,
+      "shared_prefix_logprob_mean_abs": 0.005374731911304822,
+      "core_next_token": 5519,
+      "megatron_next_token": 3976
+    },
+    {
+      "id": "gsm8k-eval:805:gsm8k-test-000805",
+      "common_generated_token_prefix": 147,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.0956907868385315,
+      "shared_prefix_logprob_mean_abs": 0.0016646857546492647,
+      "core_next_token": 439,
+      "megatron_next_token": 315
+    },
+    {
+      "id": "gsm8k-eval:540:gsm8k-test-000540",
+      "common_generated_token_prefix": 242,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.03264594078063965,
+      "shared_prefix_logprob_mean_abs": 0.0005289266010617557,
+      "core_next_token": 1243,
+      "megatron_next_token": 574
+    },
+    {
+      "id": "gsm8k-eval:609:gsm8k-test-000609",
+      "common_generated_token_prefix": 344,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.0910484790802002,
+      "shared_prefix_logprob_mean_abs": 0.0021456043030591604,
+      "core_next_token": 11,
+      "megatron_next_token": 14432
+    },
+    {
+      "id": "gsm8k-eval:358:gsm8k-test-000358",
+      "common_generated_token_prefix": 415,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09163904190063477,
+      "shared_prefix_logprob_mean_abs": 0.0036226135061064356,
+      "core_next_token": 6118,
+      "megatron_next_token": 3445
+    },
+    {
+      "id": "gsm8k-eval:561:gsm8k-test-000561",
+      "common_generated_token_prefix": 590,
+      "identical_response_tokens": true,
+      "shared_prefix_logprob_max_abs": 0.15719830989837646,
+      "shared_prefix_logprob_mean_abs": 0.0032273753715188276,
+      "core_next_token": null,
+      "megatron_next_token": null
+    },
+    {
+      "id": "gsm8k-eval:3:gsm8k-test-000003",
+      "common_generated_token_prefix": 284,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.15212631225585938,
+      "shared_prefix_logprob_mean_abs": 0.0045539738309750815,
+      "core_next_token": 8640,
+      "megatron_next_token": 1587
+    },
+    {
+      "id": "gsm8k-eval:241:gsm8k-test-000241",
+      "common_generated_token_prefix": 70,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.09314215183258057,
+      "shared_prefix_logprob_mean_abs": 0.012003033664586837,
+      "core_next_token": 706,
+      "megatron_next_token": 596
+    },
+    {
+      "id": "gsm8k-eval:600:gsm8k-test-000600",
+      "common_generated_token_prefix": 100,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.08597904443740845,
+      "shared_prefix_logprob_mean_abs": 0.00648499816507865,
+      "core_next_token": 433,
+      "megatron_next_token": 11
+    },
+    {
+      "id": "gsm8k-eval:1137:gsm8k-test-001137",
+      "common_generated_token_prefix": 129,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.07644069194793701,
+      "shared_prefix_logprob_mean_abs": 0.007364818842505383,
+      "core_next_token": 2860,
+      "megatron_next_token": 279
+    },
+    {
+      "id": "gsm8k-eval:707:gsm8k-test-000707",
+      "common_generated_token_prefix": 160,
+      "identical_response_tokens": false,
+      "shared_prefix_logprob_max_abs": 0.037102341651916504,
+      "shared_prefix_logprob_mean_abs": 0.001339182218816859,
+      "core_next_token": 14,
+      "megatron_next_token": 4
+    }
+  ]
+}
