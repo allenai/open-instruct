@@ -24,6 +24,7 @@ from miles.utils.ft_utils.process_group_utils import GroupInfo
 from olmo_core.nn.hf import convert
 from olmo_core.nn.moe.v2 import olmo3
 from olmo_miles.evaluation import policy_contract_schema as schema
+from olmo_miles.evaluation.auxiliary_contract import AuxiliaryObserver
 from olmo_miles.evaluation.policy_contract_capture import validate_capture
 from torch import distributed as dist
 from torch.distributed.tensor import DTensor
@@ -130,8 +131,8 @@ def configuration(root, output, fixture):
             max_sequence_length=128,
             activation_checkpointing=False,
             diagnostic_interval=1,
-            router_aux_loss_weight=0.0,
-            router_z_loss_weight=0.0,
+            router_aux_loss_weight=fixture.get("auxiliary", {}).get("lb", 0.0),
+            router_z_loss_weight=fixture.get("auxiliary", {}).get("z", 0.0),
         ),
         dict(
             hf_checkpoint=str(root / "hf"),
@@ -258,7 +259,9 @@ def run(root, output):
             )
             return result
 
+        observer = AuxiliaryObserver(fixture) if fixture.get("auxiliary") else None
         with (
+            observer.core(worker.model) if observer else contextlib.nullcontext(),
             mock.patch.object(actor.miles_loss, "loss_function", side_effect=loss),
             mock.patch.object(policy_losses, "get_log_probs_and_entropy", side_effect=logprobs),
             mock.patch.object(worker.optimizer, "_clip_grad", side_effect=clip),
@@ -306,6 +309,8 @@ def run(root, output):
             "objective_inputs": "immutable advantages/rollout old_log_probs, actual current Core forward",
             "limitations": "EP1 fixed-input objective/optimizer; excludes rewards, generation, and replay",
         }
+        if observer:
+            report["auxiliary_oracle"] = observer.report()
         (output / "report.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
         print(json.dumps({"output": str(output), "optimizer_steps": 1, "fixture_sha256": digest}))
     finally:

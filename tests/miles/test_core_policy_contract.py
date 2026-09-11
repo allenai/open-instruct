@@ -146,3 +146,24 @@ def test_rejects_changed_consumed_objective_inputs(field):
         batch[field][0][0] += 1
     with pytest.raises(ValueError, match="Objective"):
         capture.assert_objective_inputs(value, batch)
+
+
+@pytest.mark.parametrize(
+    "arm,lb,z", [("policy", 0.0, 0.0), ("lb", 0.01, 0.0), ("z", 0.0, 1e-5), ("combined", 0.01, 1e-5)]
+)
+def test_auxiliary_arm_uses_explicit_coefficients_and_immutable_policy_inputs(tmp_path, arm, lb, z):
+    value = fixture()
+    value["objective"] = "auxiliary_contract"
+    value["auxiliary"] = {"arm": arm, "lb": lb, "z": z}
+    if arm in ("lb", "z"):
+        for sample in value["samples"]:
+            sample["advantages"] = [0.0] * sample["response_length"]
+    schema.validate_fixture(value)
+    config = capture.configuration(tmp_path, tmp_path / "output", value)
+    assert config.core.router_aux_loss_weight == lb
+    assert config.core.router_z_loss_weight == z
+    assert config.miles["use_rollout_logprobs"]
+    rollout = capture.rollout_from_fixture(value, "cpu")
+    capture.inject_advantages(value, rollout)
+    assert [x.tolist() for x in rollout["advantages"]] == [x["advantages"] for x in value["samples"]]
+    assert [x.tolist() for x in rollout["rollout_log_probs"]] == [x["old_log_probs"] for x in value["samples"]]
