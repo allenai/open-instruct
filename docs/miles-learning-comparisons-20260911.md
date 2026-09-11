@@ -88,4 +88,4 @@ before launching the Core reproduction. Source recovery and preparation passed; 
 The original100-update pair is complete and independently audited: Core97→93/128,
 Megatron96→107/128. [Final learning/performance report](measurements/miles-gsm8k-results-20260911.md).
 These are completed results; the three new learning allocations above do not yet
-have final results. Status snapshot:2026-09-11 approximately04:09UTC. Core500 passed its resolved-configuration and storage checks; see [startup evidence](measurements/miles-core500-startup-20260911.json). Initial publication and evaluation are pending.
+have final results. Status snapshot:2026-09-11 approximately04:21UTC. Core500 passed its configuration, storage, and initial-publication checks; its initial greedy evaluation scored99/128 with20 truncated responses. Training generation has begun. See [startup evidence](measurements/miles-core500-startup-20260911.json). This is the new run’s starting point, not a learning gain over the old Core100 initial97/128.

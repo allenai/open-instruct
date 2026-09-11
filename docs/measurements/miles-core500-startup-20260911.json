@@ -59,7 +59,52 @@
     "required_bytes": 1492021231360,
     "filesystem_free_bytes": 38228938657792
   },
-  "initial_publication": null,
-  "initial_evaluation": null,
-  "provenance": "Read original effective.json and storage-preflight.json through the owning Beaker container on Holmes488; no training process or stored artifacts modified."
+  "initial_publication": {
+    "buckets": 35,
+    "bytes": 37028386304,
+    "export_pack_seconds": 0.35649104695767164,
+    "finalize_seconds": 0.04032010259106755,
+    "pause_connect_seconds": 0.04854272259399295,
+    "repeated_version": false,
+    "stream_moe_export": true,
+    "tensors": 29669,
+    "total_seconds": 5.1372362077236176,
+    "transport": "flattened",
+    "transport_collectives": 35,
+    "transport_load_seconds": 4.691881944425404,
+    "version": 0,
+    "observed_at": "2026-09-11T04:15:33.140Z"
+  },
+  "initial_evaluation": {
+    "completed_updates": 0,
+    "observed_at": "2026-09-11T04:20:32.622Z",
+    "correct": 99,
+    "samples": 128,
+    "accuracy": 0.7734375,
+    "mean_response_tokens": 1788.4765625,
+    "truncated_count": 20,
+    "policy_version": 0,
+    "none_reward_ratio": 0.0,
+    "mixed_version_ratio": 0.0,
+    "source": "Native evaluation log; retained response audit remains separate."
+  },
+  "provenance": "Read original effective.json and storage-preflight.json through the owning Beaker container on Holmes488; no training process or stored artifacts modified. Serving settings were read from the live local /server_info endpoint after startup; publication metrics are from native actor logs.",
+  "serving_resolved_settings": {
+    "sampling_backend": "pytorch",
+    "max_total_tokens": 32768,
+    "chunked_prefill_size": 16384,
+    "max_running_requests": 4,
+    "max_mamba_cache_size": 8,
+    "disable_radix_cache": true,
+    "context_length": 6144,
+    "cuda_graph_max_bs_decode": 4,
+    "cuda_graph_bs_decode": null
+  },
+  "startup_completed": true,
+  "training_completed": false,
+  "startup_log_sha256": "4a24c18c79203051fd56f2a568de9b5a40b5f94bda3e03c860662fde3f01adee",
+  "limits": [
+    "This records startup and initial evaluation only;500-update learning results and periodic checkpoint outcomes are pending.",
+    "NewCore500 initial99/128 differs from oldCore100 initial97/128; assess changes relative to each run\u2019s own initial evaluation."
+  ]
 }
