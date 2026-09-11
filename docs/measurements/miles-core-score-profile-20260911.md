@@ -80,3 +80,29 @@ and checks, and training sees new response lengths/routing on successive batches
 The next attribution measurement should score successive retained batches in one process
 while retaining caches and counting new specializations. Optimization should preserve
 score equivalence and separate the Core SwiGLU shape key from FLA kernel specialization.
+
+## Separate warm trace scopes
+
+[Trace summary](miles-core-score-profile-20260911/trace-summary.json) retains raw trace
+SHA256s and a [read-only extraction script](miles-core-score-profile-20260911/summarize_traces.py).
+This is the instrumented1.75s pass, not the ordinary1.24s repeats. Per rank, GPU active
+time is the union of kernel, memcpy and memset intervals on that rank's GPU. Inclusive
+CUDA-event durations are not summed into GPU busy time.
+
+| Scope | Rank0 (s) | Rank1 (s) |
+|---|---:|---:|
+| Eight `_forward` CPU ranges |1.74310 |1.74453 |
+| Sixteen logprob helper CPU ranges |0.007737 |0.008215 |
+| GPU active interval union |0.753360 |0.196155 |
+| NCCL kernel interval union |0.586286 |0.024815 |
+| Other GPU interval union |0.171825 |0.171424 |
+| NCCL/other overlap |0.004751 |0.000084 |
+
+CPU ranges are host scopes that include launches and waits; nested ranges must not be
+added. GPU kernels are not attributed to individual CPU ranges here. Each rank has457
+NCCL events,456 named SendRecv; the large rank asymmetry includes synchronization and
+peer waiting, not just bytes transferred. Other GPU work includes copies and routing as
+well as arithmetic. The remaining trace span is not a clean orchestration measurement:
+profiler overhead and host scheduling affect this diagnostic, which took about0.51s
+longer than regular warm passes. These measurements establish cheap warm score execution
+and bounded logprob-host overhead, not an end-to-end optimized training throughput.

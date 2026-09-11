@@ -1,0 +1,428 @@
+{
+  "ranks": [
+    {
+      "rank": 0,
+      "trace_sha256": "63e460a003de712efb0f68fd228d435dd83986ffa77641e5344659fe647749f1",
+      "trace_bytes": 81454457,
+      "gpu_devices": [
+        "0"
+      ],
+      "duration_event_categories": {
+        "cpu_op": 67751,
+        "user_annotation": 481,
+        "cuda_runtime": 46433,
+        "overhead": 10,
+        "kernel": 20426,
+        "cuda_driver": 4241,
+        "gpu_memset": 1900,
+        "gpu_memcpy": 464,
+        "gpu_user_annotation": 489,
+        "Trace": 1
+      },
+      "cpu_ranges": {
+        "core_score_forward": {
+          "count": 8,
+          "cpu_sum_seconds": 1.7431021569999998,
+          "cpu_union_seconds": 1.74310215625,
+          "durations_seconds": [
+            0.21295376300000002,
+            0.215028557,
+            0.22226768,
+            0.216071752,
+            0.222587691,
+            0.218805981,
+            0.21918892499999998,
+            0.216197808
+          ]
+        },
+        "core_score_logprobs": {
+          "count": 16,
+          "cpu_sum_seconds": 0.007736972,
+          "cpu_union_seconds": 0.007736974609375,
+          "durations_seconds": [
+            0.00047269900000000004,
+            0.00034477499999999996,
+            0.000357747,
+            0.000342818,
+            0.00035478699999999996,
+            0.000328661,
+            0.000347656,
+            0.000366785,
+            0.001004362,
+            0.000653319,
+            0.00040861200000000004,
+            0.0006595910000000001,
+            0.000427206,
+            0.000407493,
+            0.000452581,
+            0.00080788
+          ]
+        }
+      },
+      "gpu": {
+        "event_count": 22790,
+        "active_union_seconds": 0.75336045703125,
+        "nccl_union_seconds": 0.5862864833984375,
+        "non_nccl_union_seconds": 0.1718246455078125,
+        "nccl_non_nccl_overlap_seconds": 0.004750671875000001,
+        "nccl_event_count": 457,
+        "span_seconds": 1.7517036904296874,
+        "top_kernels_by_summed_duration": [
+          [
+            "ncclDevKernel_SendRecv(ncclDevKernelArgsStorage<4096ul>)",
+            {
+              "events": 456,
+              "duration_sum_seconds": 0.5857084980000001
+            }
+          ],
+          [
+            "_ZN7cutlass13device_kernelIN2at4cuda6detail25enable_3x_kernel_for_sm10INS_4gemm6kernel13GemmUniversalINS5_17GroupProblemShapeIN4cute5tupleIJiiiEEEEENS5_10collective13CollectiveMmaINS5_40MainloopSm100ArrayTmaUmmaWarpSpecializedILi4ELi8ELi2ENSA_IJNS9_1CILi2EEENSG_ILi1EEESI_EEEEENSA_IJNSG_ILi128EEENSG_ILi256EEENSG_ILi64EEEEEENS_10bfloat16_tEPNSA_IJlSI_NSG_ILi0EEEEEESP_SS_NS9_8TiledMMAINS9_8MMA_AtomIJNS9_20SM100_MMA_F16BF16_SSISP_SP_fLi128ELi256ELNS9_4UMMA5MajorE0ELSX_0ELNSW_7ScaleInE0ELSY_0EEEEEENS9_6LayoutINSA_IJSI_SI_SI_EEENSA_IJSQ_SQ_SQ_EEEEENSA_IJNS9_10UnderscoreES15_S15_EEEEENS9_13SM90_TMA_LOADENS9_14ComposedLayoutINS9_7SwizzleILi3ELi4ELi3EEENS9_18smem_ptr_flag_bitsILi16EEENS11_INSA_IJNSG_ILi8EEESN_EEENSA_IJSN_SI_EEEEEEEvNS9_8identityENS9_23SM90_TMA_LOAD_MULTICASTES1I_vS1J_EENS_8epilogue10collective18CollectiveEpilogueINS1M_31Sm100PtrArrayTmaWarpSpecializedILi4ELi2ELi32ELb0ELb0EEEJSO_NSA_IJNS11_ISL_SI_EENS11_INSG_ILi32EEESI_EEEEEvSS_SP_SS_NS1M_6fusion15FusionCallbacksIS1Q_NS1V_17LinearCombinationISP_fSP_fLNS_15FloatRoundStyleE2EEESO_S1U_JEEENS9_5SM1004TMEM4LOAD26SM100_TMEM_LOAD_32dp32b32xES18_NS19_INS1A_ILi2ELi4ELi3EEES1D_NS11_INSA_IJS1E_S1S_EEENSA_IJS1S_SI_EEEEEEENS9_39AutoVectorizingCopyWithAssumedAlignmentILi128EEENS9_14SM90_TMA_STOREES29_S2B_S2B_EEEvvEEEEEEvNT_6ParamsE",
+            {
+              "events": 135,
+              "duration_sum_seconds": 0.020560564999999986
+            }
+          ],
+          [
+            "_ZN7cutlass13device_kernelIN2at4cuda6detail25enable_3x_kernel_for_sm10INS_4gemm6kernel13GemmUniversalINS5_17GroupProblemShapeIN4cute5tupleIJiiiEEEEENS5_10collective13CollectiveMmaINS5_40MainloopSm100ArrayTmaUmmaWarpSpecializedILi4ELi8ELi2ENSA_IJNS9_1CILi2EEENSG_ILi1EEESI_EEEEENSA_IJNSG_ILi128EEENSG_ILi256EEENSG_ILi64EEEEEENS_10bfloat16_tEPNSA_IJlSI_NSG_ILi0EEEEEESP_PNSA_IJSI_lSQ_EEENS9_8TiledMMAINS9_8MMA_AtomIJNS9_20SM100_MMA_F16BF16_SSISP_SP_fLi128ELi256ELNS9_4UMMA5MajorE0ELSZ_1ELNSY_7ScaleInE0ELS10_0EEEEEENS9_6LayoutINSA_IJSI_SI_SI_EEENSA_IJSQ_SQ_SQ_EEEEENSA_IJNS9_10UnderscoreES17_S17_EEEEENS9_13SM90_TMA_LOADENS9_14ComposedLayoutINS9_7SwizzleILi3ELi4ELi3EEENS9_18smem_ptr_flag_bitsILi16EEENS13_INSA_IJNSG_ILi8EEESN_EEENSA_IJSN_SI_EEEEEEEvNS9_8identityENS9_23SM90_TMA_LOAD_MULTICASTENS1B_IS1D_S1F_NS13_INSA_IJSN_S1G_EEENSA_IJSI_SN_EEEEEEEvS1L_EENS_8epilogue10collective18CollectiveEpilogueINS1S_31Sm100PtrArrayTmaWarpSpecializedILi4ELi2ELi32ELb0ELb0EEEJSO_NSA_IJNS13_ISL_SI_EENS13_INSG_ILi32EEESI_EEEEEvSS_SP_SS_NS1S_6fusion15FusionCallbacksIS1W_NS21_17LinearCombinationISP_fSP_fLNS_15FloatRoundStyleE2EEESO_S20_JEEENS9_5SM1004TMEM4LOAD26SM100_TMEM_LOAD_32dp32b32xES1A_NS1B_INS1C_ILi2ELi4ELi3EEES1F_NS13_INSA_IJS1G_S1Y_EEENSA_IJS1Y_SI_EEEEEEENS9_39AutoVectorizingCopyWithAssumedAlignmentILi128EEENS9_14SM90_TMA_STOREES2F_S2H_S2H_EEEvvEEEEEEvNT_6ParamsE",
+            {
+              "events": 135,
+              "duration_sum_seconds": 0.011644087000000001
+            }
+          ],
+          [
+            "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+            {
+              "events": 1912,
+              "duration_sum_seconds": 0.010919343999999997
+            }
+          ],
+          [
+            "void cub::_V_300304_SM_750_800_890_900_1000_1200::detail::radix_sort::DeviceRadixSortOnesweepKernel<cub::_V_300304_SM_750_800_890_900_1000_1200::detail::radix_sort::policy_selector_from_types<unsigned int, int, unsigned long long>, (cub::_V_300304_SM_750_800_890_900_1000_1200::SortOrder)0, unsigned int, int, unsigned long long, int, int, cub::_V_300304_SM_750_800_890_900_1000_1200::detail::identity_decomposer_t>(int*, int*, unsigned long long*, unsigned long long const*, unsigned int*, unsigned int const*, int*, int const*, int, int, int, cub::_V_300304_SM_750_800_890_900_1000_1200::detail::identity_decomposer_t)",
+            {
+              "events": 1216,
+              "duration_sum_seconds": 0.009264330000000013
+            }
+          ],
+          [
+            "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+            {
+              "events": 1440,
+              "duration_sum_seconds": 0.007754648999999999
+            }
+          ],
+          [
+            "void at::native::sbtopk::gatherTopK<float, unsigned int, 2, false>(at::cuda::detail::TensorInfo<float const, unsigned int>, unsigned int, unsigned int, bool, unsigned int, unsigned int, at::cuda::detail::TensorInfo<float, unsigned int>, unsigned int, at::cuda::detail::TensorInfo<long, unsigned int>, unsigned int, float*)",
+            {
+              "events": 152,
+              "duration_sum_seconds": 0.005955016000000002
+            }
+          ],
+          [
+            "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+            {
+              "events": 128,
+              "duration_sum_seconds": 0.005359715999999999
+            }
+          ],
+          [
+            "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_bf16_256x128_64x3_tn_align2>(cutlass_80_tensorop_bf16_s16816gemm_bf16_256x128_64x3_tn_align2::Params)",
+            {
+              "events": 4,
+              "duration_sum_seconds": 0.004442303
+            }
+          ],
+          [
+            "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_bf16_128x256_64x3_tn_align2>(cutlass_80_tensorop_bf16_s16816gemm_bf16_128x256_64x3_tn_align2::Params)",
+            {
+              "events": 4,
+              "duration_sum_seconds": 0.004345568
+            }
+          ],
+          [
+            "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4>)",
+            {
+              "events": 720,
+              "duration_sum_seconds": 0.004174446999999995
+            }
+          ],
+          [
+            "cutlass3x_sm100_simt_sgemm_f32_f32_f32_f32_f32_128x64x16_1x1x1_3_tnn_align1_bias_f32_relu",
+            {
+              "events": 76,
+              "duration_sum_seconds": 0.004120988999999998
+            }
+          ],
+          [
+            "void at::native::reduce_kernel<128, 4, at::native::ReduceOp<long, at::native::func_wrapper_t<long, at::native::sum_functor<long, long, long>::operator()(at::TensorIterator&)::{lambda(long, long)#1}>, unsigned int, long, 4, 4> >(at::native::ReduceOp<long, at::native::func_wrapper_t<long, at::native::sum_functor<long, long, long>::operator()(at::TensorIterator&)::{lambda(long, long)#1}>, unsigned int, long, 4, 4>)",
+            {
+              "events": 456,
+              "duration_sum_seconds": 0.0038801599999999936
+            }
+          ],
+          [
+            "_swiglu_valid_prefix_kernel",
+            {
+              "events": 152,
+              "duration_sum_seconds": 0.0038128839999999995
+            }
+          ],
+          [
+            "chunk_kda_fwd_kernel_inter_solve_fused",
+            {
+              "events": 128,
+              "duration_sum_seconds": 0.003665370000000002
+            }
+          ],
+          [
+            "Memset (Device)",
+            {
+              "events": 1900,
+              "duration_sum_seconds": 0.003490668999999964
+            }
+          ],
+          [
+            "void moe_permute_kernel<__nv_bfloat16, __nv_bfloat16, 128, false>(__nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16*, float const*, float*, int const*, int, int, int)",
+            {
+              "events": 304,
+              "duration_sum_seconds": 0.0029642829999999985
+            }
+          ],
+          [
+            "cutlass3x_sm100_simt_sgemm_f32_f32_f32_f32_f32_64x32x16_1x1x1_3_tnn_align1_bias_f32_relu",
+            {
+              "events": 76,
+              "duration_sum_seconds": 0.0026434099999999992
+            }
+          ],
+          [
+            "causal_conv1d_fwd_kernel",
+            {
+              "events": 384,
+              "duration_sum_seconds": 0.002588494
+            }
+          ],
+          [
+            "chunk_gla_fwd_kernel_o",
+            {
+              "events": 128,
+              "duration_sum_seconds": 0.0025361429999999994
+            }
+          ]
+        ]
+      },
+      "scope": "Separate warm instrumented pass. CPU ranges include host launches/waits, not isolated compute. GPU active time is union of kernel/memcpy/memset intervals, not inclusive event sum. NCCL classified by kernel name; includes synchronization/waiting and is not all EP overhead. No attribution of GPU kernels to CPU ranges."
+    },
+    {
+      "rank": 1,
+      "trace_sha256": "dc08d81d445baef4ae30fed68d2f1047c7ec1f85acf8eae02473844f4c749cf2",
+      "trace_bytes": 81547859,
+      "gpu_devices": [
+        "1"
+      ],
+      "duration_event_categories": {
+        "cpu_op": 67751,
+        "user_annotation": 481,
+        "cuda_runtime": 46500,
+        "overhead": 10,
+        "kernel": 20426,
+        "cuda_driver": 4241,
+        "gpu_memset": 1976,
+        "gpu_memcpy": 464,
+        "gpu_user_annotation": 489,
+        "Trace": 1
+      },
+      "cpu_ranges": {
+        "core_score_forward": {
+          "count": 8,
+          "cpu_sum_seconds": 1.74452802,
+          "cpu_union_seconds": 1.7445280185546874,
+          "durations_seconds": [
+            0.213867976,
+            0.215183288,
+            0.222518466,
+            0.215795173,
+            0.22283370800000002,
+            0.21877622,
+            0.21926317499999998,
+            0.216290014
+          ]
+        },
+        "core_score_logprobs": {
+          "count": 16,
+          "cpu_sum_seconds": 0.008215371999999999,
+          "cpu_union_seconds": 0.00821537109375,
+          "durations_seconds": [
+            0.00038997,
+            0.000365888,
+            0.000350382,
+            0.000347995,
+            0.000379259,
+            0.000346034,
+            0.000379731,
+            0.000425784,
+            0.001027114,
+            0.0005091259999999999,
+            0.000544422,
+            0.0006196870000000001,
+            0.00096977,
+            0.00052967,
+            0.0005278780000000001,
+            0.000502662
+          ]
+        }
+      },
+      "gpu": {
+        "event_count": 22866,
+        "active_union_seconds": 0.1961552197265625,
+        "nccl_union_seconds": 0.024815013671875,
+        "non_nccl_union_seconds": 0.1714242099609375,
+        "nccl_non_nccl_overlap_seconds": 8.400390624999088e-05,
+        "nccl_event_count": 457,
+        "span_seconds": 1.7526323046875,
+        "top_kernels_by_summed_duration": [
+          [
+            "ncclDevKernel_SendRecv(ncclDevKernelArgsStorage<4096ul>)",
+            {
+              "events": 456,
+              "duration_sum_seconds": 0.02480693800000002
+            }
+          ],
+          [
+            "_ZN7cutlass13device_kernelIN2at4cuda6detail25enable_3x_kernel_for_sm10INS_4gemm6kernel13GemmUniversalINS5_17GroupProblemShapeIN4cute5tupleIJiiiEEEEENS5_10collective13CollectiveMmaINS5_40MainloopSm100ArrayTmaUmmaWarpSpecializedILi4ELi8ELi2ENSA_IJNS9_1CILi2EEENSG_ILi1EEESI_EEEEENSA_IJNSG_ILi128EEENSG_ILi256EEENSG_ILi64EEEEEENS_10bfloat16_tEPNSA_IJlSI_NSG_ILi0EEEEEESP_SS_NS9_8TiledMMAINS9_8MMA_AtomIJNS9_20SM100_MMA_F16BF16_SSISP_SP_fLi128ELi256ELNS9_4UMMA5MajorE0ELSX_0ELNSW_7ScaleInE0ELSY_0EEEEEENS9_6LayoutINSA_IJSI_SI_SI_EEENSA_IJSQ_SQ_SQ_EEEEENSA_IJNS9_10UnderscoreES15_S15_EEEEENS9_13SM90_TMA_LOADENS9_14ComposedLayoutINS9_7SwizzleILi3ELi4ELi3EEENS9_18smem_ptr_flag_bitsILi16EEENS11_INSA_IJNSG_ILi8EEESN_EEENSA_IJSN_SI_EEEEEEEvNS9_8identityENS9_23SM90_TMA_LOAD_MULTICASTES1I_vS1J_EENS_8epilogue10collective18CollectiveEpilogueINS1M_31Sm100PtrArrayTmaWarpSpecializedILi4ELi2ELi32ELb0ELb0EEEJSO_NSA_IJNS11_ISL_SI_EENS11_INSG_ILi32EEESI_EEEEEvSS_SP_SS_NS1M_6fusion15FusionCallbacksIS1Q_NS1V_17LinearCombinationISP_fSP_fLNS_15FloatRoundStyleE2EEESO_S1U_JEEENS9_5SM1004TMEM4LOAD26SM100_TMEM_LOAD_32dp32b32xES18_NS19_INS1A_ILi2ELi4ELi3EEES1D_NS11_INSA_IJS1E_S1S_EEENSA_IJS1S_SI_EEEEEEENS9_39AutoVectorizingCopyWithAssumedAlignmentILi128EEENS9_14SM90_TMA_STOREES29_S2B_S2B_EEEvvEEEEEEvNT_6ParamsE",
+            {
+              "events": 134,
+              "duration_sum_seconds": 0.020396948
+            }
+          ],
+          [
+            "_ZN7cutlass13device_kernelIN2at4cuda6detail25enable_3x_kernel_for_sm10INS_4gemm6kernel13GemmUniversalINS5_17GroupProblemShapeIN4cute5tupleIJiiiEEEEENS5_10collective13CollectiveMmaINS5_40MainloopSm100ArrayTmaUmmaWarpSpecializedILi4ELi8ELi2ENSA_IJNS9_1CILi2EEENSG_ILi1EEESI_EEEEENSA_IJNSG_ILi128EEENSG_ILi256EEENSG_ILi64EEEEEENS_10bfloat16_tEPNSA_IJlSI_NSG_ILi0EEEEEESP_PNSA_IJSI_lSQ_EEENS9_8TiledMMAINS9_8MMA_AtomIJNS9_20SM100_MMA_F16BF16_SSISP_SP_fLi128ELi256ELNS9_4UMMA5MajorE0ELSZ_1ELNSY_7ScaleInE0ELS10_0EEEEEENS9_6LayoutINSA_IJSI_SI_SI_EEENSA_IJSQ_SQ_SQ_EEEEENSA_IJNS9_10UnderscoreES17_S17_EEEEENS9_13SM90_TMA_LOADENS9_14ComposedLayoutINS9_7SwizzleILi3ELi4ELi3EEENS9_18smem_ptr_flag_bitsILi16EEENS13_INSA_IJNSG_ILi8EEESN_EEENSA_IJSN_SI_EEEEEEEvNS9_8identityENS9_23SM90_TMA_LOAD_MULTICASTENS1B_IS1D_S1F_NS13_INSA_IJSN_S1G_EEENSA_IJSI_SN_EEEEEEEvS1L_EENS_8epilogue10collective18CollectiveEpilogueINS1S_31Sm100PtrArrayTmaWarpSpecializedILi4ELi2ELi32ELb0ELb0EEEJSO_NSA_IJNS13_ISL_SI_EENS13_INSG_ILi32EEESI_EEEEEvSS_SP_SS_NS1S_6fusion15FusionCallbacksIS1W_NS21_17LinearCombinationISP_fSP_fLNS_15FloatRoundStyleE2EEESO_S20_JEEENS9_5SM1004TMEM4LOAD26SM100_TMEM_LOAD_32dp32b32xES1A_NS1B_INS1C_ILi2ELi4ELi3EEES1F_NS13_INSA_IJS1G_S1Y_EEENSA_IJS1Y_SI_EEEEEEENS9_39AutoVectorizingCopyWithAssumedAlignmentILi128EEENS9_14SM90_TMA_STOREES2F_S2H_S2H_EEEvvEEEEEEvNT_6ParamsE",
+            {
+              "events": 134,
+              "duration_sum_seconds": 0.011565683000000002
+            }
+          ],
+          [
+            "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+            {
+              "events": 1912,
+              "duration_sum_seconds": 0.01132608800000001
+            }
+          ],
+          [
+            "void cub::_V_300304_SM_750_800_890_900_1000_1200::detail::radix_sort::DeviceRadixSortOnesweepKernel<cub::_V_300304_SM_750_800_890_900_1000_1200::detail::radix_sort::policy_selector_from_types<unsigned int, int, unsigned long long>, (cub::_V_300304_SM_750_800_890_900_1000_1200::SortOrder)0, unsigned int, int, unsigned long long, int, int, cub::_V_300304_SM_750_800_890_900_1000_1200::detail::identity_decomposer_t>(int*, int*, unsigned long long*, unsigned long long const*, unsigned int*, unsigned int const*, int*, int const*, int, int, int, cub::_V_300304_SM_750_800_890_900_1000_1200::detail::identity_decomposer_t)",
+            {
+              "events": 1216,
+              "duration_sum_seconds": 0.00891585799999999
+            }
+          ],
+          [
+            "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+            {
+              "events": 1440,
+              "duration_sum_seconds": 0.008056300999999997
+            }
+          ],
+          [
+            "void at::native::sbtopk::gatherTopK<float, unsigned int, 2, false>(at::cuda::detail::TensorInfo<float const, unsigned int>, unsigned int, unsigned int, bool, unsigned int, unsigned int, at::cuda::detail::TensorInfo<float, unsigned int>, unsigned int, at::cuda::detail::TensorInfo<long, unsigned int>, unsigned int, float*)",
+            {
+              "events": 152,
+              "duration_sum_seconds": 0.006293201000000001
+            }
+          ],
+          [
+            "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_bf16_256x128_64x3_tn_align2>(cutlass_80_tensorop_bf16_s16816gemm_bf16_256x128_64x3_tn_align2::Params)",
+            {
+              "events": 6,
+              "duration_sum_seconds": 0.005845101
+            }
+          ],
+          [
+            "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+            {
+              "events": 128,
+              "duration_sum_seconds": 0.005605644000000002
+            }
+          ],
+          [
+            "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4> >(at::native::ReduceOp<float, at::native::MeanOps<float, float, float, float>, unsigned int, float, 4, 4>)",
+            {
+              "events": 720,
+              "duration_sum_seconds": 0.004141695999999999
+            }
+          ],
+          [
+            "_swiglu_valid_prefix_kernel",
+            {
+              "events": 152,
+              "duration_sum_seconds": 0.0038510040000000008
+            }
+          ],
+          [
+            "chunk_kda_fwd_kernel_inter_solve_fused",
+            {
+              "events": 128,
+              "duration_sum_seconds": 0.003682621999999999
+            }
+          ],
+          [
+            "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_bf16_128x256_64x3_tn_align2>(cutlass_80_tensorop_bf16_s16816gemm_bf16_128x256_64x3_tn_align2::Params)",
+            {
+              "events": 2,
+              "duration_sum_seconds": 0.003509371
+            }
+          ],
+          [
+            "cutlass3x_sm100_simt_sgemm_f32_f32_f32_f32_f32_64x32x16_1x1x1_3_tnn_align1_bias_f32_relu",
+            {
+              "events": 95,
+              "duration_sum_seconds": 0.0033300400000000003
+            }
+          ],
+          [
+            "cutlass3x_sm100_simt_sgemm_f32_f32_f32_f32_f32_128x64x16_1x1x1_3_tnn_align1_bias_f32_relu",
+            {
+              "events": 57,
+              "duration_sum_seconds": 0.0030842859999999986
+            }
+          ],
+          [
+            "Memset (Device)",
+            {
+              "events": 1976,
+              "duration_sum_seconds": 0.003052451000000005
+            }
+          ],
+          [
+            "void moe_permute_kernel<__nv_bfloat16, __nv_bfloat16, 128, false>(__nv_bfloat16 const*, __nv_bfloat16 const*, __nv_bfloat16*, float const*, float*, int const*, int, int, int)",
+            {
+              "events": 304,
+              "duration_sum_seconds": 0.0029805520000000013
+            }
+          ],
+          [
+            "chunk_gla_fwd_kernel_o",
+            {
+              "events": 128,
+              "duration_sum_seconds": 0.0026878270000000007
+            }
+          ],
+          [
+            "causal_conv1d_fwd_kernel",
+            {
+              "events": 384,
+              "duration_sum_seconds": 0.0026545289999999975
+            }
+          ],
+          [
+            "chunk_kda_fwd_kernel_intra_token_parallel",
+            {
+              "events": 128,
+              "duration_sum_seconds": 0.002608592000000003
+            }
+          ]
+        ]
+      },
+      "scope": "Separate warm instrumented pass. CPU ranges include host launches/waits, not isolated compute. GPU active time is union of kernel/memcpy/memset intervals, not inclusive event sum. NCCL classified by kernel name; includes synchronization/waiting and is not all EP overhead. No attribution of GPU kernels to CPU ranges."
+    }
+  ]
+}
