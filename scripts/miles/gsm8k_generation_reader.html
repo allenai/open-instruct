@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'">
+<title>GSM8K · paired heldout generations</title>
+<style>
+:root{color-scheme:light;font:16px system-ui,sans-serif;color:#17232b;background:#f4f6f7}*{box-sizing:border-box}body{margin:0 auto;padding:28px;max-width:1600px}h1{font-size:28px;margin:0 0 8px}h2{font-size:19px;margin:0 0 10px}p{line-height:1.5}small,.muted{color:#586974}header{margin-bottom:22px}.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end;position:sticky;top:0;background:#f4f6f7;padding:14px 0;z-index:1;border-bottom:1px solid #ccd5da}label{display:grid;gap:5px;font-size:13px}select,input,button{font:inherit;padding:9px;border:1px solid #a9b7c0;border-radius:5px;background:white;color:inherit}input{width:220px}#questionSelect{max-width:470px}button{cursor:pointer}button:disabled{opacity:.4;cursor:default}.question{padding:20px;background:#fff;border:1px solid #cdd7dc;border-radius:8px;margin:18px 0}.question pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.5}.target{font-weight:600}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.panel{background:#fff;border:1px solid #cdd7dc;border-radius:8px;padding:18px;min-width:0}.panel pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;margin-bottom:0;max-height:72vh;overflow:auto}.badge{display:inline-block;font-size:12px;border-radius:4px;padding:4px 7px;background:#e9eef0;margin:0 5px 6px 0}.correct{background:#dceddf;color:#155e2c}.incorrect{background:#f7e3dd;color:#923a21}.sectionLabel{margin:24px 0 10px;font-weight:600}details{margin-top:14px}summary{cursor:pointer}.hash{font-size:11px;overflow-wrap:anywhere}.empty{padding:32px;text-align:center}@media(max-width:800px){body{padding:16px}.grid{grid-template-columns:1fr}.controls{position:static}#questionSelect{max-width:90vw}}
+</style>
+<header>
+<h1>Paired GSM8K heldout generations</h1>
+<p id="verification"></p>
+<p class="muted">Exact retained model responses, shown without cleanup or shortening. Greedy evaluation: temperature 0, one response per question. A response can be scored correct even when it reaches the 4,096-token cap. Filters use the final evaluation.</p>
+</header>
+<div class="controls">
+<label>Final outcome<select id="group"><option value="all">All questions</option><option value="core_only">Core only correct</option><option value="megatron_only">Megatron only correct</option><option value="both">Both correct</option><option value="neither">Neither correct</option></select></label>
+<label>Find question or ID<input id="search" type="search" placeholder="Search shared questions"></label>
+<label>Question<select id="questionSelect"></select></label>
+<label>Compare with initial at step<select id="step"></select></label>
+<button id="previous" type="button">← Previous</button><button id="next" type="button">Next →</button>
+<span id="position" class="muted" aria-live="polite"></span>
+</div>
+<main id="content"></main>
+<details><summary>Verification and provenance</summary><pre id="proof" class="hash"></pre></details>
+<script id="verified-data" type="application/json">__VERIFIED_GENERATIONS_JSON__</script>
+<script>
+'use strict';
+const data=JSON.parse(document.getElementById('verified-data').textContent);
+const el=id=>document.getElementById(id);
+const make=(tag,text,className)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;};
+let filtered=[], selected=null;
+el('verification').textContent=`Verified ${data.verification.questions} identical question IDs, rendered prompts, targets, and prompt-token hashes across ${data.verification.dumps} dumps. All ${data.verification.responses_verified} response hashes match the retained audits.`;
+el('proof').textContent=JSON.stringify(data.verification,null,2);
+for(const option of el('group').options){if(option.value!=='all')option.textContent+=` (${data.verification.final_groups[option.value].length})`;}
+for(const step of data.steps){const option=make('option',String(step));option.value=String(step);el('step').append(option);}
+el('step').value=String(data.steps.at(-1));
+function panel(row,backend,step){
+ const sample=row.generations[backend][String(step)], n=make('article',undefined,'panel');
+ n.append(make('h2',`${backend==='core'?'OLMo-core':'Megatron'} · step ${step}`));
+ n.append(make('span',sample.reward===1?'Correct':'Incorrect',`badge ${sample.reward===1?'correct':'incorrect'}`));
+ n.append(make('span',`${sample.response_length.toLocaleString()} response tokens`,'badge'));
+ n.append(make('span',sample.status,'badge'));
+ n.append(make('span',`Policy version ${sample.weight_versions.join(', ')}`,'badge'));
+ n.append(make('pre',sample.response));
+ const details=make('details');details.append(make('summary','Exact response SHA-256'),make('p',sample.response_sha256,'hash'));n.append(details);
+ return n;
+}
+function render(){
+ const content=el('content');content.replaceChildren();const index=filtered.findIndex(r=>r.id===selected), row=filtered[index];
+ el('previous').disabled=index<=0;el('next').disabled=index<0||index>=filtered.length-1;
+ el('position').textContent=row?`${index+1} / ${filtered.length}`:'0 questions';
+ if(!row){content.append(make('p','No questions match this filter.','empty'));return;}
+ el('questionSelect').value=row.id;
+ const question=make('section',undefined,'question');question.append(make('small',row.id),make('pre',row.question),make('p',`Target answer: ${row.label}`,'target'));
+ const exact=make('details');exact.append(make('summary','Exact shared rendered prompt'),make('pre',row.prompt));question.append(exact);content.append(question);
+ const selectedStep=Number(el('step').value), steps=selectedStep===data.steps[0]?[data.steps[0]]:[data.steps[0],selectedStep];
+ for(const step of steps){content.append(make('p',step===data.steps[0]?'Initial evaluation':`After ${step} optimizer updates`,'sectionLabel'));const grid=make('div',undefined,'grid');for(const backend of ['core','megatron'])grid.append(panel(row,backend,step));content.append(grid);}
+}
+function filter(){
+ const group=el('group').value, search=el('search').value.toLowerCase();
+ filtered=data.rows.filter(row=>(group==='all'||row.final_group===group)&&(row.id+' '+row.question).toLowerCase().includes(search));
+ if(!filtered.some(r=>r.id===selected))selected=filtered[0]?.id??null;
+ el('questionSelect').replaceChildren();for(const row of filtered){const option=make('option',`${row.id} — ${row.question.slice(0,70)}`);option.value=row.id;el('questionSelect').append(option);}render();
+}
+el('group').addEventListener('change',filter);el('search').addEventListener('input',filter);
+el('questionSelect').addEventListener('change',()=>{selected=el('questionSelect').value;render();});el('step').addEventListener('change',render);
+for(const [id,direction] of [['previous',-1],['next',1]])el(id).addEventListener('click',()=>{const next=filtered.findIndex(r=>r.id===selected)+direction;if(filtered[next]){selected=filtered[next].id;render();}});
+filter();
+</script>
+</html>
