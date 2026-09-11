@@ -86,3 +86,32 @@ The four changing batches are too few for a useful correlation conclusion.
 [Scoring measurement series](miles-control-exercise-20260911-scoring.json). Raw
 compiler signatures, source hashes and score tensors are in the scoring task's
 Beaker result. Scheduling and controls results remain pending.
+
+
+## Larger serving baseline follow-up
+
+The full-SFT starter now requests 64 client/engine slots, decode graphs through
+64, 524288 full-attention token slots and 128 recurrent slots, with radix cache
+off and the existing dedicated fraction 0.6. Collection and optimizer batch both
+increase to 64 (16 prompts × 4 responses). Core microbatch remains one.
+The tiny resident dev profile retains four samples/requests.
+
+The `--admission-only` campaign reads those capacity/batch fields from the
+committed training starter and runs 12 synchronous then 12 async updates in one
+three-B300 allocation. The matched pair retains the original control exercise's
+objective, including rollout behavior log probabilities, to isolate scheduling
+within that pair. It does not exercise the training starter's 100-update horizon,
+actor-recomputed denominator, evaluation or saving. Larger-batch results versus
+the original 16-sample pair compare useful throughput, not admission alone or
+learning quality. Both arms have independent token/reward/membership, 64-sample
+normalization and policy-version audits. The historical pair is unchanged.
+
+```bash
+MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
+  ./scripts/train/build_image_and_launch.sh --miles \
+  scripts/train/debug/miles_control_exercise.sh --admission-only
+```
+
+CPU validation covers all four starter TOMLs, their installed MILES parser,
+and documented async/two-engine overrides. The batch-aware regression checks
+both the historical four-group and new sixteen-group audit schemas.

@@ -93,7 +93,13 @@ exit "$status"
 """
 
 
-def specification(image):
+def specification(image, admission_only=False):
+    if admission_only:
+        return dict(
+            version="v2",
+            description="Core admission-64 starter: 12 matched sync and async updates, 64-sample batch, one update per collection",
+            tasks=[task(image, "admission", live_command("sync-admission64 async-admission64", 12), 3, "2h")],
+        )
     return dict(
         version="v2",
         description="Pinned Core dynamic rows: exact EP2 scores; 24-update sync/async pair; grouped CLI controls",
@@ -109,8 +115,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--admission-only", action="store_true")
     options = parser.parse_args()
-    document = json.dumps(specification(options.image), indent=2) + "\n"
+    document = json.dumps(specification(options.image, options.admission_only), indent=2) + "\n"
     if options.render_only:
         print(document, end="")
         return

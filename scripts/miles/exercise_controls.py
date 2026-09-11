@@ -17,7 +17,21 @@ from scripts.miles.check_gsm8k_checkpoints import check_boundaries
 
 from open_instruct.miles.config import RunConfig
 
-ARMS = ("sync", "async", "controls")
+ARMS = ("sync", "async", "controls", "sync-admission64", "async-admission64")
+ADMISSION_KEYS = (
+    "rollout_batch_size",
+    "global_batch_size",
+    "sglang_log_level",
+    "sglang_server_concurrency",
+    "sglang_max_running_requests",
+    "sglang_max_total_tokens",
+    "sglang_max_mamba_cache_size",
+    "sglang_cuda_graph_max_bs_decode",
+)
+
+
+def is_async(arm):
+    return arm in ("async", "controls", "async-admission64")
 
 
 def configuration(campaign, output, arm, updates):
@@ -28,7 +42,7 @@ def configuration(campaign, output, arm, updates):
     config = dataclasses.replace(
         config,
         core=dataclasses.replace(
-            config.core, row_specialization="dynamic", max_policy_lag=int(arm != "sync"), diagnostic_interval=0
+            config.core, row_specialization="dynamic", max_policy_lag=int(is_async(arm)), diagnostic_interval=0
         ),
     )
     config.miles.update(
@@ -43,7 +57,7 @@ def configuration(campaign, output, arm, updates):
         wandb_group="core-controls-20260911",
         wandb_dir=str(output / "wandb"),
     )
-    if arm != "sync":
+    if is_async(arm):
         config.miles.update(
             fully_async=True,
             async_data_buffer_capacity_factor=1.0,
@@ -74,6 +88,11 @@ def configuration(campaign, output, arm, updates):
             n_samples_per_eval_prompt=1,
             eval_max_response_len=4096,
         )
+    if arm.endswith("-admission64"):
+        starter = RunConfig.load(
+            Path(__file__).resolve().parents[2] / "configs/miles/profiles/train-disaggregated.toml"
+        )
+        config.miles.update({key: starter.miles[key] for key in ADMISSION_KEYS})
     config.validate()
     return config
 
@@ -100,6 +119,8 @@ def prepare(campaign, output, arm, updates):
     if arm == "controls":
         (output / "eval.jsonl").write_text("\n".join((campaign / "eval.jsonl").read_text().splitlines()[:8]) + "\n")
     config = configuration(campaign, output, arm, updates)
+    if updates * config.miles["rollout_batch_size"] > len(evidence.read_rows(campaign / "train.jsonl")):
+        raise ValueError("Trial would repeat prompts from the frozen training set")
     write_config(output / "run.toml", config)
     (output / "arguments.json").write_text(json.dumps(config.arguments(), indent=2) + "\n")
     (output / "protocol.json").write_text(
@@ -159,6 +180,7 @@ def audit(campaign, output, arm, updates, report_path=None):
     preparation = prepare_gsm8k_parity.verify_preparation(campaign)
     prepared = {evidence.identity(row): row for row in evidence.read_rows(campaign / "train.jsonl")}
     proofs = {row["prepared_sample_id"]: row for row in preparation["partitions"]["train"]["rows"]}
+    collection_size = config.miles["rollout_batch_size"] * config.miles["n_samples_per_prompt"]
     consumed, groups_seen, reports = set(), set(), []
     for rollout in range(updates):
         path = output / f"rollouts/{rollout}.pt"
@@ -167,14 +189,20 @@ def audit(campaign, output, arm, updates, report_path=None):
             payload["samples"],
             prepared,
             rollout=rollout,
-            asynchronous=arm != "sync",
+            asynchronous=is_async(arm),
             consumed=consumed,
             updates=updates,
+            groups_per_collection=config.miles["rollout_batch_size"],
+            samples_per_prompt=config.miles["n_samples_per_prompt"],
         )
         if groups_seen.intersection(groups):
             raise ValueError("Duplicate consumed group")
         report = evidence.audit_dump(
-            path, [prepared[key] for key in selected], version=versions, multiplicity=4, token_proofs=proofs
+            path,
+            [prepared[key] for key in selected],
+            version=versions,
+            multiplicity=config.miles["n_samples_per_prompt"],
+            token_proofs=proofs,
         )
         if not report["valid"]:
             raise ValueError(f"Independent reward/token audit failed: {report['errors']}")
@@ -197,7 +225,7 @@ def audit(campaign, output, arm, updates, report_path=None):
         for step, report in zip(steps, reports, strict=True):
             if (
                 step["local_behavior_versions"] != report["rank_versions"][str(rank)]
-                or step["normalization"]["samples"] != 16
+                or step["normalization"]["samples"] != config.miles["global_batch_size"]
             ):
                 raise ValueError("Trainer consumed different versions or sample count")
         contracts[str(rank)] = rows
@@ -232,8 +260,8 @@ def audit(campaign, output, arm, updates, report_path=None):
             for name in {r["stage"] for r in stages}
         },
         measured_cycle_seconds=sum(cycles),
-        consumed_samples=16 * updates,
-        consumed_response_tokens=sum(row["summary"]["mean_response_tokens"] * 16 for row in reports),
+        consumed_samples=collection_size * updates,
+        consumed_response_tokens=sum(row["summary"]["mean_response_tokens"] * collection_size for row in reports),
         publication_count=len(publications),
         scoring_by_rank=score_rows,
         elapsed=json.loads((output / "elapsed.json").read_text()),

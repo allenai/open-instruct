@@ -61,17 +61,24 @@ def test_grouped_launch_is_bounded_and_on_holmes():
     assert "for arm in sync async" in tasks[1]["arguments"][0]
 
 
-def test_audit_reads_metric_schemas_without_prompt_metadata(tmp_path, monkeypatch):
+@pytest.mark.parametrize("arm,groups_per_collection", (("sync", 4), ("sync-admission64", 16)))
+def test_audit_reads_metric_schemas_without_prompt_metadata(tmp_path, monkeypatch, arm, groups_per_collection):
     campaign, output = tmp_path / "prepared", tmp_path / "output"
     campaign.mkdir()
     (output / "metrics").mkdir(parents=True)
     (output / "rollouts").mkdir()
-    prepared = [{"input": f"prompt{i}", "metadata": {"prepared_sample_id": str(i)}} for i in range(16)]
+    prepared = [
+        {"input": f"prompt{i}", "metadata": {"prepared_sample_id": str(i)}} for i in range(4 * groups_per_collection)
+    ]
     (campaign / "train.jsonl").write_text("".join(json.dumps(row) + "\n" for row in prepared))
     monkeypatch.setattr(
         exercise_controls.prepare_gsm8k_parity,
         "verify_preparation",
-        lambda _: {"partitions": {"train": {"rows": [{"prepared_sample_id": str(i)} for i in range(16)]}}},
+        lambda _: {
+            "partitions": {
+                "train": {"rows": [{"prepared_sample_id": str(i)} for i in range(4 * groups_per_collection)]}
+            }
+        },
     )
     monkeypatch.setattr(
         exercise_controls.evidence,
@@ -79,13 +86,13 @@ def test_audit_reads_metric_schemas_without_prompt_metadata(tmp_path, monkeypatc
         lambda *a, **k: {"valid": True, "summary": {"mean_response_tokens": 10}},
     )
     monkeypatch.setattr(exercise_controls.evidence, "parse_timing_log", lambda *a, **k: {})
-    config = exercise_controls.configuration(campaign, output, "sync", 4)
+    config = exercise_controls.configuration(campaign, output, arm, 4)
     exercise_controls.write_config(output / "run.toml", config)
     rows, stages = [], []
     for update in range(4):
         samples = [
             {"metadata": {"prepared_sample_id": str(group)}, "group_index": group, "weight_versions": [str(update)]}
-            for group in range(4 * update, 4 * update + 4)
+            for group in range(groups_per_collection * update, groups_per_collection * (update + 1))
             for _ in range(4)
         ]
         torch.save({"samples": samples}, output / f"rollouts/{update}.pt")
@@ -95,7 +102,7 @@ def test_audit_reads_metric_schemas_without_prompt_metadata(tmp_path, monkeypatc
                 "step": update + 1,
                 "optimizer_skipped": False,
                 "local_behavior_versions": [update],
-                "normalization": {"samples": 16},
+                "normalization": {"samples": 4 * groups_per_collection},
             },
             {"event": "score_timing", "rollout_id": update, "row_specialization": "dynamic", "seconds": 1.0},
         ]
@@ -112,5 +119,26 @@ def test_audit_reads_metric_schemas_without_prompt_metadata(tmp_path, monkeypatc
     )
     (output / "metrics/driver_timing.jsonl").write_text("".join(json.dumps(row) + "\n" for row in stages))
     (output / "elapsed.json").write_text('{"seconds": 12}')
-    exercise_controls.audit(campaign, output, "sync", 4)
+    exercise_controls.audit(campaign, output, arm, 4)
     assert json.loads((output / "audit.json").read_text())["passed"]
+
+
+@pytest.mark.parametrize("base", ("sync", "async"))
+def test_admission_followup_changes_only_capacity_and_batch_size(tmp_path, base):
+    before = exercise_controls.configuration(Path("/prepared"), tmp_path, base, 12)
+    after = exercise_controls.configuration(Path("/prepared"), tmp_path, base + "-admission64", 12)
+    assert before.core == after.core
+    assert {k for k in before.miles if before.miles[k] != after.miles[k]} == set(exercise_controls.ADMISSION_KEYS)
+    assert after.miles["sglang_server_concurrency"] == after.miles["sglang_max_running_requests"] == 64
+    assert after.miles["rollout_batch_size"] * after.miles["n_samples_per_prompt"] == 64
+    assert after.miles["sglang_max_total_tokens"] >= 64 * after.miles["sglang_context_length"]
+    assert exercise_controls.is_async(base + "-admission64") == (base == "async")
+
+
+def test_admission_launch_uses_one_bounded_allocation():
+    (task,) = launch_control_exercise.specification("image", admission_only=True)["tasks"]
+    assert task["resources"]["gpuCount"] == 3
+    assert task["context"]["priority"] == "urgent"
+    assert task["context"]["minRuntime"] == "1h"
+    assert "for arm in sync-admission64 async-admission64" in task["arguments"][0]
+    assert "--updates 12" in task["arguments"][0]

@@ -46,7 +46,8 @@ The builder verifies the base image's immutable Docker ID. It fetches Core/MILES
 ## Configure and run
 
 For an inventory against our customized olmo-miles stack and bounded starting
-configurations, see [feature parity and default profiles](miles-feature-parity.md).
+configurations, see [Core run starters](../configs/miles/README.md) and
+[feature parity](miles-feature-parity.md).
 The profiles distinguish tiny resident development, the measured SFT EP2
 synchronous shape, and an explicitly unqualified bounded-async candidate.
 

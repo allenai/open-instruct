@@ -47,7 +47,17 @@ def configuration(campaign, output, *, asynchronous):
     return config
 
 
-def batch_membership(samples, prepared, *, rollout, asynchronous, consumed, updates=UPDATES):
+def batch_membership(
+    samples,
+    prepared,
+    *,
+    rollout,
+    asynchronous,
+    consumed,
+    updates=UPDATES,
+    groups_per_collection=4,
+    samples_per_prompt=4,
+):
     """Completion order may vary; identities and complete groups may not."""
     counts, groups, versions = Counter(), {}, {}
     for sample in samples:
@@ -71,8 +81,13 @@ def batch_membership(samples, prepared, *, rollout, asynchronous, consumed, upda
         if not 0 <= rollout - version <= int(asynchronous):
             raise ValueError("Training collection exceeds its policy-lag budget")
         versions[key] = version
-    if len(counts) != 4 or set(counts.values()) != {4} or len(groups) != 4 or len(set(groups.values())) != 4:
-        raise ValueError("Expected four distinct four-response prompt groups")
+    if (
+        len(counts) != groups_per_collection
+        or set(counts.values()) != {samples_per_prompt}
+        or len(groups) != groups_per_collection
+        or len(set(groups.values())) != groups_per_collection
+    ):
+        raise ValueError(f"Expected {groups_per_collection} distinct {samples_per_prompt}-response prompt groups")
     return list(counts), versions, sorted(groups)
 
 
