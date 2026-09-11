@@ -37,4 +37,11 @@ Placement: urgent, `ai2/holmes`, `ai2/open-instruct-dev`, minimum runtime one ho
 three GPUs, two-hour timeout. Results are under
 `/weka/oe-training-default/robertb/open-instruct/control-exercise/$BEAKER_EXPERIMENT_ID/replay-admission64`.
 
-Status: prepared; full-model results pending.
+Status: submitted and scheduled on Holmes 503; full-model results pending.
+
+- Experiment: [01M291KSAXN8P2M0QCE26NE1TZ](https://beaker.org/ex/01M291KSAXN8P2M0QCE26NE1TZ)
+- Source: `9004a8cda`; immutable image: `01M291KK92RHGYEDN33N5F8BNR`.
+- Core development revision pinned by the image: `48bb6d7e1554`.
+- Local validation: 27 tests passed (real-router recomputation/gradient checks,
+  corruption rejection, trial parser and control audit tests); lint and type checks passed.
+- Submitted 2026-09-11 20:12:45 UTC; scheduled 20:13:05 UTC.
