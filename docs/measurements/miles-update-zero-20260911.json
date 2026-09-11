@@ -4,7 +4,7 @@
   "core": {
     "experiment": "01M27F1Q59128QKVBTMFW32JDD",
     "source": "ffeffe0f2",
-    "status": "running; original parser passed, SGLang graph capture completed, prefill kernel warmup active at 05:35 UTC",
+    "status": "exited 1 after complete observations; learner.dispose timed out after 180 seconds",
     "output": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v2/core",
     "parser_qualification": {
       "image_docker": "7c55472146e2",
@@ -14,17 +14,52 @@
       "local_log": "/tmp/update-zero-core-parser-proof.log"
     },
     "job": "01M27F1Q95CMY6SDDMNW1T0MYE",
-    "result": "01M27F1Q5NTWDFHNHE9NFDSF7P"
-  },
-  "megatron": {
-    "experiment": "01M27EPG7T5PKJ9B7P6J1GPASD",
-    "status": "running; original source bootstrap and parser passed"
+    "result": "01M27F1Q5NTWDFHNHE9NFDSF7P",
+    "exit_code": 1,
+    "exited": "2026-09-11T05:49:02.126621Z",
+    "observations_complete": true,
+    "full_protocol_complete": false,
+    "optimizer_calls": 0,
+    "initial_publications": 1,
+    "initial_weight_comparison": {
+      "success": true
+    },
+    "cleanup": {
+      "completed": false,
+      "errors": [
+        "TimeoutError()"
+      ]
+    },
+    "official_results_local": "/tmp/update-zero-core-v2-results",
+    "hf_vs_published": {
+      "cases": 4,
+      "all_captured_activations_exact": true,
+      "all_route_logits_exact": true,
+      "all_route_sets_exact": true,
+      "all_next_token_logits_exact": true,
+      "next_token_logits_max_abs": 0.0,
+      "parameter_dtype_shape_changes": {},
+      "local_check_log": "/tmp/update-zero-core-publication-check.log",
+      "limitation": "Exact captured fixed-prefix prefill observations and native full weight comparison; does not establish historical decode equivalence."
+    }
   },
   "outputs": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v1",
-  "next": "Monitor Core v2 and Megatron v1; compare retained fixed-prefix traces using separate backend roots",
+  "next": "Compare Core v2 and Megatron v3 retained phases in explicit evidence-only mode; preserve cleanup failure separately from complete observations.",
   "core_attempt1": {
     "experiment": "01M27ENY7T955XE1W116D7M4BM",
     "status": "failed before model initialization",
     "error": "unsupported --no-use-wandb diagnostic argument; no optimizer steps"
+  },
+  "megatron_attempt1": {
+    "experiment": "01M27EPG7T5PKJ9B7P6J1GPASD",
+    "status": "failed after complete HF observations, before publication: native zero-rollout scheduler decay horizon was zero",
+    "optimizer_calls": 0
+  },
+  "megatron": {
+    "experiment": "01M27FJAG1YP5V889QNC3FBA5Z",
+    "job": "01M27FJAMK5K1KESPX25Q8GZFF",
+    "output": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-v3/megatron",
+    "status": "running; all HF observations completed at 05:56:38 UTC; native snapshot then trainer initialization pending",
+    "diagnostic_fix": "Explicit lr-decay-iters=100 preserves nonzero scheduler horizon with zero optimizer calls."
   }
 }
