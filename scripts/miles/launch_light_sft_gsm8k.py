@@ -51,7 +51,7 @@ python -m scripts.miles.light_sft_gsm8k run --root "$RUN_ROOT"
 """
     if stage == "core-retry":
         setup = (
-            f"python -m scripts.miles.light_sft_retry --source-root {ROOT} "
+            f"timeout --signal=TERM --kill-after=10s 20m python -m scripts.miles.light_sft_retry --source-root {ROOT} "
             '--root "$RUN_ROOT" --local-hf /tmp/light-sft-hf\n'
             'cp "$RUN_ROOT/local-staging.json" /output/\n'
         )

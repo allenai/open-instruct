@@ -225,6 +225,7 @@ def test_retry_preserves_original_outputs_and_stages_before_driver():
     assert "--source-root " + str(light_sft_gsm8k.ROOT) in command
     assert command.index("light_sft_retry") < command.index("light_sft_gsm8k run")
     assert "--local-hf /tmp/light-sft-hf" in command
+    assert "timeout --signal=TERM --kill-after=10s 20m python -m scripts.miles.light_sft_retry" in command
     assert task["resources"]["gpuCount"] == 4
     assert task["constraints"]["cluster"] == ["ai2/holmes"]
 
