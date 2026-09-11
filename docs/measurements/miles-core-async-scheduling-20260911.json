@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "qualification": "Full-SFT asynchronous four-update scheduling; corrected offline audit of retained samples",
+  "gpu_experiment": "01M274MRNFSFF34QRYRGAASH52",
+  "gpu_exit_code": 1,
+  "original_failure": "After all four optimizer updates and nine publications, original audit incorrectly required one policy version for the entire collection.",
+  "auditor_source": "f6d530fbe",
+  "cpu_experiment": "01M277SGJZ0YMSZHK6DY2NWE4H",
+  "cpu_result": "01M277SGK9TSQ8W1YKBEWKECVD",
+  "cpu_exit_code": 0,
+  "audit_sha256": "ada2a09488163368f264b4b298122ce6164101be62f83c3df6ff622fa322d908",
+  "passed_retained_execution_audit": true,
+  "completed_updates": 4,
+  "unique_prompts": 16,
+  "prepared_sha256": "1d8a22500fffdd9a7461c445998815d5e85cf9dd79859d93313798472c0e76e0",
+  "training": [
+    {
+      "file": "0.pt",
+      "sha256": "b44a46674ec52ba9a0156c729a88580260004f76fd6a0949e1e9ab4b0f51579b",
+      "versions": [
+        0
+      ],
+      "rank_versions": {
+        "0": [
+          0
+        ],
+        "1": [
+          0
+        ]
+      },
+      "summary": {
+        "samples": 16,
+        "accuracy": 0.75,
+        "mean_reward": 0.75,
+        "mean_response_tokens": 2266.1875,
+        "truncation_rate": 0.1875,
+        "at_response_cap": 3,
+        "prompt_groups": 4,
+        "mixed_reward_groups": 0,
+        "mixed_reward_group_fraction": 0.0
+      }
+    },
+    {
+      "file": "1.pt",
+      "sha256": "30283de55cb245057641773869eb1092579cc35f6f8b21ac26b0e5f84df6ceb2",
+      "versions": [
+        0
+      ],
+      "rank_versions": {
+        "0": [
+          0
+        ],
+        "1": [
+          0
+        ]
+      },
+      "summary": {
+        "samples": 16,
+        "accuracy": 0.5,
+        "mean_reward": 0.5,
+        "mean_response_tokens": 2029.8125,
+        "truncation_rate": 0.1875,
+        "at_response_cap": 3,
+        "prompt_groups": 4,
+        "mixed_reward_groups": 2,
+        "mixed_reward_group_fraction": 0.5
+      }
+    },
+    {
+      "file": "2.pt",
+      "sha256": "fbda03010e5facfb0f639a69c1d497c9dfaa617d92db8104ebb4deb126bb2775",
+      "versions": [
+        1,
+        2
+      ],
+      "rank_versions": {
+        "0": [
+          1,
+          2
+        ],
+        "1": [
+          1,
+          2
+        ]
+      },
+      "summary": {
+        "samples": 16,
+        "accuracy": 1.0,
+        "mean_reward": 1.0,
+        "mean_response_tokens": 1194.0,
+        "truncation_rate": 0.0,
+        "at_response_cap": 0,
+        "prompt_groups": 4,
+        "mixed_reward_groups": 0,
+        "mixed_reward_group_fraction": 0.0
+      }
+    },
+    {
+      "file": "3.pt",
+      "sha256": "3319b38dbfc20317f0f4d0ce50a54f95a20a9b4d045e7fb1cd9968de920e2ad4",
+      "versions": [
+        2,
+        3
+      ],
+      "rank_versions": {
+        "0": [
+          2,
+          3
+        ],
+        "1": [
+          2,
+          3
+        ]
+      },
+      "summary": {
+        "samples": 16,
+        "accuracy": 0.875,
+        "mean_reward": 0.875,
+        "mean_response_tokens": 1438.1875,
+        "truncation_rate": 0.125,
+        "at_response_cap": 2,
+        "prompt_groups": 4,
+        "mixed_reward_groups": 1,
+        "mixed_reward_group_fraction": 0.25
+      }
+    }
+  ],
+  "publication_versions": [
+    0,
+    1,
+    1,
+    2,
+    2,
+    3,
+    3,
+    4,
+    4
+  ],
+  "publication_repeated": [
+    false,
+    false,
+    true,
+    false,
+    true,
+    false,
+    true,
+    false,
+    true
+  ],
+  "checks": [
+    "Four complete four-response prompt groups per collection, no duplicates across collections",
+    "Exact prepared membership, rendered prompt, label, verifier, and tokenizer-ID hash",
+    "Direct independent GSM8KVerifier rescoring equals each stored reward",
+    "Homogeneous behavior version within each response and group; per-group lag at most one",
+    "Exact pinned rank-strided local behavior versions and unskipped optimizer steps1..4",
+    "Initial publication and all four same-version diagnostic re-publications"
+  ],
+  "synchronous_control": {
+    "experiment": "01M274P7X8F52HTW6SNEPTRD4T",
+    "exit_code": 143,
+    "reason": "Exceeded45-minute timeout; incomplete control is not a pass"
+  },
+  "limitations": [
+    "No heldout evaluation or learning comparison",
+    "No restart or endurance claim",
+    "Async completion order can consume different prepared prompts from sync",
+    "SG decode CUDA graphs disabled; eager-mode wall times must not be compared to earlier graph-enabled throughput",
+    "Original GPU failure and new CPU audit are separate immutable results"
+  ],
+  "gpu_source": "778a91cd930ba9c6ed19860be7711128d0617aac",
+  "gpu_image": "01M274MBFVF4SAMCPA6X8A85P2"
+}
