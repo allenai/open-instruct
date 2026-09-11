@@ -1,6 +1,7 @@
 """Compare successive retained batches under isolated Core kernel variants."""
 
 import argparse
+import dataclasses
 import hashlib
 import inspect
 import json
@@ -47,7 +48,17 @@ def compare_runs(root, manifest):
             raise ValueError("Core Python sources other than SwiGLU differ")
         if left["sources"]["oi_modules"] != right["sources"]["oi_modules"]:
             raise ValueError("Open-instruct runtime sources differ")
-        if left["recipe_argv"] != right["recipe_argv"]:
+        recipes = []
+        for mode, document in (("static", left), ("dynamic", right)):
+            recipe = list(document["recipe_argv"])
+            if manifest.get("configured_modes"):
+                index = recipe.index("--olmo-core-config") + 1
+                core = json.loads(recipe[index])
+                if core.pop("row_specialization") != mode:
+                    raise ValueError("Wrong configured row specialization")
+                recipe[index] = json.dumps(core, sort_keys=True)
+            recipes.append(recipe)
+        if recipes[0] != recipes[1]:
             raise ValueError("Effective recipe arguments differ")
         if left["inputs"] != right["inputs"]:
             raise ValueError("Retained batch inputs or partitions differ")
@@ -104,6 +115,13 @@ def run(root, output, arm, manifest):
             )
         )
         configuration = gsm8k_parity.configuration(root)
+        if manifest.get("configured_modes"):
+            configuration = dataclasses.replace(
+                configuration,
+                core=dataclasses.replace(
+                    configuration.core, row_specialization="static" if arm == "parent" else "dynamic"
+                ),
+            )
         report["recipe_argv"] = configuration.arguments()
         sys.argv = ["core-score-variants", *report["recipe_argv"]]
         args = arguments.parse_args()
@@ -114,6 +132,13 @@ def run(root, output, arm, manifest):
         started = time.perf_counter()
         worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
         worker.model = worker.train_module.model
+        if manifest.get("configured_modes"):
+            modes = [
+                module.row_specialization for module in worker.model.modules() if hasattr(module, "row_specialization")
+            ]
+            if not modes or set(modes) != {configuration.core.row_specialization}:
+                raise ValueError("Requested specialization did not reach expert modules")
+            report["module_modes"] = modes
         torch.cuda.synchronize()
         report["model_initialization_seconds"] = time.perf_counter() - started
         for rollout in range(5, 10):

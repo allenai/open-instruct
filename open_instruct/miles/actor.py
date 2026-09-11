@@ -127,7 +127,20 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 self._agree(lambda: self._validate_replay_batches(batches))
             versions = self._agree(lambda: data.policy_versions(rollout))
             self._agree(lambda: self.clock.validate_versions(versions, self.args.olmo_core.max_policy_lag))
+            torch.cuda.synchronize()
+            score_started = time.perf_counter()
             rollout["log_probs"] = self._score(self.train_module, batches, use_replay=True)
+            torch.cuda.synchronize()
+            contract.record(
+                self.args,
+                {
+                    "event": "score_timing",
+                    "rollout_id": rollout_id,
+                    "seconds": time.perf_counter() - score_started,
+                    "model_tokens": sum(batch["tokens"].numel() for batch in batches),
+                    "row_specialization": self.args.olmo_core.row_specialization,
+                },
+            )
             self._agree(lambda: contract.validate_training_data(rollout))
             agreement = self._agree(lambda: data.score_agreement(rollout))
             dist.all_reduce(agreement)

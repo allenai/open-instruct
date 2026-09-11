@@ -47,7 +47,7 @@ def configuration(campaign, output, *, asynchronous):
     return config
 
 
-def batch_membership(samples, prepared, *, rollout, asynchronous, consumed):
+def batch_membership(samples, prepared, *, rollout, asynchronous, consumed, updates=UPDATES):
     """Completion order may vary; identities and complete groups may not."""
     counts, groups, versions = Counter(), {}, {}
     for sample in samples:
@@ -60,7 +60,7 @@ def batch_membership(samples, prepared, *, rollout, asynchronous, consumed):
         groups[group] = key
         counts[key] += 1
         raw_versions = sample.get("weight_versions")
-        if not raw_versions or any(str(v) not in {str(i) for i in range(UPDATES + 1)} for v in raw_versions):
+        if not raw_versions or any(str(v) not in {str(i) for i in range(updates + 1)} for v in raw_versions):
             raise ValueError("Missing or malformed policy version")
         sample_versions = {int(v) for v in raw_versions}
         if len(sample_versions) != 1:

@@ -11,6 +11,7 @@ from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 from open_instruct import logger_utils
+from open_instruct.miles.timing import stage
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -59,7 +60,8 @@ async def train(args):
             if args.fully_async:
                 await manager.core_publication_boundary.remote(False)
 
-        await publish()
+        with stage(args, "initial_publication"):
+            await publish()
         evaluation = EvalDispatcher(args, learner, manager)
         if args.eval_interval is not None and not args.skip_eval_before_train:
             await evaluation.dispatch(
@@ -68,11 +70,13 @@ async def train(args):
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
             # In async mode the managed producer fills the bounded queue while
             # learning runs; dequeue happens only after the preceding publication.
-            batch = await manager.generate.remote(rollout_id)
+            with stage(args, "generation_wait", rollout_id):
+                batch = await manager.generate.remote(rollout_id)
             if args.offload_rollout:
                 await manager.offload.remote()
             try:
-                await learner.train(rollout_id, batch)
+                with stage(args, "training", rollout_id):
+                    await learner.train(rollout_id, batch)
             finally:
                 remove_rollout_data_refs(args, batch)
             sentinel = args.save_trigger_sentinel and os.path.exists(args.save_trigger_sentinel)
@@ -85,7 +89,8 @@ async def train(args):
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
             if (rollout_id + 1) % args.update_weights_interval == 0:
-                await publish(rollout_id)
+                with stage(args, "publication", rollout_id):
+                    await publish(rollout_id)
             if should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout):
                 await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
             if (
