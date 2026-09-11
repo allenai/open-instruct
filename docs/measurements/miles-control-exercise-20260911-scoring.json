@@ -1,0 +1,386 @@
+{
+  "exact_score_gate": true,
+  "compared_tokens": 154531,
+  "static": {
+    "points": [
+      {
+        "name": "batch5-first",
+        "model_tokens": 21045,
+        "seconds": 220.44546175096184,
+        "swiglu_misses_by_rank": [
+          150,
+          151
+        ],
+        "all_jit_misses_by_rank": [
+          361,
+          328
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          126.82996702520177,
+          117.60266043432057
+        ]
+      },
+      {
+        "name": "batch5-repeat",
+        "model_tokens": 21045,
+        "seconds": 1.0720391310751438,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch6-first",
+        "model_tokens": 35462,
+        "seconds": 81.41588580189273,
+        "swiglu_misses_by_rank": [
+          150,
+          148
+        ],
+        "all_jit_misses_by_rank": [
+          216,
+          246
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          58.15437491144985,
+          64.21673063421622
+        ]
+      },
+      {
+        "name": "batch6-repeat",
+        "model_tokens": 35462,
+        "seconds": 1.1412413357757032,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch7-first",
+        "model_tokens": 42131,
+        "seconds": 57.10450371494517,
+        "swiglu_misses_by_rank": [
+          151,
+          152
+        ],
+        "all_jit_misses_by_rank": [
+          151,
+          184
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          42.75723883509636,
+          48.93770775292069
+        ]
+      },
+      {
+        "name": "batch7-repeat",
+        "model_tokens": 42131,
+        "seconds": 1.2912543192505836,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch8-first",
+        "model_tokens": 18332,
+        "seconds": 45.33320289570838,
+        "swiglu_misses_by_rank": [
+          142,
+          147
+        ],
+        "all_jit_misses_by_rank": [
+          144,
+          147
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          40.979389297775924,
+          39.71388600766659
+        ]
+      },
+      {
+        "name": "batch8-repeat",
+        "model_tokens": 18332,
+        "seconds": 1.1804268909618258,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch9-first",
+        "model_tokens": 50029,
+        "seconds": 57.446934388019145,
+        "swiglu_misses_by_rank": [
+          147,
+          148
+        ],
+        "all_jit_misses_by_rank": [
+          179,
+          148
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          50.37481988640502,
+          39.58502572635189
+        ]
+      },
+      {
+        "name": "batch9-repeat",
+        "model_tokens": 50029,
+        "seconds": 1.2143721538595855,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      }
+    ],
+    "first_batch_seconds": 220.44546175096184,
+    "changing_batch_seconds": {
+      "count": 4,
+      "mean": 60.325131700141355,
+      "median": 57.275719051482156,
+      "min": 45.33320289570838,
+      "max": 81.41588580189273
+    },
+    "repeated_batch_seconds": {
+      "count": 5,
+      "mean": 1.1798667661845683,
+      "median": 1.1804268909618258,
+      "min": 1.0720391310751438,
+      "max": 1.2912543192505836
+    },
+    "changing_batch_token_time_correlation": 0.315535829237808
+  },
+  "dynamic": {
+    "points": [
+      {
+        "name": "batch5-first",
+        "model_tokens": 21045,
+        "seconds": 121.5909286532551,
+        "swiglu_misses_by_rank": [
+          1,
+          1
+        ],
+        "all_jit_misses_by_rank": [
+          212,
+          178
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          91.27361859800294,
+          75.21665124874562
+        ]
+      },
+      {
+        "name": "batch5-repeat",
+        "model_tokens": 21045,
+        "seconds": 1.115855042822659,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch6-first",
+        "model_tokens": 35462,
+        "seconds": 38.14885811787099,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          66,
+          98
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          18.271434131544083,
+          25.47808046732098
+        ]
+      },
+      {
+        "name": "batch6-repeat",
+        "model_tokens": 35462,
+        "seconds": 1.10337282018736,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch7-first",
+        "model_tokens": 42131,
+        "seconds": 12.34305314719677,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          32
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          7.582607073243707
+        ]
+      },
+      {
+        "name": "batch7-repeat",
+        "model_tokens": 42131,
+        "seconds": 1.0884326337836683,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch8-first",
+        "model_tokens": 18332,
+        "seconds": 1.8091839482076466,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          2,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0.5125981098972261,
+          0
+        ]
+      },
+      {
+        "name": "batch8-repeat",
+        "model_tokens": 18332,
+        "seconds": 1.0737945372238755,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "batch9-first",
+        "model_tokens": 50029,
+        "seconds": 12.614686145912856,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          32,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          7.860696353949606,
+          0
+        ]
+      },
+      {
+        "name": "batch9-repeat",
+        "model_tokens": 50029,
+        "seconds": 1.1132821990177035,
+        "swiglu_misses_by_rank": [
+          0,
+          0
+        ],
+        "all_jit_misses_by_rank": [
+          0,
+          0
+        ],
+        "jit_miss_wall_seconds_by_rank": [
+          0,
+          0
+        ]
+      }
+    ],
+    "first_batch_seconds": 121.5909286532551,
+    "changing_batch_seconds": {
+      "count": 4,
+      "mean": 16.228945339797065,
+      "median": 12.478869646554813,
+      "min": 1.8091839482076466,
+      "max": 38.14885811787099
+    },
+    "repeated_batch_seconds": {
+      "count": 5,
+      "mean": 1.0989474466070532,
+      "median": 1.10337282018736,
+      "min": 1.0737945372238755,
+      "max": 1.115855042822659
+    },
+    "changing_batch_token_time_correlation": 0.2693250383516359
+  },
+  "dynamic_no_new_swiglu_variants_after_first": true,
+  "changing_batch_speedup": 3.717131978515598
+}

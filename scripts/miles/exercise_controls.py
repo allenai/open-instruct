@@ -148,7 +148,11 @@ def describe(values):
     )
 
 
-def audit(campaign, output, arm, updates):
+def read_jsonl(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def audit(campaign, output, arm, updates, report_path=None):
     config = configuration(campaign, output, arm, updates)
     if RunConfig.load(output / "run.toml").arguments() != config.arguments():
         raise ValueError("Run config differs from protocol")
@@ -184,7 +188,7 @@ def audit(campaign, output, arm, updates):
         groups_seen.update(groups)
     contracts = {}
     for rank in (0, 1):
-        rows = evidence.read_rows(output / f"metrics/training_contract_rank{rank}.jsonl")
+        rows = read_jsonl(output / f"metrics/training_contract_rank{rank}.jsonl")
         steps = [row for row in rows if row["event"] == "optimizer"]
         if [row["step"] for row in steps] != list(range(1, updates + 1)) or any(
             row["optimizer_skipped"] for row in steps
@@ -197,11 +201,11 @@ def audit(campaign, output, arm, updates):
             ):
                 raise ValueError("Trainer consumed different versions or sample count")
         contracts[str(rank)] = rows
-    publications = evidence.read_rows(output / "metrics/publication.jsonl")
+    publications = read_jsonl(output / "metrics/publication.jsonl")
     expected = [(i, False) for i in range(updates + 1)] + ([(updates, True)] if arm == "controls" else [])
     if [(row["version"], row["repeated_version"]) for row in publications] != expected:
         raise ValueError("Missing or repeated publication")
-    stages = evidence.read_rows(output / "metrics/driver_timing.jsonl")
+    stages = read_jsonl(output / "metrics/driver_timing.jsonl")
     if any(not row["passed"] for row in stages):
         raise ValueError("A measured driver stage failed")
     score_rows = [[row for row in contracts[str(rank)] if row["event"] == "score_timing"] for rank in (0, 1)]
@@ -248,7 +252,10 @@ def audit(campaign, output, arm, updates):
         ]
         if not all(row["valid"] for row in report["evaluation"]):
             raise ValueError("Heldout eval audit failed")
-    (output / "audit.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    destination = report_path or output / "audit.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("x") as stream:
+        stream.write(json.dumps(report, indent=2, allow_nan=False) + "\n")
     print("CONTROL_EXERCISE_PASSED", arm, json.dumps({k: v for k, v in report.items() if k != "training"}), flush=True)
 
 
@@ -259,6 +266,7 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("arm", choices=ARMS)
     parser.add_argument("--updates", type=int, default=24)
+    parser.add_argument("--report", type=Path, help="Fresh independent audit report path")
     args = parser.parse_args()
     if not 4 <= args.updates <= 80:
         parser.error("Use 4..80 updates within the frozen 400-prompt training set")
@@ -267,7 +275,7 @@ def main():
     elif args.command == "train":
         train_cli(args.output)
     else:
-        audit(args.campaign, args.output, args.arm, args.updates)
+        audit(args.campaign, args.output, args.arm, args.updates, args.report)
 
 
 if __name__ == "__main__":

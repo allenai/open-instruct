@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 from miles.utils import arguments
 from scripts.miles import exercise_controls, launch_control_exercise
 from transformers import Qwen3Config
@@ -58,3 +59,58 @@ def test_grouped_launch_is_bounded_and_on_holmes():
     assert all(t["context"]["priority"] == "urgent" and t["context"]["minRuntime"] == "1h" for t in tasks)
     assert all(t["constraints"]["cluster"] == ["ai2/holmes"] for t in tasks)
     assert "for arm in sync async" in tasks[1]["arguments"][0]
+
+
+def test_audit_reads_metric_schemas_without_prompt_metadata(tmp_path, monkeypatch):
+    campaign, output = tmp_path / "prepared", tmp_path / "output"
+    campaign.mkdir()
+    (output / "metrics").mkdir(parents=True)
+    (output / "rollouts").mkdir()
+    prepared = [{"input": f"prompt{i}", "metadata": {"prepared_sample_id": str(i)}} for i in range(16)]
+    (campaign / "train.jsonl").write_text("".join(json.dumps(row) + "\n" for row in prepared))
+    monkeypatch.setattr(
+        exercise_controls.prepare_gsm8k_parity,
+        "verify_preparation",
+        lambda _: {"partitions": {"train": {"rows": [{"prepared_sample_id": str(i)} for i in range(16)]}}},
+    )
+    monkeypatch.setattr(
+        exercise_controls.evidence,
+        "audit_dump",
+        lambda *a, **k: {"valid": True, "summary": {"mean_response_tokens": 10}},
+    )
+    monkeypatch.setattr(exercise_controls.evidence, "parse_timing_log", lambda *a, **k: {})
+    config = exercise_controls.configuration(campaign, output, "sync", 4)
+    exercise_controls.write_config(output / "run.toml", config)
+    rows, stages = [], []
+    for update in range(4):
+        samples = [
+            {"metadata": {"prepared_sample_id": str(group)}, "group_index": group, "weight_versions": [str(update)]}
+            for group in range(4 * update, 4 * update + 4)
+            for _ in range(4)
+        ]
+        torch.save({"samples": samples}, output / f"rollouts/{update}.pt")
+        rows += [
+            {
+                "event": "optimizer",
+                "step": update + 1,
+                "optimizer_skipped": False,
+                "local_behavior_versions": [update],
+                "normalization": {"samples": 16},
+            },
+            {"event": "score_timing", "rollout_id": update, "row_specialization": "dynamic", "seconds": 1.0},
+        ]
+        stages += [
+            {"stage": name, "rollout_id": update, "passed": True, "seconds": 1.0}
+            for name in ("generation_wait", "training", "publication")
+        ]
+    for rank in (0, 1):
+        (output / f"metrics/training_contract_rank{rank}.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows)
+        )
+    (output / "metrics/publication.jsonl").write_text(
+        "".join(json.dumps({"version": v, "repeated_version": False}) + "\n" for v in range(5))
+    )
+    (output / "metrics/driver_timing.jsonl").write_text("".join(json.dumps(row) + "\n" for row in stages))
+    (output / "elapsed.json").write_text('{"seconds": 12}')
+    exercise_controls.audit(campaign, output, "sync", 4)
+    assert json.loads((output / "audit.json").read_text())["passed"]

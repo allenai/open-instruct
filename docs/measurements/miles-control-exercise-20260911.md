@@ -55,11 +55,34 @@ large native checkpoints remain on WEKA. A job exit alone is not an audit pass.
 
 Submitted experiment: [01M28PAQW8YCJ6P8M9F2343PYH](https://beaker.org/ex/01M28PAQW8YCJ6P8M9F2343PYH).
 Source: `d8beffb81`; immutable image: `01M28PAA65C3MQ0QWZRP3KK6Z7`.
-All three tasks were placed on `holmes-cs-aus-504`, using disjoint GPUs on the
-same host. Shared host/IO/fabric contention may affect the overlapping startup
-and early measurements; this is not an isolated hardware benchmark.
+Scoring and scheduling were placed on `holmes-cs-aus-504`, using disjoint GPUs.
+The controls task ran on `holmes-cs-aus-488`. Shared host/IO/fabric contention
+between scoring and scheduling may affect their overlapping startup and early
+measurements; this is not an isolated hardware benchmark.
 
 Prelaunch validation: 30 runtime parser/audit tests and four paired KDA/latent
 GPU training parity cases passed; formatting/static checks passed. The scoring
 recipe guard subsequently passed 10 tests including an injected unrelated
 configuration difference. Results below must come from completed remote audits.
+
+## Completed scoring result
+
+The two-rank full-model comparison passed with **154,531 exact log-probabilities**.
+The configured mode was checked on constructed routed-expert modules.
+
+| Measurement | Static rows | Dynamic rows |
+| --- | ---: | ---: |
+| First cold scoring pass | 220.45 s | 121.59 s |
+| Subsequent changing batches (four), mean | 60.33 s | 16.23 s |
+| Repeated batches (five), mean | 1.18 s | 1.10 s |
+| SwiGLU variants per rank on first batch | 150–151 | 1 |
+| New SwiGLU variants per rank on each later batch | 142–152 | 0 |
+
+Changing-batch scoring was 3.72× faster in this bounded trial. All dynamic
+repeats had zero JIT misses. Dynamic first passes still encountered other kernels'
+JIT misses (up to 98 per rank), so this patch does not eliminate all compilation.
+The four changing batches are too few for a useful correlation conclusion.
+
+[Scoring measurement series](miles-control-exercise-20260911-scoring.json). Raw
+compiler signatures, source hashes and score tensors are in the scoring task's
+Beaker result. Scheduling and controls results remain pending.
