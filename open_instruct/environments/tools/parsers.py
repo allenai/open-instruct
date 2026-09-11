@@ -254,7 +254,9 @@ VLLM_PARSERS: dict[str, VllmParserConfig] = {
     # are wrapped in <tool_response> per the Qwen3.5 chat template.
     # The generation prompt starts a <think> block as the Qwen3.5 default is thinking mode.
     "vllm_qwen3_xml": VllmParserConfig(
-        import_path="vllm.tool_parsers.qwen3xml_tool_parser:Qwen3XMLToolParser",
+        # vllm 0.26 replaced Qwen3XMLToolParser with the parser-engine-backed
+        # Qwen3EngineToolParser; same XML tool-call format.
+        import_path="vllm.tool_parsers.qwen3_engine_tool_parser:Qwen3EngineToolParser",
         role_templates={
             "tool": "<|im_start|>user\n<tool_response>\n{output}\n</tool_response>\n<|im_end|>\n",
             "user": "<|im_start|>user\n{output}<|im_end|>\n",

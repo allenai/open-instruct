@@ -9,7 +9,10 @@ dependencies = [
     "antlr4-python3-runtime==4.11",
     "backoff>=2.2.1",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
-    "datasets>=4.0.0",
+    # >=4.8.4: older datasets does `from torchvision.io import VideoReader`, which
+    # torchvision 0.26 (torch 2.11's companion) removed; it kills any .map/formatting
+    # call once torchvision is imported, including hours into a tokenization job.
+    "datasets>=4.8.4,<5",
     "debugpy>=1.8.13",
     "deepspeed>=0.18.3",
     "hf-transfer>=0.1.8",
@@ -33,12 +36,15 @@ dependencies = [
     "torchvision>=0.25.0; platform_system == 'Linux'",
     "torchaudio>=2.10.0; platform_system == 'Linux'",
     "transformers>=5.4.0",
-    "vllm>=0.19.1; platform_system != 'Darwin'",
+    "vllm>=0.26.0; platform_system != 'Darwin'",
     "wandb==0.23.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "flash-attn>=2.8.3; platform_system != 'Darwin' and platform_machine != 'aarch64'",
-    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta6/flash_attn_4-4.0.0b5-py3-none-any.whl ; platform_system != 'Darwin'",
+    # beta19 is the newest fa4 whose declared ranges admit vllm 0.26's exact pins
+    # (nvidia-cutlass-dsl==4.6.0, apache-tvm-ffi==0.1.10). beta14 and older target
+    # the removed cutlass 4.4 API; beta20+ pin cutlass 4.6.0.dev0 or tvm-ffi>=0.1.12.
+    "flash-attn-4 @ https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta19/flash_attn_4-4.0.0b19-py3-none-any.whl ; platform_system != 'Darwin'",
     "liger-kernel>=0.7.0; platform_system != 'Darwin'",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
@@ -72,6 +78,8 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 # pytorch related setups
 [tool.uv.sources]
 ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "fa6c5014c9f6e9ee789da2d9c20d5126fee8df0d" }
+# No prebuilt flash-attn 2 wheel exists for torch 2.11 (builders went 2.10 -> 2.13);
+# the torch2.10 builds import and train under torch 2.11 (validated on the KDA MoE spike).
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda12" },
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda13" },
@@ -92,16 +100,32 @@ torchaudio = [
   { index = "pytorch-cu130", group = "cuda13" },
   { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
 ]
+# torchcodec (pulled in by vllm >=0.26) ships no cu128 builds from 0.14 on — only
+# cu130 and cpu. The PyPI default is cu13-built and fails to dlopen on the cu128
+# stack, so cuda12 takes the cpu build; open-instruct never GPU-decodes video.
+torchcodec = [
+  { index = "pytorch-cpu", group = "cuda12" },
+  { index = "pytorch-cu130", group = "cuda13" },
+  { index = "pytorch-cu130", marker = "platform_system == 'Linux' and platform_machine == 'aarch64'" },
+]
 
-# vLLM wheels on PyPI are built against CUDA 12.8 on x86_64. The +cu130 builds
-# are only published on the version-specific vLLM wheel index.
+# From 0.26 vLLM's PyPI wheels are built against CUDA 13 (they need
+# libcudart.so.13 and die on the cu128 stack), and no cu128 build exists. The
+# cuda12 group takes the +cu129 build from the version-specific index: CUDA 12.x
+# minor-version compatibility runs it on the fleet's 12.8 drivers.
 vllm = [
+  { index = "vllm-cu129", group = "cuda12" },
   { index = "vllm-cu130", group = "cuda13" },
 ]
 
 [[tool.uv.index]]
+name = "vllm-cu129"
+url = "https://wheels.vllm.ai/0.26.0/cu129"
+explicit = true
+
+[[tool.uv.index]]
 name = "vllm-cu130"
-url = "https://wheels.vllm.ai/0.19.1/cu130"
+url = "https://wheels.vllm.ai/0.26.0/cu130"
 explicit = true
 
 [[tool.uv.index]]
@@ -142,12 +166,18 @@ conflicts = [
     ],
 ]
 override-dependencies = [
-    "transformers>=5.4.0",
+    # Floor matches vllm 0.26.0's own requirement; the override otherwise silences it.
+    "transformers>=5.5.3",
 ]
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
     "sys_platform == 'darwin'",
+]
+# xgrammar (via vllm) publishes aarch64 wheels ahead of x86_64; without this the
+# resolver picks a version with no x86_64 Linux wheel and sync fails.
+required-environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [dependency-groups]
@@ -155,7 +185,8 @@ cuda12 = [
     "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchcodec>=0.14; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "vllm>=0.26.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
     # The flat FA3 index can publish a newer aarch64-only build than the latest x86_64 build.
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu128torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
@@ -164,7 +195,8 @@ cuda13 = [
     "torch>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "torchvision>=0.25.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "torchaudio>=2.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
-    "vllm>=0.19.1; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "torchcodec>=0.14; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "vllm>=0.26.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn>=2.8.3; platform_system == 'Linux' and platform_machine == 'x86_64'",
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
