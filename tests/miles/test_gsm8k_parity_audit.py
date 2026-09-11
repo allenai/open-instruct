@@ -78,7 +78,7 @@ def test_rejects_corrupt_stored_evidence(fault, tmp_path):
         assert result["samples"][0]["correct"] == 1
 
 
-def _campaign(root):
+def _campaign(root, updates=audit.UPDATES, eval_steps=audit.EVAL_STEPS):
     train = [_row(f"train-{i}") for i in range(400)]
     heldout = [_row(f"test-{i}") for i in range(2)]
     proofs = {}
@@ -98,14 +98,14 @@ def _campaign(root):
     )
     for backend, offset in (("core", 0), ("megatron", 1)):
         folder = root / backend / ("rollouts" if backend == "core" else "rollout_data")
-        for index in range(audit.UPDATES):
+        for index in range(updates):
             samples = [
                 _sample(row, correct=i % 2 == 0, version=index + offset)
-                for row in train[index * 4 : (index + 1) * 4]
+                for row in [train[(index * 4 + offset) % len(train)] for offset in range(4)]
                 for i in range(4)
             ]
             _write_dump(folder / f"{index}.pt", samples)
-        for step in audit.EVAL_STEPS:
+        for step in eval_steps:
             # Deliberately reverse sample order between arms: pairing must use IDs.
             samples = [
                 _sample(row, correct=(i == 0 if step == 0 else backend == "core" or i == 1), version=step + offset)
@@ -117,20 +117,20 @@ def _campaign(root):
     publication = root / "core/metrics/publication.jsonl"
     publication.parent.mkdir()
     publication.write_text(
-        "".join(json.dumps({"version": step, "total_seconds": 0.5}) + "\n" for step in range(audit.UPDATES + 1))
+        "".join(json.dumps({"version": step, "total_seconds": 0.5}) + "\n" for step in range(updates + 1))
     )
     (publication.parent / "training_contract_rank0.jsonl").write_text(
         json.dumps({"event": "initialize"})
         + "\n"
-        + "".join(json.dumps({"event": "optimizer", "step": step}) + "\n" for step in range(1, audit.UPDATES + 1))
+        + "".join(json.dumps({"event": "optimizer", "step": step}) + "\n" for step in range(1, updates + 1))
     )
     (root / "core/completion.json").write_text(
         json.dumps(
             {
                 "completed": True,
-                "optimizer_steps": audit.UPDATES,
-                "publication_count": audit.UPDATES + 1,
-                "rollout_files": audit.UPDATES + len(audit.EVAL_STEPS),
+                "optimizer_steps": updates,
+                "publication_count": updates + 1,
+                "rollout_files": updates + len(eval_steps),
             }
         )
     )
@@ -523,3 +523,52 @@ def test_compare_rejects_shared_change_of_membership_between_endpoints(tmp_path)
     result = audit.compare(core, megatron)
     assert not result["valid"]
     assert any("transition endpoint membership" in error for error in result["errors"])
+
+
+def test_500_updates_audit_repeated_passes_and_final_endpoint(tmp_path):
+    steps = tuple(range(0, 501, 20))
+    _campaign(tmp_path, updates=500, eval_steps=steps)
+    core, megatron = [
+        audit.audit(tmp_path, backend, updates=500, eval_steps=steps) for backend in ("core", "megatron")
+    ]
+    assert core["valid"] and megatron["valid"]
+    assert core["training_summary"]["samples"] == 8000
+    assert core["training_summary"]["prompt_groups"] == 2000
+    assert core["evaluation"][-1]["policy_version"] == 500
+    assert megatron["evaluation"][-1]["policy_version"] == 501
+    result = audit.compare(core, megatron, updates=500, eval_steps=steps)
+    assert result["valid"] and result["within_backend_0_to_500"]["core"]["final_step"] == 500
+    assert "accuracy_gain_0_to_100" not in result
+    assert not audit.audit(tmp_path, "core")["valid"]
+    (tmp_path / "core/rollouts/499.pt").unlink()
+    assert not audit.audit(tmp_path, "core", updates=500, eval_steps=steps)["valid"]
+
+
+def test_extended_timing_excludes_later_evaluation_boundary(tmp_path):
+    path = tmp_path / "timing.log"
+    path.write_text(
+        "\n".join(
+            [
+                f"(RolloutManager pid=1) [2026-09-11 00:{minute:02}:00.000 rollout_manager] metrics.py:89 - perf {step}: {{'perf/rollout_time': 10.0}}"
+                for step, minute in ((119, 1), (120, 5), (121, 6))
+            ]
+        )
+    )
+    result = audit.parse_timing_log(path, eval_steps=tuple(range(0, 501, 20)))
+    assert result["excluded_eval_intervals"] == [[119, 120]]
+    assert result["phases"]["collection_boundary_cycle"]["warm"]["mean_seconds"] == 60
+
+
+def test_per_prompt_version_map_remains_strict_within_group(tmp_path):
+    rows = [_row("a"), _row("b")]
+    path = tmp_path / "3.pt"
+    samples = [_sample(rows[0], version=2), _sample(rows[1], version=3)]
+    _write_dump(path, samples)
+    assert audit.audit_dump(path, rows, version={"a": 2, "b": 3}, multiplicity=1)["valid"]
+    assert not audit.audit_dump(path, rows, version=3, multiplicity=1)["valid"]
+    samples[0]["weight_versions"] = ["2", "3"]
+    _write_dump(path, samples)
+    assert not audit.audit_dump(path, rows, version={"a": 2, "b": 3}, multiplicity=1)["valid"]
+    for invalid in ({"a": 2}, {"a": 2, "b": 3, "c": 3}, {"a": True, "b": 3}, {"a": "2", "b": 3}):
+        with pytest.raises(ValueError, match="version mapping"):
+            audit.audit_dump(path, rows, version=invalid, multiplicity=1)

@@ -66,6 +66,11 @@ def summarize(rows):
 
 def audit_dump(path, prepared_rows, *, version, multiplicity, response_cap=4096, token_proofs=None):
     expected = {identity(row): row for row in prepared_rows}
+    if isinstance(version, dict):
+        if set(version) != set(expected) or any(type(value) is not int or value < 0 for value in version.values()):
+            raise ValueError("Policy version mapping must contain exactly the prepared IDs and nonnegative integers")
+    elif type(version) is not int or version < 0:
+        raise ValueError("Policy version must be a nonnegative integer")
     expected_counts = Counter({key: multiplicity for key in expected})
     payload = torch.load(path, map_location="cpu", weights_only=False)
     errors, records, seen = [], [], Counter()
@@ -90,8 +95,9 @@ def audit_dump(path, prepared_rows, *, version, multiplicity, response_cap=4096,
         if sample["metadata"].get("verifiers") != row["metadata"].get("verifiers"):
             errors.append(f"{prefix}: verifier specification differs from prepared data")
         versions = sample.get("weight_versions")
-        if not versions or any(str(value) != str(version) for value in versions):
-            errors.append(f"{prefix}: missing or unexpected policy version (expected {version})")
+        expected_version = version[key] if isinstance(version, dict) else version
+        if not versions or any(str(value) != str(expected_version) for value in versions):
+            errors.append(f"{prefix}: missing or unexpected policy version (expected {expected_version})")
         length = sample["response_length"]
         if not isinstance(length, int) or not 0 < length <= response_cap or length > len(sample["tokens"]):
             errors.append(f"{prefix}: invalid response token length")
@@ -149,13 +155,13 @@ def evidence_rows(path):
     return rows, []
 
 
-def publication_summary(path):
+def publication_summary(path, *, updates=UPDATES):
     rows, errors = evidence_rows(path)
     if rows is None:
         return {"available": path.is_file(), "valid": False, "errors": errors}
     versions = [row.get("version") for row in rows]
-    if versions != list(range(UPDATES + 1)) or any(type(version) is not int for version in versions):
-        errors.append(f"publication versions must be exactly 0..{UPDATES} in order")
+    if versions != list(range(updates + 1)) or any(type(version) is not int for version in versions):
+        errors.append(f"publication versions must be exactly 0..{updates} in order")
     repeated = sum(bool(row.get("repeated_version", False)) for row in rows)
     if repeated:
         errors.append("unexpected repeated-version publications")
@@ -177,13 +183,13 @@ def publication_summary(path):
     }
 
 
-def optimizer_summary(path):
+def optimizer_summary(path, *, updates=UPDATES):
     rows, errors = evidence_rows(path)
     if rows is None:
         return {"available": path.is_file(), "valid": False, "errors": errors}
     steps = [row.get("step") for row in rows if row.get("event") == "optimizer"]
-    if steps != list(range(1, UPDATES + 1)) or any(type(step) is not int for step in steps):
-        errors.append(f"optimizer records must be exactly 1..{UPDATES} in order")
+    if steps != list(range(1, updates + 1)) or any(type(step) is not int for step in steps):
+        errors.append(f"optimizer records must be exactly 1..{updates} in order")
     return {
         "available": True,
         "valid": not errors,
@@ -194,15 +200,15 @@ def optimizer_summary(path):
     }
 
 
-def check_core_completion(root, directory, report):
+def check_core_completion(root, directory, report, *, updates=UPDATES, eval_steps=EVAL_STEPS):
     for key, filename, summarizer in (
         ("publication", "publication.jsonl", publication_summary),
         ("optimizer", "training_contract_rank0.jsonl", optimizer_summary),
     ):
-        report[key] = summarizer(root / "metrics" / filename)
+        report[key] = summarizer(root / "metrics" / filename, updates=updates)
         report["errors"].extend(f"{key}: {error}" for error in report[key]["errors"])
-    expected_names = {f"{step}.pt" for step in range(UPDATES)} | {
-        f"eval_{step - 1 if step else 0}.pt" for step in EVAL_STEPS
+    expected_names = {f"{step}.pt" for step in range(updates)} | {
+        f"eval_{step - 1 if step else 0}.pt" for step in eval_steps
     }
     actual_names = {path.name for path in directory.glob("*.pt")}
     report["rollout_file_count"] = len(actual_names)
@@ -221,9 +227,9 @@ def check_core_completion(root, directory, report):
     if not isinstance(record, dict) or record.get("completed") is not True:
         report["errors"].append("Core completion must explicitly report completed=true")
     expected = {
-        "optimizer_steps": UPDATES,
-        "publication_count": UPDATES + 1,
-        "rollout_files": UPDATES + len(EVAL_STEPS),
+        "optimizer_steps": updates,
+        "publication_count": updates + 1,
+        "rollout_files": updates + len(eval_steps),
     }
     for key, count in expected.items():
         if not isinstance(record, dict) or type(record.get(key)) is not int or record.get(key) != count:
@@ -240,7 +246,17 @@ def arm_directory(backend, megatron_directory="megatron"):
     return megatron_directory if backend == "megatron" else "core"
 
 
-def audit(root, backend, *, megatron_directory="megatron"):
+def audit(
+    root,
+    backend,
+    *,
+    megatron_directory="megatron",
+    updates=UPDATES,
+    eval_steps=EVAL_STEPS,
+    prompts_per_update=4,
+    samples_per_prompt=4,
+    response_cap=4096,
+):
     selected_directory = arm_directory(backend, megatron_directory)
     preparation = json.loads((root / "preparation.json").read_text())
     if not {"train.jsonl", "eval.jsonl"}.issubset(preparation["files"]):
@@ -271,21 +287,37 @@ def audit(root, backend, *, megatron_directory="megatron"):
         "errors": [],
         "interpretation": "One run per backend; descriptive comparison, without significance or learning-rate conclusions.",
     }
-    for rollout in range(UPDATES):
-        selected = [training[(rollout * 4 + offset) % len(training)] for offset in range(4)]
+    for rollout in range(updates):
+        selected = [
+            training[(rollout * prompts_per_update + offset) % len(training)] for offset in range(prompts_per_update)
+        ]
         path = directory / f"{rollout}.pt"
         if not path.is_file():
             report["errors"].append(f"missing training dump {path.name}")
             continue
-        entry = audit_dump(path, selected, version=rollout + version_offset, multiplicity=4, token_proofs=token_proofs)
+        entry = audit_dump(
+            path,
+            selected,
+            version=rollout + version_offset,
+            multiplicity=samples_per_prompt,
+            response_cap=response_cap,
+            token_proofs=token_proofs,
+        )
         entry["completed_steps_before_update"] = rollout
         report["training"].append(entry)
-    for step in EVAL_STEPS:
+    for step in eval_steps:
         path = directory / f"eval_{step - 1 if step else 0}.pt"
         if not path.is_file():
             report["errors"].append(f"missing evaluation dump {path.name}")
             continue
-        entry = audit_dump(path, evaluation, version=step + version_offset, multiplicity=1, token_proofs=token_proofs)
+        entry = audit_dump(
+            path,
+            evaluation,
+            version=step + version_offset,
+            multiplicity=1,
+            response_cap=response_cap,
+            token_proofs=token_proofs,
+        )
         entry["completed_steps"] = step
         report["evaluation"].append(entry)
     report["training_summary"] = summarize([sample for row in report["training"] for sample in row["samples"]])
@@ -296,7 +328,7 @@ def audit(root, backend, *, megatron_directory="megatron"):
         report["training_summary"]["mixed_reward_groups"] / groups if groups else None
     )
     if backend == "core":
-        check_core_completion(root / selected_directory, directory, report)
+        check_core_completion(root / selected_directory, directory, report, updates=updates, eval_steps=eval_steps)
     else:
         report["completion_evidence"] = (
             "Rollout/evaluation evidence only; confirm final training log and Beaker exit status separately. "
@@ -306,9 +338,9 @@ def audit(root, backend, *, megatron_directory="megatron"):
     return report
 
 
-def within_backend_transitions(report):
+def within_backend_transitions(report, *, updates=UPDATES):
     endpoints = []
-    for step in (0, UPDATES):
+    for step in (0, updates):
         matches = [entry for entry in report["evaluation"] if entry["completed_steps"] == step]
         if len(matches) != 1:
             return None, [f"{report['backend']}: missing unique transition endpoint {step}"]
@@ -336,7 +368,7 @@ def within_backend_transitions(report):
     caps = Counter((pair["initial_at_response_cap"], pair["final_at_response_cap"]) for pair in pairs)
     return {
         "initial_step": 0,
-        "final_step": UPDATES,
+        "final_step": updates,
         "questions": len(pairs),
         "correctness": {
             "correct_to_correct": scores[1, 1],
@@ -358,7 +390,7 @@ def within_backend_transitions(report):
     }, []
 
 
-def compare(core, megatron):
+def compare(core, megatron, *, updates=UPDATES, eval_steps=EVAL_STEPS):
     errors = []
     if not core["valid"] or not megatron["valid"]:
         errors.append("At least one arm failed its independent audit")
@@ -368,7 +400,7 @@ def compare(core, megatron):
     ):
         errors.append("Arms were audited against different prepared data")
     curves = []
-    for step in EVAL_STEPS:
+    for step in eval_steps:
         arms = []
         for report in (core, megatron):
             rows = [row for row in report["evaluation"] if row["completed_steps"] == step]
@@ -403,12 +435,12 @@ def compare(core, megatron):
         )
     transitions = {}
     for report in (core, megatron):
-        transition, transition_errors = within_backend_transitions(report)
+        transition, transition_errors = within_backend_transitions(report, updates=updates)
         errors.extend(transition_errors)
         if transition is not None:
             transitions[report["backend"]] = transition
     gains = {}
-    if curves and curves[0]["completed_steps"] == 0 and curves[-1]["completed_steps"] == UPDATES:
+    if curves and curves[0]["completed_steps"] == 0 and curves[-1]["completed_steps"] == updates:
         gains = {
             backend: curves[-1][backend]["accuracy"] - curves[0][backend]["accuracy"]
             for backend in ("core", "megatron")
@@ -418,8 +450,7 @@ def compare(core, megatron):
         valid=not errors,
         errors=errors,
         learning_curves=curves,
-        accuracy_gain_0_to_100=gains,
-        within_backend_0_to_100=transitions,
+        **{f"accuracy_gain_0_to_{updates}": gains, f"within_backend_0_to_{updates}": transitions},
         artifact_directories={
             "core": core.get("artifact_directory", "core"),
             "megatron": megatron.get("artifact_directory", "megatron"),
@@ -459,7 +490,7 @@ def _duration_summary(points):
     )
 
 
-def parse_timing_log(path, *, warmup_updates=5):
+def parse_timing_log(path, *, warmup_updates=5, eval_steps=EVAL_STEPS):
     """Extract indexed durations; initial eval/setup never enters warm phase means.
 
     Rollout and trainer `perf` dictionaries can share a rollout ID. Merge their
@@ -542,7 +573,7 @@ def parse_timing_log(path, *, warmup_updates=5):
     for index, (end, manager) in sorted(generation_ends.items()):
         if index - 1 not in generation_ends:
             continue  # A partial log is not evidence for any missing boundary.
-        if index in EVAL_STEPS:
+        if index in eval_steps:
             excluded_eval_intervals.append([index - 1, index])
             continue
         start, previous_manager = generation_ends[index - 1]
@@ -576,7 +607,7 @@ def parse_timing_log(path, *, warmup_updates=5):
         observed_log_span_seconds=max(timestamps) - min(timestamps) if timestamps else None,
         scope="Collection-boundary cycles run from generation-end N to generation-end N+1: "
         "update/publication N plus generation N+1 and orchestration. Missing boundaries are never inferred. "
-        "Scheduled-eval crossings are excluded; final update99 is not covered by cycles. "
+        "Scheduled-eval crossings are excluded; the final update is not covered by cycles. "
         "Generation includes rewards and rollout debug-dump time. "
         "Warm phase means exclude indices below warmup_updates and all eval/setup. "
         "Phase sums are not total runtime. Log span is only the observed timestamp span. "
@@ -655,20 +686,34 @@ def main():
     compare_parser.add_argument("--plot", type=Path)
     compare_parser.add_argument("--core-allocated-seconds", type=float)
     compare_parser.add_argument("--megatron-allocated-seconds", type=float)
+    for command_parser in (audit_parser, compare_parser):
+        command_parser.add_argument("--updates", type=int, default=UPDATES)
+        command_parser.add_argument("--eval-interval", type=int, default=20)
     args = parser.parse_args()
+    if args.updates <= 0 or args.eval_interval <= 0 or args.updates % args.eval_interval:
+        raise ValueError("Update horizon must be positive and divisible by evaluation interval")
+    eval_steps = tuple(range(0, args.updates + 1, args.eval_interval))
     if args.command == "audit":
-        result = audit(args.root, args.backend, megatron_directory=args.megatron_directory)
+        result = audit(
+            args.root,
+            args.backend,
+            megatron_directory=args.megatron_directory,
+            updates=args.updates,
+            eval_steps=eval_steps,
+        )
         output = args.output or args.root / arm_directory(args.backend, args.megatron_directory) / "audit.json"
     else:
         result = compare(
             *[
                 json.loads((args.root / arm_directory(backend, args.megatron_directory) / "audit.json").read_text())
                 for backend in ("core", "megatron")
-            ]
+            ],
+            updates=args.updates,
+            eval_steps=eval_steps,
         )
         output = args.output or args.root / "comparison.json"
         result["timing"] = {
-            backend: parse_timing_log(path, warmup_updates=args.warmup_updates)
+            backend: parse_timing_log(path, warmup_updates=args.warmup_updates, eval_steps=eval_steps)
             for backend, path in (("core", args.core_log), ("megatron", args.megatron_log))
             if path
         }

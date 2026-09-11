@@ -21,7 +21,7 @@ UPDATES = 100
 EVAL_INTERVAL = 20
 
 
-def configuration(root):
+def configuration(root, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, campaign=CAMPAIGN, save_interval=None):
     output = root / "core"
     return RunConfig(
         CoreConfig(
@@ -45,7 +45,7 @@ def configuration(root):
             global_batch_size=16,
             rollout_batch_size=4,
             n_samples_per_prompt=4,
-            num_rollout=UPDATES,
+            num_rollout=updates,
             prompt_data=str(root / "train.jsonl"),
             input_key="input",
             label_key="label",
@@ -56,7 +56,7 @@ def configuration(root):
             rollout_max_prompt_len=2048,
             rollout_max_context_len=6144,
             eval_prompt_data=["gsm8k", str(root / "eval.jsonl")],
-            eval_interval=EVAL_INTERVAL,
+            eval_interval=eval_interval,
             eval_temperature=0.0,
             n_samples_per_eval_prompt=1,
             eval_max_response_len=4096,
@@ -77,10 +77,11 @@ def configuration(root):
             check_weight_update_equal=True,
             update_weight_buffer_size=1024**3,
             save=str(output / "metrics"),
+            **({"save_interval": save_interval} if save_interval is not None else {}),
             save_debug_rollout_data=str(output / "rollouts/{rollout_id}.pt"),
             lr=1e-6,
             lr_decay_style="constant",
-            lr_decay_iters=UPDATES,
+            lr_decay_iters=updates,
             lr_warmup_iters=0,
             weight_decay=0.0,
             adam_beta1=0.9,
@@ -95,7 +96,7 @@ def configuration(root):
             wandb_mode="online",
             wandb_team="ai2-llm",
             wandb_project="olmo-rl-comparison",
-            wandb_group=CAMPAIGN + "-core",
+            wandb_group=campaign + "-core",
             wandb_dir=str(output / "wandb"),
             disable_wandb_random_suffix=True,
             wandb_always_use_train_step=True,
@@ -103,14 +104,14 @@ def configuration(root):
     )
 
 
-def effective_settings(args):
+def effective_settings(args, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, save_interval=None):
     """Record actual parser defaults too, so implicit differences are visible."""
     expected = {
-        "num_rollout": UPDATES,
+        "num_rollout": updates,
         "global_batch_size": 16,
         "rollout_batch_size": 4,
         "n_samples_per_prompt": 4,
-        "eval_interval": EVAL_INTERVAL,
+        "eval_interval": eval_interval,
         "rollout_shuffle": False,
         "skip_eval_before_train": False,
         "grpo_std_normalization": False,
@@ -131,7 +132,7 @@ def effective_settings(args):
         "adam_beta2": 0.95,
         "adam_eps": 1e-8,
         "clip_grad": 1.0,
-        "save_interval": None,
+        "save_interval": save_interval,
     }
     actual = {name: getattr(args, name) for name in expected}
     differences = {name: (expected[name], actual[name]) for name in expected if expected[name] != actual[name]}
@@ -140,19 +141,19 @@ def effective_settings(args):
     return actual
 
 
-def check_completion(root):
+def check_completion(root, *, updates=UPDATES, eval_interval=EVAL_INTERVAL):
     output = root / "core"
     records = [
         json.loads(line) for line in (output / "metrics/training_contract_rank0.jsonl").read_text().splitlines()
     ]
     steps = [row["step"] for row in records if row["event"] == "optimizer"]
     publications = [json.loads(line) for line in (output / "metrics/publication.jsonl").read_text().splitlines()]
-    if steps != list(range(1, UPDATES + 1)) or [row["version"] for row in publications] != list(range(UPDATES + 1)):
+    if steps != list(range(1, updates + 1)) or [row["version"] for row in publications] != list(range(updates + 1)):
         raise ValueError("Missing optimizer steps or weight publications")
     names = (
-        [str(i) for i in range(UPDATES)]
+        [str(i) for i in range(updates)]
         + ["eval_0"]
-        + [f"eval_{i - 1}" for i in range(EVAL_INTERVAL, UPDATES + 1, EVAL_INTERVAL)]
+        + [f"eval_{i - 1}" for i in range(eval_interval, updates + 1, eval_interval)]
     )
     for name in names:
         if not (output / f"rollouts/{name}.pt").is_file():
@@ -160,12 +161,20 @@ def check_completion(root):
     return {"optimizer_steps": len(steps), "publication_count": len(publications), "rollout_files": len(names)}
 
 
-def run(root, validate_only=False):
+def run(
+    root, validate_only=False, *, updates=UPDATES, eval_interval=EVAL_INTERVAL, campaign=CAMPAIGN, save_interval=None
+):
+    if updates <= 0 or eval_interval <= 0 or updates % eval_interval:
+        raise ValueError("Update horizon must be positive and divisible by evaluation interval")
+    if save_interval is not None and (save_interval <= 0 or updates % save_interval):
+        raise ValueError("Save interval must divide the update horizon")
     preparation = verify_preparation(root)
-    config = configuration(root)
+    config = configuration(
+        root, updates=updates, eval_interval=eval_interval, campaign=campaign, save_interval=save_interval
+    )
     sys.argv = ["gsm8k-parity-core", *config.arguments()]
     args = arguments.parse_args()
-    effective = effective_settings(args)
+    effective = effective_settings(args, updates=updates, eval_interval=eval_interval, save_interval=save_interval)
     if validate_only:
         print("GSM8K_PARITY_CONFIG_VALIDATED", json.dumps(effective), flush=True)
         return
@@ -181,7 +190,11 @@ def run(root, validate_only=False):
         asyncio.run(train(args))
     finally:
         ray.shutdown()
-    report = {**check_completion(root), "elapsed_seconds": time.monotonic() - started, "completed": True}
+    report = {
+        **check_completion(root, updates=updates, eval_interval=eval_interval),
+        "elapsed_seconds": time.monotonic() - started,
+        "completed": True,
+    }
     (output / "completion.json").write_text(json.dumps(report, indent=2) + "\n")
     print("GSM8K_PARITY_CORE_COMPLETED", json.dumps(report), flush=True)
 
@@ -190,8 +203,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, nargs="?", default=DEFAULT_ROOT)
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--updates", type=int, default=UPDATES)
+    parser.add_argument("--eval-interval", type=int, default=EVAL_INTERVAL)
+    parser.add_argument("--campaign", default=CAMPAIGN)
+    parser.add_argument("--save-interval", type=int)
     args = parser.parse_args()
-    run(args.root, args.validate_only)
+    run(
+        args.root,
+        args.validate_only,
+        updates=args.updates,
+        eval_interval=args.eval_interval,
+        campaign=args.campaign,
+        save_interval=args.save_interval,
+    )
 
 
 if __name__ == "__main__":
