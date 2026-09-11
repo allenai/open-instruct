@@ -79,6 +79,12 @@ dump_vllm_failure() {
 : "${CONCURRENCY:=256}"
 : "${VLLM_MAX_NUM_SEQS:=$CONCURRENCY}"
 : "${VLLM_READY_TIMEOUT:=14400}"
+# vLLM has its own, much shorter deadline for engine-core startup (default
+# 600s) that is independent of the wait loop below. Under DP every rank runs
+# its own engine core loading its own weights, so a 700+ GB checkpoint blows
+# through 600s and the API server aborts with "Timed out waiting for engine
+# core processes to start" even while the shard reads are progressing fine.
+export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-7200}"
 : "${DATASET:=allenai/Dolci-Think-SFT-7B}"
 : "${RESULTS_DIR:=/results}"
 : "${SYNC_INTERVAL:=180}"
