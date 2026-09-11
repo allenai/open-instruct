@@ -141,14 +141,23 @@ probe_weka_read() {
     f="$(find "$dir" -type f -size +1G -print -quit 2>/dev/null)" || true
     [ -n "$f" ] || { log "weka read probe: no cached blob >1G to sample yet"; return 0; }
     local start end mb
+    # iflag=count_bytes reinterprets count in BYTES, so `count=2048` read 2048
+    # bytes rather than 2048 MiB while the arithmetic below still divided 2048 MB
+    # by the elapsed time -- inflating the result by ~10^6 (a run reported
+    # "342202 MB/s") and making the slow-node warning unreachable. Neither flag
+    # was doing anything useful here since there is no skip=, so drop both and
+    # let count=2048 mean 2048 blocks of bs=1M.
+    local bytes
     start=$(date +%s%N)
-    dd if="$f" of=/dev/null bs=1M count=2048 iflag=skip_bytes,count_bytes 2>/dev/null || true
+    bytes=$(dd if="$f" of=/dev/null bs=1M count=2048 2>&1 | awk '/bytes/{print $1; exit}')
     end=$(date +%s%N)
-    mb=$(awk -v s="$start" -v e="$end" 'BEGIN{d=(e-s)/1e9; if(d>0) printf "%.0f", 2048/d; else print "?"}')
-    log "weka read probe: ~${mb} MB/s"
+    [ -n "$bytes" ] || bytes=0
+    mb=$(awk -v s="$start" -v e="$end" -v b="$bytes" \
+        'BEGIN{d=(e-s)/1e9; if(d>0 && b>0) printf "%.0f", (b/1048576)/d; else print "?"}')
+    log "weka read probe: ~${mb} MB/s ($(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1073741824}') GiB sampled)"
     if [ "$mb" != "?" ] && [ "$mb" -lt 300 ] 2>/dev/null; then
-        log "  WARNING: slow node. A 700 GB checkpoint would take >40 min to load here;"
-        log "  a healthy node on this cluster sustains 1500+ MB/s. Consider relaunching."
+        log "  WARNING: slow node. A 700 GB checkpoint would take >40 min to load here."
+        log "  Consider relaunching to land on a different node."
     fi
 }
 
