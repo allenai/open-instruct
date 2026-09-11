@@ -1,4 +1,10 @@
-# Core run starters
+# Core run configurations
+
+Start with the [researcher workflow](../../docs/miles-workflow.md) and the
+[structured examples](examples). They use the same section layout as olmo-miles
+for model, data, trainer, inference, objective, tracking and launch. The profiles
+below remain the low-level `[core]` / `[miles]` equivalents.
+
 
 Use these standalone TOMLs with `python -m open_instruct.miles plan`, `validate`,
 and `train`. They describe runtime settings; allocation, mounts and credentials
@@ -8,7 +14,7 @@ belong to the Beaker launcher. Copy a file and replace its `/data` paths first.
 | --- | --- | --- |
 | Default local colocated dev/test | [tiny-resident](profiles/tiny-resident.toml) | One GPU shared by a tiny trainer and TP1 engine; four completions and four requests. Two updates plus checkpoints. |
 | Default full-SFT disaggregated training | [train-disaggregated](profiles/train-disaggregated.toml) | Two B300 trainer GPUs plus one dedicated TP1 engine; 64 completions and 64 requests. 100 updates, heldout eval every 20, final checkpoint, offline W&B. |
-| Bounded-async full-SFT training | [train-disaggregated-async](profiles/train-disaggregated-async.toml) | Same three-GPU/64-completion shape, one-step lag, buffer factor one/retry, rollout behavior log probabilities. Same 100-update eval/save schedule. |
+| Bounded-async full-SFT training | [train-disaggregated-async](profiles/train-disaggregated-async.toml) | Same three-GPU/64-completion shape, one-step lag, buffer factor two/retry, old-policy scoring plus TIS. Same 100-update eval/save schedule. |
 | Short full-SFT synchronous check | [sft-b300-ep2-sync](profiles/sft-b300-ep2-sync.toml) | Same three-GPU topology/admission; two updates, initial/final eval, no optimizer save. |
 | Short async lifecycle check | [sft-b300-ep2-async-candidate](profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU topology; 64 requests, shorter 512-token responses, eager decode, four updates, lag at most one. |
 
@@ -53,11 +59,11 @@ The new 4K-response starter sets these together:
 | `sglang_max_mamba_cache_size` | 128 | Recurrent-state capacity with headroom; radix cache disabled |
 | `sglang_mem_fraction_static` | 0.6 | Keep the existing dedicated-GPU policy; do not substitute olmo-miles' 0.85 without measurement |
 
-The collection is `rollout_batch_size=16` × `n_samples_per_prompt=4` = 64,
-and `global_batch_size=64` gives one optimizer update per collection. This raises
-the optimizer batch from the historical 16, as well as increasing serving admission;
-compare token throughput, and do not attribute learning differences solely to
-inference settings. Trainer microbatch remains one, accumulating unpadded samples.
+The collection is `rollout_batch_size=8` × `n_samples_per_prompt=8` = 64,
+and `global_batch_size=64` gives one optimizer update per collection. Compared with the previous maintained 16 × 4 starter this preserves the
+optimizer batch size while restoring the historical 8 × 8 group geometry. The
+earlier 16-completion comparison runs used a smaller optimizer batch; compare
+token throughput and do not attribute learning differences solely to admission. Trainer microbatch remains one, accumulating unpadded samples.
 The short async candidate reserves 262144 tokens for its 2560-token context.
 
 To add a second dedicated TP1 engine on the same node:
@@ -74,7 +80,7 @@ Compare generated tokens/second, tokens/GPU-second, request tails, cache
 retractions and weight-publication time, not just update time.
 
 To keep **both** engines busy at 64 requests, supply 128 completions:
-set `miles.rollout_batch_size=32` and `miles.global_batch_size=128` (with four
+set `miles.rollout_batch_size=16` and `miles.global_batch_size=128` (with eight
 samples per prompt). More generally, `collection >= engines × concurrency`
 is necessary to occupy every slot in a synchronous collection. Keeping one
 optimizer step per collection means growing `global_batch_size` with collection
@@ -87,27 +93,31 @@ or optimal 4K-response configuration on every checkpoint/GPU.
 ## Async, evaluation and recovery
 
 Use [train-disaggregated-async.toml](profiles/train-disaggregated-async.toml)
-for the measured bounded-async settings. The original `train-disaggregated.toml`
-remains the synchronous starter. Equivalently, apply these overrides to it,
+for the updated bounded-async recipe (8 × 8, TIS, buffer factor two). The
+previous measured async arm used 16 × 4 and rollout behavior log probabilities.
+The original `train-disaggregated.toml` remains the synchronous starter. Equivalently, apply these overrides to it,
 keeping lengths, batch size and objective coefficients fixed:
 
 ```bash
 python -m open_instruct.miles plan /path/to/run.toml \
   --set miles.fully_async=true \
   --set core.max_policy_lag=1 \
-  --set miles.async_data_buffer_capacity_factor=1.0 \
+  --set miles.async_data_buffer_capacity_factor=2.0 \
   --set 'miles.async_unused_samples_handler="retry"' \
   --set 'miles.rollout_submission_granularity="group"' \
-  --set miles.use_rollout_logprobs=true
+  --set miles.use_rollout_logprobs=false \
+  --set miles.use_tis=true
 ```
 
 Use the same overrides with `validate` and `train`. Async changes the data schedule
-and explicitly uses rollout behavior log probabilities. It requires disaggregated,
-resident engines. Replay, reference KL and TIS remain separate choices.
+and uses trainer-scored old-policy log probabilities with TIS correction. It
+requires disaggregated, resident engines. Replay and reference KL remain separate
+choices. This recipe change does not rewrite prior measurements.
 
 Prepare an HF descriptor with the exact tokenizer/chat template, rendered
 `train.jsonl`, disjoint `eval.jsonl`, and trusted open-instruct `verifiers.json`.
-No automatic template expansion, task download or `/data` substitution happens.
+These low-level profiles require prepared inputs; the structured workflow
+examples support task preparation. Neither format substitutes `/data` paths automatically.
 Initial and every-20-update heldout evaluation use greedy decoding with the same
 4096-token response cap. Full rollout dumps and offline W&B are retained.
 

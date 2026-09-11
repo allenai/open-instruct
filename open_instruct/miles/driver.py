@@ -17,7 +17,7 @@ from open_instruct.miles.timing import evaluation_stage, stage
 logger = logger_utils.setup_logger(__name__)
 
 
-async def train(args):
+async def train(args, *, export_hf=None):
     with stage(args, "startup_cache_prepare"):
         startup_cache.prepare(args)
     with stage(args, "placement"):
@@ -27,6 +27,7 @@ async def train(args):
     manager = None
     learner = None
     failure = None
+    completed = []
     try:
         with stage(args, "serving_startup"):
             manager, rollouts_per_epoch = placement_group.create_rollout_manager(args, groups["rollout"])
@@ -84,6 +85,7 @@ async def train(args):
             try:
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
+                completed.append(rollout_id)
             finally:
                 remove_rollout_data_refs(args, batch)
             sentinel = args.save_trigger_sentinel and os.path.exists(args.save_trigger_sentinel)
@@ -107,6 +109,11 @@ async def train(args):
             ):
                 break
         await evaluation.drain()
+        if export_hf is not None:
+            if args.fully_async:
+                await manager.core_publication_boundary.remote(True)
+            with stage(args, "final_hf_export"):
+                await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
     except BaseException as error:
         failure = error
         raise
@@ -134,3 +141,4 @@ async def train(args):
         finish_tracking()
         if failure is None and cleanup_error is not None:
             raise cleanup_error
+    return {"completed_rollout_ids": completed, "start_rollout_id": args.start_rollout_id, "export_hf": export_hf}

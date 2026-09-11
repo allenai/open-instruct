@@ -8,15 +8,16 @@ the [September 11 capability audit](measurements/miles-feature-parity-audit-2026
 for runtime consumers, qualification, workflow gaps and corrected unsupported controls.
 “Native pass-through” means the pinned parser exposes the corresponding option;
 it is not a claim that every combination is qualified on Core. Baseline run-spec
-sections for task recipes, conversion, HF export and Beaker lifecycle are covered
-in that guide separately from this dataclass inventory.
+sections for task preparation, conversion, HF export and Beaker lifecycle are covered
+in the [researcher workflow](miles-workflow.md). Its new 8 × 8 async-TIS example
+awaits a bounded config-driven qualification; historical measurements remain frozen.
 
 | Baseline field | Core integration |
 | --- | --- |
 | `hf_checkpoint` | Native pass-through: `miles.hf_checkpoint`. |
 | `megatron_checkpoint` | Replaced: initialize from HF; resume from native Core `miles.load`. |
 | `prompt_data` | Native pass-through: `miles.prompt_data`. |
-| `output_dir` | Split: `miles.save`, debug-rollout paths, W&B directory and launch output paths. |
+| `output_dir` | Structured `output.root` owns prepared data, native saves, rollout dumps, W&B and workflow records; raw files set those paths independently. |
 | `trainer_num_nodes` | `miles.actor_num_nodes`. |
 | `placement_mode` | `miles.colocate`; both normal wrappers keep the trainer resident. Core optional trainer offload remains unsupported; full-model Core colocation is unqualified. |
 | `rollout_num_gpus` | Native pass-through: `miles.rollout_num_gpus`. |
@@ -26,7 +27,7 @@ in that guide separately from this dataclass inventory.
 | `rollout_expert_parallel_size` | `miles.sglang_ep_size`. |
 | `inference_ep_diagnostics` | Separate diagnostic scripts; no generic run toggle. |
 | `dataset_profile` | Data preparation workflow; not a MILES argument. |
-| `rl_manifest` | Prepare/adopt immutable JSONL through data tooling; no direct baseline-manifest loader. |
+| `rl_manifest` | Structured `data.rl_manifest` validates/adopts the supported baseline manifest format into immutable Core run data. Raw MILES prompt input is still JSONL. |
 | `expert_parallel_size` | `core.expert_parallel_size`. |
 | `trainer_backend` | Replaced by architecture-selected Core MoE or standard trainer; no Megatron compatibility/optimized switch. |
 | `trainer_diagnostics` | `core.diagnostic_interval`; different measurement contract. |
@@ -46,7 +47,7 @@ in that guide separately from this dataclass inventory.
 | `debug_exit_after_rollout` | Native pass-through: `miles.debug_exit_after_rollout`. |
 | `debug_disable_optimizer` | Rejected: Core always performs its optimizer step. |
 | `debug_rollout_only` | Rejected by Core training driver; use a separate serving probe. |
-| `save_checkpoints` | Choose `miles.save` and `miles.save_interval`; omit the interval to disable periodic native saves. |
+| `save_checkpoints` | Structured `training.save_checkpoints`; raw files choose `miles.save`/`save_interval`, omitting interval to disable periodic saves. |
 | `save_interval` | Native pass-through: `miles.save_interval`. |
 | `save_retain_interval` | Not ported: native Core checkpoint retention policy needs a separate implementation. |
 | `save_tokens_per_expert_interval` | Not ported: baseline custom token-per-expert save scheduling. |
@@ -83,7 +84,7 @@ in that guide separately from this dataclass inventory.
 | `eval_max_response_length` | `miles.eval_max_response_len`. |
 | `sglang_chunked_prefill_size` | Native pass-through: `miles.sglang_chunked_prefill_size`. |
 | `max_response_length` | `miles.rollout_max_response_len`. |
-| `max_context_length` | Set `miles.rollout_max_context_len`, `rollout_max_prompt_len`, `sglang_context_length`, and `core.max_sequence_length` consistently. |
+| `max_context_length` | Structured `inference.max_context_length` sets Core and serving/rollout limits together; prompt capacity defaults to context minus response limit. Raw files must set consistent limits. |
 | `global_batch_size` | Native pass-through: `miles.global_batch_size`. |
 | `max_tokens_per_gpu` | Rejected: not a Core dynamic-batching control; Core microbatch is fixed at one. |
 | `learning_rate` | `miles.lr`. |
@@ -94,7 +95,7 @@ in that guide separately from this dataclass inventory.
 | `adam_beta2` | Native pass-through: `miles.adam_beta2`. |
 | `adam_eps` | Native pass-through: `miles.adam_eps`. |
 | `clip_grad` | Native pass-through: `miles.clip_grad`. |
-| `kl_loss_coef` | `miles.kl_loss_coef` plus `use_kl_loss=true` and reference initialization; coefficient alone does not enable KL. |
+| `kl_loss_coef` | `miles.kl_loss_coef` plus `use_kl_loss=true` and reference initialization; raw coefficient alone does not enable KL. Structured `optimizer.kl_loss_coef>0` enables KL and defaults reference initialization to the prepared starting HF model. |
 | `entropy_coef` | Native pass-through: `miles.entropy_coef`. |
 | `eps_clip` | Native pass-through: `miles.eps_clip`. |
 | `eps_clip_high` | Native pass-through: `miles.eps_clip_high`. |
@@ -104,7 +105,7 @@ in that guide separately from this dataclass inventory.
 | `check_weight_update_equal` | Native pass-through: `miles.check_weight_update_equal`. |
 | `colocated_live_weight_export` | Core owns live export/IPC; no baseline Megatron monkey-patch switch. |
 | `colocated_weight_update_pipeline_depth` | Only 1 accepted; Megatron pipeline overlap is not implemented by Core. |
-| `fully_async` | Implemented bounded-async Core path; requires disaggregation and positive lag. Baseline wrapper enables TIS automatically; Core async starter instead selects rollout log probabilities. |
+| `fully_async` | Implemented bounded-async Core path; requires disaggregation and positive lag. Both structured async and maintained Core async starters now use trainer-scored old logprobs plus TIS; older measurements used rollout logprobs. |
 | `max_weight_staleness` | `core.max_policy_lag`, in optimizer steps; explicit native alias must agree. |
 | `tis_clip` | Native pass-through: `miles.tis_clip`. |
 | `tis_clip_low` | Native pass-through: `miles.tis_clip_low`. |
@@ -144,7 +145,7 @@ in that guide separately from this dataclass inventory.
 | `skip_eval_before_train` | Native pass-through. Core repeats restored initial-state eval when false; baseline wrapper automatically skips initial eval on resume. |
 | `seed` | Native pass-through: `miles.seed`. |
 | `comparison_id` | Experiment metadata / W&B group or run name; no native comparison_id argument. |
-| `wandb_project` | `miles.wandb_project` plus explicit `use_wandb=true` to enable tracking. |
+| `wandb_project` | Raw `miles.wandb_project` needs `use_wandb=true`; structured `tracking.wandb_mode` enables tracking unless disabled. |
 | `wandb_team` | Native pass-through: `miles.wandb_team`. |
 | `wandb_group` | Native pass-through: `miles.wandb_group`. |
 | `wandb_mode` | Native pass-through: `miles.wandb_mode`. |

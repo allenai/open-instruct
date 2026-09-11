@@ -10,12 +10,13 @@ from open_instruct.miles import actor, driver
 from open_instruct.miles.config import CoreConfig
 
 
+@pytest.mark.parametrize("with_export", [False, True])
 @pytest.mark.parametrize("fully_async", [False, True])
 @pytest.mark.parametrize("diagnostic_interval", [0, 1])
 @pytest.mark.parametrize("start_rollout", [0, 2])
 @pytest.mark.parametrize("with_eval", [False, True])
 def test_driver_quiesces_then_retires_transport_before_engines(
-    monkeypatch, fully_async, diagnostic_interval, start_rollout, with_eval, tmp_path
+    monkeypatch, fully_async, diagnostic_interval, start_rollout, with_eval, with_export, tmp_path
 ):
     events = []
 
@@ -33,6 +34,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         dispose=lambda: event("trainer-disposed"),
         update_weights=lambda rollout_id: event("published"),
         train=lambda rollout_id, batch: event("trained"),
+        export_hf=lambda rollout_id, path: event(f"export-{rollout_id}-{path}"),
     )
 
     async def create(*args):
@@ -71,7 +73,13 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         start_rollout_id=start_rollout,
         num_rollout=start_rollout + 1,
     )
-    asyncio.run(driver.train(args))
+    result = asyncio.run(driver.train(args, export_hf="/final" if with_export else None))
+    assert result["completed_rollout_ids"] == [start_rollout]
+    if with_export:
+        export_index = events.index(f"export-{start_rollout}-/final")
+        assert events.index("drained") < export_index < events.index("close_weight_transport")
+        if fully_async:
+            assert events[export_index - 1] == "paused-True"
     timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
     evaluations = [row for row in timings if row["stage"] == "evaluation"]
     assert len(evaluations) == events.count("evaluated") == (2 if with_eval else 0)

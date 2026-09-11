@@ -302,3 +302,11 @@ settings. They remain useful experiment records; the capability claims in this
 audit use later completed evidence where available. In particular, compiler-cache
 code, full-model async, math/IF/mixture runs, replay and checkpoint continuation
 should no longer be described as wholly absent or awaiting their first exercise.
+
+## Subsequent workflow implementation
+
+This audit remains a point-in-time record. Later structured run files, task and
+manifest preparation, one-node Beaker launch/status, native auto resume, optional
+final export, and the 8 × 8 async-TIS defaults are described in the
+[current researcher workflow](../miles-workflow.md). Implementation does not
+retroactively qualify those paths or change the measured configurations above.

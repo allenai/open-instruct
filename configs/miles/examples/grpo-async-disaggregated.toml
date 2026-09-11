@@ -1,0 +1,126 @@
+# Full-SFT B300 training: two Core trainer GPUs and one SGLang engine.
+# Replace YOUR_USERNAME/model source before launch; inspect `plan` first.
+schema_version = 1
+name = "grpo-async-disaggregated"
+
+[model]
+source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/policy-hf"
+format = "hf"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/grpo-async-disaggregated"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "1h"
+timeout = "8h"
+auto_resume = true
+gpus_per_replica = 3
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[data]
+seed = 17
+shuffle = true
+
+[[data.tasks]]
+task = "gsm8k"
+train_count = 400
+eval_count = 128
+
+[training]
+num_rollouts = 100
+skip_eval_before_train = false
+eval_interval = 20
+save_checkpoints = true
+# Core saves synchronously. Choose a more frequent cadence for recovery.
+save_interval = 100
+
+[trainer]
+gpus = 2
+trainer_num_nodes = 1
+expert_parallel_size = 2
+micro_batch_size = 1
+activation_recompute = true
+trainer_flash_attention_version = 4
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 1
+rollout_tensor_parallel_size = 1
+# Restore the historical 8 prompts x 8 responses, one optimizer update/collection.
+rollout_batch_size = 8
+samples_per_prompt = 8
+global_batch_size = 64
+max_response_length = 4096
+max_context_length = 6144
+sglang_server_concurrency = 64
+sglang_max_running_requests = 64
+sglang_max_total_tokens = 524288
+sglang_max_mamba_cache_size = 128
+sglang_mem_fraction_static = 0.6
+sglang_disable_radix_cache = true
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 64
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_sampling_backend = "pytorch"
+sglang_attention_backend = "triton"
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+
+[optimizer]
+learning_rate = 0.000001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.95
+adam_eps = 0.00000001
+clip_grad = 1.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+eps_clip = 0.2
+eps_clip_high = 0.28
+
+[tracking]
+wandb_mode = "offline"
+wandb_project = "olmo-rl-comparison"
+wandb_group = "core-workflow-async"
+
+[runtime]
+row_specialization = "dynamic"
+
+[core]
+max_train_rollout_logprob_abs_diff = 0.05
+router_aux_loss_weight = 0.01
+router_z_loss_weight = 0.00001
+stream_moe_export = true
+weight_sync_mode = "flattened"
+
+[miles]
+rollout_temperature = 1.0
+rollout_seed = 17
+rollout_max_prompt_len = 2048
+seed = 17
+disable_grpo_std_normalization = true
+
+[async]
+fully_async = true
+max_weight_staleness = 1
+async_data_buffer_capacity_factor = 2.0
+async_unused_samples_handler = "retry"
+rollout_submission_granularity = "group"
+# Core scores the old policy; TIS corrects the behavior-policy mismatch.
+off_policy_correction = "tis"
+
+# Opt in separately after qualifying cache reuse for your runtime and hardware.
+[compiler_cache]
+enabled = false
+shared_root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/compiler-cache/tmp-30d"
+restore = true

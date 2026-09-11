@@ -1,19 +1,19 @@
-"""Run with python -m open_instruct.miles {plan,validate,train} CONFIG.toml."""
+"""Run with python -m open_instruct.miles {plan,validate,train,run,status} CONFIG.toml."""
 
 import argparse
-import asyncio
 import importlib
 import json
-import os
-import sys
 from pathlib import Path
 
+import tomllib
+
 from open_instruct.miles.config import RunConfig
+from open_instruct.miles.run_spec import RunSpec
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("plan", "validate", "train"))
+    parser.add_argument("command", choices=("plan", "validate", "train", "run", "status"))
     parser.add_argument("config", type=Path)
     parser.add_argument(
         "--set",
@@ -24,27 +24,42 @@ def main() -> None:
         help="Override a setting with a TOML value; repeatable, quote strings",
     )
     options = parser.parse_args()
-    config = RunConfig.load(options.config, options.overrides)
+    payload = (
+        json.loads(options.config.read_text())
+        if options.config.suffix == ".json"
+        else tomllib.loads(options.config.read_text())
+    )
+    structured = "schema_version" in payload or "model" in payload
+    config = (
+        RunSpec.from_dict(payload, config_path=options.config, overrides=options.overrides)
+        if structured
+        else RunConfig.load(options.config, options.overrides)
+    )
     if options.command == "plan":
         print(json.dumps(config.plan(), indent=2))
         return
-    arguments = config.arguments()
-    # Runtime-only imports keep planning usable on CPU-only submitting hosts.
-    native = importlib.import_module("miles.utils.arguments")
-    sys.argv = [sys.argv[0], *arguments]
-    args = native.parse_args()
-    if args.train_backend != "olmo_core":
-        raise RuntimeError("Expected the pinned MILES runtime with the olmo_core backend patch")
-    if options.command == "validate":
-        print("MILES arguments validated for OLMo-core")
+    if options.command in ("run", "status"):
+        if not structured:
+            parser.error("run/status require a schema_version=1 run file; raw configs support plan/validate/train")
+        launch = importlib.import_module("open_instruct.miles.launch")
+        if options.command == "run":
+            launch.run(options.config, options.overrides)
+        else:
+            print(json.dumps(launch.status(config), indent=2))
         return
-    if args.load:
-        checkpoint = importlib.import_module("open_instruct.miles.checkpoint")
-        _, manifest = checkpoint.resume_manifest(args.load)
-        args.start_rollout_id = manifest["clock"]["next_rollout_id"]
-    os.environ.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "olmo_sglang.models")
-    driver = importlib.import_module("open_instruct.miles.driver")
-    asyncio.run(driver.train(args))
+    workflow = importlib.import_module("open_instruct.miles.workflow")
+    if options.command == "validate":
+        if structured:
+            config.compile().arguments()
+            print("Run schema, topology and MILES/Core options validated; inputs and runtime checked during train")
+        else:
+            workflow.parse_runtime(config)
+            print("MILES arguments validated for OLMo-core")
+        return
+    if structured:
+        workflow.execute(config)
+    else:
+        workflow.train_config(config)
 
 
 if __name__ == "__main__":

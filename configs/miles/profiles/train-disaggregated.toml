@@ -1,7 +1,7 @@
 # Default full-SFT training starter: two Core trainer B300s + one TP1 serving B300.
 # Copy and replace /data paths. See configs/miles/README.md for preparation,
 # bounded async, adding engines, and the distinction between tested and candidate sizes.
-# 100 updates, 16 prompts x 4 responses, admission 64 rather than 4.
+# 100 updates, 8 prompts x 8 responses, admission 64 rather than 4.
 # Admission/pools passed the 12-update sync/async B300 trial; the complete
 # 100-update eval/save recipe remains a starter, not a completed run.
 [core]
@@ -36,8 +36,8 @@ fully_async = false
 offload_train = false
 offload_rollout = false
 micro_batch_size = 1
-rollout_batch_size = 16
-n_samples_per_prompt = 4
+rollout_batch_size = 8
+n_samples_per_prompt = 8
 global_batch_size = 64
 num_rollout = 100
 rollout_temperature = 1.0

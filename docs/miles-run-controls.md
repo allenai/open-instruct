@@ -1,6 +1,9 @@
 # MILES run controls in open-instruct
 
-The public interface remains `python -m open_instruct.miles {plan,validate,train} run.toml`.
+The researcher interface is `python -m open_instruct.miles {plan,validate,train,run,status} run.toml`.
+See the [workflow guide](miles-workflow.md) for structured sections matching
+olmo-miles and the one-node Beaker launcher. The original low-level files support
+`plan/validate/train`; the native names below describe their resolved controls.
 `[miles]` expresses the native MILES/SGLang options using underscores. `[core]`
 expresses the settings owned by the OLMo-core adapter. TOML is our integration's
 format; it was not the preexisting open-instruct GRPO configuration format.
@@ -14,7 +17,9 @@ acceptance does not establish backend support or GPU qualification.
 
 Start with the [colocated dev/test and disaggregated training profiles](../configs/miles/README.md).
 The full-SFT starter now exposes 64 concurrent requests and sizes its graph and
-cache limits together; previous measured comparison configs remain frozen.
+cache limits together. Maintained full-SFT examples now use 8 × 8; async uses
+trainer-scored old logprobs plus TIS and buffer factor two. The combined
+config-driven exercise is pending; previous measured configs remain frozen.
 
 ## Editing and inspecting a run
 
@@ -39,8 +44,10 @@ installed runtime resolves its own defaults. Planning imports no MILES, SGLang,
 CUDA, model code, or dataset. It checks option names, basic types, choices and the
 Core restrictions using a snapshot of the pinned parser. `runtime_validated=false`
 means installed-runtime checks and model-dependent checks have not run.
-`validate` invokes the real MILES parser and its argument/model checks; it does not
-start engines or certify GPU memory fit, numerical equivalence, or training.
+For low-level files, `validate` invokes the real MILES parser and its argument/model
+checks. Structured files validate the CPU-safe schema and resolved options; the
+real parser runs before training. Neither starts engines or certifies GPU memory
+fit, numerical equivalence, or training.
 
 Native switches now behave correctly: `use_wandb=false` emits no switch instead
 of inventing `--no-use-wandb`. `offload_train=false` uses the real
@@ -90,12 +97,12 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Dial | open-instruct control and semantics |
 | --- | --- |
 | Training input | `prompt_data`, `input_key`, `label_key`, `metadata_key`; `custom_rm_path` selects the reward function. `core.reward_config` configures registered open-instruct verifiers. Prepare prompts with one chat-template application. |
-| Task catalog / recipe / manifest | These remain preparation workflows, not new implicit TOML run sections. Use the datasource harness and prepared immutable JSONL. An olmo-miles `rl_manifest` cannot just be passed to MILES as training data. |
+| Task catalog / recipe / manifest | Structured `data.tasks` and supported `data.rl_manifest` invoke explicit preparation/adoption with immutable manifests. Named `data.recipe` selection is rejected. Named tasks currently include GSM8K, math, IF and generated multiplication; see the workflow guide for limits. Raw `miles.prompt_data` still expects prepared JSONL, not a baseline manifest. |
 | Held-out in-loop eval | `eval_prompt_data=[name,path,...]`, `eval_interval`, `skip_eval_before_train=false`, `n_samples_per_eval_prompt`; explicit `eval_temperature`, `eval_top_p`, `eval_top_k`, `eval_max_response_len`, `eval_max_prompt_len`. Retain source indices and dataset hashes for comparisons. |
 | Learning rate / Adam | `lr`, `lr_decay_style`, `lr_decay_iters`, `lr_warmup_iters` or `lr_warmup_fraction`, `min_lr`, `weight_decay`, `adam_beta1`, `adam_beta2`, `adam_eps`, `clip_grad`. Core uses AdamW; changing `optimizer` to another family is rejected. |
-| Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. The baseline uses std normalization off and upper clipping 0.28; these are separate choices, not automatically applied defaults. |
-| Reference KL | Enable `use_kl_loss`, set `kl_loss_coef`, and provide the reference initialization through `ref_load` as required by MILES. This creates a frozen reference and adds scoring. Setting a coefficient alone is not the enable switch. |
-| Off-policy correction | `use_tis`, `tis_clip`, `tis_clip_low`; alternative corrections use `custom_tis_function_path` (the baseline ICEPOP helper is not bundled); explicitly choose the policy-ratio anchor. These are algorithm changes, not just async throughput controls. |
+| Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. The baseline uses std normalization off and upper clipping 0.28; these are separate choices. Structured run files and full-SFT starters now apply both defaults; raw MILES parser defaults remain separate. |
+| Reference KL | Enable `use_kl_loss`, set `kl_loss_coef`, and provide the reference initialization through `ref_load` as required by MILES. This creates a frozen reference and adds scoring. In raw files a coefficient alone is not the enable switch; the structured compiler enables reference KL for a positive coefficient and initializes the reference from the prepared starting HF model. |
+| Off-policy correction | `use_tis`, `tis_clip`, `tis_clip_low`; alternative corrections use `custom_tis_function_path` (the baseline ICEPOP helper is not bundled); explicitly choose the policy-ratio anchor. Structured async defaults to trainer-scored old logprobs with TIS; these are algorithm changes, not just async throughput controls. |
 | Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` requires `use_miles_router=true`. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. `core.replay_diagnostics=true` opts into per-layer returned-route and recomputation checks (adds synchronization overhead). |
 
 ## Checkpoints, reporting and operational controls
@@ -104,11 +111,11 @@ All names below are under `[miles]` unless prefixed `core.`.
 | --- | --- |
 | Save / restart | `save`, `save_interval`, `load`. Saves are synchronous native Core checkpoints with completion manifests and a rollout/policy cursor. `async_save=true` is rejected. Baseline NVRX saves, retention and token-per-expert cadence are not ported. |
 | Native MoE checkpoint writer | Arithmetic metadata planning, compact storage, and balanced replicated ownership are enabled by default. Opt out with `core.checkpoint_constant_memory_planning=false`, `core.checkpoint_compact_storage=false`, and `core.checkpoint_dedup_save_to_lowest_rank=true`. Each switch is independent. Profiling (`core.checkpoint_profile`) and spawned workers (`core.checkpoint_process_count`) remain opt-in; `core.checkpoint_thread_count` controls thread buckets. The separate dense trainer keeps its own checkpoint path and rejects policy overrides. See the [qualification record](measurements/miles-checkpoint-perf-20260911.md). |
-| Final HF export | The actor has HF export support, and `eval_hf_dir` requests snapshot export for evaluation. The public driver has no olmo-miles `export_hf` post-run lifecycle. `save_hf` is rejected because native saves do not produce that output. |
-| Auto resume / launch | Beaker placement, priority, min runtime, mounts, compiler caches and restart policy remain launch-script controls. Use `build_image_and_launch.sh --miles`. TOML training configuration does not submit or automatically resume a Beaker job. |
+| Final HF export | `output.export_hf=true` in structured files requests explicit driver export at completion; `eval_hf_dir` remains snapshot export for evaluation. New workflow export is implemented but outside the pending bounded async qualification. `save_hf` remains rejected because native saves do not produce HF output. |
+| Auto resume / launch | Structured `[launch]` controls placement, priority, minimum runtime, mounts and Beaker restart policy. `run` delegates to `build_image_and_launch.sh --miles`; `status` reads a local receipt and queries Beaker. The workflow loads the latest completed Core checkpoint on retry when `auto_resume=true`. The config launcher supports one physical node; raw training files do not submit jobs. |
 | Weight publication | `update_weight_buffer_size`, `core.stream_moe_export`, `core.weight_sync_mode` (`flattened` / `per_tensor`); colocation uses IPC. Core publishes every collection (`update_weights_interval=1`); skipping publication is rejected. Megatron disk-delta/p2p/rdt transports and pipeline-depth=2 are rejected rather than silently ignored. |
 | W&B | `use_wandb`, `wandb_project`, `wandb_team`, `wandb_group`, `wandb_run_name`, `wandb_mode`, `wandb_dir`, `wandb_always_use_train_step`; the Core metrics adapter and rollout hooks determine reported metric definitions. |
-| Dashboard / generations | `use_miles_dashboard`, `save_debug_rollout_data` and the custom rollout/eval logging hooks. The existing harnesses retain generations; baseline's sample-count knob and `olmo-miles status` lifecycle are not automatically provided by this entrypoint. |
+| Dashboard / generations | `use_miles_dashboard`, `save_debug_rollout_data` and the custom rollout/eval logging hooks. The existing harnesses retain generations; the baseline sample-count knob remains absent. Structured `status` reports Beaker attempts and config identity, not the complete olmo-miles service/stage dashboard. |
 | Contract measurements | `core.diagnostic_interval`, `check_weight_update_equal`, `core.max_train_rollout_logprob_abs_diff`. The last is the active-token **mean absolute** gap in the current implementation despite its legacy name; violations fail. Baseline's configurable warn/fail policy is not ported. |
 | Fault tolerance | MILES rollout health/recovery controls pass through (`use_fault_tolerance`, `ft_components`, health intervals/timeouts). The baseline custom retry budget and stage deadline wrapper are not ported. This is not evidence of Core train-actor recovery; fault-injected endurance qualification remains separate. |
 | Debugging | `debug_exit_after_rollout`, retained rollout loading, and scoring/diagnostic probes. `debug_disable_optimizer` and `debug_rollout_only` are rejected by the Core training entrypoint because its driver does not implement those shortcuts. |
@@ -128,10 +135,11 @@ training contract; they do not add the missing capabilities.
 
 `use_rollout_logprobs=true` changes the policy-ratio denominator, but **does not
 skip Core's scoring forward**. That forward still supplies agreement diagnostics.
-Our async starter selects this behavior anchor with TIS off; olmo-miles' async
-compiler selects TIS and rejects that anchor option. Likewise, our starter's
-16 prompts × 4 responses differs from the historical 8 × 8 baseline even though
-both produce 64 samples. Preserve these distinctions in learning comparisons.
+The maintained async starter now selects trainer-scored old logprobs with TIS,
+matching olmo-miles' async correction. Full-SFT starters also restore the historical
+8 prompts × 8 responses. Earlier measurements used 16 × 4 and rollout logprobs
+without TIS; preserve those configurations when interpreting their results. The
+new configuration-driven combined exercise is pending.
 Core also repeats an initial evaluation after resume when it is enabled, whereas
 olmo-miles suppresses that duplicate; account for the extra point and cost.
 

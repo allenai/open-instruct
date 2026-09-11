@@ -1,7 +1,7 @@
 # Bounded-async full-SFT training starter: two Core trainer B300s + one TP1 serving B300.
 # Copy and replace /data paths. See configs/miles/README.md for preparation,
 # bounded async, adding engines, and the distinction between tested and candidate sizes.
-# 100 updates, 16 prompts x 4 responses, admission 64 rather than 4.
+# 100 updates, 8 prompts x 8 responses, admission 64 rather than 4.
 # Admission/pools passed the 12-update sync/async B300 trial; the complete
 # 100-update eval/save recipe remains a starter, not a completed run.
 [core]
@@ -33,14 +33,14 @@ rollout_num_gpus = 1
 rollout_num_gpus_per_engine = 1
 colocate = false
 fully_async = true
-async_data_buffer_capacity_factor = 1.0
+async_data_buffer_capacity_factor = 2.0
 async_unused_samples_handler = "retry"
 rollout_submission_granularity = "group"
 offload_train = false
 offload_rollout = false
 micro_batch_size = 1
-rollout_batch_size = 16
-n_samples_per_prompt = 4
+rollout_batch_size = 8
+n_samples_per_prompt = 8
 global_batch_size = 64
 num_rollout = 100
 rollout_temperature = 1.0
@@ -72,9 +72,10 @@ update_weight_buffer_size = 1073741824
 update_weights_interval = 1
 loss_type = "policy_loss"
 advantage_estimator = "grpo"
-# Keep the established objective coefficients. Async uses rollout behavior
-# log probabilities as the policy anchor, as in the measured scheduling pair.
-use_rollout_logprobs = true
+# Score the old policy in Core and correct serving-policy mismatch with TIS.
+# This matches the olmo-miles async recipe; it changes the older measured arm.
+use_rollout_logprobs = false
+use_tis = true
 disable_grpo_std_normalization = true
 eps_clip = 0.2
 eps_clip_high = 0.28
