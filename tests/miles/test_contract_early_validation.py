@@ -46,7 +46,7 @@ def _worker(rank, rendezvous, fault):
         block = nn.Module()
         block.add_module("routed_experts_router", MoERouterConfigV2(d_model=8, num_experts=4, top_k=2).build())
         model.add_module("blocks", nn.ModuleList([block]))
-        worker.train_module = SimpleNamespace(model=model)
+        worker.train_module = SimpleNamespace(model=model, _miles_model_backend="moe")
         # Both schedules contain complete local optimizer batches. Only their
         # cross-rank disagreement should reject them before the first EP forward.
         rollout = _rollout(4 if fault == "schedule" and rank == 1 else 2)

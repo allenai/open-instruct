@@ -1,6 +1,7 @@
 """Stable model API shared by the MILES actor and both Core trainer backends."""
 
 import json
+from contextlib import nullcontext
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,7 @@ def build_train_module(args, source=None):
     config.init_seed = args.seed
     kind = "moe" if isinstance(config, transformer_config.OLMoDDPModelConfig) else "standard"
     backend = _backend(kind)
+    backend.validate_training_options(args)
     if kind == "moe":
         backend.prepare_model_config(config, hf, args.olmo_core)
     model = config.build(init_device="meta")
@@ -108,3 +110,10 @@ def save_native(module, path):
 
 def load_native(module, path, *, optim=True):
     _module_backend(module).load_native(module, path, optim=optim)
+
+
+def replay_context(module, batch, *, enabled):
+    """Enter the selected trainer's routing context only when replay is enabled."""
+    if not enabled:
+        return nullcontext()
+    return _module_backend(module).replay_context(module, batch)

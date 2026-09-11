@@ -65,9 +65,20 @@ def model_config_from_hf(hf: Any, options: Any) -> transformer.TransformerConfig
     return config
 
 
-def build_train_module(args, *, common, optim, hf_config, hf_state):
+def validate_training_options(args):
+    """Reject MoE-only operations before model storage or checkpoint allocation."""
+    if getattr(args, "use_rollout_routing_replay", False):
+        raise ValueError("Router replay requires an OLMoDDP MoE model; standard dense trainers do not support replay")
     if args.olmo_core.expert_parallel_size != 1:
         raise ValueError("Expert parallelism requires an OLMoDDP MoE model")
+
+
+def replay_context(module, batch):
+    raise ValueError("Router replay is not supported by the standard dense trainer")
+
+
+def build_train_module(args, *, common, optim, hf_config, hf_state):
+    validate_training_options(args)
     module = train_transformer.TransformerTrainModule(
         **common,
         optim=AdamWConfig(**optim),

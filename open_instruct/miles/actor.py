@@ -15,7 +15,6 @@ from miles.ray.train_actor import TrainRayActor
 from miles.utils import distributed_utils
 from miles.utils.ft_utils.process_group_utils import GroupInfo
 from miles.utils.hf_config import HF_EXPORT_COMPLETE_MARKER
-from olmo_core.nn.moe.v2 import replay
 from safetensors import torch as safetensors_torch
 from torch import distributed as dist
 from transformers import AutoTokenizer
@@ -90,9 +89,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         return result
 
     def _replay_context(self, module, batch):
-        if not self.args.use_rollout_routing_replay:
-            return contextlib.nullcontext()
-        return replay.replay_routes(module.model, data.router_routes(module.model, batch))
+        return models.replay_context(module, batch, enabled=self.args.use_rollout_routing_replay)
 
     def _forward(self, module, batch):
         forward = getattr(module, "model_forward_no_pipeline", None) or module.model_forward

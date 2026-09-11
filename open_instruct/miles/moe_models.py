@@ -4,12 +4,12 @@ from olmo_core import config as core_config
 from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.nn import attention
 from olmo_core.nn.hf import config as hf_config_utils
-from olmo_core.nn.moe.v2 import olmo3
+from olmo_core.nn.moe.v2 import olmo3, replay
 from olmo_core.optim import OLMoDDPOptimizerConfig
 from olmo_core.train.train_module import transformer as train_transformer
 from olmo_core.train.train_module.transformer import config as train_config
 
-from open_instruct.miles import fla_compat
+from open_instruct.miles import data, fla_compat
 
 
 def register_hf_classes():
@@ -76,3 +76,11 @@ def save_native(module, path):
 
 def load_native(module, path, *, optim=True):
     module.load_state_dict_direct(str(path), load_optim_state=optim)
+
+
+def validate_training_options(args):
+    """MoE routing replay and expert parallelism are supported by this backend."""
+
+
+def replay_context(module, batch):
+    return replay.replay_routes(module.model, data.router_routes(module.model, batch))
