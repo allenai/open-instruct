@@ -19,7 +19,7 @@ from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
 from torch import distributed as dist
 from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
 
-from open_instruct.miles import actor, checkpoint, models, scheduler
+from open_instruct.miles import actor, checkpoint, data, models, scheduler
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.state import PolicyClock
 
@@ -283,3 +283,88 @@ def test_scheduler_matches_miles_and_restores(style):
         reference_optim.step()
         reference.step()
         actual.step()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+@pytest.mark.parametrize("recompute", [False, True])
+def test_row_specialization_training_parity(parsed_args, tmp_path, monkeypatch, recompute):
+    if json.loads((Path(parsed_args.hf_checkpoint) / "config.json").read_text())["model_type"] != "olmo3moe":
+        pytest.skip("row specialization applies to routed MoE experts")
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/paired-rendezvous", rank=0, world_size=1)
+    try:
+        group = GroupInfo(rank=0, size=1, group=dist.group.WORLD, gloo_group=dist.group.WORLD)
+        trivial = GroupInfo(rank=0, size=1, group=None)
+        parallel.set_parallel_state(
+            parallel.ParallelState(
+                intra_dp=group,
+                intra_dp_cp=group,
+                cp=trivial,
+                tp=trivial,
+                pp=trivial,
+                ep=trivial,
+                etp=trivial,
+                indep_dp=trivial,
+            )
+        )
+        monkeypatch.setattr(actor.distributed_utils, "get_gloo_group", lambda: dist.group.WORLD)
+        results = []
+        for mode in ("static", "dynamic"):
+            args = copy.deepcopy(parsed_args)
+            args.save = str(tmp_path / mode)
+            args.olmo_core = dataclasses.replace(
+                args.olmo_core, row_specialization=mode, activation_checkpointing=recompute
+            )
+            worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
+            worker.args = args
+            worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
+            worker.model = worker.train_module.model
+            experts = [m for m in worker.model.modules() if hasattr(m, "row_specialization")]
+            assert experts and all(m.row_specialization == mode for m in experts)
+            worker.optimizer = worker.train_module.optim
+            captured_gradients = {}
+            original_clip = worker.optimizer._clip_grad
+
+            def capture_clip(optimizer=worker.optimizer, captured=captured_gradients, clip=original_clip):
+                captured.update({k: v.detach().cpu().clone() for k, v in optimizer.main_grad.items()})
+                return clip()
+
+            monkeypatch.setattr(worker.optimizer, "_clip_grad", capture_clip)
+            worker.lr_scheduler = scheduler.CoreLRScheduler(args, worker.optimizer)
+            worker.clock = PolicyClock()
+            worker.clock.published()
+            worker.ref_module = None
+            worker._heartbeat = SimpleNamespace(bump=lambda: None)
+            lengths = [5, 13, 19, 25]
+            rollout = {
+                "tokens": [torch.arange(1, length + 1, device="cuda") for length in lengths],
+                "total_lengths": lengths,
+                "response_lengths": [3] * 4,
+                "loss_masks": [torch.tensor([1, 0, 1], device="cuda") for _ in lengths],
+                "rewards": [1.0, -1.0, 1.0, -1.0],
+                "weight_versions": [["0"] for _ in lengths],
+                "rollout_log_probs": [torch.full((3,), -5.0, device="cuda") for _ in lengths],
+            }
+            before = worker._score(worker.train_module, data.sample_batches(rollout, 128), use_replay=False)
+            monkeypatch.setattr(
+                actor.miles_data,
+                "get_rollout_data",
+                lambda *a, payload=rollout, **kw: (payload, contextlib.nullcontext()),
+            )
+            worker.train(0, None)
+            after = worker._score(worker.train_module, data.sample_batches(rollout, 128), use_replay=False)
+            assert worker.clock.completed_steps == 1
+            assert any(not torch.equal(a, b) for a, b in zip(before, after))
+            results.append(
+                {
+                    "before": [v.cpu() for v in before],
+                    "after": [v.cpu() for v in after],
+                    "weights": {k: v.detach().cpu().clone() for k, v in worker.model.state_dict().items()},
+                    "optimizer": copy.deepcopy(worker.optimizer.state_dict()),
+                    "gradients": captured_gradients,
+                }
+            )
+            assert results[-1]["gradients"]
+            del worker
+        torch.testing.assert_close(results[0], results[1], rtol=0, atol=0)
+    finally:
+        dist.destroy_process_group()

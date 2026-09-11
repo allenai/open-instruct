@@ -4,6 +4,7 @@
 # RL chat template. Prompts are already rendered, without reference solutions.
 # No optimizer checkpoint is saved by this two-update profile.
 [core]
+row_specialization = "dynamic"
 expert_parallel_size = 2
 attention_backend = "flash_4"
 max_sequence_length = 6144

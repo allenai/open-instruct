@@ -4,6 +4,7 @@
 # Eager decode isolates async lifecycle from graph/replay changes. No replay.
 # Four updates, no optimizer checkpoints; restart needs a separate qualification.
 [core]
+row_specialization = "dynamic"
 expert_parallel_size = 2
 attention_backend = "flash_4"
 max_sequence_length = 2560

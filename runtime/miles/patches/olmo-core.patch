@@ -1,7 +1,15 @@
 diff --git a/src/olmo_core/kernels/swiglu.py b/src/olmo_core/kernels/swiglu.py
-index 4c71441ff45c0b8efc91c05f03527a231d38afac..e78a9b54abc92ae024d58109f3c7a213418d654b 100644
+index 4c71441ff45c0b8efc91c05f03527a231d38afac..e43c2506da3caa82b4a5e8f9090bc3edc156aaeb 100644
 --- a/src/olmo_core/kernels/swiglu.py
 +++ b/src/olmo_core/kernels/swiglu.py
+@@ -1,6 +1,6 @@
+ from __future__ import annotations
+ 
+-from typing import Optional
++from typing import Literal, Optional
+ 
+ import torch
+ import torch.nn.functional as F
 @@ -39,6 +39,7 @@ if triton is not None:
          ROW_PROGRAMS: tl.constexpr,
          HAS_START_TENSOR: tl.constexpr,
@@ -10,7 +18,7 @@ index 4c71441ff45c0b8efc91c05f03527a231d38afac..e78a9b54abc92ae024d58109f3c7a213
      ):
          pid_m = tl.program_id(0)
          pid_n = tl.program_id(1)
-@@ -58,7 +59,13 @@ if triton is not None:
+@@ -58,7 +59,61 @@ if triton is not None:
              gate_offsets = row_idx * x_stride_0 + (col_idx + hidden) * x_stride_1
              up = tl.load(x_ptr + up_offsets, mask=mask, other=0.0).to(tl.float32)
              gate = tl.load(x_ptr + gate_offsets, mask=mask, other=0.0).to(tl.float32)
@@ -22,18 +30,67 @@ index 4c71441ff45c0b8efc91c05f03527a231d38afac..e78a9b54abc92ae024d58109f3c7a213
 +                y = up * silu.to(tl.float32)
 +            else:
 +                y = up * gate * tl.sigmoid(gate)
++
++            out_offsets = row_idx * out_stride_0 + col_idx * out_stride_1
++            tl.store(out_ptr + out_offsets, y, mask=mask)
++            row_start += row_stride
++
++    @triton.jit(do_not_specialize=["rows"])
++    def _swiglu_valid_prefix_dynamic_rows_kernel(
++        x_ptr,
++        x_stride_0,
++        x_stride_1,
++        start_elements_ptr,
++        num_elements_ptr,
++        out_ptr,
++        out_stride_0,
++        out_stride_1,
++        rows,
++        hidden: tl.constexpr,
++        BLOCK_M: tl.constexpr,
++        BLOCK_N: tl.constexpr,
++        HAS_START_TENSOR: tl.constexpr,
++        START_ROW: tl.constexpr,
++        MATCH_EAGER_ROUNDING: tl.constexpr,
++    ):
++        pid_m = tl.program_id(0)
++        pid_n = tl.program_id(1)
++        start_row_base = tl.load(start_elements_ptr) if HAS_START_TENSOR else START_ROW
++        end_row = start_row_base + tl.load(num_elements_ptr)
++
++        col_idx = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)[None, :]
++        col_mask = col_idx < hidden
++        row_start = start_row_base + pid_m * BLOCK_M
++        row_stride = tl.num_programs(0) * BLOCK_M
++
++        while row_start < end_row:
++            row_idx = row_start + tl.arange(0, BLOCK_M)[:, None]
++            mask = (row_idx < end_row) & (row_idx < rows) & col_mask
++
++            up_offsets = row_idx * x_stride_0 + col_idx * x_stride_1
++            gate_offsets = row_idx * x_stride_0 + (col_idx + hidden) * x_stride_1
++            up = tl.load(x_ptr + up_offsets, mask=mask, other=0.0).to(tl.float32)
++            gate = tl.load(x_ptr + gate_offsets, mask=mask, other=0.0).to(tl.float32)
++            if MATCH_EAGER_ROUNDING:
++                # PyTorch's separate silu and multiply materialize silu in the
++                # input dtype. Scoring must retain that training-time rounding.
++                silu = (gate * tl.sigmoid(gate)).to(x_ptr.dtype.element_ty)
++                y = up * silu.to(tl.float32)
++            else:
++                y = up * gate * tl.sigmoid(gate)
  
              out_offsets = row_idx * out_stride_0 + col_idx * out_stride_1
              tl.store(out_ptr + out_offsets, y, mask=mask)
-@@ -169,6 +176,7 @@ def swiglu_valid_prefix(
+@@ -169,6 +224,8 @@ def swiglu_valid_prefix(
      *,
      start: torch.Tensor | int | None = None,
      out: Optional[torch.Tensor] = None,
 +    match_eager_rounding: bool = False,
++    row_specialization: Literal["static", "dynamic"] = "static",
      block_m: int = _VALID_PREFIX_SWIGLU_BLOCK_M,
      block_n: int = _VALID_PREFIX_SWIGLU_BLOCK_N,
      row_programs: int = _VALID_PREFIX_SWIGLU_ROW_PROGRAMS,
-@@ -182,7 +190,10 @@ def swiglu_valid_prefix(
+@@ -182,8 +239,18 @@ def swiglu_valid_prefix(
      valid-row count without synchronizing to the host. ``start`` can also be a
      device scalar. The returned/output tensor has capacity shape
      ``[x.shape[0], x.shape[1] // 2]``; rows outside the requested range are
@@ -42,11 +99,38 @@ index 4c71441ff45c0b8efc91c05f03527a231d38afac..e78a9b54abc92ae024d58109f3c7a213
 +    kernel rounds ``silu(gate)`` to the input dtype before multiplication, as
 +    the eager training expression does. The default preserves the fused
 +    arithmetic used by explicit fused forward/backward callers.
++
++    ``row_specialization="static"`` preserves the capacity-specialized kernel.
++    ``"dynamic"`` reuses a forward kernel across row capacities, while retaining
++    specialization on hidden width, tile sizes, offsets, and arithmetic mode.
++    This option does not change the backward kernel or register an autograd rule.
      """
++    if row_specialization not in ("static", "dynamic"):
++        raise ValueError("row_specialization must be 'static' or 'dynamic'")
      if x.ndim != 2:
          raise ValueError(f"Expected x rank-2 [M, 2H], got {tuple(x.shape)}")
-@@ -261,6 +272,7 @@ def swiglu_valid_prefix(
-         ROW_PROGRAMS=int(row_grid),
+     if x.shape[1] % 2 != 0:
+@@ -245,7 +312,13 @@ def swiglu_valid_prefix(
+     has_start_tensor = isinstance(start, torch.Tensor)
+     start_ptr = start if has_start_tensor else num_elements
+     start_row = 0 if start is None or has_start_tensor else int(start)
+-    _swiglu_valid_prefix_kernel[(row_grid, col_grid)](
++    kernel = (
++        _swiglu_valid_prefix_kernel
++        if row_specialization == "static"
++        else _swiglu_valid_prefix_dynamic_rows_kernel
++    )
++    capacity_options = {"ROW_PROGRAMS": int(row_grid)} if row_specialization == "static" else {}
++    kernel[(row_grid, col_grid)](
+         x,
+         x.stride(0),
+         x.stride(1),
+@@ -258,9 +331,10 @@ def swiglu_valid_prefix(
+         hidden,
+         BLOCK_M=int(block_m),
+         BLOCK_N=int(block_n),
+-        ROW_PROGRAMS=int(row_grid),
++        **capacity_options,
          HAS_START_TENSOR=has_start_tensor,
          START_ROW=start_row,
 +        MATCH_EAGER_ROUNDING=match_eager_rounding,
@@ -1225,16 +1309,42 @@ index 0000000000000000000000000000000000000000..07a0fd9ae8a5eed4dac0bb6523d82f02
 +        for name, router in routers.items():
 +            router.replay_expert_indices = previous[name]
 diff --git a/src/olmo_core/nn/moe/v2/routed_experts.py b/src/olmo_core/nn/moe/v2/routed_experts.py
-index ab957f6bd5e7839485bff64896fb41c69aaa67f4..f405b49398511fcd0918698f8f61e9669ca0e476 100644
+index ab957f6bd5e7839485bff64896fb41c69aaa67f4..acb746c9470a53fa3f6670997e6379be5577c2c8 100644
 --- a/src/olmo_core/nn/moe/v2/routed_experts.py
 +++ b/src/olmo_core/nn/moe/v2/routed_experts.py
-@@ -1122,7 +1122,9 @@ class RoutedExperts(nn.Module):
+@@ -406,6 +406,8 @@ class RoutedExpertsConfig(Config):
+     activation: ExpertActivation = ExpertActivation.swiglu
+     activation_alpha: float = 1.702
+     activation_limit: Optional[float] = None
++    # Forward valid-prefix kernel only; direct wave/backward callers keep their defaults.
++    row_specialization: str = "static"
+ 
+     def build(
+         self,
+@@ -476,8 +478,12 @@ class RoutedExperts(nn.Module):
+         activation_alpha: float = 1.702,
+         activation_limit: Optional[float] = None,
+         init_device: str = "cpu",
++        row_specialization: str = "static",
+     ):
+         super().__init__()
++        if row_specialization not in ("static", "dynamic"):
++            raise ValueError("row_specialization must be static or dynamic")
++        self.row_specialization = row_specialization
+         self.d_model = d_model
+         self.hidden_size = hidden_size
+         self.num_experts = num_experts
+@@ -1122,7 +1128,13 @@ class RoutedExperts(nn.Module):
                  and num_elements.device == up_gate.device
                  and not torch.is_grad_enabled()
              ):
 -                return swiglu_valid_prefix(up_gate, num_elements, start=start)
 +                return swiglu_valid_prefix(
-+                    up_gate, num_elements, start=start, match_eager_rounding=True
++                    up_gate,
++                    num_elements,
++                    start=start,
++                    match_eager_rounding=True,
++                    row_specialization=self.row_specialization,
 +                )
              up, gate = up_gate.chunk(2, dim=-1)
              h = up * F.silu(gate)  # -> (BS, H)
@@ -1397,15 +1507,24 @@ index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa974
          # Set model to train mode if it isn't already.
          self._set_model_mode("train")
 diff --git a/src/test/kernels/swiglu_valid_prefix_test.py b/src/test/kernels/swiglu_valid_prefix_test.py
-index 06138448ec852fa8c552e27c9187835bafe09cfc..61fc3105362c319eae838fc4d5fc00e4e7cdae0f 100644
+index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a60ff59350 100644
 --- a/src/test/kernels/swiglu_valid_prefix_test.py
 +++ b/src/test/kernels/swiglu_valid_prefix_test.py
-@@ -1,3 +1,4 @@
+@@ -1,7 +1,13 @@
++from unittest import mock
++
 +import pytest
  import torch
  import torch.nn.functional as F
  
-@@ -147,3 +148,28 @@ def test_swiglu_valid_prefix_accepts_device_start_offset():
++from olmo_core.config import DType
++from olmo_core.kernels import swiglu
+ from olmo_core.kernels.swiglu import swiglu_backward_valid_prefix, swiglu_valid_prefix
++from olmo_core.nn.moe.v2.routed_experts import RoutedExpertsConfig
+ from olmo_core.testing import requires_gpu, requires_triton
+ 
+ 
+@@ -147,3 +153,126 @@ def test_swiglu_valid_prefix_accepts_device_start_offset():
          atol=0.0,
          rtol=0.0,
      )
@@ -1434,6 +1553,104 @@ index 06138448ec852fa8c552e27c9187835bafe09cfc..61fc3105362c319eae838fc4d5fc00e4
 +    if valid_rows and dtype == torch.bfloat16:
 +        fused = swiglu_valid_prefix(x, count, start=start)
 +        assert not torch.equal(fused[1 : 1 + valid_rows], eager)
++
++
++@pytest.mark.parametrize("mode", ["static", "dynamic"])
++def test_row_specialization_config_and_cpu_fallback(mode):
++    config = RoutedExpertsConfig(
++        d_model=8,
++        hidden_size=8,
++        num_experts=2,
++        bias=False,
++        dtype=DType.float32,
++        row_specialization=mode,
++    )
++    assert config.build(init_device="meta").row_specialization == mode
++    assert RoutedExpertsConfig.from_dict(config.as_dict()).row_specialization == mode
++    x = torch.randn(7, 16)
++    actual = swiglu_valid_prefix(x, torch.tensor(5), row_specialization=mode)
++    torch.testing.assert_close(actual[:5], x[:5, :8] * F.silu(x[:5, 8:]))
++    with pytest.raises(ValueError, match="row_specialization"):
++        swiglu_valid_prefix(x, torch.tensor(5), row_specialization="invalid")
++
++
++@requires_gpu
++@requires_triton
++@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
++@pytest.mark.parametrize("eager_rounding", [False, True])
++def test_dynamic_rows_exact_values_and_boundaries(dtype, eager_rounding):
++    # Includes a partial column tile and capacities on both sides of the grid cap.
++    for rows, valid, offset in [(1, 0, 0), (17, 9, 3), (37, 37, 0), (16385, 16380, 5)]:
++        x = torch.randn(rows, 2 * 257, device="cuda", dtype=dtype)
++        count = torch.tensor(valid, device="cuda", dtype=torch.long)
++        start = torch.tensor(offset, device="cuda", dtype=torch.long)
++        expected = torch.full((rows, 257), 7.0, device="cuda", dtype=dtype)
++        actual = expected.clone()
++        swiglu_valid_prefix(
++            x, count, start=start, out=expected, match_eager_rounding=eager_rounding
++        )
++        swiglu_valid_prefix(
++            x,
++            count,
++            start=start,
++            out=actual,
++            match_eager_rounding=eager_rounding,
++            row_specialization="dynamic",
++        )
++        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
++        assert torch.equal(actual[:offset], torch.full_like(actual[:offset], 7.0))
++        assert torch.equal(actual[offset + valid :], torch.full_like(actual[offset + valid :], 7.0))
++
++
++@requires_gpu
++@requires_triton
++def test_dynamic_rows_do_not_compile_for_new_capacities():
++    compiled = []
++    original = swiglu._swiglu_valid_prefix_dynamic_rows_kernel._do_compile
++
++    def observe(*args, **kwargs):
++        compiled.append(1)
++        return original(*args, **kwargs)
++
++    # Distinct width to keep this test independent of other kernel warmups.
++    with mock.patch.object(swiglu._swiglu_valid_prefix_dynamic_rows_kernel, "_do_compile", observe):
++        for index, rows in enumerate([1, 16, 17, 63, 128, 257, 16385]):
++            x = torch.randn(rows, 2 * 73, device="cuda", dtype=torch.bfloat16)
++            count = torch.tensor(rows, device="cuda", dtype=torch.long)
++            swiglu_valid_prefix(x, count, row_specialization="dynamic")
++            torch.cuda.synchronize()
++            if index == 0:
++                first = len(compiled)
++            assert len(compiled) == first, f"capacity {rows} triggered another compilation"
++
++
++@requires_gpu
++@requires_triton
++@pytest.mark.parametrize("mode", ["static", "dynamic"])
++def test_routed_dispatch_and_gradient_path(mode):
++    module = RoutedExpertsConfig(
++        d_model=8,
++        hidden_size=8,
++        num_experts=2,
++        bias=False,
++        dtype=DType.float32,
++        row_specialization=mode,
++    ).build(init_device="meta")
++    x = torch.randn(19, 16, device="cuda", requires_grad=True)
++    count = torch.tensor(17, device="cuda", dtype=torch.long)
++    with mock.patch(
++        "olmo_core.nn.moe.v2.routed_experts.swiglu_valid_prefix", wraps=swiglu_valid_prefix
++    ) as kernel:
++        with torch.no_grad():
++            module.chunk_and_activate(x, num_elements=count)
++        assert kernel.call_args.kwargs["row_specialization"] == mode
++        kernel.reset_mock()
++        value = module.chunk_and_activate(x, num_elements=count)
++        value.sum().backward()
++        kernel.assert_not_called()
++    reference = x.detach().clone().requires_grad_()
++    (reference[:, :8] * F.silu(reference[:, 8:])).sum().backward()
++    torch.testing.assert_close(x.grad, reference.grad, rtol=0, atol=0)
 diff --git a/src/test/nn/moe/v2/olmo3_factory_test.py b/src/test/nn/moe/v2/olmo3_factory_test.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..66c66c41e4d67c1e6378d40419aacfb2c4b74d1b

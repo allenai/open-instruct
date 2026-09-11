@@ -3,6 +3,7 @@
 # Two optimizer updates plus durable checkpoints; a three-step LR horizon lets
 # a separate resume exercise complete the third step with the same schedule.
 [core]
+row_specialization = "dynamic"
 expert_parallel_size = 1
 attention_backend = "torch"
 max_sequence_length = 512

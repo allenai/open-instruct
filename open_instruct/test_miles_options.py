@@ -121,3 +121,11 @@ def test_public_plan_cli(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["miles", "plan", str(path), "--set", "miles.use_wandb=false"])
     __main__.main()
     assert json.loads(capsys.readouterr().out)["miles"]["use_wandb"] is False
+
+
+def test_row_specialization_is_explicit_and_validated():
+    assert CoreConfig().row_specialization == "static"
+    value = RunConfig(CoreConfig(row_specialization="dynamic"), {"hf_checkpoint": "model", "global_batch_size": 8})
+    assert value.plan()["core"]["row_specialization"] == "dynamic"
+    with pytest.raises(ValueError, match="row_specialization"):
+        CoreConfig(row_specialization="auto")

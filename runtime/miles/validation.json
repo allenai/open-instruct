@@ -344,6 +344,18 @@
       "skipped": 0,
       "changed_sources": [],
       "evidence": "docs/measurements/miles-core-contract-parity-20260910.json"
+    },
+    "row_specialization_opt_in": {
+      "core_commit": "307d20590f241222176f51f1760529988402e1b7",
+      "status": "local GPU and interface gates passed; full-run timing follow-up remains",
+      "core_kernel_cases": 25,
+      "paired_training_cases": 4,
+      "runtime_regression_cases": 42,
+      "cpu_interface_cases": 52,
+      "evidence": "docs/measurements/miles-core-row-specialization-20260911.md",
+      "static_default": true,
+      "rl_profiles": "dynamic",
+      "backward_changed": false
     }
   },
   "limitations": [

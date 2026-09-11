@@ -34,6 +34,11 @@ inheritance or environment-variable substitution is implied.
 | [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two Core EP ranks plus one dedicated SGLang GPU | 4 prompts × 4 responses; 2 updates; context 6144, response 4096; decode graphs through batch 4; FA4 | Derived from the successful full SFT run with two real updates and 64 audited responses. Adds per-step contract diagnostics and explicit prompt admission; this file is not a claim of a new completed run. |
 | [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU allocation; bounded asynchronous generation | 4 prompts × 4 responses; 4 updates; context 2560, response 512; lag ≤1; one collection buffered; eager decode | Candidate for async qualification only. Core's bounded queue and ledger have targeted tests; full-model async endurance, restart and failures need their own run. Replay stays off. |
 
+All profiles explicitly select `core.row_specialization="dynamic"` for forward-only
+routed-expert scoring; Core defaults remain static. See the
+[row-specialization integration](measurements/miles-core-row-specialization-20260911.md)
+for isolation, rollback and qualification scope.
+
 All profiles keep trainer offload disabled (the compiler explicitly supplies
 `--no-offload-train`), microbatch size one, activation recomputation enabled,
 router auxiliary coefficient 0.01 and z-loss coefficient 1e-5. They enable initial

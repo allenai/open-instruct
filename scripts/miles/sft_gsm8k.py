@@ -32,6 +32,7 @@ DATASET_REVISION = "93ffaae6cd2acb8f821f6d4712651320a889b1b9"
 def configuration(root):
     return RunConfig(
         CoreConfig(
+            row_specialization="dynamic",
             expert_parallel_size=2,
             attention_backend="flash_4",
             max_sequence_length=6144,

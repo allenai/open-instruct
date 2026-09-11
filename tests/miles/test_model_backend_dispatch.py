@@ -8,7 +8,7 @@ import torch
 from olmo_core.nn.moe.v2.router import MoERouterConfigV2
 from transformers import AutoModelForCausalLM, Olmo3Config
 
-from open_instruct.miles import actor, models
+from open_instruct.miles import actor, checkpoint, models, moe_models
 from open_instruct.miles.config import CoreConfig
 
 
@@ -82,3 +82,27 @@ def test_actor_moe_replay_preserves_router_gradients_and_cleans_up():
     with pytest.raises(RuntimeError, match="injected"), worker._replay_context(module, batch):
         raise RuntimeError("injected")
     assert router.replay_expert_indices is None
+
+
+def test_checkpoint_row_mode_rollback_and_legacy_manifest():
+    legacy = {"block": {"routed_experts": {"hidden_size": 128}, "router": {"top_k": 2}}}
+    static = {
+        "block": {"routed_experts": {"hidden_size": 128, "row_specialization": "static"}, "router": {"top_k": 2}}
+    }
+    dynamic = {
+        "block": {"routed_experts": {"hidden_size": 128, "row_specialization": "dynamic"}, "router": {"top_k": 2}}
+    }
+    assert checkpoint.comparable_model_config(legacy) == checkpoint.comparable_model_config(static)
+    assert checkpoint.comparable_model_config(static) == checkpoint.comparable_model_config(dynamic)
+    dynamic["block"]["router"]["top_k"] = 3
+    assert checkpoint.comparable_model_config(static) != checkpoint.comparable_model_config(dynamic)
+    dynamic["block"]["routed_experts"]["row_specialization"] = "invalid"
+    with pytest.raises(ValueError, match="row_specialization"):
+        checkpoint.comparable_model_config(dynamic)
+
+
+def test_row_mode_initialization_covers_named_blocks_and_overrides():
+    blocks = [SimpleNamespace(routed_experts=SimpleNamespace(row_specialization="static")) for _ in range(3)]
+    config = SimpleNamespace(block={"kda": blocks[0], "attention": blocks[1]}, block_overrides={7: blocks[2]})
+    moe_models.prepare_model_config(config, SimpleNamespace(layer_types=[]), CoreConfig(row_specialization="dynamic"))
+    assert all(block.routed_experts.row_specialization == "dynamic" for block in blocks)

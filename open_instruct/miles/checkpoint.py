@@ -114,7 +114,9 @@ def _restore_preflight(actor):
     # Read and validate rank-local state before any native checkpoint collective.
     path, manifest = resume_manifest(actor.args.load)
     validate_topology(manifest, dist.get_world_size(), actor.args.olmo_core.expert_parallel_size)
-    if manifest["model_config"] != actor.model_config.as_config_dict():
+    if comparable_model_config(manifest["model_config"]) != comparable_model_config(
+        actor.model_config.as_config_dict()
+    ):
         raise ValueError("Core model configuration differs from the saved architecture")
     clock = PolicyClock.from_dict(manifest["clock"])
     state = torch.load(path / f"rank_{dist.get_rank()}.pt", map_location="cpu", weights_only=False)
@@ -135,3 +137,23 @@ def restore(actor):
     np.random.set_state(state["numpy"])
     torch.set_rng_state(state["torch"])
     torch.cuda.set_rng_state(state["cuda"])
+
+
+def comparable_model_config(value, *, parent=None):
+    """Exclude only validated SwiGLU execution selection from architecture equality.
+
+    Old manifests omit this field. Retain the original config in new manifests for
+    provenance while allowing a static/dynamic rollback without changing weights.
+    """
+    if isinstance(value, list):
+        return [comparable_model_config(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {}
+    for key, item in value.items():
+        if parent == "routed_experts" and key == "row_specialization":
+            if item not in ("static", "dynamic"):
+                raise ValueError("Invalid saved routed-expert row_specialization")
+            continue
+        result[key] = comparable_model_config(item, parent=key)
+    return result

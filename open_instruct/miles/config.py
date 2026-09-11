@@ -18,6 +18,7 @@ class CoreConfig:
     diagnostic_interval: int = 0
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
+    row_specialization: str = "static"
     model_config: str | None = None
     reward_config: str | None = None
     expert_parallel_size: int = 1
@@ -29,6 +30,8 @@ class CoreConfig:
     router_z_loss_weight: float = 1e-5
 
     def __post_init__(self):
+        if self.row_specialization not in ("static", "dynamic"):
+            raise ValueError("core.row_specialization must be static or dynamic")
         if type(self.diagnostic_interval) is not int or self.diagnostic_interval < 0:
             raise ValueError("core.diagnostic_interval must be a nonnegative integer")
         limit = self.max_train_rollout_logprob_abs_diff

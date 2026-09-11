@@ -30,6 +30,11 @@ def prepare_model_config(config, hf, options):
     if "linear_attention" in (getattr(hf, "layer_types", None) or []):
         fla_compat.install_kda_triton_compat()
     config.recompute_each_block = options.activation_checkpointing
+    blocks = list(config.block.values()) if isinstance(config.block, dict) else [config.block]
+    for block in [*blocks, *(config.block_overrides or {}).values()]:
+        experts = getattr(block, "routed_experts", None)
+        if experts is not None:
+            experts.row_specialization = options.row_specialization
 
 
 class HFInitializedMoETrainModule(train_transformer.OLMoDDPTrainModule):
