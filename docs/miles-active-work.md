@@ -10,7 +10,7 @@ separate authorization.
 | Track | State | Next evidence needed |
 | --- | --- | --- |
 | Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128→102/128→97/128 at0/20/40/60/80 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
-| Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe; initial held-out96/128 versus Core97/128 | Full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
+| Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe; held-out96/128→93/128 at0/20; Core97/128→101/128 | Full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
 | Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis completed](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
 | Native reduction/clipping stress | [EP1/EP2 passed](https://beaker.org/ex/01M270A2J2E3WC60978EM8G5SV); independent global norm, active clipping and Adam moments verified | [Evidence](measurements/miles-core-ep-stress-20260910.json); max gradient relative L2 difference 5.002e-6; does not establish exact update parity near zero gradients. |
@@ -84,6 +84,12 @@ at SwiGLU. Ordinary HF retains a separate packed-layout/reduction difference.
 Core commit `290d2ca4521373bef0bf7fe4244673cc79dcc004` corrects the scoring
 call to round the SiLU intermediate as eager training does, preserving the fused
 kernel default for its explicit forward/backward users. Fourteen local GPU kernel
-tests pass; full-checkpoint rerun pending. This fix does not change either active
+tests pass; the [full-checkpoint block rerun](measurements/miles-hero-scoring-rounding-20260910.json)
+now matches grad-enabled Core and controlled HF exactly at every captured
+branch/GEMM boundary for both prefixes. This fix does not change either active
 100-update image. The old Core image contains the same shortcut; its full-model
 impact on that run is not yet quantified.
+
+[Full-model layerwise follow-up](https://beaker.org/ex/01M273R04XVRRQZA0HMRD2M5ZG)
+is running after the scoring correction; ordinary HF/SGLang qualification remains
+separate from the controlled-HF diagnostic.

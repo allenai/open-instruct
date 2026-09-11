@@ -1,0 +1,277 @@
+{
+  "diagnosis_only": true,
+  "model": "/weka/olmo-3p5-checkpoints/scratch/hero-hf-20260909/non-emo/step75500/hf",
+  "layer": 1,
+  "hf_source_sha256": {
+    "configuration_olmo3moe.py": "49ed9aca7406dd62cc43f317ce81e13eaa26d94adb310f1af88c6e10dd2fd7ba",
+    "modeling_olmo3moe.py": "81c4427030be8a6e982d131ed7615d44c4f2747df6bc4c537cd2b9430703913a"
+  },
+  "activation_sha256": "c008bf362243a0b91a5b1f205e4b5d9f12e8f8640f39b2bb76c88b576ea6c659",
+  "core_sources_sha256": {
+    "factory": "27898e1c2fda95a6c5b1abe09da9f075e87ca35cfd0417cc7e58665f8516c14d",
+    "routed_experts": "3e46e38b0114ce08b4c15dbd4c0c6d115d2386893098941a2f79fec5932d81b1",
+    "shared_experts": "172c0bc5480dcc0b31a27e31dfc054a497c9a669df4677f4bebaff3149e60164"
+  },
+  "core_model_training_flag": false,
+  "core_routed_profile_pairwise_swiglu": false,
+  "core_routed_profile_rounded_wgrad": false,
+  "core_torch_grouped_mm": true,
+  "grad_enabled_forward": "Actual single-block MoE forward with autograd enabled, eval mode, no backward",
+  "input_boundary": "Frozen HF attention residual / pre-FFN norm output; attention bypassed; actual no-EP MoE math unchanged",
+  "limitations": "One block, no backward/optimizer; grad-enabled activation is a labeled same-input diagnostic only. No gate or tolerance changes.",
+  "experiment": "01M273FED8GYWAYJ62JCRD9FJM",
+  "job": "01M273FEK2GVKVREAWB1YC6HSG",
+  "result": "01M273FEDFJZRV20GZQ15KBBR3",
+  "source": "f2f3fa2d81a6c81f1608a592ce53b1c6795b6339",
+  "core_source": "290d2ca4521373bef0bf7fe4244673cc79dcc004",
+  "exit_code": 0,
+  "full_report_sha256": "9ac0ed3e87e6d4ebc865678a2e52169a432323d6128c80149da43ef9cba39aa6",
+  "records": [
+    {
+      "prompt_length": 16,
+      "modes": [
+        {
+          "hf_core_reference": false,
+          "no_grad_combined": {
+            "shape": [
+              1,
+              16,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 1.0,
+            "mean_abs": 0.020445268601179123,
+            "relative_l2": 0.0042155822313435206,
+            "reference_rms": 8.61437702178955,
+            "equal_fraction": 0.336669921875
+          },
+          "grad_enabled_combined": {
+            "shape": [
+              1,
+              16,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 1.0,
+            "mean_abs": 0.020445268601179123,
+            "relative_l2": 0.0042155822313435206,
+            "reference_rms": 8.61437702178955,
+            "equal_fraction": 0.336669921875
+          }
+        },
+        {
+          "hf_core_reference": true,
+          "no_grad_combined": {
+            "shape": [
+              1,
+              16,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "relative_l2": 0.0,
+            "reference_rms": 8.614809036254883,
+            "equal_fraction": 1.0
+          },
+          "grad_enabled_combined": {
+            "shape": [
+              1,
+              16,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "relative_l2": 0.0,
+            "reference_rms": 8.614809036254883,
+            "equal_fraction": 1.0
+          },
+          "same_input_activation": {
+            "native_no_grad_vs_hf_eager": {
+              "shape": [
+                256,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.0,
+              "mean_abs": 0.0,
+              "relative_l2": 0.0,
+              "reference_rms": 0.21551188826560974,
+              "equal_fraction": 1.0
+            },
+            "native_no_grad_vs_fp32_single_cast": {
+              "shape": [
+                256,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.03125,
+              "mean_abs": 0.00015568500384688377,
+              "relative_l2": 0.002837684783599086,
+              "reference_rms": 0.21554645895957947,
+              "equal_fraction": 0.7339935302734375
+            },
+            "native_grad_enabled_vs_hf_eager": {
+              "shape": [
+                256,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.0,
+              "mean_abs": 0.0,
+              "relative_l2": 0.0,
+              "reference_rms": 0.21551188826560974,
+              "equal_fraction": 1.0
+            },
+            "hf_actual_down_input_vs_eager_core_input": {
+              "shape": [
+                256,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.0,
+              "mean_abs": 0.0,
+              "relative_l2": 0.0,
+              "reference_rms": 0.21551188826560974,
+              "equal_fraction": 1.0
+            }
+          },
+          "all_controlled_branches_exact": true,
+          "all_controlled_gmm_boundaries_exact": true
+        }
+      ]
+    },
+    {
+      "prompt_length": 81,
+      "modes": [
+        {
+          "hf_core_reference": false,
+          "no_grad_combined": {
+            "shape": [
+              1,
+              81,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 2.0,
+            "mean_abs": 0.0189005509018898,
+            "relative_l2": 0.0038384363966557393,
+            "reference_rms": 9.118148803710938,
+            "equal_fraction": 0.3421826660633087
+          },
+          "grad_enabled_combined": {
+            "shape": [
+              1,
+              81,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 2.0,
+            "mean_abs": 0.0189005509018898,
+            "relative_l2": 0.0038384363966557393,
+            "reference_rms": 9.118148803710938,
+            "equal_fraction": 0.3421826660633087
+          }
+        },
+        {
+          "hf_core_reference": true,
+          "no_grad_combined": {
+            "shape": [
+              1,
+              81,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "relative_l2": 0.0,
+            "reference_rms": 9.120256423950195,
+            "equal_fraction": 1.0
+          },
+          "grad_enabled_combined": {
+            "shape": [
+              1,
+              81,
+              1024
+            ],
+            "actual_dtype": "torch.bfloat16",
+            "reference_dtype": "torch.bfloat16",
+            "max_abs": 0.0,
+            "mean_abs": 0.0,
+            "relative_l2": 0.0,
+            "reference_rms": 9.120256423950195,
+            "equal_fraction": 1.0
+          },
+          "same_input_activation": {
+            "native_no_grad_vs_hf_eager": {
+              "shape": [
+                1296,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.0,
+              "mean_abs": 0.0,
+              "relative_l2": 0.0,
+              "reference_rms": 0.20076656341552734,
+              "equal_fraction": 1.0
+            },
+            "native_no_grad_vs_fp32_single_cast": {
+              "shape": [
+                1296,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.0625,
+              "mean_abs": 0.00014441055827774107,
+              "relative_l2": 0.0028278448279387787,
+              "reference_rms": 0.2008010894060135,
+              "equal_fraction": 0.7352942824363708
+            },
+            "native_grad_enabled_vs_hf_eager": {
+              "shape": [
+                1296,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.0,
+              "mean_abs": 0.0,
+              "relative_l2": 0.0,
+              "reference_rms": 0.20076656341552734,
+              "equal_fraction": 1.0
+            },
+            "hf_actual_down_input_vs_eager_core_input": {
+              "shape": [
+                1296,
+                1024
+              ],
+              "actual_dtype": "torch.bfloat16",
+              "reference_dtype": "torch.bfloat16",
+              "max_abs": 0.0,
+              "mean_abs": 0.0,
+              "relative_l2": 0.0,
+              "reference_rms": 0.20076656341552734,
+              "equal_fraction": 1.0
+            }
+          },
+          "all_controlled_branches_exact": true,
+          "all_controlled_gmm_boundaries_exact": true
+        }
+      ]
+    }
+  ]
+}
