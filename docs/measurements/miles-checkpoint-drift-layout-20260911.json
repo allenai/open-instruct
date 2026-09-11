@@ -1,0 +1,18 @@
+{
+  "native_parameter_count": 503,
+  "canonical_native_virtual_keys": 503,
+  "model_storage_dtypes": {
+    "torch.bfloat16": 471,
+    "torch.float32": 32
+  },
+  "largest_master_bytes": 2495610880,
+  "loaded_payload": false,
+  "checkpoint": "/weka/oe-training-default/robertb/open-instruct/miles-core-durable/01M276Y2J577FPD6G6JYMS9NV6/split/core/rollout_0000001/model",
+  "metadata_inventory_sha256": "a3efbed0689524d39b499bc2c660f5a5c6825606a463bf112504ab740cae562e",
+  "scope": "Read metadata and build meta-device shapes only; no checkpoint tensor payload read",
+  "execution_job": "01M279ZFQZGCXK4TSQ7DBB5JN3",
+  "execution_container": "e4daec577bb7",
+  "execution_hostname": "holmes-cs-aus-488.reviz.ai2.in",
+  "execution_image": "01M279KKMX3RGXB6AYB273DE3C",
+  "approval_review": "Initial metadata-only command rejected for unverified destination and interpretation of Saturn placement. Retried only after live Beaker hostname/owner and docker execution labels verified; approved with exact evidence. No new CPU job launched."
+}
