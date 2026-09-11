@@ -230,3 +230,12 @@ To exercise the planner through an open-instruct run config, set
 `core.checkpoint_constant_memory_planning = true` and optionally
 `core.checkpoint_profile = true`. Writer compaction, ownership, and process settings
 remain separate options; they are not required to select arithmetic metadata planning.
+
+
+Post-integration verification: **97 tests passed**, with 14 deselected (GPU-marked
+and remote-storage cases), covering wrapper options, continuation auditing, topology
+contracts, metadata parity, local writer/reader compatibility, and save-failure recovery.
+Open-instruct formatting, lint, compilation, and type checks passed on the working branch.
+The Core runtime commit and overlay checksum match the merged Core working branch.
+The candidate full-model live state is byte-exact before and after save on both ranks;
+the fresh-process subsequent-update audit remains pending.
