@@ -130,7 +130,7 @@ fills absent events or compares unequal coverage silently.
 | Operational cycle | Consecutive native generation-end timestamps, excluding eval crossings | 90 matched warm cycles: Core mean91.06497s; Megatron68.24182s. Generation is included in these cycles, so do not add the generation row |
 | Core ingress/scoring | Same-rollout generation-end timestamp to rank0 score-contract timestamp |95 warm events mean44.32847s, median44.872s; includes dispatch, data conversion, preflight, forward/logprob work and score checks; not a pure model-forward timer |
 | Training | Core optimizer contract starts after scoring; Megatron `actor_train` also excludes its separately timed log-prob pass but has different instrumentation/reductions | 95 warm events each: Core6.16966s; Megatron17.38376s. Diagnostic scopes differ; not an isolated backend compute-speed ratio |
-| Publication | Core explicit publication timer / optimizer-log to publication boundary; baseline `update_weights` timer | Core publications for completed updates6–100 mean3.74132s; boundary mean3.76832s. Megatron warm update_weights95-event mean5.89236s; export/communication/check scopes differ |
+| Publication | Matched completed-update indices5–99; explicit publication timers | Core3.72784s; Megatron5.88441s. Core export0.4356s and transport/load3.2223s; Megatron gather1.1027s, conversion0.2518s and engine wait3.4089s. Stage scopes differ; see retained weight-sync evidence |
 | Orchestration | Requires explicit boundaries or a profiler | Do not obtain this by subtracting independently averaged generation/training phases |
 | Evaluation | Initial/final held-out generation and scoring logs, separated from warm training cycles | Same128 prompts, but response lengths/caps and therefore duration change with policy |
 | Startup | Beaker scheduled→started→first eval / first update | Megatron r3 cold DCP load consumed approximately22min; startup/checkpoint I/O excluded from warm throughput |
@@ -222,3 +222,12 @@ support plus validation tools. Both flags are false in this campaign's old SFT
 checkpoint, as verified from its actual HF configuration. These are different serving
 revisions even when the added architecture branches are inactive; no throughput or
 initial-evaluation difference is attributed to that revision change without evidence.
+
+[Matched weight-sync evidence](miles-gsm8k-weight-sync-20260911.json) resolves the
+publication stage timings above. [Actual Megatron padding evidence](miles-gsm8k-megatron-padding-20260911.json)
+checks all200 retained rank dumps from the100-update r3 run:3,281,711 real input tokens
+occupied6,034,840 padded forward slots. Artificial positions total2,753,129, or45.6206%
+of capacity (1.83893× real input length). All eight samples on each rank pad to that
+rank's rollout-batch maximum, even with microbatch1 and effective pad multiple1. This
+counts sequence slots, not measured FLOPs or time; Core and Megatron also generated
+different responses, so it is not a direct total-work ratio between the two runs.

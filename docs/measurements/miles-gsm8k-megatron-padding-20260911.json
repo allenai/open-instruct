@@ -1,0 +1,3611 @@
+{
+  "source": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/megatron-r3/train_data",
+  "records": [
+    {
+      "rollout": 0,
+      "rank": 0,
+      "sha256": "1c02860ba9ce8714da0ed9003cb91bace2914e7daa41bce17927cb37065d075a",
+      "real_tokens": 16658,
+      "padded_capacity_tokens": 33888,
+      "sample_lengths": [
+        4236,
+        2293,
+        2460,
+        524,
+        2006,
+        2317,
+        928,
+        1894
+      ],
+      "max_seq_len": 4236
+    },
+    {
+      "rollout": 0,
+      "rank": 1,
+      "sha256": "98ec384ba8398e2142dda82d0fed49ed058c5c769770d40e0dbc0e75d10a2266",
+      "real_tokens": 17735,
+      "padded_capacity_tokens": 34056,
+      "sample_lengths": [
+        924,
+        2572,
+        2576,
+        4257,
+        2229,
+        1394,
+        2479,
+        1304
+      ],
+      "max_seq_len": 4257
+    },
+    {
+      "rollout": 1,
+      "rank": 0,
+      "sha256": "eb50c1ce3f8f427f0a2793a9ac8dc8766853371dd9e2863ff8fd283dbb72eeda",
+      "real_tokens": 21242,
+      "padded_capacity_tokens": 34384,
+      "sample_lengths": [
+        4298,
+        3599,
+        2029,
+        1907,
+        4271,
+        2431,
+        1384,
+        1323
+      ],
+      "max_seq_len": 4298
+    },
+    {
+      "rollout": 1,
+      "rank": 1,
+      "sha256": "2a19feefb401fcbe1bd0df704655a452998c33e5ed15bc02a11c4c0add44edea",
+      "real_tokens": 20280,
+      "padded_capacity_tokens": 33856,
+      "sample_lengths": [
+        4087,
+        1536,
+        4232,
+        1640,
+        2931,
+        2680,
+        2334,
+        840
+      ],
+      "max_seq_len": 4232
+    },
+    {
+      "rollout": 2,
+      "rank": 0,
+      "sha256": "8de5c7c7bab0337063efcfba28aca6096933d27cc6c49845065a86e075aa635e",
+      "real_tokens": 15425,
+      "padded_capacity_tokens": 34136,
+      "sample_lengths": [
+        1203,
+        2206,
+        883,
+        933,
+        4267,
+        3106,
+        1935,
+        892
+      ],
+      "max_seq_len": 4267
+    },
+    {
+      "rollout": 2,
+      "rank": 1,
+      "sha256": "4e18a08955b8333630527ce971604e7897331aa51cea92d3e326999173992f04",
+      "real_tokens": 11870,
+      "padded_capacity_tokens": 14888,
+      "sample_lengths": [
+        1139,
+        1278,
+        1759,
+        1835,
+        1175,
+        1569,
+        1254,
+        1861
+      ],
+      "max_seq_len": 1861
+    },
+    {
+      "rollout": 3,
+      "rank": 0,
+      "sha256": "46e975f26d7798f721ade95ddca81ea25131865d5dc58912013ce27a3d24bdea",
+      "real_tokens": 17210,
+      "padded_capacity_tokens": 34240,
+      "sample_lengths": [
+        1091,
+        1604,
+        1047,
+        1825,
+        2666,
+        1527,
+        3170,
+        4280
+      ],
+      "max_seq_len": 4280
+    },
+    {
+      "rollout": 3,
+      "rank": 1,
+      "sha256": "e436ec4eb67b33ddfaea89f9fc7f6653b31df4d7509574b9d4fb5d1ff9c281ed",
+      "real_tokens": 16567,
+      "padded_capacity_tokens": 34240,
+      "sample_lengths": [
+        546,
+        1132,
+        1085,
+        2076,
+        3942,
+        555,
+        4280,
+        2951
+      ],
+      "max_seq_len": 4280
+    },
+    {
+      "rollout": 4,
+      "rank": 0,
+      "sha256": "8963bad428caad98125e0645c194587bf9072e9e321e6a51b306235cff1a2cfe",
+      "real_tokens": 25975,
+      "padded_capacity_tokens": 34232,
+      "sample_lengths": [
+        960,
+        1667,
+        4279,
+        4279,
+        3529,
+        4231,
+        4262,
+        2768
+      ],
+      "max_seq_len": 4279
+    },
+    {
+      "rollout": 4,
+      "rank": 1,
+      "sha256": "397b36f07a13b48f6cfe626c76ca383e0af7440ab35f6bb0085e50e2449ebd13",
+      "real_tokens": 23109,
+      "padded_capacity_tokens": 34232,
+      "sample_lengths": [
+        794,
+        1574,
+        3295,
+        4279,
+        2721,
+        1922,
+        4262,
+        4262
+      ],
+      "max_seq_len": 4279
+    },
+    {
+      "rollout": 5,
+      "rank": 0,
+      "sha256": "693b5ad0e60ce94dd8fa0c2de7b6a1d0d87f15a930a5585c6ceb6d3b76be3681",
+      "real_tokens": 7663,
+      "padded_capacity_tokens": 16128,
+      "sample_lengths": [
+        1132,
+        424,
+        820,
+        2016,
+        1032,
+        545,
+        709,
+        985
+      ],
+      "max_seq_len": 2016
+    },
+    {
+      "rollout": 5,
+      "rank": 1,
+      "sha256": "da7e7157b3b923abb8862fc68f96933e6d06e0fca8a286438eb9d5da6aa005d9",
+      "real_tokens": 13510,
+      "padded_capacity_tokens": 34360,
+      "sample_lengths": [
+        1601,
+        1217,
+        926,
+        1430,
+        631,
+        1346,
+        2064,
+        4295
+      ],
+      "max_seq_len": 4295
+    },
+    {
+      "rollout": 6,
+      "rank": 0,
+      "sha256": "8a7e7dd073aa7d3e6d196ce258c8736df5badf72a21c1c003caa3d75c537d379",
+      "real_tokens": 16512,
+      "padded_capacity_tokens": 34336,
+      "sample_lengths": [
+        4292,
+        4292,
+        1187,
+        911,
+        1263,
+        896,
+        2034,
+        1637
+      ],
+      "max_seq_len": 4292
+    },
+    {
+      "rollout": 6,
+      "rank": 1,
+      "sha256": "566eeda7078502558b9840930558cf6859d5e0870ff49584ee64447be3919dec",
+      "real_tokens": 12110,
+      "padded_capacity_tokens": 24040,
+      "sample_lengths": [
+        3005,
+        2280,
+        1595,
+        1299,
+        945,
+        566,
+        1573,
+        847
+      ],
+      "max_seq_len": 3005
+    },
+    {
+      "rollout": 7,
+      "rank": 0,
+      "sha256": "bf6ca43f20aaf4f0383a7bdcbc475d6e35a0fb9674c27c81f7c018b8ec56d1bd",
+      "real_tokens": 16162,
+      "padded_capacity_tokens": 34216,
+      "sample_lengths": [
+        636,
+        2211,
+        1315,
+        716,
+        4277,
+        4277,
+        2048,
+        682
+      ],
+      "max_seq_len": 4277
+    },
+    {
+      "rollout": 7,
+      "rank": 1,
+      "sha256": "f453cffca7f0ec6ee1e2bfaacee99ab9230db2bafdb941698c8f1bf7ba7fff20",
+      "real_tokens": 22062,
+      "padded_capacity_tokens": 34216,
+      "sample_lengths": [
+        3002,
+        4269,
+        1327,
+        2104,
+        4277,
+        4277,
+        2068,
+        738
+      ],
+      "max_seq_len": 4277
+    },
+    {
+      "rollout": 8,
+      "rank": 0,
+      "sha256": "d40f7d4b26041ce90092acba383ea2a3b3825e44df22e50b02e32dd4aa19e127",
+      "real_tokens": 11406,
+      "padded_capacity_tokens": 18968,
+      "sample_lengths": [
+        649,
+        927,
+        2361,
+        1033,
+        1416,
+        1013,
+        2371,
+        1636
+      ],
+      "max_seq_len": 2371
+    },
+    {
+      "rollout": 8,
+      "rank": 1,
+      "sha256": "bd76a7fea03fe7b73008ef874d02bfe49fdd9fda955424e9e7e5fbf90f5c0111",
+      "real_tokens": 9358,
+      "padded_capacity_tokens": 17808,
+      "sample_lengths": [
+        530,
+        288,
+        1366,
+        879,
+        1518,
+        1326,
+        1225,
+        2226
+      ],
+      "max_seq_len": 2226
+    },
+    {
+      "rollout": 9,
+      "rank": 0,
+      "sha256": "5ca909730cdbb0e415d3a5bf2c8aa7ae848a51a983675e227e9cb65f6d4684e0",
+      "real_tokens": 30033,
+      "padded_capacity_tokens": 34568,
+      "sample_lengths": [
+        3803,
+        4321,
+        869,
+        4062,
+        4241,
+        4241,
+        4248,
+        4248
+      ],
+      "max_seq_len": 4321
+    },
+    {
+      "rollout": 9,
+      "rank": 1,
+      "sha256": "ef94b404424378b743fadb14bc5363496f1d21045f5cc8bbd4edfb3913983279",
+      "real_tokens": 24794,
+      "padded_capacity_tokens": 33984,
+      "sample_lengths": [
+        2793,
+        3147,
+        1234,
+        862,
+        4021,
+        4241,
+        4248,
+        4248
+      ],
+      "max_seq_len": 4248
+    },
+    {
+      "rollout": 10,
+      "rank": 0,
+      "sha256": "c0f936568e984e2c0f4976c1bd0af99fc67904ae940369adf092fc62d4c220c1",
+      "real_tokens": 18670,
+      "padded_capacity_tokens": 33928,
+      "sample_lengths": [
+        4241,
+        2188,
+        2274,
+        2222,
+        2660,
+        2624,
+        651,
+        1810
+      ],
+      "max_seq_len": 4241
+    },
+    {
+      "rollout": 10,
+      "rank": 1,
+      "sha256": "a1b5f048ba1d4235ca64a1be5663bc003ed40c7f5b58d17e9f365924b53f6b05",
+      "real_tokens": 22370,
+      "padded_capacity_tokens": 33928,
+      "sample_lengths": [
+        3395,
+        4241,
+        2351,
+        4087,
+        3559,
+        2069,
+        693,
+        1975
+      ],
+      "max_seq_len": 4241
+    },
+    {
+      "rollout": 11,
+      "rank": 0,
+      "sha256": "f71d2b21cc94778b5beeeb069fcc48b144cf0778839032a599719eb64006429c",
+      "real_tokens": 23142,
+      "padded_capacity_tokens": 34336,
+      "sample_lengths": [
+        1869,
+        1928,
+        4292,
+        4292,
+        1863,
+        2517,
+        4010,
+        2371
+      ],
+      "max_seq_len": 4292
+    },
+    {
+      "rollout": 11,
+      "rank": 1,
+      "sha256": "aae958784a3c79e4b68bcd680a3255b678ad34b261f1465846b9548ce35c2a87",
+      "real_tokens": 24374,
+      "padded_capacity_tokens": 34336,
+      "sample_lengths": [
+        2906,
+        1403,
+        4292,
+        4292,
+        1690,
+        1703,
+        3828,
+        4260
+      ],
+      "max_seq_len": 4292
+    },
+    {
+      "rollout": 12,
+      "rank": 0,
+      "sha256": "29dfa9543d4fa0d138011de7d9db743f6f1ca088caf7544a7efe206fbf74e02f",
+      "real_tokens": 16972,
+      "padded_capacity_tokens": 34064,
+      "sample_lengths": [
+        1526,
+        3521,
+        4258,
+        4258,
+        986,
+        1274,
+        533,
+        616
+      ],
+      "max_seq_len": 4258
+    },
+    {
+      "rollout": 12,
+      "rank": 1,
+      "sha256": "bf908a79d01ca258d59312150eb3facf52222a07daf628ca8309222cf1510d0d",
+      "real_tokens": 13946,
+      "padded_capacity_tokens": 34064,
+      "sample_lengths": [
+        629,
+        907,
+        4258,
+        4258,
+        511,
+        1600,
+        633,
+        1150
+      ],
+      "max_seq_len": 4258
+    },
+    {
+      "rollout": 13,
+      "rank": 0,
+      "sha256": "ad743addc6b0e782b818468bfa281f5006dd4726cb2ab523a78a320ef3eaf740",
+      "real_tokens": 16658,
+      "padded_capacity_tokens": 26736,
+      "sample_lengths": [
+        556,
+        3342,
+        1709,
+        2420,
+        1894,
+        2344,
+        2235,
+        2158
+      ],
+      "max_seq_len": 3342
+    },
+    {
+      "rollout": 13,
+      "rank": 1,
+      "sha256": "5bf6a426bed370eb317fd8f41c820108bde28091a07c541b2ac6eeb235f7c8bd",
+      "real_tokens": 17340,
+      "padded_capacity_tokens": 34184,
+      "sample_lengths": [
+        2157,
+        861,
+        3107,
+        1979,
+        4273,
+        2786,
+        1306,
+        871
+      ],
+      "max_seq_len": 4273
+    },
+    {
+      "rollout": 14,
+      "rank": 0,
+      "sha256": "e421c0c955dbed94081b928c9c6643daa4a94890cc290a19d41351f51253ee6a",
+      "real_tokens": 14835,
+      "padded_capacity_tokens": 31360,
+      "sample_lengths": [
+        1169,
+        1127,
+        1302,
+        2550,
+        2076,
+        3920,
+        1371,
+        1320
+      ],
+      "max_seq_len": 3920
+    },
+    {
+      "rollout": 14,
+      "rank": 1,
+      "sha256": "8c6534dfc3ee71a59775356124214d2ecf427f685ee5517a7f40f4435391f54e",
+      "real_tokens": 15126,
+      "padded_capacity_tokens": 33872,
+      "sample_lengths": [
+        1388,
+        979,
+        990,
+        922,
+        2911,
+        3178,
+        4234,
+        524
+      ],
+      "max_seq_len": 4234
+    },
+    {
+      "rollout": 15,
+      "rank": 0,
+      "sha256": "9cfceae15a7606a80a669a4f36c52729b7a90a094e8ff784f0f9e262fc74f45b",
+      "real_tokens": 22165,
+      "padded_capacity_tokens": 33936,
+      "sample_lengths": [
+        959,
+        2430,
+        4227,
+        450,
+        2221,
+        4242,
+        4233,
+        3403
+      ],
+      "max_seq_len": 4242
+    },
+    {
+      "rollout": 15,
+      "rank": 1,
+      "sha256": "535685bd3fe8b6bec8a127484b620320b691d78ce34af9718a0657f8567969ec",
+      "real_tokens": 24282,
+      "padded_capacity_tokens": 34224,
+      "sample_lengths": [
+        3855,
+        4278,
+        324,
+        1925,
+        4242,
+        3354,
+        2825,
+        3479
+      ],
+      "max_seq_len": 4278
+    },
+    {
+      "rollout": 16,
+      "rank": 0,
+      "sha256": "4745b258e482cd34a57cb116aa1541c933a057c75c0f7b1d3074fc9fbcce4912",
+      "real_tokens": 24246,
+      "padded_capacity_tokens": 34096,
+      "sample_lengths": [
+        4241,
+        3655,
+        2047,
+        869,
+        4262,
+        4262,
+        2336,
+        2574
+      ],
+      "max_seq_len": 4262
+    },
+    {
+      "rollout": 16,
+      "rank": 1,
+      "sha256": "08d8c2afc3092119be9dbacbd82410ba5181686a1d1a01269eb570e2c24bae91",
+      "real_tokens": 21562,
+      "padded_capacity_tokens": 34096,
+      "sample_lengths": [
+        1106,
+        2074,
+        1015,
+        1099,
+        4184,
+        4262,
+        3569,
+        4253
+      ],
+      "max_seq_len": 4262
+    },
+    {
+      "rollout": 17,
+      "rank": 0,
+      "sha256": "f743cffe83d90ec84464f156129b8ba2ff067a224803ee7fd907b7b94ee77d6c",
+      "real_tokens": 8648,
+      "padded_capacity_tokens": 16696,
+      "sample_lengths": [
+        610,
+        658,
+        1446,
+        1055,
+        514,
+        866,
+        2087,
+        1412
+      ],
+      "max_seq_len": 2087
+    },
+    {
+      "rollout": 17,
+      "rank": 1,
+      "sha256": "e9aa4c894f777cb4e42c2241214409ee67c9686158824f55f2a9bfea87a65ee1",
+      "real_tokens": 13478,
+      "padded_capacity_tokens": 24224,
+      "sample_lengths": [
+        650,
+        718,
+        2923,
+        1685,
+        546,
+        2662,
+        3028,
+        1266
+      ],
+      "max_seq_len": 3028
+    },
+    {
+      "rollout": 18,
+      "rank": 0,
+      "sha256": "e8e7b56c029a5b54225d9b7fe663dbfe46e8591b483c9a66f26578b2ead2e996",
+      "real_tokens": 14204,
+      "padded_capacity_tokens": 22392,
+      "sample_lengths": [
+        835,
+        1075,
+        2356,
+        2799,
+        1595,
+        1516,
+        2755,
+        1273
+      ],
+      "max_seq_len": 2799
+    },
+    {
+      "rollout": 18,
+      "rank": 1,
+      "sha256": "48641a82c443d8bfebcf8aea6b93eb8a5712c487b071f0849e5b69eb5f03f027",
+      "real_tokens": 13928,
+      "padded_capacity_tokens": 30784,
+      "sample_lengths": [
+        339,
+        950,
+        1246,
+        3848,
+        1366,
+        1235,
+        1799,
+        3145
+      ],
+      "max_seq_len": 3848
+    },
+    {
+      "rollout": 19,
+      "rank": 0,
+      "sha256": "7fc5ffebe81825ed54c67dc8cda4606b694c795c681a33bd690d115fca534bf7",
+      "real_tokens": 9117,
+      "padded_capacity_tokens": 12128,
+      "sample_lengths": [
+        514,
+        1234,
+        1483,
+        1516,
+        1511,
+        1047,
+        883,
+        929
+      ],
+      "max_seq_len": 1516
+    },
+    {
+      "rollout": 19,
+      "rank": 1,
+      "sha256": "78f3fb8c7b472ee00d4a505497517614734541bd533b0cbb0619af5b724fe0fa",
+      "real_tokens": 9694,
+      "padded_capacity_tokens": 12400,
+      "sample_lengths": [
+        1143,
+        1440,
+        1139,
+        1438,
+        987,
+        726,
+        1550,
+        1271
+      ],
+      "max_seq_len": 1550
+    },
+    {
+      "rollout": 20,
+      "rank": 0,
+      "sha256": "51920e8e0811d51bee77212be13437a7413b8c162a2fed2ee27e2d2f26186512",
+      "real_tokens": 17451,
+      "padded_capacity_tokens": 28496,
+      "sample_lengths": [
+        924,
+        1133,
+        2508,
+        3088,
+        3562,
+        3241,
+        978,
+        2017
+      ],
+      "max_seq_len": 3562
+    },
+    {
+      "rollout": 20,
+      "rank": 1,
+      "sha256": "96f91e5e68700708f800a1c015fd4ffdab1907d2a6bd545ee4afe194ad37c3b0",
+      "real_tokens": 16220,
+      "padded_capacity_tokens": 34416,
+      "sample_lengths": [
+        1900,
+        1221,
+        924,
+        1792,
+        4302,
+        4302,
+        948,
+        831
+      ],
+      "max_seq_len": 4302
+    },
+    {
+      "rollout": 21,
+      "rank": 0,
+      "sha256": "970f5bbfaaa3e7a2cfc595b31f283d0a425db50ecaf604fb16eff104bd654502",
+      "real_tokens": 16550,
+      "padded_capacity_tokens": 34176,
+      "sample_lengths": [
+        4272,
+        4272,
+        1253,
+        2631,
+        685,
+        1065,
+        1009,
+        1363
+      ],
+      "max_seq_len": 4272
+    },
+    {
+      "rollout": 21,
+      "rank": 1,
+      "sha256": "b55867789ca80f022438f53eaac1f4644b765e8fdc31393c5b6a5d45006cbf29",
+      "real_tokens": 18945,
+      "padded_capacity_tokens": 34176,
+      "sample_lengths": [
+        4272,
+        4272,
+        2044,
+        881,
+        1793,
+        1832,
+        2213,
+        1638
+      ],
+      "max_seq_len": 4272
+    },
+    {
+      "rollout": 22,
+      "rank": 0,
+      "sha256": "5da837009d46ed8eaa6666d2119e208f37707a122ddea57687207f210a56361c",
+      "real_tokens": 17093,
+      "padded_capacity_tokens": 34096,
+      "sample_lengths": [
+        2917,
+        810,
+        752,
+        1927,
+        1005,
+        1158,
+        4262,
+        4262
+      ],
+      "max_seq_len": 4262
+    },
+    {
+      "rollout": 22,
+      "rank": 1,
+      "sha256": "0365e55aedf849abb48ce08eaca134bf1f3e048e8833a4cdb89d89fcf515a227",
+      "real_tokens": 14986,
+      "padded_capacity_tokens": 34008,
+      "sample_lengths": [
+        2648,
+        4251,
+        1005,
+        1260,
+        1511,
+        518,
+        1046,
+        2747
+      ],
+      "max_seq_len": 4251
+    },
+    {
+      "rollout": 23,
+      "rank": 0,
+      "sha256": "01b9cdb4a876d03f5422ca4d8991c66d8f243792e886b2d3ac8870c31bb801f9",
+      "real_tokens": 23120,
+      "padded_capacity_tokens": 33952,
+      "sample_lengths": [
+        4230,
+        2053,
+        3272,
+        2722,
+        1889,
+        994,
+        4244,
+        3716
+      ],
+      "max_seq_len": 4244
+    },
+    {
+      "rollout": 23,
+      "rank": 1,
+      "sha256": "18c5c5730be4d7c37dfae34d4c38411322c40c0e8188a32f95029d7ea240b549",
+      "real_tokens": 25755,
+      "padded_capacity_tokens": 33952,
+      "sample_lengths": [
+        4230,
+        4230,
+        2768,
+        2257,
+        3143,
+        1521,
+        4244,
+        3362
+      ],
+      "max_seq_len": 4244
+    },
+    {
+      "rollout": 24,
+      "rank": 0,
+      "sha256": "05cc36f6f98cbe45aaeced05d254206241584063190f7c0d50036c1cef81efeb",
+      "real_tokens": 16780,
+      "padded_capacity_tokens": 34064,
+      "sample_lengths": [
+        544,
+        1172,
+        2228,
+        2508,
+        1098,
+        714,
+        4258,
+        4258
+      ],
+      "max_seq_len": 4258
+    },
+    {
+      "rollout": 24,
+      "rank": 1,
+      "sha256": "be95d22b09a7a08a9123f5575735abaaee258b868db775c13562f1f63d7e0814",
+      "real_tokens": 12696,
+      "padded_capacity_tokens": 23168,
+      "sample_lengths": [
+        798,
+        855,
+        2008,
+        2896,
+        834,
+        660,
+        2686,
+        1959
+      ],
+      "max_seq_len": 2896
+    },
+    {
+      "rollout": 25,
+      "rank": 0,
+      "sha256": "e73726a4be05df07079cb91cad9b8606e16a27063bd08037e407ae1205fe6146",
+      "real_tokens": 21422,
+      "padded_capacity_tokens": 34080,
+      "sample_lengths": [
+        4238,
+        2446,
+        999,
+        2975,
+        3352,
+        4260,
+        1433,
+        1719
+      ],
+      "max_seq_len": 4260
+    },
+    {
+      "rollout": 25,
+      "rank": 1,
+      "sha256": "e575b6ba36bd78b256eec7ea3dfe33bd01116ff34cbcc2ffa525979f76d2e258",
+      "real_tokens": 24394,
+      "padded_capacity_tokens": 34080,
+      "sample_lengths": [
+        2216,
+        4238,
+        2550,
+        2489,
+        4260,
+        4260,
+        2651,
+        1730
+      ],
+      "max_seq_len": 4260
+    },
+    {
+      "rollout": 26,
+      "rank": 0,
+      "sha256": "957a8c75fa583cd8371efb570ac55b5fec59e76bd9d56a262da197b781596127",
+      "real_tokens": 10562,
+      "padded_capacity_tokens": 18376,
+      "sample_lengths": [
+        1877,
+        1021,
+        1198,
+        517,
+        2297,
+        1096,
+        1516,
+        1040
+      ],
+      "max_seq_len": 2297
+    },
+    {
+      "rollout": 26,
+      "rank": 1,
+      "sha256": "69c087ccc089ad23a3d8188dea6dcb52c54bc00239a0ad4394fb37e01bd9e523",
+      "real_tokens": 11944,
+      "padded_capacity_tokens": 17352,
+      "sample_lengths": [
+        1049,
+        1217,
+        1422,
+        1350,
+        1366,
+        2169,
+        1410,
+        1961
+      ],
+      "max_seq_len": 2169
+    },
+    {
+      "rollout": 27,
+      "rank": 0,
+      "sha256": "c0d4cfd485e7030f93a3c4979590822b0ac7064063cab0a2d7b7bd87aeadcb59",
+      "real_tokens": 17499,
+      "padded_capacity_tokens": 34656,
+      "sample_lengths": [
+        4332,
+        4332,
+        602,
+        520,
+        837,
+        1334,
+        2832,
+        2710
+      ],
+      "max_seq_len": 4332
+    },
+    {
+      "rollout": 27,
+      "rank": 1,
+      "sha256": "cf9b5c05e4fc9dd47f8ecaa2f77607789983cd9a0376f912218c9e52ec83e240",
+      "real_tokens": 16804,
+      "padded_capacity_tokens": 34656,
+      "sample_lengths": [
+        4332,
+        4332,
+        1017,
+        678,
+        3090,
+        799,
+        1430,
+        1126
+      ],
+      "max_seq_len": 4332
+    },
+    {
+      "rollout": 28,
+      "rank": 0,
+      "sha256": "bc82dbffdf60fd2ed05735f5ca92504d27edd0af54eb311fd11d197b0a56715f",
+      "real_tokens": 13840,
+      "padded_capacity_tokens": 34056,
+      "sample_lengths": [
+        1100,
+        591,
+        1073,
+        1387,
+        995,
+        1405,
+        4257,
+        3032
+      ],
+      "max_seq_len": 4257
+    },
+    {
+      "rollout": 28,
+      "rank": 1,
+      "sha256": "ed5f6500dac738ac9e6e43b48efae39d8a80b406b7bdb2326bf2c621be212d14",
+      "real_tokens": 11928,
+      "padded_capacity_tokens": 34056,
+      "sample_lengths": [
+        308,
+        480,
+        673,
+        933,
+        357,
+        663,
+        4257,
+        4257
+      ],
+      "max_seq_len": 4257
+    },
+    {
+      "rollout": 29,
+      "rank": 0,
+      "sha256": "ddd78f473b52e30a806e20f2da893a3a10af523f1d97599bb0fc4bd0497a6000",
+      "real_tokens": 20503,
+      "padded_capacity_tokens": 33896,
+      "sample_lengths": [
+        1512,
+        2594,
+        1441,
+        1826,
+        3254,
+        3505,
+        4237,
+        2134
+      ],
+      "max_seq_len": 4237
+    },
+    {
+      "rollout": 29,
+      "rank": 1,
+      "sha256": "8419b64f7bcacfc756c462154924d25360cbb0276b70d12094ae5e1e2e91f248",
+      "real_tokens": 21487,
+      "padded_capacity_tokens": 34152,
+      "sample_lengths": [
+        1086,
+        959,
+        2264,
+        1292,
+        4269,
+        4269,
+        3111,
+        4237
+      ],
+      "max_seq_len": 4269
+    },
+    {
+      "rollout": 30,
+      "rank": 0,
+      "sha256": "d8d8dfd35eb48fe59b21b007cc9069feb34f1b6a76bef0e064d800c5ef05e990",
+      "real_tokens": 17594,
+      "padded_capacity_tokens": 34256,
+      "sample_lengths": [
+        735,
+        3432,
+        1058,
+        1574,
+        4282,
+        4282,
+        1485,
+        746
+      ],
+      "max_seq_len": 4282
+    },
+    {
+      "rollout": 30,
+      "rank": 1,
+      "sha256": "48e6a0de129623baf9a4954179a51024e96cdfe9a665beeb00ea0284228470f3",
+      "real_tokens": 17221,
+      "padded_capacity_tokens": 34256,
+      "sample_lengths": [
+        1241,
+        1187,
+        2205,
+        876,
+        4282,
+        4282,
+        851,
+        2297
+      ],
+      "max_seq_len": 4282
+    },
+    {
+      "rollout": 31,
+      "rank": 0,
+      "sha256": "f90a260ea92acfae65139c894bac28806f40b2be6aa6d973391a3ca3c50e0143",
+      "real_tokens": 14895,
+      "padded_capacity_tokens": 34072,
+      "sample_lengths": [
+        2553,
+        1546,
+        2159,
+        1615,
+        4259,
+        1445,
+        923,
+        395
+      ],
+      "max_seq_len": 4259
+    },
+    {
+      "rollout": 31,
+      "rank": 1,
+      "sha256": "ea3dbdaebb6767e1a5709001d9962cce95d6c4eb928764ea6d27d72b94917e66",
+      "real_tokens": 15965,
+      "padded_capacity_tokens": 34152,
+      "sample_lengths": [
+        1966,
+        4269,
+        1221,
+        1191,
+        1898,
+        2920,
+        923,
+        1577
+      ],
+      "max_seq_len": 4269
+    },
+    {
+      "rollout": 32,
+      "rank": 0,
+      "sha256": "1e94d43fd99a52b9653a9697d8fbfcd2d5598033ae2a6ec6d3e8a0e8fcd39190",
+      "real_tokens": 11947,
+      "padded_capacity_tokens": 17824,
+      "sample_lengths": [
+        1433,
+        785,
+        845,
+        962,
+        2051,
+        2216,
+        1427,
+        2228
+      ],
+      "max_seq_len": 2228
+    },
+    {
+      "rollout": 32,
+      "rank": 1,
+      "sha256": "34fc777b26f97d9fc80b755cd8b1e56c4b6aa12e59d6d231951dd31d8434d430",
+      "real_tokens": 15949,
+      "padded_capacity_tokens": 33928,
+      "sample_lengths": [
+        1103,
+        2364,
+        412,
+        710,
+        1893,
+        3007,
+        2219,
+        4241
+      ],
+      "max_seq_len": 4241
+    },
+    {
+      "rollout": 33,
+      "rank": 0,
+      "sha256": "ea3e2b4076f4dfb2534edac659b52ea2a4bcd50f465111ca2d8cd86930bdc784",
+      "real_tokens": 18930,
+      "padded_capacity_tokens": 33992,
+      "sample_lengths": [
+        1498,
+        1495,
+        874,
+        4241,
+        1712,
+        4249,
+        3663,
+        1198
+      ],
+      "max_seq_len": 4249
+    },
+    {
+      "rollout": 33,
+      "rank": 1,
+      "sha256": "d705a818f3ab9aa619a2019789aa374fdb5699409d72c7e9cca4ba32095b86b9",
+      "real_tokens": 23355,
+      "padded_capacity_tokens": 33992,
+      "sample_lengths": [
+        753,
+        1272,
+        3342,
+        2916,
+        2349,
+        4249,
+        4237,
+        4237
+      ],
+      "max_seq_len": 4249
+    },
+    {
+      "rollout": 34,
+      "rank": 0,
+      "sha256": "67cf36581db868191712743ddb0486333ac408c769ee14130fc14a9304452251",
+      "real_tokens": 13383,
+      "padded_capacity_tokens": 33960,
+      "sample_lengths": [
+        1804,
+        1546,
+        4245,
+        1492,
+        1174,
+        995,
+        605,
+        1522
+      ],
+      "max_seq_len": 4245
+    },
+    {
+      "rollout": 34,
+      "rank": 1,
+      "sha256": "7c2c1a7b4d973758e059b5285b55119d3dc3823037bf95463778d0c5ffc592d2",
+      "real_tokens": 16490,
+      "padded_capacity_tokens": 33576,
+      "sample_lengths": [
+        764,
+        2123,
+        2600,
+        4197,
+        857,
+        1390,
+        2053,
+        2506
+      ],
+      "max_seq_len": 4197
+    },
+    {
+      "rollout": 35,
+      "rank": 0,
+      "sha256": "b28f16475202bf0aa5ad16d33af8fcaa86f93c4d113ece2ccb7eaa162a39a273",
+      "real_tokens": 16159,
+      "padded_capacity_tokens": 33752,
+      "sample_lengths": [
+        4219,
+        4219,
+        2512,
+        1239,
+        1563,
+        572,
+        706,
+        1129
+      ],
+      "max_seq_len": 4219
+    },
+    {
+      "rollout": 35,
+      "rank": 1,
+      "sha256": "3c4bc932aea8db20151df70aaaf13690849744b35c6aa56106b48cec83a8c52d",
+      "real_tokens": 16958,
+      "padded_capacity_tokens": 33752,
+      "sample_lengths": [
+        4219,
+        3660,
+        627,
+        1957,
+        1623,
+        678,
+        3125,
+        1069
+      ],
+      "max_seq_len": 4219
+    },
+    {
+      "rollout": 36,
+      "rank": 0,
+      "sha256": "c12d05287c421db1756f8e3a0b613a32ce831b5651e3f67d07be50024dbae187",
+      "real_tokens": 24232,
+      "padded_capacity_tokens": 33760,
+      "sample_lengths": [
+        1342,
+        2756,
+        4021,
+        3880,
+        2278,
+        2697,
+        3038,
+        4220
+      ],
+      "max_seq_len": 4220
+    },
+    {
+      "rollout": 36,
+      "rank": 1,
+      "sha256": "b22b3065db8ebdb4347c97714f2d27a2cb43d30410c3ad0633a685e2fc27063d",
+      "real_tokens": 19839,
+      "padded_capacity_tokens": 34264,
+      "sample_lengths": [
+        2005,
+        1553,
+        4241,
+        1819,
+        2201,
+        4283,
+        1684,
+        2053
+      ],
+      "max_seq_len": 4283
+    },
+    {
+      "rollout": 37,
+      "rank": 0,
+      "sha256": "40175e1469309098b5e8c6f0072f00a5c6a082eec12b60e9dde92028c046d6ae",
+      "real_tokens": 10503,
+      "padded_capacity_tokens": 25768,
+      "sample_lengths": [
+        3221,
+        1457,
+        1128,
+        620,
+        849,
+        1378,
+        1086,
+        764
+      ],
+      "max_seq_len": 3221
+    },
+    {
+      "rollout": 37,
+      "rank": 1,
+      "sha256": "d770d52c6986db5a9d5765f9f6c41f7fa67990c210e3d2380af0344f568198b8",
+      "real_tokens": 9848,
+      "padded_capacity_tokens": 16832,
+      "sample_lengths": [
+        1106,
+        1020,
+        1040,
+        1403,
+        1089,
+        2104,
+        755,
+        1331
+      ],
+      "max_seq_len": 2104
+    },
+    {
+      "rollout": 38,
+      "rank": 0,
+      "sha256": "1f1ee6db564d5c784495adb8fcb83b68b26df17d33bb7ee957287f292ddeaedd",
+      "real_tokens": 21082,
+      "padded_capacity_tokens": 34072,
+      "sample_lengths": [
+        1978,
+        1246,
+        4247,
+        3841,
+        4259,
+        3864,
+        715,
+        932
+      ],
+      "max_seq_len": 4259
+    },
+    {
+      "rollout": 38,
+      "rank": 1,
+      "sha256": "cf21e398d8f76eb121f546109f21a8483d533917d2d93edb59b0311bbbe37fde",
+      "real_tokens": 16609,
+      "padded_capacity_tokens": 34072,
+      "sample_lengths": [
+        446,
+        3551,
+        2657,
+        427,
+        4259,
+        4259,
+        699,
+        311
+      ],
+      "max_seq_len": 4259
+    },
+    {
+      "rollout": 39,
+      "rank": 0,
+      "sha256": "7003c127d2c119a0c7600076af353fc0d42ccdd4c63018f7b40db825b001dfdc",
+      "real_tokens": 22149,
+      "padded_capacity_tokens": 34056,
+      "sample_lengths": [
+        725,
+        1226,
+        2169,
+        1091,
+        4257,
+        4171,
+        4255,
+        4255
+      ],
+      "max_seq_len": 4257
+    },
+    {
+      "rollout": 39,
+      "rank": 1,
+      "sha256": "5a32c2723d41f5a012a33a94cb144a6cfd31e355ae7c64499e0a96a0faf79b09",
+      "real_tokens": 29108,
+      "padded_capacity_tokens": 34056,
+      "sample_lengths": [
+        2026,
+        4145,
+        1846,
+        4067,
+        4257,
+        4257,
+        4255,
+        4255
+      ],
+      "max_seq_len": 4257
+    },
+    {
+      "rollout": 40,
+      "rank": 0,
+      "sha256": "83c1cee05a3cc4b4abe31e390d6a011c91ea0f50fe9bb7f13232dee2839ee5d2",
+      "real_tokens": 23639,
+      "padded_capacity_tokens": 34304,
+      "sample_lengths": [
+        4273,
+        4273,
+        4288,
+        4288,
+        1204,
+        2161,
+        1680,
+        1472
+      ],
+      "max_seq_len": 4288
+    },
+    {
+      "rollout": 40,
+      "rank": 1,
+      "sha256": "6e0b480dd06225d08c2846918b97e8370f2155c40ccfbb4c54502be69b2a0f0f",
+      "real_tokens": 24508,
+      "padded_capacity_tokens": 34304,
+      "sample_lengths": [
+        4043,
+        1843,
+        4288,
+        4288,
+        3612,
+        3903,
+        939,
+        1592
+      ],
+      "max_seq_len": 4288
+    },
+    {
+      "rollout": 41,
+      "rank": 0,
+      "sha256": "2cecb0e1e2eceb1ebf000cf53d6f72989d94177ee26eaf40626b6f4b6b3894c3",
+      "real_tokens": 18980,
+      "padded_capacity_tokens": 34104,
+      "sample_lengths": [
+        1950,
+        1878,
+        4042,
+        1299,
+        1856,
+        1026,
+        2666,
+        4263
+      ],
+      "max_seq_len": 4263
+    },
+    {
+      "rollout": 41,
+      "rank": 1,
+      "sha256": "62f8b6e100cbc7e6cb5c2ebefa855371ca70498ef174302f0c7a9edb64905030",
+      "real_tokens": 19483,
+      "padded_capacity_tokens": 34104,
+      "sample_lengths": [
+        2401,
+        2162,
+        3480,
+        1917,
+        587,
+        1281,
+        4263,
+        3392
+      ],
+      "max_seq_len": 4263
+    },
+    {
+      "rollout": 42,
+      "rank": 0,
+      "sha256": "43e104e7a3b201ac6ad4c5a3a121e4499a947e2cf3b34cbb13b0bcedbb6461e7",
+      "real_tokens": 10068,
+      "padded_capacity_tokens": 20640,
+      "sample_lengths": [
+        1277,
+        2580,
+        616,
+        1007,
+        1429,
+        745,
+        1113,
+        1301
+      ],
+      "max_seq_len": 2580
+    },
+    {
+      "rollout": 42,
+      "rank": 1,
+      "sha256": "72039968a28258a59e49c4da2ab3e5ba753dbe04661b57ee86b9dbc0e0341304",
+      "real_tokens": 9847,
+      "padded_capacity_tokens": 16808,
+      "sample_lengths": [
+        1776,
+        936,
+        704,
+        1188,
+        1809,
+        2101,
+        613,
+        720
+      ],
+      "max_seq_len": 2101
+    },
+    {
+      "rollout": 43,
+      "rank": 0,
+      "sha256": "b04ebe422faa55fa609ac2025323746de12b4643686eda4afbf28a6dfb852514",
+      "real_tokens": 20107,
+      "padded_capacity_tokens": 34208,
+      "sample_lengths": [
+        1586,
+        4276,
+        1369,
+        1659,
+        1641,
+        1092,
+        4242,
+        4242
+      ],
+      "max_seq_len": 4276
+    },
+    {
+      "rollout": 43,
+      "rank": 1,
+      "sha256": "96286465ca776f819e1501aac0935ce02206ea08edbc07c525d01a70916e65a6",
+      "real_tokens": 20908,
+      "padded_capacity_tokens": 34208,
+      "sample_lengths": [
+        4276,
+        4276,
+        1350,
+        609,
+        1362,
+        726,
+        4242,
+        4067
+      ],
+      "max_seq_len": 4276
+    },
+    {
+      "rollout": 44,
+      "rank": 0,
+      "sha256": "ac379202fd89c2a8b4c3caa20f166263b2d14c7131d4a19dd13fb1f4c9c17044",
+      "real_tokens": 15432,
+      "padded_capacity_tokens": 34208,
+      "sample_lengths": [
+        893,
+        792,
+        1719,
+        539,
+        1368,
+        3758,
+        4276,
+        2087
+      ],
+      "max_seq_len": 4276
+    },
+    {
+      "rollout": 44,
+      "rank": 1,
+      "sha256": "e622b5aae7bec681c11ccc9e2a507a9584630d6c051358ee75c587ba68a5ecf6",
+      "real_tokens": 20260,
+      "padded_capacity_tokens": 34208,
+      "sample_lengths": [
+        1095,
+        1112,
+        4235,
+        2123,
+        3268,
+        2217,
+        1934,
+        4276
+      ],
+      "max_seq_len": 4276
+    },
+    {
+      "rollout": 45,
+      "rank": 0,
+      "sha256": "643f872fb98738583c27f1d63ed0e3a57f05f475c7adf72c2aa1c4dac34a4030",
+      "real_tokens": 11589,
+      "padded_capacity_tokens": 26736,
+      "sample_lengths": [
+        1086,
+        3342,
+        1576,
+        1557,
+        1133,
+        660,
+        1472,
+        763
+      ],
+      "max_seq_len": 3342
+    },
+    {
+      "rollout": 45,
+      "rank": 1,
+      "sha256": "ca06a491c8b8c4c10d8253a33b9c53fee579eba9cb216a3a6537b8ca77156c31",
+      "real_tokens": 15078,
+      "padded_capacity_tokens": 31576,
+      "sample_lengths": [
+        3947,
+        2366,
+        1569,
+        1915,
+        777,
+        1492,
+        1555,
+        1457
+      ],
+      "max_seq_len": 3947
+    },
+    {
+      "rollout": 46,
+      "rank": 0,
+      "sha256": "f82b2e960929adab9d201fb37109021dedaf09bf5b41b10fcee43ac81e9a6fbe",
+      "real_tokens": 27753,
+      "padded_capacity_tokens": 34104,
+      "sample_lengths": [
+        1084,
+        3315,
+        3369,
+        2991,
+        4263,
+        4263,
+        4234,
+        4234
+      ],
+      "max_seq_len": 4263
+    },
+    {
+      "rollout": 46,
+      "rank": 1,
+      "sha256": "dcfc6ca5c309cb8824996ee1f12481e87f142871a10ab082c5e8014d1e498b4b",
+      "real_tokens": 23165,
+      "padded_capacity_tokens": 34104,
+      "sample_lengths": [
+        379,
+        1473,
+        4153,
+        2099,
+        4263,
+        4263,
+        2301,
+        4234
+      ],
+      "max_seq_len": 4263
+    },
+    {
+      "rollout": 47,
+      "rank": 0,
+      "sha256": "1e471e30b20a6573a2428edf0ced2902cee1dc51b184261d9955777e90ac7dc3",
+      "real_tokens": 12905,
+      "padded_capacity_tokens": 23112,
+      "sample_lengths": [
+        1420,
+        1382,
+        2889,
+        1502,
+        602,
+        941,
+        2462,
+        1707
+      ],
+      "max_seq_len": 2889
+    },
+    {
+      "rollout": 47,
+      "rank": 1,
+      "sha256": "686757ba7f93a0734e2445c73be384c45731867eb784b5b0e967aaf4121313d4",
+      "real_tokens": 11664,
+      "padded_capacity_tokens": 20000,
+      "sample_lengths": [
+        677,
+        1572,
+        1889,
+        2100,
+        1112,
+        611,
+        2500,
+        1203
+      ],
+      "max_seq_len": 2500
+    },
+    {
+      "rollout": 48,
+      "rank": 0,
+      "sha256": "17502c433508323518e0d408683f91016ecd5ca1a4bf6ca72656e6daea946399",
+      "real_tokens": 18706,
+      "padded_capacity_tokens": 33952,
+      "sample_lengths": [
+        4244,
+        2401,
+        2286,
+        1849,
+        4240,
+        1728,
+        1386,
+        572
+      ],
+      "max_seq_len": 4244
+    },
+    {
+      "rollout": 48,
+      "rank": 1,
+      "sha256": "e8855a0d79260b23a5cd115304e26e498db7d5677f6c0bde3cbe52a13d3556d6",
+      "real_tokens": 15274,
+      "padded_capacity_tokens": 33952,
+      "sample_lengths": [
+        4244,
+        1637,
+        899,
+        1586,
+        644,
+        4240,
+        497,
+        1527
+      ],
+      "max_seq_len": 4244
+    },
+    {
+      "rollout": 49,
+      "rank": 0,
+      "sha256": "5db324fd2a657886525bf652e76481819afbad10684fe4010c6fa9ab315f9171",
+      "real_tokens": 16166,
+      "padded_capacity_tokens": 34944,
+      "sample_lengths": [
+        2581,
+        4368,
+        1935,
+        1154,
+        713,
+        1786,
+        1196,
+        2433
+      ],
+      "max_seq_len": 4368
+    },
+    {
+      "rollout": 49,
+      "rank": 1,
+      "sha256": "3d7b60a8a5ac0bdfb23d19b53d73c469aa7a2bd5107fdb76050ea2f6b25549b8",
+      "real_tokens": 14421,
+      "padded_capacity_tokens": 34944,
+      "sample_lengths": [
+        2714,
+        4368,
+        1027,
+        1202,
+        1548,
+        2008,
+        668,
+        886
+      ],
+      "max_seq_len": 4368
+    },
+    {
+      "rollout": 50,
+      "rank": 0,
+      "sha256": "f5bb2fba10c4f47e9534e2ec46b32d6dc6163e718f0038693eaf7e5f495b4b7e",
+      "real_tokens": 22783,
+      "padded_capacity_tokens": 34552,
+      "sample_lengths": [
+        1983,
+        1473,
+        4254,
+        4254,
+        1536,
+        645,
+        4319,
+        4319
+      ],
+      "max_seq_len": 4319
+    },
+    {
+      "rollout": 50,
+      "rank": 1,
+      "sha256": "c4dfc82e834bb895bc28bb8694d0f2b9ff1efdaa34f1a45da0a67d737d88e240",
+      "real_tokens": 20635,
+      "padded_capacity_tokens": 34552,
+      "sample_lengths": [
+        1712,
+        1025,
+        4113,
+        2411,
+        2166,
+        570,
+        4319,
+        4319
+      ],
+      "max_seq_len": 4319
+    },
+    {
+      "rollout": 51,
+      "rank": 0,
+      "sha256": "cd8aef7f8cbf32e03411ba2478311afa283b2bd668041d86b2599628ebff783e",
+      "real_tokens": 19136,
+      "padded_capacity_tokens": 33912,
+      "sample_lengths": [
+        926,
+        3825,
+        4041,
+        4239,
+        1454,
+        1901,
+        1309,
+        1441
+      ],
+      "max_seq_len": 4239
+    },
+    {
+      "rollout": 51,
+      "rank": 1,
+      "sha256": "03a4e1fc95e47601a0ebb6a64ffdba8c6a65a60107c632eed048984100f6d7d2",
+      "real_tokens": 22770,
+      "padded_capacity_tokens": 34200,
+      "sample_lengths": [
+        3721,
+        4275,
+        4239,
+        4239,
+        1745,
+        1067,
+        1007,
+        2477
+      ],
+      "max_seq_len": 4275
+    },
+    {
+      "rollout": 52,
+      "rank": 0,
+      "sha256": "812289658364184a51033e0e99ff548448c5dc4e625fe506f48ef61851965e1e",
+      "real_tokens": 9875,
+      "padded_capacity_tokens": 14160,
+      "sample_lengths": [
+        1002,
+        631,
+        1740,
+        1632,
+        752,
+        1355,
+        1770,
+        993
+      ],
+      "max_seq_len": 1770
+    },
+    {
+      "rollout": 52,
+      "rank": 1,
+      "sha256": "4945ca14d2facafe7d05e9f278a77714c1b183084a7bf46f668047be4ea54f33",
+      "real_tokens": 12693,
+      "padded_capacity_tokens": 27328,
+      "sample_lengths": [
+        770,
+        805,
+        2290,
+        3416,
+        2064,
+        1212,
+        523,
+        1613
+      ],
+      "max_seq_len": 3416
+    },
+    {
+      "rollout": 53,
+      "rank": 0,
+      "sha256": "f357a6127f3f221a1c2751a400998a0a28429124bc57b9039998250de99bc4e0",
+      "real_tokens": 18495,
+      "padded_capacity_tokens": 34048,
+      "sample_lengths": [
+        2551,
+        4256,
+        1823,
+        1709,
+        895,
+        1382,
+        4135,
+        1744
+      ],
+      "max_seq_len": 4256
+    },
+    {
+      "rollout": 53,
+      "rank": 1,
+      "sha256": "612a8fc6c1a8f3f9fc4e0a289a7258b846b40049a4c2f32729493f9a0ec04c62",
+      "real_tokens": 28259,
+      "padded_capacity_tokens": 34048,
+      "sample_lengths": [
+        4256,
+        4223,
+        4244,
+        4244,
+        1566,
+        1238,
+        4244,
+        4244
+      ],
+      "max_seq_len": 4256
+    },
+    {
+      "rollout": 54,
+      "rank": 0,
+      "sha256": "e6b9c06085865663aeb9725b920d4772d0d4706edcf4cbb28235d4275d9d2573",
+      "real_tokens": 13309,
+      "padded_capacity_tokens": 27560,
+      "sample_lengths": [
+        1612,
+        1695,
+        1846,
+        1478,
+        1881,
+        993,
+        3445,
+        359
+      ],
+      "max_seq_len": 3445
+    },
+    {
+      "rollout": 54,
+      "rank": 1,
+      "sha256": "b4a573ef0ef229461de980d97931ea9e6c92c89bda13ab1d4f312693c03e943d",
+      "real_tokens": 16138,
+      "padded_capacity_tokens": 34096,
+      "sample_lengths": [
+        1064,
+        4262,
+        1388,
+        2947,
+        1062,
+        1944,
+        1455,
+        2016
+      ],
+      "max_seq_len": 4262
+    },
+    {
+      "rollout": 55,
+      "rank": 0,
+      "sha256": "1ef7d996e1d0aacd2bb5ee16ae5772d68b955fb65c5d72e714709764f1b1066b",
+      "real_tokens": 15836,
+      "padded_capacity_tokens": 33976,
+      "sample_lengths": [
+        1209,
+        952,
+        3221,
+        934,
+        1560,
+        1775,
+        4247,
+        1938
+      ],
+      "max_seq_len": 4247
+    },
+    {
+      "rollout": 55,
+      "rank": 1,
+      "sha256": "4581d3bbaece473f916496aa7be797c5af05f5ae820f2417546b7d2ad2e85dd9",
+      "real_tokens": 12720,
+      "padded_capacity_tokens": 26080,
+      "sample_lengths": [
+        1117,
+        1694,
+        1109,
+        1364,
+        1578,
+        3260,
+        1626,
+        972
+      ],
+      "max_seq_len": 3260
+    },
+    {
+      "rollout": 56,
+      "rank": 0,
+      "sha256": "3cd0f0e5bcb53245beb1a587bd89d25cb6126883aa1418b2e9936b858d1c434e",
+      "real_tokens": 23793,
+      "padded_capacity_tokens": 33840,
+      "sample_lengths": [
+        2407,
+        1503,
+        3101,
+        4230,
+        3206,
+        1254,
+        4061,
+        4031
+      ],
+      "max_seq_len": 4230
+    },
+    {
+      "rollout": 56,
+      "rank": 1,
+      "sha256": "eae04082296ddb0905f3e12db1d188884228d51e10bf7a05ea830932dbd70cfa",
+      "real_tokens": 19739,
+      "padded_capacity_tokens": 26976,
+      "sample_lengths": [
+        2487,
+        3372,
+        2481,
+        715,
+        2835,
+        1746,
+        2783,
+        3320
+      ],
+      "max_seq_len": 3372
+    },
+    {
+      "rollout": 57,
+      "rank": 0,
+      "sha256": "f29ac0f2cb391bd279b80c92f00b870819256b18cf7b99a7c8809417bfc07b98",
+      "real_tokens": 15688,
+      "padded_capacity_tokens": 34272,
+      "sample_lengths": [
+        886,
+        2239,
+        815,
+        1444,
+        1136,
+        600,
+        4284,
+        4284
+      ],
+      "max_seq_len": 4284
+    },
+    {
+      "rollout": 57,
+      "rank": 1,
+      "sha256": "33334b5dfb1368528bb215a23aa37687a7adb92315922bc644b1c122585d8498",
+      "real_tokens": 20612,
+      "padded_capacity_tokens": 34272,
+      "sample_lengths": [
+        1003,
+        2200,
+        980,
+        1349,
+        3523,
+        2989,
+        4284,
+        4284
+      ],
+      "max_seq_len": 4284
+    },
+    {
+      "rollout": 58,
+      "rank": 0,
+      "sha256": "c68e25f274bae86fc6888f5cad18395ef0b1bd8c5717ed23ee8343f00612d9fa",
+      "real_tokens": 12817,
+      "padded_capacity_tokens": 22680,
+      "sample_lengths": [
+        473,
+        1917,
+        2438,
+        1364,
+        2835,
+        820,
+        2499,
+        471
+      ],
+      "max_seq_len": 2835
+    },
+    {
+      "rollout": 58,
+      "rank": 1,
+      "sha256": "3483214f971157fd8e9b0ed07416cf21dd767f3bac9c230283323cb0258bc7f0",
+      "real_tokens": 14188,
+      "padded_capacity_tokens": 23296,
+      "sample_lengths": [
+        1749,
+        2452,
+        2912,
+        1498,
+        655,
+        1752,
+        1918,
+        1252
+      ],
+      "max_seq_len": 2912
+    },
+    {
+      "rollout": 59,
+      "rank": 0,
+      "sha256": "4bc6e12c0f147039670e0be53492438b10a8df082deb6b661946c4959a967e6f",
+      "real_tokens": 20968,
+      "padded_capacity_tokens": 33920,
+      "sample_lengths": [
+        1428,
+        2367,
+        4240,
+        4240,
+        2106,
+        4231,
+        1592,
+        764
+      ],
+      "max_seq_len": 4240
+    },
+    {
+      "rollout": 59,
+      "rank": 1,
+      "sha256": "11b1ca1365e20b821133916c8e09984eab171242be44a23358c62aa27ff90602",
+      "real_tokens": 17813,
+      "padded_capacity_tokens": 33920,
+      "sample_lengths": [
+        1311,
+        498,
+        4240,
+        4240,
+        2232,
+        2403,
+        2110,
+        779
+      ],
+      "max_seq_len": 4240
+    },
+    {
+      "rollout": 60,
+      "rank": 0,
+      "sha256": "03372b87c85dd27f8646ef28a9f2a17d4da669f270992f15ce766622eec4087d",
+      "real_tokens": 15507,
+      "padded_capacity_tokens": 33984,
+      "sample_lengths": [
+        1296,
+        1314,
+        1742,
+        707,
+        612,
+        1340,
+        4248,
+        4248
+      ],
+      "max_seq_len": 4248
+    },
+    {
+      "rollout": 60,
+      "rank": 1,
+      "sha256": "57307f7c234eef4fc9e6cd54b9c93f4ff07e6c2dec154d427c4b03d508854fad",
+      "real_tokens": 19710,
+      "padded_capacity_tokens": 33984,
+      "sample_lengths": [
+        1637,
+        567,
+        3301,
+        3108,
+        1421,
+        1180,
+        4248,
+        4248
+      ],
+      "max_seq_len": 4248
+    },
+    {
+      "rollout": 61,
+      "rank": 0,
+      "sha256": "f9e18db16c889c49f0dc38b62ecc3fe229270c461edd64c3f98335298aebcc9b",
+      "real_tokens": 11077,
+      "padded_capacity_tokens": 15296,
+      "sample_lengths": [
+        1435,
+        1496,
+        1109,
+        1080,
+        1912,
+        1773,
+        971,
+        1301
+      ],
+      "max_seq_len": 1912
+    },
+    {
+      "rollout": 61,
+      "rank": 1,
+      "sha256": "3245101417b4edcd835961761bc5cc986ae256d505835e3670f9c7867b49c57b",
+      "real_tokens": 13758,
+      "padded_capacity_tokens": 20232,
+      "sample_lengths": [
+        1634,
+        1591,
+        570,
+        710,
+        2442,
+        2485,
+        1797,
+        2529
+      ],
+      "max_seq_len": 2529
+    },
+    {
+      "rollout": 62,
+      "rank": 0,
+      "sha256": "0474ec8ada19b7da3d8e8d8642257c41a099e6ca25e4cd3ccb2a107784595d00",
+      "real_tokens": 21853,
+      "padded_capacity_tokens": 34264,
+      "sample_lengths": [
+        4283,
+        4283,
+        506,
+        3267,
+        2180,
+        871,
+        3082,
+        3381
+      ],
+      "max_seq_len": 4283
+    },
+    {
+      "rollout": 62,
+      "rank": 1,
+      "sha256": "3b086a531f896d9dd3e767ddf80b0bcbf3d1aa28fc09d001d047f409c31dcbb7",
+      "real_tokens": 18433,
+      "padded_capacity_tokens": 34264,
+      "sample_lengths": [
+        4283,
+        2255,
+        2264,
+        4244,
+        1065,
+        956,
+        2154,
+        1212
+      ],
+      "max_seq_len": 4283
+    },
+    {
+      "rollout": 63,
+      "rank": 0,
+      "sha256": "7a896d350759a2d9028c85cf32a49dc9dd6ce0fa705daeec60a8dc2e6c8a33ac",
+      "real_tokens": 26838,
+      "padded_capacity_tokens": 34080,
+      "sample_lengths": [
+        3575,
+        1564,
+        4260,
+        4260,
+        4255,
+        3960,
+        4225,
+        739
+      ],
+      "max_seq_len": 4260
+    },
+    {
+      "rollout": 63,
+      "rank": 1,
+      "sha256": "e54f364a979158b13c1017dcee0cc80309985564fce4ba8bb1d094aff71c1a65",
+      "real_tokens": 25856,
+      "padded_capacity_tokens": 34080,
+      "sample_lengths": [
+        1991,
+        1123,
+        4260,
+        4260,
+        4255,
+        4255,
+        4225,
+        1487
+      ],
+      "max_seq_len": 4260
+    },
+    {
+      "rollout": 64,
+      "rank": 0,
+      "sha256": "c74f9472a189d0f58498402e3eb81a216fbe7fd940f44f6a00e5f93253b5fed5",
+      "real_tokens": 25927,
+      "padded_capacity_tokens": 34352,
+      "sample_lengths": [
+        4261,
+        4261,
+        4294,
+        4294,
+        2899,
+        3448,
+        1007,
+        1463
+      ],
+      "max_seq_len": 4294
+    },
+    {
+      "rollout": 64,
+      "rank": 1,
+      "sha256": "7ae022682106bd49d775d1757e4efb6bdc62b252fff68647f424ef87194aa5fc",
+      "real_tokens": 22614,
+      "padded_capacity_tokens": 34352,
+      "sample_lengths": [
+        4111,
+        664,
+        4294,
+        4294,
+        3240,
+        2016,
+        1030,
+        2965
+      ],
+      "max_seq_len": 4294
+    },
+    {
+      "rollout": 65,
+      "rank": 0,
+      "sha256": "9d00f73f4e60309197638c737bc13aa379a7227d5eb30c47fabeebf739525965",
+      "real_tokens": 14642,
+      "padded_capacity_tokens": 28064,
+      "sample_lengths": [
+        765,
+        1250,
+        2649,
+        1829,
+        1605,
+        710,
+        3508,
+        2326
+      ],
+      "max_seq_len": 3508
+    },
+    {
+      "rollout": 65,
+      "rank": 1,
+      "sha256": "1d4144cba9df792612c8ec257fe82a434fc8a7c291be6b5c67b74fe73ca2a20b",
+      "real_tokens": 11598,
+      "padded_capacity_tokens": 25104,
+      "sample_lengths": [
+        1015,
+        2028,
+        658,
+        3138,
+        583,
+        789,
+        1948,
+        1439
+      ],
+      "max_seq_len": 3138
+    },
+    {
+      "rollout": 66,
+      "rank": 0,
+      "sha256": "ae6809d75c36be99658fa778199e7e70747d046e88e55f823a3a2f17974d1bbb",
+      "real_tokens": 15914,
+      "padded_capacity_tokens": 33984,
+      "sample_lengths": [
+        2004,
+        1608,
+        621,
+        1817,
+        4248,
+        4248,
+        624,
+        744
+      ],
+      "max_seq_len": 4248
+    },
+    {
+      "rollout": 66,
+      "rank": 1,
+      "sha256": "60d75433caddc63042d307e48b1349ee1783037ff36738a682bcdb0d917047b7",
+      "real_tokens": 19452,
+      "padded_capacity_tokens": 33984,
+      "sample_lengths": [
+        3294,
+        1421,
+        1185,
+        1678,
+        4248,
+        4248,
+        1790,
+        1588
+      ],
+      "max_seq_len": 4248
+    },
+    {
+      "rollout": 67,
+      "rank": 0,
+      "sha256": "41faf0a2817ec8113178fa9e18b87e4f409027a11a42b39723722e0821483fd4",
+      "real_tokens": 12724,
+      "padded_capacity_tokens": 33976,
+      "sample_lengths": [
+        525,
+        606,
+        1001,
+        808,
+        1610,
+        1891,
+        4247,
+        2036
+      ],
+      "max_seq_len": 4247
+    },
+    {
+      "rollout": 67,
+      "rank": 1,
+      "sha256": "5cb00fd1164739457fa8c1b139932e00b3aa1d2674e1019bd4b0bbcd74c73c6c",
+      "real_tokens": 13004,
+      "padded_capacity_tokens": 33976,
+      "sample_lengths": [
+        934,
+        1501,
+        627,
+        699,
+        1547,
+        1834,
+        4247,
+        1615
+      ],
+      "max_seq_len": 4247
+    },
+    {
+      "rollout": 68,
+      "rank": 0,
+      "sha256": "f4ae4c2722f7dbb83a0d0ac0386c0f3b9f0204c9ca2128ec61f69dd74b82fb70",
+      "real_tokens": 14768,
+      "padded_capacity_tokens": 34032,
+      "sample_lengths": [
+        1543,
+        1619,
+        1808,
+        976,
+        4254,
+        3494,
+        225,
+        849
+      ],
+      "max_seq_len": 4254
+    },
+    {
+      "rollout": 68,
+      "rank": 1,
+      "sha256": "cf0b63d9816d989abde457944445b29aa5f25a62259cb20bd99600ab45feb361",
+      "real_tokens": 11795,
+      "padded_capacity_tokens": 26024,
+      "sample_lengths": [
+        1204,
+        1547,
+        907,
+        2267,
+        1518,
+        3253,
+        480,
+        619
+      ],
+      "max_seq_len": 3253
+    },
+    {
+      "rollout": 69,
+      "rank": 0,
+      "sha256": "93018f265b4dab8caf3ee3a2c479cdec43fe811837eae883026ccd2bc1aa77bf",
+      "real_tokens": 14729,
+      "padded_capacity_tokens": 34040,
+      "sample_lengths": [
+        4255,
+        1779,
+        886,
+        630,
+        1811,
+        1995,
+        1725,
+        1648
+      ],
+      "max_seq_len": 4255
+    },
+    {
+      "rollout": 69,
+      "rank": 1,
+      "sha256": "9cc0b7a5593cf116129e750340e7bed1b3a785595e9faf3798a3fb2b10813510",
+      "real_tokens": 24518,
+      "padded_capacity_tokens": 34256,
+      "sample_lengths": [
+        2166,
+        4282,
+        1799,
+        4183,
+        3198,
+        2403,
+        4225,
+        2262
+      ],
+      "max_seq_len": 4282
+    },
+    {
+      "rollout": 70,
+      "rank": 0,
+      "sha256": "415103b272eff9ec8c4b828e199c6dadaae9a900b4bd877513d08d1a6ac22d44",
+      "real_tokens": 24718,
+      "padded_capacity_tokens": 34296,
+      "sample_lengths": [
+        891,
+        1212,
+        4264,
+        3648,
+        4287,
+        4287,
+        2773,
+        3356
+      ],
+      "max_seq_len": 4287
+    },
+    {
+      "rollout": 70,
+      "rank": 1,
+      "sha256": "3f6d48fe8e6591a1ccbdc1adc3e21d4a813a3417e3299df471856bc09ca9e8c9",
+      "real_tokens": 18249,
+      "padded_capacity_tokens": 34296,
+      "sample_lengths": [
+        877,
+        914,
+        1853,
+        3526,
+        2452,
+        4287,
+        2514,
+        1826
+      ],
+      "max_seq_len": 4287
+    },
+    {
+      "rollout": 71,
+      "rank": 0,
+      "sha256": "c62737206b42d5f2f46a23935a2fdafd8f03430ce7a3e04b82654b32118a311e",
+      "real_tokens": 18488,
+      "padded_capacity_tokens": 33912,
+      "sample_lengths": [
+        4239,
+        4239,
+        2121,
+        1694,
+        535,
+        1294,
+        943,
+        3423
+      ],
+      "max_seq_len": 4239
+    },
+    {
+      "rollout": 71,
+      "rank": 1,
+      "sha256": "090a7c1d48a4b530cb05776081515620eec67a4a71630fcd7547e0437f4140b0",
+      "real_tokens": 21738,
+      "padded_capacity_tokens": 33912,
+      "sample_lengths": [
+        4239,
+        4239,
+        1853,
+        4238,
+        1684,
+        1146,
+        864,
+        3475
+      ],
+      "max_seq_len": 4239
+    },
+    {
+      "rollout": 72,
+      "rank": 0,
+      "sha256": "7cbb13d0df67f5e2119c7bf123f575d045ac78a67a6413d4353b9854ea2ec60c",
+      "real_tokens": 23407,
+      "padded_capacity_tokens": 34304,
+      "sample_lengths": [
+        922,
+        1093,
+        2380,
+        4242,
+        2020,
+        4288,
+        4231,
+        4231
+      ],
+      "max_seq_len": 4288
+    },
+    {
+      "rollout": 72,
+      "rank": 1,
+      "sha256": "226ed78484d2963294e76f1cd532bb4f6965500320168c8792c7ad2153d78823",
+      "real_tokens": 15575,
+      "padded_capacity_tokens": 33936,
+      "sample_lengths": [
+        660,
+        1535,
+        2100,
+        4242,
+        1743,
+        2400,
+        1347,
+        1548
+      ],
+      "max_seq_len": 4242
+    },
+    {
+      "rollout": 73,
+      "rank": 0,
+      "sha256": "072b4442385fe5574a3c3057b4073fafeb5fe7a67eb6259edda2a45bb4976571",
+      "real_tokens": 12007,
+      "padded_capacity_tokens": 24152,
+      "sample_lengths": [
+        689,
+        1812,
+        662,
+        1255,
+        952,
+        723,
+        3019,
+        2895
+      ],
+      "max_seq_len": 3019
+    },
+    {
+      "rollout": 73,
+      "rank": 1,
+      "sha256": "916ae1c6884869603bbbf6df0658ad7401a604aa7ecac538d1da33109900bcf9",
+      "real_tokens": 14568,
+      "padded_capacity_tokens": 34272,
+      "sample_lengths": [
+        487,
+        735,
+        918,
+        695,
+        2393,
+        772,
+        4284,
+        4284
+      ],
+      "max_seq_len": 4284
+    },
+    {
+      "rollout": 74,
+      "rank": 0,
+      "sha256": "93c1749918be8c798795a17d5ed79b98e78b819cd0201447da805f40d75372e8",
+      "real_tokens": 14871,
+      "padded_capacity_tokens": 34008,
+      "sample_lengths": [
+        898,
+        1574,
+        3826,
+        4251,
+        809,
+        1316,
+        1238,
+        959
+      ],
+      "max_seq_len": 4251
+    },
+    {
+      "rollout": 74,
+      "rank": 1,
+      "sha256": "38dfbe38915119938e5aaf69ab9f7412b56420219123090132ffc2b3c8be771f",
+      "real_tokens": 13699,
+      "padded_capacity_tokens": 34008,
+      "sample_lengths": [
+        1064,
+        1338,
+        2771,
+        4251,
+        1209,
+        1258,
+        995,
+        813
+      ],
+      "max_seq_len": 4251
+    },
+    {
+      "rollout": 75,
+      "rank": 0,
+      "sha256": "69701710a533bc2521fd9e7d790aa622fcc5fe3507ded668cbee989f1d0f58cd",
+      "real_tokens": 14572,
+      "padded_capacity_tokens": 34296,
+      "sample_lengths": [
+        1829,
+        1003,
+        4287,
+        2186,
+        1839,
+        2043,
+        436,
+        949
+      ],
+      "max_seq_len": 4287
+    },
+    {
+      "rollout": 75,
+      "rank": 1,
+      "sha256": "8d57e7a2cf3965043d2387f6211ac5e0f8607b48dcacb3f2949c42a57f92cbd3",
+      "real_tokens": 20010,
+      "padded_capacity_tokens": 33968,
+      "sample_lengths": [
+        2730,
+        2226,
+        2102,
+        2545,
+        2628,
+        4246,
+        1168,
+        2365
+      ],
+      "max_seq_len": 4246
+    },
+    {
+      "rollout": 76,
+      "rank": 0,
+      "sha256": "aee51502d41d10d1e88d36d15206c4b4d0e4be87793c52959839429bcb867963",
+      "real_tokens": 15647,
+      "padded_capacity_tokens": 32384,
+      "sample_lengths": [
+        2704,
+        2060,
+        1044,
+        933,
+        2347,
+        4048,
+        1469,
+        1042
+      ],
+      "max_seq_len": 4048
+    },
+    {
+      "rollout": 76,
+      "rank": 1,
+      "sha256": "ee08bba7978c10839fde5c105af652a981b016cd87c38914a8f3e9f90ce72e4d",
+      "real_tokens": 11416,
+      "padded_capacity_tokens": 21936,
+      "sample_lengths": [
+        1554,
+        2742,
+        1316,
+        1871,
+        872,
+        815,
+        758,
+        1488
+      ],
+      "max_seq_len": 2742
+    },
+    {
+      "rollout": 77,
+      "rank": 0,
+      "sha256": "d58a68d8ec3816dfd06efc2e2aa4aef29cf2406253483f5dc8f53a886d45abac",
+      "real_tokens": 13513,
+      "padded_capacity_tokens": 33936,
+      "sample_lengths": [
+        958,
+        2521,
+        1067,
+        4242,
+        1018,
+        1085,
+        1966,
+        656
+      ],
+      "max_seq_len": 4242
+    },
+    {
+      "rollout": 77,
+      "rank": 1,
+      "sha256": "9c7774961a53bb7786a1b0061a9dea74944d5334f956a31b9ab369dcc0c115a6",
+      "real_tokens": 16042,
+      "padded_capacity_tokens": 33952,
+      "sample_lengths": [
+        2058,
+        4244,
+        3707,
+        727,
+        1902,
+        845,
+        1515,
+        1044
+      ],
+      "max_seq_len": 4244
+    },
+    {
+      "rollout": 78,
+      "rank": 0,
+      "sha256": "c3a6702ea00bbc5a4ef2c01254eec14a82c9bbe3a30684b6eee4b535867fc98a",
+      "real_tokens": 14709,
+      "padded_capacity_tokens": 33864,
+      "sample_lengths": [
+        2616,
+        1478,
+        987,
+        610,
+        560,
+        657,
+        4233,
+        3568
+      ],
+      "max_seq_len": 4233
+    },
+    {
+      "rollout": 78,
+      "rank": 1,
+      "sha256": "93de12538e984ed7c1b1836955fd51e1fa137bb3751e5714601ec682f0d81325",
+      "real_tokens": 11577,
+      "padded_capacity_tokens": 31408,
+      "sample_lengths": [
+        1013,
+        807,
+        1251,
+        716,
+        384,
+        389,
+        3926,
+        3091
+      ],
+      "max_seq_len": 3926
+    },
+    {
+      "rollout": 79,
+      "rank": 0,
+      "sha256": "4a7d2d2861938f74812879ebc5cbd8b758531d850acfe8f095be44acce451b8c",
+      "real_tokens": 13093,
+      "padded_capacity_tokens": 29976,
+      "sample_lengths": [
+        2104,
+        830,
+        500,
+        1382,
+        707,
+        1144,
+        3747,
+        2679
+      ],
+      "max_seq_len": 3747
+    },
+    {
+      "rollout": 79,
+      "rank": 1,
+      "sha256": "9562405101370668475623707bbd626d4f2f8bd7c437a1ba9606c2af4bab653e",
+      "real_tokens": 12918,
+      "padded_capacity_tokens": 33848,
+      "sample_lengths": [
+        951,
+        1059,
+        535,
+        594,
+        2979,
+        1495,
+        4231,
+        1074
+      ],
+      "max_seq_len": 4231
+    },
+    {
+      "rollout": 80,
+      "rank": 0,
+      "sha256": "ba1e2d79d950a54f1e1744e4fdffeefa3538c39efab1fe89c49540f37e1be6e5",
+      "real_tokens": 14924,
+      "padded_capacity_tokens": 23096,
+      "sample_lengths": [
+        1026,
+        1297,
+        1832,
+        1962,
+        2887,
+        2258,
+        1533,
+        2129
+      ],
+      "max_seq_len": 2887
+    },
+    {
+      "rollout": 80,
+      "rank": 1,
+      "sha256": "9679278055dbcf004a164d4f588be376232dfcb2043eb3d490f7b5cb5847cbed",
+      "real_tokens": 11476,
+      "padded_capacity_tokens": 19136,
+      "sample_lengths": [
+        1557,
+        1551,
+        1231,
+        2233,
+        794,
+        638,
+        2392,
+        1080
+      ],
+      "max_seq_len": 2392
+    },
+    {
+      "rollout": 81,
+      "rank": 0,
+      "sha256": "c6b42098f9a1a8aa46ecfabdac060c434b80b01387f97a19897a34c05cad80ed",
+      "real_tokens": 10237,
+      "padded_capacity_tokens": 20448,
+      "sample_lengths": [
+        923,
+        674,
+        1314,
+        2556,
+        805,
+        722,
+        1849,
+        1394
+      ],
+      "max_seq_len": 2556
+    },
+    {
+      "rollout": 81,
+      "rank": 1,
+      "sha256": "afbfb049ec92bde79a63eb4ba4b50e8f7f47417f0141a652088932d8564712fc",
+      "real_tokens": 13421,
+      "padded_capacity_tokens": 34064,
+      "sample_lengths": [
+        555,
+        1162,
+        4258,
+        4258,
+        1004,
+        537,
+        801,
+        846
+      ],
+      "max_seq_len": 4258
+    },
+    {
+      "rollout": 82,
+      "rank": 0,
+      "sha256": "cefa195e18ab1a97bdef9f43fdbb7e572c600e6d204e67fc7c27431ad49b3cfd",
+      "real_tokens": 9424,
+      "padded_capacity_tokens": 13656,
+      "sample_lengths": [
+        1707,
+        1611,
+        1410,
+        1308,
+        1220,
+        1140,
+        484,
+        544
+      ],
+      "max_seq_len": 1707
+    },
+    {
+      "rollout": 82,
+      "rank": 1,
+      "sha256": "8a283ece27ac41bf77a66236efc17c80aa1a7d711f94ccddb7377bb56f23e4fe",
+      "real_tokens": 11319,
+      "padded_capacity_tokens": 18808,
+      "sample_lengths": [
+        1129,
+        1300,
+        1907,
+        1559,
+        2351,
+        1753,
+        779,
+        541
+      ],
+      "max_seq_len": 2351
+    },
+    {
+      "rollout": 83,
+      "rank": 0,
+      "sha256": "55c0ade4b29d4298810e65213bd28e6f29382059c01c9fc769f35ff6b8bda3d5",
+      "real_tokens": 13765,
+      "padded_capacity_tokens": 33984,
+      "sample_lengths": [
+        484,
+        433,
+        1137,
+        961,
+        4248,
+        1483,
+        4146,
+        873
+      ],
+      "max_seq_len": 4248
+    },
+    {
+      "rollout": 83,
+      "rank": 1,
+      "sha256": "aee68b1e4e271f0ded0f753ca578bacd28085f97038c830b32dbfca3e6b83117",
+      "real_tokens": 14128,
+      "padded_capacity_tokens": 33984,
+      "sample_lengths": [
+        450,
+        618,
+        1085,
+        1250,
+        4248,
+        3753,
+        741,
+        1983
+      ],
+      "max_seq_len": 4248
+    },
+    {
+      "rollout": 84,
+      "rank": 0,
+      "sha256": "fa29cb59978ee6aafff2495384ac2c8000b5f8ecec5af5cb5283c1ff66298025",
+      "real_tokens": 17666,
+      "padded_capacity_tokens": 34280,
+      "sample_lengths": [
+        803,
+        1891,
+        1919,
+        1124,
+        4285,
+        4285,
+        2269,
+        1090
+      ],
+      "max_seq_len": 4285
+    },
+    {
+      "rollout": 84,
+      "rank": 1,
+      "sha256": "02dca87bc8cacc23fd7f51f9c1122e05a256f4a969e8e3825f69253103bd54ef",
+      "real_tokens": 15607,
+      "padded_capacity_tokens": 34280,
+      "sample_lengths": [
+        499,
+        1761,
+        1854,
+        1545,
+        4285,
+        4285,
+        739,
+        639
+      ],
+      "max_seq_len": 4285
+    },
+    {
+      "rollout": 85,
+      "rank": 0,
+      "sha256": "7975d856f87f3daf02a4d98352e044f4a20df0d4ce96bda418a8f54245d94a61",
+      "real_tokens": 10725,
+      "padded_capacity_tokens": 19824,
+      "sample_lengths": [
+        994,
+        911,
+        2478,
+        2389,
+        958,
+        993,
+        1068,
+        934
+      ],
+      "max_seq_len": 2478
+    },
+    {
+      "rollout": 85,
+      "rank": 1,
+      "sha256": "278feeaeced70e103f9cc7dcb3ea479ed4cc1cc46ab0f256addc50a19b998f18",
+      "real_tokens": 12946,
+      "padded_capacity_tokens": 34040,
+      "sample_lengths": [
+        1110,
+        791,
+        4255,
+        2133,
+        1003,
+        1136,
+        1079,
+        1439
+      ],
+      "max_seq_len": 4255
+    },
+    {
+      "rollout": 86,
+      "rank": 0,
+      "sha256": "72da1c6b1671f04661bd0950e1fd29d5f0b67ba05f202bae0052935b1d156d6d",
+      "real_tokens": 11198,
+      "padded_capacity_tokens": 20904,
+      "sample_lengths": [
+        1909,
+        488,
+        2613,
+        1601,
+        1953,
+        1017,
+        1087,
+        530
+      ],
+      "max_seq_len": 2613
+    },
+    {
+      "rollout": 86,
+      "rank": 1,
+      "sha256": "8540b1919ee6c1af5023aaff63f8da2fb5e0945a786c3b3be2a4c5b06a43547d",
+      "real_tokens": 9833,
+      "padded_capacity_tokens": 21176,
+      "sample_lengths": [
+        888,
+        1117,
+        2214,
+        2647,
+        753,
+        822,
+        588,
+        804
+      ],
+      "max_seq_len": 2647
+    },
+    {
+      "rollout": 87,
+      "rank": 0,
+      "sha256": "5a8dbc08a12fcc36f2958088afeb9011f0f0fdca8bdfbd70d57ecfe0eb7eb56e",
+      "real_tokens": 20074,
+      "padded_capacity_tokens": 33976,
+      "sample_lengths": [
+        1408,
+        1801,
+        1714,
+        2026,
+        3984,
+        1960,
+        4247,
+        2934
+      ],
+      "max_seq_len": 4247
+    },
+    {
+      "rollout": 87,
+      "rank": 1,
+      "sha256": "3e4e9cc82e9c08c030d974928692706a7cf1f6b63d67a754cad891176c720507",
+      "real_tokens": 16474,
+      "padded_capacity_tokens": 33976,
+      "sample_lengths": [
+        452,
+        702,
+        1037,
+        1203,
+        2445,
+        3740,
+        4247,
+        2648
+      ],
+      "max_seq_len": 4247
+    },
+    {
+      "rollout": 88,
+      "rank": 0,
+      "sha256": "476717015189e20c4d8ee09516f5c5ac682ac340c0ee5c3d6ff6082944c89dbc",
+      "real_tokens": 13270,
+      "padded_capacity_tokens": 28184,
+      "sample_lengths": [
+        2404,
+        1850,
+        3523,
+        2736,
+        634,
+        1019,
+        555,
+        549
+      ],
+      "max_seq_len": 3523
+    },
+    {
+      "rollout": 88,
+      "rank": 1,
+      "sha256": "65f26b66f5e1f9f7909cb88f5fbbdeb01eb7737478a1c73918d7e0e02af0c607",
+      "real_tokens": 12691,
+      "padded_capacity_tokens": 28232,
+      "sample_lengths": [
+        3529,
+        1380,
+        2669,
+        2545,
+        758,
+        794,
+        471,
+        545
+      ],
+      "max_seq_len": 3529
+    },
+    {
+      "rollout": 89,
+      "rank": 0,
+      "sha256": "28fee94d6f8f3a4456ee025b076f84c51ad597744e3240c173e9ad34af57e575",
+      "real_tokens": 12452,
+      "padded_capacity_tokens": 25456,
+      "sample_lengths": [
+        1085,
+        540,
+        707,
+        1310,
+        1318,
+        2704,
+        3182,
+        1606
+      ],
+      "max_seq_len": 3182
+    },
+    {
+      "rollout": 89,
+      "rank": 1,
+      "sha256": "63cb420b10891d897158efa603730debd48541fdfe0c8b48b0ddef2bd4bce03d",
+      "real_tokens": 14181,
+      "padded_capacity_tokens": 34256,
+      "sample_lengths": [
+        742,
+        1060,
+        534,
+        809,
+        4282,
+        3871,
+        1137,
+        1746
+      ],
+      "max_seq_len": 4282
+    },
+    {
+      "rollout": 90,
+      "rank": 0,
+      "sha256": "fee384fd8911b1e96145d551f4f13f891b6797e278c18318305eedd29df80bca",
+      "real_tokens": 16125,
+      "padded_capacity_tokens": 34536,
+      "sample_lengths": [
+        4317,
+        3423,
+        1770,
+        1242,
+        1620,
+        1008,
+        1655,
+        1090
+      ],
+      "max_seq_len": 4317
+    },
+    {
+      "rollout": 90,
+      "rank": 1,
+      "sha256": "791f8de968dcf94cb451fc68d3fee127e1c676ab9f4501dfd9611294d5d2e30b",
+      "real_tokens": 13032,
+      "padded_capacity_tokens": 34536,
+      "sample_lengths": [
+        2290,
+        4317,
+        595,
+        770,
+        1694,
+        612,
+        1730,
+        1024
+      ],
+      "max_seq_len": 4317
+    },
+    {
+      "rollout": 91,
+      "rank": 0,
+      "sha256": "3f00579c7c46afb557d53d83dec2a3c6581238c041c3487912151174308753be",
+      "real_tokens": 8377,
+      "padded_capacity_tokens": 12136,
+      "sample_lengths": [
+        924,
+        1196,
+        1471,
+        1271,
+        450,
+        810,
+        738,
+        1517
+      ],
+      "max_seq_len": 1517
+    },
+    {
+      "rollout": 91,
+      "rank": 1,
+      "sha256": "7aaa7662aa1347deb80b1c111699510a5f385bd6378f989bda31b53002cecc7d",
+      "real_tokens": 7820,
+      "padded_capacity_tokens": 13728,
+      "sample_lengths": [
+        688,
+        986,
+        668,
+        1716,
+        854,
+        613,
+        1348,
+        947
+      ],
+      "max_seq_len": 1716
+    },
+    {
+      "rollout": 92,
+      "rank": 0,
+      "sha256": "2189ee9b1dfb97be4050adde0cd1fce18630b59aaeecb42f87e043756687ed50",
+      "real_tokens": 8152,
+      "padded_capacity_tokens": 12296,
+      "sample_lengths": [
+        975,
+        972,
+        1207,
+        1537,
+        783,
+        1254,
+        613,
+        811
+      ],
+      "max_seq_len": 1537
+    },
+    {
+      "rollout": 92,
+      "rank": 1,
+      "sha256": "00c663ad1cd95b692a8c8a2dd38fc449cfb61fba3b2d555f61aac2f86c53d4c1",
+      "real_tokens": 9805,
+      "padded_capacity_tokens": 22064,
+      "sample_lengths": [
+        777,
+        1198,
+        2758,
+        1817,
+        736,
+        435,
+        468,
+        1616
+      ],
+      "max_seq_len": 2758
+    },
+    {
+      "rollout": 93,
+      "rank": 0,
+      "sha256": "6e74180b62959c4ea3105cee94c84e64773c1baa3fb6839f68c868680b59fb1b",
+      "real_tokens": 14375,
+      "padded_capacity_tokens": 33944,
+      "sample_lengths": [
+        774,
+        950,
+        929,
+        977,
+        319,
+        1940,
+        4243,
+        4243
+      ],
+      "max_seq_len": 4243
+    },
+    {
+      "rollout": 93,
+      "rank": 1,
+      "sha256": "e9a002315d31ef3c34715b6064edb1177c084f85fba96a1e464dbaea8bc4615b",
+      "real_tokens": 13934,
+      "padded_capacity_tokens": 32040,
+      "sample_lengths": [
+        667,
+        1110,
+        1484,
+        1467,
+        975,
+        609,
+        3617,
+        4005
+      ],
+      "max_seq_len": 4005
+    },
+    {
+      "rollout": 94,
+      "rank": 0,
+      "sha256": "782319300636f84bf0928aa7050b47d7f72e1c199f572e44d498229cd34ecd51",
+      "real_tokens": 17747,
+      "padded_capacity_tokens": 34120,
+      "sample_lengths": [
+        716,
+        1607,
+        4030,
+        4265,
+        2806,
+        2383,
+        1475,
+        465
+      ],
+      "max_seq_len": 4265
+    },
+    {
+      "rollout": 94,
+      "rank": 1,
+      "sha256": "93bf8a208b1a94e33c05741fccbc7d0fe38951cc30296ee6ac22016ba953dde3",
+      "real_tokens": 12643,
+      "padded_capacity_tokens": 34120,
+      "sample_lengths": [
+        432,
+        824,
+        4265,
+        2939,
+        702,
+        533,
+        1662,
+        1286
+      ],
+      "max_seq_len": 4265
+    },
+    {
+      "rollout": 95,
+      "rank": 0,
+      "sha256": "6399fe1d507770d00d2c94f6f3ce65390fca28a5af325cc11fad40e90dd9f6f5",
+      "real_tokens": 15891,
+      "padded_capacity_tokens": 34304,
+      "sample_lengths": [
+        1021,
+        511,
+        2206,
+        1440,
+        744,
+        1988,
+        3693,
+        4288
+      ],
+      "max_seq_len": 4288
+    },
+    {
+      "rollout": 95,
+      "rank": 1,
+      "sha256": "0752c1933d8e8b4710ab33b0af9decff8c9108ee9fb635f917f2972efd552fff",
+      "real_tokens": 17095,
+      "padded_capacity_tokens": 34304,
+      "sample_lengths": [
+        1340,
+        4237,
+        955,
+        820,
+        644,
+        523,
+        4288,
+        4288
+      ],
+      "max_seq_len": 4288
+    },
+    {
+      "rollout": 96,
+      "rank": 0,
+      "sha256": "760611543c19b8fdae427ca95f44baed198401699dcb66d15ac167b16bd00d17",
+      "real_tokens": 8699,
+      "padded_capacity_tokens": 15008,
+      "sample_lengths": [
+        1876,
+        479,
+        864,
+        1459,
+        551,
+        888,
+        931,
+        1651
+      ],
+      "max_seq_len": 1876
+    },
+    {
+      "rollout": 96,
+      "rank": 1,
+      "sha256": "d976cbb69e0fed70defd9ca52b333923a212ef2507128400b76c8d28c52d1eef",
+      "real_tokens": 8164,
+      "padded_capacity_tokens": 14248,
+      "sample_lengths": [
+        1781,
+        1352,
+        910,
+        1045,
+        484,
+        409,
+        1398,
+        785
+      ],
+      "max_seq_len": 1781
+    },
+    {
+      "rollout": 97,
+      "rank": 0,
+      "sha256": "ddc1eae0a77f25682733967300b6dba1f4a65e58febd801b85fd6c5ab28541f9",
+      "real_tokens": 9326,
+      "padded_capacity_tokens": 16096,
+      "sample_lengths": [
+        1059,
+        403,
+        2012,
+        1767,
+        1618,
+        682,
+        814,
+        971
+      ],
+      "max_seq_len": 2012
+    },
+    {
+      "rollout": 97,
+      "rank": 1,
+      "sha256": "ffed95460c6468490f9703114384ca3615f3fab0cde363f8a23638b0e14f6ad8",
+      "real_tokens": 11352,
+      "padded_capacity_tokens": 29736,
+      "sample_lengths": [
+        509,
+        593,
+        3717,
+        2952,
+        603,
+        902,
+        1162,
+        914
+      ],
+      "max_seq_len": 3717
+    },
+    {
+      "rollout": 98,
+      "rank": 0,
+      "sha256": "e2d99ce5b66294d82a660a711c64042eca693a039136cc3c44f1c656abbe2241",
+      "real_tokens": 10931,
+      "padded_capacity_tokens": 25496,
+      "sample_lengths": [
+        1439,
+        1228,
+        690,
+        1730,
+        3187,
+        1052,
+        721,
+        884
+      ],
+      "max_seq_len": 3187
+    },
+    {
+      "rollout": 98,
+      "rank": 1,
+      "sha256": "b05f0c1153ef2150c80c419a626119fade1d108b996d0808bfa9e392d52ec409",
+      "real_tokens": 7636,
+      "padded_capacity_tokens": 17840,
+      "sample_lengths": [
+        2230,
+        647,
+        1304,
+        629,
+        688,
+        1120,
+        432,
+        586
+      ],
+      "max_seq_len": 2230
+    },
+    {
+      "rollout": 99,
+      "rank": 0,
+      "sha256": "7dbbb362f34ebf7aa6345cf4f3a0b2269c320f4e9a218daac7bda6523f4c1b55",
+      "real_tokens": 12253,
+      "padded_capacity_tokens": 34256,
+      "sample_lengths": [
+        433,
+        392,
+        1264,
+        2571,
+        4282,
+        971,
+        1325,
+        1015
+      ],
+      "max_seq_len": 4282
+    },
+    {
+      "rollout": 99,
+      "rank": 1,
+      "sha256": "67f2654aad0ac11cbf7ce0e82d85c6f131f4b1a784339de2e8b1fec56f0b7d5b",
+      "real_tokens": 12156,
+      "padded_capacity_tokens": 34256,
+      "sample_lengths": [
+        445,
+        553,
+        1670,
+        2208,
+        4282,
+        1327,
+        828,
+        843
+      ],
+      "max_seq_len": 4282
+    }
+  ],
+  "real_tokens": 3281711,
+  "padded_capacity_tokens": 6034840,
+  "artificial_tokens": 2753129,
+  "padding_fraction_of_capacity": 0.45620579833102454,
+  "capacity_to_real_ratio": 1.838930972288541,
+  "scope": "Actual retained100-update Megatronr3 training dumps,2ranks,8samples/rank,microbatch1,bshd,CP1. Each microbatch is padded to rank rollout-batch maximum. This counts forward slots, not measured FLOPs or runtime."
+}

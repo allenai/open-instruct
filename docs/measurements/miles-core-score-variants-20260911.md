@@ -35,3 +35,10 @@ weights. It does not establish optimizer/learning parity, reconstruct historical
 weights or measure Ray ingress. FLA specialization remains separate from the candidate's
 SwiGLU change. The earlier identical-batch profile and isolated4090 kernel probe motivated
 this experiment; a full-model result is required before promoting the optimization.
+
+Submitted September11 at04:29:08UTC from clean committed OI source2d945483a:
+[Beaker experiment](https://beaker.org/ex/01M27BKYTF9N7JMYBTKAV0HS9A). The immutable
+image was reused explicitly through the standard wrapper. Eighteen focused tests passed
+in that pinned image; the final nine comparator/launcher cases passed again after recipe
+argument validation. A local source-copy preflight applied the exact patch with zero fuzz
+and verified both expected kernel hashes. Results are pending.
