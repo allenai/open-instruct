@@ -12536,5 +12536,51 @@
     "core_mean_seconds": 3.7278427042655253,
     "megatron_mean_seconds": 5.8844085617285025,
     "scope": "Core total_seconds versus Megatron export_post_pause_total_s; component scopes are retained in the artifact."
+  },
+  "response_cap_outcomes": {
+    "core": {
+      "initial": {
+        "at_cap": {
+          "correct": 3,
+          "incorrect": 15
+        },
+        "below_cap": {
+          "correct": 94,
+          "incorrect": 16
+        }
+      },
+      "final": {
+        "at_cap": {
+          "correct": 2,
+          "incorrect": 22
+        },
+        "below_cap": {
+          "correct": 91,
+          "incorrect": 13
+        }
+      }
+    },
+    "megatron": {
+      "initial": {
+        "at_cap": {
+          "correct": 4,
+          "incorrect": 16
+        },
+        "below_cap": {
+          "correct": 92,
+          "incorrect": 16
+        }
+      },
+      "final": {
+        "at_cap": {
+          "correct": 6,
+          "incorrect": 12
+        },
+        "below_cap": {
+          "correct": 101,
+          "incorrect": 9
+        }
+      }
+    }
   }
 }

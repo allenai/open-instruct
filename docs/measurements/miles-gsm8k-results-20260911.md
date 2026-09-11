@@ -46,7 +46,12 @@ That initial divergence matters when interpreting later question-level changes.
 | Training groups with mixed rewards /400 |127 |116 |
 
 Eleven of Core's16 lost answers hit the cap at the final evaluation. That is an
-association, not proof that a longer cap would recover those answers. Megatron
+association, not proof that a longer cap would recover those answers. At the final
+endpoint, Core had22 incorrect capped responses and13 incorrect responses below
+the cap; Megatron had12 and9. These are outcome-selected subsets, not matched
+evaluation populations. Some capped responses already contained a correct
+extractable answer (Core2, Megatron6), so truncation does not imply reward zero.
+Megatron
 produced substantially shorter held-out responses late in training, while average
 training reward across the run was nearly identical. Training reward alone would
 have missed the held-out difference. With standard-deviation normalization disabled,
