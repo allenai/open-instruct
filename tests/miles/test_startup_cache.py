@@ -119,3 +119,27 @@ def test_trial_resource_bounds():
     assert task["context"]["priority"] == "urgent"
     assert task["context"]["minRuntime"] == "1h"
     assert task["timeout"] == "2h"
+
+
+def test_cache_is_opt_out_and_uses_olmo_miles_ttl_namespace():
+    assert CoreConfig().compiler_cache is True
+    assert CoreConfig(compiler_cache=False).compiler_cache is False
+    assert startup.DEFAULT_SHARED == "/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl"
+    startup.cache.validate_shared_root(Path(startup.DEFAULT_SHARED))
+
+
+@pytest.mark.parametrize(
+    "root", ("relative/cache", "/weka", "/weka/oe-training-default/cache", "/weka/tmp-0d/cache", "", 42)
+)
+def test_invalid_cache_root_rejected_before_launch(root):
+    with pytest.raises(ValueError):
+        CoreConfig(compiler_cache_root=root)
+
+
+def test_invalid_retention_path_cannot_create_reports():
+    args = SimpleNamespace(olmo_core=SimpleNamespace(compiler_cache=True, compiler_cache_root="/weka/no-ttl/cache"))
+    with (
+        mock.patch.object(Path, "mkdir", side_effect=AssertionError("created before validation")),
+        pytest.raises(ValueError, match="expiry"),
+    ):
+        startup.prepare(args)

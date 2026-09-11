@@ -37,6 +37,7 @@ def prepare(args):
     if args.olmo_core.compiler_cache_root is None and not Path("/weka/oe-training-default").is_dir():
         logger.info("Core compiler cache: no default WEKA mount; using ordinary local compiler caches")
         return
+    cache.validate_shared_root(shared)
     root = Path(__file__).resolve().parents[2]
     lock_path = root / "build/runtime/miles/runtime.lock.json"
     if not lock_path.exists():

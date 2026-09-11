@@ -198,11 +198,19 @@ def snapshot(source, destination, family):
 def artifact_root(shared, key, family):
     if not HEX.fullmatch(key) or family not in FAMILIES:
         raise ValueError("Invalid fingerprint or cache family")
-    if str(shared.resolve()).startswith("/weka/") and not any(
-        re.fullmatch(r"tmp-[1-9][0-9]*[hdwmy]", part) for part in shared.parts
+    validate_shared_root(shared)
+    return shared / f"core-v{SCHEMA}" / key / family
+
+
+def validate_shared_root(shared):
+    """Validate retention policy before creating reports or cache artifacts."""
+    if not shared.is_absolute():
+        raise ValueError("Compiler cache root must be an absolute path")
+    resolved = shared.resolve()
+    if resolved.is_relative_to("/weka") and not any(
+        re.fullmatch(r"tmp-[1-9][0-9]*[hdwmy]", part) for part in resolved.parts
     ):
         raise ValueError("WEKA cache root requires an expiry component such as tmp-30d")
-    return shared / f"core-v{SCHEMA}" / key / family
 
 
 def extract_verified(base, key, family, destination, generation=None):

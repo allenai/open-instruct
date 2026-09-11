@@ -162,3 +162,14 @@ including serving flags. Regenerate it inside the runtime with
 pins. CPU tests check provenance and invalid values; runtime tests compare every
 record and round-trip boolean switches plus representative serving, objective,
 eval and JSON controls. A parser-only pass is not a new GPU training result.
+
+
+## Compiler cache reuse
+
+Core RL now enables persistent Triton caches by default. Structured run files use
+`[compiler_cache] enabled = false` to opt out; low-level files use
+`[core] compiler_cache = false`. The default shared directory is
+`/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl`, following
+olmo-miles' WEKA TTL naming convention. Custom WEKA roots require a TTL component
+and are validated before launch. See the [cache guide](miles-compiler-cache.md)
+for measured cold/restored startup, worker compatibility, and remaining scope limits.

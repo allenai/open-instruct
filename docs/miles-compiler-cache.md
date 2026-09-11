@@ -1,6 +1,6 @@
-# Opt-in Core compiler-cache lifecycle
+# Core compiler-cache lifecycle
 
-`python -m scripts.miles.compiler_cache_run` runs one bounded, single-node command with private node-local compiler caches. It can restore a verified immutable generation before any child imports and publish a new generation after a successful command exits. This is an opt-in qualification tool; existing training launchers and running experiments are unchanged.
+`python -m scripts.miles.compiler_cache_run` runs one bounded, single-node command with private node-local compiler caches. It can restore a verified immutable generation before any child imports and publish a new generation after a successful command exits. This standalone wrapper is an opt-in qualification tool. The production Ray lifecycle described below automatically persists Triton caches for Core RL.
 
 The design follows `olmo-miles/src/olmo_miles/runtime/{compiler_cache,cache_lifecycle}.py` and `olmo-miles/docs/runtime-images.md`, with a Core-specific fingerprint and explicit Triton path relocation. It does not reuse Megatron's model/layout fingerprint.
 
@@ -71,13 +71,13 @@ CPU tests cover immutable generations, changed compile inputs, changed source du
 
 A local RTX 4090 screen with Torch 2.13/CUDA 13 and the pinned image's Triton executed the actual kernel in separate cold/restored containers: exact output both times, nine compiler writes cold and zero restored, unchanged generation after republishing, and one relocated group. The first kernel launch measured 0.521s cold versus 0.237s restored; restoring the 83.6KB inventory took 2.6ms. This single small measurement establishes Triton artifact portability only, not training speedup. Raw reports are under `/tmp/miles-validation/compiler-cache-probe/`; [the retained measurement](measurements/core-compiler-cache-20260910.json) records their hashes and source/runtime provenance. The GPU screen preceded the final conservative environment-prefix expansion and remote-cache rejection; the final 33-test CPU suite covers those refinements.
 
-Remaining gates: same-job Core training cold/restored screen; actual TileLang/Inductor/FA4/DeepEP/DeepGEMM artifact relocation and reuse; launch-time Ray environment propagation on every node; realistic WEKA archive timing; and compatibility across replacement nodes of the same hardware class. Image, driver, architecture or compile-setting changes intentionally miss. FlashInfer and CUDA graph recordings are not covered.
+Remaining gates beyond the qualified Triton trials below: actual TileLang/Inductor/FA4/DeepEP/DeepGEMM artifact relocation and reuse; multi-node Ray operation; and compatibility across replacement nodes of the same hardware class. Image, driver, architecture or compile-setting changes intentionally miss. FlashInfer and CUDA graph recordings are not covered.
 
-## Ray startup integration (qualification in progress)
+## Ray startup integration
 
 The MILES/Core driver now has a worker-level Triton lifecycle controlled by
-`core.compiler_cache`. It is temporarily off by default while the full-model
-cold/restored qualification runs. Explicitly enabled runs use
+`core.compiler_cache`, enabled by default. Set it to `false` to opt out.
+Enabled runs use
 `core.compiler_cache_root`, or the mounted default
 `/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl`.
 With no default WEKA mount, automatic persistence is skipped and logged.
@@ -173,5 +173,90 @@ The full SFT EP2/TP1 comparison is submitted as
 [Beaker 01M295M9QNN2ME018S25WM6P40](https://beaker.org/ex/01M295M9QNN2ME018S25WM6P40)
 using image `01M295M38BD4W67Q5P6FV5FXT6` and source `4936986ce`.
 At 2026-09-11 21:45 UTC it remained queued on Holmes (urgent, minimum runtime
-one hour). Full-model timing and WEKA archive qualification remain pending;
-automatic persistence stays off by default until that gate passes.
+one hour). That historical queue snapshot is superseded by the completed result below.
+
+
+### Full-SFT result and promotion
+
+The EP2/TP1 full-model job completed successfully at 2026-09-11 22:55 UTC.
+The retained report also passes the newer post-hoc gate requiring two optimizer
+steps on each rank, correct sample counts and behavior versions, and the complete
+initial/updated publication sequence. [Full measurement](measurements/miles-startup-full-sft-20260911.json).
+
+| Interval | Cold | Restored |
+| --- | ---: | ---: |
+| Driver entry through first optimizer update | 830.52 s | 452.87 s |
+| Serving startup | 404.46 s | 216.85 s |
+| Trainer startup | 125.86 s | 127.86 s |
+| First training call, including scoring | 279.91 s | 86.18 s |
+| Whole command, including cache publication | 1031.79 s | 720.69 s |
+
+All three restored workers consumed Triton groups with zero new compiler writes
+and unchanged republished generations. HF reads took approximately 18–25 seconds
+per rank and HF-to-native conversion approximately 40–42 seconds in both arms.
+The measured improvement therefore was not explained by a faster HF import.
+Caches totaled about 286 MB uncompressed. Publication remains expensive: the
+current publisher stages/verifies many small files on WEKA, taking 174 seconds
+cold and 238 seconds on the unchanged restored arm. This is a follow-up optimization;
+whole-command savings above already include this cost.
+
+### Shared path, retention, and archive format
+
+The default shares olmo-miles' cache namespace and exact TTL convention:
+
+```text
+/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl/
+  core-v1/<fingerprint>/triton/
+    CURRENT
+    .publish.lock
+    generations/<inventory-sha256>/
+      manifest.json
+      cache.tar.gz
+  runs/<run-id>/<worker-report>.json
+```
+
+The `tmp-30d` component marks artifacts and reports for the existing WEKA TTL
+cleanup system. No separate cleanup daemon or retention metadata file is added.
+Missing/expired artifacts simply cause a cold miss. Custom WEKA roots must have
+an exact `tmp-N[hdwmy]` component, and roots must be absolute. Invalid retention
+paths now fail configuration validation before launching workers or creating reports.
+
+Olmo-miles also uses versioned, fingerprinted, checksummed immutable generations,
+but its layout starts with `v1/<family>/<fingerprint>` and archives use Zstandard
+(`cache.tar.zst`). Core currently uses gzip and its separate `core-rl/core-v1`
+namespace; the archive formats are deliberately not treated as interchangeable.
+The TTL naming convention is the same.
+
+The researcher interface exposes the default and opt-out as:
+
+```toml
+[compiler_cache]
+enabled = true
+# shared_root = "/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl"
+```
+
+Low-level files use `[core] compiler_cache = true` instead. Set the corresponding
+boolean to `false` to disable persistence; compiler diagnostics stay off by default.
+
+
+### Automatic miss, reuse, and deliberate invalidation
+
+The final local screen ran three fresh public-CLI processes with restoration
+**enabled in every arm**, using the default-on Core policy. Each completed two
+updates and initial plus post-update weight-equality checks:
+
+| Arm | Trainer and serving restore | Compiler activity | Publication |
+| --- | --- | --- | --- |
+| Empty shared cache, Core max sequence 512 | miss | new artifacts | published |
+| Same settings, different dataset/output file paths | hit | zero new writes | unchanged |
+| Only Core max sequence changed to 256 | miss | new artifacts | published |
+
+The audit compares the full recorded fingerprint inputs: the only identity change
+in the third arm is `compile_settings.core.max_sequence_length`, for both workers.
+Dataset files had identical contents at different paths, demonstrating that paths
+and run labels do not bust the cache. Generations and log-probabilities matched
+as multisets between the first two arms. [Evidence and reproduction script](measurements/miles-startup-cache-compatibility-20260911.json).
+
+The screen ran with the default-on/early-TTL-validation patch. The final validation
+also rejects the bare `/weka` root, covered by the CPU tests. No model arithmetic,
+weight conversion, optimizer, or OLMo-core pretraining defaults changed here.

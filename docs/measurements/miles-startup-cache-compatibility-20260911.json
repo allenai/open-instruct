@@ -1,0 +1,240 @@
+{
+  "scope": "Local RTX 4090, tiny hybrid MoE, real public CLI, resident EP1/TP1; two updates per arm.",
+  "arms": {
+    "initial": {
+      "cache": {
+        "report_dir": "/validation/startup-compatibility-v1/cache/tmp-7d/runs/673933f7a95f43dbbd3412b219a9ddac",
+        "success": true,
+        "workers": [
+          {
+            "activity": {
+              "group_miss": 120,
+              "put": 968
+            },
+            "files_after": 968,
+            "publish": {
+              "family": "triton",
+              "generation": "cc50b12d3b3a3b41d87bce6ccf832ef171a1cb5866e8cc970300ee3a76ffbb08",
+              "local_bytes": 46738961,
+              "seconds": 0.6756534678861499,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "seconds": 0.000191620085388422,
+              "status": "miss"
+            },
+            "setup_seconds": 0.8208943721838295,
+            "slot": "serve-regular-rank0"
+          },
+          {
+            "activity": {
+              "group_miss": 234,
+              "put": 1891
+            },
+            "files_after": 1891,
+            "publish": {
+              "family": "triton",
+              "generation": "7bf56b32f47318e21058a75be44c9366513718408de7e747e9be8252165f122e",
+              "local_bytes": 83936191,
+              "seconds": 1.2943267412483692,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "seconds": 0.00022009387612342834,
+              "status": "miss"
+            },
+            "setup_seconds": 0.8401297111995518,
+            "slot": "train-actor-cell0-rank0"
+          }
+        ]
+      },
+      "run_config": "[core]\nmax_train_rollout_logprob_abs_diff = 0.05\ndiagnostic_interval = 1\nreplay_diagnostics = false\nstream_moe_export = true\nweight_sync_mode = \"flattened\"\nrow_specialization = \"dynamic\"\ncompiler_cache = true\ncompiler_cache_root = \"/validation/startup-compatibility-v1/cache/tmp-7d\"\ncompiler_cache_restore = true\ncompiler_cache_diagnostics = true\ncheckpoint_profile = false\ncheckpoint_compact_storage = true\ncheckpoint_dedup_save_to_lowest_rank = false\ncheckpoint_constant_memory_planning = true\nreward_config = \"/validation/public-hybrid-moe/verifiers.json\"\nexpert_parallel_size = 1\nattention_backend = \"torch\"\nactivation_checkpointing = true\nmax_sequence_length = 512\nmax_policy_lag = 0\nrouter_aux_loss_weight = 0.01\nrouter_z_loss_weight = 1e-05\n[miles]\nhf_checkpoint = \"/validation/public-hybrid-moe/hf\"\nprompt_data = \"/validation/startup-compatibility-v1/initial/prompts.jsonl\"\ninput_key = \"input\"\nlabel_key = \"label\"\nmetadata_key = \"metadata\"\ncustom_rm_path = \"open_instruct.miles.rewards.registered_reward\"\nactor_num_nodes = 1\nactor_num_gpus_per_node = 1\nnum_gpus_per_node = 1\nrollout_num_gpus = 1\nrollout_num_gpus_per_engine = 1\ncolocate = true\noffload_rollout = false\nmicro_batch_size = 1\nrollout_batch_size = 1\nn_samples_per_prompt = 4\nglobal_batch_size = 4\nnum_rollout = 2\nrollout_temperature = 0.0\nrollout_seed = 17\nrollout_max_prompt_len = 256\nrollout_max_response_len = 32\nrollout_max_context_len = 512\nsglang_context_length = 512\nsglang_max_total_tokens = 4096\nsglang_max_running_requests = 4\nsglang_server_concurrency = 4\nsglang_mem_fraction_static = 0.2\nsglang_disable_radix_cache = true\nsglang_max_mamba_cache_size = 16\nsglang_cuda_graph_backend_decode = \"disabled\"\nsglang_cuda_graph_backend_prefill = \"disabled\"\nsglang_sampling_backend = \"pytorch\"\nsglang_attention_backend = \"torch_native\"\nsglang_log_level = \"info\"\ncheck_weight_update_equal = true\nupdate_weight_buffer_size = 1073741824\nupdate_weights_interval = 1\nloss_type = \"policy_loss\"\nadvantage_estimator = \"grpo\"\nlr = 1e-06\nlr_decay_iters = 3\nseed = 17\nsave = \"/validation/startup-compatibility-v1/initial/metrics\"\nsave_debug_rollout_data = \"/validation/startup-compatibility-v1/initial/rollouts/{rollout_id}.pt\"\n",
+      "optimizer_steps": [
+        1,
+        2
+      ],
+      "fingerprints": {
+        "train-actor-cell0-rank0": "46a62e5573509c3c79f6d73fd7f88479a75c43ef6beb799dfd9e03469530d4e4",
+        "serve-regular-rank0": "79a612ee9f1636c1aba4821e343542c5090ed8b5617afe57f012baa06c92c786"
+      }
+    },
+    "reuse": {
+      "cache": {
+        "report_dir": "/validation/startup-compatibility-v1/cache/tmp-7d/runs/c2bba89175bd4d89a1e4ee20df83c3d3",
+        "success": true,
+        "workers": [
+          {
+            "activity": {
+              "group_hit": 21
+            },
+            "files_after": 968,
+            "publish": {
+              "family": "triton",
+              "generation": "cc50b12d3b3a3b41d87bce6ccf832ef171a1cb5866e8cc970300ee3a76ffbb08",
+              "local_bytes": 46738961,
+              "seconds": 0.835521737113595,
+              "status": "unchanged"
+            },
+            "restore": {
+              "archive_bytes": 8979173,
+              "family": "triton",
+              "generation": "cc50b12d3b3a3b41d87bce6ccf832ef171a1cb5866e8cc970300ee3a76ffbb08",
+              "local_bytes": 46738961,
+              "relocated_groups": 120,
+              "seconds": 0.21658170875161886,
+              "status": "hit"
+            },
+            "setup_seconds": 1.1156070958822966,
+            "slot": "serve-regular-rank0"
+          },
+          {
+            "activity": {
+              "group_hit": 23
+            },
+            "files_after": 1891,
+            "publish": {
+              "family": "triton",
+              "generation": "7bf56b32f47318e21058a75be44c9366513718408de7e747e9be8252165f122e",
+              "local_bytes": 83936191,
+              "seconds": 1.5847553331404924,
+              "status": "unchanged"
+            },
+            "restore": {
+              "archive_bytes": 16680622,
+              "family": "triton",
+              "generation": "7bf56b32f47318e21058a75be44c9366513718408de7e747e9be8252165f122e",
+              "local_bytes": 83936191,
+              "relocated_groups": 234,
+              "seconds": 0.3975130869075656,
+              "status": "hit"
+            },
+            "setup_seconds": 1.3431862858124077,
+            "slot": "train-actor-cell0-rank0"
+          }
+        ]
+      },
+      "run_config": "[core]\nmax_train_rollout_logprob_abs_diff = 0.05\ndiagnostic_interval = 1\nreplay_diagnostics = false\nstream_moe_export = true\nweight_sync_mode = \"flattened\"\nrow_specialization = \"dynamic\"\ncompiler_cache = true\ncompiler_cache_root = \"/validation/startup-compatibility-v1/cache/tmp-7d\"\ncompiler_cache_restore = true\ncompiler_cache_diagnostics = true\ncheckpoint_profile = false\ncheckpoint_compact_storage = true\ncheckpoint_dedup_save_to_lowest_rank = false\ncheckpoint_constant_memory_planning = true\nreward_config = \"/validation/public-hybrid-moe/verifiers.json\"\nexpert_parallel_size = 1\nattention_backend = \"torch\"\nactivation_checkpointing = true\nmax_sequence_length = 512\nmax_policy_lag = 0\nrouter_aux_loss_weight = 0.01\nrouter_z_loss_weight = 1e-05\n[miles]\nhf_checkpoint = \"/validation/public-hybrid-moe/hf\"\nprompt_data = \"/validation/startup-compatibility-v1/reuse/prompts.jsonl\"\ninput_key = \"input\"\nlabel_key = \"label\"\nmetadata_key = \"metadata\"\ncustom_rm_path = \"open_instruct.miles.rewards.registered_reward\"\nactor_num_nodes = 1\nactor_num_gpus_per_node = 1\nnum_gpus_per_node = 1\nrollout_num_gpus = 1\nrollout_num_gpus_per_engine = 1\ncolocate = true\noffload_rollout = false\nmicro_batch_size = 1\nrollout_batch_size = 1\nn_samples_per_prompt = 4\nglobal_batch_size = 4\nnum_rollout = 2\nrollout_temperature = 0.0\nrollout_seed = 17\nrollout_max_prompt_len = 256\nrollout_max_response_len = 32\nrollout_max_context_len = 512\nsglang_context_length = 512\nsglang_max_total_tokens = 4096\nsglang_max_running_requests = 4\nsglang_server_concurrency = 4\nsglang_mem_fraction_static = 0.2\nsglang_disable_radix_cache = true\nsglang_max_mamba_cache_size = 16\nsglang_cuda_graph_backend_decode = \"disabled\"\nsglang_cuda_graph_backend_prefill = \"disabled\"\nsglang_sampling_backend = \"pytorch\"\nsglang_attention_backend = \"torch_native\"\nsglang_log_level = \"info\"\ncheck_weight_update_equal = true\nupdate_weight_buffer_size = 1073741824\nupdate_weights_interval = 1\nloss_type = \"policy_loss\"\nadvantage_estimator = \"grpo\"\nlr = 1e-06\nlr_decay_iters = 3\nseed = 17\nsave = \"/validation/startup-compatibility-v1/reuse/metrics\"\nsave_debug_rollout_data = \"/validation/startup-compatibility-v1/reuse/rollouts/{rollout_id}.pt\"\n",
+      "optimizer_steps": [
+        1,
+        2
+      ],
+      "fingerprints": {
+        "train-actor-cell0-rank0": "46a62e5573509c3c79f6d73fd7f88479a75c43ef6beb799dfd9e03469530d4e4",
+        "serve-regular-rank0": "79a612ee9f1636c1aba4821e343542c5090ed8b5617afe57f012baa06c92c786"
+      }
+    },
+    "changed": {
+      "cache": {
+        "report_dir": "/validation/startup-compatibility-v1/cache/tmp-7d/runs/9d99e278a01841c492dc0387d2118e39",
+        "success": true,
+        "workers": [
+          {
+            "activity": {
+              "group_miss": 120,
+              "put": 968
+            },
+            "files_after": 968,
+            "publish": {
+              "family": "triton",
+              "generation": "df465f4dc9d1183871481a2b5ded4723d095bffe94a00c5dbabf5f0c7ac2d031",
+              "local_bytes": 46738949,
+              "seconds": 0.6218836018815637,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "seconds": 0.00021374179050326347,
+              "status": "miss"
+            },
+            "setup_seconds": 0.8379171970300376,
+            "slot": "serve-regular-rank0"
+          },
+          {
+            "activity": {
+              "group_miss": 234,
+              "put": 1891
+            },
+            "files_after": 1891,
+            "publish": {
+              "family": "triton",
+              "generation": "ff184d14831a39f554a0d991dbda69decc17741e8bb600485b78aff9b7946578",
+              "local_bytes": 83927642,
+              "seconds": 1.2104225112125278,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "seconds": 0.000279746949672699,
+              "status": "miss"
+            },
+            "setup_seconds": 0.8065796298906207,
+            "slot": "train-actor-cell0-rank0"
+          }
+        ]
+      },
+      "run_config": "[core]\nmax_train_rollout_logprob_abs_diff = 0.05\ndiagnostic_interval = 1\nreplay_diagnostics = false\nstream_moe_export = true\nweight_sync_mode = \"flattened\"\nrow_specialization = \"dynamic\"\ncompiler_cache = true\ncompiler_cache_root = \"/validation/startup-compatibility-v1/cache/tmp-7d\"\ncompiler_cache_restore = true\ncompiler_cache_diagnostics = true\ncheckpoint_profile = false\ncheckpoint_compact_storage = true\ncheckpoint_dedup_save_to_lowest_rank = false\ncheckpoint_constant_memory_planning = true\nreward_config = \"/validation/public-hybrid-moe/verifiers.json\"\nexpert_parallel_size = 1\nattention_backend = \"torch\"\nactivation_checkpointing = true\nmax_sequence_length = 256\nmax_policy_lag = 0\nrouter_aux_loss_weight = 0.01\nrouter_z_loss_weight = 1e-05\n[miles]\nhf_checkpoint = \"/validation/public-hybrid-moe/hf\"\nprompt_data = \"/validation/startup-compatibility-v1/changed/prompts.jsonl\"\ninput_key = \"input\"\nlabel_key = \"label\"\nmetadata_key = \"metadata\"\ncustom_rm_path = \"open_instruct.miles.rewards.registered_reward\"\nactor_num_nodes = 1\nactor_num_gpus_per_node = 1\nnum_gpus_per_node = 1\nrollout_num_gpus = 1\nrollout_num_gpus_per_engine = 1\ncolocate = true\noffload_rollout = false\nmicro_batch_size = 1\nrollout_batch_size = 1\nn_samples_per_prompt = 4\nglobal_batch_size = 4\nnum_rollout = 2\nrollout_temperature = 0.0\nrollout_seed = 17\nrollout_max_prompt_len = 256\nrollout_max_response_len = 32\nrollout_max_context_len = 512\nsglang_context_length = 512\nsglang_max_total_tokens = 4096\nsglang_max_running_requests = 4\nsglang_server_concurrency = 4\nsglang_mem_fraction_static = 0.2\nsglang_disable_radix_cache = true\nsglang_max_mamba_cache_size = 16\nsglang_cuda_graph_backend_decode = \"disabled\"\nsglang_cuda_graph_backend_prefill = \"disabled\"\nsglang_sampling_backend = \"pytorch\"\nsglang_attention_backend = \"torch_native\"\nsglang_log_level = \"info\"\ncheck_weight_update_equal = true\nupdate_weight_buffer_size = 1073741824\nupdate_weights_interval = 1\nloss_type = \"policy_loss\"\nadvantage_estimator = \"grpo\"\nlr = 1e-06\nlr_decay_iters = 3\nseed = 17\nsave = \"/validation/startup-compatibility-v1/changed/metrics\"\nsave_debug_rollout_data = \"/validation/startup-compatibility-v1/changed/rollouts/{rollout_id}.pt\"\n",
+      "optimizer_steps": [
+        1,
+        2
+      ],
+      "fingerprints": {
+        "train-actor-cell0-rank0": "10c8c148c0c0b6cad568ccdca2fb67dc550c6ae38451f8061558abe4e79b510f",
+        "serve-regular-rank0": "e8763f53bf42fb51b4ef8d501a6f7bd088df157808cb6a6448921b19a3dab2b9"
+      }
+    }
+  },
+  "identity_changes": {
+    "train-actor-cell0-rank0": [
+      {
+        "path": ".compile_settings.core.max_sequence_length",
+        "left": 512,
+        "right": 256
+      }
+    ],
+    "serve-regular-rank0": [
+      {
+        "path": ".compile_settings.core.max_sequence_length",
+        "left": 512,
+        "right": 256
+      }
+    ]
+  },
+  "source_base": "aee4b2cffcdecaf5cca68e9c5314d895ca5f17b9",
+  "generation_comparison": [
+    {
+      "update": 0,
+      "multiset_exact": true
+    },
+    {
+      "update": 1,
+      "multiset_exact": true
+    }
+  ],
+  "source_hashes": {
+    "miles": {
+      "files": 379,
+      "sha256": "4e27d3dc138b6de9cbc01c1767a496b99cf1340f44b248db62543fa86fc03952"
+    },
+    "olmo-core": {
+      "files": 289,
+      "sha256": "1948fa0c7b6f13930c0057f5dc298093e596140dcf17f9dd821e5ff63bed087a"
+    },
+    "olmo-sglang": {
+      "files": 20,
+      "sha256": "74b83f334d117fd3f02886aee4c3d5da79fcc844b3ab9ddbdad99d9011600ba9"
+    },
+    "open-instruct": {
+      "files": 162,
+      "sha256": "5c451c686072b3e8363576c01dec3914a549f4d526ff92bd8596bf1ddc882c41"
+    }
+  },
+  "script_sha256": "2b390381f5d67634f63a2afce11abdff1dc067d9da86d5266a8368ab6edf85b7",
+  "script_source": "import dataclasses\nimport json\nimport os\nimport runpy\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nimport ray\nfrom scripts.miles.exercise_controls import write_config\nfrom open_instruct.miles.config import RunConfig\n\nos.environ['SGLANG_EXTERNAL_MODEL_PACKAGE'] = 'olmo_sglang.models'\n\nroot = Path('/validation/startup-compatibility-v1')\nif len(sys.argv) > 1:\n    output = root / sys.argv[1]\n    ray.init(num_gpus=1, num_cpus=8, include_dashboard=False, object_store_memory=1024**3)\n    try:\n        sys.argv = ['open-instruct-miles', 'train', str(output / 'run.toml')]\n        runpy.run_module('open_instruct.miles', run_name='__main__')\n    finally:\n        ray.shutdown()\nelse:\n    root.mkdir()\n    for arm in ('initial','reuse','changed'):\n        output = root / arm\n        output.mkdir()\n        (output/'prompts.jsonl').write_bytes(Path('/validation/public-hybrid-moe/prompts.jsonl').read_bytes())\n        cfg = RunConfig.load('/work/oi/configs/miles/profiles/tiny-resident.toml')\n        cfg = dataclasses.replace(cfg, core=dataclasses.replace(cfg.core,\n            compiler_cache_restore=True, max_sequence_length=256 if arm=='changed' else 512,\n            compiler_cache_root=str(root/'cache/tmp-7d'), compiler_cache_diagnostics=True,\n            reward_config='/validation/public-hybrid-moe/verifiers.json'))\n        cfg.miles.update(hf_checkpoint='/validation/public-hybrid-moe/hf',\n            prompt_data=str(output/'prompts.jsonl'),\n            save=str(output/'metrics'),save_debug_rollout_data=str(output/'rollouts/{rollout_id}.pt'),\n            rollout_max_response_len=32,rollout_temperature=0.0,sglang_log_level='info')\n        cfg.miles.pop('save_interval')\n        cfg.validate()\n        write_config(output/'run.toml', cfg)\n        environment=dict(os.environ)\n        for variable,family in [('TORCHINDUCTOR_CACHE_DIR','inductor'),('FLASH_ATTENTION_CUTE_DSL_CACHE_DIR','fa4'),('TILELANG_CACHE_DIR','tilelang')]:\n            environment[variable]=f'/tmp/startup-compatibility-v1-{arm}/{family}'\n        with (output/'run.log').open('w') as stream:\n            subprocess.run([sys.executable,__file__,arm],env=environment,stdout=stream,stderr=subprocess.STDOUT,check=True)\n        print(arm,'finished',flush=True)\n",
+  "passed": true,
+  "limits": [
+    "Tiny random model has zero task reward; startup/auxiliary-gradient qualification, not learning quality.",
+    "Local timings not used: other GPU tests overlapped the initial arm. Full-model timing is measured separately."
+  ]
+}

@@ -9,6 +9,7 @@ from typing import Any
 
 import tomllib
 
+from open_instruct.miles import compiler_cache as cache
 from open_instruct.miles import options as cli_options
 
 
@@ -20,7 +21,7 @@ class CoreConfig:
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     row_specialization: str = "static"
-    compiler_cache: bool = False
+    compiler_cache: bool = True
     compiler_cache_root: str | None = None
     compiler_cache_restore: bool = True
     compiler_cache_diagnostics: bool = False
@@ -41,6 +42,10 @@ class CoreConfig:
     router_z_loss_weight: float = 1e-5
 
     def __post_init__(self):
+        if self.compiler_cache_root is not None:
+            if not isinstance(self.compiler_cache_root, str) or not self.compiler_cache_root:
+                raise ValueError("core.compiler_cache_root must be a nonempty absolute path or unset")
+            cache.validate_shared_root(Path(self.compiler_cache_root))
         if self.row_specialization not in ("static", "dynamic"):
             raise ValueError("core.row_specialization must be static or dynamic")
         if type(self.diagnostic_interval) is not int or self.diagnostic_interval < 0:

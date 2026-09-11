@@ -1,0 +1,487 @@
+{
+  "arms": {
+    "cold": {
+      "cache": {
+        "report_dir": "/weka/oe-training-default/robertb/open-instruct/startup/01M295M9QNN2ME018S25WM6P40/cache/tmp-7d/runs/6aabd8b2c4414949b4c66d5fd5b6f575",
+        "success": true,
+        "workers": [
+          {
+            "activity": {
+              "group_miss": 138,
+              "put": 1112
+            },
+            "files_after": 1176,
+            "publish": {
+              "family": "triton",
+              "generation": "a8b7641ae73c5b04b663e4b23e13458322668ae51b049e037bccb80815a622b5",
+              "local_bytes": 54329943,
+              "seconds": 35.68349373014644,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "status": "cold"
+            },
+            "setup_seconds": 2.2513353880494833,
+            "slot": "serve-regular-rank0"
+          },
+          {
+            "activity": {
+              "group_miss": 276,
+              "put": 2229
+            },
+            "files_after": 2229,
+            "publish": {
+              "family": "triton",
+              "generation": "cd9c951a5421363f6f422dc49c5129021520e8a8a30c248630f2b3e196c95afe",
+              "local_bytes": 115987629,
+              "seconds": 69.29125733207911,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "status": "cold"
+            },
+            "setup_seconds": 2.175667654722929,
+            "slot": "train-actor-cell0-rank0"
+          },
+          {
+            "activity": {
+              "group_miss": 276,
+              "put": 2229
+            },
+            "files_after": 2229,
+            "publish": {
+              "family": "triton",
+              "generation": "f7bdbb9c969357c34dc0766248af966ca30718cc5261dde45986f674596d7ffb",
+              "local_bytes": 115904085,
+              "seconds": 68.67908759275451,
+              "status": "published"
+            },
+            "restore": {
+              "family": "triton",
+              "status": "cold"
+            },
+            "setup_seconds": 2.5633017821237445,
+            "slot": "train-actor-cell0-rank1"
+          }
+        ]
+      },
+      "driver_stages": [
+        {
+          "stage": "startup_cache_prepare",
+          "rollout_id": null,
+          "started_unix": 1789165559.2737226,
+          "seconds": 0.2056032787077129,
+          "passed": true
+        },
+        {
+          "stage": "placement",
+          "rollout_id": null,
+          "started_unix": 1789165559.4794474,
+          "seconds": 0.24294807389378548,
+          "passed": true
+        },
+        {
+          "stage": "serving_startup",
+          "rollout_id": null,
+          "started_unix": 1789165559.724162,
+          "seconds": 404.45841562375426,
+          "passed": true
+        },
+        {
+          "stage": "trainer_startup",
+          "rollout_id": null,
+          "started_unix": 1789165964.1839967,
+          "seconds": 125.85667138919234,
+          "passed": true
+        },
+        {
+          "stage": "initial_publication",
+          "rollout_id": null,
+          "started_unix": 1789166090.042057,
+          "seconds": 15.494600167032331,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 0,
+          "started_unix": 1789166105.5388277,
+          "seconds": 4.3477665381506085,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 0,
+          "started_unix": 1789166109.8885708,
+          "seconds": 279.9066313658841,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 0,
+          "started_unix": 1789166389.7973604,
+          "seconds": 2.390804487746209,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 1,
+          "started_unix": 1789166392.1898124,
+          "seconds": 1.221258067060262,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 1,
+          "started_unix": 1789166393.414275,
+          "seconds": 1.8404525108635426,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 1,
+          "started_unix": 1789166395.2569346,
+          "seconds": 3.672165362164378,
+          "passed": true
+        }
+      ],
+      "rank_stages": {
+        "startup_rank0.jsonl": [
+          {
+            "stage": "distributed_init",
+            "started_unix": 1789165980.4442925,
+            "seconds": 16.447450421750546,
+            "passed": true
+          },
+          {
+            "stage": "hf_read",
+            "started_unix": 1789165997.1936312,
+            "seconds": 21.653526262845844,
+            "passed": true
+          },
+          {
+            "stage": "native_parameter_init",
+            "started_unix": 1789166024.2213483,
+            "seconds": 5.715542197693139,
+            "passed": true
+          },
+          {
+            "stage": "hf_to_native",
+            "started_unix": 1789166029.9385579,
+            "seconds": 40.671273100189865,
+            "passed": true
+          },
+          {
+            "stage": "native_model_optimizer_build",
+            "started_unix": 1789166018.8485374,
+            "seconds": 56.97562610870227,
+            "passed": true
+          },
+          {
+            "stage": "native_restore",
+            "started_unix": 1789166078.2396648,
+            "seconds": 0.007126715034246445,
+            "passed": true
+          }
+        ],
+        "startup_rank1.jsonl": [
+          {
+            "stage": "distributed_init",
+            "started_unix": 1789165996.0619178,
+            "seconds": 0.828553719446063,
+            "passed": true
+          },
+          {
+            "stage": "hf_read",
+            "started_unix": 1789165997.1929116,
+            "seconds": 25.433895483147353,
+            "passed": true
+          },
+          {
+            "stage": "native_parameter_init",
+            "started_unix": 1789166024.2187338,
+            "seconds": 5.739061665721238,
+            "passed": true
+          },
+          {
+            "stage": "hf_to_native",
+            "started_unix": 1789166029.9600048,
+            "seconds": 39.55252271518111,
+            "passed": true
+          },
+          {
+            "stage": "native_model_optimizer_build",
+            "started_unix": 1789166022.6282966,
+            "seconds": 53.19645108701661,
+            "passed": true
+          },
+          {
+            "stage": "native_restore",
+            "started_unix": 1789166078.3510673,
+            "seconds": 0.0021220827475190163,
+            "passed": true
+          }
+        ]
+      },
+      "elapsed": {
+        "seconds": 1031.7910728161223
+      },
+      "driver_to_first_update_seconds": 830.5214796066284
+    },
+    "restored": {
+      "cache": {
+        "report_dir": "/weka/oe-training-default/robertb/open-instruct/startup/01M295M9QNN2ME018S25WM6P40/cache/tmp-7d/runs/f29fccce9a7f4c1eb3c1728cd36be216",
+        "success": true,
+        "workers": [
+          {
+            "activity": {
+              "group_hit": 48
+            },
+            "files_after": 1176,
+            "publish": {
+              "family": "triton",
+              "generation": "a8b7641ae73c5b04b663e4b23e13458322668ae51b049e037bccb80815a622b5",
+              "local_bytes": 54329943,
+              "seconds": 50.56716018309817,
+              "status": "unchanged"
+            },
+            "restore": {
+              "archive_bytes": 10983722,
+              "family": "triton",
+              "generation": "a8b7641ae73c5b04b663e4b23e13458322668ae51b049e037bccb80815a622b5",
+              "local_bytes": 54329943,
+              "relocated_groups": 146,
+              "seconds": 0.6968627502210438,
+              "status": "hit"
+            },
+            "setup_seconds": 3.2083784360438585,
+            "slot": "serve-regular-rank0"
+          },
+          {
+            "activity": {
+              "group_hit": 29
+            },
+            "files_after": 2229,
+            "publish": {
+              "family": "triton",
+              "generation": "cd9c951a5421363f6f422dc49c5129021520e8a8a30c248630f2b3e196c95afe",
+              "local_bytes": 115987629,
+              "seconds": 94.75024164514616,
+              "status": "unchanged"
+            },
+            "restore": {
+              "archive_bytes": 23941022,
+              "family": "triton",
+              "generation": "cd9c951a5421363f6f422dc49c5129021520e8a8a30c248630f2b3e196c95afe",
+              "local_bytes": 115987629,
+              "relocated_groups": 276,
+              "seconds": 1.4076793701387942,
+              "status": "hit"
+            },
+            "setup_seconds": 4.225397640839219,
+            "slot": "train-actor-cell0-rank0"
+          },
+          {
+            "activity": {
+              "group_hit": 29
+            },
+            "files_after": 2229,
+            "publish": {
+              "family": "triton",
+              "generation": "f7bdbb9c969357c34dc0766248af966ca30718cc5261dde45986f674596d7ffb",
+              "local_bytes": 115904085,
+              "seconds": 93.01992322830483,
+              "status": "unchanged"
+            },
+            "restore": {
+              "archive_bytes": 23925062,
+              "family": "triton",
+              "generation": "f7bdbb9c969357c34dc0766248af966ca30718cc5261dde45986f674596d7ffb",
+              "local_bytes": 115904085,
+              "relocated_groups": 276,
+              "seconds": 1.4839139091782272,
+              "status": "hit"
+            },
+            "setup_seconds": 4.2589583597145975,
+            "slot": "train-actor-cell0-rank1"
+          }
+        ]
+      },
+      "driver_stages": [
+        {
+          "stage": "startup_cache_prepare",
+          "rollout_id": null,
+          "started_unix": 1789166618.5542347,
+          "seconds": 0.1939923190511763,
+          "passed": true
+        },
+        {
+          "stage": "placement",
+          "rollout_id": null,
+          "started_unix": 1789166618.7483463,
+          "seconds": 0.24828558508306742,
+          "passed": true
+        },
+        {
+          "stage": "serving_startup",
+          "rollout_id": null,
+          "started_unix": 1789166618.9984546,
+          "seconds": 216.849275236018,
+          "passed": true
+        },
+        {
+          "stage": "trainer_startup",
+          "rollout_id": null,
+          "started_unix": 1789166835.8493724,
+          "seconds": 127.86152524873614,
+          "passed": true
+        },
+        {
+          "stage": "initial_publication",
+          "rollout_id": null,
+          "started_unix": 1789166963.7130897,
+          "seconds": 19.62160645192489,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 0,
+          "started_unix": 1789166983.336741,
+          "seconds": 1.9094330510124564,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 0,
+          "started_unix": 1789166985.2480383,
+          "seconds": 86.17744680028409,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 0,
+          "started_unix": 1789167071.427847,
+          "seconds": 3.5859756930731237,
+          "passed": true
+        },
+        {
+          "stage": "generation_wait",
+          "rollout_id": 1,
+          "started_unix": 1789167075.0158854,
+          "seconds": 1.2385465949773788,
+          "passed": true
+        },
+        {
+          "stage": "training",
+          "rollout_id": 1,
+          "started_unix": 1789167076.2565289,
+          "seconds": 2.767357184085995,
+          "passed": true
+        },
+        {
+          "stage": "publication",
+          "rollout_id": 1,
+          "started_unix": 1789167079.0260174,
+          "seconds": 3.6212888308800757,
+          "passed": true
+        }
+      ],
+      "rank_stages": {
+        "startup_rank0.jsonl": [
+          {
+            "stage": "distributed_init",
+            "started_unix": 1789166852.650528,
+            "seconds": 18.04531716601923,
+            "passed": true
+          },
+          {
+            "stage": "hf_read",
+            "started_unix": 1789166870.923053,
+            "seconds": 22.658661257941276,
+            "passed": true
+          },
+          {
+            "stage": "native_parameter_init",
+            "started_unix": 1789166895.2167797,
+            "seconds": 5.7246152251027524,
+            "passed": true
+          },
+          {
+            "stage": "hf_to_native",
+            "started_unix": 1789166900.9425714,
+            "seconds": 42.18380142189562,
+            "passed": true
+          },
+          {
+            "stage": "native_model_optimizer_build",
+            "started_unix": 1789166893.582722,
+            "seconds": 54.70255460916087,
+            "passed": true
+          },
+          {
+            "stage": "native_restore",
+            "started_unix": 1789166949.8605301,
+            "seconds": 0.006091542076319456,
+            "passed": true
+          }
+        ],
+        "startup_rank1.jsonl": [
+          {
+            "stage": "distributed_init",
+            "started_unix": 1789166869.9264112,
+            "seconds": 0.7470624493435025,
+            "passed": true
+          },
+          {
+            "stage": "hf_read",
+            "started_unix": 1789166870.909344,
+            "seconds": 18.41625734884292,
+            "passed": true
+          },
+          {
+            "stage": "native_parameter_init",
+            "started_unix": 1789166895.2191105,
+            "seconds": 5.710324614774436,
+            "passed": true
+          },
+          {
+            "stage": "hf_to_native",
+            "started_unix": 1789166900.9315104,
+            "seconds": 41.59643683815375,
+            "passed": true
+          },
+          {
+            "stage": "native_model_optimizer_build",
+            "started_unix": 1789166889.3275983,
+            "seconds": 58.95592161407694,
+            "passed": true
+          },
+          {
+            "stage": "native_restore",
+            "started_unix": 1789166950.2746475,
+            "seconds": 0.0039888001047074795,
+            "passed": true
+          }
+        ]
+      },
+      "elapsed": {
+        "seconds": 720.6851162328385
+      },
+      "driver_to_first_update_seconds": 452.87125039100647
+    }
+  },
+  "limits": [
+    "Same allocation: filesystem page cache may warm between arms; HF I/O is timed separately.",
+    "Two updates, short greedy responses, full SFT weights, EP2 trainer and TP1 serving.",
+    "Compiler artifacts only; CUDA graphs and in-memory Python JIT state are rebuilt.",
+    "No retained-generation comparison performed for this full-model run; exact initial weight publication and training/publication progress gates passed.",
+    "Publication currently stages and verifies many small files on WEKA: about 174 s cold, 238 s unchanged warm; this is included in whole-command timing."
+  ],
+  "passed": true,
+  "experiment": "01M295M9QNN2ME018S25WM6P40",
+  "image": "01M295M38BD4W67Q5P6FV5FXT6",
+  "training_source": "4936986cec2f22ada3a90e0c93f7413e4c344d2e",
+  "posthoc_gate": "startup_trial.validate_progress on 39014ae4f plus cache-default/TTL changes",
+  "original_report_sha256": "ccce16c9bb90653a2e0981f50ee143a631cd8ad0e52ef56e60087a839efbea1d"
+}

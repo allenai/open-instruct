@@ -56,7 +56,7 @@ recomputation, router auxiliary coefficient 0.01, z-loss coefficient 1e-5,
 streaming export, and 1 GiB publication buckets. Shared Core's row-specialization
 default remains static. The wrapper enables the qualified arithmetic checkpoint
 planner, compact storage and balanced replicated ownership; compiler-cache
-persistence remains opt-in.
+persistence is now enabled by default after full-SFT reuse and deliberate-invalidation qualification.
 
 The synchronous starter uses actor-recomputed policy logprobs. The async
 starter now uses trainer-recomputed scoring plus TIS, matching the olmo-miles
@@ -140,7 +140,7 @@ open-instruct verifier classes imply a complete Core task bridge.
 | Bounded async | Managed producer, homogeneous prompt groups, lag reservation, pending-prompt cursor, publication pause and clean teardown. [24-update and 12-update pairs](measurements/miles-control-exercise-20260911.md) passed | Baseline additionally has 45-update basic endurance and combined replay/recovery/restart evidence. Core needs those combinations, not another claim of missing basic async. |
 | Multiple updates per collection | Complete optimizer-batch splitting and sufficient lag enforced | Full-model combined multistep/async/replay/restart not yet qualified; baseline has an EP2 initial/restart gate. |
 | Serving admission and graphs | Actual 64 concurrent requests, decode graphs through 64, 524288 KV slots and 128 recurrent slots passed the larger B300 trial without observed OOM/retractions. [Evidence](measurements/miles-admission64-20260911.json) | Prefix caching remains disabled in profiles; cache/replay/publication invalidation and full-model colocated graphs need their own acceptance. |
-| Compiler caches | Optional fingerprinted per-worker Triton restore into node-local storage and publication after successful teardown. Real tiny Core/SGLang two-lifetime trial passed. [Evidence](measurements/miles-startup-tiny-20260911.json) | Off by default; full-SFT/multinode and TP>1 serving qualification pending. Broader compiler families are not covered by the worker integration. [Cache guide](miles-compiler-cache.md) |
+| Compiler caches | Default-on fingerprinted per-worker Triton restore/publication with WEKA `tmp-30d` retention. Full-SFT EP2/TP1 reuse and local automatic miss/reuse/changed-setting gates passed. [Evidence](measurements/miles-startup-full-sft-20260911.json) | Multi-node and TP>1 serving remain unqualified. Broader compiler families are not covered; cache publication still costs minutes on WEKA. [Cache guide](miles-compiler-cache.md) |
 | Native checkpoint/resume | Schema-2 architecture/topology checks, optimizer/scheduler/RNG/cursor, completion marker. Full-model fast save/read gate passed exact restored state and two subsequent fixed-input updates/HF exports. [Evidence](measurements/miles-checkpoint-fast-audit-20260911.json) | Synchronous saves, same topology. Background writes, retention and token-per-expert cadence absent. Process writer unqualified at full model. Exact continuation used separate persistent per-rank caches; it does not promise identical future sampled rollouts. |
 | HF export | Canonical conversion and `actor.export_hf`; evaluation snapshots via `eval_hf_dir`; structured `output.export_hf` adds explicit final export | New workflow export needs its own lifecycle qualification; the bounded async exercise disables it. `save_hf` remains rejected. |
 | Recovery | Pending prompt tracking and some inherited engine management | Baseline's bounded retry/stage-timeout/communicator-replacement/republish driver is not ported. Upstream health flags alone do not provide that contract. Trainer-cell recovery unsupported. |
@@ -172,9 +172,11 @@ recorded scope.
   fresh-process load took 144.307 seconds. The approximately 222 GB checkpoint
   still makes cadence a real cost. These are checkpoint timers, not an entire
   Ray startup/restart measurement. [Record](measurements/miles-checkpoint-perf-20260911.md)
-- **Caches:** the tiny public-entrypoint cold/restored trial reduced driver-entry
-  to first update from 173.57 to 67.34 seconds. This establishes worker lifecycle
-  and reuse; full-model improvement remains to measure before default promotion.
+- **Caches:** the full-SFT EP2/TP1 cold/restored trial reduced driver-entry to
+  first update from 830.52 to 452.87 seconds; whole-command time including cache
+  publication fell from 1031.79 to 720.69 seconds. Restored workers wrote no new
+  Triton artifacts. The automatic miss/reuse/changed-setting gate also passed;
+  persistence is now opt-out. [Evidence](measurements/miles-startup-full-sft-20260911.json)
 - **Diagnostics:** snapshot/reset/republish and replay checks add overhead.
   Compare ordinary runs separately from correctness exercises, and report async
   generation wait as consumer stalls rather than total inference work.
@@ -186,8 +188,9 @@ recorded scope.
 2. Port bounded serving recovery and exercise async + replay + checkpoint/restart
    with fault injection and prompt/version conservation. Then extend multistep
    and endurance qualification.
-3. Finish full-model compiler-cache qualification and measure high-concurrency
-   evaluation during an ordinary run. Promote defaults only with retained evidence.
+3. Reduce WEKA cache-publication overhead, extend compiler-cache qualification
+   to more families/topologies, and measure high-concurrency evaluation during
+   an ordinary run. The single-node Triton default is already qualified.
 4. Broaden datasource/service gates in bounded groups, starting with real code
    execution and mock judge transport before substantive judge evaluation.
 5. Treat batching/packing, higher topology, full-model colocation, H100 and hero
