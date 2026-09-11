@@ -1,0 +1,3433 @@
+{
+  "scope": "BSHD rank-batch maximum, TP=CP=1, padmultiple1, raw round-robin DP2 partition; 95 warm retained rollouts",
+  "rows": [
+    {
+      "rollout": 5,
+      "sha256": "4f681378c29dcf8607bb52c2d68e35b2b325c90c1c7079973f8200671a393b16",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1132,
+            424,
+            820,
+            2016,
+            1032,
+            545,
+            709,
+            985
+          ],
+          "real_tokens": 7663,
+          "bshd_padded_tokens": 16128
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1601,
+            1217,
+            926,
+            1430,
+            631,
+            1346,
+            2064,
+            4295
+          ],
+          "real_tokens": 13510,
+          "bshd_padded_tokens": 34360
+        }
+      ]
+    },
+    {
+      "rollout": 6,
+      "sha256": "944757a2c00eb6c2f5c1d77a79fb22b6b82b679bf31c780860594cea5f863a57",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4292,
+            4292,
+            1187,
+            911,
+            1263,
+            896,
+            2034,
+            1637
+          ],
+          "real_tokens": 16512,
+          "bshd_padded_tokens": 34336
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3005,
+            2280,
+            1595,
+            1299,
+            945,
+            566,
+            1573,
+            847
+          ],
+          "real_tokens": 12110,
+          "bshd_padded_tokens": 24040
+        }
+      ]
+    },
+    {
+      "rollout": 7,
+      "sha256": "0d1aef340bd0f4fef5b9b73f7c252980f3ecf91bbdcaded6e86ac57e21654587",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            636,
+            2211,
+            1315,
+            716,
+            4277,
+            4277,
+            2048,
+            682
+          ],
+          "real_tokens": 16162,
+          "bshd_padded_tokens": 34216
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3002,
+            4269,
+            1327,
+            2104,
+            4277,
+            4277,
+            2068,
+            738
+          ],
+          "real_tokens": 22062,
+          "bshd_padded_tokens": 34216
+        }
+      ]
+    },
+    {
+      "rollout": 8,
+      "sha256": "8c6f63ef162e0ef0051743954e1b380419500d0ce04d2c225500258ca3480776",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            649,
+            927,
+            2361,
+            1033,
+            1416,
+            1013,
+            2371,
+            1636
+          ],
+          "real_tokens": 11406,
+          "bshd_padded_tokens": 18968
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            530,
+            288,
+            1366,
+            879,
+            1518,
+            1326,
+            1225,
+            2226
+          ],
+          "real_tokens": 9358,
+          "bshd_padded_tokens": 17808
+        }
+      ]
+    },
+    {
+      "rollout": 9,
+      "sha256": "0fc8918956f65a77fbd7a56f672bed2b36718a8c7cdad90059d5686a3db37c67",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            3803,
+            4321,
+            869,
+            4062,
+            4241,
+            4241,
+            4248,
+            4248
+          ],
+          "real_tokens": 30033,
+          "bshd_padded_tokens": 34568
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2793,
+            3147,
+            1234,
+            862,
+            4021,
+            4241,
+            4248,
+            4248
+          ],
+          "real_tokens": 24794,
+          "bshd_padded_tokens": 33984
+        }
+      ]
+    },
+    {
+      "rollout": 10,
+      "sha256": "90c4b62d3060d1b43ee0199f0eb17841d84ad61694e4d09e5252944234b16081",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4241,
+            2188,
+            2274,
+            2222,
+            2660,
+            2624,
+            651,
+            1810
+          ],
+          "real_tokens": 18670,
+          "bshd_padded_tokens": 33928
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3395,
+            4241,
+            2351,
+            4087,
+            3559,
+            2069,
+            693,
+            1975
+          ],
+          "real_tokens": 22370,
+          "bshd_padded_tokens": 33928
+        }
+      ]
+    },
+    {
+      "rollout": 11,
+      "sha256": "f3869ff07c11aa5ac5a5cf6fa0933f2097f08266bc757866ff460acc82ddb129",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1869,
+            1928,
+            4292,
+            4292,
+            1863,
+            2517,
+            4010,
+            2371
+          ],
+          "real_tokens": 23142,
+          "bshd_padded_tokens": 34336
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2906,
+            1403,
+            4292,
+            4292,
+            1690,
+            1703,
+            3828,
+            4260
+          ],
+          "real_tokens": 24374,
+          "bshd_padded_tokens": 34336
+        }
+      ]
+    },
+    {
+      "rollout": 12,
+      "sha256": "44cf15004171699a9731a6108788eb0a16377f102a4e1549b820d39334b8d5df",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1526,
+            3521,
+            4258,
+            4258,
+            986,
+            1274,
+            533,
+            616
+          ],
+          "real_tokens": 16972,
+          "bshd_padded_tokens": 34064
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            629,
+            907,
+            4258,
+            4258,
+            511,
+            1600,
+            633,
+            1150
+          ],
+          "real_tokens": 13946,
+          "bshd_padded_tokens": 34064
+        }
+      ]
+    },
+    {
+      "rollout": 13,
+      "sha256": "0d54a527661932e625e6511967caac4933abe1750cb8153bbaec6f524cbc4bc3",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            556,
+            3342,
+            1709,
+            2420,
+            1894,
+            2344,
+            2235,
+            2158
+          ],
+          "real_tokens": 16658,
+          "bshd_padded_tokens": 26736
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2157,
+            861,
+            3107,
+            1979,
+            4273,
+            2786,
+            1306,
+            871
+          ],
+          "real_tokens": 17340,
+          "bshd_padded_tokens": 34184
+        }
+      ]
+    },
+    {
+      "rollout": 14,
+      "sha256": "709eef5e8005b22c2ed23ce37461915ab5920ec00143db4d0deb5f1dbf571a7f",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1169,
+            1127,
+            1302,
+            2550,
+            2076,
+            3920,
+            1371,
+            1320
+          ],
+          "real_tokens": 14835,
+          "bshd_padded_tokens": 31360
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1388,
+            979,
+            990,
+            922,
+            2911,
+            3178,
+            4234,
+            524
+          ],
+          "real_tokens": 15126,
+          "bshd_padded_tokens": 33872
+        }
+      ]
+    },
+    {
+      "rollout": 15,
+      "sha256": "2144abacbae0aa36ed895497a09ca6a2e7fc7ab8042bacb8dfdd5e1732eedafc",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            959,
+            2430,
+            4227,
+            450,
+            2221,
+            4242,
+            4233,
+            3403
+          ],
+          "real_tokens": 22165,
+          "bshd_padded_tokens": 33936
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3855,
+            4278,
+            324,
+            1925,
+            4242,
+            3354,
+            2825,
+            3479
+          ],
+          "real_tokens": 24282,
+          "bshd_padded_tokens": 34224
+        }
+      ]
+    },
+    {
+      "rollout": 16,
+      "sha256": "e03a71eb4fb1b29be284aa8370f36592cc064347d38f92b55c70db02135fe7a2",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4241,
+            3655,
+            2047,
+            869,
+            4262,
+            4262,
+            2336,
+            2574
+          ],
+          "real_tokens": 24246,
+          "bshd_padded_tokens": 34096
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1106,
+            2074,
+            1015,
+            1099,
+            4184,
+            4262,
+            3569,
+            4253
+          ],
+          "real_tokens": 21562,
+          "bshd_padded_tokens": 34096
+        }
+      ]
+    },
+    {
+      "rollout": 17,
+      "sha256": "d373a25b3aeec244fe98d077c63e7199cee6acebcb71563277b23db6c9c8a0bd",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            610,
+            658,
+            1446,
+            1055,
+            514,
+            866,
+            2087,
+            1412
+          ],
+          "real_tokens": 8648,
+          "bshd_padded_tokens": 16696
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            650,
+            718,
+            2923,
+            1685,
+            546,
+            2662,
+            3028,
+            1266
+          ],
+          "real_tokens": 13478,
+          "bshd_padded_tokens": 24224
+        }
+      ]
+    },
+    {
+      "rollout": 18,
+      "sha256": "cddf6969445fdddbc701608a0a9f7d1d8829e2a9e54efaaed4c59ae8b4e88df6",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            835,
+            1075,
+            2356,
+            2799,
+            1595,
+            1516,
+            2755,
+            1273
+          ],
+          "real_tokens": 14204,
+          "bshd_padded_tokens": 22392
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            339,
+            950,
+            1246,
+            3848,
+            1366,
+            1235,
+            1799,
+            3145
+          ],
+          "real_tokens": 13928,
+          "bshd_padded_tokens": 30784
+        }
+      ]
+    },
+    {
+      "rollout": 19,
+      "sha256": "3936e1fb052fd6edb9bac23fb37432169aaff554707daef8ccb0d046c92b6fc7",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            514,
+            1234,
+            1483,
+            1516,
+            1511,
+            1047,
+            883,
+            929
+          ],
+          "real_tokens": 9117,
+          "bshd_padded_tokens": 12128
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1143,
+            1440,
+            1139,
+            1438,
+            987,
+            726,
+            1550,
+            1271
+          ],
+          "real_tokens": 9694,
+          "bshd_padded_tokens": 12400
+        }
+      ]
+    },
+    {
+      "rollout": 20,
+      "sha256": "a34294224d959bd26b553a8462bbb83fc0152508ca820165bb21e4b98cf120d9",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            924,
+            1133,
+            2508,
+            3088,
+            3562,
+            3241,
+            978,
+            2017
+          ],
+          "real_tokens": 17451,
+          "bshd_padded_tokens": 28496
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1900,
+            1221,
+            924,
+            1792,
+            4302,
+            4302,
+            948,
+            831
+          ],
+          "real_tokens": 16220,
+          "bshd_padded_tokens": 34416
+        }
+      ]
+    },
+    {
+      "rollout": 21,
+      "sha256": "11d979b075bf982a9a1683f53939523f3e7846279fe74cac5c453e2c213b4559",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4272,
+            4272,
+            1253,
+            2631,
+            685,
+            1065,
+            1009,
+            1363
+          ],
+          "real_tokens": 16550,
+          "bshd_padded_tokens": 34176
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4272,
+            4272,
+            2044,
+            881,
+            1793,
+            1832,
+            2213,
+            1638
+          ],
+          "real_tokens": 18945,
+          "bshd_padded_tokens": 34176
+        }
+      ]
+    },
+    {
+      "rollout": 22,
+      "sha256": "1009ddc6c920f41f7046bf42b287868783c3e733efbc758aca315b52aad03f45",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2917,
+            810,
+            752,
+            1927,
+            1005,
+            1158,
+            4262,
+            4262
+          ],
+          "real_tokens": 17093,
+          "bshd_padded_tokens": 34096
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2648,
+            4251,
+            1005,
+            1260,
+            1511,
+            518,
+            1046,
+            2747
+          ],
+          "real_tokens": 14986,
+          "bshd_padded_tokens": 34008
+        }
+      ]
+    },
+    {
+      "rollout": 23,
+      "sha256": "ec3a749697bbad8f28e0afacc0b3aaeafcbe8eecd90abfd5d65743916d45fe2f",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4230,
+            2053,
+            3272,
+            2722,
+            1889,
+            994,
+            4244,
+            3716
+          ],
+          "real_tokens": 23120,
+          "bshd_padded_tokens": 33952
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4230,
+            4230,
+            2768,
+            2257,
+            3143,
+            1521,
+            4244,
+            3362
+          ],
+          "real_tokens": 25755,
+          "bshd_padded_tokens": 33952
+        }
+      ]
+    },
+    {
+      "rollout": 24,
+      "sha256": "3a15c7aee64a1b6462a5d5f136e8c4ceddb259bbd2a740570e5f0fc3e4d1941f",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            544,
+            1172,
+            2228,
+            2508,
+            1098,
+            714,
+            4258,
+            4258
+          ],
+          "real_tokens": 16780,
+          "bshd_padded_tokens": 34064
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            798,
+            855,
+            2008,
+            2896,
+            834,
+            660,
+            2686,
+            1959
+          ],
+          "real_tokens": 12696,
+          "bshd_padded_tokens": 23168
+        }
+      ]
+    },
+    {
+      "rollout": 25,
+      "sha256": "98491b1bbe4808f784173077eba5965317b0e5510bbd128aadfdc40b263ffcf5",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4238,
+            2446,
+            999,
+            2975,
+            3352,
+            4260,
+            1433,
+            1719
+          ],
+          "real_tokens": 21422,
+          "bshd_padded_tokens": 34080
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2216,
+            4238,
+            2550,
+            2489,
+            4260,
+            4260,
+            2651,
+            1730
+          ],
+          "real_tokens": 24394,
+          "bshd_padded_tokens": 34080
+        }
+      ]
+    },
+    {
+      "rollout": 26,
+      "sha256": "d3921eb4079bb749fee7b8a2378165c50fab252c57cd221b9209a4676fc669f4",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1877,
+            1021,
+            1198,
+            517,
+            2297,
+            1096,
+            1516,
+            1040
+          ],
+          "real_tokens": 10562,
+          "bshd_padded_tokens": 18376
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1049,
+            1217,
+            1422,
+            1350,
+            1366,
+            2169,
+            1410,
+            1961
+          ],
+          "real_tokens": 11944,
+          "bshd_padded_tokens": 17352
+        }
+      ]
+    },
+    {
+      "rollout": 27,
+      "sha256": "1dc0115fd8fd817b0a418a5d41acb4069e5b9f2b19a81398a4fb2fb3a41f8a0b",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4332,
+            4332,
+            602,
+            520,
+            837,
+            1334,
+            2832,
+            2710
+          ],
+          "real_tokens": 17499,
+          "bshd_padded_tokens": 34656
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4332,
+            4332,
+            1017,
+            678,
+            3090,
+            799,
+            1430,
+            1126
+          ],
+          "real_tokens": 16804,
+          "bshd_padded_tokens": 34656
+        }
+      ]
+    },
+    {
+      "rollout": 28,
+      "sha256": "088be658faff593df290ac5d8a9fd2817005ad024a2f537c98801d380615817d",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1100,
+            591,
+            1073,
+            1387,
+            995,
+            1405,
+            4257,
+            3032
+          ],
+          "real_tokens": 13840,
+          "bshd_padded_tokens": 34056
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            308,
+            480,
+            673,
+            933,
+            357,
+            663,
+            4257,
+            4257
+          ],
+          "real_tokens": 11928,
+          "bshd_padded_tokens": 34056
+        }
+      ]
+    },
+    {
+      "rollout": 29,
+      "sha256": "7a24b67a642d2832403a2fed4c472fdf760ed9301ca281e7fea2a18331864816",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1512,
+            2594,
+            1441,
+            1826,
+            3254,
+            3505,
+            4237,
+            2134
+          ],
+          "real_tokens": 20503,
+          "bshd_padded_tokens": 33896
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1086,
+            959,
+            2264,
+            1292,
+            4269,
+            4269,
+            3111,
+            4237
+          ],
+          "real_tokens": 21487,
+          "bshd_padded_tokens": 34152
+        }
+      ]
+    },
+    {
+      "rollout": 30,
+      "sha256": "75cd5c42c3a47896b66ae9e4c2114f212f086536b13dbeaf3341149926d8314d",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            735,
+            3432,
+            1058,
+            1574,
+            4282,
+            4282,
+            1485,
+            746
+          ],
+          "real_tokens": 17594,
+          "bshd_padded_tokens": 34256
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1241,
+            1187,
+            2205,
+            876,
+            4282,
+            4282,
+            851,
+            2297
+          ],
+          "real_tokens": 17221,
+          "bshd_padded_tokens": 34256
+        }
+      ]
+    },
+    {
+      "rollout": 31,
+      "sha256": "3cbb87cc2c9c8d92ae7942f5400b532a854da1e1cbd67d81cd90908718f71e8e",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2553,
+            1546,
+            2159,
+            1615,
+            4259,
+            1445,
+            923,
+            395
+          ],
+          "real_tokens": 14895,
+          "bshd_padded_tokens": 34072
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1966,
+            4269,
+            1221,
+            1191,
+            1898,
+            2920,
+            923,
+            1577
+          ],
+          "real_tokens": 15965,
+          "bshd_padded_tokens": 34152
+        }
+      ]
+    },
+    {
+      "rollout": 32,
+      "sha256": "dd6e07246fa5d06b9ac717485809639a54eb284379c6698d16416ad39f5c0e77",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1433,
+            785,
+            845,
+            962,
+            2051,
+            2216,
+            1427,
+            2228
+          ],
+          "real_tokens": 11947,
+          "bshd_padded_tokens": 17824
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1103,
+            2364,
+            412,
+            710,
+            1893,
+            3007,
+            2219,
+            4241
+          ],
+          "real_tokens": 15949,
+          "bshd_padded_tokens": 33928
+        }
+      ]
+    },
+    {
+      "rollout": 33,
+      "sha256": "8f205dd4334031097cf906f96dcd15516cf806aa19d15bc4863716e288495162",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1498,
+            1495,
+            874,
+            4241,
+            1712,
+            4249,
+            3663,
+            1198
+          ],
+          "real_tokens": 18930,
+          "bshd_padded_tokens": 33992
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            753,
+            1272,
+            3342,
+            2916,
+            2349,
+            4249,
+            4237,
+            4237
+          ],
+          "real_tokens": 23355,
+          "bshd_padded_tokens": 33992
+        }
+      ]
+    },
+    {
+      "rollout": 34,
+      "sha256": "e51e0ce396c3fb9cbf6bb9fa8e406a69f9bb534fc8bc59331c45ef5c32ab2c28",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1804,
+            1546,
+            4245,
+            1492,
+            1174,
+            995,
+            605,
+            1522
+          ],
+          "real_tokens": 13383,
+          "bshd_padded_tokens": 33960
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            764,
+            2123,
+            2600,
+            4197,
+            857,
+            1390,
+            2053,
+            2506
+          ],
+          "real_tokens": 16490,
+          "bshd_padded_tokens": 33576
+        }
+      ]
+    },
+    {
+      "rollout": 35,
+      "sha256": "0b6a31b63add83ec3ed57d286f46d02e0ce6e7ecd610abe4bd0d3f48ff9f39ed",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4219,
+            4219,
+            2512,
+            1239,
+            1563,
+            572,
+            706,
+            1129
+          ],
+          "real_tokens": 16159,
+          "bshd_padded_tokens": 33752
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4219,
+            3660,
+            627,
+            1957,
+            1623,
+            678,
+            3125,
+            1069
+          ],
+          "real_tokens": 16958,
+          "bshd_padded_tokens": 33752
+        }
+      ]
+    },
+    {
+      "rollout": 36,
+      "sha256": "1ef8e449a60b81aa7899ba9de4daa177c20df1ebbd9fc6dbd865905df6043a38",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1342,
+            2756,
+            4021,
+            3880,
+            2278,
+            2697,
+            3038,
+            4220
+          ],
+          "real_tokens": 24232,
+          "bshd_padded_tokens": 33760
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2005,
+            1553,
+            4241,
+            1819,
+            2201,
+            4283,
+            1684,
+            2053
+          ],
+          "real_tokens": 19839,
+          "bshd_padded_tokens": 34264
+        }
+      ]
+    },
+    {
+      "rollout": 37,
+      "sha256": "3b20b9ca131cdb03c35091b60dafab85a7c95f8598fe8719168f321dff5b1839",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            3221,
+            1457,
+            1128,
+            620,
+            849,
+            1378,
+            1086,
+            764
+          ],
+          "real_tokens": 10503,
+          "bshd_padded_tokens": 25768
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1106,
+            1020,
+            1040,
+            1403,
+            1089,
+            2104,
+            755,
+            1331
+          ],
+          "real_tokens": 9848,
+          "bshd_padded_tokens": 16832
+        }
+      ]
+    },
+    {
+      "rollout": 38,
+      "sha256": "5ae9356f52f0967e9a272635c6f8fbf8f30192638fdbed019ff08173c3198391",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1978,
+            1246,
+            4247,
+            3841,
+            4259,
+            3864,
+            715,
+            932
+          ],
+          "real_tokens": 21082,
+          "bshd_padded_tokens": 34072
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            446,
+            3551,
+            2657,
+            427,
+            4259,
+            4259,
+            699,
+            311
+          ],
+          "real_tokens": 16609,
+          "bshd_padded_tokens": 34072
+        }
+      ]
+    },
+    {
+      "rollout": 39,
+      "sha256": "c350c774a5dd739428f6c30a7d2d5dd9303d7ee5ce9c77d0170e2412b4fb21b4",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            725,
+            1226,
+            2169,
+            1091,
+            4257,
+            4171,
+            4255,
+            4255
+          ],
+          "real_tokens": 22149,
+          "bshd_padded_tokens": 34056
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2026,
+            4145,
+            1846,
+            4067,
+            4257,
+            4257,
+            4255,
+            4255
+          ],
+          "real_tokens": 29108,
+          "bshd_padded_tokens": 34056
+        }
+      ]
+    },
+    {
+      "rollout": 40,
+      "sha256": "c8b7383213abdeed77bfbdae946bd13cc62aa595c5fd4af9330e3281be04383d",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4273,
+            4273,
+            4288,
+            4288,
+            1204,
+            2161,
+            1680,
+            1472
+          ],
+          "real_tokens": 23639,
+          "bshd_padded_tokens": 34304
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4043,
+            1843,
+            4288,
+            4288,
+            3612,
+            3903,
+            939,
+            1592
+          ],
+          "real_tokens": 24508,
+          "bshd_padded_tokens": 34304
+        }
+      ]
+    },
+    {
+      "rollout": 41,
+      "sha256": "b091e967039fb3c5b4ed1f49b22d2e4d550a7ff1e7c8e4cd3c95e8b87b7f7893",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1950,
+            1878,
+            4042,
+            1299,
+            1856,
+            1026,
+            2666,
+            4263
+          ],
+          "real_tokens": 18980,
+          "bshd_padded_tokens": 34104
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2401,
+            2162,
+            3480,
+            1917,
+            587,
+            1281,
+            4263,
+            3392
+          ],
+          "real_tokens": 19483,
+          "bshd_padded_tokens": 34104
+        }
+      ]
+    },
+    {
+      "rollout": 42,
+      "sha256": "a578a1f028424e5763a4e1e7d5623d0c26efe01125dd3373d18172b4c6e6e8e0",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1277,
+            2580,
+            616,
+            1007,
+            1429,
+            745,
+            1113,
+            1301
+          ],
+          "real_tokens": 10068,
+          "bshd_padded_tokens": 20640
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1776,
+            936,
+            704,
+            1188,
+            1809,
+            2101,
+            613,
+            720
+          ],
+          "real_tokens": 9847,
+          "bshd_padded_tokens": 16808
+        }
+      ]
+    },
+    {
+      "rollout": 43,
+      "sha256": "8eee5f9231be0fea7eb5d70b2c3883b3f29bf30e7c51a388099eb08884733044",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1586,
+            4276,
+            1369,
+            1659,
+            1641,
+            1092,
+            4242,
+            4242
+          ],
+          "real_tokens": 20107,
+          "bshd_padded_tokens": 34208
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4276,
+            4276,
+            1350,
+            609,
+            1362,
+            726,
+            4242,
+            4067
+          ],
+          "real_tokens": 20908,
+          "bshd_padded_tokens": 34208
+        }
+      ]
+    },
+    {
+      "rollout": 44,
+      "sha256": "8b5725bbd93230bfa5dcb92914b147b8d7ccc3c35d3ba03ca5c6180c1ab3a09b",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            893,
+            792,
+            1719,
+            539,
+            1368,
+            3758,
+            4276,
+            2087
+          ],
+          "real_tokens": 15432,
+          "bshd_padded_tokens": 34208
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1095,
+            1112,
+            4235,
+            2123,
+            3268,
+            2217,
+            1934,
+            4276
+          ],
+          "real_tokens": 20260,
+          "bshd_padded_tokens": 34208
+        }
+      ]
+    },
+    {
+      "rollout": 45,
+      "sha256": "0cc1715b658f9d132d9bd919b76fdad3c68d4afb7676dfe12437a92e2fceccb7",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1086,
+            3342,
+            1576,
+            1557,
+            1133,
+            660,
+            1472,
+            763
+          ],
+          "real_tokens": 11589,
+          "bshd_padded_tokens": 26736
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3947,
+            2366,
+            1569,
+            1915,
+            777,
+            1492,
+            1555,
+            1457
+          ],
+          "real_tokens": 15078,
+          "bshd_padded_tokens": 31576
+        }
+      ]
+    },
+    {
+      "rollout": 46,
+      "sha256": "7a46b2a4024d8465010e7369f955b56748524c7e9a4827ee03b4e406ec4e91c5",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1084,
+            3315,
+            3369,
+            2991,
+            4263,
+            4263,
+            4234,
+            4234
+          ],
+          "real_tokens": 27753,
+          "bshd_padded_tokens": 34104
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            379,
+            1473,
+            4153,
+            2099,
+            4263,
+            4263,
+            2301,
+            4234
+          ],
+          "real_tokens": 23165,
+          "bshd_padded_tokens": 34104
+        }
+      ]
+    },
+    {
+      "rollout": 47,
+      "sha256": "70a470cb51abcbe0149810fa953c93194d60b845783be53cbd1054e977549bb6",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1420,
+            1382,
+            2889,
+            1502,
+            602,
+            941,
+            2462,
+            1707
+          ],
+          "real_tokens": 12905,
+          "bshd_padded_tokens": 23112
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            677,
+            1572,
+            1889,
+            2100,
+            1112,
+            611,
+            2500,
+            1203
+          ],
+          "real_tokens": 11664,
+          "bshd_padded_tokens": 20000
+        }
+      ]
+    },
+    {
+      "rollout": 48,
+      "sha256": "ef1dc80995b612559ffa03edbc28fa9c33c258d5aa632aa87dbc7cd29fb85908",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4244,
+            2401,
+            2286,
+            1849,
+            4240,
+            1728,
+            1386,
+            572
+          ],
+          "real_tokens": 18706,
+          "bshd_padded_tokens": 33952
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4244,
+            1637,
+            899,
+            1586,
+            644,
+            4240,
+            497,
+            1527
+          ],
+          "real_tokens": 15274,
+          "bshd_padded_tokens": 33952
+        }
+      ]
+    },
+    {
+      "rollout": 49,
+      "sha256": "5c458e3a1a51c3a3486be6e5d222954a2ef5145076f24903b71c51dd25de0e93",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2581,
+            4368,
+            1935,
+            1154,
+            713,
+            1786,
+            1196,
+            2433
+          ],
+          "real_tokens": 16166,
+          "bshd_padded_tokens": 34944
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2714,
+            4368,
+            1027,
+            1202,
+            1548,
+            2008,
+            668,
+            886
+          ],
+          "real_tokens": 14421,
+          "bshd_padded_tokens": 34944
+        }
+      ]
+    },
+    {
+      "rollout": 50,
+      "sha256": "103c5ca97f878d39516209b34fdbcd0ca622045cbc2f7a562674110b56ef3dac",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1983,
+            1473,
+            4254,
+            4254,
+            1536,
+            645,
+            4319,
+            4319
+          ],
+          "real_tokens": 22783,
+          "bshd_padded_tokens": 34552
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1712,
+            1025,
+            4113,
+            2411,
+            2166,
+            570,
+            4319,
+            4319
+          ],
+          "real_tokens": 20635,
+          "bshd_padded_tokens": 34552
+        }
+      ]
+    },
+    {
+      "rollout": 51,
+      "sha256": "b79121d35a3c67d3a47dc513f98c348e828c987d384d4360aefdba3b7f011085",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            926,
+            3825,
+            4041,
+            4239,
+            1454,
+            1901,
+            1309,
+            1441
+          ],
+          "real_tokens": 19136,
+          "bshd_padded_tokens": 33912
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3721,
+            4275,
+            4239,
+            4239,
+            1745,
+            1067,
+            1007,
+            2477
+          ],
+          "real_tokens": 22770,
+          "bshd_padded_tokens": 34200
+        }
+      ]
+    },
+    {
+      "rollout": 52,
+      "sha256": "02d00115808429500e23ac104c3a3dc312cbc933ede6269908dc55e3bbdf9f4d",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1002,
+            631,
+            1740,
+            1632,
+            752,
+            1355,
+            1770,
+            993
+          ],
+          "real_tokens": 9875,
+          "bshd_padded_tokens": 14160
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            770,
+            805,
+            2290,
+            3416,
+            2064,
+            1212,
+            523,
+            1613
+          ],
+          "real_tokens": 12693,
+          "bshd_padded_tokens": 27328
+        }
+      ]
+    },
+    {
+      "rollout": 53,
+      "sha256": "4a2bc7bf620aff334e19eaf927c56b2830920dafb604a25c98ad390ba7af0826",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2551,
+            4256,
+            1823,
+            1709,
+            895,
+            1382,
+            4135,
+            1744
+          ],
+          "real_tokens": 18495,
+          "bshd_padded_tokens": 34048
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4256,
+            4223,
+            4244,
+            4244,
+            1566,
+            1238,
+            4244,
+            4244
+          ],
+          "real_tokens": 28259,
+          "bshd_padded_tokens": 34048
+        }
+      ]
+    },
+    {
+      "rollout": 54,
+      "sha256": "95bcf512179a38b3f5de64841b4b20364535cf96bc8c93be0e81ae1a7befabb1",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1612,
+            1695,
+            1846,
+            1478,
+            1881,
+            993,
+            3445,
+            359
+          ],
+          "real_tokens": 13309,
+          "bshd_padded_tokens": 27560
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1064,
+            4262,
+            1388,
+            2947,
+            1062,
+            1944,
+            1455,
+            2016
+          ],
+          "real_tokens": 16138,
+          "bshd_padded_tokens": 34096
+        }
+      ]
+    },
+    {
+      "rollout": 55,
+      "sha256": "1b13f92f1021c03d2b9d3a60d7f944396757b41a319b1d50815c294703a187a0",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1209,
+            952,
+            3221,
+            934,
+            1560,
+            1775,
+            4247,
+            1938
+          ],
+          "real_tokens": 15836,
+          "bshd_padded_tokens": 33976
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1117,
+            1694,
+            1109,
+            1364,
+            1578,
+            3260,
+            1626,
+            972
+          ],
+          "real_tokens": 12720,
+          "bshd_padded_tokens": 26080
+        }
+      ]
+    },
+    {
+      "rollout": 56,
+      "sha256": "f6014c2765f871c46350af0a36b8c9a0fb2d8af3244b1488dae6948afc2e4d23",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2407,
+            1503,
+            3101,
+            4230,
+            3206,
+            1254,
+            4061,
+            4031
+          ],
+          "real_tokens": 23793,
+          "bshd_padded_tokens": 33840
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2487,
+            3372,
+            2481,
+            715,
+            2835,
+            1746,
+            2783,
+            3320
+          ],
+          "real_tokens": 19739,
+          "bshd_padded_tokens": 26976
+        }
+      ]
+    },
+    {
+      "rollout": 57,
+      "sha256": "82811b20ad6c6a5cd71febc5ff8b07e906b23233b03b29a1cf3afec9f008b3b4",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            886,
+            2239,
+            815,
+            1444,
+            1136,
+            600,
+            4284,
+            4284
+          ],
+          "real_tokens": 15688,
+          "bshd_padded_tokens": 34272
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1003,
+            2200,
+            980,
+            1349,
+            3523,
+            2989,
+            4284,
+            4284
+          ],
+          "real_tokens": 20612,
+          "bshd_padded_tokens": 34272
+        }
+      ]
+    },
+    {
+      "rollout": 58,
+      "sha256": "e620dd3ae1b9f970c5d22f845e7ae5ac0ef316d31f65d3b8e96e32ce2c1b1f5b",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            473,
+            1917,
+            2438,
+            1364,
+            2835,
+            820,
+            2499,
+            471
+          ],
+          "real_tokens": 12817,
+          "bshd_padded_tokens": 22680
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1749,
+            2452,
+            2912,
+            1498,
+            655,
+            1752,
+            1918,
+            1252
+          ],
+          "real_tokens": 14188,
+          "bshd_padded_tokens": 23296
+        }
+      ]
+    },
+    {
+      "rollout": 59,
+      "sha256": "9ecc0edcb914bafccfc3a9e8591d06f80c785c976297bfc01ee959b923cfc239",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1428,
+            2367,
+            4240,
+            4240,
+            2106,
+            4231,
+            1592,
+            764
+          ],
+          "real_tokens": 20968,
+          "bshd_padded_tokens": 33920
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1311,
+            498,
+            4240,
+            4240,
+            2232,
+            2403,
+            2110,
+            779
+          ],
+          "real_tokens": 17813,
+          "bshd_padded_tokens": 33920
+        }
+      ]
+    },
+    {
+      "rollout": 60,
+      "sha256": "d24865d29a09c06cd7752042b1d4a82a330f7bfc31d2316a7c602b05e0bd0128",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1296,
+            1314,
+            1742,
+            707,
+            612,
+            1340,
+            4248,
+            4248
+          ],
+          "real_tokens": 15507,
+          "bshd_padded_tokens": 33984
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1637,
+            567,
+            3301,
+            3108,
+            1421,
+            1180,
+            4248,
+            4248
+          ],
+          "real_tokens": 19710,
+          "bshd_padded_tokens": 33984
+        }
+      ]
+    },
+    {
+      "rollout": 61,
+      "sha256": "e067c95b889b01438dd8af6f1414c65a479216e6e7d5ebdf5e67daf235204ce6",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1435,
+            1496,
+            1109,
+            1080,
+            1912,
+            1773,
+            971,
+            1301
+          ],
+          "real_tokens": 11077,
+          "bshd_padded_tokens": 15296
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1634,
+            1591,
+            570,
+            710,
+            2442,
+            2485,
+            1797,
+            2529
+          ],
+          "real_tokens": 13758,
+          "bshd_padded_tokens": 20232
+        }
+      ]
+    },
+    {
+      "rollout": 62,
+      "sha256": "4b6b468a4e794585b9e98b587de0fa821f3d0e8d75ee6e116be392b655b0048c",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4283,
+            4283,
+            506,
+            3267,
+            2180,
+            871,
+            3082,
+            3381
+          ],
+          "real_tokens": 21853,
+          "bshd_padded_tokens": 34264
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4283,
+            2255,
+            2264,
+            4244,
+            1065,
+            956,
+            2154,
+            1212
+          ],
+          "real_tokens": 18433,
+          "bshd_padded_tokens": 34264
+        }
+      ]
+    },
+    {
+      "rollout": 63,
+      "sha256": "3d8dc9f038f96bd8958acba53afc01ea7eeb8528928a79d911af9ab9e3cc7c74",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            3575,
+            1564,
+            4260,
+            4260,
+            4255,
+            3960,
+            4225,
+            739
+          ],
+          "real_tokens": 26838,
+          "bshd_padded_tokens": 34080
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1991,
+            1123,
+            4260,
+            4260,
+            4255,
+            4255,
+            4225,
+            1487
+          ],
+          "real_tokens": 25856,
+          "bshd_padded_tokens": 34080
+        }
+      ]
+    },
+    {
+      "rollout": 64,
+      "sha256": "8d66d511533450e8e7a238f8e6490049e6825a5b0756a6f03b19a6a997fc02c2",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4261,
+            4261,
+            4294,
+            4294,
+            2899,
+            3448,
+            1007,
+            1463
+          ],
+          "real_tokens": 25927,
+          "bshd_padded_tokens": 34352
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4111,
+            664,
+            4294,
+            4294,
+            3240,
+            2016,
+            1030,
+            2965
+          ],
+          "real_tokens": 22614,
+          "bshd_padded_tokens": 34352
+        }
+      ]
+    },
+    {
+      "rollout": 65,
+      "sha256": "dc8a8f01ea22e2d9a1d26cbd6b62e4e004e0b9c53d10b9c110019f153e980759",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            765,
+            1250,
+            2649,
+            1829,
+            1605,
+            710,
+            3508,
+            2326
+          ],
+          "real_tokens": 14642,
+          "bshd_padded_tokens": 28064
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1015,
+            2028,
+            658,
+            3138,
+            583,
+            789,
+            1948,
+            1439
+          ],
+          "real_tokens": 11598,
+          "bshd_padded_tokens": 25104
+        }
+      ]
+    },
+    {
+      "rollout": 66,
+      "sha256": "2b2d77d774b4dc9fde8cba5e416a7546b5164849c816b73b075111d2e7a35375",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2004,
+            1608,
+            621,
+            1817,
+            4248,
+            4248,
+            624,
+            744
+          ],
+          "real_tokens": 15914,
+          "bshd_padded_tokens": 33984
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3294,
+            1421,
+            1185,
+            1678,
+            4248,
+            4248,
+            1790,
+            1588
+          ],
+          "real_tokens": 19452,
+          "bshd_padded_tokens": 33984
+        }
+      ]
+    },
+    {
+      "rollout": 67,
+      "sha256": "d7ab56780863f529997b470c30a8e6be16414be3d33027e850c58dd39097d5dd",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            525,
+            606,
+            1001,
+            808,
+            1610,
+            1891,
+            4247,
+            2036
+          ],
+          "real_tokens": 12724,
+          "bshd_padded_tokens": 33976
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            934,
+            1501,
+            627,
+            699,
+            1547,
+            1834,
+            4247,
+            1615
+          ],
+          "real_tokens": 13004,
+          "bshd_padded_tokens": 33976
+        }
+      ]
+    },
+    {
+      "rollout": 68,
+      "sha256": "60c8504077360a1452db09dbca8404a7f2120557050483abfdcd10c4a73bd54b",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1543,
+            1619,
+            1808,
+            976,
+            4254,
+            3494,
+            225,
+            849
+          ],
+          "real_tokens": 14768,
+          "bshd_padded_tokens": 34032
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1204,
+            1547,
+            907,
+            2267,
+            1518,
+            3253,
+            480,
+            619
+          ],
+          "real_tokens": 11795,
+          "bshd_padded_tokens": 26024
+        }
+      ]
+    },
+    {
+      "rollout": 69,
+      "sha256": "83c02de35dbb58b6d50ebe48a586a2c131cdca2f2adff72b9c3f289853681b7b",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4255,
+            1779,
+            886,
+            630,
+            1811,
+            1995,
+            1725,
+            1648
+          ],
+          "real_tokens": 14729,
+          "bshd_padded_tokens": 34040
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2166,
+            4282,
+            1799,
+            4183,
+            3198,
+            2403,
+            4225,
+            2262
+          ],
+          "real_tokens": 24518,
+          "bshd_padded_tokens": 34256
+        }
+      ]
+    },
+    {
+      "rollout": 70,
+      "sha256": "10627e217952b22ba9ee8dc8828e82cbe626b3d61f4d2c61093cc0fbe60d165f",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            891,
+            1212,
+            4264,
+            3648,
+            4287,
+            4287,
+            2773,
+            3356
+          ],
+          "real_tokens": 24718,
+          "bshd_padded_tokens": 34296
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            877,
+            914,
+            1853,
+            3526,
+            2452,
+            4287,
+            2514,
+            1826
+          ],
+          "real_tokens": 18249,
+          "bshd_padded_tokens": 34296
+        }
+      ]
+    },
+    {
+      "rollout": 71,
+      "sha256": "379c381514cfc0f9aa54c12a19a0d21ebf8f077e3a6af81c813caa5b5df3b9e5",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4239,
+            4239,
+            2121,
+            1694,
+            535,
+            1294,
+            943,
+            3423
+          ],
+          "real_tokens": 18488,
+          "bshd_padded_tokens": 33912
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            4239,
+            4239,
+            1853,
+            4238,
+            1684,
+            1146,
+            864,
+            3475
+          ],
+          "real_tokens": 21738,
+          "bshd_padded_tokens": 33912
+        }
+      ]
+    },
+    {
+      "rollout": 72,
+      "sha256": "536f56efa28ea8f721eda38fc4171e559246adaf49a1c726f364c0591809412e",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            922,
+            1093,
+            2380,
+            4242,
+            2020,
+            4288,
+            4231,
+            4231
+          ],
+          "real_tokens": 23407,
+          "bshd_padded_tokens": 34304
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            660,
+            1535,
+            2100,
+            4242,
+            1743,
+            2400,
+            1347,
+            1548
+          ],
+          "real_tokens": 15575,
+          "bshd_padded_tokens": 33936
+        }
+      ]
+    },
+    {
+      "rollout": 73,
+      "sha256": "d31158506afdb418117763d19e170ef37623dd2f7a19dc0845d368388bb5a3cd",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            689,
+            1812,
+            662,
+            1255,
+            952,
+            723,
+            3019,
+            2895
+          ],
+          "real_tokens": 12007,
+          "bshd_padded_tokens": 24152
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            487,
+            735,
+            918,
+            695,
+            2393,
+            772,
+            4284,
+            4284
+          ],
+          "real_tokens": 14568,
+          "bshd_padded_tokens": 34272
+        }
+      ]
+    },
+    {
+      "rollout": 74,
+      "sha256": "86c922c8098018aaaa37c1132add65cac7db57414c9008ce290cedc896b3147a",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            898,
+            1574,
+            3826,
+            4251,
+            809,
+            1316,
+            1238,
+            959
+          ],
+          "real_tokens": 14871,
+          "bshd_padded_tokens": 34008
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1064,
+            1338,
+            2771,
+            4251,
+            1209,
+            1258,
+            995,
+            813
+          ],
+          "real_tokens": 13699,
+          "bshd_padded_tokens": 34008
+        }
+      ]
+    },
+    {
+      "rollout": 75,
+      "sha256": "84d3cf4fce6b0f1029559ac71138e41ae69af49dd270c5fe7b38d4cd679738a2",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1829,
+            1003,
+            4287,
+            2186,
+            1839,
+            2043,
+            436,
+            949
+          ],
+          "real_tokens": 14572,
+          "bshd_padded_tokens": 34296
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2730,
+            2226,
+            2102,
+            2545,
+            2628,
+            4246,
+            1168,
+            2365
+          ],
+          "real_tokens": 20010,
+          "bshd_padded_tokens": 33968
+        }
+      ]
+    },
+    {
+      "rollout": 76,
+      "sha256": "10e41e4cdf7d5bc6a0b824262a3e8b95cac82ba7b256bcc4a64f8cca01cacfaf",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2704,
+            2060,
+            1044,
+            933,
+            2347,
+            4048,
+            1469,
+            1042
+          ],
+          "real_tokens": 15647,
+          "bshd_padded_tokens": 32384
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1554,
+            2742,
+            1316,
+            1871,
+            872,
+            815,
+            758,
+            1488
+          ],
+          "real_tokens": 11416,
+          "bshd_padded_tokens": 21936
+        }
+      ]
+    },
+    {
+      "rollout": 77,
+      "sha256": "fca9ab2bcdf0628bf80b90c87d6cc1784acb88fe5df080974046c2a1a3683b30",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            958,
+            2521,
+            1067,
+            4242,
+            1018,
+            1085,
+            1966,
+            656
+          ],
+          "real_tokens": 13513,
+          "bshd_padded_tokens": 33936
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2058,
+            4244,
+            3707,
+            727,
+            1902,
+            845,
+            1515,
+            1044
+          ],
+          "real_tokens": 16042,
+          "bshd_padded_tokens": 33952
+        }
+      ]
+    },
+    {
+      "rollout": 78,
+      "sha256": "a8f6cc07d3c89317a2fecd255e45c30141f9444729fc79ec609166f263458572",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2616,
+            1478,
+            987,
+            610,
+            560,
+            657,
+            4233,
+            3568
+          ],
+          "real_tokens": 14709,
+          "bshd_padded_tokens": 33864
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1013,
+            807,
+            1251,
+            716,
+            384,
+            389,
+            3926,
+            3091
+          ],
+          "real_tokens": 11577,
+          "bshd_padded_tokens": 31408
+        }
+      ]
+    },
+    {
+      "rollout": 79,
+      "sha256": "36c990080cb610c422e8c922dc119712bd4a97648587d78540ab0d6425e6d552",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2104,
+            830,
+            500,
+            1382,
+            707,
+            1144,
+            3747,
+            2679
+          ],
+          "real_tokens": 13093,
+          "bshd_padded_tokens": 29976
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            951,
+            1059,
+            535,
+            594,
+            2979,
+            1495,
+            4231,
+            1074
+          ],
+          "real_tokens": 12918,
+          "bshd_padded_tokens": 33848
+        }
+      ]
+    },
+    {
+      "rollout": 80,
+      "sha256": "e5e1083c0516a89b4ac19ca0c3a17eeefcd355ff861c0f9c70d5243c359bcb1b",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1026,
+            1297,
+            1832,
+            1962,
+            2887,
+            2258,
+            1533,
+            2129
+          ],
+          "real_tokens": 14924,
+          "bshd_padded_tokens": 23096
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1557,
+            1551,
+            1231,
+            2233,
+            794,
+            638,
+            2392,
+            1080
+          ],
+          "real_tokens": 11476,
+          "bshd_padded_tokens": 19136
+        }
+      ]
+    },
+    {
+      "rollout": 81,
+      "sha256": "4d1f7b3c9262c87f566e3e53c8b7fb03c4866db5a71544b36a07760944ecb8b6",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            923,
+            674,
+            1314,
+            2556,
+            805,
+            722,
+            1849,
+            1394
+          ],
+          "real_tokens": 10237,
+          "bshd_padded_tokens": 20448
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            555,
+            1162,
+            4258,
+            4258,
+            1004,
+            537,
+            801,
+            846
+          ],
+          "real_tokens": 13421,
+          "bshd_padded_tokens": 34064
+        }
+      ]
+    },
+    {
+      "rollout": 82,
+      "sha256": "5551479d0d825372cadea9a7301bd29cd4456b07ec42488c3e2ade62cc9107cc",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1707,
+            1611,
+            1410,
+            1308,
+            1220,
+            1140,
+            484,
+            544
+          ],
+          "real_tokens": 9424,
+          "bshd_padded_tokens": 13656
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1129,
+            1300,
+            1907,
+            1559,
+            2351,
+            1753,
+            779,
+            541
+          ],
+          "real_tokens": 11319,
+          "bshd_padded_tokens": 18808
+        }
+      ]
+    },
+    {
+      "rollout": 83,
+      "sha256": "5e2c36a2e5e0c0840853822769d94a9cd5ab862ed7cbd37c4297456c9134c3c7",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            484,
+            433,
+            1137,
+            961,
+            4248,
+            1483,
+            4146,
+            873
+          ],
+          "real_tokens": 13765,
+          "bshd_padded_tokens": 33984
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            450,
+            618,
+            1085,
+            1250,
+            4248,
+            3753,
+            741,
+            1983
+          ],
+          "real_tokens": 14128,
+          "bshd_padded_tokens": 33984
+        }
+      ]
+    },
+    {
+      "rollout": 84,
+      "sha256": "aa24b980aae6211c2367ce9963310c4e4cc57f87dd6534984f92520dd89b489f",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            803,
+            1891,
+            1919,
+            1124,
+            4285,
+            4285,
+            2269,
+            1090
+          ],
+          "real_tokens": 17666,
+          "bshd_padded_tokens": 34280
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            499,
+            1761,
+            1854,
+            1545,
+            4285,
+            4285,
+            739,
+            639
+          ],
+          "real_tokens": 15607,
+          "bshd_padded_tokens": 34280
+        }
+      ]
+    },
+    {
+      "rollout": 85,
+      "sha256": "739c482ef1d9d7418e480c6e035543a6c98612331e35b06cf2a280b37c47d3d5",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            994,
+            911,
+            2478,
+            2389,
+            958,
+            993,
+            1068,
+            934
+          ],
+          "real_tokens": 10725,
+          "bshd_padded_tokens": 19824
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1110,
+            791,
+            4255,
+            2133,
+            1003,
+            1136,
+            1079,
+            1439
+          ],
+          "real_tokens": 12946,
+          "bshd_padded_tokens": 34040
+        }
+      ]
+    },
+    {
+      "rollout": 86,
+      "sha256": "52507d7e56fb2721359414ebccfeff4054bb8acfb10a285389ac59119e4322c5",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1909,
+            488,
+            2613,
+            1601,
+            1953,
+            1017,
+            1087,
+            530
+          ],
+          "real_tokens": 11198,
+          "bshd_padded_tokens": 20904
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            888,
+            1117,
+            2214,
+            2647,
+            753,
+            822,
+            588,
+            804
+          ],
+          "real_tokens": 9833,
+          "bshd_padded_tokens": 21176
+        }
+      ]
+    },
+    {
+      "rollout": 87,
+      "sha256": "c36bc4d4fd5016f0c8085af73aa66689c9c63b68eefad41a8ca996513ee6e9ed",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1408,
+            1801,
+            1714,
+            2026,
+            3984,
+            1960,
+            4247,
+            2934
+          ],
+          "real_tokens": 20074,
+          "bshd_padded_tokens": 33976
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            452,
+            702,
+            1037,
+            1203,
+            2445,
+            3740,
+            4247,
+            2648
+          ],
+          "real_tokens": 16474,
+          "bshd_padded_tokens": 33976
+        }
+      ]
+    },
+    {
+      "rollout": 88,
+      "sha256": "c612dad79ff1a27c064a83fdf36926242bfc07e7f71314402859fe792fb2fd13",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            2404,
+            1850,
+            3523,
+            2736,
+            634,
+            1019,
+            555,
+            549
+          ],
+          "real_tokens": 13270,
+          "bshd_padded_tokens": 28184
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            3529,
+            1380,
+            2669,
+            2545,
+            758,
+            794,
+            471,
+            545
+          ],
+          "real_tokens": 12691,
+          "bshd_padded_tokens": 28232
+        }
+      ]
+    },
+    {
+      "rollout": 89,
+      "sha256": "b8106566461ca65b76e4ce5c906bf6ad66e5243d0589f7b5a6263b567cb3fee7",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1085,
+            540,
+            707,
+            1310,
+            1318,
+            2704,
+            3182,
+            1606
+          ],
+          "real_tokens": 12452,
+          "bshd_padded_tokens": 25456
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            742,
+            1060,
+            534,
+            809,
+            4282,
+            3871,
+            1137,
+            1746
+          ],
+          "real_tokens": 14181,
+          "bshd_padded_tokens": 34256
+        }
+      ]
+    },
+    {
+      "rollout": 90,
+      "sha256": "f78fd203fd6e7188c5b7a9a2aaaef1d0ef287e3f701eadd88957a8ccbd3e92c8",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            4317,
+            3423,
+            1770,
+            1242,
+            1620,
+            1008,
+            1655,
+            1090
+          ],
+          "real_tokens": 16125,
+          "bshd_padded_tokens": 34536
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2290,
+            4317,
+            595,
+            770,
+            1694,
+            612,
+            1730,
+            1024
+          ],
+          "real_tokens": 13032,
+          "bshd_padded_tokens": 34536
+        }
+      ]
+    },
+    {
+      "rollout": 91,
+      "sha256": "27aea433b00b6b01447c5cdee7c5033d5097fdb5531921eb7e24bfe5ffd60dfc",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            924,
+            1196,
+            1471,
+            1271,
+            450,
+            810,
+            738,
+            1517
+          ],
+          "real_tokens": 8377,
+          "bshd_padded_tokens": 12136
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            688,
+            986,
+            668,
+            1716,
+            854,
+            613,
+            1348,
+            947
+          ],
+          "real_tokens": 7820,
+          "bshd_padded_tokens": 13728
+        }
+      ]
+    },
+    {
+      "rollout": 92,
+      "sha256": "f518adf1170d6f7372ddb9d6c2dd896d88a3032a2a4c3084bcacb5a652478e42",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            975,
+            972,
+            1207,
+            1537,
+            783,
+            1254,
+            613,
+            811
+          ],
+          "real_tokens": 8152,
+          "bshd_padded_tokens": 12296
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            777,
+            1198,
+            2758,
+            1817,
+            736,
+            435,
+            468,
+            1616
+          ],
+          "real_tokens": 9805,
+          "bshd_padded_tokens": 22064
+        }
+      ]
+    },
+    {
+      "rollout": 93,
+      "sha256": "a24c1b9f67e81c11c46083296dbff1f10b7d8260f350fbbcff11930fa463149f",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            774,
+            950,
+            929,
+            977,
+            319,
+            1940,
+            4243,
+            4243
+          ],
+          "real_tokens": 14375,
+          "bshd_padded_tokens": 33944
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            667,
+            1110,
+            1484,
+            1467,
+            975,
+            609,
+            3617,
+            4005
+          ],
+          "real_tokens": 13934,
+          "bshd_padded_tokens": 32040
+        }
+      ]
+    },
+    {
+      "rollout": 94,
+      "sha256": "a791a40eb85a68fd0204819eb8192b6847044f6d764e70ee73810cf3ce04532e",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            716,
+            1607,
+            4030,
+            4265,
+            2806,
+            2383,
+            1475,
+            465
+          ],
+          "real_tokens": 17747,
+          "bshd_padded_tokens": 34120
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            432,
+            824,
+            4265,
+            2939,
+            702,
+            533,
+            1662,
+            1286
+          ],
+          "real_tokens": 12643,
+          "bshd_padded_tokens": 34120
+        }
+      ]
+    },
+    {
+      "rollout": 95,
+      "sha256": "fda81bec05245c8a64031be752d256d1a3ec520c39ecc8439d6c0847abce5dc0",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1021,
+            511,
+            2206,
+            1440,
+            744,
+            1988,
+            3693,
+            4288
+          ],
+          "real_tokens": 15891,
+          "bshd_padded_tokens": 34304
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1340,
+            4237,
+            955,
+            820,
+            644,
+            523,
+            4288,
+            4288
+          ],
+          "real_tokens": 17095,
+          "bshd_padded_tokens": 34304
+        }
+      ]
+    },
+    {
+      "rollout": 96,
+      "sha256": "f7271be7fafb1f928d5eec196119ed35196f174c061251ffdd33c17a71456a67",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1876,
+            479,
+            864,
+            1459,
+            551,
+            888,
+            931,
+            1651
+          ],
+          "real_tokens": 8699,
+          "bshd_padded_tokens": 15008
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            1781,
+            1352,
+            910,
+            1045,
+            484,
+            409,
+            1398,
+            785
+          ],
+          "real_tokens": 8164,
+          "bshd_padded_tokens": 14248
+        }
+      ]
+    },
+    {
+      "rollout": 97,
+      "sha256": "c0bc2bba976779e0f812949ca2dc16e0aabbdbb3031c3ddf6c8e9758bc23ee17",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1059,
+            403,
+            2012,
+            1767,
+            1618,
+            682,
+            814,
+            971
+          ],
+          "real_tokens": 9326,
+          "bshd_padded_tokens": 16096
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            509,
+            593,
+            3717,
+            2952,
+            603,
+            902,
+            1162,
+            914
+          ],
+          "real_tokens": 11352,
+          "bshd_padded_tokens": 29736
+        }
+      ]
+    },
+    {
+      "rollout": 98,
+      "sha256": "5e8922e72e36d53e8b3b522e65a9c2c513033fcc1c5d02e774733f980e4a3a44",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            1439,
+            1228,
+            690,
+            1730,
+            3187,
+            1052,
+            721,
+            884
+          ],
+          "real_tokens": 10931,
+          "bshd_padded_tokens": 25496
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            2230,
+            647,
+            1304,
+            629,
+            688,
+            1120,
+            432,
+            586
+          ],
+          "real_tokens": 7636,
+          "bshd_padded_tokens": 17840
+        }
+      ]
+    },
+    {
+      "rollout": 99,
+      "sha256": "d5b5cc081deb8179e0347d21749259cb2d5033ca61452563c97cad3ba9f407cd",
+      "ranks": [
+        {
+          "rank": 0,
+          "lengths": [
+            433,
+            392,
+            1264,
+            2571,
+            4282,
+            971,
+            1325,
+            1015
+          ],
+          "real_tokens": 12253,
+          "bshd_padded_tokens": 34256
+        },
+        {
+          "rank": 1,
+          "lengths": [
+            445,
+            553,
+            1670,
+            2208,
+            4282,
+            1327,
+            828,
+            843
+          ],
+          "real_tokens": 12156,
+          "bshd_padded_tokens": 34256
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "real_tokens": 3095640,
+    "padded_forward_slots": 5712688,
+    "artificial_slots": 2617048,
+    "padded_to_real_ratio": 1.8453980437001718,
+    "artificial_fraction_of_slots": 0.458111487972037
+  },
+  "method": "Reconstruct from audited raw token arrays and frozen MILES rank-batch maximum padding rule; raw round-robin DP2. All95 fileSHA256s matched the independently passing retained-response audit. Not a FLOP or kernel-utilization estimate."
+}

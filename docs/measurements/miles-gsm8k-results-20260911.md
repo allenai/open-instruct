@@ -79,8 +79,12 @@ There are no missing/conflicting timing records in either parser output.
 | Allocated GPU-hours |9.935 |9.037 |Three GPUs throughout |
 
 The wall-clock result is clear: Core's overall warm cadence is slower, despite its
-shorter recorded optimizer phase. It would be misleading to claim that Core is
-faster from its6.17s training timer alone. The large pre-update interval is the main
+shorter recorded optimizer phase. Across the same95 warm Megatron batches,
+[reconstruction from audited lengths](miles-gsm8k-warm-padding-20260911.json) finds
+3,095,640 real tokens expanded to5,712,688 padded forward positions:1.845× real
+length, with45.8% of positions artificial. This is a token-workload difference,
+not a measured FLOP ratio or proof of its share of runtime. It would be misleading
+to claim that Core is faster from its6.17s training timer alone. The large pre-update interval is the main
 observed difference. The completed [frozen-runtime scorer profile](miles-core-score-profile-20260911.md)
 found230.458s for the first score pass and a1.243s mean across three identical
 warm repeats, with bitwise-identical log probabilities. Cold SwiGLU specialization
