@@ -1,9 +1,9 @@
 diff --git a/src/olmo_core/distributed/checkpoint/contiguous_planner.py b/src/olmo_core/distributed/checkpoint/contiguous_planner.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..c04efc850e27217fd2affbdebe728b1325a6a3f7
+index 0000000000000000000000000000000000000000..b4e24a9c5b8e54b2e434d8396b81bc1f722015a5
 --- /dev/null
 +++ b/src/olmo_core/distributed/checkpoint/contiguous_planner.py
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,146 @@
 +"""Constant-memory metadata for ordinary contiguous DTensor shards.
 +
 +Some PyTorch versions materialize an index vector per shard to find its first offset.
@@ -14,17 +14,26 @@ index 0000000000000000000000000000000000000000..c04efc850e27217fd2affbdebe728b13
 +from typing import Any, Dict, Optional, Sequence, Tuple
 +
 +import torch
-+from torch.distributed.checkpoint.default_planner import create_default_local_save_plan
++from torch.distributed.checkpoint.default_planner import (
++    DefaultLoadPlanner,
++    create_default_local_load_plan,
++    create_default_local_save_plan,
++)
 +from torch.distributed.checkpoint.metadata import (
 +    ChunkStorageMetadata,
 +    MetadataIndex,
 +    TensorProperties,
++    TensorStorageMetadata,
 +)
 +from torch.distributed.checkpoint.planner import (
++    LoadPlan,
 +    SavePlan,
 +    TensorWriteData,
 +    WriteItem,
 +    WriteItemType,
++)
++from torch.distributed.checkpoint.planner_helpers import (
++    create_read_items_for_chunk_list,
 +)
 +from torch.distributed.tensor import DTensor, Replicate, Shard
 +from torch.distributed.tensor.placement_types import Placement
@@ -96,6 +105,51 @@ index 0000000000000000000000000000000000000000..c04efc850e27217fd2affbdebe728b13
 +                continue
 +        items.extend(create_default_local_save_plan({name: value}, is_coordinator).items)
 +    return SavePlan(items)
++
++
++class ContiguousLoadPlanner(DefaultLoadPlanner):
++    """Use the same bounded shard metadata for reads, retaining DCP's resharding algorithm."""
++
++    def create_local_plan(self) -> LoadPlan:
++        # Let PyTorch handle missing keys and legacy flattened-key migration unchanged.
++        if (
++            self.metadata is None
++            or not self.state_dict.keys() <= self.metadata.state_dict_metadata.keys()
++        ):
++            return super().create_local_plan()
++        requests = []
++        for name, value in self.state_dict.items():
++            stored = self.metadata.state_dict_metadata[name]
++            if type(value) is DTensor and isinstance(stored, TensorStorageMetadata):
++                coordinate = value.device_mesh.get_coordinate()
++                if coordinate is None:
++                    continue
++                if stored.size != value.size():
++                    raise ValueError(
++                        f"Size mismatch between saved {stored.size} and current: {value.size()} for {name}"
++                    )
++                metadata = contiguous_shard_metadata(
++                    value.shape, value.device_mesh.shape, coordinate, value.placements
++                )
++                local = value.to_local()
++                if metadata is not None and type(local) is torch.Tensor:
++                    sizes, offsets = map(torch.Size, metadata)
++                    if sizes != local.size():
++                        raise ValueError(
++                            f"Checkpoint shard shape mismatch for {name}: {sizes} != {local.size()}"
++                        )
++                    requests.extend(
++                        create_read_items_for_chunk_list(
++                            name, stored, [ChunkStorageMetadata(offsets=offsets, sizes=sizes)]
++                        )
++                    )
++                    continue
++            requests.extend(
++                create_default_local_load_plan(
++                    {name: value}, self.metadata, not self.allow_partial_load
++                ).items
++            )
++        return LoadPlan(requests)
 diff --git a/src/olmo_core/distributed/checkpoint/filesystem.py b/src/olmo_core/distributed/checkpoint/filesystem.py
 index 570f845f9e520dfd58fe385abbf8039c58b5b452..34e19df1001fd11135d4d69c6baaedb73b4e9f72 100644
 --- a/src/olmo_core/distributed/checkpoint/filesystem.py
@@ -1739,7 +1793,7 @@ index ca243909ce65f5fcfdcf0d2c33d48e366291b006..620e7f44ea1c47435851bbebb159aab6
                  if torch.is_grad_enabled():
                      self._recompute_cache = expert_indices.detach()  # save for recompute
 diff --git a/src/olmo_core/train/train_module/transformer/ddp_train_module.py b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-index a855836be5a9c92ca67136acf6125861503f108d..57afa6320bb942cccc0de160b60e96139eab51f8 100644
+index a855836be5a9c92ca67136acf6125861503f108d..96002191b696a9670e3164fa463585755aeca0c9 100644
 --- a/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 +++ b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 @@ -1,4 +1,6 @@
@@ -1919,7 +1973,67 @@ index a855836be5a9c92ca67136acf6125861503f108d..57afa6320bb942cccc0de160b60e9613
  
      def load_state_dict_direct(
          self,
-@@ -1282,7 +1338,10 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -1179,9 +1235,25 @@ class OLMoDDPTrainModule(TrainModule):
+         thread_count: Optional[int] = None,
+         load_optim_state: Optional[bool] = True,
+         reset_optimizer_states_on_load: Optional[bool] = None,
++        constant_memory_planning: bool = False,
++        profile: bool = False,
+     ):
+         from olmo_core.io import normalize_path
+ 
++        if profile:
++            torch.cuda.synchronize()
++        load_start = time.perf_counter()
++        load_pass_seconds = []
++
++        def load_pass(*args, **kwargs):
++            if profile:
++                torch.cuda.synchronize()
++            phase_start = time.perf_counter()
++            dist_cp.state_dict_loader.load(*args, **kwargs)
++            if profile:
++                torch.cuda.synchronize()
++            load_pass_seconds.append(time.perf_counter() - phase_start)
++
+         dir = normalize_path(dir)
+         reader = RemoteFileSystemReader(
+             dir, thread_count=thread_count, pre_download=pre_download, work_dir=work_dir
+@@ -1192,11 +1264,14 @@ class OLMoDDPTrainModule(TrainModule):
+ 
+         if self.eval_only:
+             sd_to_load = self._get_model_state_dict_for_eval_load(metadata)
+-            dist_cp.state_dict_loader.load(
++            load_pass(
+                 sd_to_load,
+                 checkpoint_id=dir,
+                 storage_reader=reader,
+                 process_group=process_group,
++                planner=(
++                    contiguous_planner.ContiguousLoadPlanner() if constant_memory_planning else None
++                ),
+             )
+         else:
+             optim = self._require_optimizer()
+@@ -1221,11 +1296,16 @@ class OLMoDDPTrainModule(TrainModule):
+                     "Skipping optimizer state during checkpoint load; loading model weights directly"
+                 )
+                 sd_to_load = self._get_model_state_dict_for_eval_load(metadata)
+-                dist_cp.state_dict_loader.load(
++                load_pass(
+                     sd_to_load,
+                     checkpoint_id=dir,
+                     storage_reader=reader,
+                     process_group=process_group,
++                    planner=(
++                        contiguous_planner.ContiguousLoadPlanner()
++                        if constant_memory_planning
++                        else None
++                    ),
+                 )
+                 optim._copy_model_params_to_main_params()
+                 optim._copy_main_params_to_mxfp8_weights()
+@@ -1282,7 +1362,10 @@ class OLMoDDPTrainModule(TrainModule):
                              sd_to_load.pop(key)
  
              if not loaded_model_directly:
@@ -1931,7 +2045,61 @@ index a855836be5a9c92ca67136acf6125861503f108d..57afa6320bb942cccc0de160b60e9613
  
                  expansions = {}
                  if self.expand_shared_qk_norm_on_load:
-@@ -1520,6 +1579,10 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -1293,12 +1376,16 @@ class OLMoDDPTrainModule(TrainModule):
+                         if name.endswith((".q_norm.weight", ".k_norm.weight")) and param.ndim == 2
+                     }
+                     expansions = prepare_qk_expansion(sd_to_load, metadata, gain_shapes)
+-                dist_cp.state_dict_loader.load(
++                load_pass(
+                     sd_to_load,
+                     checkpoint_id=dir,
+                     storage_reader=reader,
+                     process_group=process_group,
+-                    # planner=FlatLoadPlanner(),
++                    planner=(
++                        contiguous_planner.ContiguousLoadPlanner()
++                        if constant_memory_planning
++                        else None
++                    ),
+                 )
+ 
+                 finish_qk_expansion(sd_to_load, expansions)
+@@ -1322,16 +1409,32 @@ class OLMoDDPTrainModule(TrainModule):
+             buffer_reader = RemoteFileSystemReader(
+                 dir, thread_count=thread_count, pre_download=pre_download, work_dir=work_dir
+             )
+-            dist_cp.state_dict_loader.load(
++            load_pass(
+                 buffers_to_load,
+                 checkpoint_id=dir,
+                 storage_reader=buffer_reader,
+                 process_group=process_group,
++                planner=(
++                    contiguous_planner.ContiguousLoadPlanner() if constant_memory_planning else None
++                ),
+             )
+ 
+         torch.cuda.empty_cache()
+ 
+-        return
++        if profile:
++            torch.cuda.synchronize()
++            log.info(
++                "checkpoint_load %s",
++                json.dumps(
++                    {
++                        "total_seconds": time.perf_counter() - load_start,
++                        "distributed_load_seconds": sum(load_pass_seconds),
++                        "load_pass_seconds": load_pass_seconds,
++                        "constant_memory_planning": constant_memory_planning,
++                    },
++                    sort_keys=True,
++                ),
++            )
+ 
+     def _get_model_state_dict_for_eval_load(self, metadata: Metadata) -> Dict[str, Any]:
+         model_state: Dict[str, Any] = {}
+@@ -1520,6 +1623,10 @@ class OLMoDDPTrainModule(TrainModule):
                  flush=True,
              )
  
@@ -1942,7 +2110,7 @@ index a855836be5a9c92ca67136acf6125861503f108d..57afa6320bb942cccc0de160b60e9613
      @nvtx.annotate("train_batch")
      def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
          self._require_optimizer()
-@@ -2271,12 +2334,12 @@ class OLMoDDPTrainModule(TrainModule):
+@@ -2271,12 +2378,12 @@ class OLMoDDPTrainModule(TrainModule):
              "labels": None if labels is None else self._debug_tensor_payload(labels),
              "loss": self._debug_tensor_payload(lm_output.loss),
              "ce_loss": self._debug_tensor_payload(lm_output.ce_loss),
@@ -2096,10 +2264,10 @@ index 0000000000000000000000000000000000000000..93fa054745f9ebc9d7427c83b3cdced9
 +        (968_750_000_000,),
 +    )
 diff --git a/src/test/distributed/checkpoint/filesystem_test.py b/src/test/distributed/checkpoint/filesystem_test.py
-index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..ef1855358c44c7b9ee1ebdd443a7f0d336339daa 100644
+index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..5c1356d024dbb2fe3eb900a78269ceb14a0b8e61 100644
 --- a/src/test/distributed/checkpoint/filesystem_test.py
 +++ b/src/test/distributed/checkpoint/filesystem_test.py
-@@ -1,20 +1,35 @@
+@@ -1,20 +1,36 @@
 +import io
 +
  import pytest
@@ -2114,6 +2282,7 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..ef1855358c44c7b9ee1ebdd443a7f0d3
 +    init_device_mesh,
 +)
  
++from olmo_core.distributed.checkpoint.contiguous_planner import ContiguousLoadPlanner
  from olmo_core.distributed.checkpoint.filesystem import (
      RemoteFileSystemReader,
      RemoteFileSystemWriter,
@@ -2137,7 +2306,7 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..ef1855358c44c7b9ee1ebdd443a7f0d3
  ):
      mesh = init_device_mesh(get_default_device().type, (dist.get_world_size(),))
  
-@@ -28,23 +43,34 @@ def run_save_and_load_with_dtensors(
+@@ -28,32 +44,47 @@ def run_save_and_load_with_dtensors(
      x = distribute_tensor(x_full, mesh, [Shard(dim=0)])
      y = distribute_tensor(y_full, mesh, [Shard(dim=0)])
  
@@ -2162,29 +2331,45 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..ef1855358c44c7b9ee1ebdd443a7f0d3
          ),
      )
  
-     # Now create new sharded copies with a different sharding strategy and load the checkpoint.
-     x_loaded = distribute_tensor(torch.zeros_like(x_full), mesh, [Shard(dim=1)])
-     y_loaded = distribute_tensor(torch.zeros_like(y_full), mesh, [Shard(dim=1)])
-+    replicated_loaded = distribute_tensor(
-+        torch.zeros_like(replicated.to_local()), mesh, [Replicate()]
-+    )
-     distcp.state_dict_loader.load(
+-    # Now create new sharded copies with a different sharding strategy and load the checkpoint.
+-    x_loaded = distribute_tensor(torch.zeros_like(x_full), mesh, [Shard(dim=1)])
+-    y_loaded = distribute_tensor(torch.zeros_like(y_full), mesh, [Shard(dim=1)])
+-    distcp.state_dict_loader.load(
 -        {"x": x_loaded, "y": y_loaded},
-+        {"x": x_loaded, "y": y_loaded, "replicated": replicated_loaded},
-         checkpoint_id=dir,
-         storage_reader=RemoteFileSystemReader(dir, thread_count=thread_count),
-     )
-@@ -53,7 +79,8 @@ def run_save_and_load_with_dtensors(
-     x_full_loaded = x_loaded.full_tensor()
-     y_full_loaded = y_loaded.full_tensor()
-     torch.testing.assert_close(x_full, x_full_loaded)
+-        checkpoint_id=dir,
+-        storage_reader=RemoteFileSystemReader(dir, thread_count=thread_count),
+-    )
+-
+-    # Make sure the loaded tensors match the original tensors.
+-    x_full_loaded = x_loaded.full_tensor()
+-    y_full_loaded = y_loaded.full_tensor()
+-    torch.testing.assert_close(x_full, x_full_loaded)
 -    torch.testing.assert_close(y_full, y_full_loaded)
-+    torch.testing.assert_close(y_full, y_full_loaded, rtol=0, atol=0)
-+    torch.testing.assert_close(replicated, replicated_loaded, rtol=0, atol=0)
++    # Both legacy and bounded readers must consume either save policy.
++    for load_planner in (None, ContiguousLoadPlanner()):
++        # Now create new sharded copies with a different sharding strategy and load the checkpoint.
++        x_loaded = distribute_tensor(torch.zeros_like(x_full), mesh, [Shard(dim=1)])
++        y_loaded = distribute_tensor(torch.zeros_like(y_full), mesh, [Shard(dim=1)])
++        replicated_loaded = distribute_tensor(
++            torch.zeros_like(replicated.to_local()), mesh, [Replicate()]
++        )
++        distcp.state_dict_loader.load(
++            {"x": x_loaded, "y": y_loaded, "replicated": replicated_loaded},
++            checkpoint_id=dir,
++            storage_reader=RemoteFileSystemReader(dir, thread_count=thread_count),
++            planner=load_planner,
++        )
++
++        # Make sure the loaded tensors match the original tensors.
++        x_full_loaded = x_loaded.full_tensor()
++        y_full_loaded = y_loaded.full_tensor()
++        torch.testing.assert_close(x_full, x_full_loaded)
++        torch.testing.assert_close(y_full, y_full_loaded, rtol=0, atol=0)
++        torch.testing.assert_close(replicated, replicated_loaded, rtol=0, atol=0)
  
  
  @pytest.mark.parametrize("backend", BACKENDS)
-@@ -61,11 +88,25 @@ def run_save_and_load_with_dtensors(
+@@ -61,11 +92,25 @@ def run_save_and_load_with_dtensors(
      "thread_count, process_count",
      [pytest.param(2, None, id="threads"), pytest.param(None, 2, id="processes")],
  )
@@ -2212,7 +2397,7 @@ index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..ef1855358c44c7b9ee1ebdd443a7f0d3
          start_method="spawn",
      )
  
-@@ -112,3 +153,32 @@ def test_save_and_load_remotely_to_gcs_with_dtensors(
+@@ -112,3 +157,32 @@ def test_save_and_load_remotely_to_gcs_with_dtensors(
          func_args=(gcs_checkpoint_dir, thread_count, process_count, throttle),
          start_method="spawn",  # NOTE: forking causes a crash with boto3
      )
@@ -2391,7 +2576,7 @@ index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a6
 +    (reference[:, :8] * F.silu(reference[:, 8:])).sum().backward()
 +    torch.testing.assert_close(x.grad, reference.grad, rtol=0, atol=0)
 diff --git a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
-index b98ed4185e41e9157f82bffad82522aeb00a1e95..3edbf474a08f2e3bec50007d25c3cdd9929800ae 100644
+index b98ed4185e41e9157f82bffad82522aeb00a1e95..69a76a69f20684514489a5eb3424ef42f87df703 100644
 --- a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
 +++ b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
 @@ -11,6 +11,7 @@ from torch.distributed.tensor import Shard
@@ -2421,7 +2606,7 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..3edbf474a08f2e3bec50007d25c3cdd9
          )
  
      original = build(1)
-@@ -69,14 +71,14 @@ def _run_reshard(save_root, ep_degree):
+@@ -69,20 +71,21 @@ def _run_reshard(save_root, ep_degree):
              state.to_local().fill_(value)
              expected[name] = state.full_tensor().cpu()
      original.optim._copy_main_params_to_model_params()
@@ -2439,7 +2624,14 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..3edbf474a08f2e3bec50007d25c3cdd9
      for ep in (ep_degree,):
          tm = build(ep)
          tm.load_state_dict_direct(
-@@ -107,7 +109,7 @@ def _run_reshard(save_root, ep_degree):
+             Path(save_root) / "ep1",
+             load_optim_state=True,
+             reset_optimizer_states_on_load=False,
++            constant_memory_planning=save_options.get("constant_memory_planning", False),
+         )
+         expert_names = {
+             name
+@@ -107,7 +110,7 @@ def _run_reshard(save_root, ep_degree):
  
          # The direct synchronous save temporarily changes EP checkpoint views and
          # then reloads live optimizer state. Check that all local shards survive.
@@ -2448,7 +2640,7 @@ index b98ed4185e41e9157f82bffad82522aeb00a1e95..3edbf474a08f2e3bec50007d25c3cdd9
          tm.zero_grads()
          for name, state in tm.optim.states.items():
              torch.testing.assert_close(
-@@ -122,14 +124,29 @@ def _run_reshard(save_root, ep_degree):
+@@ -122,14 +125,29 @@ def _run_reshard(save_root, ep_degree):
  
  @pytest.mark.gpu
  @pytest.mark.parametrize("ep_degree", [2, 4, 8])

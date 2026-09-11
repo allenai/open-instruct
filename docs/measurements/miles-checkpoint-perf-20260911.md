@@ -149,5 +149,18 @@ slowest writer determine the critical path. They wrote the same 222.18 GB total 
 the prior controls checkpoint. Aggregate throughput is about 0.51 GB/s including
 planning, or 1.92 GB/s for the writer phase alone. This run does not reproduce the
 reported 1,000-second save, but directly identifies metadata planning as its main
-checkpoint cost. Export, fingerprinting, and fresh-process initialization are measured
-by the harness separately from this direct-save timer. Exact resume is still pending.
+checkpoint cost. Export, fingerprinting, and fresh-process initialization are excluded
+from this direct-save timer. Exact resume is still pending.
+
+
+## Read-side follow-up
+
+Baseline resume stacks also observed the expensive PyTorch shard-offset calculation.
+The opt-in metadata control now selects an arithmetic read planner as well. It keeps
+PyTorch's chunk-overlap/resharding algorithm, strict shape checks, and missing-key/legacy
+key migration fallback. Original and candidate readers both consume either save policy
+in the CPU compatibility tests (44 passed, six GPU skips). A local CUDA toy run passed
+exact fresh-process save/export/resume and next-update log probabilities with this path.
+`checkpoint_profile` also logs total native load and individual DCP load-pass durations.
+The first full-model experiment uses the original reader throughout; a separate full-model
+run is required before promoting the read-side optimization.

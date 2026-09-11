@@ -62,3 +62,22 @@ def test_dense_backend_rejects_unqualified_checkpoint_policy():
     with pytest.raises(ValueError, match="Checkpoint writer overrides"):
         standard_models.validate_training_options(SimpleNamespace(olmo_core=CoreConfig(checkpoint_profile=True)))
     standard_models.validate_training_options(SimpleNamespace(olmo_core=CoreConfig()))
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_resume_uses_only_qualified_read_controls(tmp_path, enabled):
+    config = CoreConfig(
+        checkpoint_profile=enabled,
+        checkpoint_constant_memory_planning=enabled,
+        checkpoint_process_count=2,
+        checkpoint_thread_count=4,
+        checkpoint_compact_storage=True,
+    )
+    module = SimpleNamespace(
+        _miles_model_backend="moe",
+        _miles_checkpoint_options=config.checkpoint_save_options(),
+        load_state_dict_direct=mock.Mock(),
+    )
+    models.load_native(module, tmp_path)
+    expected = {"profile": True, "constant_memory_planning": True} if enabled else {}
+    module.load_state_dict_direct.assert_called_once_with(str(tmp_path), load_optim_state=True, **expected)

@@ -45,9 +45,9 @@ CHUNK_BYTES = 16 * 1024**2
 
 def runtime_lock():
     image_path = Path("/opt/core-rl/build/runtime/miles/runtime.lock.json")
-    path = (
-        image_path if image_path.is_file() else Path(__file__).resolve().parents[2] / "runtime/miles/runtime.lock.json"
-    )
+    checkout_path = Path(__file__).resolve().parents[2] / "runtime/miles/runtime.lock.json"
+    # Development containers mount source over an older image; record the active checkout.
+    path = checkout_path if checkout_path.is_file() else image_path
     return json.loads(path.read_text())
 
 

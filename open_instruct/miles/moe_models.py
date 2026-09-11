@@ -85,7 +85,9 @@ def save_native(module, path):
 
 
 def load_native(module, path, *, optim=True):
-    module.load_state_dict_direct(str(path), load_optim_state=optim)
+    options = getattr(module, "_miles_checkpoint_options", {})
+    load_options = {key: options[key] for key in ("constant_memory_planning", "profile") if options.get(key)}
+    module.load_state_dict_direct(str(path), load_optim_state=optim, **load_options)
 
 
 def validate_training_options(args):
