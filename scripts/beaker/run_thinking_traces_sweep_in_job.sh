@@ -130,15 +130,18 @@ fi
 probe_weka_read() {
     local dir="${HF_CACHE_DIR:-}"
     [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    # HuggingFace stores cache entries as blobs/<sha> with NO extension; the
+    # *.safetensors names under snapshots/ are symlinks, so matching on name and
+    # size finds nothing. Search the blobs by size instead.
     local f
-    f="$(find "$dir" -name '*.safetensors' -size +1G -print -quit 2>/dev/null)" || true
-    [ -n "$f" ] || { log "weka read probe: no cached shard to sample yet"; return 0; }
+    f="$(find "$dir" -type f -size +1G -print -quit 2>/dev/null)" || true
+    [ -n "$f" ] || { log "weka read probe: no cached blob >1G to sample yet"; return 0; }
     local start end mb
     start=$(date +%s%N)
     dd if="$f" of=/dev/null bs=1M count=2048 iflag=skip_bytes,count_bytes 2>/dev/null || true
     end=$(date +%s%N)
     mb=$(awk -v s="$start" -v e="$end" 'BEGIN{d=(e-s)/1e9; if(d>0) printf "%.0f", 2048/d; else print "?"}')
-    log "weka read probe: ~${mb} MB/s from $(basename "$(dirname "$f")")"
+    log "weka read probe: ~${mb} MB/s"
     if [ "$mb" != "?" ] && [ "$mb" -lt 300 ] 2>/dev/null; then
         log "  WARNING: slow node. A 700 GB checkpoint would take >40 min to load here;"
         log "  a healthy node on this cluster sustains 1500+ MB/s. Consider relaunching."
