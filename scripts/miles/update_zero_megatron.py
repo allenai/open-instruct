@@ -44,6 +44,11 @@ def prepare(manifest, *, driver, output, probe_dir):
     if argv.count("--use-wandb") != 1:
         raise ValueError("Expected the original tracking switch")
     argv.remove("--use-wandb")
+    # Native Megatron rejects a zero LR horizon even when no optimizer update is requested.
+    # Preserve the original 100-update constant-LR schedule; the driver still performs zero updates.
+    if "--lr-decay-iters" in argv:
+        raise ValueError("Expected the original implicit scheduler horizon")
+    argv.extend(["--lr-decay-iters", "100"])
     runtime_env = copy.deepcopy(manifest["runtime_env"])
     if runtime_env.get("worker_process_setup_hook") != "olmo_miles.compat.sglang_worker_setup.setup_worker":
         raise ValueError("The original Megatron/SGLang worker setup hook is required")
@@ -61,6 +66,8 @@ def prepare(manifest, *, driver, output, probe_dir):
         "runtime_env": runtime_env,
         "output": str(output),
         "num_optimizer_updates": 0,
+        "added_arguments": ["--lr-decay-iters", "100"],
+        "scheduler_horizon": "Original100 horizon retained for native scheduler construction only",
         "scope": "Actual trainer initialization and initial publication only; common diagnostic driver must not train",
         "changed_flags": [
             "--num-rollout",
