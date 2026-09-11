@@ -178,3 +178,22 @@ Both ranks shared a Triton autotuning cache. A rank-specific persistent cache is
 hypothesis test; it does not relax the exactness gate. The first faster-reader trial
 `01M28Y59M19RG252HTEY4BZ16D` was stopped during startup so it can be replaced with this
 controlled setup. The original four-arm job continues to measure save phases.
+
+
+## Compact/balanced writer result
+
+At 19:29 UTC this arm saved in 448.22 seconds (max rank), with local planning
+329.97 seconds and writing 117.51 seconds. Worker clone time fell from roughly
+42 seconds summed per rank to less than 0.02 seconds. Overall save time did not
+improve; eliminating these copies and changing replicated ownership did not
+remove the measured dominant cost. [Raw timings](miles-checkpoint-balanced-profile-20260911.json).
+
+[Baseline continuation details](miles-checkpoint-continuation-20260911.json) distinguish
+exact restored state/export from divergent post-restart computation.
+
+Replacement full-model read/write qualification: `01M28YRXD7NGGTHWBZ2RY3R1XX`,
+image `01M28YRP8WWWJGYTQ1JYRXSTVR`, OI `63c8cae42`, Core `48bb6d7e1`.
+It passed the updated GPU topology gate (10 passed, six larger-topology skips,
+three deselections) and uses separate persistent caches for each global trainer rank.
+The local cold-cache toy qualification also passed with all 18 cache fingerprints
+unchanged across restart. Full-model exactness is pending.

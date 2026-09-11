@@ -1,0 +1,34 @@
+{
+  "experiment": "01M28TFNGP78F24E6YNTTY4XMJ",
+  "mode": "baseline",
+  "ranks": {
+    "rank0.json": {
+      "saved_live_state_unchanged": true,
+      "restored_boundary_exact": true,
+      "hf_export_tensors_exact": true,
+      "score3_exact": false,
+      "score4_exact": false,
+      "final_different_model_tensors": 372,
+      "final_different_optimizer_tensors": 1509
+    },
+    "rank1.json": {
+      "saved_live_state_unchanged": true,
+      "restored_boundary_exact": true,
+      "hf_export_tensors_exact": true,
+      "score3_exact": true,
+      "score4_exact": false,
+      "final_different_model_tensors": 372,
+      "final_different_optimizer_tensors": 1506
+    }
+  },
+  "export_sidecars_identical": true,
+  "export_sidecar_files": [
+    ".complete",
+    "chat_template.jinja",
+    "config.json",
+    "configuration_olmo3moe.py",
+    "tokenizer.json",
+    "tokenizer_config.json"
+  ],
+  "cache_hypothesis": "Shared cold-start autotuning cache may overwrite rank-specific selected kernel configurations; not yet causally established."
+}
