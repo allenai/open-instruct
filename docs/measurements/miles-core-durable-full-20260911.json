@@ -1,0 +1,335 @@
+{
+  "schema_version": 1,
+  "qualification": "Full18.5B SFT native Core EP2 durable state round trip and independent trajectory comparison",
+  "experiment": "01M276Y2J577FPD6G6JYMS9NV6",
+  "job": "01M276Y2NNK61BRTNC5HVWDT86",
+  "result": "01M276Y2JEWDCTJ49BW16GRXMN",
+  "image": "01M276XWJQBR9EAT08V7S2MM77",
+  "source_commit": "5c5d5af5985d",
+  "runtime_lock": {
+    "base_image": {
+      "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+      "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    },
+    "schema_version": 1,
+    "sources": {
+      "miles": {
+        "development_commit": "64ba71950c973e458f22a8d10541475940c911b0",
+        "patch": "patches/miles.patch",
+        "patch_sha256": "e85add303ee3b7b38f4571e66b7b364a769b32e0fb096ab35e32f1447c173579",
+        "repository": "https://github.com/radixark/miles.git",
+        "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6"
+      },
+      "olmo-core": {
+        "development_commit": "290d2ca4521373bef0bf7fe4244673cc79dcc004",
+        "patch": "patches/olmo-core.patch",
+        "patch_sha256": "37579d412e9d29460e69ab2602b52bf032a7441c74af55bd8331c23580072233",
+        "repository": "https://github.com/allenai/OLMo-core.git",
+        "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5"
+      },
+      "olmo-sglang": {
+        "development_commit": "11ae9f6c4c131ded0ab67420e4f30ea67b924e99",
+        "embedded_path": "/src/olmo-sglang",
+        "note": "Base image omits original test files; runtime delta covers src/tools/docs. Full tests live at development_commit.",
+        "patch": "patches/olmo-sglang.patch",
+        "patch_paths": [
+          "src",
+          "tools",
+          "docs"
+        ],
+        "patch_sha256": "e1bb9d06028986c754782a832b6a78d6313e80ccaf7f466200d8a7e8a12d9751",
+        "repository": "https://github.com/allenai/olmo-sglang.git",
+        "revision": "81a312ee8326e279a4641e03542ef971a5ffb863"
+      }
+    },
+    "status": "experimental hero support; conversion and serving qualification in progress"
+  },
+  "status": {
+    "created": "2026-09-11T03:07:16.932932Z",
+    "scheduled": "2026-09-11T03:07:38.018627Z",
+    "started": "2026-09-11T03:08:57.575657Z",
+    "exited": "2026-09-11T03:58:50.819348Z",
+    "finalized": "2026-09-11T03:58:54.595963Z",
+    "exitCode": 1,
+    "idleSince": "2026-09-11T03:58:50.758889Z",
+    "ready": "2026-09-11T03:08:56.77474Z"
+  },
+  "aggregate_gate_passed": false,
+  "save_without_mutation_exact": true,
+  "saved_to_fresh_restored_exact": true,
+  "independent_fresh_start_trajectory_exact": false,
+  "final_resumed_vs_independent_control_exact": false,
+  "comparisons": [
+    {
+      "rank": 0,
+      "reference": "control/step2",
+      "actual": "split/step2",
+      "exact": false,
+      "mismatched_tensors": {
+        "model": 382,
+        "optimizer": 1509
+      },
+      "other_mismatched_categories": []
+    },
+    {
+      "rank": 0,
+      "reference": "split/step2",
+      "actual": "split/after_save2",
+      "exact": true,
+      "mismatched_tensors": {
+        "model": 0,
+        "optimizer": 0
+      },
+      "other_mismatched_categories": []
+    },
+    {
+      "rank": 0,
+      "reference": "split/step2",
+      "actual": "resumed/restored2",
+      "exact": true,
+      "mismatched_tensors": {
+        "model": 0,
+        "optimizer": 0
+      },
+      "other_mismatched_categories": []
+    },
+    {
+      "rank": 0,
+      "reference": "control/step4",
+      "actual": "resumed/step4",
+      "exact": false,
+      "mismatched_tensors": {
+        "model": 382,
+        "optimizer": 1509
+      },
+      "other_mismatched_categories": []
+    },
+    {
+      "rank": 1,
+      "reference": "control/step2",
+      "actual": "split/step2",
+      "exact": false,
+      "mismatched_tensors": {
+        "model": 382,
+        "optimizer": 1506
+      },
+      "other_mismatched_categories": []
+    },
+    {
+      "rank": 1,
+      "reference": "split/step2",
+      "actual": "split/after_save2",
+      "exact": true,
+      "mismatched_tensors": {
+        "model": 0,
+        "optimizer": 0
+      },
+      "other_mismatched_categories": []
+    },
+    {
+      "rank": 1,
+      "reference": "split/step2",
+      "actual": "resumed/restored2",
+      "exact": true,
+      "mismatched_tensors": {
+        "model": 0,
+        "optimizer": 0
+      },
+      "other_mismatched_categories": []
+    },
+    {
+      "rank": 1,
+      "reference": "control/step4",
+      "actual": "resumed/step4",
+      "exact": false,
+      "mismatched_tensors": {
+        "model": 382,
+        "optimizer": 1506
+      },
+      "other_mismatched_categories": []
+    }
+  ],
+  "state_counts": [
+    {
+      "rank": 0,
+      "model_tensors": 503,
+      "model_local_bytes": 19247158784,
+      "optimizer_tensors": 2012,
+      "optimizer_local_bytes": 111086019548,
+      "clock_at_checkpoint": {
+        "completed_steps": 2,
+        "next_rollout_id": 2,
+        "published_step": 1
+      },
+      "cursor_at_checkpoint": {
+        "epoch_id": 0,
+        "metadata": {},
+        "sample_group_index": 2,
+        "sample_index": 8,
+        "sample_offset": 2
+      }
+    },
+    {
+      "rank": 1,
+      "model_tensors": 503,
+      "model_local_bytes": 19247158784,
+      "optimizer_tensors": 2012,
+      "optimizer_local_bytes": 111086019548,
+      "clock_at_checkpoint": {
+        "completed_steps": 2,
+        "next_rollout_id": 2,
+        "published_step": 1
+      },
+      "cursor_at_checkpoint": {
+        "epoch_id": 0,
+        "metadata": {},
+        "sample_group_index": 2,
+        "sample_index": 8,
+        "sample_offset": 2
+      }
+    }
+  ],
+  "checkpoint_bytes": 222176117175,
+  "phase_elapsed_seconds": {
+    "control": [
+      750.9401635411195,
+      780.5890966951847
+    ],
+    "split": [
+      999.1099293418229,
+      969.5498643876053
+    ],
+    "resumed": [
+      1062.567141192034,
+      1034.0343996006995
+    ]
+  },
+  "scorer_vs_grad": {
+    "all_checks_exact": true,
+    "checks_per_rank": 8,
+    "active_response_tokens_per_check": 52,
+    "update_sequences": {
+      "control": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "split": [
+        1,
+        2
+      ],
+      "resumed": [
+        3,
+        4
+      ]
+    }
+  },
+  "scheduler": {
+    "fixed_horizon": 4,
+    "style": "linear",
+    "initial_lr": 1e-06,
+    "final_lr": 1e-07
+  },
+  "timing_observations": {
+    "native_save_entry_log": "2026-09-11T03:28:32.804Z",
+    "native_save_live_optimizer_restoration_log": "2026-09-11T03:37:25.276Z",
+    "save_interval_about_seconds": 532.472,
+    "fresh_native_load_cursor_ready_log": "2026-09-11T03:52:10.197Z",
+    "state_hash_snapshot_about_seconds": 180,
+    "interpretation": "Save interval includes native optimizer conversion/checkpoint IO/live optimizer reconstruction. Phase elapsed includes setup and exhaustive hashes; not a weight-sync transfer benchmark."
+  },
+  "artifacts": {
+    "audit.json": {
+      "bytes": 1246522,
+      "sha256": "9754b2456f534b075eb3268eb644d4b47add464c3d53403d5d1a768cbb6ae9aa"
+    },
+    "control/rank0.json": {
+      "bytes": 1923801,
+      "sha256": "ea3b4e270ce06c86da46605a51936a786275e973ad908a05fff27dfa1ccba6bd"
+    },
+    "control/rank1.json": {
+      "bytes": 1923801,
+      "sha256": "105307cd68504724ef7f1a7f87bf8405f615ba2c08d44033c88564ad280201c5"
+    },
+    "control/training_contract_rank0.jsonl": {
+      "bytes": 5766,
+      "sha256": "eae8806dfa5c588c987591c3e7cf7dde22f366fbc42b51061a0d999d05097904"
+    },
+    "control/training_contract_rank1.jsonl": {
+      "bytes": 5755,
+      "sha256": "a2d07525ecffcc008b9933618bf2f6dfc7bc11e5e310c8193901c715548e7aea"
+    },
+    "preparation.json": {
+      "bytes": 2550,
+      "sha256": "6562f7908141e55a523a887942a3fd1c457a1bfb632745eb29a101881d816a7e"
+    },
+    "resumed/rank0.json": {
+      "bytes": 1923616,
+      "sha256": "cb6e7b78b0a3bf5cb6f93c02c9cb14bbc7f68ba1a7c875e154ff973f84a240da"
+    },
+    "resumed/rank1.json": {
+      "bytes": 1923617,
+      "sha256": "cdaa963c3633e9fe951ae226b4327ec18cd7ca677fc14b6d9b1911df2a559fe5"
+    },
+    "resumed/training_contract_rank0.jsonl": {
+      "bytes": 2911,
+      "sha256": "d66e29e936283a67f9c2186b3e7f17e5ec0c7225277a65b0d8b7a0397687ab9b"
+    },
+    "resumed/training_contract_rank1.jsonl": {
+      "bytes": 2909,
+      "sha256": "31ccff197ae820c59301db0425fe233cf9d6794fcf28be615b865b30b3bcc568"
+    },
+    "split/core/rollout_0000001/complete.json": {
+      "bytes": 14235,
+      "sha256": "aeb23f4e8318fd0f466b4ec4fb5590a68e11d86b3054252e2fcf8de7786ff35f"
+    },
+    "split/core/rollout_0000001/pending.json": {
+      "bytes": 14148,
+      "sha256": "8c7fcbe8b992f6895437599918ca6875a644b92888577d0e4eb26455ca1e1a8a"
+    },
+    "split/core-latest.json": {
+      "bytes": 21,
+      "sha256": "22f1fb2ad41528983b2fa16a7443550cfc62bac9d7334c4eccb59fd74e2e4b4c"
+    },
+    "split/rank0.json": {
+      "bytes": 1923615,
+      "sha256": "c422308dbd3f789d66b2da5609cae38a007e3e23cc90044a413c27cc3f31ab0e"
+    },
+    "split/rank1.json": {
+      "bytes": 1923615,
+      "sha256": "f57eb77a7d7c0da054819864a58df240e544b6de9460dfc1775e0395b8946aa5"
+    },
+    "split/rollout/global_dataset_state_dict_1.pt": {
+      "bytes": 1573,
+      "sha256": "a1e1925b2aa9bc4c48bf7133bec0af86b8ec8dfea76b4f4697cecdcfffbc7967"
+    },
+    "split/training_contract_rank0.jsonl": {
+      "bytes": 2854,
+      "sha256": "da8122f28557bb16e5eda76a5dd259657dee3c694736cae31f7c27480a78523f"
+    },
+    "split/training_contract_rank1.jsonl": {
+      "bytes": 2854,
+      "sha256": "0c82d806a893fd35311995a01889c1bb076f551283f04df0dd4d813ceb2b00f2"
+    }
+  },
+  "tests": {
+    "image_cpu_targeted_tests": 11,
+    "image_cpu_seconds": 7.03,
+    "tiny_actual_gpu_roundtrip": "docs/measurements/miles-core-durable-local-20260911.json",
+    "ruff": "passed"
+  },
+  "interpretation": [
+    "Checkpoint roundtrip integrity passed exactly on both ranks for503 model tensors and2012 optimizer tensors per rank plus scheduler,RNG,clock,and MILES cursor.",
+    "The overall gate remains failed: independent fresh starts differed before saving, and final trajectories also differ. Hashes establish inequality but do not measure its magnitude or attribute it to checkpointing.",
+    "All scorer-vs-grad comparisons were exactly equal within each worker.",
+    "Periodic saves for a fresh longer run can rely on demonstrated save/restore integrity; bitwise trajectory reproducibility remains unqualified."
+  ],
+  "limits": [
+    "Four deterministic short synthetic batches; no SGLang publication or real rollout generation in this harness.",
+    "Fixed world2/EP2 and runtime; no topology resharding tested.",
+    "Runtime includes Core290d2ca scorer correction and differs from frozen Core100.",
+    "No checkpoint retention policy implemented; each full native checkpoint is222GB.",
+    "Resume currently loads initial HF weights before native checkpoint state, which adds avoidable initialization IO."
+  ]
+}
