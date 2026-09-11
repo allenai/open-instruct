@@ -142,6 +142,11 @@ records architecture, source pins, CPU-only execution overrides, 579 seconds
 elapsed and 72 GiB peak RSS. No optimizer moments were loaded.
 
 [Full-checkpoint scoring](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ)
-is submitted separately: Core/HF/SGLang at TP1, short mixed-length prompts,
-chunked prefill and decode graphs. Weight equality alone does not qualify
-forward math, distributed training or live publication.
+finished with exit one because both Core and SGLang exceeded the predeclared
+0.1 log-probability limit. All eight greedy tokens matched HF in both serving
+modes. Core maximum full-vocabulary error was 0.5473 (mean 0.08255); SGLang
+maximum top-20 conditional error was 0.5619, with sampled cached-decode error
+0.08974. These measure different subsets and are not equivalent statistics.
+[The retained report](measurements/miles-hero-serving-20260910.json) records
+the failed gate. Layerwise numerical diagnosis is required before advancing
+hero training; token agreement does not override the failed probability check.

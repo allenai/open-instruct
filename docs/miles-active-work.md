@@ -9,10 +9,10 @@ separate authorization.
 
 | Track | State | Next evidence needed |
 | --- | --- | --- |
-| Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128 at0/20/40 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
+| Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128→102/128 at0/20/40/60 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
 | Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe | Initial evaluation and full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
-| Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring submitted](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ), including Core/HF/SGLang, mixed lengths, chunking and graphs. Then real training/EP/publication qualification. |
+| Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. Diagnose before training qualification. |
 | Standard dense Olmo3 | Isolated standard trainer plus local full/sliding HF math and real update/resume passed | Full-checkpoint serving and a bounded training trial when prioritized; no claim of a full recipe run yet. |
 
 The first Megatron attempt failed at initialization; r2 was stopped at the user's

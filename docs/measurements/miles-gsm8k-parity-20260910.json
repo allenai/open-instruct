@@ -29,6 +29,12 @@
         "correct": 94,
         "total": 128,
         "at_response_cap": 22
+      },
+      {
+        "completed_updates": 60,
+        "correct": 102,
+        "total": 128,
+        "at_response_cap": 19
       }
     ],
     "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/un6so0cr"
