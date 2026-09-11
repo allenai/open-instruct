@@ -135,3 +135,9 @@ def test_native_and_full_test_are_separate_historical_series():
     assert old["native_eval"]["correct_by_step"]["200"] == 77
     assert old["full_test"]["after_correct"] == 274
     assert json.loads(light_sft_gsm8k.HISTORY_PATH.read_text())["manifest"]["model"]["megatron_iteration"] == "999"
+
+
+def test_runtime_history_is_inside_docker_copied_configs():
+    root = light_sft_gsm8k.HISTORY_PATH.parents[3]
+    assert light_sft_gsm8k.HISTORY_PATH.relative_to(root).parts[:2] == ("configs", "miles")
+    assert "COPY configs/miles /opt/core-rl/configs/miles" in (root / "runtime/miles/Dockerfile").read_text()

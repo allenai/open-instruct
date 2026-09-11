@@ -13,7 +13,7 @@ from pathlib import Path
 
 from scripts.miles.prepare_gsm8k_parity import derive_rows, digest, json_bytes, write_immutable
 
-HISTORY_PATH = Path(__file__).resolve().parents[2] / "docs/measurements/light-sft1000-gsm8k-historical.json"
+HISTORY_PATH = Path(__file__).resolve().parents[2] / "configs/miles/reference/light-sft1000-gsm8k-historical.json"
 ROOT = Path("/weka/oe-training-default/robertb/open-instruct/light-sft1000-gsm8k/20260911-v1")
 COUNTS = {"train": 7473, "eval": 128}
 CAMPAIGN = "gsm8k-light-sft1000-core-20260911-v1"
@@ -60,6 +60,8 @@ def checkpoint_descriptor(root, source):
     if not shards:
         raise ValueError("Historical HF checkpoint has no safetensors shards")
     headers = {}
+    router_tensors = {}
+    dtype_counts = {}
     for shard in shards:
         with shard.open("rb") as stream:
             size = struct.unpack("<Q", stream.read(8))[0]
@@ -68,6 +70,14 @@ def checkpoint_descriptor(root, source):
             raw = stream.read(size)
             tensors = json.loads(raw)
             for name, tensor in tensors.items():
+                if name != "__metadata__":
+                    dtype_counts[tensor["dtype"]] = dtype_counts.get(tensor["dtype"], 0) + 1
+                    if ".router." in name:
+                        router_tensors[name] = {
+                            "dtype": tensor["dtype"],
+                            "shape": tensor["shape"],
+                            "shard": shard.name,
+                        }
                 if name != "__metadata__" and tensor["data_offsets"][1] > shard.stat().st_size - 8 - size:
                     raise ValueError(f"Truncated tensor payload: {shard}:{name}")
         headers[shard.name] = {"header_sha256": digest(raw), "bytes": shard.stat().st_size}
@@ -84,7 +94,38 @@ def checkpoint_descriptor(root, source):
             else:
                 target.symlink_to(item)
     write_immutable(hf / "chat_template.jinja", template)
-    return {"source": str(source), "shards": headers, "weight_payload_hashes_verified": False}
+    torch = importlib.import_module("torch")
+    safetensors = importlib.import_module("safetensors")
+    for name, info in router_tensors.items():
+        with safetensors.safe_open(source / info["shard"], framework="pt", device="cpu") as reader:
+            original = reader.get_tensor(name)
+        original_fp32 = original.float()
+        delta = original_fp32 - original.to(torch.bfloat16).float()
+        info["payload_sha256"] = digest(original.contiguous().view(torch.uint8).numpy().tobytes())
+        info["bf16_rounding"] = {
+            "changed_elements": int(delta.count_nonzero()),
+            "elements": original.numel(),
+            "max_abs": float(delta.abs().max()),
+            "relative_l2": float(delta.norm() / original_fp32.norm().clamp_min(1e-30)),
+        }
+    if len(router_tensors) != 19:
+        raise ValueError(f"Expected 19 sparse-block router tensors, got {len(router_tensors)}")
+    return {
+        "source": str(source),
+        "shards": headers,
+        "weight_payload_hashes_verified": False,
+        "source_tensor_dtype_counts": dtype_counts,
+        "source_router_tensors": router_tensors,
+        "source_config_dtype": json.loads(config_raw).get("torch_dtype", json.loads(config_raw).get("dtype")),
+        "import_contract": {
+            "core_hf_load_dtype": "bfloat16",
+            "core_factory_dtype": "bfloat16",
+            "sglang_router_storage": "ReplicatedLinear inherits engine model dtype; no FP32 override",
+            "router_projection_compute": "FP32 F.linear(input.float(), weight.float()) in both current implementations",
+            "non_bf16_source_router_import": "Source FP32 values, if present, are rounded by BF16 model import; not identical original-precision policy",
+            "runtime_storage_validation": "Initial all-tensor publication equality gate remains enabled",
+        },
+    }
 
 
 def offline_rows(requests, tokenizer):
