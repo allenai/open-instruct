@@ -423,8 +423,8 @@ run_one_model() {
         ${FLASHINFER_WHEELS:+--with flashinfer-cubin==${FLASHINFER_VERSION} \
           --with flashinfer-jit-cache==${FLASHINFER_VERSION} \
           --index-strategy unsafe-best-match \
-          --extra-index-url https://flashinfer.ai/whl/flashinfer-cubin/ \
-          --extra-index-url https://flashinfer.ai/whl/cu130/flashinfer-jit-cache/} \
+          --find-links https://flashinfer.ai/whl/flashinfer-cubin/ \
+          --find-links https://flashinfer.ai/whl/cu130/flashinfer-jit-cache/} \
         "vllm==${VLLM_PKG_VERSION}" serve "$model" \
         ${extra} \
         --served-model-name "$served" \
