@@ -1,0 +1,387 @@
+{
+  "experiment": "01M279F38FPRHMTYQQYWQ17GSN",
+  "job": "01M279F3CEEZ010BW0V1GBZSZ1",
+  "result": "01M279F38PFJDFSNRAMSHXQXYH",
+  "exit_code": 0,
+  "optimizer_updates": 0,
+  "image": "01M26N80T0V9PREQTS87J849P8",
+  "worker_commit": "1ceaf0d35",
+  "scope": "Frozen Core100 initial weights; retained rollout5 tokens; EP2; FA4; rank-private cold caches; no serving, Ray ingress or optimizer step. Profile diagnostic excluded from warm mean.",
+  "trace_directory": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/score-profile-20260911-v1",
+  "ranks": [
+    {
+      "rank": 0,
+      "valid": true,
+      "report_sha256": "bcdf91eb847e80fd63b38908087da146ce1aed57c67b04e322f18c83cd8ca0e5",
+      "model_initialization_seconds": 108.22152009885758,
+      "input": {
+        "path": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/core/rollouts/5.pt",
+        "sha256": "c27d476689d09016da6d14198aaf0aff970c3fd7f29fb64dafa67c7b4bdc24fc",
+        "rollout": 5,
+        "partition": [
+          0,
+          2,
+          4,
+          6,
+          8,
+          10,
+          12,
+          14
+        ],
+        "lengths": [
+          1382,
+          901,
+          864,
+          904,
+          965,
+          1636,
+          1390,
+          2104
+        ],
+        "response_lengths": [
+          1212,
+          731,
+          734,
+          774,
+          832,
+          1503,
+          1191,
+          1905
+        ],
+        "balance_data": false
+      },
+      "passes": [
+        {
+          "name": "cold",
+          "wall_seconds": 230.4559794170782,
+          "cuda_stream_elapsed_seconds": 230.454171875,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 362,
+          "jit_miss_wall_seconds": 134.59248507022858,
+          "cache_artifact_writes_by_extension": {
+            ".source": 362,
+            ".ttir": 362,
+            ".ttgir": 362,
+            ".llir": 362,
+            ".ptx": 362,
+            ".cubin": 362,
+            ".json": 738
+          },
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 8882,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {
+            "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel": {
+              "misses": 98,
+              "wall_seconds": 25.177759965881705
+            },
+            "fla.modules.l2norm.l2norm_fwd_kernel": {
+              "misses": 25,
+              "wall_seconds": 6.623683770187199
+            },
+            "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel": {
+              "misses": 6,
+              "wall_seconds": 1.557966130785644
+            },
+            "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel": {
+              "misses": 16,
+              "wall_seconds": 3.6141075743362308
+            },
+            "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused": {
+              "misses": 6,
+              "wall_seconds": 13.004466296639293
+            },
+            "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel": {
+              "misses": 9,
+              "wall_seconds": 7.460368199739605
+            },
+            "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64": {
+              "misses": 6,
+              "wall_seconds": 6.720798561815172
+            },
+            "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o": {
+              "misses": 36,
+              "wall_seconds": 25.83436647662893
+            },
+            "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel": {
+              "misses": 9,
+              "wall_seconds": 3.21530929999426
+            },
+            "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel": {
+              "misses": 151,
+              "wall_seconds": 41.38365879422054
+            }
+          }
+        },
+        {
+          "name": "warm1",
+          "wall_seconds": 1.2491105999797583,
+          "cuda_stream_elapsed_seconds": 1.2490250244140626,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 8882,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        },
+        {
+          "name": "warm2",
+          "wall_seconds": 1.2338744709268212,
+          "cuda_stream_elapsed_seconds": 1.233798583984375,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 8882,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        },
+        {
+          "name": "warm3",
+          "wall_seconds": 1.2450617952272296,
+          "cuda_stream_elapsed_seconds": 1.2449864501953125,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 8882,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        },
+        {
+          "name": "profile_diagnostic_only",
+          "wall_seconds": 1.7503855130635202,
+          "cuda_stream_elapsed_seconds": 1.7503018798828125,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 8882,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        }
+      ]
+    },
+    {
+      "rank": 1,
+      "valid": true,
+      "report_sha256": "126470e3dd42d6590747517ad520dbabe4b2e2d2f624d5317bc1e1371f51f454",
+      "model_initialization_seconds": 109.12004704773426,
+      "input": {
+        "path": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/core/rollouts/5.pt",
+        "sha256": "c27d476689d09016da6d14198aaf0aff970c3fd7f29fb64dafa67c7b4bdc24fc",
+        "rollout": 5,
+        "partition": [
+          1,
+          3,
+          5,
+          7,
+          9,
+          11,
+          13,
+          15
+        ],
+        "lengths": [
+          1327,
+          1123,
+          1117,
+          1959,
+          1074,
+          1034,
+          1111,
+          2154
+        ],
+        "response_lengths": [
+          1157,
+          953,
+          987,
+          1829,
+          941,
+          901,
+          912,
+          1955
+        ],
+        "balance_data": false
+      },
+      "passes": [
+        {
+          "name": "cold",
+          "wall_seconds": 230.457767306827,
+          "cuda_stream_elapsed_seconds": 230.455890625,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 327,
+          "jit_miss_wall_seconds": 127.25246996199712,
+          "cache_artifact_writes_by_extension": {
+            ".source": 327,
+            ".ttir": 327,
+            ".ttgir": 327,
+            ".llir": 327,
+            ".ptx": 327,
+            ".cubin": 327,
+            ".json": 666
+          },
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 9635,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {
+            "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel": {
+              "misses": 64,
+              "wall_seconds": 17.10244512464851
+            },
+            "fla.modules.l2norm.l2norm_fwd_kernel": {
+              "misses": 25,
+              "wall_seconds": 6.641403790097684
+            },
+            "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel": {
+              "misses": 6,
+              "wall_seconds": 1.592691421508789
+            },
+            "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel": {
+              "misses": 16,
+              "wall_seconds": 3.6217425549402833
+            },
+            "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused": {
+              "misses": 6,
+              "wall_seconds": 13.294611650984734
+            },
+            "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel": {
+              "misses": 9,
+              "wall_seconds": 7.409396435134113
+            },
+            "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64": {
+              "misses": 6,
+              "wall_seconds": 6.798697158228606
+            },
+            "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o": {
+              "misses": 36,
+              "wall_seconds": 26.1473620403558
+            },
+            "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel": {
+              "misses": 9,
+              "wall_seconds": 3.2400473346933722
+            },
+            "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel": {
+              "misses": 150,
+              "wall_seconds": 41.40407245140523
+            }
+          }
+        },
+        {
+          "name": "warm1",
+          "wall_seconds": 1.248743622098118,
+          "cuda_stream_elapsed_seconds": 1.2486593017578125,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 9635,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        },
+        {
+          "name": "warm2",
+          "wall_seconds": 1.2348810792900622,
+          "cuda_stream_elapsed_seconds": 1.23480615234375,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 9635,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        },
+        {
+          "name": "warm3",
+          "wall_seconds": 1.2456365618854761,
+          "cuda_stream_elapsed_seconds": 1.2455550537109374,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 9635,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        },
+        {
+          "name": "profile_diagnostic_only",
+          "wall_seconds": 1.751868933904916,
+          "cuda_stream_elapsed_seconds": 1.751782470703125,
+          "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+          "jit_miss_count": 0,
+          "jit_miss_wall_seconds": 0,
+          "cache_artifact_writes_by_extension": {},
+          "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+          "residual": {
+            "valid": true,
+            "finite": true,
+            "tokens": 9635,
+            "max_abs": 0.0,
+            "mean_abs": 0.0
+          },
+          "jit_by_kernel": {}
+        }
+      ]
+    }
+  ],
+  "wall_seconds_max_across_ranks": {
+    "cold": 230.457767306827,
+    "warm1": 1.2491105999797583,
+    "warm2": 1.2348810792900622,
+    "warm3": 1.2456365618854761,
+    "profile_diagnostic_only": 1.751868933904916
+  },
+  "warm_mean_max_across_ranks_seconds": 1.2432094137184322
+}

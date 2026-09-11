@@ -1,0 +1,2142 @@
+{
+  "rank": 1,
+  "world_size": 2,
+  "passes": [
+    {
+      "name": "cold",
+      "wall_seconds": 230.457767306827,
+      "cuda_stream_elapsed_seconds": 230.455890625,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "bd6feb9f5cd381e25c6533d21508d5bb0abaf03425090dbc07d57815283561f6",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.22133628372102976
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "09cbc4b049dccab04f87d99cd7c063862e76f15050ff8c55fa87f79b22ff808a",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.19075702177360654
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "8947dd544f6b4bae882d1e2c9fb9b11d920c15f690f90d18936178ee31a5f803",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.1755870063789189
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "8b6ef3b10637dd322ea1566600b4834689e1ba55ab52d1a090a3f86cd05dad28",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.17372722504660487
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "769031812c252220a3a57a816e443201097c03a94bf2a6a603c2208a0f4f13ed",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.23544764192774892
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "c66b974c1768756d046c1c898151530b4c77b2b8b5d581a490a2d9e4ed923ccd",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.20033469097688794
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "e161a432b71828da92ab360f0f910a79889ca1330dc98fc4e542f716f89b676d",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.18479159101843834
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "fa8c4f51f0aa4ce23ee43b050c6dfffb053f3036e2fa8117e2022675649129d9",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.1792420451529324
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "6ea9d0b4459124d27c1666c8d1f086496f3dd9e96153b6cac7c15463da1a9ff6",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.34457409428432584
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "7a5578029e54efc164b84c5f03626aa8163a086b62cda16c2261f5442bdd1fcd",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.24397569242864847
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "a92b683e63e436249082774f37e8c3408700fdf7a2e50a60d8fa093f8e96d0e6",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.21607322292402387
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "70d0c7b03a3bd2ccf99b5848864eb639a3e63cf286d8e50013743197701b932a",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.1916067646816373
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "b7f81900f7ab7072be43b7c0ab9aa5a461488d0742ea757b760acde776f8ce2b",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.5730709270574152
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "0cd5d2526622405c9aadcad915aec9fa8a408ef25e3e9935f42fa275daa283ae",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.34270085906609893
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "590d6dade3f690686b1265fba520f721421faf90ab15bafdb922be2734253dbc",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2472820868715644
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "2182bf38eb7fbc3c25077739497f3646a9370dfde77c2d4d42b89a6390566faf",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.21465607080608606
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "5cfa58c66878da8744d4ed19f5dc209b3a7da1321f487e86868bde1cc6028b21",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.19865201320499182
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "36198f3d4d7ab41c02e6885481a19d45c0805caac4ff4d272de32836c9b8ba93",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.18738141795620322
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "38b47983cfa3e15497edab0014eb68620c74d9288d8d8078372d3ae0a4b45e8f",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.17588470689952374
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "7cc0af75fc21002918f26f76201ee48852e7c554088b03c677a1e40cf03e052d",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.17405992513522506
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "afd31530768d7baa0b9fa05813275878cd9d766b160d68464eab1f0d46884c6c",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.23809781577438116
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "f5269d5dffc9e08beb041fe065f9a83b8265f2537f72f855605568af88fba6e8",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.20871599996462464
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "777e1e15a752541a8ffeea636c35ebb409e0c537c3ccc9081bbf1360d4b4921a",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.19000694388523698
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "e12054a7203fb7f97c553974b5b9c0ba7f1c5aaac51ee49168973cb7680ef5f4",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.1807125429622829
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "9014e64b8c4a64e5158d3d24fb2c497e581eb771b23c673bfbc157645915c3cd",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.3286456158384681
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "0315432aec475a5b5e3ffad695ee6b5c221a92b877e7873305ffc4f580a89d1d",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.23896549781784415
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "b0038a714967bed82060e37d5c87529c05c4cbb79544d05984ade267d8bb2f68",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.21156154107302427
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "9782d61d7b63f2f1fd232e43f1158b8cce9694aa60151d5e379be778baab7b18",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.1874299282208085
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "6baa7900b6aa2bb5f45e5c2b05141d4e34b8fbc0359481e5476dad32d44fb30a",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.5646537030115724
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "7c94e9ea30f86115600b5698425fc46a4f018e020281fa42c045ec20eeedb943",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.33876021718606353
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "538f5ca55da5f6001223f0713aae31085864f9e7f295feb410154a184f4da20c",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2552197449840605
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "21c05cdbdedb625962d4dee81edafb1584015520efb91de6eeac1c93ca421027",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 2, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.22279610391706228
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "5d119f0fce53861c12651dff52429be1e08cb1082d61d52ba9dde1a213a1a1a1",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 8}",
+          "wall_seconds": 0.15751091903075576
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "dd9a81097af078b608fcb7e914a0c9e269b44ff282ba20b3052ea63270dd7b1a",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 16}",
+          "wall_seconds": 0.20062227034941316
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "42f709ac6603c5319b0c3eb1aa18cd74320e18b599851a9f3f44b3740cbad5fa",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 32}",
+          "wall_seconds": 0.29843267798423767
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "5c126fdcf2c1651fa6f7420654d75ea8779a7baf1199035699cfdd929f995de7",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 64}",
+          "wall_seconds": 0.5663371309638023
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "fec84104e5daf1e4488996053ee7a37165d9ca8bdd9548714312121711fe5f50",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 128}",
+          "wall_seconds": 1.4527257611043751
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "cc12c9600d02fa769ca32e68c0e14ebe72b9a35c5068071096cebccfc994708a",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 8}",
+          "wall_seconds": 0.15444011520594358
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "eb6bff1b23144e1946e3c5fb2422ecb9d71e072c3daf11e7798d8bc7ed4d0c69",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 16}",
+          "wall_seconds": 0.17278788005933166
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "7c77a0410df6e508b210b4606a15d3f7d71e37eeb6870d6d7501c8340c6dedd7",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 32}",
+          "wall_seconds": 0.20903496211394668
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "2a7aa8f3715ec02d8106f5809e78496184e90b8435c1f57a1937dc7bfdd69a6f",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 64}",
+          "wall_seconds": 0.31998058408498764
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "207cc1d19b6e1d9dfb47d046ede88da6dc00bfb861d557fc4153f3ee601d5e8f",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 128}",
+          "wall_seconds": 0.5942385690286756
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "5d674d84a60305f67ea33ed1662cc1ba5f5603ca065ccaef3e9412709ab79806",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 8}",
+          "wall_seconds": 0.14390560938045382
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "944344ccd98a882779f059102c8000e3c7e49e764aa3615ba60eb7577229d2fa",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 16}",
+          "wall_seconds": 0.15802083304151893
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "32a505ab81446302924ee098e130b6336f33ebcbdf763ff833872afeb00c2674",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 32}",
+          "wall_seconds": 0.16748039796948433
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "0f10112097844a547437b6320e723a7a9b4a437b4ccc0b5179a7c851d524a225",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 64}",
+          "wall_seconds": 0.2107607489451766
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "02a3b0400c1be667396f4569896fdf900366ea7dda7ebe24becd8529269e389a",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 128}",
+          "wall_seconds": 0.32857723999768496
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "6457f5e5fcc27021b05da8f9e035e54bd0a90066d16b245b965514fb55505577",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 8}",
+          "wall_seconds": 0.13609939999878407
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "580cc374b16307cf0527005b4390491c149be1954f0fdaf6ba533559a25293b3",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 16}",
+          "wall_seconds": 0.1407784828916192
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "b5c1a4d5441389e7fef029e40c80edd41de433424599a8d9b937cfdc90bf8896",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 32}",
+          "wall_seconds": 0.14489975571632385
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "4c5bc6e662444980acd11c2759ea7d1435e97808bdf26622e75060b236b00dce",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 64}",
+          "wall_seconds": 0.16846398962661624
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "73b263991719d8d1590ea1c605b2e9ceeac92f9e94463b57c01868b60e6abe95",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 128}",
+          "wall_seconds": 0.21015436621382833
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "c923173bdaf72f0fbc3c4063570486c464e6ee9e17a43a97a5f1b28e184a4012",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 8}",
+          "wall_seconds": 0.12974560679867864
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "37a44a9a443be4eeb9c07e3891da9f82c3ef631029cc448b3b691119e874bc6e",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 16}",
+          "wall_seconds": 0.13672820199280977
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "73a926eb225574945f215a71e6558edc937c3c5cdc74f901fbd9b4cfedca97e7",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 32}",
+          "wall_seconds": 0.1305652530863881
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "ddb452f95e275fa185f77f55c9a201bf9afe55655f8b4fb0cd942a8c60ed42d8",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 64}",
+          "wall_seconds": 0.148422843310982
+        },
+        {
+          "kernel": "fla.modules.l2norm.l2norm_fwd_kernel",
+          "key_sha256": "e3025310b3c25cf7129dbf1f31347fa7a700218628494a9573b0bf1110b38b24",
+          "constexprs": "{(5,): 128, (6,): 128, (7,): 1, (8,): 128}",
+          "wall_seconds": 0.16069019120186567
+        },
+        {
+          "kernel": "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel",
+          "key_sha256": "1664d3899930d048c13444fb447bb31c191b82787e56599a2d83e1b44d685154",
+          "constexprs": "{(5,): None, (6,): None, (7,): None, (9,): 16, (10,): 128, (11,): 64, (12,): 32, (13,): False, (14,): True, (15,): True, (16,): False, (17,): False}",
+          "wall_seconds": 0.28308211313560605
+        },
+        {
+          "kernel": "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel",
+          "key_sha256": "1ec262c50c007c7b3c82488ab668516447796b851e5e3e899b073d4d2cc5983e",
+          "constexprs": "{(5,): None, (6,): None, (7,): None, (9,): 16, (10,): 128, (11,): 64, (12,): 32, (13,): False, (14,): True, (15,): True, (16,): False, (17,): False}",
+          "wall_seconds": 0.20396688487380743
+        },
+        {
+          "kernel": "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel",
+          "key_sha256": "78d83eeed5d453a8a098d029322b5a8de6b629ec00a870d668e4935d668da2a1",
+          "constexprs": "{(5,): None, (6,): None, (7,): None, (9,): 16, (10,): 128, (11,): 64, (12,): 32, (13,): False, (14,): True, (15,): True, (16,): False, (17,): False}",
+          "wall_seconds": 0.1768563468940556
+        },
+        {
+          "kernel": "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel",
+          "key_sha256": "3193759b4a977933af7402ed32cba36b8794a71cffd61f2f8fe619082f940d38",
+          "constexprs": "{(5,): None, (6,): None, (7,): None, (9,): 16, (10,): 128, (11,): 64, (12,): 64, (13,): False, (14,): True, (15,): True, (16,): False, (17,): False}",
+          "wall_seconds": 0.40847215987741947
+        },
+        {
+          "kernel": "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel",
+          "key_sha256": "28f16cc8eb4d9eb87120c1a27ad4ea61570a17b229c18d21b9b9c6ac9b07db41",
+          "constexprs": "{(5,): None, (6,): None, (7,): None, (9,): 16, (10,): 128, (11,): 64, (12,): 64, (13,): False, (14,): True, (15,): True, (16,): False, (17,): False}",
+          "wall_seconds": 0.2934536053799093
+        },
+        {
+          "kernel": "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel",
+          "key_sha256": "b0bd582c1d4f9c2f2781e75e6a321a23b97e028485008eabaf6e64dbe62390c7",
+          "constexprs": "{(5,): None, (6,): None, (7,): None, (9,): 16, (10,): 128, (11,): 64, (12,): 64, (13,): False, (14,): True, (15,): True, (16,): False, (17,): False}",
+          "wall_seconds": 0.22686031134799123
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "fedb0dc4abf520144fd3733f477defec4f286ec82b8bc695b94ff94bc2e2b513",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 1, (16,): False}",
+          "wall_seconds": 0.2080837581306696
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "f93cab61440f69f7ff52d9cc1cfb3aff79c1616381c03dbd9e7eed8f008fd2cf",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 1, (16,): False}",
+          "wall_seconds": 0.19638242525979877
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "8941763c6153684efd0095bae69f9624a17fa5a8c65905852ebd683ae589aa4b",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 1, (16,): False}",
+          "wall_seconds": 0.18927705893293023
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "9027c6b70b92e374a5b3806843e17c38847fb696c8ebf12067c105b659f39cc0",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 1, (16,): False}",
+          "wall_seconds": 0.20302143273875117
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "86d20c6d776810108e94fad401fc2d46def51fa2f4087378f067d9731abce1bd",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 2, (16,): False}",
+          "wall_seconds": 0.21570376073941588
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "c6a735dcbdd4578b428050afc0ee6d7e6e9049356ef4334abd986f21f7739069",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 2, (16,): False}",
+          "wall_seconds": 0.2180915200151503
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "3358c63642c084b380a3579af139406ff2f90765c98816e7690cd0c14a71d853",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 2, (16,): False}",
+          "wall_seconds": 0.21674385387450457
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "bbc5fdcb8905b076a186702a5bd499025269f753f36d7628aae00fb6ae739f8f",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 2, (16,): False}",
+          "wall_seconds": 0.2093611527234316
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "bf3bd967f66d2bfabbd86dc54998bd4f6bd9f172836509c628108e54485d130d",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 4, (16,): False}",
+          "wall_seconds": 0.2455975180491805
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "82e668ee8e5958794e613347c1329d86aef79f427869034e227b94bf96876a07",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 4, (16,): False}",
+          "wall_seconds": 0.22892157128080726
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "7c232938024d4256d4134e23b4efb6f1941f32d5f2490f0cf7a9effc00981fd8",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 4, (16,): False}",
+          "wall_seconds": 0.2156717823818326
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "96a465c7c3df2ed56776e1fdb3cb12d05f4e662035257f4dd3e289dbf70217c3",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 4, (16,): False}",
+          "wall_seconds": 0.2354045589454472
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "bf3224457b5bd407200117f2b9f65c7d17328c7f2f76d4a36fe3ab274d58dcce",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 8, (16,): False}",
+          "wall_seconds": 0.3144380231387913
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "90d28d1f21a53990eaecb0ce5198c4fc012bf480291c43557d36453faddc9e85",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 8, (16,): False}",
+          "wall_seconds": 0.2562141977250576
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "f09bdb9c206d2fb4213516c6ab6397f52686161d77862ac288c9482c0a84c812",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 8, (16,): False}",
+          "wall_seconds": 0.24783064611256123
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel",
+          "key_sha256": "54885f36af49c1b4b9873ed5662c3f0a3cb860cb0926cee8f282cf1bc82df372",
+          "constexprs": "{(7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 64, (14,): 16, (15,): 8, (16,): False}",
+          "wall_seconds": 0.22099929489195347
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused",
+          "key_sha256": "0f30e0a7453188968cc2aa1a49a2b71dbee95cd1fd5e4ab50051e1532db9f6f6",
+          "constexprs": "{(8,): None, (9,): None, (11,): 16, (12,): 16, (13,): 128, (14,): 64, (15,): 16, (16,): 4, (17,): 32, (18,): False, (19,): False}",
+          "wall_seconds": 2.1416432461701334
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused",
+          "key_sha256": "8e5fc2bf57cf9c235a3481208e96af914b4585d40b2a195d6bc6bfc3a505b366",
+          "constexprs": "{(8,): None, (9,): None, (11,): 16, (12,): 16, (13,): 128, (14,): 64, (15,): 16, (16,): 4, (17,): 32, (18,): False, (19,): False}",
+          "wall_seconds": 1.7942683571018279
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused",
+          "key_sha256": "6b65750858fec6c3b228b7818af7b3727d4c9ecf4d01d2f5e30ba3c22b827880",
+          "constexprs": "{(8,): None, (9,): None, (11,): 16, (12,): 16, (13,): 128, (14,): 64, (15,): 16, (16,): 4, (17,): 32, (18,): False, (19,): False}",
+          "wall_seconds": 1.7959132208488882
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused",
+          "key_sha256": "dd76987cbe26302b47d5d357dd227fc756ff3994f5568c9d9ccc045c7397615d",
+          "constexprs": "{(8,): None, (9,): None, (11,): 16, (12,): 16, (13,): 128, (14,): 64, (15,): 16, (16,): 4, (17,): 64, (18,): False, (19,): False}",
+          "wall_seconds": 2.7988288649357855
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused",
+          "key_sha256": "c50def185326f993a4856b366bf62b96638be70df98d0ada595436916a997adc",
+          "constexprs": "{(8,): None, (9,): None, (11,): 16, (12,): 16, (13,): 128, (14,): 64, (15,): 16, (16,): 4, (17,): 64, (18,): False, (19,): False}",
+          "wall_seconds": 2.5534086357802153
+        },
+        {
+          "kernel": "fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused",
+          "key_sha256": "c295afc23fdcf4bee56e791f167ad672a0f6face4c6e676a5ebb95ea8f9f6015",
+          "constexprs": "{(8,): None, (9,): None, (11,): 16, (12,): 16, (13,): 128, (14,): 64, (15,): 16, (16,): 4, (17,): 64, (18,): False, (19,): False}",
+          "wall_seconds": 2.210549326147884
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "16825bfe8115282c03d284c3000b37ab14f9e12359fcd2015506c6c70be95945",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 1.0894031831994653
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "53c8af12637c680c478a31cfc46d5cbbc9dd82d7ecfc8f127c1e33076a2b4466",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 1.1598133756779134
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "004ec6c18b5319d612ddabfae0f66cb5248ccd3beb9e337daf5ea35161997490",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 1.2662770501337945
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "0238ab301e12ec2c9af13f85d90047a758ffd7537bd7dd9f20ff54e9fa2f04b1",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 0.6892838310450315
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "01e1095d8afbb6ba03b6a3baf19105cf46854e1de4b345d679b0e1474aa67f97",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 0.7431866829283535
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "edb86dab50f66f246b1d86a8846d66abb4f70d6551a41123b40480884cf2d086",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 0.7813881281763315
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "79a4760e0f96a289f435c92b89945a6d70c600e7cfae1502ebcc9aecd9ea39d3",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 0.5007800948806107
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "5c891f0de60eb3fb6630190623ae6a7db8c8eb2d42d8ccda277a25636e70b000",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 0.5863299109041691
+        },
+        {
+          "kernel": "fla.ops.kda.wy_fast.recompute_w_u_fwd_kda_kernel",
+          "key_sha256": "79ec6a60f3d80bbb9105dfc54f160ba8c01ada0092e4ff253a905fd0c1032e84",
+          "constexprs": "{(0,): None, (2,): None, (10,): None, (11,): None, (13,): 16, (14,): 16, (15,): 128, (16,): 256, (17,): 64, (18,): 64, (19,): 64, (20,): False, (21,): True, (22,): False}",
+          "wall_seconds": 0.5929341781884432
+        },
+        {
+          "kernel": "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+          "key_sha256": "a931d79654ae757bcd6c5e5443e9ae1c6b22340fcadacff6f125cfc161cd9aa4",
+          "constexprs": "{(4,): None, (7,): None, (8,): None, (9,): None, (10,): None, (12,): 16, (13,): 16, (14,): 128, (15,): 256, (16,): 64, (17,): 32, (18,): False, (19,): True, (20,): False, (21,): False, (22,): True, (23,): False, (24,): False}",
+          "wall_seconds": 0.8315800172276795
+        },
+        {
+          "kernel": "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+          "key_sha256": "7e08398ced094817f54a2f615c60c9c13007dd71041120566db2c40a19082e24",
+          "constexprs": "{(4,): None, (7,): None, (8,): None, (9,): None, (10,): None, (12,): 16, (13,): 16, (14,): 128, (15,): 256, (16,): 64, (17,): 64, (18,): False, (19,): True, (20,): False, (21,): False, (22,): True, (23,): False, (24,): False}",
+          "wall_seconds": 1.1382879400625825
+        },
+        {
+          "kernel": "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+          "key_sha256": "45853807422ce0778993ca7dd44f725d3209d5efbd4aa055bf855005bba828e7",
+          "constexprs": "{(4,): None, (7,): None, (8,): None, (9,): None, (10,): None, (12,): 16, (13,): 16, (14,): 128, (15,): 256, (16,): 64, (17,): 32, (18,): False, (19,): True, (20,): False, (21,): False, (22,): True, (23,): False, (24,): False}",
+          "wall_seconds": 0.8989587449468672
+        },
+        {
+          "kernel": "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+          "key_sha256": "56e781f63dea4d2b3f520dbb906533db2c44c410a3809747efd28855aa0fee50",
+          "constexprs": "{(4,): None, (7,): None, (8,): None, (9,): None, (10,): None, (12,): 16, (13,): 16, (14,): 128, (15,): 256, (16,): 64, (17,): 64, (18,): False, (19,): True, (20,): False, (21,): False, (22,): True, (23,): False, (24,): False}",
+          "wall_seconds": 1.3292010258883238
+        },
+        {
+          "kernel": "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+          "key_sha256": "4ce746cd1a1ade0130ddffdc340712b6fc5eecd187792a78328ff075a645be08",
+          "constexprs": "{(4,): None, (7,): None, (8,): None, (9,): None, (10,): None, (12,): 16, (13,): 16, (14,): 128, (15,): 256, (16,): 64, (17,): 32, (18,): False, (19,): True, (20,): False, (21,): False, (22,): True, (23,): False, (24,): False}",
+          "wall_seconds": 1.1466096881777048
+        },
+        {
+          "kernel": "fla.ops.common.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+          "key_sha256": "ad512ddcc20ac98f9a994f35c4cd7ecad8a716b2837d0e7d1fcf723f9a97da6a",
+          "constexprs": "{(4,): None, (7,): None, (8,): None, (9,): None, (10,): None, (12,): 16, (13,): 16, (14,): 128, (15,): 256, (16,): 64, (17,): 64, (18,): False, (19,): True, (20,): False, (21,): False, (22,): True, (23,): False, (24,): False}",
+          "wall_seconds": 1.4540597419254482
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "8acbc776321797710492594fb6e0d3f7f1797c588cc953ae0420b1ff15cf4dcd",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6901577217504382
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "f40515f29b987b32257db5f16800cee269f8104a180b822664087c6abec61a2e",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6716422503814101
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "a8f26e43f89eabb0fc1f6c862bd9b871cf45fdb5a9c9d4d6c3a41217def9e6d4",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.660587620921433
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "313da6689560dbcf46ed9f5a8b84a3a51f32c66cda319cc86bc05f012d54143f",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6565261599607766
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "0ccc4e41738a47bbe273d62191c60dc0d276ae80ac697a8a6c1640cd04ad65f3",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6500860909000039
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "83b91d206d5b0bac072cbba3dd07bb3ec6eee459627d27c3f69fb4ca1b442f52",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6511496379971504
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "d8e8d02aa34a1c391506ce9b00eb9d96bf290cf0c6df9001db28db1fc4c449e1",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.561503860168159
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "3f1c7bce3d150a7c62088bb47ae5221eb368a2187911a571411d08003fcf1328",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.561206913087517
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "b14d93301851fb56e2874d995b9cc54df68846684167c2179b776f3e9c0ce23d",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.47763573564589024
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "39cba66b51f2362e50ae8590b5dacde59e5dcf0aad23605c8686a9d17d9df81c",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.9608797593973577
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "16cb31c2e63bc44eb248faa1c22c1b5c6a0f3cd68b5462f985c5259fc3c96445",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.9825238357298076
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "5e2ff4d9fe71def46f02df377fdd81217c68f901b2a1ef7ae87a7c9cc58412d1",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.9729129406623542
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "b9ee174f9b8c9f44d5754b22a29cc182098b2025362366a03345ca738b8a13d7",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.7699639513157308
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "4caaab5a0e0bbbc894159d53b7c949b4e8485d2ad5039fada0c63d0f0a78747a",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.7689078110270202
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "77db565e73ff7014dd2c85a1bdcb5967ac9b06192e1cc05257f8c6f0bcaf9f18",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.7711290181614459
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "7b04cea604f2f40340f2c59bcaccf73e0436ca13bdb0fd9b7f2e8e4c7c37124a",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.6304226899519563
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "1e23007bf544672d16b6c49cc4d4dc3ee8b070076648aa49564ed3d4b5c9bda6",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.6132158390246332
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "007bf9ead2ea3c5605279e85f8e9aa6a182bc4b3b4b641332bc36a02ea50b188",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 32, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.6225445866584778
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "c06894a0974a15e24e58c94bb760786271019ee1819fb413598d076043b15484",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.7198574342764914
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "4e63b049294e70c57783dd83c32992eb616f28fe921faf8560dd006b9a43c9d6",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.7270228201523423
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "d3edda48467a7a8f2a2f4178a94accee62a809ce315384b21cab2fcb1fa4ff4b",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.7351535046473145
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "7f59177dfea8398e6d807245c7c1fc16b8e47cdfcec9d779988d4578427ba89a",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6651311619207263
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "44e0f1ac06efffc05e7216103c9b14c170542f63566adebe30fb67e4cbcba090",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6768630580045283
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "517f1ee403bb4d777b0531c4c212700b559b6b547cde8765ed1150630723f0cf",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.6708586607128382
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "99de37cfe25d4a86ddc49b26bdd0c13b6924f71862b7e6f061b53324daa2b393",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.5530830230563879
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "98666e5816ce04f9d8fbd2c36c74aa232018c36f58f215e8724d3f494ae587bd",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.531717337667942
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "be0466bd9b294d970418431583bfaf4ae0babc66a4ec1ed2181bf9117f12082f",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 64, (17,): False, (18,): False}",
+          "wall_seconds": 0.5531300781294703
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "af18dfa790cc62547bdf1eb2210b842e9bf0b70ecab11d111d99d06b1291cd01",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 1.1061316370032728
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "e27573c315b01963f9ef8af2f8b0632f4ac94b6e3dc07ea076623587f34526a6",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 1.09606910077855
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "b3551766a695465ff0070fff6cebae5c31eeda279f5ee25720c2fbcaae7b6c25",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 1.0917426580563188
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "a38b779da61848eff7ed7b20c07d18a767404f8ea7f3f4e647063c33d471c064",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.8261450282298028
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "2facac6dbe370e3b9f724695b372fded8d95a1f8ffb88fa6098ac99eaff1ffe3",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.8293583141639829
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "d49fb83749a38632844d919c9a783824e29694bfc43c38f79ebf6aa6e0264788",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.8110842132009566
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "7075785f5de084f341dd6c4a9dedbd075f58a1aee038573df2610a8a443af9ee",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.6296056406572461
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "410a87eb53f3d884d84c6840b44af01ae2adf2e8c5314790126e8f522992a94e",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.6295285997912288
+        },
+        {
+          "kernel": "fla.ops.gla.chunk.chunk_gla_fwd_kernel_o",
+          "key_sha256": "6bd3f9aff9b50f2043c146b2d8fcc4c1ba3d77850eb3a6724a811a2e32e30fca",
+          "constexprs": "{(6,): None, (7,): None, (10,): 16, (11,): 16, (12,): 128, (13,): 256, (14,): 64, (15,): 64, (16,): 128, (17,): False, (18,): False}",
+          "wall_seconds": 0.6218833471648395
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "fe37d91975899ed55480090fce042b6f4adf275aefa083b23ba4d8b048f3d82d",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 16, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.29284374974668026
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "c2e6a6791ac8f72b10dced5fa009a16c709a0e9b61a3652da88a38d5796ba0bc",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 16, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.2255594707094133
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "cc2c3edfed3b02511f2de03d048390041c39afa335a85fdcd4a437e349f03c95",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 16, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.2068085791543126
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "64663cb800c0f56ae8ebe2627b9c1b6df25925a21d3000706e7a9a0856a91bc1",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 32, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.4290577028878033
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "75b5f91f3adf48cd2cd2cded011a11521890b04c078317b1a83d93087a8a8deb",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 32, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.2980761048384011
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "df5cb248ed83860606f5c58c5844c707ab3fb28e5b15bca4e7ab6ca0a203fcb8",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 32, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.23112613335251808
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "4704c52097523b6c1e5caa15e64db6adfe86dcd84de2dafeb54369459d0046bb",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 64, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.8240961469709873
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "9a295ed72eec6e130df64a8cc47bbfb37625a129df3309895d5e9aef7f8acff2",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 64, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.44018422393128276
+        },
+        {
+          "kernel": "fla.modules.fused_norm_gate.layer_norm_gated_fwd_kernel",
+          "key_sha256": "a790547b9e535e62fafbb2485ecd74cd62f1377304051538c618bc0047db74e2",
+          "constexprs": "{(4,): None, (5,): None, (6,): None, (7,): None, (11,): 256, (12,): 64, (13,): 256, (14,): 1, (15,): 'sigmoid', (16,): True, (17,): False, (18,): False, (19,): True, (20,): False}",
+          "wall_seconds": 0.29229522310197353
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "978cdbb08f5760f522e7a0e2e4e6f2561a1036534aadf97bb2ab58d93bffa945",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22321, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2837553839199245
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "049e6c94a5a5e7a0f84b6dcceb15ce6595dd41159e0b9259a73997a2f10cd3b9",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21556, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26830123411491513
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "3627865317f1779aae0b5648a8fa6e4b1c3645228f558f056b3f7a9f44796719",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21339, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2660158397629857
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "3f4473de12e43ac43db93ba7fb758ae3b2dd24dd61d8e2b1cd227470de351118",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21399, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28048206586390734
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "dc1ed9acb3b5427428aaa9eeb8110d8006582059bfd21e5744ef5386a55ef933",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22733, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26906599570065737
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "ef41fd4f30ce9509def72558233a716a0482d2458e045e1c1142603338fe049d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21843, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2673849379643798
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "cb7d1b7164f425df2164c7461e75a8877fd00f4ad20bc425b9f95f6327164bf5",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20813, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2649154420942068
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5305ab244f2246af48169394dc40e4b8359b7715d61f0ca001a8dcd9d94c4f43",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21687, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26672314712777734
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "39840e882333f02087c9f2d0947935cc904f710ef258b361304cf4342cdf2164",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21406, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2640847200527787
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "72ad4e8abf99e4df3d913a6b1e59b862e2da07742617a1c7b72c7e2f15c4bc43",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21443, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26361248595640063
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "3b9e4ba450185f81b30c479b26c99144ad49e1d097e8b270fcab1d672aac196c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22251, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26484732097014785
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "6e4c8f7acddc744b991c9b2f8599be93ab2723d51ce817537cc3f41d5ecda0f4",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22795, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2880879598669708
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "1f0d3bffa656c93509956d1f52516b7d039fe3b3370f15bb52d5a4e707c9b397",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21531, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.272325973957777
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "63908cad5713496e37d482a63c9ded0498e1e8affb65da0abc6bb5fa9a1ec049",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21451, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2699711970053613
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5dc9dde67bf437b8ab2d3f6a4ac4b264b10eba0fc5fd9492eddf4b078f801e89",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22754, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26711071934551
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "636c466c22a6707a822d9d039ee1c2598a428fd47fb7d1dfdda9bc617212ddfc",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21809, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2667011362500489
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "a0f4ca79455a5606b6e42fb6c75b032a7c1874106e63cda5bf007f2a953ba9d0",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20948, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2641224809922278
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "86799d48fe0c4bb7653907e3604bd903914878cb4ade1a175ba276ad67ab9dc3",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21473, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2659438829869032
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "fafaa752cb7317fd75951b158c04c5d72893ba25eeb6d1cf7e5498e88483df16",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16857, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2722091106697917
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "9713a0a57d03f9b2b0a2dacb7414b12d11c0a9126a6cbe3305da7da962bdc878",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16164, (9,): 952, (10,): 16, (11,): 256, (12,): 1011, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26457937993109226
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "a2c3344fd64e00faa3f6b33b63e771116f7f8c384c7f92a1dab1efeb0e29260d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15852, (9,): 952, (10,): 16, (11,): 256, (12,): 991, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2657901351340115
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "858d9a9d4a2278f8c60c2568f95dc489dfa57effb6ad56e95d9fc16d40b74b6f",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15953, (9,): 952, (10,): 16, (11,): 256, (12,): 998, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2682924959808588
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "73f916837c5d8f7c96384ea72c5db0262ddd37b604652cb90d69b2ae9ebdda4c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 17026, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2664232407696545
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "f293cc95e2057464c454e8a986a83138eadf2370dbef5a7a4444305cc43b1ecb",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16314, (9,): 952, (10,): 16, (11,): 256, (12,): 1020, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2925900463014841
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "2fd060f2acbdaf1cf6357602f1b4e21a407b0f20c8b5f904876cdef6f51c6ccf",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15719, (9,): 952, (10,): 16, (11,): 256, (12,): 983, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2837782190181315
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "6a427808866ef429a738d734d0ce39f48cbeb1452b59ce25812286d634c698b7",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16452, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27831335505470634
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "3bf50e79acf93f50759a42af73eb785cb878f72099c9dee2452ea378d5c53d9e",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16016, (9,): 952, (10,): 16, (11,): 256, (12,): 1001, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2703396691940725
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "247819fdedfca7add6a77724b0951d3bcbc32d22ef2a8c45bd148cc71d3c21cc",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15961, (9,): 952, (10,): 16, (11,): 256, (12,): 998, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2760178791359067
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "07d70abf9071f840d5553d233a7a80f7ad69e4bf6e94295392311248e6e6c947",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16738, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2764410339295864
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "75ca0033d746d2063caf0beb414dbaeb97074a657e78df30a76305a63365c607",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 17017, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27840712992474437
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5eca831883858389c62a652f5b7d3fb0df5b0c19ca6832c809f89d926285b5fb",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16234, (9,): 952, (10,): 16, (11,): 256, (12,): 1015, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26880810083821416
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "cf3751ad9680b302e378d826975924eb6130971e09a5436ef8faf10d5b673022",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16361, (9,): 952, (10,): 16, (11,): 256, (12,): 1023, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2702797497622669
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "c18fe956c9a0de4ab32ae234ccc9d54cf6e23e0b8db5f55995d28d62b6ad6dd3",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 17119, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27034384990110993
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "3d5b001453a677636e9f85e7d9b119c26e99bab69da257eb5b58eb5b7c3753cf",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16420, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2656278689391911
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "378120e630ea6321814acf32c717160820edb06d359599894a012f7448978546",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16364, (9,): 952, (10,): 16, (11,): 256, (12,): 1023, (13,): False, (14,): 0}",
+          "wall_seconds": 0.269387770909816
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "e222ee83c36d8c8321e68fe92034620b5149d731330da536802eff8cec8eb483",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15782, (9,): 952, (10,): 16, (11,): 256, (12,): 987, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2989754411391914
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "df689688682b1eb3bd0978d3a257659b7b97ce155a48da5479e44f1b1eecb5bd",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16409, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28672700794413686
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "fba630a914e980d2572d45af9f05b9ddca2b361f0c768b7fd8191d85c4ac183c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16215, (9,): 952, (10,): 16, (11,): 256, (12,): 1014, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28652675077319145
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "bcb8f47999b46ba1d4c2a507e9a5cfff2df21f8c4863787c5998f174a11fb06b",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15851, (9,): 952, (10,): 16, (11,): 256, (12,): 991, (13,): False, (14,): 0}",
+          "wall_seconds": 0.261106772813946
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "74f2a38b79dfad76fc688abf262c71cf918190f1da8f9cb0eebb01e9d69fe484",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15419, (9,): 952, (10,): 16, (11,): 256, (12,): 964, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2588258688338101
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "d59a10206f040f3d646db27852b0832153da7e18ff5f4f5420826d096f8216e4",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15868, (9,): 952, (10,): 16, (11,): 256, (12,): 992, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2706265770830214
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5d8f90987aa368759b91078cec7d32d0a66d1d07983ea14d7b45d14e6f4eb241",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16517, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2705677216872573
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "6dcb6c34140f21619f10b47e90e75937b5c76d023fae32a4b494047b91938a57",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15718, (9,): 952, (10,): 16, (11,): 256, (12,): 983, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2680519628338516
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "0267567186265bbae298e008cad5fda12c73a521b125a968841196d392ad5747",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15138, (9,): 952, (10,): 16, (11,): 256, (12,): 947, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26523182820528746
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "c20dc99d98002e8879244bef3a67c67b0dd12cbb808590eb98d8be715148dcda",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15819, (9,): 952, (10,): 16, (11,): 256, (12,): 989, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2680137539282441
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "786be069487edfecd67a2f3c5ec40d757edd37667258c2124f3ca6614e1b88ce",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15258, (9,): 952, (10,): 16, (11,): 256, (12,): 954, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2661718288436532
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "bcc7ca205297309aa929d6e8dc9dfa047d14611be8c6ffc3f8b06559115e7d12",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15640, (9,): 952, (10,): 16, (11,): 256, (12,): 978, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26232119370251894
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "72e652f06f525c9b23b14c46f2a4826a953e03cc1ccab4c7809717e39a049010",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16151, (9,): 952, (10,): 16, (11,): 256, (12,): 1010, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2985865417867899
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "69be20432ec470361a8eeaa3e9df6d3164190a4e295e3b593d628375e144822b",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16429, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2890501329675317
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "84b1e306a7b186aad6ed0bd6fc489075e218150d2ba0b356763f7cab6d4170ed",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15722, (9,): 952, (10,): 16, (11,): 256, (12,): 983, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28546769730746746
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "6cc1fc260374232ada80611c21d19065cf5bac9814a0d6b3823ab42dee361d2f",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15749, (9,): 952, (10,): 16, (11,): 256, (12,): 985, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2798727578483522
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "ffc471a8ccb315311172a73067719ad2abd897d5b74a3daa4d21d7a4b45670a1",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16765, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2758910246193409
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5b31a1f3eb4510535022b0eab99525ea95d72af44e77ea47f2fd13c26359fd45",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15803, (9,): 952, (10,): 16, (11,): 256, (12,): 988, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27531920094043016
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "29c76a2114f43f70a91c921e943506e6b4f6aa057a2f7bed28d5225ee23871ae",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16206, (9,): 952, (10,): 16, (11,): 256, (12,): 1013, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26941874576732516
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "f5e9869af04fdc8febf2bef4aa2e37f9775b487819331ba8e7ebe6dd8cd7e3ff",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15836, (9,): 952, (10,): 16, (11,): 256, (12,): 990, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2647219873033464
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5f736c4111d38f1ec441eb80d2a1e02c8db01fb81c97c7a1af770e0dd18dfef3",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 15551, (9,): 952, (10,): 16, (11,): 256, (12,): 972, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27037715166807175
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5f79e989e71587f7638a6609ac0846fdddf0d0d27f62e55249513c455327763d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 23366, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2689759051427245
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5dd02704383b85d3230a97a424ee432812755917e8eac65ffb2168a5cf7e0f57",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 23024, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2623606910929084
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "4d1e7db054fce5175090168926e322356137aed20ec39a2d5b74e56817a6d90f",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22371, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26770993508398533
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "9da247d51c553932ade7d7bdb1eafa778763c490689627f7a4ae4cf8066d012f",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22913, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.29889406403526664
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "98da0a5222b374addf63bf143417337c471c3b5de14839b9c228d347c2393bf7",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 24003, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2928633582778275
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "89f38853a1b5879d36069df90c1bdd6e6f9905ee961af160eef38fb116ed5866",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22996, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2841959074139595
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "f103a4ce8740a82378db3577b51aa3f01fe5115aa70d49b078be224389d8083d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21987, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28702026791870594
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "14c9d3047ff38f7f898a67f2d308706e5dbf7999533bdebaafece1cd5e4c59f5",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 23101, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2803354589268565
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "a615aad14eaf0d9a46a7decec6094858425f40baa0383481e64e2a70fa0b5b0f",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22423, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27116490388289094
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "918f81608a5d538f15d13a6cf32dc2fb78804afed1f2196037a5ee3c8f08a4dd",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22844, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2717716949991882
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "a6cb890732481a0461f59a556cbfc64dce70ac741b39e1779b6e240ec27389a3",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 23288, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26529232086613774
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "e075d5ef43612279257bcf1d798c5abdef204aba692b6063f70715d51e67cc68",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 23881, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26748166512697935
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "4b534e30a8b7c7b4cf2c870263202bffc73fb18872bbb64fe2cef8cba3ea2ab0",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22698, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26745115779340267
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "f8b96f4263235ad47f7c6c07b0ada4de3b2f665c2bc0eef566fc15d5920e8f6b",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22624, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2616205820813775
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "819fe624028a1a2c2665484e5026e789a21ffc31343481cd968216697b6d9107",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 23989, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2663602698594332
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "a1ad5315e5db9982cf58a9ad0f649b69392c4d12e7c425f9651a40f189eddc8d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22953, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.3003531168214977
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "d12c6f9139293a865bcfe95f20d27bb099f7388e7865fb02f52990c6d3233386",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 23143, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.29077344154939055
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5cbbb91222169d73b5aa39fc62b52ef452cc206518b4eaa39a6da8ddf1d27d4c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22915, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2865222250111401
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "50643d2b3513d372c69cb23717562870eb4876d856e1a15bfe58e9d762412d37",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22195, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28666586615145206
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "e0dcc40f9365b0d082ec088c71043fd8fe7da7e1d575a14834893218033918c1",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 17009, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28100237203761935
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "7ffcc34f2068f20e856f3a96e7ef821e00c43cda5706b5316e7fba5cea1d930c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16173, (9,): 952, (10,): 16, (11,): 256, (12,): 1011, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27796989819034934
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "d2c06faf3e2699521362397c86eee33a1868775c822fe5cf5cf6d3820d15a48a",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16184, (9,): 952, (10,): 16, (11,): 256, (12,): 1012, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27125260420143604
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "870cbe86a6bcea4b3cad6b4a25ba4f01dce55c598c55d1528f006a4b6fb9618c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16460, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27247514156624675
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "3fce60c77498afab524bc9d951e2926237f301ab69932f30bde4b66b5b176aa8",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16540, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26643169904127717
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "8b3a71dedf432c843a8728eb8847a86ec80be38f2ef170d2529485f70014dd94",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16204, (9,): 952, (10,): 16, (11,): 256, (12,): 1013, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2661034199409187
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "ee8d25dc7c97fcad81355b24e8f5eebe24e881dde701084a08634d20f75761cc",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16216, (9,): 952, (10,): 16, (11,): 256, (12,): 1014, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26673934422433376
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "296e1a3f98d6c9aea24459fef8e09f6ccf55e379e83d7e432d7248777decd32d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16054, (9,): 952, (10,): 16, (11,): 256, (12,): 1004, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2641080729663372
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "a92218ebbd03e9c62b2a5a20d79fc949ff9164181e3959db1d56573e3e77e035",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16155, (9,): 952, (10,): 16, (11,): 256, (12,): 1010, (13,): False, (14,): 0}",
+          "wall_seconds": 0.3004820756614208
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "96b8b2dfd12d8968f4e792d7052a3c2a57a716be19f90b4bbe1367224c14e1b8",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16413, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.29203553311526775
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "c2db8de6b5e654b275ff69b6ed84e1a0d5a4c2700b874a2c4b7d236cc4853697",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16648, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2839379129000008
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "87f954703ce5e221d9abf57bb34586913629c66251163acfa21037427be04a65",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16329, (9,): 952, (10,): 16, (11,): 256, (12,): 1021, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28487762901932
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "051df1342bb2d9fed62004e5d037b111b2ea3e8208bdabdc8a7d9c03b199e476",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16613, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2862085881642997
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "9a4439de3ff6aa9609b7d4e10093ff95ea6f2173bbe2f453e5efe62a80e5c163",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16235, (9,): 952, (10,): 16, (11,): 256, (12,): 1015, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2828479940071702
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "713c10e0095a58bd9f2f9168f11cce506b4ce8d9558a869e43596b580d363503",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16246, (9,): 952, (10,): 16, (11,): 256, (12,): 1016, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2795862415805459
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "0edf964fc4e9feac0f8a24a0a05e5e54d2bf0842cc93eeef02401cd5db5ab0ce",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16089, (9,): 952, (10,): 16, (11,): 256, (12,): 1006, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2731964378617704
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "afd5b6bbbe687df4cf3b9afd5e5608b47dfe290af36bb5e9750f8513301f75b3",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16003, (9,): 952, (10,): 16, (11,): 256, (12,): 1001, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27128501096740365
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "ccceae25d5177c32dececa658539d6eacbe98c2299e56dd8db89ea0576884059",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 16352, (9,): 952, (10,): 16, (11,): 256, (12,): 1022, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2646975168026984
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "19be72b9947f62e9733d40d989f416e261a97e4b9a3e667e3f1384ef68c8a8ed",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22070, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26739841792732477
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "f2fb61552f8146c4710b410f9b3a8f9d4c34a25a8fd5e94d5126307a7381e5c3",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21171, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2650712989270687
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "ad6c2339a20c73048b7a4f63f0d326e26fa2742e10b7d622f0b25015c2f98dfb",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21268, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2999257082119584
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "e8199310f29d8eed9e52e9eecc9345180d9b0d89196607e2ee7e8fd798059d03",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21072, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2893346883356571
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "57b19f21f14b7c33ab8eca2bbcf0e6fab50b56e338a49dfddf47d687086f8ae6",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21673, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.288976585958153
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "922f7d7f388250e35a36f59d627db3ab54ef3a96fe37899a982fc2c660ecd7d7",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21828, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2854770799167454
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "9afcc854152703cae29527f331d71d1677e992d4acae3ad2931054493709bad8",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21107, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2879764810204506
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "1cb15a29fdbe00fa731b6b6f1762e104a6319a187a9c1e987852834d352cd085",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21079, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28454797994345427
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "b66e608ea1266ea4907b9aed1aae763834518d2bc7f7bfdccd620c6077a64472",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20979, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.288143714889884
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "4b20b0e303a6737286ae28c3aeade8343757750763f4c47995a7e176b3d40124",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21766, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27574201114475727
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "bef5d0182d515d9275b1bda08ddb109a8623b324357fd24e9625d90114ae74c4",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21463, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27040564687922597
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "4f3c61e527fae1dd3772aeced1e68a8d20c845b630f95cadb518438a535aea8d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 22120, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2676764577627182
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "5b4060c7639c15e04f98f1ec7f39be2cc9afcc29cce45939f09a65b0249cbd46",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21304, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2639380870386958
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "39455c96ee4e12653d7b4f208874f2dfad06ce84cdbe3cd357b3895d83982189",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21418, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26377295795828104
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "638b9906ed65baf25455887f2c7909afb130f54dd888229f8b9436fc17574530",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21746, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.3013642099685967
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "23089919b84129f52115dbd6b333213074ddc27686a3392c12bdde4f89271694",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21280, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2884435332380235
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "4a8075c5d265d3d7cf96ec49d06bdba83c6212b7b21cedeaab45f30231b9668c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21353, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.29053174424916506
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "6c0b0943b4460708847945cf7864270315328b26fbd4fa4e156bfdd079886d4f",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20839, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.29131836211308837
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "4c0685d5910a43c5bb5a8b95a2dc2ccd73f9de3e374b54dbd7c690291ccea306",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 21568, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28386319801211357
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "05ccc0fc2283d703dd6c11a9183e47c2224f4376a2d5db31fab5fee0584a8526",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20506, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28193951584398746
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "de9f7d3a67fe06574b21ae2242e1f9ca5584e8829228ef6c1719533e3100e9cf",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19929, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28486017091199756
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "497e587bda7851b73959f0600cf3be49bf39c54e89cf4e0bd832b94dad82d1b5",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19173, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2766735819168389
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "0c9a597ed39b70cac623621aab32d62a8267eb318771a70ed31a1a258f5b4355",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19557, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2728791246190667
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "05594e6dd320889c23ae1aa80153898b9de7929e4dbc05fcab946965575a4c0b",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20603, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27107352297753096
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "898b0332497927ffd0869ef81616b6395fc994d9ac44b351f62c7c5e539d5e70",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19475, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2676399350166321
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "7784b676fe10567bf6ade6b95d327267660bcd25f8dc0d1c5aa23edc4b1083b8",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19291, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.267985412850976
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "ecbb31e6b985d82201eb4a3ee59d4b086149da5c20201c16e7002eb1c57e3719",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19748, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.3010955359786749
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "51c34dde3ed6407fc0a9a61a39af01237d51c3d0e383d0056a1609b3d232273e",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19873, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.29003235418349504
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "9f3f9b3ae6819d36eee7c2f22f00cec689f56140b9bf4d014af96f4280683eac",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19587, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28955142479389906
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "0af1818fa7f97a6bd984c88861ce066664fad5b3eaa34720b0d493349f10ed13",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20725, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.29388495394960046
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "ff9f2218086fda4a52dda32ce1c8015c8793bda5c98e6c0e9f164e5f8b27c10d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19834, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.28720907773822546
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "9bee1e5bf9690069e77b035b3b00580ed1425a81dac791c76fe40ec939c71531",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19880, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2811279548332095
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "c87b51bc1eae6b4357726873ffec25edeaeca84a979413cc138d6fab18b2b997",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20800, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2789245401509106
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "c06ef4c647e0e8f6d20a129a886a9b4e573bb7535c28dca9138f25a3e7882b8c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20444, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27908032992854714
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "f18d1d4e9bfb1b066e82ad2a001d9f306d68e540bc29b6afec5a71347e677cf6",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20086, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27542261919006705
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "2efdfd0d392ec1bd10f094f74baae173a55803dda555af130fc427037974d66c",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20180, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2698482656851411
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "382b7464423dc8674b98cc80f4f66a454e67160932e3c41919d26c237e54d297",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 19462, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26840030727908015
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "399b7f6f9527f0275c6550c4d6cdbbf2ec90f4ed19cc26b0580c7ec7d745ac98",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 20544, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2600988391786814
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "02fd75229bed71087007edd091f60bb23e174ce5ab8eb90cd53b5c8ac9516516",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2521144347265363
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "ad53717d134cf8ce853ef7a8032800e8f6bd0711da417ba1dc58d6a95f90aac3",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.22947439085692167
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "bc5c1a28b6b49f8d574bec100b21d43e53c9b74e6742cf35cf4e8c1983a7f6c3",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2235485860146582
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "bfaa2f04044af07fe24b811b1b81a360eec35f420e411120927d3bf831fc771f",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.21483072405681014
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "fa9b66c1f8c79a5eeca6ac1c817e8235041d82dd564dc479b330af6be0feeb18",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2779242559336126
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "0e68503bbd1585901f59e1f429f6a2a61a1c55b4e9be0d706ac7729ae0aed8b5",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.25081707909703255
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "ffa1387e201e2d720f5c464b3d746bdcac1d270136f4f116a1e54abf1cb02850",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.23024543793872
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "1ea38e398163468ab8825604177d76457b74622f98e0fceceb2688f119d0a138",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2266623191535473
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "bb95846f3726eeb61d77868e87f09a5adf1027d5a8053080d2eb455ecf56aac2",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.4015731178224087
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "12abaed7a8f62d73ba1c497787ab5274af3fda277a7c0ac89f03ed1c07275b03",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.27700928412377834
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "dbacc3dcfe14a1edded367f9361b65a2bfb777ecca96ec9a884dab45b52e3661",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.269902088213712
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "1521b7776006abb2e03f180eada6192b9cb64272846b7a9834947c62d1b4a67e",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2331989030353725
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "4827ccd82edc3fb32b6029283b229230298d8872c13d3a6d02d03cd4770f9edc",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.6494799200445414
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "f362e7bb3237e0c414b2a3f9b5cc22a779cc752c116ba47979452570397152b1",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.38608071580529213
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "6c92048115dd16ca46f974c1fe1ddc61fb522be305d56dfed6c1757c7acf8141",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.29544286616146564
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "e61461a33ade0f29bd102e0afa91948c0881e6ab2bdd3c167a7b99b3590985ae",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 2048, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.26617176411673427
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "f0ebc91cbec68be8da83184fd43de9bbb48cf1d146f69377e1ce1e4ab2a43176",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.24237843276932836
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "6ce949b33aab529317f2dbf94564f8d4335e2c7636a28f638d082e5199a0558c",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2361956429667771
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "f21685332c928fb575e4d4054280e192bee62909621d2460978c3aff92175cc1",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.21329636126756668
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "f53f465157a225ffac60be98ef1b98f0af9ed399bdb5e649a88f3d5589189f5b",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 16, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.22171214874833822
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "e511cf730299fcd523e07b6ee69d04ace5111ad78d078928cdba90800fd0aafd",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.27361857099458575
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "fce7af0efd7bead7590d4b6a7a6b9b08033a01df05233afb22f3c2ab0eee601f",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.24805978313088417
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "ade620ef5d5bb3be332c4469fef56cab232eefc0d815cd3ece8bc39a4e0f4792",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.23391412617638707
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "101a7b9df51c6d33334255b88786f6798d1666ea137c37338c2b8d48c95d86ae",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 32, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.21714556263759732
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "655486f29fdd64b21b52b4c446050f7513c681137caa80ccd5eefbe110e5aee5",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.38006134424358606
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "36e3bbdda9a08092063cb62b446fe42a73d4aaed875945ef5aa813fab05fa5a6",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2840036088600755
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "d3708945e22a50561136ccff5ce70eb905ac62f723658eded0b84f1fcdd43aa0",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.2581579349935055
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "5d1f50f76441d5ae2cd531883fb7dfb5b582d774734eb1a511db1217161aa6b8",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 64, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.24304794007912278
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "881187f93cb3132d5b4ba90c1950b8bd5ddcc747ef45e76f930294ae1929f6fa",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.587762797717005
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "8ce3b54082d35e343c2057b99e13bd9fed2692ec8c2799e9c8e62d81b9321c92",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.39272322319447994
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "f112ab3a14747c080452cd5e5b30c4c40fd020d467a64f64e89b6e7cdfbd2a06",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.28331808280199766
+        },
+        {
+          "kernel": "fla.modules.conv.triton.kernels.causal_conv1d_fwd_kernel",
+          "key_sha256": "8f0f3e3a1f2bb522e27d5f371973b688dc08af91f38052d268c52a969a9489ce",
+          "constexprs": "{(3,): None, (4,): None, (5,): None, (6,): None, (7,): None, (8,): 1, (12,): 1, (13,): 4096, (14,): 4, (15,): 64, (16,): 4, (17,): 128, (18,): 3, (19,): 'silu', (20,): True, (21,): False, (22,): False, (23,): False, (24,): False}",
+          "wall_seconds": 0.26586673501878977
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "46066ce7afc6f07239886e030185a199d920cfc47cc1ad0570b319b9e005d3cc",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 34797, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2867270512506366
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "99a19490fc6a47f5003215533d13c5efc64c9afe12134b9eed65f5ccdcd377d7",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 34074, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2754779630340636
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "dbb74241aced77c5cd3bbc56cec1265d938f3d53ff927836e4169dd7da5c3000",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 32720, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2664210982620716
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "c1d520d8f05a55abc8cd5dbd73952cb2871f252a7b958a7320df8ff833ce1c82",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33485, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.266364102717489
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "62eab9955636eeb1a9974744173b820b78f99aefaeb8379b2a4979f4c74792c3",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 34968, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26293106423690915
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "7bac29398eb69f3002773763e91f661e3448345b752555f5ed7d8344c2540dc0",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33742, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2666456871666014
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "d5a8f0cf1e4f5cd387c0bba4a27796e5da16fa7576c3df124bc173c2c006a683",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33251, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.3021939443424344
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "90f63af12b56e3caa3ab55d61fb2b84a37d4a14105dbd3987ed41fdced111771",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33219, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2930713640525937
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "293ac3b65a7de537efa6f48c394f21bcfb9d9fd0f88e8d3f0b417e89a995483e",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33773, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2829088759608567
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "1dc26602af3444b3179798299f464056ab1579b39e45dbe47ce17f700ee04a75",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33491, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.27492611901834607
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "44b8dbe0201c8d884528a521ed4cff63009a35b7f665d91a74d6ce0ac030ce50",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 35181, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.273125596344471
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "aa6ba843f416857c915e8f620db38aa59300c3b9adde319e9645065816457510",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33896, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2685117810033262
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "502a14d3301f589fd7f1fe9a00f67cffd1e88f058dedab4aad09779a125ad0c7",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33888, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2651775130070746
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "953d396109dcdb2ddbdfe2f4656312200fe6ec2d56aa158c128645dddd3cd3c4",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 35148, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.2654675729572773
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "61acf9449c8c45da644327d735f9abdaba5f1a4a16e96230bcc362404b31f27d",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 34799, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26611665403470397
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "172fd266a0f585443e707ef81a5cbd270d1e45e314843c9e2f7ca08b02ebbc6e",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33925, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26858381601050496
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "7d86eb27fb66b5822945383b3ddcc02025e434afbfb9b964d0ffb47303642cf0",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 34618, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26521413307636976
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "29f0d67fa1852a00ba90ac42ab0b9bc5ff4d62d793d0f7f6c9fe084328535371",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 33289, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.26671832613646984
+        },
+        {
+          "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
+          "key_sha256": "14efc95377da567c877327aeefedd130c758764ca530cbad57b6112414816370",
+          "constexprs": "{(2,): 1, (7,): 1, (8,): 34762, (9,): 952, (10,): 16, (11,): 256, (12,): 1024, (13,): False, (14,): 0}",
+          "wall_seconds": 0.30987092666327953
+        }
+      ],
+      "jit_miss_count": 327,
+      "jit_miss_wall_seconds": 127.25246996199712,
+      "cache_artifact_writes_by_extension": {
+        ".source": 327,
+        ".ttir": 327,
+        ".ttgir": 327,
+        ".llir": 327,
+        ".ptx": 327,
+        ".cubin": 327,
+        ".json": 666
+      },
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+      "residual": {
+        "valid": true,
+        "finite": true,
+        "tokens": 9635,
+        "max_abs": 0.0,
+        "mean_abs": 0.0
+      }
+    },
+    {
+      "name": "warm1",
+      "wall_seconds": 1.248743622098118,
+      "cuda_stream_elapsed_seconds": 1.2486593017578125,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [],
+      "jit_miss_count": 0,
+      "jit_miss_wall_seconds": 0,
+      "cache_artifact_writes_by_extension": {},
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+      "residual": {
+        "valid": true,
+        "finite": true,
+        "tokens": 9635,
+        "max_abs": 0.0,
+        "mean_abs": 0.0
+      }
+    },
+    {
+      "name": "warm2",
+      "wall_seconds": 1.2348810792900622,
+      "cuda_stream_elapsed_seconds": 1.23480615234375,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [],
+      "jit_miss_count": 0,
+      "jit_miss_wall_seconds": 0,
+      "cache_artifact_writes_by_extension": {},
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+      "residual": {
+        "valid": true,
+        "finite": true,
+        "tokens": 9635,
+        "max_abs": 0.0,
+        "mean_abs": 0.0
+      }
+    },
+    {
+      "name": "warm3",
+      "wall_seconds": 1.2456365618854761,
+      "cuda_stream_elapsed_seconds": 1.2455550537109374,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [],
+      "jit_miss_count": 0,
+      "jit_miss_wall_seconds": 0,
+      "cache_artifact_writes_by_extension": {},
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+      "residual": {
+        "valid": true,
+        "finite": true,
+        "tokens": 9635,
+        "max_abs": 0.0,
+        "mean_abs": 0.0
+      }
+    },
+    {
+      "name": "profile_diagnostic_only",
+      "wall_seconds": 1.751868933904916,
+      "cuda_stream_elapsed_seconds": 1.751782470703125,
+      "cuda_event_scope": "stream elapsed, including idle time; not summed GPU busy time",
+      "jit_in_memory_misses": [],
+      "jit_miss_count": 0,
+      "jit_miss_wall_seconds": 0,
+      "cache_artifact_writes_by_extension": {},
+      "scope": "_score only; misses include disk-cache loading; writes do not count unique kernels",
+      "residual": {
+        "valid": true,
+        "finite": true,
+        "tokens": 9635,
+        "max_abs": 0.0,
+        "mean_abs": 0.0
+      }
+    }
+  ],
+  "valid": true,
+  "sources": {
+    "open_instruct.miles.actor": {
+      "path": "/opt/core-rl/open_instruct/miles/actor.py",
+      "sha256": "2ffda19fc743c6cc1d7f4a6dd140fa4b21e3f365bc16bfe93a359ed39fd5e3a6"
+    },
+    "open_instruct.miles.models": {
+      "path": "/opt/core-rl/open_instruct/miles/models.py",
+      "sha256": "05dc62d586f8fb719ee46f74a72cedce97a09939c51067cfcaa94ca11334ba40"
+    },
+    "open_instruct.miles.data": {
+      "path": "/opt/core-rl/open_instruct/miles/data.py",
+      "sha256": "e4f9506ec3e0350cb603628295e42e2d6028776362c6e6aa63cee96d1e89cd10"
+    },
+    "scripts.miles.gsm8k_parity": {
+      "path": "/opt/core-rl/scripts/miles/gsm8k_parity.py",
+      "sha256": "ede6fa641424d9f6ed5690293a459b0c51e23f870485ea74ba3dd33c8e7dd483"
+    },
+    "olmo_core.kernels.swiglu": {
+      "path": "/opt/core-rl/sources/olmo-core/src/olmo_core/kernels/swiglu.py",
+      "sha256": "79e3738e1fe0cd72812d596b77169b834fd55b4e7d503f51a1f252b2031539f0"
+    }
+  },
+  "manifest": {
+    "image": "01M26N80T0V9PREQTS87J849P8",
+    "oi_source": "c3a41598e434d50058f929e6c55b82e34aa4ff09",
+    "core_source": "b7f1e5296704779e7deb06de4c4242be9729d1a9",
+    "module_sha256": {
+      "open_instruct.miles.actor": "2ffda19fc743c6cc1d7f4a6dd140fa4b21e3f365bc16bfe93a359ed39fd5e3a6",
+      "open_instruct.miles.models": "05dc62d586f8fb719ee46f74a72cedce97a09939c51067cfcaa94ca11334ba40",
+      "open_instruct.miles.data": "e4f9506ec3e0350cb603628295e42e2d6028776362c6e6aa63cee96d1e89cd10",
+      "scripts.miles.gsm8k_parity": "ede6fa641424d9f6ed5690293a459b0c51e23f870485ea74ba3dd33c8e7dd483",
+      "olmo_core.kernels.swiglu": "79e3738e1fe0cd72812d596b77169b834fd55b4e7d503f51a1f252b2031539f0"
+    },
+    "worker_sha256": "730ad1356eee422433f29e204ccd481cb6589e6a856e36a8620eea83f68061fc"
+  },
+  "model_initialization_seconds": 109.12004704773426,
+  "input": {
+    "path": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/core/rollouts/5.pt",
+    "sha256": "c27d476689d09016da6d14198aaf0aff970c3fd7f29fb64dafa67c7b4bdc24fc",
+    "rollout": 5,
+    "partition": [
+      1,
+      3,
+      5,
+      7,
+      9,
+      11,
+      13,
+      15
+    ],
+    "lengths": [
+      1327,
+      1123,
+      1117,
+      1959,
+      1074,
+      1034,
+      1111,
+      2154
+    ],
+    "response_lengths": [
+      1157,
+      953,
+      987,
+      1829,
+      941,
+      901,
+      912,
+      1955
+    ],
+    "balance_data": false
+  },
+  "checkpoint_scope": "Original initial HF weights; retained rollout supplies tokens, not trained weights",
+  "ingress_scope": "Filesystem load/DP partition occurs before scoring timers; no Ray object-store fetch"
+}

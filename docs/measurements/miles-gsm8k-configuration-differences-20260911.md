@@ -87,7 +87,7 @@ parameters separately; the native EP1/EP2 gates test this contract independently
 | Area | Core100 | Megatron r3 | Consequence |
 |---|---|---|---|
 | Auxiliary normalization | Per-sequence router losses weighted by real input-token counts; denominator is global real model tokens / trainer world size before rank averaging | `seq_aux_loss`; response-average recipe equally weights microbatch/sequence means | Unequal sequence lengths give different auxiliary objectives despite equal coefficients |
-| Auxiliary padding | Unpadded individual samples | bshd padded forward; current auxiliary path includes artificial padded positions | Policy mask does not automatically remove padded tokens from router balancing/z loss |
+| Auxiliary padding | Unpadded individual samples | bshd pads each sample to its rank rollout-batch maximum length even with pad multiple1; auxiliary includes these artificial positions | Policy mask does not automatically remove padded tokens from router balancing/z loss |
 | Gradient-enabled versus scoring activation | Old Core has a no-grad fused SwiGLU path with different BF16 rounding from gradient-enabled eager path | Separate Megatron kernels/precision contract | Old Core PPO scoring anchor need not exactly equal its gradient-enabled forward at unchanged weights; future Core290d2ca corrects the identified rounding path |
 | Sampler implementation | Explicit SGLang `sampling_backend=pytorch` | Actual SGLang resolves unspecified backend to `flashinfer` | Same seed/distribution settings do not imply identical sampled completions |
 | Serving token pool | Explicit `max_total_tokens=32768` | Unspecified / automatic (`None` in actual ServerArgs) | Admission/memory allocation may differ; do not attribute all generation timing to trainer choice |
@@ -142,17 +142,17 @@ calculation is not its explanation: the actual MILES logprob helper defaults to
 `with_entropy=False`. Both Core scoring and training use the configured synchronous EP
 path and chunk-KDA dispatch; source inspection alone does not identify the expensive
 operation. The no-grad SwiGLU rounding finding is a correctness issue, not evidence that
-it caused this timing gap. A bounded EP2 same-batch CUDA/CPU profiler is the next useful
-measurement, keeping ingress, per-forward communication, logprob extraction and postscore
-checks separate. No profiling-based attribution has yet been established.
+it caused this timing gap. The completed frozen-image EP2 scorer profile below establishes
+large cold compilation overhead and cheap identical-batch warm scoring, while attribution
+of the historical changing-batch boundary remains incomplete.
 
 A concrete compilation hypothesis remains: frozen `kernels/swiglu.py` marks
 `rows=x.shape[0]` as a Triton constexpr. Different routed row capacities can therefore
 produce separate no-grad kernel specializations; gradient-enabled eager SwiGLU does not
 use this kernel. There is no autotuner in this wrapper and its valid-count scalar stays
 on CUDA (loaded in-kernel), so this wrapper does not synchronize that count to the CPU.
-Count JIT misses, actual cache writes and cold-versus-identical-batch repeated timing
-before attributing latency to compilation; the future rounding fix retains this shape key.
+The measured JIT misses and artifact writes below confirm cold specialization; the future
+rounding fix retains this shape key.
 
 ## Startup and held-out evaluation boundaries
 
@@ -181,9 +181,14 @@ work absent from later evaluations. Changing response length and capped outcomes
 evaluation time; these durations are not fixed-output-token speed measurements.
 
 Megatron separately records95 warm `log_probs` events with mean4.18246s; the Core
-44.32847s boundary above includes more than scoring. The submitted frozen-image EP2
-profiler measures Core's actual `_score` without ingress and with explicit cache activity.
-No full-model profiler result is yet included here.
+44.32847s boundary above includes more than scoring. The completed
+[frozen-image EP2 profile](miles-core-score-profile-20260911.md) measured actual `_score`
+on retained rollout5 tokens at initial weights:230.458s with cold caches, then1.249/1.235/
+1.246s on identical repeats. Cold ranks generated362/327 cubins; warm repeats generated
+none and preserved scores exactly. SwiGLU JIT calls consumed41.38/41.40s per rank,
+with another93.21/85.85s in FLA JIT calls. These per-rank durations are not additive across
+ranks. No optimizer update occurred. This identifies a concrete cold compilation cost,
+not the fraction of historical changing-batch overhead caused by it.
 
 ## Longer500 campaign
 
