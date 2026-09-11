@@ -56,3 +56,17 @@ def test_hf_twins_allow_explicit_same_backend_roots_only_in_hf_mode():
     assert str(left) in task["arguments"][0] and str(right) in task["arguments"][0]
     with pytest.raises(ValueError):
         launch.specification(launch.IMAGE, left, right)
+
+
+def test_hf_reference_suite_uses_one_cpu_job_and_three_labeled_outputs():
+    left, right, reference = (launch.ROOT / name / "core" for name in ("pina-a", "pina-b", "original-a"))
+    result = launch.specification(launch.IMAGE, left, right, hf_only=True, reference_root=reference)
+    assert len(result["tasks"]) == 1
+    command = result["tasks"][0]["arguments"][0]
+    assert command.count("python /tmp/compare_update_zero.py") == 3
+    for name in ("pinned-twins", "reference-vs-left", "reference-vs-right"):
+        assert f"--output /output/{name}.json" in command
+    with pytest.raises(ValueError):
+        launch.specification(launch.IMAGE, left, launch.ROOT / "mega/megatron", reference_root=reference)
+    with pytest.raises(ValueError):
+        launch.specification(launch.IMAGE, left, right, hf_only=True, reference_root="/tmp/unrelated/core")
