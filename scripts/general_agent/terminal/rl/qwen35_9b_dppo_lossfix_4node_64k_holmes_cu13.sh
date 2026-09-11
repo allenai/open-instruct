@@ -11,6 +11,9 @@
 #     "undo averaging" multiplier is world_size under stage 3 (grad_norm will read ~4x higher
 #     than the prod run at SP=4 -- expected, not a regression).
 # Compare against swerl_qwen35_9b_dppo_prod_4node_64k_holmes in wandb (oe-general-agents).
+# RAY_enable_open_telemetry=0: the first launch (01M26TTNZTM1P499HW0B140EJV) wedged on retry with the
+# Ray OTel getenv SIGSEGV -> EnvironmentPool.__init__ ActorDiedError -> silent hang; Ray metrics are
+# unused (monitoring is wandb), so disable the OTel recorder.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
 
@@ -27,7 +30,7 @@ MIRRORS=jupiter-cs-aus-144.reviz.ai2.in:5000,jupiter-cs-aus-143.reviz.ai2.in:500
 uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "tmax-15k DPPO Qwen35 9b (prod recipe; 4-node; 64k; holmes/cu13/B300; LOSS-SCALE FIX 50f22169 A/B vs swerl_qwen35_9b_dppo_prod_4node_64k_holmes)" \
+       --description "tmax-15k DPPO Qwen35 9b (prod recipe; 4-node; 64k; holmes/cu13/B300; LOSS-SCALE FIX 50f22169 A/B vs swerl_qwen35_9b_dppo_prod_4node_64k_holmes; relaunch #4 (prev 01M26TTN/01M27D95/01M283KQ died to holmes gang churn) w/ RAY OTel off; RESUME from global_step36)" \
        --pure_docker_mode \
        --workspace ai2/oe-agents-holmes \
        --priority urgent \
@@ -43,6 +46,7 @@ uv run --no-default-groups --group dev --group cuda13 python mason.py \
        --env VLLM_ALLOW_INSECURE_SERIALIZATION=1 \
        --env VLLM_DISABLE_COMPILE_CACHE=1 \
        --env VLLM_USE_V1=1 \
+       --env RAY_enable_open_telemetry=0 \
        --env GIT_COMMIT="$(git rev-parse --short HEAD)" \
        --env DOCKERHUB_USERNAME=shashankg209 \
        --env SWERL_SANDBOX_TIMING_LOGS=1 \
