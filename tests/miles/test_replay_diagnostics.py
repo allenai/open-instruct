@@ -1,5 +1,8 @@
 """Failure-sensitive replay checks against the actual Core router."""
 
+import os
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -121,3 +124,24 @@ def test_replay_reaudit_is_cpu_only_on_saturn():
     assert task["constraints"]["cluster"] == ["ai2/saturn"]
     assert task["resources"].get("gpuCount", 0) == 0
     assert "for arm in replay-admission64; do" in task["arguments"][0]
+
+
+def test_reaudit_shell_forwards_replay_flag(tmp_path):
+    executable = tmp_path / "python"
+    executable.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    executable.chmod(0o755)
+    script = Path(__file__).resolve().parents[2] / "scripts/train/debug/miles_control_reaudit.sh"
+    result = subprocess.run(
+        ["bash", str(script), "image", "retained", "--replay-only"],
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == [
+        "-m",
+        "scripts.miles.launch_control_reaudit",
+        "image",
+        "retained",
+        "--replay-only",
+    ]

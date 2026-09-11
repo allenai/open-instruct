@@ -52,7 +52,7 @@ done
                 arguments=[command],
                 datasets=[{"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}}],
                 result={"path": "/output"},
-                resources={"cpuCount": 4, "memory": "32 GiB"},
+                resources={"cpuCount": 4, "memory": "32 GiB", "gpuCount": 0},
                 constraints={"cluster": ["ai2/saturn"]},
                 context={"priority": "urgent", "minRuntime": "1h", "autoResume": False},
                 timeout="3h",
