@@ -26,8 +26,10 @@ fix at OLMo-core290d2ca; this difference from Core100 is explicit.
 - Save every100 updates. Core currently retains allfive native saves; Megatron's
   existing retention keeps the latest completed save. Include disk and save-time
   differences in the report. Do not silently delete old artifacts.
-- Core minimum runtime12h, timeout18h. Megatron supports12h minimum through its
-  current schema; its18h budget requires external monitoring.
+- Core minimum runtime8h, timeout18h. Beaker rejected the first Megatron
+  submission with12h minimum before creating an experiment: the service maximum
+  is8h. Both arms therefore use8h minimum; Megatron's18h budget requires external
+  monitoring because its current public launch schema has no deadline field.
 - Full-sized Core restart qualification runs separately before the long launch.
 
 `extended_gsm8k.py` verifies the old preparation before linking it into a separate

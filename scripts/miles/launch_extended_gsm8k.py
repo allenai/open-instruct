@@ -38,7 +38,7 @@ def specification(image, stage):
             + extended_gsm8k.CAMPAIGN,
         )
         task["timeout"] = "18h"
-        task["context"]["minRuntime"] = "12h"
+        task["context"]["minRuntime"] = "8h"
     elif stage == "audit":
         command = command[: command.index("python scripts/miles/prepare_gsm8k_parity.py")]
         command += (

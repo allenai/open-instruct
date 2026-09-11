@@ -21,7 +21,7 @@ def test_extension_stage_placement_and_horizon(stage):
     if stage == "core":
         assert task["resources"]["gpuCount"] == 3
         assert task["timeout"] == "18h"
-        assert task["context"]["minRuntime"] == "12h"
+        assert task["context"]["minRuntime"] == "8h"
         assert "--save-interval 100" in command
     else:
         assert task["resources"]["gpuCount"] == 0
