@@ -1,6 +1,6 @@
 {
   "campaign": "gsm8k-core-megatron-20260910-v1",
-  "status": "in progress: Core100 running; matched Megatron r3 submitted after user re-enabled the paired comparison",
+  "status": "in progress: Core and matched Megatron r3 running",
   "shared_root": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1",
   "preparation_sha256": "1d8a22500fffdd9a7461c445998815d5e85cf9dd79859d93313798472c0e76e0",
   "preparation_experiment": "01M26N8Q8BFN4887X2CKMDWEV2",
@@ -30,7 +30,8 @@
         "total": 128,
         "at_response_cap": 22
       }
-    ]
+    ],
+    "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/un6so0cr"
   },
   "megatron": {
     "experiment": "01M26YNP5E64YGNXR85TA2RP4Q",
@@ -69,7 +70,7 @@
       "olmo_miles_source": "7d56b23db0e6d442e601eb1a5f9145c37802120c",
       "olmo_megatron_source": "ba5615df741a24ba4aee678d0e853306b3502282",
       "repair": "Restore executable router precision checks and BF16 router model/checkpoint storage with FP32 torch-mm gating; rebuild MCore without obsolete FP32-storage patch0008.",
-      "status": "pending rebuilt-image validation and new launch identity"
+      "status": "Rebuilt image passed 87 precision tests and tiny GPU router dtype gate; reused by active r3."
     },
     "artifact_directory": "megatron-r3",
     "stopped_attempts": [
@@ -83,7 +84,8 @@
         "heldout_evaluations": 0,
         "reason": "User temporarily narrowed scope to Core-only; later explicitly re-enabled matched comparison."
       }
-    ]
+    ],
+    "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/toyl0tx0"
   },
   "scheduling": {
     "workspace": "ai2/open-instruct-dev",
@@ -91,8 +93,7 @@
     "priority": "urgent",
     "minimum_runtime": "4h",
     "core_timeout": "4h",
-    "megatron_timeout": "monitored four-hour budget; no native hard timeout",
-    "latest_blocker": "workspace group ai2/oe-scaling allocated 158/160 slots; each arm requires 3"
+    "megatron_timeout": "monitored four-hour budget; no native hard timeout"
   },
   "checks": {
     "core_contract": {
@@ -101,10 +102,10 @@
       "evidence": "miles-core-contract-parity-20260910.json"
     },
     "preparation_tests_passed": 9,
-    "audit_tests_passed": 23,
+    "audit_tests_passed": 44,
     "baseline_unit_tests": {
-      "passed": 1122,
-      "skipped": 104
+      "passed": 1124,
+      "skipped": 105
     },
     "direct_grader_comparison": {
       "passed": true,
@@ -135,7 +136,10 @@
     "ppo_clip_high": 0.28,
     "aux_loss": 0.01,
     "z_loss": 1e-05,
-    "replay": false
+    "replay": false,
+    "train_temperature": 1.0,
+    "eval_temperature": 0.0,
+    "eval_samples_per_question": 1
   },
   "preparation": {
     "dataset": "ai2-adapt-dev/rlvr_gsm8k_zs",

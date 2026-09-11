@@ -130,3 +130,18 @@ HF greedy tokens agreed in both serving modes. This explicitly uses semantic
 reference attention/KDA execution, not the production optimized training kernels.
 The full-checkpoint serving launcher enables the same comparison with a preset
 0.1 maximum absolute logprob error gate and records actual errors.
+
+## Full checkpoint weight gate
+
+[The step75500 conversion job](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ)
+finished with exit zero. All 23,441 HF tensors matched native FP32 masters after
+the expected BF16 export cast and embedding/head vocabulary trim. HF import
+through the adapter and re-export produced the identical tensor-content digest.
+The [machine-readable report](measurements/miles-hero-conversion-20260910.json)
+records architecture, source pins, CPU-only execution overrides, 579 seconds
+elapsed and 72 GiB peak RSS. No optimizer moments were loaded.
+
+[Full-checkpoint scoring](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ)
+is submitted separately: Core/HF/SGLang at TP1, short mixed-length prompts,
+chunked prefill and decode graphs. Weight equality alone does not qualify
+forward math, distributed training or live publication.
