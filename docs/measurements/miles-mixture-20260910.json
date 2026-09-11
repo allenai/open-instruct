@@ -1,0 +1,142 @@
+{
+  "interpretation": "Per-source verification and prompt-group integrity; no learning claim",
+  "optimizer_steps": 2,
+  "passed": true,
+  "preparation_sha256": "e18fd1ee226c303d2072e96b3c6921a26c4ce0a20d938a6b52ee1785a1fb7eaf",
+  "results": {
+    "0": {
+      "policy_version": 0,
+      "samples": 24,
+      "sha256": "ba139ed61f22d5d05361899019a45a80f0efbde532b253a68a942fd54f857ca3",
+      "sources": {
+        "gsm8k": {
+          "mean_reward": 1.0,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 0,
+          "samples": 8
+        },
+        "ifeval": {
+          "mean_reward": 0.0,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 2,
+          "samples": 8
+        },
+        "math": {
+          "mean_reward": 0.125,
+          "mixed_reward_groups": 1,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 8,
+          "samples": 8
+        }
+      }
+    },
+    "1": {
+      "policy_version": 1,
+      "samples": 24,
+      "sha256": "f2ed7dc7f2f4337c964aec328b3ca42daa8e21808cbc273e42d3cac0b327afbf",
+      "sources": {
+        "gsm8k": {
+          "mean_reward": 0.875,
+          "mixed_reward_groups": 1,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 0,
+          "samples": 8
+        },
+        "ifeval": {
+          "mean_reward": 0.25,
+          "mixed_reward_groups": 1,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 0,
+          "samples": 8
+        },
+        "math": {
+          "mean_reward": 0.0,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 8,
+          "samples": 8
+        }
+      }
+    },
+    "eval_0": {
+      "policy_version": 0,
+      "samples": 6,
+      "sha256": "7e07733d0ed8bacfbf58a2d5d903001d9f264ae5b4c8b5a4beeee5137371c0bf",
+      "sources": {
+        "gsm8k": {
+          "mean_reward": 0.5,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 0,
+          "samples": 2
+        },
+        "ifeval": {
+          "mean_reward": 0.0,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 1,
+          "samples": 2
+        },
+        "math": {
+          "mean_reward": 0.0,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 2,
+          "samples": 2
+        }
+      }
+    },
+    "eval_1": {
+      "policy_version": 2,
+      "samples": 6,
+      "sha256": "6bd68216d1fd611f519e6632eea48ca3124da41f5595e94561684200bbcf9387",
+      "sources": {
+        "gsm8k": {
+          "mean_reward": 0.5,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 0,
+          "samples": 2
+        },
+        "ifeval": {
+          "mean_reward": 0.0,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 1,
+          "samples": 2
+        },
+        "math": {
+          "mean_reward": 0.0,
+          "mixed_reward_groups": 0,
+          "prompt_groups": 2,
+          "responses_at_token_cap": 2,
+          "samples": 2
+        }
+      }
+    }
+  },
+  "source_order": [
+    "gsm8k",
+    "math",
+    "ifeval"
+  ],
+  "experiment": "01M270TQ57VM13CMYAP8AYAZA8",
+  "job": "01M270TQ9RNJMZXWJ5X8T32ZZM",
+  "result": "01M270TQ5GD2NDE7NY9R5GVRZZ",
+  "source": "abcf7e516bebc0fd1826f8222159d17d3e6549b4",
+  "job_status": {
+    "created": "2026-09-11T01:20:35.495641Z",
+    "scheduled": "2026-09-11T01:20:51.940553Z",
+    "started": "2026-09-11T01:22:05.557311Z",
+    "exited": "2026-09-11T01:51:25.193918Z",
+    "finalized": "2026-09-11T01:51:26.371121Z",
+    "exitCode": 0,
+    "idleSince": "2026-09-11T01:51:25.137491Z",
+    "ready": "2026-09-11T01:22:04.810329Z"
+  },
+  "response_cap": 8192,
+  "trainer_topology": "EP2 with one SGLang TP1 engine, three B300s",
+  "limitations": "Every math training response reached8192 tokens; all sources had at least one mixed-reward prompt group across two updates. Successful contract execution does not establish learning from six held-out questions."
+}

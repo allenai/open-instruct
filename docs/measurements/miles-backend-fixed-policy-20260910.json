@@ -1,0 +1,900 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "fc4b538938b267c442b61a3eea397ca83fb9743111863c5ff918f7ac58ced63b",
+  "reference_backend": "megatron",
+  "actual_backend": "core",
+  "same_initial_weights": true,
+  "same_initial_masters": true,
+  "scope": "Descriptive single fixed-batch backend comparison; no cross-backend tolerance or learning claim.",
+  "normalization": "Relative delta uses reference norm; update categories subtract initial state first.",
+  "zero_norm_policy": "relative_delta_l2 and cosine are null when their denominator is zero",
+  "categories": {
+    "initial_weights": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 42.149015240138695,
+        "actual_l2": 42.149015240138695,
+        "delta_l2": 0.0,
+        "relative_delta_l2": 0.0,
+        "cosine": 1.0000000000000009,
+        "max_abs_delta": 0.0
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 19.108545167558194,
+          "actual_l2": 19.108545167558194,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0000000000000004,
+          "max_abs_delta": 0.0
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 6.271256668648574,
+          "actual_l2": 6.271256668648574,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0000000000000002,
+          "max_abs_delta": 0.0
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 5.106903285840754,
+          "actual_l2": 5.106903285840754,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 0.9999999999999998,
+          "max_abs_delta": 0.0
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 2.5565292869347,
+          "actual_l2": 2.5565292869347,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 0.9999999999999999,
+          "max_abs_delta": 0.0
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 35.77708763999664,
+          "actual_l2": 35.77708763999664,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 0.9999999999999998,
+          "max_abs_delta": 0.0
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 6.291346880163244,
+          "actual_l2": 6.291346880163244,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0000000000000004,
+          "max_abs_delta": 0.0
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 0.4488055535794717,
+          "actual_l2": 0.4488055535794717,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0,
+          "max_abs_delta": 0.0
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 4.435713238185658,
+          "actual_l2": 4.435713238185658,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0,
+          "max_abs_delta": 0.0
+        }
+      }
+    },
+    "initial_masters": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 42.149015240138695,
+        "actual_l2": 42.149015240138695,
+        "delta_l2": 0.0,
+        "relative_delta_l2": 0.0,
+        "cosine": 1.0000000000000009,
+        "max_abs_delta": 0.0
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 19.108545167558194,
+          "actual_l2": 19.108545167558194,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0000000000000004,
+          "max_abs_delta": 0.0
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 6.271256668648574,
+          "actual_l2": 6.271256668648574,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0000000000000002,
+          "max_abs_delta": 0.0
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 5.106903285840754,
+          "actual_l2": 5.106903285840754,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 0.9999999999999998,
+          "max_abs_delta": 0.0
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 2.5565292869347,
+          "actual_l2": 2.5565292869347,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 0.9999999999999999,
+          "max_abs_delta": 0.0
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 35.77708763999664,
+          "actual_l2": 35.77708763999664,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 0.9999999999999998,
+          "max_abs_delta": 0.0
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 6.291346880163244,
+          "actual_l2": 6.291346880163244,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0000000000000004,
+          "max_abs_delta": 0.0
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 0.4488055535794717,
+          "actual_l2": 0.4488055535794717,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0,
+          "max_abs_delta": 0.0
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 4.435713238185658,
+          "actual_l2": 4.435713238185658,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 1.0,
+          "max_abs_delta": 0.0
+        }
+      }
+    },
+    "preclip_gradients": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 68.94048703760213,
+        "actual_l2": 68.82677087558066,
+        "delta_l2": 0.7804405785424433,
+        "relative_delta_l2": 0.011320497026903343,
+        "cosine": 0.9999371799503565,
+        "max_abs_delta": 0.0625
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 45.66958744146747,
+          "actual_l2": 45.61379005660233,
+          "delta_l2": 0.5201247825540829,
+          "relative_delta_l2": 0.011388865362988049,
+          "cosine": 0.9999358148055971,
+          "max_abs_delta": 0.0317378044128418
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 25.18371892841969,
+          "actual_l2": 25.138948870618833,
+          "delta_l2": 0.27947056786085184,
+          "relative_delta_l2": 0.01109727156085239,
+          "cosine": 0.9999398986138857,
+          "max_abs_delta": 0.015980184078216553
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 42.66442017396797,
+          "actual_l2": 42.58289330753087,
+          "delta_l2": 0.48460876954642773,
+          "relative_delta_l2": 0.011358616092059669,
+          "cosine": 0.9999371966538623,
+          "max_abs_delta": 0.0625
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 0.08481306321850905,
+          "actual_l2": 0.08456231826878986,
+          "delta_l2": 0.0010904080028321975,
+          "relative_delta_l2": 0.012856604412729594,
+          "cosine": 0.9999214920334986,
+          "max_abs_delta": 6.182468496263027e-05
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 1.2819354153797657,
+          "actual_l2": 1.278041693877171,
+          "delta_l2": 0.015748123888050018,
+          "relative_delta_l2": 0.012284646869971005,
+          "cosine": 0.9999289407221689,
+          "max_abs_delta": 0.003108978271484375
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 0.0845882065976439,
+          "actual_l2": 0.08430765712638918,
+          "delta_l2": 0.0011050061038664542,
+          "relative_delta_l2": 0.013063358928066371,
+          "cosine": 0.9999199087756552,
+          "max_abs_delta": 8.272239938378334e-05
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 0.0020840695090722505,
+          "actual_l2": 0.0020859516609552575,
+          "delta_l2": 6.975344488059218e-05,
+          "relative_delta_l2": 0.033469826499042156,
+          "cosine": 0.9994407981871682,
+          "max_abs_delta": 1.36522576212883e-05
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 14.524096422479218,
+          "actual_l2": 14.47720068190836,
+          "delta_l2": 0.15924142390581414,
+          "relative_delta_l2": 0.010963947034898032,
+          "cosine": 0.9999449307737868,
+          "max_abs_delta": 0.009072303771972656
+        }
+      }
+    },
+    "postclip_gradients": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 0.005000000064457831,
+        "actual_l2": 0.0050000000044408315,
+        "delta_l2": 5.6044646472503494e-05,
+        "relative_delta_l2": 0.011208929150000047,
+        "cosine": 0.9999371799528433,
+        "max_abs_delta": 5.068373866379261e-06
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 0.0033122472738432523,
+          "actual_l2": 0.003313666290551488,
+          "delta_l2": 3.7562829849983615e-05,
+          "relative_delta_l2": 0.011340587445453272,
+          "cosine": 0.9999358148058103,
+          "max_abs_delta": 2.0493753254413605e-06
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 0.0018264825460754149,
+          "actual_l2": 0.001826247881515173,
+          "delta_l2": 2.0025100899525418e-05,
+          "relative_delta_l2": 0.010963751579533894,
+          "cosine": 0.9999398986072888,
+          "max_abs_delta": 1.0551302693784237e-06
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 0.003094293537369118,
+          "actual_l2": 0.00309348330497863,
+          "delta_l2": 3.468402840765023e-05,
+          "relative_delta_l2": 0.011209029779747356,
+          "cosine": 0.9999371966628167,
+          "max_abs_delta": 5.068373866379261e-06
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 6.15117965560134e-06,
+          "actual_l2": 6.14312696554554e-06,
+          "delta_l2": 7.744728570192405e-08,
+          "relative_delta_l2": 0.012590639525769597,
+          "cosine": 0.9999214920309494,
+          "max_abs_delta": 4.108699158678064e-09
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 9.297406278640746e-05,
+          "actual_l2": 9.284480979454528e-05,
+          "delta_l2": 1.1151216790112921e-06,
+          "relative_delta_l2": 0.011993900724475167,
+          "cosine": 0.9999289407204975,
+          "max_abs_delta": 2.1033065422670916e-07
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 6.134871634655122e-06,
+          "actual_l2": 6.1246268101950414e-06,
+          "delta_l2": 7.825356024602158e-08,
+          "relative_delta_l2": 0.012755533433491421,
+          "cosine": 0.9999199087745,
+          "max_abs_delta": 6.55654730508104e-09
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 1.5114989924803462e-07,
+          "actual_l2": 1.5153636006175264e-07,
+          "delta_l2": 5.076028080506615e-09,
+          "relative_delta_l2": 0.03358274207101476,
+          "cosine": 0.9994407981134887,
+          "max_abs_delta": 9.835336989283405e-10
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 0.0010533793154009145,
+          "actual_l2": 0.0010517129102651124,
+          "delta_l2": 1.117112686548973e-05,
+          "relative_delta_l2": 0.010605037237927932,
+          "cosine": 0.9999449307757226,
+          "max_abs_delta": 6.090776878409088e-07
+        }
+      }
+    },
+    "exp_avg": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 0.0005000001255029267,
+        "actual_l2": 0.0005000000096209152,
+        "delta_l2": 5.6044653711613125e-06,
+        "relative_delta_l2": 0.011208927928816103,
+        "cosine": 0.9999371799527677,
+        "max_abs_delta": 5.068286554887891e-07
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 0.0003312248062015266,
+          "actual_l2": 0.00033136663507014755,
+          "delta_l2": 3.756280817499617e-06,
+          "relative_delta_l2": 0.01134057820299301,
+          "cosine": 0.9999358148023221,
+          "max_abs_delta": 2.0494189811870456e-07
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 0.0001826482982433622,
+          "actual_l2": 0.00018262479129129732,
+          "delta_l2": 2.0025108526712e-06,
+          "relative_delta_l2": 0.010963753136112099,
+          "cosine": 0.9999398986054059,
+          "max_abs_delta": 1.0551457307883538e-07
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 0.00030942942737868464,
+          "actual_l2": 0.0003093483364113314,
+          "delta_l2": 3.4684047387325083e-06,
+          "relative_delta_l2": 0.01120903324585163,
+          "cosine": 0.9999371966675442,
+          "max_abs_delta": 5.068286554887891e-07
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 6.151181120453261e-07,
+          "actual_l2": 6.143127066946913e-07,
+          "delta_l2": 7.744743823272608e-09,
+          "relative_delta_l2": 0.012590661324409062,
+          "cosine": 0.9999214920289016,
+          "max_abs_delta": 4.1087488966695673e-10
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 9.297408485035188e-06,
+          "actual_l2": 9.284481105108354e-06,
+          "delta_l2": 1.1151244741636943e-07,
+          "relative_delta_l2": 0.011993927941948158,
+          "cosine": 0.9999289406888213,
+          "max_abs_delta": 2.1033315533713903e-08
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 6.134873094434938e-07,
+          "actual_l2": 6.124626910948107e-07,
+          "delta_l2": 7.825374125373116e-09,
+          "relative_delta_l2": 0.012755559903059224,
+          "cosine": 0.9999199087884728,
+          "max_abs_delta": 6.556462039952748e-10
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 1.5114993543955666e-08,
+          "actual_l2": 1.515363625374471e-08,
+          "delta_l2": 5.076026461101544e-10,
+          "relative_delta_l2": 0.033582723316024146,
+          "cosine": 0.9994407980465575,
+          "max_abs_delta": 9.835349201736676e-11
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 0.00010533795664731445,
+          "actual_l2": 0.00010517129284588373,
+          "delta_l2": 1.1171163183761004e-06,
+          "relative_delta_l2": 0.010605069188083408,
+          "cosine": 0.9999449307738976,
+          "max_abs_delta": 6.090817805670667e-08
+        }
+      }
+    },
+    "exp_avg_sq": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 2.7205833708137125e-08,
+        "actual_l2": 2.7219446042067792e-08,
+        "delta_l2": 3.8408437869911595e-10,
+        "relative_delta_l2": 0.01411772132475537,
+        "cosine": 0.9999005199200509,
+        "max_abs_delta": 1.6325296670061107e-10
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 7.779560975245551e-09,
+          "actual_l2": 7.798169921837185e-09,
+          "delta_l2": 1.043669802794519e-10,
+          "relative_delta_l2": 0.013415535993810719,
+          "cosine": 0.9999130805158394,
+          "max_abs_delta": 3.15769632663887e-11
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 1.7739738726390897e-09,
+          "actual_l2": 1.767876159488946e-09,
+          "delta_l2": 2.7384188031098722e-11,
+          "relative_delta_l2": 0.015436635484580196,
+          "cosine": 0.9998863721464475,
+          "max_abs_delta": 7.115308342520166e-12
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 2.5993990675821725e-08,
+          "actual_l2": 2.600319523035374e-08,
+          "delta_l2": 3.6835504782792316e-10,
+          "relative_delta_l2": 0.014170777100822311,
+          "cosine": 0.9998996927518236,
+          "max_abs_delta": 1.6325296670061107e-10
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 3.5905812896502053e-14,
+          "actual_l2": 3.5774515676991054e-14,
+          "delta_l2": 6.656272385310967e-16,
+          "relative_delta_l2": 0.018538147025100277,
+          "cosine": 0.9998342482174829,
+          "max_abs_delta": 9.960493360823813e-17
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 3.859858424607054e-11,
+          "actual_l2": 3.847062088054967e-11,
+          "delta_l2": 5.15100284977406e-13,
+          "relative_delta_l2": 0.013345056432473811,
+          "cosine": 0.9999161722161589,
+          "max_abs_delta": 2.0566014169443037e-13
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 3.63524946640939e-14,
+          "actual_l2": 3.6370258676249665e-14,
+          "delta_l2": 7.729688911993474e-16,
+          "relative_delta_l2": 0.02126315947067106,
+          "cosine": 0.9997741687736837,
+          "max_abs_delta": 2.194175322391221e-16
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 1.3837904807055323e-16,
+          "actual_l2": 1.3938211238818345e-16,
+          "delta_l2": 4.1385769126825704e-18,
+          "relative_delta_l2": 0.02990753998085387,
+          "cosine": 0.9995820705815536,
+          "max_abs_delta": 1.5347012776941344e-18
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 8.94312237711648e-10,
+          "actual_l2": 8.909323278751817e-10,
+          "delta_l2": 1.388319287001682e-11,
+          "relative_delta_l2": 0.015523876655809737,
+          "cosine": 0.9998862163042072,
+          "max_abs_delta": 2.2273710653664125e-12
+        }
+      }
+    },
+    "final_masters": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 42.1490925894229,
+        "actual_l2": 42.1490923349555,
+        "delta_l2": 0.0053680998718527015,
+        "relative_delta_l2": 0.00012735979690342846,
+        "cosine": 0.9999999918897176,
+        "max_abs_delta": 0.0001958133652806282
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 19.10874383100158,
+          "actual_l2": 19.10875076246205,
+          "delta_l2": 0.004426602911352538,
+          "relative_delta_l2": 0.00023165326567259334,
+          "cosine": 0.9999999731684385,
+          "max_abs_delta": 0.0001958133652806282
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 6.271253940787959,
+          "actual_l2": 6.271250437170912,
+          "delta_l2": 0.002536844257274663,
+          "relative_delta_l2": 0.00040451945994008303,
+          "cosine": 0.9999999181820891,
+          "max_abs_delta": 0.0001946234770002775
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 5.107169756107467,
+          "actual_l2": 5.107167572616409,
+          "delta_l2": 0.0008110016918466296,
+          "relative_delta_l2": 0.00015879669769675934,
+          "cosine": 0.9999999873918841,
+          "max_abs_delta": 0.00019488763064146042
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 2.5565578656303978,
+          "actual_l2": 2.55655523759273,
+          "delta_l2": 0.00014073632424044323,
+          "relative_delta_l2": 5.5049144841374586e-05,
+          "cosine": 0.9999999984853165,
+          "max_abs_delta": 1.4687422662973404e-05
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 35.7770232099011,
+          "actual_l2": 35.77701884994013,
+          "delta_l2": 0.00016834302863765344,
+          "relative_delta_l2": 4.705339168381829e-06,
+          "cosine": 0.9999999999889391,
+          "max_abs_delta": 9.292364120483398e-05
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 6.291386217207513,
+          "actual_l2": 6.291385932265809,
+          "delta_l2": 0.00018417469770441535,
+          "relative_delta_l2": 2.9274104520984713e-05,
+          "cosine": 0.9999999995714867,
+          "max_abs_delta": 2.1721236407756805e-05
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 0.44874751455459233,
+          "actual_l2": 0.4487479092995459,
+          "delta_l2": 2.6812439649266446e-05,
+          "relative_delta_l2": 5.974950006325791e-05,
+          "cosine": 0.9999999982153878,
+          "max_abs_delta": 5.430541932582855e-06
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 4.435742740209984,
+          "actual_l2": 4.435754974242588,
+          "delta_l2": 0.0014302430056108604,
+          "relative_delta_l2": 0.0003224359683093691,
+          "cosine": 0.9999999480214536,
+          "max_abs_delta": 0.00016937684267759323
+        }
+      }
+    },
+    "final_weights": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 42.14907828153342,
+        "actual_l2": 42.14907855797054,
+        "delta_l2": 0.006884921228120903,
+        "relative_delta_l2": 0.0001633468988843194,
+        "cosine": 0.9999999866588967,
+        "max_abs_delta": 0.000244140625
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 19.108647931444672,
+          "actual_l2": 19.108647095533204,
+          "delta_l2": 0.005553933468222722,
+          "relative_delta_l2": 0.00029065025888531443,
+          "cosine": 0.9999999577612129,
+          "max_abs_delta": 0.000244140625
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 6.2711898167583895,
+          "actual_l2": 6.271192726210708,
+          "delta_l2": 0.00300508365494111,
+          "relative_delta_l2": 0.0004791887572770765,
+          "cosine": 0.9999998851892283,
+          "max_abs_delta": 0.000244140625
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 5.107059572326643,
+          "actual_l2": 5.107057673985518,
+          "delta_l2": 0.0014317253349496314,
+          "relative_delta_l2": 0.0002803423995106003,
+          "cosine": 0.999999960704124,
+          "max_abs_delta": 0.000244140625
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 2.556577980458392,
+          "actual_l2": 2.556572080556982,
+          "delta_l2": 0.0007954880848531668,
+          "relative_delta_l2": 0.0003111534601852968,
+          "cosine": 0.9999999515943131,
+          "max_abs_delta": 0.0001220703125
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 35.77708763999664,
+          "actual_l2": 35.77708763999664,
+          "delta_l2": 0.0,
+          "relative_delta_l2": 0.0,
+          "cosine": 0.9999999999999998,
+          "max_abs_delta": 0.0
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 6.291317615808682,
+          "actual_l2": 6.291320079637745,
+          "delta_l2": 0.001359403523559355,
+          "relative_delta_l2": 0.00021607612372700376,
+          "cosine": 0.9999999766556403,
+          "max_abs_delta": 0.0001220703125
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 0.448790513597379,
+          "actual_l2": 0.4487908166955516,
+          "delta_l2": 9.832255899181658e-05,
+          "relative_delta_l2": 0.00021908341645568777,
+          "cosine": 0.9999999760014725,
+          "max_abs_delta": 6.103515625e-05
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 4.435799114430002,
+          "actual_l2": 4.435803289705793,
+          "delta_l2": 0.0017277591213588949,
+          "relative_delta_l2": 0.0003895034641533606,
+          "cosine": 0.99999992414404,
+          "max_abs_delta": 0.000244140625
+        }
+      }
+    },
+    "master_update": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 0.07644159783491039,
+        "actual_l2": 0.07644156839486993,
+        "delta_l2": 0.0053680998718527015,
+        "relative_delta_l2": 0.07022485170242117,
+        "cosine": 0.9975342341522591,
+        "max_abs_delta": 0.0001958133652806282
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 0.06190216348953372,
+          "actual_l2": 0.06190503536446071,
+          "delta_l2": 0.004426602911352538,
+          "relative_delta_l2": 0.07150966398938509,
+          "cosine": 0.9974433036691351,
+          "max_abs_delta": 0.0001958133652806282
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 0.03099574096239375,
+          "actual_l2": 0.03099611686284518,
+          "delta_l2": 0.002536844257274663,
+          "relative_delta_l2": 0.08184493025517744,
+          "cosine": 0.9966507443873658,
+          "max_abs_delta": 0.0001946234770002775
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 0.01795454499739381,
+          "actual_l2": 0.01794867189308343,
+          "delta_l2": 0.0008110016918466296,
+          "relative_delta_l2": 0.0451697156326908,
+          "cosine": 0.9989795681020975,
+          "max_abs_delta": 0.00019488763064146042
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 0.00875719933925507,
+          "actual_l2": 0.008756405035080583,
+          "delta_l2": 0.00014073632424044323,
+          "relative_delta_l2": 0.016070928477050626,
+          "cosine": 0.9998708550286244,
+          "max_abs_delta": 1.4687422662973404e-05
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 0.003495885703106468,
+          "actual_l2": 0.0034955824631437656,
+          "delta_l2": 0.00016834302863765344,
+          "relative_delta_l2": 0.04815461457680458,
+          "cosine": 0.9988404697296399,
+          "max_abs_delta": 9.292364120483398e-05
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 0.01284400761835569,
+          "actual_l2": 0.012841908694749538,
+          "delta_l2": 0.00018417469770441535,
+          "relative_delta_l2": 0.014339348214120234,
+          "cosine": 0.9998971880977193,
+          "max_abs_delta": 2.1721236407756805e-05
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 0.0007038330795951377,
+          "actual_l2": 0.0007033251133663386,
+          "delta_l2": 2.6812439649266446e-05,
+          "relative_delta_l2": 0.0380948841800525,
+          "cosine": 0.9992741264621083,
+          "max_abs_delta": 5.430541932582855e-06
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 0.021770730837008794,
+          "actual_l2": 0.021768391783909737,
+          "delta_l2": 0.0014302430056108604,
+          "relative_delta_l2": 0.06569568179950773,
+          "cosine": 0.9978418125919285,
+          "max_abs_delta": 0.00016937684267759323
+        }
+      }
+    },
+    "model_update": {
+      "all": {
+        "elements": 763848,
+        "reference_l2": 0.08228669739541876,
+        "actual_l2": 0.08228943499309135,
+        "delta_l2": 0.006884921228120903,
+        "relative_delta_l2": 0.08366991805536013,
+        "cosine": 0.99649978940829,
+        "max_abs_delta": 0.000244140625
+      },
+      "groups": {
+        "attention": {
+          "elements": 434376,
+          "reference_l2": 0.06676954707920507,
+          "actual_l2": 0.06677327988527293,
+          "delta_l2": 0.005553933468222722,
+          "relative_delta_l2": 0.08318063714936383,
+          "cosine": 0.9965406857602312,
+          "max_abs_delta": 0.000244140625
+        },
+        "dense_mlp": {
+          "elements": 98304,
+          "reference_l2": 0.03337795038512783,
+          "actual_l2": 0.03337380560052348,
+          "delta_l2": 0.00300508365494111,
+          "relative_delta_l2": 0.09003200077498112,
+          "cosine": 0.9959466237908149,
+          "max_abs_delta": 0.000244140625
+        },
+        "embedding_and_output": {
+          "elements": 65536,
+          "reference_l2": 0.019509368356959506,
+          "actual_l2": 0.019509573900645043,
+          "delta_l2": 0.0014317253349496314,
+          "relative_delta_l2": 0.07338655505158358,
+          "cosine": 0.9973072351943313,
+          "max_abs_delta": 0.000244140625
+        },
+        "latent_projections": {
+          "elements": 16384,
+          "reference_l2": 0.009533576357154166,
+          "actual_l2": 0.009534794660568618,
+          "delta_l2": 0.0007954880848531668,
+          "relative_delta_l2": 0.08344067903292329,
+          "cosine": 0.996519279510587,
+          "max_abs_delta": 0.0001220703125
+        },
+        "normalization": {
+          "elements": 1280,
+          "reference_l2": 0.0,
+          "actual_l2": 0.0,
+          "delta_l2": 0.0,
+          "relative_delta_l2": null,
+          "cosine": null,
+          "max_abs_delta": 0.0
+        },
+        "routed_experts": {
+          "elements": 98304,
+          "reference_l2": 0.013255284395578486,
+          "actual_l2": 0.013259321798386275,
+          "delta_l2": 0.001359403523559355,
+          "relative_delta_l2": 0.102555590886666,
+          "cosine": 0.994742823049823,
+          "max_abs_delta": 0.0001220703125
+        },
+        "router": {
+          "elements": 512,
+          "reference_l2": 0.0006526964858723114,
+          "actual_l2": 0.0006524639246917813,
+          "delta_l2": 9.832255899181658e-05,
+          "relative_delta_l2": 0.1506405521096243,
+          "cosine": 0.9886497313128274,
+          "max_abs_delta": 6.103515625e-05
+        },
+        "shared_experts": {
+          "elements": 49152,
+          "reference_l2": 0.023477808036855147,
+          "actual_l2": 0.023479740157283654,
+          "delta_l2": 0.0017277591213588949,
+          "relative_delta_l2": 0.07359115973035821,
+          "cosine": 0.9972923968148975,
+          "max_abs_delta": 0.000244140625
+        }
+      }
+    }
+  },
+  "independent_optimizer_checks": {
+    "reference": {
+      "passed": true,
+      "tensors": 56,
+      "preclip_norm": 68.94048703761032,
+      "clip_factor": 7.2526321503153e-05,
+      "router_norm": 0.0020840695090722505,
+      "max_abs_errors": {
+        "clip": 0.0,
+        "moment1": 1.0913936421275139e-11,
+        "moment2": 1.7763568394002505e-15,
+        "adam": 7.450580596923828e-09
+      }
+    },
+    "actual": {
+      "passed": true,
+      "tensors": 56,
+      "preclip_norm": 68.82677087559524,
+      "clip_factor": 7.264615009167548e-05,
+      "router_norm": 0.0020859516609552575,
+      "max_abs_errors": {
+        "clip": 0.0,
+        "moment1": 0.0,
+        "moment2": 0.0,
+        "adam": 7.450580596923828e-09
+      }
+    }
+  },
+  "provenance": {
+    "megatron_capture": "/tmp/miles-validation/megatron-policy-contract-02/megatron-capture.pt",
+    "core_capture": "/tmp/miles-validation/core-policy-contract-02-r2/capture.pt",
+    "full_comparison": "/tmp/miles-validation/policy-contract-comparison-02.json",
+    "megatron_source": "bf4c1e0",
+    "core_source": "f5e65ce64",
+    "hardware": "single RTX 4090",
+    "limitations": "Tiny fixed batch, EP1, auxiliary objectives excluded. Megatron compatibility grouped GEMM and unfused attention; no full-model or distributed equivalence claim."
+  }
+}

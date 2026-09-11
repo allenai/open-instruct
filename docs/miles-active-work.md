@@ -9,12 +9,12 @@ separate authorization.
 
 | Track | State | Next evidence needed |
 | --- | --- | --- |
-| Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128→102/128 at0/20/40/60 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
+| Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128→102/128→97/128 at0/20/40/60/80 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
 | Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe; initial held-out96/128 versus Core97/128 | Full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
-| Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis submitted](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
+| Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis completed](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
 | Native reduction/clipping stress | [EP1/EP2 passed](https://beaker.org/ex/01M270A2J2E3WC60978EM8G5SV); independent global norm, active clipping and Adam moments verified | [Evidence](measurements/miles-core-ep-stress-20260910.json); max gradient relative L2 difference 5.002e-6; does not establish exact update parity near zero gradients. |
-| Three-source mixture | [Two-update 8192-response trial submitted](https://beaker.org/ex/01M270TQ57VM13CMYAP8AYAZA8); 16 focused tests passed | Audit GSM8K/math/legacy-IF identities, rewards, four-response groups, cap hits and per-source policy signal. |
+| Three-source mixture | [Two-update 8192-response trial passed](https://beaker.org/ex/01M270TQ57VM13CMYAP8AYAZA8); both updates and independent audit passed; 16 focused tests passed | [Evidence](measurements/miles-mixture-20260910.json): all three sources supplied mixed-reward groups; all 16 math training responses hit the cap. No learning claim. |
 | Standard dense Olmo3 | Isolated standard trainer plus local full/sliding HF math and real update/resume passed | Full-checkpoint serving and a bounded training trial when prioritized; no claim of a full recipe run yet. |
 
 The first Megatron attempt failed at initialization; r2 was stopped at the user's
@@ -34,7 +34,7 @@ The detailed acceptance sequence remains in
 [miles-qualification-plan.md](miles-qualification-plan.md), and feature/default
 coverage in [miles-feature-parity.md](miles-feature-parity.md):
 
-- Mixed open-instruct datasource GPU qualification is now submitted above.
+- Mixed open-instruct datasource GPU qualification passed above.
   The prior full-SFT math slice was almost entirely capped at4096 tokens; the
   new8192-token limit is a measured extension, not an assumption that math
   responses will now be uncapped.
@@ -56,11 +56,23 @@ Training uses temperature 1. The observed held-out score changes are greedy
 outputs on the same fixed set; they are not repeated stochastic eval samples.
 
 The [full hero graph/chunk matrix](https://beaker.org/ex/01M27118R2ER9QG0PYP3ARCHBE)
-is submitted independently of layerwise Core/HF diagnosis. It varies each setting
-separately; the original probability gate remains unchanged.
+completed with all eight greedy tokens matching in all four modes. Graphs on/off
+produce exactly the same checked probabilities at each fixed chunk size. Changing
+chunk size produces up to 0.5712 logprob difference; the original 0.1 probability
+gate still fails. [Evidence](measurements/miles-hero-matrix-20260910.json).
 
 The [hero layerwise report](measurements/miles-hero-layerwise-20260910.json)
 found exact dense-block and same-input KDA attention outputs. The first mismatch
 is in the first latent MoE block. A [Core-compatible HF MoE control](https://beaker.org/ex/01M271KNVXQ7N0EKK99MFHMHHX)
-is submitted to test arithmetic-layout differences; it is a diagnostic and cannot
-promote the default HF/SGLang implementation by itself.
+completed but did not eliminate the local MoE difference.
+[Evidence](measurements/miles-hero-moe-control-20260910.json). Operator-level
+diagnosis now separates native inference-only activation math from the actual
+gradient-enabled training path; default execution and gates remain unchanged.
+
+The [fixed-batch Core/Megatron comparison](measurements/miles-backend-fixed-policy-20260910.json)
+starts from exactly matching model weights and FP32 masters. Both production
+optimizers pass independent clipping/Adam checks. Across the tiny EP1 fixture,
+preclip gradient relative L2 delta is 1.132% (cosine 0.999937); FP32 master-update
+delta is 7.022% (cosine 0.997534). These are descriptive, with no cross-backend
+acceptance threshold. Auxiliary objectives are disabled in this fixture and
+remain a separate comparison.
