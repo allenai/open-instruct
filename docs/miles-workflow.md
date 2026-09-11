@@ -178,3 +178,5 @@ four updates, the previously prepared full-SFT checkpoint, fresh named-task
 GSM8K preparation, heldout evaluation, async TIS and 8 × 8 sampling. It disables
 checkpoint saving and final export to isolate the configuration-to-training
 path. This is a workflow check, not a new 100-update learning comparison.
+
+The [completed exercise and independent sample audit](measurements/miles-researcher-workflow-20260911.md) passed: four updates, 256 training responses, and 12/16 held-out answers correct both initially and finally. The report records the exact scope and observed TIS clipping.

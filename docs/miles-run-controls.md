@@ -19,7 +19,7 @@ Start with the [colocated dev/test and disaggregated training profiles](../confi
 The full-SFT starter now exposes 64 concurrent requests and sizes its graph and
 cache limits together. Maintained full-SFT examples now use 8 × 8; async uses
 trainer-scored old logprobs plus TIS and buffer factor two. The combined
-config-driven exercise is pending; previous measured configs remain frozen.
+config-driven exercise passed four updates with independently audited samples; previous measured configs remain frozen.
 
 ## Editing and inspecting a run
 
@@ -111,7 +111,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 | --- | --- |
 | Save / restart | `save`, `save_interval`, `load`. Saves are synchronous native Core checkpoints with completion manifests and a rollout/policy cursor. `async_save=true` is rejected. Baseline NVRX saves, retention and token-per-expert cadence are not ported. |
 | Native MoE checkpoint writer | Arithmetic metadata planning, compact storage, and balanced replicated ownership are enabled by default. Opt out with `core.checkpoint_constant_memory_planning=false`, `core.checkpoint_compact_storage=false`, and `core.checkpoint_dedup_save_to_lowest_rank=true`. Each switch is independent. Profiling (`core.checkpoint_profile`) and spawned workers (`core.checkpoint_process_count`) remain opt-in; `core.checkpoint_thread_count` controls thread buckets. The separate dense trainer keeps its own checkpoint path and rejects policy overrides. See the [qualification record](measurements/miles-checkpoint-perf-20260911.md). |
-| Final HF export | `output.export_hf=true` in structured files requests explicit driver export at completion; `eval_hf_dir` remains snapshot export for evaluation. New workflow export is implemented but outside the pending bounded async qualification. `save_hf` remains rejected because native saves do not produce HF output. |
+| Final HF export | `output.export_hf=true` in structured files requests explicit driver export at completion; `eval_hf_dir` remains snapshot export for evaluation. New workflow export is implemented but outside the completed bounded async qualification. `save_hf` remains rejected because native saves do not produce HF output. |
 | Auto resume / launch | Structured `[launch]` controls placement, priority, minimum runtime, mounts and Beaker restart policy. `run` delegates to `build_image_and_launch.sh --miles`; `status` reads a local receipt and queries Beaker. The workflow loads the latest completed Core checkpoint on retry when `auto_resume=true`. The config launcher supports one physical node; raw training files do not submit jobs. |
 | Weight publication | `update_weight_buffer_size`, `core.stream_moe_export`, `core.weight_sync_mode` (`flattened` / `per_tensor`); colocation uses IPC. Core publishes every collection (`update_weights_interval=1`); skipping publication is rejected. Megatron disk-delta/p2p/rdt transports and pipeline-depth=2 are rejected rather than silently ignored. |
 | W&B | `use_wandb`, `wandb_project`, `wandb_team`, `wandb_group`, `wandb_run_name`, `wandb_mode`, `wandb_dir`, `wandb_always_use_train_step`; the Core metrics adapter and rollout hooks determine reported metric definitions. |
@@ -139,7 +139,7 @@ The maintained async starter now selects trainer-scored old logprobs with TIS,
 matching olmo-miles' async correction. Full-SFT starters also restore the historical
 8 prompts × 8 responses. Earlier measurements used 16 × 4 and rollout logprobs
 without TIS; preserve those configurations when interpreting their results. The
-new configuration-driven combined exercise is pending.
+new configuration-driven combined exercise passed four updates; see the [workflow evidence](measurements/miles-researcher-workflow-20260911.md).
 Core also repeats an initial evaluation after resume when it is enabled, whereas
 olmo-miles suppresses that duplicate; account for the extra point and cost.
 

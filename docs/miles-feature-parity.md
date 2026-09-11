@@ -17,8 +17,10 @@ pins; individual measurement records identify the revisions actually exercised.
 
 The new [researcher workflow](miles-workflow.md) adds structured run files,
 preparation, one-node Beaker `run/status`, native resume and optional final HF
-export. The configuration-driven 8 × 8 async-TIS exercise is pending; implemented
-workflow stages are not yet a completed end-to-end qualification.
+export. The configuration-driven 8 × 8 async-TIS exercise passed four updates with
+independently audited samples and initial/final held-out evaluation.
+[Workflow evidence](measurements/miles-researcher-workflow-20260911.md) records
+the exact qualified path; conversion/save/export/restart remain separate.
 
 Use the [detailed audit](measurements/miles-feature-parity-audit-20260911.md),
 [run-control guide](miles-run-controls.md), and
@@ -38,7 +40,7 @@ uses implicit inheritance or environment-variable expansion.
 | --- | --- | --- |
 | [tiny-resident](../configs/miles/profiles/tiny-resident.toml) | One shared GPU; 1 prompt × 4 responses; two updates, native saves, eager decode | Tiny hybrid-MoE updates and separate-process continuation passed. Zero task rewards establish plumbing, not learning. |
 | [train-disaggregated](../configs/miles/profiles/train-disaggregated.toml) | Two B300 Core EP ranks + one TP1 engine; 8 prompts × 8 responses; admission 64; 100 updates; initial/every-20 heldout eval; final native save; offline W&B | Full-model capacity and synchronous scheduling passed a 12-update trial. That trial used 16 × 4; the new 8 × 8 recipe and complete 100-update eval/save lifecycle are not established by it. |
-| [train-disaggregated-async](../configs/miles/profiles/train-disaggregated-async.toml) | Same hardware/batch; lag ≤1 optimizer step; buffer factor two; retry; trainer-scored old logprobs plus TIS | Full-model bounded async passed 24-update and admission-64 12-update exercises. Those runs used the earlier behavior-logprob recipe; the new TIS/8 × 8 exercise is pending. Combined replay/restart/failure endurance remains separate. |
+| [train-disaggregated-async](../configs/miles/profiles/train-disaggregated-async.toml) | Same hardware/batch; lag ≤1 optimizer step; buffer factor two; retry; trainer-scored old logprobs plus TIS | Full-model bounded async passed 24-update and admission-64 12-update exercises. Those runs used the earlier behavior-logprob recipe; the new TIS/8 × 8 exercise passed four updates with an independent sample audit. Combined replay/restart/failure endurance remains separate. |
 | [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two updates, initial/final eval, diagnostics; same admission 64 | Short correctness recipe; no optimizer checkpoint requested. |
 | [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Four updates; 512-token responses; eager decode; admission 64 | Short lifecycle variant. Its name does not mean all Core async support remains unqualified. |
 
@@ -62,7 +64,7 @@ async recipe. Both full-SFT starters restore 8 prompts × 8 responses per
 collection. The earlier measured Core scheduling pair used 16 × 4 and rollout
 logprobs in both arms; those measurements remain unchanged. Neither larger
 reward groups nor a different policy-ratio anchor is an inference-only
-performance switch. The combined new recipe is awaiting its bounded exercise.
+performance switch. The combined new recipe passed its four-update bounded exercise.
 
 Copy a profile, replace `/data` paths, and prepare an HF descriptor with the exact
 tokenizer/chat template, rendered `train.jsonl`, disjoint eval data where needed,
@@ -122,7 +124,7 @@ Append `--task math` or `--task ifeval` to select one task. Broader olmo-miles
 catalog and code/judge-service qualification remain work. The new workflow
 implements named GSM8K/math/IF/generated-multiplication preparation and supported
 baseline-manifest adoption; named recipe selection remains unsupported. The full
-config-driven exercise is pending. The baseline's 41 static-source
+config-driven GSM8K exercise passed with independently audited samples. The baseline's 41 static-source
 and generated-arithmetic gates mostly used a tiny development model; judge
 transport was tested against a mock service. Neither those gates nor existing
 open-instruct verifier classes imply a complete Core task bridge.
@@ -145,7 +147,7 @@ open-instruct verifier classes imply a complete Core task bridge.
 | Batching and parallelism | Unpadded microbatch one with accumulation; MoE DDP/EP and separate dense FSDP backend | Dynamic batching, packing and trainer TP/PP/CP >1 unsupported. EP8/multinode unqualified. Our customized Olmo Megatron replay also restricts TP/PP/CP; general Megatron features are not baseline qualification. |
 | Rewards and tools | Trusted weighted verifier registry, isolated bounded math workers, full-SFT math/IF/mixture gates; tool-token masks tested | Code/judge service lifecycle and broader sources remain. No complete multi-turn environment bridge; baseline's adopted catalog also does not establish such a bridge. |
 | Evaluation | Fixed heldout GSM8K runs with retained questions/generations; shared-engine and snapshot dispatcher | Admission 64 now applies to shared eval, but the warm 128-question <60 s target has not been measured in the admission-only run. External/dedicated evaluation workflows need qualification. |
-| Reporting and workflow | MILES W&B/dashboard interfaces and retained JSONL; structured task/manifest preparation, one-node `run/status`, launch receipts and checkpoint-based auto resume now implemented | New config-driven exercise pending. Sample summaries, broader catalog/service workflows and recovery dashboards remain incomplete. |
+| Reporting and workflow | MILES W&B/dashboard interfaces and retained JSONL; structured task/manifest preparation, one-node `run/status`, launch receipts and checkpoint-based auto resume now implemented | Four-update HF/GSM8K config-driven exercise and independent sample audit passed. Sample summaries, broader catalog/service workflows and recovery dashboards remain incomplete. |
 | Model/hardware breadth | Prior SFT KDA/latent on B300 EP2; isolated standard dense Olmo3 path with local conversion/update/resume tests; exact hero native/HF conversion | Full hero optimized probability gate remains unresolved despite controlled-operator diagnostic parity. Full hero RL, original Olmo3 recipe and Core H100 MoE qualification remain. Baseline H100 evidence uses a smaller model and a different trainer backend. [Hero support](miles-hero-support.md) |
 
 Unsupported native options are rejected by the
@@ -179,9 +181,8 @@ recorded scope.
 
 ## Promotion order
 
-1. Complete the bounded config-driven exercise of the implemented researcher
-   workflow and new 8 × 8 async-TIS recipe. Save/export/restart qualification
-   remains separate from that exercise.
+1. Qualify the remaining researcher-workflow conversion, save/export and restart
+   stages beyond the completed four-update HF/GSM8K 8 × 8 async-TIS exercise.
 2. Port bounded serving recovery and exercise async + replay + checkpoint/restart
    with fault injection and prompt/version conservation. Then extend multistep
    and endurance qualification.

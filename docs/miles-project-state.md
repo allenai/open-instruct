@@ -1,6 +1,6 @@
 # MILES/Core project working branches
 
-Updated September 11, 2026 after consolidation and the feature-parity audit.
+Updated September 11, 2026 after consolidation and the researcher-workflow exercise.
 These are the project integration branches; the unrelated root checkouts still
 have their existing `qmoe-int` branches. No branch was renamed to Git `main`.
 
@@ -59,3 +59,5 @@ See [current feature parity](miles-feature-parity.md), the
 [136-field inventory](miles-knob-inventory.md) for actual remaining implementation
 and qualification work. The confirmed unsupported native controls found by the
 audit now fail in both CPU planning and direct runtime argument validation.
+
+The structured researcher workflow, 8 × 8 starter defaults and async TIS are now incorporated on the open-instruct working branch. The [four-update config launch and independent audit](measurements/miles-researcher-workflow-20260911.md) passed. Dependency branches were unchanged by this addition.
