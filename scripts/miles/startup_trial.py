@@ -45,6 +45,29 @@ def prepare(campaign, root):
         exercise_controls.write_config(output / "run.toml", config)
 
 
+def validate_progress(metrics, stages):
+    """A warm cache cannot pass qualification by skipping actual RL work."""
+    expected = list(range(2))
+    for name in ("generation_wait", "training", "publication"):
+        if [row["rollout_id"] for row in stages if row["stage"] == name] != expected:
+            raise ValueError(f"Incomplete {name} in startup trial")
+    if sum(row["stage"] == "initial_publication" for row in stages) != 1:
+        raise ValueError("Missing initial publication gate")
+    for rank in range(2):
+        rows = exercise_controls.read_jsonl(metrics / f"training_contract_rank{rank}.jsonl")
+        steps = [row for row in rows if row["event"] == "optimizer"]
+        if [row["step"] for row in steps] != [1, 2] or any(row["optimizer_skipped"] for row in steps):
+            raise ValueError(f"Rank {rank}: missing or skipped optimizer step")
+        if any(
+            row["local_behavior_versions"] != [update] or row["normalization"]["samples"] != 4
+            for update, row in enumerate(steps)
+        ):
+            raise ValueError(f"Rank {rank}: incorrect policy version or sample count")
+    publications = exercise_controls.read_jsonl(metrics / "publication.jsonl")
+    if [(row["version"], row["repeated_version"]) for row in publications] != [(0, False), (1, False), (2, False)]:
+        raise ValueError("Incomplete weight publication sequence")
+
+
 def compare(root):
     result = {
         "arms": {},
@@ -62,9 +85,14 @@ def compare(root):
         stages = [json.loads(s) for s in (metrics / "driver_timing.jsonl").read_text().splitlines()]
         if any(not row["passed"] for row in stages):
             raise ValueError(f"{arm}: failed stage")
+        validate_progress(metrics, stages)
         ranks = {
             p.name: [json.loads(s) for s in p.read_text().splitlines()] for p in metrics.glob("startup_rank*.jsonl")
         }
+        if set(ranks) != {"startup_rank0.jsonl", "startup_rank1.jsonl"} or any(
+            not row["passed"] for rows in ranks.values() for row in rows
+        ):
+            raise ValueError(f"{arm}: incomplete or failed rank startup")
         result["arms"][arm] = dict(
             cache=cached,
             driver_stages=stages,
