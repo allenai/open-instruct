@@ -228,15 +228,20 @@ class Watcher:
             output = self.call(
                 command,
                 cwd=self.config["checkout"],
-                env={**os.environ, "MILES_BASE_IMAGE": self.config["base_image"]},
+                env={
+                    **{key: value for key, value in os.environ.items() if key != "MILES_EXISTING_IMAGE"},
+                    "MILES_BASE_IMAGE": self.config["base_image"],
+                },
                 timeout=1800,
             )
             (self.output / "submission.log").write_text(output)
             experiment = submitted_id(output)
             self.state["audit"].update(status="submitted", experiment=experiment)
         except Exception as error:
-            details = getattr(error, "stdout", "") or ""
-            details += "\n" + (getattr(error, "stderr", "") or "")
+            details = []
+            for value in (getattr(error, "stdout", None), getattr(error, "stderr", None)):
+                details.append(value.decode(errors="replace") if isinstance(value, bytes) else (value or ""))
+            details = "\n".join(details)
             (self.output / "submission.log").write_text(details + "\n" + str(error))
             self.state["audit"]["status"] = "ambiguous"
             self.attention("Audit submission ambiguous or failed; inspect submission.log before any manual action")

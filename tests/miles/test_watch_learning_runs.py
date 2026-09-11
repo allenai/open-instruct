@@ -1,6 +1,7 @@
 """The local watcher never retries an ambiguous external submission."""
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -234,3 +235,22 @@ def test_expired_watch_does_not_call_external_commands(tmp_path):
     with pytest.raises(TimeoutError, match="deadline"):
         w.call(["beaker", "experiment", "get", "anything"])
     assert runner.calls == []
+
+
+def test_timeout_bytes_are_recorded_as_ambiguous_without_retry(tmp_path):
+    failure = subprocess.TimeoutExpired(["wrapper"], 1, output=b"possibly submitted", stderr=b"transport timeout")
+    runner = Commands(submission_error=failure)
+    w = watch.Watcher(tmp_path / "out", configuration(tmp_path), runner)
+    assert w.poll() and w.state["audit"]["status"] == "ambiguous"
+    assert "possibly submitted" in (w.output / "submission.log").read_text()
+    w.poll()
+    assert runner.submissions == 1
+
+
+def test_submission_discards_inherited_existing_image_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILES_EXISTING_IMAGE", "unrelated-profiler-image")
+    runner = Commands()
+    w = watch.Watcher(tmp_path / "out", configuration(tmp_path), runner)
+    w.poll()
+    _, kwargs = next((argv, kw) for argv, kw in runner.calls if argv[0].endswith("build_image_and_launch.sh"))
+    assert "MILES_EXISTING_IMAGE" not in kwargs["env"]
