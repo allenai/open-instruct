@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import torch
+from triton.runtime.autotuner import Autotuner
 
 TRACE_ENV = "OI_UPDATE_ZERO_TRACE_DIR"
 MODEL_MODULE = "olmo_sglang.models.olmo3_moe"
@@ -90,6 +91,65 @@ def source_manifest():
             if filename and Path(filename).is_file():
                 records[name] = {"file": filename, "sha256": digest(Path(filename).read_bytes())}
     return records
+
+
+def snapshot_autotune_configs():
+    """Read populated tuner decisions without running, compiling, or retuning kernels.
+
+    This follows olmo-miles' evaluation.determinism_trace implementation. Empty
+    caches are explicitly absent, so an empty report is not proof of equal choices.
+    """
+    result, seen = {}, set()
+    for module_name, module in sorted(list(sys.modules.items())):
+        if module is None or not module_name.startswith(
+            ("fla.", "sglang.kernels.ops.attention.fla.", "sglang.srt.batch_invariant_ops.")
+        ):
+            continue
+        for symbol, candidate in sorted(list(vars(module).items())):
+            current = candidate
+            for _ in range(8):
+                if isinstance(current, Autotuner):
+                    break
+                current = getattr(current, "fn", None)
+                if current is None:
+                    break
+            if not isinstance(current, Autotuner) or id(current) in seen:
+                continue
+            seen.add(id(current))
+            if not current.cache:
+                continue
+            result[module_name + "." + symbol] = {
+                repr(key): {
+                    "kwargs": dict(config.kwargs),
+                    **{
+                        name: getattr(config, name, None)
+                        for name in ("num_warps", "num_stages", "num_ctas", "maxnreg")
+                    },
+                }
+                for key, config in current.cache.items()
+            }
+    return result
+
+
+def autotune_policy():
+    mode = getattr(sys.modules.get("fla.ops.utils.cache"), "FLA_CACHE_MODE", None)
+    return {
+        "cache_results": getattr(sys.modules.get("fla.utils._config"), "FLA_CACHE_RESULTS", None),
+        "cache_mode": getattr(mode, "value", None),
+        "environment": {
+            key: value
+            for key, value in os.environ.items()
+            if key.startswith(("FLA_", "TRITON_"))
+            or key
+            in (
+                "CUBLAS_WORKSPACE_CONFIG",
+                "NVIDIA_TF32_OVERRIDE",
+                "CUDA_MODULE_LOADING",
+                "CUDA_DEVICE_MAX_CONNECTIONS",
+            )
+        },
+        "interpretation": "Observed populated autotuner caches after this forward; includes earlier warmup choices and does not identify every kernel actually launched by this request.",
+    }
 
 
 def selected_tensor(value, token_count, positions):
@@ -288,6 +348,8 @@ def attach_capture(model, root):
                     "pid": os.getpid(),
                 }
                 active["sources"] = source_manifest()
+                active["autotune_configs"] = snapshot_autotune_configs()
+                active["autotune_policy"] = autotune_policy()
                 path = destination / f"{active['capture_id']}.pt"
                 temporary = path.with_suffix(".tmp")
                 torch.save(active, temporary)
@@ -306,6 +368,8 @@ def attach_capture(model, root):
                         "activation_names": list(active["activations"]),
                         "controls": active["controls"],
                         "sources": active["sources"],
+                        "autotune_configs": active["autotune_configs"],
+                        "autotune_policy": active["autotune_policy"],
                     },
                 )
             return result

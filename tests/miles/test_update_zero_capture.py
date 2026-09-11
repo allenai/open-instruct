@@ -2,7 +2,8 @@
 
 import json
 import os
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
@@ -136,3 +137,49 @@ def test_import_hook_patches_constructor_and_is_idempotent(tmp_path, monkeypatch
     capture.arm_capture(tmp_path, "hf", "341", "hf341", [1, 2])
     model(torch.tensor([1, 2]))
     assert len(list(tmp_path.rglob("*.pt"))) == 1
+
+
+def test_autotune_snapshot_unwraps_deduplicates_and_never_invokes(monkeypatch):
+    class Tuner:
+        def __init__(self, cache):
+            self.cache = cache
+
+        def __call__(self):
+            pytest.fail("Reading choices must never invoke kernels")
+
+    config = SimpleNamespace(kwargs={"BLOCK_M": 64}, num_warps=4, num_stages=2, num_ctas=1, maxnreg=128)
+    tuner = Tuner({(177, "bf16"): config})
+    module = ModuleType("fla.test_update_zero_snapshot")
+    module.a = SimpleNamespace(fn=SimpleNamespace(fn=tuner))
+    module.b = tuner
+    module.empty = Tuner({})
+    unrelated = ModuleType("unrelated_update_zero_snapshot")
+    unrelated.tuner = Tuner({(1,): config})
+    monkeypatch.setattr(capture, "Autotuner", Tuner)
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setitem(sys.modules, unrelated.__name__, unrelated)
+    snapshot = capture.snapshot_autotune_configs()
+    assert snapshot == {
+        "fla.test_update_zero_snapshot.a": {
+            "(177, 'bf16')": {
+                "kwargs": {"BLOCK_M": 64},
+                "num_warps": 4,
+                "num_stages": 2,
+                "num_ctas": 1,
+                "maxnreg": 128,
+            }
+        }
+    }
+
+
+def test_autotune_policy_records_controls_without_unrelated_secrets(monkeypatch):
+    monkeypatch.setenv("TRITON_CACHE_DIR", "/tmp/cache")
+    monkeypatch.setenv("UNRELATED_SECRET", "not-recorded")
+    monkeypatch.setitem(
+        sys.modules, "fla.ops.utils.cache", SimpleNamespace(FLA_CACHE_MODE=SimpleNamespace(value="memory"))
+    )
+    monkeypatch.setitem(sys.modules, "fla.utils._config", SimpleNamespace(FLA_CACHE_RESULTS=True))
+    policy = capture.autotune_policy()
+    assert policy["cache_mode"] == "memory" and policy["cache_results"] is True
+    assert policy["environment"]["TRITON_CACHE_DIR"] == "/tmp/cache"
+    assert "UNRELATED_SECRET" not in policy["environment"]

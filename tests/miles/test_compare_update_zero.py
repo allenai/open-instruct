@@ -156,3 +156,14 @@ def test_separate_retry_roots_full_campaign(tmp_path):
     assert limited["valid"] and not limited["full_protocol_complete"]
     assert len(limited["comparisons"]) == 6 and len(limited["observer_controls"]) == 8
     assert all(row["comparison"] != "before_after_publication" for row in limited["comparisons"])
+
+
+def test_autotune_choice_comparison_is_explicit_about_missing_and_empty():
+    left, right = trace(), trace()
+    assert compare.compare_captures(left, right)["autotune_observations"] == {"available_both": False}
+    left["autotune_configs"], right["autotune_configs"] = {}, {}
+    observed = compare.compare_captures(left, right)["autotune_observations"]
+    assert observed["available_both"] and observed["populated_cache_counts"] == {"left": 0, "right": 0}
+    left["autotune_configs"] = {"kernel": {"shape": {"num_warps": 4}}}
+    right["autotune_configs"] = {"kernel": {"shape": {"num_warps": 8}}}
+    assert "kernel" in compare.compare_captures(left, right)["autotune_observations"]["changed_configs"]

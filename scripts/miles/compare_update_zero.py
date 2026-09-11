@@ -170,6 +170,23 @@ def compare_captures(left, right):
         "changed_execution_controls": controls,
         "changed_parameter_dtype_or_shape": parameter_dtypes,
     }
+    available = "autotune_configs" in left and "autotune_configs" in right
+    result["autotune_observations"] = {"available_both": available}
+    if available:
+        choices_a, choices_b = left["autotune_configs"], right["autotune_configs"]
+        result["autotune_observations"].update(
+            {
+                "populated_cache_counts": {"left": len(choices_a), "right": len(choices_b)},
+                "changed_configs": {
+                    name: {"left": choices_a.get(name), "right": choices_b.get(name)}
+                    for name in sorted(choices_a.keys() | choices_b.keys())
+                    if choices_a.get(name) != choices_b.get(name)
+                },
+                "left_policy": left.get("autotune_policy"),
+                "right_policy": right.get("autotune_policy"),
+                "interpretation": "Populated caches include warmup/history; equal or empty caches do not prove equal kernels for every launch.",
+            }
+        )
     require(("next_token_logits" in left) == ("next_token_logits" in right), "Next-token logit capture differs")
     if "next_token_logits" in left:
         a, b = left["next_token_logits"], right["next_token_logits"]
@@ -196,6 +213,8 @@ def load_capture(directory, capture_id, expected_ids):
         data["sources"] == metadata["sources"] and data["controls"] == metadata["controls"],
         f"{capture_id}: source/control metadata differs",
     )
+    for field in ("autotune_configs", "autotune_policy"):
+        require(data.get(field) == metadata.get(field), f"{capture_id}: autotune metadata differs")
     expected_positions = sorted(
         set(range(min(16, len(expected_ids)))) | set(range(max(0, len(expected_ids) - 128), len(expected_ids)))
     )
