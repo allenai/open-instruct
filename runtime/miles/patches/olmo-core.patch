@@ -1,3 +1,237 @@
+diff --git a/src/olmo_core/distributed/checkpoint/filesystem.py b/src/olmo_core/distributed/checkpoint/filesystem.py
+index 570f845f9e520dfd58fe385abbf8039c58b5b452..34e19df1001fd11135d4d69c6baaedb73b4e9f72 100644
+--- a/src/olmo_core/distributed/checkpoint/filesystem.py
++++ b/src/olmo_core/distributed/checkpoint/filesystem.py
+@@ -1,10 +1,12 @@
+ import dataclasses
+ import io
++import json
+ import logging
+ import operator
+ import os
+ import pickle
+ import tempfile
++import time
+ import traceback
+ from concurrent.futures import (
+     Executor,
+@@ -102,10 +104,32 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
+     return buckets
+ 
+ 
++def _compact_checkpoint_tensor(data: torch.Tensor) -> torch.Tensor:
++    # Contiguity alone does not exclude slices of a larger storage. torch.save serializes
++    # the entire backing storage, including bytes outside such a slice.
++    if (
++        data.is_contiguous()
++        and data.storage_offset() == 0
++        and data.untyped_storage().nbytes() == data.nbytes
++    ):
++        return data
++    return data.clone(memory_format=torch.contiguous_format)
++
++
+ def _write_items(
+-    path: str, storage_key: str, items: List[WriteItem], planner: SavePlanner
++    path: str,
++    storage_key: str,
++    items: List[WriteItem],
++    planner: SavePlanner,
++    *,
++    compact_storage: bool = False,
++    timings: Optional[Dict[str, float]] = None,
+ ) -> List[WriteResult]:
+     results: List[WriteResult] = []
++    timings = {} if timings is None else timings
++
++    def record(name: str, start: float) -> None:
++        timings[name] = timings.get(name, 0.0) + time.perf_counter() - start
+ 
+     tmp_file = tempfile.NamedTemporaryFile(
+         mode="w+b", suffix=".distcp", dir=None if is_url(path) else Path(path).parent, delete=False
+@@ -114,18 +138,31 @@ def _write_items(
+     try:
+         for write_item in items:
+             offset = tmp_file.tell()
++            start = time.perf_counter()
+             data = planner.resolve_data(write_item)
++            record("resolve_seconds", start)
+ 
+             if write_item.type == WriteItemType.BYTE_IO:
+                 assert isinstance(data, io.BytesIO)
++                start = time.perf_counter()
+                 tmp_file.write(data.getbuffer())
++                record("serialize_seconds", start)
+             else:
+                 assert isinstance(data, torch.Tensor)
+-                data = data.cpu()  # should already be on CPU, but just in case
+-                data = data.clone()  # avoid serializing unrelated shared storage
++                start = time.perf_counter()
++                data = data.cpu()  # Blocking copy: includes transfer completion.
++                record("cpu_seconds", start)
++                start = time.perf_counter()
++                data = _compact_checkpoint_tensor(data) if compact_storage else data.clone()
++                record("clone_seconds", start)
++                start = time.perf_counter()
+                 torch.save(data, tmp_file)
++                record("serialize_seconds", start)
++                timings["tensor_bytes"] = timings.get("tensor_bytes", 0.0) + data.nbytes
+ 
+             length = tmp_file.tell() - offset
++            timings["written_bytes"] = timings.get("written_bytes", 0.0) + length
++            timings["items"] = timings.get("items", 0.0) + 1
+ 
+             if isinstance(data, torch.Tensor) and (length - data.nbytes) > 1024 * 1024:
+                 raise OLMoCheckpointError(
+@@ -143,16 +180,20 @@ def _write_items(
+             )
+ 
+         # Ensure all data is written to disk.
++        start = time.perf_counter()
+         tmp_file.flush()
+         if hasattr(os, "fdatasync"):  # only available on linux
+             os.fdatasync(tmp_file)  # type: ignore
+         tmp_file.close()
++        record("flush_seconds", start)
+ 
++        start = time.perf_counter()
+         # Copy to final destination.
+         if is_url(path):
+             upload(tmp_path, path, save_overwrite=True)
+         else:
+             tmp_path.replace(path)
++        record("publish_seconds", start)
+     finally:
+         tmp_file.close()
+         tmp_path.unlink(missing_ok=True)
+@@ -160,20 +201,34 @@ def _write_items(
+     return results
+ 
+ 
++@dataclass
++class _BucketResult:
++    results: List[WriteResult]
++    timings: Dict[str, float]
++
++
+ def _write_buckets(
+-    buckets: List[List[WriteItem]], paths: List[str], planner: dist_cp.SavePlanner
+-) -> List[WriteResult]:
++    buckets: List[List[WriteItem]],
++    paths: List[str],
++    planner: dist_cp.SavePlanner,
++    compact_storage: bool = False,
++) -> _BucketResult:
+     results: List[WriteResult] = []
++    timings: Dict[str, float] = {}
+     for bucket, path in zip(buckets, paths):
+         key = os.path.basename(path)
+         try:
+-            results.extend(_write_items(path, key, bucket, planner))
++            results.extend(
++                _write_items(
++                    path, key, bucket, planner, compact_storage=compact_storage, timings=timings
++                )
++            )
+         except BaseException:
+             # NOTE: we might get an error here that can't be pickled, which causes a different failure
+             # later when PyTorch tries to reduce that error across ranks. So here we just make
+             # sure we're raising a simple error type that can be pickled.
+             raise OLMoCheckpointError(f"Original error:\n{traceback.format_exc()}")
+-    return results
++    return _BucketResult(results, timings)
+ 
+ 
+ def _narrow_tensor_by_index(
+@@ -205,10 +260,18 @@ class RemoteFileSystemWriter(dist_cp.StorageWriter):
+         process_count: Optional[int] = None,
+         process_group: Optional[dist.ProcessGroup] = None,
+         throttle_uploads: bool = False,
++        *,
++        compact_storage: bool = False,
++        profile: bool = False,
+     ) -> None:
+         super().__init__()
+         if thread_count is not None and thread_count <= 0:
+             raise ValueError("thread count must be at least 1")
++        if process_count is not None and process_count <= 0:
++            raise ValueError("process count must be at least 1")
++        self.compact_storage = compact_storage
++        self.profile = profile
++        self.timings: Dict[str, float] = {}
+         self.path = normalize_path(path)
+         self.thread_count = thread_count or get_default_thread_count()
+         self.process_count = process_count
+@@ -242,6 +305,8 @@ class RemoteFileSystemWriter(dist_cp.StorageWriter):
+         plan: dist_cp.SavePlan,
+         planner: dist_cp.SavePlanner,
+     ) -> Future[List[WriteResult]]:
++        start = time.perf_counter()
++        self.timings = {}
+         if is_url(self.path):
+             # Create the global S3 client up front to work around a threading issue in boto.
+             init_client(self.path)
+@@ -259,11 +324,13 @@ class RemoteFileSystemWriter(dist_cp.StorageWriter):
+         if self.throttle_uploads and is_url(self.path):
+             buckets = _split_by_size_and_type(1, plan.items)
+             paths = [gen_file_name() for _ in buckets]
+-            results = do_n_at_a_time(
+-                partial(_write_buckets, buckets, paths, planner),
++            result = do_n_at_a_time(
++                partial(_write_buckets, buckets, paths, planner, self.compact_storage),
+                 process_group=self.process_group,
+                 n=max(get_num_nodes() // 4, 1),
+             )
++            results = result.results
++            self.timings.update(result.timings)
+         else:
+             buckets = _split_by_size_and_type(self.thread_count, plan.items)
+             paths = [gen_file_name() for _ in buckets]
+@@ -283,15 +350,30 @@ class RemoteFileSystemWriter(dist_cp.StorageWriter):
+ 
+                 futures = []
+                 for bucket, path in zip(buckets, paths):
+-                    futures.append(executor.submit(_write_buckets, [bucket], [path], planner))
++                    futures.append(
++                        executor.submit(
++                            _write_buckets, [bucket], [path], planner, self.compact_storage
++                        )
++                    )
+                 for f in as_completed(futures):
+-                    results.extend(f.result())
+-
++                    result = f.result()
++                    results.extend(result.results)
++                    for name, value in result.timings.items():
++                        self.timings[name] = self.timings.get(name, 0.0) + value
++
++        # Stage durations above are summed worker time, not mutually exclusive wall time.
++        self.timings["write_wall_seconds"] = time.perf_counter() - start
++        if self.profile:
++            log.info(
++                "checkpoint_writer %s",
++                json.dumps({"rank_prefix": storage_plan.prefix, **self.timings}, sort_keys=True),
++            )
+         fut: Future[List[WriteResult]] = Future()
+         fut.set_result(results)
+         return fut
+ 
+     def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
++        start = time.perf_counter()
+         storage_md = dict()
+         for wr_list in results:
+             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
+@@ -323,6 +405,10 @@ class RemoteFileSystemWriter(dist_cp.StorageWriter):
+             tmp_file.close()
+             tmp_path.unlink(missing_ok=True)
+ 
++        self.timings["metadata_seconds"] = time.perf_counter() - start
++        if self.profile:
++            log.info("checkpoint_metadata_seconds %.6f", self.timings["metadata_seconds"])
++
+     def storage_meta(self) -> Optional[StorageMeta]:
+         return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
+ 
 diff --git a/src/olmo_core/kernels/swiglu.py b/src/olmo_core/kernels/swiglu.py
 index 4c71441ff45c0b8efc91c05f03527a231d38afac..e43c2506da3caa82b4a5e8f9090bc3edc156aaeb 100644
 --- a/src/olmo_core/kernels/swiglu.py
@@ -1407,18 +1641,173 @@ index ca243909ce65f5fcfdcf0d2c33d48e366291b006..620e7f44ea1c47435851bbebb159aab6
                  if torch.is_grad_enabled():
                      self._recompute_cache = expert_indices.detach()  # save for recompute
 diff --git a/src/olmo_core/train/train_module/transformer/ddp_train_module.py b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-index a855836be5a9c92ca67136acf6125861503f108d..70474f2157f4d10a91322297296dd1aa18e3ce0b 100644
+index a855836be5a9c92ca67136acf6125861503f108d..13497ba64be7aab78614ba5fd86f6421188f3c4a 100644
 --- a/src/olmo_core/train/train_module/transformer/ddp_train_module.py
 +++ b/src/olmo_core/train/train_module/transformer/ddp_train_module.py
-@@ -80,6 +80,7 @@ from olmo_core.utils import get_default_device, log_once, move_to_device
- 
- from ...common import MetricMergeStrategy, ReduceType
- from ..train_module import EvalBatchSpec, TrainModule
+@@ -1,4 +1,5 @@
+ import contextlib
++import json
+ import logging
+ import math
+ import os
+@@ -88,6 +89,7 @@ from .config import (
+     TransformerPipelineParallelConfig,
+     TransformerTensorParallelConfig,
+ )
 +from .objective import Objective, train_batch_with_loss
- from .config import (
-     TransformerActivationCheckpointingConfig,
-     TransformerContextParallelConfig,
-@@ -1520,6 +1521,10 @@ class OLMoDDPTrainModule(TrainModule):
+ 
+ log = logging.getLogger(__name__)
+ 
+@@ -106,7 +108,23 @@ def cpu_mesh_like(gpu_mesh: DeviceMesh) -> DeviceMesh:
+ 
+ 
+ class FlatSavePlanner(DefaultSavePlanner):
+-    pass
++    """Default planner with separately observable metadata planning cost."""
++
++    def __init__(self, **kwargs):
++        super().__init__(**kwargs)
++        self.timings: Dict[str, float] = {}
++
++    def create_local_plan(self):
++        start = time.perf_counter()
++        result = super().create_local_plan()
++        self.timings["local_plan_seconds"] = time.perf_counter() - start
++        return result
++
++    def create_global_plan(self, all_plans):
++        start = time.perf_counter()
++        result = super().create_global_plan(all_plans)
++        self.timings["global_plan_seconds"] = time.perf_counter() - start
++        return result
+ 
+ 
+ class OLMoDDPTrainModule(TrainModule):
+@@ -1122,52 +1140,71 @@ class OLMoDDPTrainModule(TrainModule):
+         process_group: Optional[dist.ProcessGroup] = None,
+         save_overwrite: bool = False,
+         thread_count: Optional[int] = None,
++        process_count: Optional[int] = None,
+         throttle_uploads: bool = False,
+-    ):
+-        optim = self._require_optimizer()
+-        state_dict = optim.state_dict()  # this will free optim states, need to load back after save
+-
+-        # this is count the param size of the global dtensor, not the local shard
+-        main_param_sz = 0
+-        for key, value in state_dict.items():
+-            if key.endswith(".main"):
+-                main_param_sz += value.numel()
+-
+-        # this is the theretical model param size calculated from config before PP split
+-        # model_param_sz = self.model_parts[0].num_params
+-
+-        # assert main_param_sz == model_param_sz, f"Main param size {main_param_sz} != model param size {model_param_sz}"
++        compact_storage: bool = False,
++        dedup_save_to_lowest_rank: bool = True,
++        profile: bool = False,
++    ) -> Dict[str, float]:
++        """Save native optimizer/model state and restore the live optimizer's storage.
++
++        Defaults preserve the existing writer policy. ``compact_storage`` skips copies only
++        for compact CPU storage; ``process_count`` selects the writer's existing spawn pool.
++        ``profile`` logs per-rank phases and summed worker time separately from wall time.
++        Returned durations are seconds; writer byte and item counts are also included.
++        """
+ 
+-        # Persistent model buffers (e.g. the router's aux-loss-free score_bias) are not optimizer
+-        # state, so they must be added to the checkpoint explicitly; optim.load_state_dict() below
+-        # only round-trips the optimizer keys.
+-        save_dict = dict(state_dict)
+-        for key, buffer in self._persistent_model_buffer_state_dict().items():
+-            assert key not in save_dict, f"Buffer key '{key}' collides with an optimizer state key"
+-            save_dict[key] = buffer
++        def timestamp():
++            if profile:
++                torch.cuda.synchronize()
++            return time.perf_counter()
+ 
++        start = timestamp()
++        timings: Dict[str, float] = {}
++        optim = self._require_optimizer()
++        # Validate the path and writer options before state_dict releases optimizer storage.
+         dir = _prepare_env_for_save(dir, process_group=process_group, save_overwrite=save_overwrite)
+-        planner = FlatSavePlanner(dedup_save_to_lowest_rank=True)
+-        dist_cp.state_dict_saver.save(
+-            save_dict,
+-            storage_writer=RemoteFileSystemWriter(
+-                dir,
+-                thread_count=thread_count,
+-                process_group=process_group,
+-                throttle_uploads=throttle_uploads,
+-            ),
++        writer = RemoteFileSystemWriter(
++            dir,
++            thread_count=thread_count,
++            process_count=process_count,
+             process_group=process_group,
+-            planner=planner,
++            throttle_uploads=throttle_uploads,
++            compact_storage=compact_storage,
++            profile=profile,
+         )
+-
+-        optim.load_state_dict(
+-            state_dict,
+-            reset_optimizer_moments_on_load=False,
+-        )  # load back the optim state after save
+-
+-        torch.cuda.empty_cache()
+-
+-        return
++        planner = FlatSavePlanner(dedup_save_to_lowest_rank=dedup_save_to_lowest_rank)
++        timings["prepare_seconds"] = timestamp() - start
++        phase_start = timestamp()
++        state_dict = optim.state_dict()
++        timings["state_dict_seconds"] = timestamp() - phase_start
++        try:
++            phase_start = timestamp()
++            save_dict = dict(state_dict)
++            for key, buffer in self._persistent_model_buffer_state_dict().items():
++                assert (
++                    key not in save_dict
++                ), f"Buffer key '{key}' collides with an optimizer state key"
++                save_dict[key] = buffer
++            timings["buffers_seconds"] = timestamp() - phase_start
++            phase_start = timestamp()
++            dist_cp.state_dict_saver.save(
++                save_dict, storage_writer=writer, process_group=process_group, planner=planner
++            )
++            timings["distributed_save_seconds"] = timestamp() - phase_start
++            timings.update(writer.timings)
++            timings.update(planner.timings)
++        finally:
++            phase_start = timestamp()
++            optim.load_state_dict(state_dict, reset_optimizer_moments_on_load=False)
++            timings["optimizer_reload_seconds"] = timestamp() - phase_start
++            phase_start = timestamp()
++            torch.cuda.empty_cache()
++            timings["empty_cache_seconds"] = timestamp() - phase_start
++            timings["total_seconds"] = timestamp() - start
++            if profile:
++                log.info("checkpoint_save %s", json.dumps(timings, sort_keys=True))
++        return timings
+ 
+     def load_state_dict_direct(
+         self,
+@@ -1282,7 +1319,10 @@ class OLMoDDPTrainModule(TrainModule):
+                             sd_to_load.pop(key)
+ 
+             if not loaded_model_directly:
+-                from .headwise_qk_checkpoint import finish_qk_expansion, prepare_qk_expansion
++                from .headwise_qk_checkpoint import (
++                    finish_qk_expansion,
++                    prepare_qk_expansion,
++                )
+ 
+                 expansions = {}
+                 if self.expand_shared_qk_norm_on_load:
+@@ -1520,6 +1560,10 @@ class OLMoDDPTrainModule(TrainModule):
                  flush=True,
              )
  
@@ -1429,6 +1818,25 @@ index a855836be5a9c92ca67136acf6125861503f108d..70474f2157f4d10a91322297296dd1aa
      @nvtx.annotate("train_batch")
      def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
          self._require_optimizer()
+@@ -2271,12 +2315,12 @@ class OLMoDDPTrainModule(TrainModule):
+             "labels": None if labels is None else self._debug_tensor_payload(labels),
+             "loss": self._debug_tensor_payload(lm_output.loss),
+             "ce_loss": self._debug_tensor_payload(lm_output.ce_loss),
+-            "z_loss": None
+-            if lm_output.z_loss is None
+-            else self._debug_tensor_payload(lm_output.z_loss),
+-            "logits": None
+-            if lm_output.logits is None
+-            else self._debug_tensor_payload(lm_output.logits),
++            "z_loss": (
++                None if lm_output.z_loss is None else self._debug_tensor_payload(lm_output.z_loss)
++            ),
++            "logits": (
++                None if lm_output.logits is None else self._debug_tensor_payload(lm_output.logits)
++            ),
+         }
+         torch.save(payload, self._debug_dump_path("logits", f"mb{micro_batch_idx:03d}"))
+ 
 diff --git a/src/olmo_core/train/train_module/transformer/objective.py b/src/olmo_core/train/train_module/transformer/objective.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..6656db30b78a00c5f5a2f936bb74e55ca9defb4b
@@ -1506,6 +1914,141 @@ index ce35efec397da3d7f13cbcad98bec7de43f40ca7..9dd69848dacf8aaa9cea699335daa974
      def train_batch(self, batch: Dict[str, Any], dry_run: bool = False):
          # Set model to train mode if it isn't already.
          self._set_model_mode("train")
+diff --git a/src/test/distributed/checkpoint/filesystem_test.py b/src/test/distributed/checkpoint/filesystem_test.py
+index b33cd2c2cfc5c3f9b5c83790aaaeb22446aa4ec4..841c2eb4cc6cadaa4b89fb5241677f158bb0a5fd 100644
+--- a/src/test/distributed/checkpoint/filesystem_test.py
++++ b/src/test/distributed/checkpoint/filesystem_test.py
+@@ -1,12 +1,20 @@
++import io
++
+ import pytest
+ import torch
+ import torch.distributed as dist
+ import torch.distributed.checkpoint as distcp
+-from torch.distributed.tensor import Shard, distribute_tensor, init_device_mesh
++from torch.distributed.tensor import (
++    Replicate,
++    Shard,
++    distribute_tensor,
++    init_device_mesh,
++)
+ 
+ from olmo_core.distributed.checkpoint.filesystem import (
+     RemoteFileSystemReader,
+     RemoteFileSystemWriter,
++    _compact_checkpoint_tensor,
+ )
+ from olmo_core.io import dir_is_empty
+ from olmo_core.testing import BACKENDS, run_distributed_test
+@@ -14,7 +22,12 @@ from olmo_core.utils import get_default_device
+ 
+ 
+ def run_save_and_load_with_dtensors(
+-    dir, thread_count: int | None = 2, process_count: int | None = None, throttle: bool = False
++    dir,
++    thread_count: int | None = 2,
++    process_count: int | None = None,
++    throttle: bool = False,
++    compact_storage: bool = False,
++    balanced: bool = False,
+ ):
+     mesh = init_device_mesh(get_default_device().type, (dist.get_world_size(),))
+ 
+@@ -28,23 +41,32 @@ def run_save_and_load_with_dtensors(
+     x = distribute_tensor(x_full, mesh, [Shard(dim=0)])
+     y = distribute_tensor(y_full, mesh, [Shard(dim=0)])
+ 
++    replicated = distribute_tensor(
++        torch.arange(16, device=get_default_device()), mesh, [Replicate()]
++    )
+     # Save the sharded tensors.
+     distcp.state_dict_saver.save(
+-        {"x": x, "y": y},
++        {"x": x, "y": y, "replicated": replicated},
+         checkpoint_id=dir,
+         storage_writer=RemoteFileSystemWriter(
+             dir,
+             thread_count=thread_count,
+             process_count=process_count,
+             throttle_uploads=throttle,
++            compact_storage=compact_storage,
++            profile=True,
+         ),
++        planner=distcp.DefaultSavePlanner(dedup_save_to_lowest_rank=not balanced),
+     )
+ 
+     # Now create new sharded copies with a different sharding strategy and load the checkpoint.
+     x_loaded = distribute_tensor(torch.zeros_like(x_full), mesh, [Shard(dim=1)])
+     y_loaded = distribute_tensor(torch.zeros_like(y_full), mesh, [Shard(dim=1)])
++    replicated_loaded = distribute_tensor(
++        torch.zeros_like(replicated.to_local()), mesh, [Replicate()]
++    )
+     distcp.state_dict_loader.load(
+-        {"x": x_loaded, "y": y_loaded},
++        {"x": x_loaded, "y": y_loaded, "replicated": replicated_loaded},
+         checkpoint_id=dir,
+         storage_reader=RemoteFileSystemReader(dir, thread_count=thread_count),
+     )
+@@ -53,7 +75,8 @@ def run_save_and_load_with_dtensors(
+     x_full_loaded = x_loaded.full_tensor()
+     y_full_loaded = y_loaded.full_tensor()
+     torch.testing.assert_close(x_full, x_full_loaded)
+-    torch.testing.assert_close(y_full, y_full_loaded)
++    torch.testing.assert_close(y_full, y_full_loaded, rtol=0, atol=0)
++    torch.testing.assert_close(replicated, replicated_loaded, rtol=0, atol=0)
+ 
+ 
+ @pytest.mark.parametrize("backend", BACKENDS)
+@@ -61,11 +84,14 @@ def run_save_and_load_with_dtensors(
+     "thread_count, process_count",
+     [pytest.param(2, None, id="threads"), pytest.param(None, 2, id="processes")],
+ )
+-def test_save_and_load_locally_with_dtensors(backend, tmp_path, thread_count, process_count):
++@pytest.mark.parametrize("compact_storage, balanced", [(False, False), (True, True)])
++def test_save_and_load_locally_with_dtensors(
++    backend, tmp_path, thread_count, process_count, compact_storage, balanced
++):
+     run_distributed_test(
+         run_save_and_load_with_dtensors,
+         backend=backend,
+-        func_args=(tmp_path, thread_count, process_count),
++        func_args=(tmp_path, thread_count, process_count, False, compact_storage, balanced),
+         start_method="spawn",
+     )
+ 
+@@ -112,3 +138,32 @@ def test_save_and_load_remotely_to_gcs_with_dtensors(
+         func_args=(gcs_checkpoint_dir, thread_count, process_count, throttle),
+         start_method="spawn",  # NOTE: forking causes a crash with boto3
+     )
++
++
++@pytest.mark.parametrize(
++    "kind", ["compact", "prefix", "offset", "transpose", "stride", "expanded", "empty"]
++)
++def test_compact_checkpoint_tensor_preserves_values_and_bounds_storage(kind):
++    base = torch.arange(1024 * 1024, dtype=torch.float32)
++    values = {
++        "compact": base,
++        "prefix": base[:16],
++        "offset": base[16:32],
++        "transpose": base[:16].reshape(4, 4).T,
++        "stride": base[::65536],
++        "expanded": base[:1].expand(16),
++        "empty": base[:0],
++    }
++    original = values[kind]
++    result = _compact_checkpoint_tensor(original)
++    torch.testing.assert_close(result, original, rtol=0, atol=0)
++    assert result.is_contiguous()
++    assert result.storage_offset() == 0
++    assert result.untyped_storage().nbytes() == result.nbytes
++    if kind == "compact":
++        assert result is original
++    stream = io.BytesIO()
++    torch.save(result, stream)
++    assert stream.tell() < result.nbytes + 4096
++    stream.seek(0)
++    torch.testing.assert_close(torch.load(stream, weights_only=True), original, rtol=0, atol=0)
 diff --git a/src/test/kernels/swiglu_valid_prefix_test.py b/src/test/kernels/swiglu_valid_prefix_test.py
 index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a60ff59350 100644
 --- a/src/test/kernels/swiglu_valid_prefix_test.py
@@ -1651,6 +2194,62 @@ index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a6
 +    reference = x.detach().clone().requires_grad_()
 +    (reference[:, :8] * F.silu(reference[:, 8:])).sum().backward()
 +    torch.testing.assert_close(x.grad, reference.grad, rtol=0, atol=0)
+diff --git a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
+index b98ed4185e41e9157f82bffad82522aeb00a1e95..d35c10fad7be71053661e7698425556d2bd3d9ca 100644
+--- a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
++++ b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
+@@ -20,7 +20,7 @@ from olmo_core.train.train_module.transformer import (
+ )
+ 
+ 
+-def _run_reshard(save_root, ep_degree):
++def _run_reshard(save_root, ep_degree, save_options):
+     rank = dist.get_rank()
+     torch.cuda.set_device(rank)
+     for key in (
+@@ -69,7 +69,7 @@ def _run_reshard(save_root, ep_degree):
+             state.to_local().fill_(value)
+             expected[name] = state.full_tensor().cpu()
+     original.optim._copy_main_params_to_model_params()
+-    original.save_state_dict_direct(Path(save_root) / "ep1")
++    original.save_state_dict_direct(Path(save_root) / "ep1", **save_options)
+     for name, state in original.optim.states.items():
+         torch.testing.assert_close(
+             state.full_tensor().cpu(), expected[name], rtol=0, atol=0, msg=name
+@@ -107,7 +107,7 @@ def _run_reshard(save_root, ep_degree):
+ 
+         # The direct synchronous save temporarily changes EP checkpoint views and
+         # then reloads live optimizer state. Check that all local shards survive.
+-        tm.save_state_dict_direct(Path(save_root) / f"ep{ep}")
++        tm.save_state_dict_direct(Path(save_root) / f"ep{ep}", **save_options)
+         tm.zero_grads()
+         for name, state in tm.optim.states.items():
+             torch.testing.assert_close(
+@@ -122,14 +122,19 @@ def _run_reshard(save_root, ep_degree):
+ 
+ @pytest.mark.gpu
+ @pytest.mark.parametrize("ep_degree", [2, 4, 8])
+-def test_ep1_checkpoint_reshards_and_preserves_live_states(tmp_path, ep_degree):
++@pytest.mark.parametrize(
++    "save_options",
++    [{}, {"compact_storage": True, "dedup_save_to_lowest_rank": False}],
++    ids=["legacy", "balanced-compact"],
++)
++def test_ep1_checkpoint_reshards_and_preserves_live_states(tmp_path, ep_degree, save_options):
+     """Use node-local temporary checkpoints; never touch Weka or user checkpoints."""
+-    if torch.cuda.device_count() < 8:
+-        pytest.skip("requires8 CUDA GPUs")
++    if torch.cuda.device_count() < ep_degree:
++        pytest.skip(f"requires {ep_degree} CUDA GPUs")
+     run_distributed_test(
+         _run_reshard,
+-        world_size=8,
++        world_size=ep_degree,
+         backend="nccl",
+         start_method="spawn",
+-        func_args=(str(tmp_path / "ep-reshard"), ep_degree),
++        func_args=(str(tmp_path / "ep-reshard"), ep_degree, save_options),
+     )
 diff --git a/src/test/nn/moe/v2/olmo3_factory_test.py b/src/test/nn/moe/v2/olmo3_factory_test.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..66c66c41e4d67c1e6378d40419aacfb2c4b74d1b
@@ -2028,3 +2627,39 @@ index 0000000000000000000000000000000000000000..12a462001099b6d420d24a9c4e9cb392
 +    assert seen and all(torch.equal(actual, indices) for actual in seen)
 +    assert torch.isfinite(router.weight.grad).all() and router.weight.grad.abs().sum() > 0
 +    assert router.replay_expert_indices is None
+diff --git a/src/test/train/train_module/transformer/checkpoint_save_failure_test.py b/src/test/train/train_module/transformer/checkpoint_save_failure_test.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..271ea1d1358aad0747e9d8b1d03feb7c9dd5b8c6
+--- /dev/null
++++ b/src/test/train/train_module/transformer/checkpoint_save_failure_test.py
+@@ -0,0 +1,30 @@
++"""Native save must restore released optimizer storage even if writing fails."""
++
++from types import SimpleNamespace
++from unittest import mock
++
++import pytest
++import torch
++
++from olmo_core.train.train_module.transformer import ddp_train_module
++
++
++@pytest.mark.parametrize("failure_phase", ["buffers", "write"])
++def test_failed_save_restores_live_optimizer(tmp_path, monkeypatch, failure_phase):
++    states = {"parameter.main": torch.tensor([1.0])}
++    optimizer = mock.Mock()
++    optimizer.state_dict.return_value = states
++    module = SimpleNamespace(
++        _require_optimizer=lambda: optimizer,
++        _persistent_model_buffer_state_dict=mock.Mock(return_value={}),
++    )
++    error = RuntimeError("injected save failure")
++    monkeypatch.setattr(ddp_train_module, "_prepare_env_for_save", lambda path, **kwargs: path)
++    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
++    write = mock.Mock(side_effect=error if failure_phase == "write" else None)
++    monkeypatch.setattr(ddp_train_module.dist_cp.state_dict_saver, "save", write)
++    if failure_phase == "buffers":
++        module._persistent_model_buffer_state_dict.side_effect = error
++    with pytest.raises(RuntimeError, match="injected save failure"):
++        ddp_train_module.OLMoDDPTrainModule.save_state_dict_direct(module, tmp_path)
++    optimizer.load_state_dict.assert_called_once_with(states, reset_optimizer_moments_on_load=False)

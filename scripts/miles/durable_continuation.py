@@ -26,6 +26,7 @@ from miles.backends.training_utils.loss_hub import losses
 from miles.rollout.data_source import RolloutDataSource
 from miles.utils import arguments
 from miles.utils.ft_utils.process_group_utils import GroupInfo
+from scripts.miles.checkpoint_weights import SafeTensorState
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
@@ -199,7 +200,7 @@ def fixed_rollout(groups, rank, world, step, vocab):
     return result
 
 
-def run(root, phase, backend):
+def run(root, phase, backend, *, checkpoint_options=None, continue_after_save=False, verify_export=False):
     rank, world = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     if world not in (1, 2):
         raise ValueError("Continuation qualification supports local EP1 or full-model EP2")
@@ -282,17 +283,48 @@ def run(root, phase, backend):
         worker.clock = PolicyClock()
         worker.ref_module = None
         worker._heartbeat = SimpleNamespace(bump=lambda: None)
-        snapshots, score_checks = {}, []
+        snapshots, score_checks, score_hashes, exports, save_timings = {}, [], {}, {}, []
+        if checkpoint_options is not None:
+            original_save = worker.train_module.save_state_dict_direct
+
+            def measured_save(path, **kwargs):
+                timings = original_save(path, **kwargs, **checkpoint_options)
+                save_timings.append(timings)
+                atomic_json(output / f"save-rank{rank}.json", timings)
+                print("CHECKPOINT_PROFILE", json.dumps({"rank": rank, **timings}), flush=True)
+                return timings
+
+            worker.train_module.save_state_dict_direct = measured_save
+
+        def export_at_boundary():
+            export_path = output / "hf-boundary"
+            worker.export_hf(BOUNDARY - 1, str(export_path))
+            # Read the actual written artifact and compare the complete exported inventory.
+            # Every rank participates in the native EP gather; only rank 0 reads the file.
+            expected = {
+                name: tensor_record(value)
+                for name, value in models.iter_export_state(worker.train_module, worker.hf_config)
+            }
+            if rank == 0:
+                with SafeTensorState(export_path) as stored:
+                    actual = {name: tensor_record(value) for name, value in stored.items()}
+                if actual != expected:
+                    raise ValueError("HF export file differs from live model export")
+            dist.barrier()
+            return expected
+
         with mock.patch.object(actor.distributed_utils, "get_gloo_group", return_value=gloo):
             if phase == "resumed":
                 checkpoint.restore(worker)
                 worker.train_module._trainer.global_step = worker.clock.completed_steps
                 source.load(BOUNDARY - 1)
                 snapshots["restored2"] = capture(worker, source)
+                if verify_export:
+                    exports["boundary"] = export_at_boundary()
                 if worker.clock.completed_steps != BOUNDARY or source.sample_offset != BOUNDARY:
                     raise ValueError("Resume did not restore the two-update boundary")
             worker.clock.published()  # No serving process in this trainer-only qualification.
-            stop = BOUNDARY if phase == "split" else HORIZON
+            stop = BOUNDARY if phase == "split" and not continue_after_save else HORIZON
             for step in range(worker.clock.next_rollout_id, stop):
                 rollout = fixed_rollout(source.get_samples(1), rank, world, step, worker.hf_config.vocab_size)
                 original_score = worker._score
@@ -300,9 +332,10 @@ def run(root, phase, backend):
                 original_log_probs = losses.get_log_probs_and_entropy
                 observed = torch.zeros(3, device="cuda", dtype=torch.float64)
 
-                def scored(module, batches, *, use_replay, original_score=original_score, rollout=rollout):
+                def scored(module, batches, *, use_replay, original_score=original_score, rollout=rollout, step=step):
                     result = original_score(module, batches, use_replay=use_replay)
                     rollout["rollout_log_probs"] = [value.detach().clone() for value in result]
+                    score_hashes[str(step + 1)] = [tensor_record(value) for value in result]
                     return result
 
                 def checked_loss(
@@ -365,6 +398,8 @@ def run(root, phase, backend):
                     worker.save_model(step, force_sync=True)
                     worker.finalize_checkpoint(step)
                     snapshots["after_save2"] = capture(worker, source)
+                    if verify_export:
+                        exports["boundary"] = export_at_boundary()
                 worker.clock.published()
         checkpoint_files = list((root / "split/core").rglob("*"))
         report = {
@@ -375,6 +410,9 @@ def run(root, phase, backend):
             "elapsed_seconds": time.monotonic() - started,
             "snapshots": snapshots,
             "score_checks": score_checks,
+            "score_hashes": score_hashes,
+            "exports": exports,
+            "save_timings": save_timings,
             "checkpoint_bytes": sum(p.stat().st_size for p in checkpoint_files if p.is_file()),
             "scheduler_horizon": HORIZON,
             "runtime_lock": runtime_lock(),
