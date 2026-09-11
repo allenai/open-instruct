@@ -13,20 +13,27 @@ from torch.utils.checkpoint import checkpoint
 from open_instruct.miles import data, replay_diagnostics
 
 
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
 @pytest.mark.parametrize("corrupt", [False, True])
-def test_observes_routes_in_forward_and_recomputation(monkeypatch, corrupt):
+def test_observes_routes_in_forward_and_recomputation(monkeypatch, corrupt, device):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA required for CPU-route/GPU-router regression")
     router = MoERouterConfigV2(d_model=8, num_experts=4, top_k=2).build()
     nn.init.normal_(router.weight, std=0.1)
     model = nn.Module()
     model.blocks = nn.ModuleDict({"0": nn.Module()})
     model.blocks["0"].routed_experts_router = router
+    model.to(device)
     module = SimpleNamespace(model=model)
     actor = SimpleNamespace(args=None, clock=SimpleNamespace(next_rollout_id=0))
-    batch = {"tokens": torch.tensor([[1, 2, 3]]), "rollout_routed_experts": [torch.tensor([[[1, 3]], [[2, 3]]])]}
+    batch = {
+        "tokens": torch.tensor([[1, 2, 3]], device=device),
+        "rollout_routed_experts": [torch.tensor([[[1, 3]], [[2, 3]]])],
+    }
     rows = []
     monkeypatch.setattr(replay_diagnostics.contract, "record", lambda args, row: rows.append(row))
     context = replay.replay_routes(model, data.router_routes(model, batch))
-    x = torch.randn(1, 3, 8, requires_grad=True)
+    x = torch.randn(1, 3, 8, device=device, requires_grad=True)
 
     def forward(x):
         weights, _, _, _ = router(x, scores_only=False)
@@ -37,7 +44,7 @@ def test_observes_routes_in_forward_and_recomputation(monkeypatch, corrupt):
             if corrupt:
                 router.replay_expert_indices = router.replay_expert_indices.roll(1, dims=-1)
             weights = checkpoint(forward, x, use_reentrant=True)
-            (weights * torch.tensor([1.0, 2.0])).sum().backward()
+            (weights * torch.tensor([1.0, 2.0], device=device)).sum().backward()
 
     if corrupt:
         with pytest.raises(ValueError, match="diverged"):

@@ -13,7 +13,10 @@ from open_instruct.miles import contract, data
 
 @contextmanager
 def checked_context(actor, module, batch, context):
-    expected = data.router_routes(module.model, batch)
+    # Rollout IDs arrive on CPU; the router copies them to its compute device.
+    # Keep diagnostic references/counters together without changing replay inputs.
+    device = batch["tokens"].device
+    expected = {name: ids.to(device) for name, ids in data.router_routes(module.model, batch).items()}
     routers = dict(module.model.named_modules())
     calls = {name: {"entered": 0, "returned": 0, "grad_enabled": 0} for name in expected}
     mismatches = torch.zeros((), dtype=torch.int64, device=batch["tokens"].device)
@@ -27,7 +30,7 @@ def checked_context(actor, module, batch, context):
         actual = getattr(router, "replay_expert_indices", None)
         if actual is None or actual.shape != expected[name].shape:
             raise ValueError(f"Missing or malformed replay override: {name}")
-        mismatches += (actual != expected[name]).sum()
+        mismatches += (actual.to(device) != expected[name]).sum()
 
     def after(name, router, inputs, output):
         nonlocal mismatches
@@ -35,7 +38,7 @@ def checked_context(actor, module, batch, context):
         if actual is None or actual.shape != expected[name].shape:
             raise ValueError(f"Missing or malformed returned replay routes: {name}")
         calls[name]["returned"] += 1
-        mismatches += (actual != expected[name]).sum()
+        mismatches += (actual.to(device) != expected[name]).sum()
 
     try:
         for name in expected:

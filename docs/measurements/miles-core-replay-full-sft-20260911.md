@@ -37,7 +37,11 @@ Placement: urgent, `ai2/holmes`, `ai2/open-instruct-dev`, minimum runtime one ho
 three GPUs, two-hour timeout. Results are under
 `/weka/oe-training-default/robertb/open-instruct/control-exercise/$BEAKER_EXPERIMENT_ID/replay-admission64`.
 
-Status: submitted and scheduled on Holmes 503; full-model results pending.
+Status: first attempt failed before its first optimizer update in the new diagnostic hook.
+Captured IDs remained on CPU while returned router IDs were on GPU. The diagnostic
+now compares both on one device without changing the replay inputs. A local CUDA
+regression exercises CPU route payloads and GPU forward/backward, including
+intentional route corruption; all 27 targeted tests passed with no skips. Retry pending.
 
 - Experiment: [01M291KSAXN8P2M0QCE26NE1TZ](https://beaker.org/ex/01M291KSAXN8P2M0QCE26NE1TZ)
 - Source: `9004a8cda`; immutable image: `01M291KK92RHGYEDN33N5F8BNR`.
