@@ -115,3 +115,38 @@ On Beaker, launch through the committed `scripts/train/build_image_and_launch.sh
 urgent, with positive minimum runtime sized to the job (at least one hour for
 these trials). CPU-only preparation requiring WEKA goes to Saturn. Run the
 existing FA4 forward/backward preflight for B300 Core training.
+
+## Evaluation concurrency on the next ordinary run
+
+Shared-engine evaluation uses the same `GenerateState` client semaphore and the
+same SGLang engine as rollout generation. The 64-way baseline therefore applies
+to evaluation already; there is no separate four-request eval cap to override.
+It does not require changing training batch size just to evaluate 128 prompts.
+For a future Core/Megatron pair, use the same serving controls from the admission
+table in **both** arms, including graph/cache limits, lengths, radix policy and
+memory fraction. Historical comparison configurations stay frozen at four.
+
+Evaluate the same immutable 128 heldout question IDs, tokenizer/chat template and
+4096-response-token limit, with one greedy answer per question. Compare update
+zero at the same checkpoint before comparing learned policies. Retain responses,
+per-question rewards, lengths and cap hits; inspect paired answer flips rather
+than assuming every score difference is noise. Keep the existing autotune/cache
+provenance so unrelated kernel-selection changes are visible.
+
+New Core runs record `evaluation` events in `driver_timing.jsonl`, with initial
+versus periodic phase and configured serving limits. This is blocking end-to-end
+eval time, including data/loading, scoring rewards and retaining outputs. Native
+MILES `eval_rollout` timing remains the narrower generation/reward measurement.
+Cold initial evaluation is reported separately from later points. Snapshot-based
+evaluation instead records `evaluation_dispatch`, which measures submission and
+must not be counted as completed evaluation latency.
+
+The target is **under 60 seconds for warm 128-question evaluation**. It is a
+performance target, not a timeout or correctness condition: one 64-slot engine
+still needs at least two admission waves, and long tails/batching can keep it
+above that target. Report tokens/second, response lengths, engine occupancy,
+actual allocated KV/recurrent pools and retraction messages with wall time.
+The TOML pool sizes are requests, not proof of the allocation SGLang obtained.
+Observe this on the next ordinary run that includes evaluation; no separate
+allocation is required. The current 12-update admission trial has no heldout eval
+and cannot establish this evaluation speedup.

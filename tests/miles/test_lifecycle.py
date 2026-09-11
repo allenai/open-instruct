@@ -1,6 +1,7 @@
 """Distributed serving groups must retire while both peers still exist."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -12,8 +13,9 @@ from open_instruct.miles.config import CoreConfig
 @pytest.mark.parametrize("fully_async", [False, True])
 @pytest.mark.parametrize("diagnostic_interval", [0, 1])
 @pytest.mark.parametrize("start_rollout", [0, 2])
+@pytest.mark.parametrize("with_eval", [False, True])
 def test_driver_quiesces_then_retires_transport_before_engines(
-    monkeypatch, fully_async, diagnostic_interval, start_rollout
+    monkeypatch, fully_async, diagnostic_interval, start_rollout, with_eval, tmp_path
 ):
     events = []
 
@@ -43,7 +45,11 @@ def test_driver_quiesces_then_retires_transport_before_engines(
     monkeypatch.setattr(driver, "init_tracking", lambda args: None)
     monkeypatch.setattr(driver, "finish_tracking", lambda: None)
     monkeypatch.setattr(driver, "remove_rollout_data_refs", lambda *args: None)
-    monkeypatch.setattr(driver, "EvalDispatcher", lambda *args: SimpleNamespace(drain=lambda: event("drained")))
+    monkeypatch.setattr(
+        driver,
+        "EvalDispatcher",
+        lambda *args: SimpleNamespace(drain=lambda: event("drained"), dispatch=lambda *a, **k: event("evaluated")),
+    )
     args = SimpleNamespace(
         fully_async=fully_async,
         offload_rollout=False,
@@ -56,11 +62,25 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         save_interval=None,
         update_weights_interval=1,
         debug_exit_after_rollout=None,
-        eval_interval=None,
+        eval_interval=1 if with_eval else None,
+        skip_eval_before_train=False,
+        hf_checkpoint="/hf",
+        eval_uses_snapshots=False,
+        save=str(tmp_path),
+        sglang_server_concurrency=64,
         start_rollout_id=start_rollout,
         num_rollout=start_rollout + 1,
     )
     asyncio.run(driver.train(args))
+    timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
+    evaluations = [row for row in timings if row["stage"] == "evaluation"]
+    assert len(evaluations) == events.count("evaluated") == (2 if with_eval else 0)
+    if with_eval:
+        assert [row["details"]["phase"] for row in evaluations] == ["initial", "periodic"]
+        assert all(
+            row["passed"] and row["details"]["configured_serving"]["sglang_server_concurrency"] == 64
+            for row in evaluations
+        )
     checks = 1 + int(diagnostic_interval > 0)
     roundtrips = int(diagnostic_interval > 0) + int(start_rollout > 0)
     assert events.count("compare") == checks

@@ -10,7 +10,7 @@ from miles.utils import arguments
 from scripts.miles import analyze_control_exercise, exercise_controls, launch_control_exercise
 from transformers import Qwen3Config
 
-from open_instruct.miles.timing import stage
+from open_instruct.miles.timing import evaluation_stage, stage
 
 
 def test_pair_differs_only_in_scheduling_and_output(tmp_path):
@@ -117,10 +117,14 @@ def test_audit_reads_metric_schemas_without_prompt_metadata(tmp_path, monkeypatc
     (output / "metrics/publication.jsonl").write_text(
         "".join(json.dumps({"version": v, "repeated_version": False}) + "\n" for v in range(5))
     )
+    stages += [{"stage": "evaluation", "rollout_id": i, "passed": True, "seconds": 100} for i in (0, 3)]
     (output / "metrics/driver_timing.jsonl").write_text("".join(json.dumps(row) + "\n" for row in stages))
     (output / "elapsed.json").write_text('{"seconds": 12}')
     exercise_controls.audit(campaign, output, arm, 4)
-    assert json.loads((output / "audit.json").read_text())["passed"]
+    report = json.loads((output / "audit.json").read_text())
+    assert report["passed"]
+    assert report["cycle_seconds"]["mean"] == 3
+    assert len(report["evaluation_timings"]) == 2
 
 
 @pytest.mark.parametrize("base", ("sync", "async"))
@@ -165,3 +169,14 @@ def test_warm_throughput_excludes_cold_tokens_and_handles_larger_batches(tmp_pat
     assert measured["post_first_four_consumed_response_tokens"] == 40 * samples
     assert measured["post_first_four_consumed_tokens_per_cycle_second"] == 10 * samples
     assert measured["samples_per_collection"] == samples
+
+
+@pytest.mark.parametrize("snapshots", (False, True))
+def test_evaluation_failure_and_snapshot_dispatch_are_labeled(tmp_path, snapshots):
+    args = SimpleNamespace(save=str(tmp_path), eval_uses_snapshots=snapshots, sglang_server_concurrency=64)
+    with pytest.raises(RuntimeError, match="eval failed"), evaluation_stage(args, 0, initial=True):
+        raise RuntimeError("eval failed")
+    row = json.loads((tmp_path / "driver_timing.jsonl").read_text())
+    assert not row["passed"]
+    assert row["stage"] == ("evaluation_dispatch" if snapshots else "evaluation")
+    assert row["details"]["scope"] == ("snapshot_submission" if snapshots else "blocking_shared_engine_evaluation")

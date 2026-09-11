@@ -85,7 +85,7 @@ The four changing batches are too few for a useful correlation conclusion.
 
 [Scoring measurement series](miles-control-exercise-20260911-scoring.json). Raw
 compiler signatures, source hashes and score tensors are in the scoring task's
-Beaker result. Scheduling and controls results remain pending.
+Beaker result. Scheduling and controls results are recorded below.
 
 
 ## Larger serving baseline follow-up
@@ -123,3 +123,56 @@ All four starter TOMLs and documented async/two-engine overrides passed the
 installed parser; 28 focused tests and `make style && make quality` passed.
 The initial scheduling event reports the Holmes workspace-group allocation limit
 (159/160 slots used, three required); the job remains queued without relaunching.
+
+## Evaluation follow-up without another allocation
+
+Future ordinary training/evaluation runs inherit the larger serving admission.
+The Core driver now records initial and periodic blocking evaluation boundaries,
+including configured admission/graph/cache limits; snapshot submission is labeled
+separately. These changes are newer than both submitted measurement images.
+The current admission trial omits eval, so it cannot qualify the proposed warm
+128-question evaluation target (<60 seconds). The next matched Core/Megatron
+run must use identical serving settings and immutable heldout IDs, retaining
+per-question results and generations. See the [starter guide](../../configs/miles/README.md#evaluation-concurrency-on-the-next-ordinary-run).
+
+
+## Completed scheduling and grouped-control results
+
+The original 24-update sync/async executions and four-update controls execution
+completed. The first image's post-run auditor incorrectly used the prepared-dataset
+JSONL reader for metric JSONL, causing `KeyError: metadata`. The GPU scheduling
+and controls tasks therefore exited 1 **after execution**. The corrected independent
+[Saturn audit](https://beaker.org/ex/01M28RHF6NK58X69BHRNF5RBG3), source `53bacd91b`,
+passed all three retained executions and exited 0. These are independently audited
+results, not a claim that the original GPU tasks exited successfully.
+
+Warm measurements exclude the first four updates (20 points per arm):
+
+| Metric | Sync, admission 4 | Async, admission 4 |
+| --- | ---: | ---: |
+| Mean cycle seconds | 49.974 | 48.904 |
+| Mean scoring seconds | 1.180 | 1.324 |
+| Score time / model-token Pearson correlation | -0.041 | 0.094 |
+| Consumed response tokens / cycle second | 622.35 | 633.78 |
+| Prompt groups at lag 0 / lag 1, all 24 updates | 96 / 0 | 80 / 16 |
+
+Both arms completed 24 optimizer updates and 25 publications. Independent audits
+checked prompt/token identity, rewards, complete groups, no duplicate consumption,
+rank-local policy versions and lag at most one. Async cycle time improved by only
+1.022× and warm consumed-token throughput by 1.018× in this admission-four test;
+that small difference is not strong evidence of a throughput benefit. Generation
+still dominated. Different completion order changes the consumed prompts and
+response lengths. The score timings are now nearly flat with tokens in this
+bounded live run, supporting that dynamic rows reached the runtime.
+
+Controls passed four updates, six publications including the final diagnostic
+repeat, native checkpoint inspection, and both eight-question evals (5/8 before
+and after). TIS, cosine/warmup, entropy loss, buffer/drop handling, admission eight,
+smaller publication buckets and offline W&B ran together. This establishes
+interoperability, not isolated performance effects or learning quality. The native
+checkpoint was 222175220085 bytes; its save boundary cost roughly nine minutes.
+
+[Machine-readable final measurements](miles-control-exercise-20260911-results.json)
+are derived from the GPU scoring result and the separate successful CPU audits.
+The CPU audit provenance is embedded in that report. The larger admission-64
+trial is a different batch size and remains a separate result.

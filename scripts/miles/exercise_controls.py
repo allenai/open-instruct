@@ -243,7 +243,11 @@ def audit(campaign, output, arm, updates, report_path=None):
         raise ValueError("Static scoring unexpectedly configured")
     cycles = []
     for rollout in range(updates):
-        rows = [row for row in stages if row["rollout_id"] == rollout]
+        rows = [
+            row
+            for row in stages
+            if row["rollout_id"] == rollout and row["stage"] in {"generation_wait", "training", "publication"}
+        ]
         if {row["stage"] for row in rows} != {"generation_wait", "training", "publication"} or len(rows) != 3:
             raise ValueError("Incomplete cycle timings")
         cycles.append(sum(row["seconds"] for row in rows))
@@ -259,6 +263,7 @@ def audit(campaign, output, arm, updates, report_path=None):
             name: describe([r["seconds"] for r in stages if r["stage"] == name])
             for name in {r["stage"] for r in stages}
         },
+        evaluation_timings=[row for row in stages if row["stage"] in {"evaluation", "evaluation_dispatch"}],
         measured_cycle_seconds=sum(cycles),
         consumed_samples=collection_size * updates,
         consumed_response_tokens=sum(row["summary"]["mean_response_tokens"] * collection_size for row in reports),
