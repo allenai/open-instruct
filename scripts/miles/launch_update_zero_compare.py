@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path("/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1")
 IMAGE = "01M26N80T0V9PREQTS87J849P8"
+BACKEND_NAMES = ("core", "megatron")
 
 
 def specification(image, core_root, megatron_root, *, hf_only=False, evidence_only=False):
@@ -20,7 +21,11 @@ def specification(image, core_root, megatron_root, *, hf_only=False, evidence_on
         raise ValueError("Use the original qualified Core runtime for the CPU comparison")
     roots = {"core": Path(core_root), "megatron": Path(megatron_root)}
     for backend, path in roots.items():
-        if not path.is_relative_to(ROOT) or ".." in path.parts or path.name != backend:
+        if (
+            not path.is_relative_to(ROOT)
+            or ".." in path.parts
+            or path.name not in (BACKEND_NAMES if hf_only else (backend,))
+        ):
             raise ValueError("Expected retained backend directory under the original GSM8K campaign")
     source = Path(__file__).with_name("compare_update_zero.py").read_bytes()
     encoded = base64.b64encode(source).decode()

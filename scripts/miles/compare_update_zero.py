@@ -316,7 +316,7 @@ def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False,
                             **compare_captures(loaded[backend, phase], repeated),
                         }
                     )
-    return {
+    report = {
         "schema_version": 1,
         "valid": True,
         "validity_scope": "HF prefill only; full protocol incomplete"
@@ -349,6 +349,27 @@ def compare_campaign(root, *, core_root=None, megatron_root=None, hf_only=False,
             for backend in BACKENDS
         },
     }
+
+    report["participants"] = {
+        side: {
+            "backend": manifests[backend].get("backend", backend),
+            "image": manifests[backend].get("image"),
+            "campaign": directories[backend].parent.name,
+            "directory": str(directories[backend]),
+        }
+        for side, backend in zip(("left", "right"), BACKENDS, strict=True)
+    }
+    same_backend = manifests["core"].get("backend") == manifests["megatron"].get("backend")
+    if same_backend and manifests["core"].get("backend") is not None:
+        slots = dict(zip(BACKENDS, ("left", "right"), strict=True))
+        for field in ("backend_directories", "manifests", "cleanup_results", "protocol_files"):
+            report[field] = {slots[key]: value for key, value in report[field].items()}
+        for row in reports + observers:
+            if row.get("comparison") == "cross_backend":
+                row["comparison"] = "cross_run"
+            if "backend" in row:
+                row["run"] = slots[row.pop("backend")]
+    return report
 
 
 def main():

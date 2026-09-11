@@ -164,6 +164,16 @@ def test_separate_retry_roots_full_campaign(tmp_path):
     assert limited["valid"] and not limited["full_protocol_complete"]
     assert len(limited["comparisons"]) == 6 and len(limited["observer_controls"]) == 8
     assert all(row["comparison"] != "before_after_publication" for row in limited["comparisons"])
+    for root in roots.values():
+        (root / "manifest.json").write_text(
+            json.dumps({"backend": "core", "image": "original", "inputs": {"cases": cases}})
+        )
+    twins = compare.compare_campaign(tmp_path, core_root=roots["core"], megatron_root=roots["megatron"], hf_only=True)
+    assert set(twins["manifests"]) == {"left", "right"}
+    assert twins["participants"]["right"]["backend"] == "core"
+    assert twins["participants"]["right"]["image"] == "original"
+    assert all("backend" not in row for row in twins["observer_controls"])
+    assert {row["comparison"] for row in twins["comparisons"]} == {"cross_run", "repeated_prefix"}
 
 
 def test_autotune_choice_comparison_is_explicit_about_missing_and_empty():

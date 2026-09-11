@@ -47,3 +47,12 @@ def test_evidence_only_cli_keeps_failure_scope_explicit():
             hf_only=True,
             evidence_only=True,
         )
+
+
+def test_hf_twins_allow_explicit_same_backend_roots_only_in_hf_mode():
+    left = launch.ROOT / "hfmatched-a/core"
+    right = launch.ROOT / "hfmatched-b/core"
+    task = launch.specification(launch.IMAGE, left, right, hf_only=True)["tasks"][0]
+    assert str(left) in task["arguments"][0] and str(right) in task["arguments"][0]
+    with pytest.raises(ValueError):
+        launch.specification(launch.IMAGE, left, right)
