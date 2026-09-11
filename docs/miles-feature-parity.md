@@ -32,14 +32,14 @@ inheritance or environment-variable substitution is implied.
 | Profile | Topology and purpose | Starting shape | Evidence / limitation |
 | --- | --- | --- | --- |
 | [tiny-resident](../configs/miles/profiles/tiny-resident.toml) | One GPU shared by a tiny Core model and one SGLang engine | 1 prompt × 4 responses; 2 updates; context 512, response 256; eager decode; Torch attention | This profile passed two updates plus a separate-process third update through the public entrypoint with schema-2 checkpoints on the random tiny KDA/latent fixture. Memory fit remains model-dependent. All-zero rewards validate plumbing, not policy learning. |
-| [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two Core EP ranks plus one dedicated SGLang GPU | 16 prompts × 4 responses; 2 updates; context 6144, response 4096; admission/decode graphs through batch 64; FA4 | Based on the successful full SFT path. Admission is raised from the historical four to 64, with 524288 KV tokens and 128 recurrent slots; larger sizing awaits its own GPU measurement. |
+| [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two Core EP ranks plus one dedicated SGLang GPU | 16 prompts × 4 responses; 2 updates; context 6144, response 4096; admission/decode graphs through batch 64; FA4 | Based on the successful full SFT path. Admission is raised from the historical four to 64, with 524288 KV tokens and 128 recurrent slots; capacity and scheduling passed the 12-update B300 pair; this two-update eval/diagnostics recipe is a separate combination. |
 | [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU allocation; bounded asynchronous generation | 16 prompts × 4 responses; 4 updates; context 2560, response 512; lag ≤1; one collection buffered; eager decode; admission 64 | Candidate for async qualification only. Core's bounded queue and ledger have targeted tests; full-model async endurance, restart and failures need their own run. Replay stays off. |
 
 The additional [train-disaggregated](../configs/miles/profiles/train-disaggregated.toml)
 starter uses the same 64-completion/64-admission shape, 100 updates, initial and
 every-20-update heldout evaluation, a final native checkpoint and offline W&B.
 It keeps the established GSM8K objective explicit. See the starter index for
-async overrides and the memory constraints on engine scaling.
+the standalone async training example, overrides and the memory constraints on engine scaling.
 
 All profiles explicitly select `core.row_specialization="dynamic"` for forward-only
 routed-expert scoring; Core defaults remain static. See the
@@ -196,8 +196,7 @@ training memory and execution. Transfer settings with the matching contract:
 - **Size client admission, engine admission, graphs and both cache pools together.**
   The new full-SFT baseline admits all 64 completions, reserves 524288 total KV
   tokens and 128 recurrent slots, and captures decode graphs through 64. Historical
-  runs used four requests, 32768 tokens and eight slots. The larger baseline is
-  pending measurement. Tiny fixtures retain four requests/4096 tokens. The collection and optimizer batch rise from 16 to 64 to supply enough work;
+  runs used four requests, 32768 tokens and eight slots. The larger baseline passed the 12-update sync/async B300 trial. Tiny fixtures retain four requests/4096 tokens. The collection and optimizer batch rise from 16 to 64 to supply enough work;
   each additional engine needs more queued samples to sustain the same occupancy;
   dedicated memory fraction stays 0.6, rather than copying 0.85 blindly.
 - **Use recomputation initially.** Disable it only in a measured memory and

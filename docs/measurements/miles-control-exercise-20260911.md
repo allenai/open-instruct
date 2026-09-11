@@ -122,7 +122,7 @@ Source `4344d745d`; immutable image `01M28SRFAM2W807AKM2EXSC8YH`.
 All four starter TOMLs and documented async/two-engine overrides passed the
 installed parser; 28 focused tests and `make style && make quality` passed.
 The initial scheduling event reports the Holmes workspace-group allocation limit
-(159/160 slots used, three required); the job remains queued without relaunching.
+(159/160 slots used, three required); the job subsequently started without relaunching and completed at 19:05 UTC with exit 0.
 
 ## Evaluation follow-up without another allocation
 
@@ -176,3 +176,37 @@ checkpoint was 222175220085 bytes; its save boundary cost roughly nine minutes.
 are derived from the GPU scoring result and the separate successful CPU audits.
 The CPU audit provenance is embedded in that report. The larger admission-64
 trial is a different batch size and remains a separate result.
+
+
+## Completed admission-64 result
+
+Both 12-update arms passed their independent token/reward/membership,
+normalization, optimizer and publication audits. Each published 13 versions.
+All 192 sync prompt groups had lag zero; async had 66 at zero and 126 at one.
+SGLang reported the requested 524288-token pool and 64 running-request capacity;
+logs reached 64 actual requests with decode graphs enabled. No KV retraction or
+OOM messages were found in the retained run logs.
+
+Warm measurements exclude the first four updates (eight points per arm):
+
+| Metric | Sync | Async |
+| --- | ---: | ---: |
+| Cycle seconds | 69.006 | 53.495 |
+| Generation wait seconds | 39.162 | 22.761 |
+| Trainer call seconds (including scoring) | 25.885 | 26.550 |
+| Scoring seconds | 4.675 | 4.970 |
+| Publication seconds | 3.959 | 4.184 |
+| Consumed response tokens / cycle second | 1856.06 | 2280.84 |
+| Token throughput / corresponding historical 16-sample arm | 2.982x | 3.599x |
+
+Async increased useful token throughput by 22.9% over sync at the same 64-sample
+batch size. Async generation wait measures consumer stalls, not all background
+inference work. The historical comparison changes batch size and admission;
+it does not isolate either. Private cold caches, eight warm observations and
+completion-order differences limit extrapolation. Total process durations were
+1677.85 seconds sync and 1517.63 async, including initialization/cleanup.
+
+[Audited measurement series](miles-admission64-20260911.json). The starter guide
+now records this qualification and provides a standalone bounded-async example.
+Evaluation timing instrumentation landed after the trial image; faster heldout
+evaluation and the longer examples' full lifecycle still need ordinary-run evidence.

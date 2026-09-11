@@ -1,0 +1,462 @@
+{
+  "experiment": "01M28SRP6G3YZ1MK34D3XEJQ2A",
+  "source": "4344d745d",
+  "image": "01M28SRFAM2W807AKM2EXSC8YH",
+  "exit_code": 0,
+  "baseline_experiment": "01M28PAQW8YCJ6P8M9F2343PYH",
+  "baseline_independent_audit": "01M28RHF6NK58X69BHRNF5RBG3",
+  "warmup_updates_excluded": 4,
+  "results": {
+    "sync": {
+      "passed": true,
+      "arm": "sync-admission64",
+      "updates": 12,
+      "cycle_seconds": {
+        "count": 12,
+        "mean": 105.8666940635303,
+        "median": 70.32324243872426,
+        "min": 64.73810521000996,
+        "max": 507.1341938995756
+      },
+      "post_first_four_cycle_seconds": {
+        "count": 8,
+        "mean": 69.00601795123657,
+        "median": 70.32324243872426,
+        "min": 64.73810521000996,
+        "max": 71.0741705535911
+      },
+      "score_seconds": {
+        "count": 12,
+        "mean": 16.465584788587876,
+        "median": 5.052325864555314,
+        "min": 3.315174581017345,
+        "max": 144.41651105321944
+      },
+      "stages": {
+        "publication": {
+          "count": 12,
+          "mean": 3.987249288630361,
+          "median": 3.9348814345430583,
+          "min": 3.74154101498425,
+          "max": 4.692025418858975
+        },
+        "initial_publication": {
+          "count": 1,
+          "mean": 15.261331696994603,
+          "median": 15.261331696994603,
+          "min": 15.261331696994603,
+          "max": 15.261331696994603
+        },
+        "generation_wait": {
+          "count": 12,
+          "mean": 40.60838553340485,
+          "median": 39.530934780370444,
+          "min": 34.831448185723275,
+          "max": 58.180748047307134
+        },
+        "training": {
+          "count": 12,
+          "mean": 61.271059241495095,
+          "median": 26.892855816986412,
+          "min": 23.115903799887747,
+          "max": 445.21190483728424
+        }
+      },
+      "measured_cycle_seconds": 1270.4003287623636,
+      "consumed_samples": 768,
+      "consumed_response_tokens": 1533411.0,
+      "publication_count": 13,
+      "elapsed": {
+        "seconds": 1677.8515142290853
+      },
+      "interpretation": "Cycle excludes startup, eval and saving; async wait is consumer stall, not total inference work. Different completion order means different consumed prompts. No learning-quality claim.",
+      "scoring_points": [
+        {
+          "rollout_id": 0,
+          "seconds": 144.41651105321944,
+          "model_tokens": 143725
+        },
+        {
+          "rollout_id": 1,
+          "seconds": 4.939030445646495,
+          "model_tokens": 128302
+        },
+        {
+          "rollout_id": 2,
+          "seconds": 5.207446920219809,
+          "model_tokens": 152862
+        },
+        {
+          "rollout_id": 3,
+          "seconds": 5.623882234096527,
+          "model_tokens": 123825
+        },
+        {
+          "rollout_id": 4,
+          "seconds": 4.98540896596387,
+          "model_tokens": 120874
+        },
+        {
+          "rollout_id": 5,
+          "seconds": 5.470861187204719,
+          "model_tokens": 133662
+        },
+        {
+          "rollout_id": 6,
+          "seconds": 5.053029739297926,
+          "model_tokens": 146918
+        },
+        {
+          "rollout_id": 7,
+          "seconds": 4.9779455261304975,
+          "model_tokens": 143672
+        },
+        {
+          "rollout_id": 8,
+          "seconds": 5.051621989812702,
+          "model_tokens": 115009
+        },
+        {
+          "rollout_id": 9,
+          "seconds": 3.315174581017345,
+          "model_tokens": 152607
+        },
+        {
+          "rollout_id": 10,
+          "seconds": 3.440318111795932,
+          "model_tokens": 159914
+        },
+        {
+          "rollout_id": 11,
+          "seconds": 5.105786708649248,
+          "model_tokens": 129813
+        }
+      ],
+      "post_first_four_score_seconds": {
+        "count": 8,
+        "mean": 4.67501835123403,
+        "median": 5.018515477888286,
+        "min": 3.315174581017345,
+        "max": 5.470861187204719
+      },
+      "post_first_four_score_token_correlation": -0.7023647283399954,
+      "consumed_response_tokens_per_cycle_second": 1207.0297569065208,
+      "updates_per_cycle_hour": 34.00502898333304,
+      "policy_lag_counts": {
+        "0": 192,
+        "1": 0
+      },
+      "post_first_four_consumed_response_tokens": 1024637.0,
+      "post_first_four_consumed_tokens_per_cycle_second": 1856.0645694772313,
+      "samples_per_collection": 64,
+      "native_generation_timing": {
+        "all": {
+          "count": 12,
+          "sum_seconds": 486.8409378528595,
+          "mean_seconds": 40.57007815440496,
+          "median_seconds": 39.49299728870392,
+          "min_seconds": 34.799583435058594,
+          "max_seconds": 58.1386194229126
+        },
+        "warm": {
+          "count": 8,
+          "sum_seconds": 312.9901852607727,
+          "mean_seconds": 39.12377315759659,
+          "median_seconds": 39.49299728870392,
+          "min_seconds": 34.799583435058594,
+          "max_seconds": 43.37241506576538
+        },
+        "points": [
+          {
+            "index": 0,
+            "seconds": 58.1386194229126,
+            "source": "miles_perf"
+          },
+          {
+            "index": 1,
+            "seconds": 37.51682710647583,
+            "source": "miles_perf"
+          },
+          {
+            "index": 2,
+            "seconds": 41.336026191711426,
+            "source": "miles_perf"
+          },
+          {
+            "index": 3,
+            "seconds": 36.85927987098694,
+            "source": "miles_perf"
+          },
+          {
+            "index": 4,
+            "seconds": 35.64934277534485,
+            "source": "miles_perf"
+          },
+          {
+            "index": 5,
+            "seconds": 38.72462844848633,
+            "source": "miles_perf"
+          },
+          {
+            "index": 6,
+            "seconds": 40.26136612892151,
+            "source": "miles_perf"
+          },
+          {
+            "index": 7,
+            "seconds": 40.31190752983093,
+            "source": "miles_perf"
+          },
+          {
+            "index": 8,
+            "seconds": 34.799583435058594,
+            "source": "miles_perf"
+          },
+          {
+            "index": 9,
+            "seconds": 41.47096228599548,
+            "source": "miles_perf"
+          },
+          {
+            "index": 10,
+            "seconds": 43.37241506576538,
+            "source": "miles_perf"
+          },
+          {
+            "index": 11,
+            "seconds": 38.39997959136963,
+            "source": "miles_perf"
+          }
+        ]
+      },
+      "warm_token_throughput_vs_batch16": 2.982364082805685,
+      "baseline_comparison_note": "Both admission and optimizer batch grow; this is useful throughput, not an isolated admission effect."
+    },
+    "async": {
+      "passed": true,
+      "arm": "async-admission64",
+      "updates": 12,
+      "cycle_seconds": {
+        "count": 12,
+        "mean": 89.45407321152743,
+        "median": 57.175128551898524,
+        "min": 30.092453450895846,
+        "max": 478.5305229597725
+      },
+      "post_first_four_cycle_seconds": {
+        "count": 8,
+        "mean": 53.495462428138126,
+        "median": 57.175128551898524,
+        "min": 30.092453450895846,
+        "max": 81.45820057485253
+      },
+      "score_seconds": {
+        "count": 12,
+        "mean": 17.97363868712758,
+        "median": 5.0043347822502255,
+        "min": 4.8737450847402215,
+        "max": 158.2390389838256
+      },
+      "stages": {
+        "training": {
+          "count": 12,
+          "mean": 59.67613659411048,
+          "median": 27.13096691388637,
+          "min": 25.666183560155332,
+          "max": 414.66596628027037
+        },
+        "generation_wait": {
+          "count": 12,
+          "mean": 25.824325372542564,
+          "median": 26.05079800146632,
+          "min": 0.22793034091591835,
+          "max": 61.3232700699009
+        },
+        "initial_publication": {
+          "count": 1,
+          "mean": 11.873452174011618,
+          "median": 11.873452174011618,
+          "min": 11.873452174011618,
+          "max": 11.873452174011618
+        },
+        "publication": {
+          "count": 12,
+          "mean": 3.9536112448743856,
+          "median": 4.030542825581506,
+          "min": 2.5412866096012294,
+          "max": 4.729495936073363
+        }
+      },
+      "measured_cycle_seconds": 1073.4488785383292,
+      "consumed_samples": 768,
+      "consumed_response_tokens": 1450234.0,
+      "publication_count": 13,
+      "elapsed": {
+        "seconds": 1517.6345972889103
+      },
+      "interpretation": "Cycle excludes startup, eval and saving; async wait is consumer stall, not total inference work. Different completion order means different consumed prompts. No learning-quality claim.",
+      "scoring_points": [
+        {
+          "rollout_id": 0,
+          "seconds": 158.2390389838256,
+          "model_tokens": 107139
+        },
+        {
+          "rollout_id": 1,
+          "seconds": 6.577028996776789,
+          "model_tokens": 145192
+        },
+        {
+          "rollout_id": 2,
+          "seconds": 5.558699680026621,
+          "model_tokens": 128900
+        },
+        {
+          "rollout_id": 3,
+          "seconds": 5.549420698080212,
+          "model_tokens": 132313
+        },
+        {
+          "rollout_id": 4,
+          "seconds": 4.989833658095449,
+          "model_tokens": 95478
+        },
+        {
+          "rollout_id": 5,
+          "seconds": 5.006677673198283,
+          "model_tokens": 147083
+        },
+        {
+          "rollout_id": 6,
+          "seconds": 4.983474669978023,
+          "model_tokens": 129764
+        },
+        {
+          "rollout_id": 7,
+          "seconds": 4.968572830315679,
+          "model_tokens": 109286
+        },
+        {
+          "rollout_id": 8,
+          "seconds": 4.910685203969479,
+          "model_tokens": 157026
+        },
+        {
+          "rollout_id": 9,
+          "seconds": 5.0244948752224445,
+          "model_tokens": 135219
+        },
+        {
+          "rollout_id": 10,
+          "seconds": 4.8737450847402215,
+          "model_tokens": 132932
+        },
+        {
+          "rollout_id": 11,
+          "seconds": 5.001991891302168,
+          "model_tokens": 147546
+        }
+      ],
+      "post_first_four_score_seconds": {
+        "count": 8,
+        "mean": 4.969934485852718,
+        "median": 4.986654164036736,
+        "min": 4.8737450847402215,
+        "max": 5.0244948752224445
+      },
+      "post_first_four_score_token_correlation": -0.1438417537823165,
+      "consumed_response_tokens_per_cycle_second": 1351.0042527360256,
+      "updates_per_cycle_hour": 40.24411489331811,
+      "policy_lag_counts": {
+        "0": 66,
+        "1": 126
+      },
+      "post_first_four_consumed_response_tokens": 976118.0,
+      "post_first_four_consumed_tokens_per_cycle_second": 2280.8429811015403,
+      "samples_per_collection": 64,
+      "native_generation_timing": {
+        "all": {
+          "count": 12,
+          "sum_seconds": 309.3381073474884,
+          "mean_seconds": 25.7781756122907,
+          "median_seconds": 26.01385807991028,
+          "min_seconds": 0.18318557739257812,
+          "max_seconds": 61.28721070289612
+        },
+        "warm": {
+          "count": 8,
+          "sum_seconds": 181.7310357093811,
+          "mean_seconds": 22.716379463672638,
+          "median_seconds": 26.01385807991028,
+          "min_seconds": 0.18466496467590332,
+          "max_seconds": 49.73381590843201
+        },
+        "points": [
+          {
+            "index": 0,
+            "seconds": 61.28721070289612,
+            "source": "miles_perf"
+          },
+          {
+            "index": 1,
+            "seconds": 0.18318557739257812,
+            "source": "miles_perf"
+          },
+          {
+            "index": 2,
+            "seconds": 50.3086097240448,
+            "source": "miles_perf"
+          },
+          {
+            "index": 3,
+            "seconds": 15.828065633773804,
+            "source": "miles_perf"
+          },
+          {
+            "index": 4,
+            "seconds": 28.658934354782104,
+            "source": "miles_perf"
+          },
+          {
+            "index": 5,
+            "seconds": 23.368781805038452,
+            "source": "miles_perf"
+          },
+          {
+            "index": 6,
+            "seconds": 0.20269107818603516,
+            "source": "miles_perf"
+          },
+          {
+            "index": 7,
+            "seconds": 46.2864043712616,
+            "source": "miles_perf"
+          },
+          {
+            "index": 8,
+            "seconds": 0.2528061866760254,
+            "source": "miles_perf"
+          },
+          {
+            "index": 9,
+            "seconds": 49.73381590843201,
+            "source": "miles_perf"
+          },
+          {
+            "index": 10,
+            "seconds": 33.04293704032898,
+            "source": "miles_perf"
+          },
+          {
+            "index": 11,
+            "seconds": 0.18466496467590332,
+            "source": "miles_perf"
+          }
+        ]
+      },
+      "warm_token_throughput_vs_batch16": 3.5988038901016473,
+      "baseline_comparison_note": "Both admission and optimizer batch grow; this is useful throughput, not an isolated admission effect."
+    }
+  },
+  "scope": "12 updates per arm; 64 responses (16 prompts x 4), one engine, EP2 trainer, no evaluation or saving. Historical baseline uses 16 responses; speedup includes both batch and admission changes."
+}

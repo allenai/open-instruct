@@ -2,7 +2,8 @@
 # Copy and replace /data paths. See configs/miles/README.md for preparation,
 # bounded async, adding engines, and the distinction between tested and candidate sizes.
 # 100 updates, 16 prompts x 4 responses, admission 64 rather than 4.
-# Larger admission/pools are a candidate sizing update, not a completed benchmark.
+# Admission/pools passed the 12-update sync/async B300 trial; the complete
+# 100-update eval/save recipe remains a starter, not a completed run.
 [core]
 row_specialization = "dynamic"
 expert_parallel_size = 2

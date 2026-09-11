@@ -8,14 +8,21 @@ belong to the Beaker launcher. Copy a file and replace its `/data` paths first.
 | --- | --- | --- |
 | Default local colocated dev/test | [tiny-resident](profiles/tiny-resident.toml) | One GPU shared by a tiny trainer and TP1 engine; four completions and four requests. Two updates plus checkpoints. |
 | Default full-SFT disaggregated training | [train-disaggregated](profiles/train-disaggregated.toml) | Two B300 trainer GPUs plus one dedicated TP1 engine; 64 completions and 64 requests. 100 updates, heldout eval every 20, final checkpoint, offline W&B. |
+| Bounded-async full-SFT training | [train-disaggregated-async](profiles/train-disaggregated-async.toml) | Same three-GPU/64-completion shape, one-step lag, buffer factor one/retry, rollout behavior log probabilities. Same 100-update eval/save schedule. |
 | Short full-SFT synchronous check | [sft-b300-ep2-sync](profiles/sft-b300-ep2-sync.toml) | Same three-GPU topology/admission; two updates, initial/final eval, no optimizer save. |
 | Short async lifecycle check | [sft-b300-ep2-async-candidate](profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU topology; 64 requests, shorter 512-token responses, eager decode, four updates, lag at most one. |
 
 The tiny resident profile has passed update and fresh-process resume tests.
 The full-SFT model is the existing 18.5B-total KDA/latent checkpoint, not a claim
 of hero model qualification. Full-SFT disaggregated runs have completed at
-admission four. **Admission 64 and its larger pools are the new candidate sizing
-baseline**, pending the corresponding GPU capacity/performance measurement.
+admission four and 64. **The 64-way sizing passed 12 sync and 12 async updates**
+in [the B300 trial](https://beaker.org/ex/01M28SRP6G3YZ1MK34D3XEJQ2A), including
+independent token/reward, optimizer, publication and policy-lag audits. Warm
+response-token throughput was 1856/s sync and 2281/s async across the full cycle,
+about 23% higher with async. Both are faster than the prior 16-completion batch;
+that comparison includes a batch-size change. This qualifies the measured
+capacity/scheduling scope, not the complete 100-update starter's evaluation,
+checkpoint cadence, restart or learning quality.
 Changing a starter does not rewrite the frozen configurations of previous runs.
 
 Core keeps the trainer resident even in colocated mode. Do not put the full SFT
@@ -79,8 +86,10 @@ or optimal 4K-response configuration on every checkpoint/GPU.
 
 ## Async, evaluation and recovery
 
-The training starter is synchronous. To exercise bounded async without changing
-its lengths, batch size or objective coefficients, apply all these overrides:
+Use [train-disaggregated-async.toml](profiles/train-disaggregated-async.toml)
+for the measured bounded-async settings. The original `train-disaggregated.toml`
+remains the synchronous starter. Equivalently, apply these overrides to it,
+keeping lengths, batch size and objective coefficients fixed:
 
 ```bash
 python -m open_instruct.miles plan /path/to/run.toml \
