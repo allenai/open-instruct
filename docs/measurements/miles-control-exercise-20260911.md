@@ -115,3 +115,11 @@ MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
 CPU validation covers all four starter TOMLs, their installed MILES parser,
 and documented async/two-engine overrides. The batch-aware regression checks
 both the historical four-group and new sixteen-group audit schemas.
+
+
+Larger-baseline submission: [01M28SRP6G3YZ1MK34D3XEJQ2A](https://beaker.org/ex/01M28SRP6G3YZ1MK34D3XEJQ2A).
+Source `4344d745d`; immutable image `01M28SRFAM2W807AKM2EXSC8YH`.
+All four starter TOMLs and documented async/two-engine overrides passed the
+installed parser; 28 focused tests and `make style && make quality` passed.
+The initial scheduling event reports the Holmes workspace-group allocation limit
+(159/160 slots used, three required); the job remains queued without relaunching.

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 from miles.utils import arguments
-from scripts.miles import exercise_controls, launch_control_exercise
+from scripts.miles import analyze_control_exercise, exercise_controls, launch_control_exercise
 from transformers import Qwen3Config
 
 from open_instruct.miles.timing import stage
@@ -142,3 +142,26 @@ def test_admission_launch_uses_one_bounded_allocation():
     assert task["context"]["minRuntime"] == "1h"
     assert "for arm in sync-admission64 async-admission64" in task["arguments"][0]
     assert "--updates 12" in task["arguments"][0]
+
+
+@pytest.mark.parametrize("samples", (16, 64))
+def test_warm_throughput_excludes_cold_tokens_and_handles_larger_batches(tmp_path, samples):
+    # Four cold collections are deliberately much larger than the two warm ones.
+    training = [{"summary": {"mean_response_tokens": n}, "policy_lags": [0]} for n in (1000, 1000, 1000, 1000, 10, 30)]
+    scores = [{"rollout_id": i, "seconds": 1, "model_tokens": 100} for i in range(6)]
+    report = dict(
+        passed=True,
+        updates=6,
+        consumed_samples=samples * 6,
+        training=training,
+        scoring_by_rank=[scores, scores],
+        consumed_response_tokens=4040 * samples,
+        measured_cycle_seconds=104,
+        post_first_four_cycle_seconds={"mean": 2},
+        native_log_timing={"phases": {"generation": {}}},
+    )
+    (tmp_path / "audit.json").write_text(json.dumps(report))
+    measured = analyze_control_exercise.live(tmp_path)
+    assert measured["post_first_four_consumed_response_tokens"] == 40 * samples
+    assert measured["post_first_four_consumed_tokens_per_cycle_second"] == 10 * samples
+    assert measured["samples_per_collection"] == samples
