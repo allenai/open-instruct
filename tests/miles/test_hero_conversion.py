@@ -16,7 +16,8 @@ from scripts.miles.validate_hero_conversion import check_architecture, validate
 
 
 @pytest.mark.parametrize("width,experts", [(32, 4), (48, 8)])
-def test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip(tmp_path, width, experts):
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip(tmp_path, width, experts, ambiguous, monkeypatch):
     hf = Olmo3MoeConfig(
         vocab_size=32,
         hidden_size=width,
@@ -68,13 +69,28 @@ def test_flat_master_checkpoint_matches_hf_and_adapter_roundtrip(tmp_path, width
     )
     (exported / "config.json").write_text(exported_config.to_json_string())
     state = {f"{name}.main": value.detach().flatten().clone() for name, value in native.named_parameters()}
+    if ambiguous:
+        name, value = next(native.named_parameters())
+        # Even identical model/master values are ambiguous; the gate must not
+        # silently prefer one representation or allocate the full model first.
+        state[f"model.{name}"] = value.detach().clone()
     state["unused_optimizer_moment"] = torch.full((11,), float("nan"))
     save_state_dict(raw / "model_and_optim", state)
     save_file(
         {name: value.bfloat16().contiguous() for name, value in reference.state_dict().items()},
         exported / "model.safetensors",
     )
+    if ambiguous:
+
+        def unexpected_allocation(*args, **kwargs):
+            raise AssertionError("Ambiguity must fail before model storage allocation")
+
+        monkeypatch.setattr(torch.nn.Module, "to_empty", unexpected_allocation)
+        with pytest.raises(ValueError, match="Ambiguous native parameter copies"):
+            validate(raw, exported)
+        return
     report = validate(raw, exported)
+    assert report["native_parameter_sources"]["master_parameter_sources"] == len(list(native.parameters()))
     assert report["valid"]
     assert report["native_to_hf"]["exact_match_after_export_cast"]
     assert report["hf_core_hf"]["exact_match_after_export_cast"]

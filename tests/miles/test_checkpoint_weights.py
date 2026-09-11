@@ -1,5 +1,7 @@
 """A conversion gate must reject incomplete, reshaped or corrupted weight streams."""
 
+import json
+
 import pytest
 import torch
 from safetensors.torch import save_file
@@ -58,3 +60,28 @@ def test_cpu_weka_audit_uses_saturn_with_reserved_runtime():
     assert task["resources"]["gpuCount"] == 0
     assert task["context"] == {"priority": "urgent", "minRuntime": "30m", "autoResume": False}
     assert "--report /output/conversion.json" in task["arguments"][0]
+
+
+@pytest.mark.parametrize("fault", [None, "missing_shard", "swapped_shards", "missing_key", "extra_key", "invalid_map"])
+def test_index_must_match_exact_tensor_to_shard_inventory(tmp_path, fault):
+    save_file({"a": torch.ones(2)}, tmp_path / "one.safetensors")
+    save_file({"b": torch.zeros(3)}, tmp_path / "two.safetensors")
+    mapping = {"a": "one.safetensors", "b": "two.safetensors"}
+    if fault == "missing_shard":
+        mapping["a"] = "missing.safetensors"
+    elif fault == "swapped_shards":
+        mapping = {"a": "two.safetensors", "b": "one.safetensors"}
+    elif fault == "missing_key":
+        del mapping["b"]
+    elif fault == "extra_key":
+        mapping["c"] = "one.safetensors"
+    elif fault == "invalid_map":
+        mapping = []
+    (tmp_path / "model.safetensors.index.json").write_text(json.dumps({"weight_map": mapping}))
+    if fault is None:
+        with SafeTensorState(tmp_path) as state:
+            assert state.tensor_shards == mapping
+            assert set(state) == {"a", "b"}
+    else:
+        with pytest.raises(ValueError, match="Safetensors index"):
+            SafeTensorState(tmp_path)

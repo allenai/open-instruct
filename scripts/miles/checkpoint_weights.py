@@ -16,6 +16,7 @@ class SafeTensorState(Mapping):
     def __init__(self, directory):
         self.stack = ExitStack()
         self.files = {}
+        self.tensor_shards = {}
         try:
             paths = sorted(Path(directory).glob("*.safetensors"))
             if not paths:
@@ -26,6 +27,26 @@ class SafeTensorState(Mapping):
                     if name in self.files:
                         raise ValueError(f"Duplicate checkpoint tensor: {name}")
                     self.files[name] = handle
+                    self.tensor_shards[name] = path.name
+            index = Path(directory) / "model.safetensors.index.json"
+            if index.exists():
+                weight_map = json.loads(index.read_text()).get("weight_map")
+                if not isinstance(weight_map, dict) or not all(
+                    isinstance(name, str) and isinstance(shard, str) for name, shard in weight_map.items()
+                ):
+                    raise ValueError("Safetensors index must contain a tensor-to-shard weight_map")
+                if weight_map != self.tensor_shards:
+                    missing = sorted(set(weight_map) - set(self.tensor_shards))
+                    unindexed = sorted(set(self.tensor_shards) - set(weight_map))
+                    wrong_shards = {
+                        name: {"index": weight_map[name], "actual": self.tensor_shards[name]}
+                        for name in weight_map.keys() & self.tensor_shards.keys()
+                        if weight_map[name] != self.tensor_shards[name]
+                    }
+                    raise ValueError(
+                        f"Safetensors index disagrees with file inventory: missing={missing}, "
+                        f"unindexed={unindexed}, wrong_shards={wrong_shards}"
+                    )
         except BaseException:
             self.stack.close()
             raise

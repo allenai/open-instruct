@@ -13,7 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from olmo_core.config import DType
-from olmo_core.distributed.checkpoint import load_model_and_optim_state
+from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_model_and_optim_state
 from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf.config import get_hf_config
 from olmo_core.nn.hf.convert_checkpoint import (
@@ -86,6 +86,35 @@ def check_architecture(actual, expected):
         raise ValueError(f"Architecture mismatch: {differences}")
 
 
+def validate_native_parameter_sources(model, checkpoint):
+    """Reject ambiguous DDP master/model copies before allocating model storage."""
+    keys = set(get_checkpoint_metadata(checkpoint).state_dict_metadata)
+    if not any(key.endswith(".main") for key in keys):
+        return {"layout": "conventional_model"}
+    selected = {}
+    for name, _ in model.named_parameters():
+        candidates = (
+            f"model.{name}",
+            f"model.module.{name}",
+            name,
+            f"module.{name}",
+            f"{name}.main",
+            f"module.{name}.main",
+        )
+        matches = [key for key in candidates if key in keys]
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous native parameter copies for {name}: {matches}")
+        if not matches:
+            raise ValueError(f"Missing native parameter source: {name}")
+        selected[name] = matches[0]
+    return {
+        "layout": "ddp_optimizer",
+        "parameters": len(selected),
+        "master_parameter_sources": sum(key.endswith(".main") for key in selected.values()),
+        "selected_parameter_keys_sha256": hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest(),
+    }
+
+
 def validate(native_path, hf_path):
     started = time.monotonic()
     experiment = load_config(native_path)
@@ -98,8 +127,9 @@ def validate(native_path, hf_path):
     check_architecture(native_hf, hf)
     if hf.vocab_size != experiment["dataset"]["tokenizer"]["vocab_size"]:
         raise ValueError("HF vocabulary differs from the native tokenizer vocabulary")
-    model.to_empty(device="cpu")
     checkpoint = native_path / "model_and_optim"
+    parameter_sources = validate_native_parameter_sources(model, checkpoint)
+    model.to_empty(device="cpu")
     with TemporaryDirectory(prefix="hero-model-load-") as work:
         loaded = _load_ddp_optimizer_model_state(checkpoint, model, work_dir=work, return_state_dict=False)
         if loaded is None:
@@ -138,6 +168,7 @@ def validate(native_path, hf_path):
             "reference_hf": hf.dense_layers_use_shared_expert,
             "adapter": adapter_hf.dense_layers_use_shared_expert,
         },
+        "native_parameter_sources": parameter_sources,
         "native_to_hf": native_result,
         "hf_core_hf": roundtrip,
         "elapsed_seconds": time.monotonic() - started,
