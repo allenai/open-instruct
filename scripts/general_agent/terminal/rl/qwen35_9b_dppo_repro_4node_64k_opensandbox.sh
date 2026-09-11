@@ -30,12 +30,13 @@ TOKENIZER=hamishivi/Qwen3.5-9B
 
 # Loss exclusion on/off is baked into the experiment name and description so the
 # two variants are distinguishable in wandb and Beaker (and get separate
-# checkpoint dirs via EXP_NAME).
+# checkpoint dirs via EXP_NAME). Labels are kept short: exp_name is used as a
+# wandb tag, which has a hard 64-char limit, and the base name is already long.
 MASK_INFRA_FAILED="${MASK_INFRA_FAILED:-true}"
 if [ "$MASK_INFRA_FAILED" = "true" ]; then
-    MASK_LABEL="mask_infra_failed"
+    MASK_LABEL="mask_infra"
 else
-    MASK_LABEL="no_mask_infra_failed"
+    MASK_LABEL="no_mask_infra"
 fi
 EXP_NAME="${EXP_NAME:-swerl_qwen35_9b_dppo_repro_4node_64k_opensandbox_${MASK_LABEL}}"
 # For the B300 cluster:
