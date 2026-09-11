@@ -15,9 +15,10 @@ from scripts.miles import analyze_gsm8k_parity as evidence
 from scripts.miles import async_trial, gsm8k_parity, prepare_gsm8k_parity
 from scripts.miles.check_gsm8k_checkpoints import check_boundaries
 
+from open_instruct.miles import replay_diagnostics
 from open_instruct.miles.config import RunConfig
 
-ARMS = ("sync", "async", "controls", "sync-admission64", "async-admission64")
+ARMS = ("sync", "async", "controls", "sync-admission64", "async-admission64", "replay-admission64")
 ADMISSION_KEYS = (
     "rollout_batch_size",
     "global_batch_size",
@@ -93,6 +94,11 @@ def configuration(campaign, output, arm, updates):
             Path(__file__).resolve().parents[2] / "configs/miles/profiles/train-disaggregated.toml"
         )
         config.miles.update({key: starter.miles[key] for key in ADMISSION_KEYS})
+    if arm == "replay-admission64":
+        config = dataclasses.replace(
+            config, core=dataclasses.replace(config.core, replay_diagnostics=True, diagnostic_interval=1)
+        )
+        config.miles.update(use_rollout_routing_replay=True, use_miles_router=True)
     config.validate()
     return config
 
@@ -285,6 +291,9 @@ def audit(campaign, output, arm, updates, report_path=None):
         ]
         if not all(row["valid"] for row in report["evaluation"]):
             raise ValueError("Heldout eval audit failed")
+    if arm == "replay-admission64":
+        from_replay = replay_diagnostics.audit_contracts(contracts, updates, collection_size // 2)
+        report["replay"] = from_replay
     destination = report_path or output / "audit.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("x") as stream:

@@ -96,7 +96,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Policy objective | `advantage_estimator`, `calculate_per_token_loss`, `use_rollout_logprobs`, `grpo_std_normalization`, `eps_clip`, `eps_clip_high`, `entropy_coef`. The baseline uses std normalization off and upper clipping 0.28; these are separate choices, not automatically applied defaults. |
 | Reference KL | Enable `use_kl_loss`, set `kl_loss_coef`, and provide the reference initialization through `ref_load` as required by MILES. This creates a frozen reference and adds scoring. Setting a coefficient alone is not the enable switch. |
 | Off-policy correction | `use_tis`, `tis_clip`, `tis_clip_low`; alternative corrections use `custom_tis_function_path` (the baseline ICEPOP helper is not bundled); explicitly choose the policy-ratio anchor. These are algorithm changes, not just async throughput controls. |
-| Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` requires `use_miles_router=true`. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. |
+| Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` requires `use_miles_router=true`. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. `core.replay_diagnostics=true` opts into per-layer returned-route and recomputation checks (adds synchronization overhead). |
 
 ## Checkpoints, reporting and operational controls
 

@@ -20,7 +20,7 @@ from torch import distributed as dist
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
-from open_instruct.miles import checkpoint, contract, data, models, publication, scheduler
+from open_instruct.miles import checkpoint, contract, data, models, publication, replay_diagnostics, scheduler
 from open_instruct.miles import metrics as training_metrics
 from open_instruct.miles.state import PolicyClock
 
@@ -89,7 +89,10 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         return result
 
     def _replay_context(self, module, batch):
-        return models.replay_context(module, batch, enabled=self.args.use_rollout_routing_replay)
+        context = models.replay_context(module, batch, enabled=self.args.use_rollout_routing_replay)
+        if getattr(self.args.olmo_core, "replay_diagnostics", False):
+            return replay_diagnostics.checked_context(self, module, batch, context)
+        return context
 
     def _forward(self, module, batch):
         forward = getattr(module, "model_forward_no_pipeline", None) or module.model_forward

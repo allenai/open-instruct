@@ -16,6 +16,7 @@ from open_instruct.miles import options as cli_options
 class CoreConfig:
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
+    replay_diagnostics: bool = False
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
     row_specialization: str = "static"
@@ -46,6 +47,7 @@ class CoreConfig:
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise ValueError("core.weight_sync_mode must be flattened or per_tensor")
         for name in (
+            "replay_diagnostics",
             "stream_moe_export",
             "activation_checkpointing",
             "checkpoint_profile",
@@ -187,6 +189,8 @@ class RunConfig:
             raise ValueError(
                 "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
             )
+        if self.core.replay_diagnostics and not options.get("use_rollout_routing_replay", False):
+            raise ValueError("core.replay_diagnostics requires rollout routing replay")
         if options.get("fully_async", False):
             if options.get("colocate", False) or options.get("offload_rollout", False):
                 raise ValueError("Async Core training requires resident disaggregated rollout engines")

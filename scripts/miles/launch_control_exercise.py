@@ -93,7 +93,13 @@ exit "$status"
 """
 
 
-def specification(image, admission_only=False):
+def specification(image, admission_only=False, replay_only=False):
+    if replay_only:
+        return dict(
+            version="v2",
+            description="Core full-SFT replay: 8 updates, EP2, 64 samples, scoring/training/recompute route assertions",
+            tasks=[task(image, "replay", live_command("replay-admission64", 8), 3, "2h")],
+        )
     if admission_only:
         return dict(
             version="v2",
@@ -116,8 +122,11 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--render-only", action="store_true")
     parser.add_argument("--admission-only", action="store_true")
+    parser.add_argument("--replay-only", action="store_true")
     options = parser.parse_args()
-    document = json.dumps(specification(options.image, options.admission_only), indent=2) + "\n"
+    if options.replay_only and options.admission_only:
+        parser.error("Choose one trial")
+    document = json.dumps(specification(options.image, options.admission_only, options.replay_only), indent=2) + "\n"
     if options.render_only:
         print(document, end="")
         return
