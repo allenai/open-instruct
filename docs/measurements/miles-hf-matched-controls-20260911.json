@@ -1,0 +1,40 @@
+{
+  "scope": "Independent identical Core-image HF-only processes; original learning runs unchanged",
+  "source": "1eed1cd70",
+  "image": "01M26N80T0V9PREQTS87J849P8",
+  "experiments": {
+    "a": "01M27GC5JWB8Z8TK9Z1WK5VFM8",
+    "b": "01M27GCMH4D4T6X2C3X99XTFYA"
+  },
+  "placement": {
+    "cluster": "ai2/holmes",
+    "workspace": "ai2/open-instruct-dev",
+    "priority": "urgent",
+    "gpu_count_per_job": 1,
+    "min_runtime": "1h",
+    "timeout": "90m"
+  },
+  "mode": "hf-matched",
+  "optimizer_calls_requested": 0,
+  "trainer_initializations_requested": 0,
+  "outputs": {
+    "a": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-hfmatched-a/core",
+    "b": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1/update-zero-20260911-hfmatched-b/core"
+  },
+  "watcher": "/home/robert/proj/open-instruct/.artifacts/miles-inference-diagnostic-watch-20260911",
+  "retention": {
+    "experiment": "01M27GYGMCX5SQYFZ78VEFXF6M",
+    "source": "d6ebe8bad",
+    "cluster": "ai2/saturn",
+    "cpu_count": 1,
+    "output": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260911-abhishek-500-v1/diagnostic-retained/megatron",
+    "iterations": [
+      99,
+      199,
+      299,
+      399
+    ],
+    "method": "Hard links outside live save tree after completion; final499 remains native latest",
+    "additional_retained_storage_forecast": "Approximately 4 x 241.4GiB after native pruning, before extra state; no payload copy at link creation"
+  }
+}
