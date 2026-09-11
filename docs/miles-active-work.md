@@ -76,3 +76,14 @@ preclip gradient relative L2 delta is 1.132% (cosine 0.999937); FP32 master-upda
 delta is 7.022% (cosine 0.997534). These are descriptive, with no cross-backend
 acceptance threshold. Auxiliary objectives are disabled in this fixture and
 remain a separate comparison.
+
+The [full hero operator trace](measurements/miles-hero-moe-operators-20260910.json)
+confirms that grad-enabled Core and the controlled HF path match exactly throughout
+the first latent MoE block at both saved prefixes. The no-grad path first differs
+at SwiGLU. Ordinary HF retains a separate packed-layout/reduction difference.
+Core commit `290d2ca4521373bef0bf7fe4244673cc79dcc004` corrects the scoring
+call to round the SiLU intermediate as eager training does, preserving the fused
+kernel default for its explicit forward/backward users. Fourteen local GPU kernel
+tests pass; full-checkpoint rerun pending. This fix does not change either active
+100-update image. The old Core image contains the same shortcut; its full-model
+impact on that run is not yet quantified.

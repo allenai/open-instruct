@@ -9,9 +9,9 @@
     "olmo-core": {
       "repository": "https://github.com/allenai/OLMo-core.git",
       "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5",
-      "development_commit": "7cc24015238711d364097c101b8e3f1189ce05f2",
+      "development_commit": "290d2ca4521373bef0bf7fe4244673cc79dcc004",
       "patch": "patches/olmo-core.patch",
-      "patch_sha256": "38a6f765dbe249373de499dd372cde479afe9f30565f50e83ebd7afb4c98b475"
+      "patch_sha256": "37579d412e9d29460e69ab2602b52bf032a7441c74af55bd8331c23580072233"
     },
     "miles": {
       "repository": "https://github.com/radixark/miles.git",
