@@ -102,6 +102,14 @@ def live(root):
     report["policy_lag_counts"] = {
         str(lag): sum(row["policy_lags"].count(lag) for row in document["training"]) for lag in (0, 1)
     }
+    warm = document["training"][4:]
+    if warm:
+        samples_per_collection = document["consumed_samples"] // document["updates"]
+        warm_seconds = document["post_first_four_cycle_seconds"]["mean"] * len(warm)
+        warm_tokens = sum(row["summary"]["mean_response_tokens"] * samples_per_collection for row in warm)
+        report["post_first_four_consumed_response_tokens"] = warm_tokens
+        report["post_first_four_consumed_tokens_per_cycle_second"] = warm_tokens / warm_seconds
+        report["samples_per_collection"] = samples_per_collection
     report["native_generation_timing"] = document["native_log_timing"]["phases"]["generation"]
     return report
 
@@ -135,8 +143,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--admission-results", type=Path, help="Downloaded admission task directory")
     args = parser.parse_args()
     report = analyze(args.results)
+    if args.admission_results:
+        report["admission64"] = {}
+        for mode in ("sync", "async"):
+            root = args.admission_results / f"{mode}-admission64"
+            if (root / "audit.json").exists():
+                measured = live(root)
+                baseline = report.get(mode, {})
+                if baseline.get("passed"):
+                    measured["warm_token_throughput_vs_batch16"] = (
+                        measured["post_first_four_consumed_tokens_per_cycle_second"]
+                        / baseline["post_first_four_consumed_tokens_per_cycle_second"]
+                    )
+                    measured["baseline_comparison_note"] = (
+                        "Both admission and optimizer batch grow; this is useful throughput, not an isolated admission effect."
+                    )
+                report["admission64"][mode] = measured
+            else:
+                report["admission64"][mode] = {"incomplete": True, "missing": str(root / "audit.json")}
     args.output.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     print(
         json.dumps(

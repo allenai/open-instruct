@@ -23,16 +23,23 @@ acceptance work. Existing GRPO entrypoints remain available.
 
 ## Starting profiles
 
-These are small, standalone **qualification profiles**, not production recipes
-or a model-capacity table. They use the actual `[core]`/`[miles]` configuration
+The [starter index](../configs/miles/README.md) identifies the default tiny
+colocated dev/test profile and the longer disaggregated training starter. The
+short profiles below remain qualification exercises, not a model-capacity table. They use the actual `[core]`/`[miles]` configuration
 schema and preserve open-instruct verifier dispatch. No additional config
 inheritance or environment-variable substitution is implied.
 
 | Profile | Topology and purpose | Starting shape | Evidence / limitation |
 | --- | --- | --- | --- |
 | [tiny-resident](../configs/miles/profiles/tiny-resident.toml) | One GPU shared by a tiny Core model and one SGLang engine | 1 prompt × 4 responses; 2 updates; context 512, response 256; eager decode; Torch attention | This profile passed two updates plus a separate-process third update through the public entrypoint with schema-2 checkpoints on the random tiny KDA/latent fixture. Memory fit remains model-dependent. All-zero rewards validate plumbing, not policy learning. |
-| [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two Core EP ranks plus one dedicated SGLang GPU | 4 prompts × 4 responses; 2 updates; context 6144, response 4096; decode graphs through batch 4; FA4 | Derived from the successful full SFT run with two real updates and 64 audited responses. Adds per-step contract diagnostics and explicit prompt admission; this file is not a claim of a new completed run. |
-| [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU allocation; bounded asynchronous generation | 4 prompts × 4 responses; 4 updates; context 2560, response 512; lag ≤1; one collection buffered; eager decode | Candidate for async qualification only. Core's bounded queue and ledger have targeted tests; full-model async endurance, restart and failures need their own run. Replay stays off. |
+| [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two Core EP ranks plus one dedicated SGLang GPU | 16 prompts × 4 responses; 2 updates; context 6144, response 4096; admission/decode graphs through batch 64; FA4 | Based on the successful full SFT path. Admission is raised from the historical four to 64, with 524288 KV tokens and 128 recurrent slots; larger sizing awaits its own GPU measurement. |
+| [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU allocation; bounded asynchronous generation | 16 prompts × 4 responses; 4 updates; context 2560, response 512; lag ≤1; one collection buffered; eager decode; admission 64 | Candidate for async qualification only. Core's bounded queue and ledger have targeted tests; full-model async endurance, restart and failures need their own run. Replay stays off. |
+
+The additional [train-disaggregated](../configs/miles/profiles/train-disaggregated.toml)
+starter uses the same 64-completion/64-admission shape, 100 updates, initial and
+every-20-update heldout evaluation, a final native checkpoint and offline W&B.
+It keeps the established GSM8K objective explicit. See the starter index for
+async overrides and the memory constraints on engine scaling.
 
 All profiles explicitly select `core.row_specialization="dynamic"` for forward-only
 routed-expert scoring; Core defaults remain static. See the
@@ -43,7 +50,8 @@ All profiles keep trainer offload disabled (the compiler explicitly supplies
 `--no-offload-train`), microbatch size one, activation recomputation enabled,
 router auxiliary coefficient 0.01 and z-loss coefficient 1e-5. They enable initial
 serving equality, a 0.05 active-token mean logprob-difference guard and
-per-step diagnostics. With serving checks enabled, each diagnostic publication
+per-step diagnostics in the short qualification profiles; the longer training
+starter keeps extra diagnostic republications off. With serving checks enabled, each diagnostic publication
 adds a snapshot/reset/republish round trip; include its extra transfer time when
 measuring performance. The logprob tolerance is inherited from our bounded
 checks; it is not a universal acceptable drift, particularly under async lag.
@@ -185,11 +193,13 @@ training memory and execution. Transfer settings with the matching contract:
   and total from active parameters. The SFT profile reserves 2048+4096 tokens.
   Shortening responses to make a test cheaper changes the task, so report cap
   hits and do not interpret truncated scores as task-quality parity.
-- **Bound admission and both cache pools.** Start with four running/client
-  requests, 32768 total tokens and eight recurrent slots for the measured SFT
-  shape. Tiny fixtures cap tokens at 4096. Increasing concurrency requires enough
-  prompt groups and memory; baseline concurrency 64 and dedicated fraction 0.85
-  are not transferred defaults.
+- **Size client admission, engine admission, graphs and both cache pools together.**
+  The new full-SFT baseline admits all 64 completions, reserves 524288 total KV
+  tokens and 128 recurrent slots, and captures decode graphs through 64. Historical
+  runs used four requests, 32768 tokens and eight slots. The larger baseline is
+  pending measurement. Tiny fixtures retain four requests/4096 tokens. The collection and optimizer batch rise from 16 to 64 to supply enough work;
+  each additional engine needs more queued samples to sustain the same occupancy;
+  dedicated memory fraction stays 0.6, rather than copying 0.85 blindly.
 - **Use recomputation initially.** Disable it only in a measured memory and
   same-update comparison. Core's microbatch one stays explicit until larger
   batches preserve the complete loss/replay contract.

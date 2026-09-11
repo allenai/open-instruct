@@ -1,10 +1,8 @@
-# Bounded qualification default for the existing 18.5B-total KDA/latent SFT model.
-# Three B300 GPUs: two Core EP ranks and one resident SGLang engine.
-# Replace /data with a prepared run directory; HF descriptor must have the pinned
-# RL chat template. Prompts are already rendered, without reference solutions.
-# No optimizer checkpoint is saved by this two-update profile.
-# Admission now covers all 64 completions. The larger pools/graphs require a
-# fresh capacity measurement; historical runs used admission 4 and 32768 tokens.
+# Default full-SFT training starter: two Core trainer B300s + one TP1 serving B300.
+# Copy and replace /data paths. See configs/miles/README.md for preparation,
+# bounded async, adding engines, and the distinction between tested and candidate sizes.
+# 100 updates, 16 prompts x 4 responses, admission 64 rather than 4.
+# Larger admission/pools are a candidate sizing update, not a completed benchmark.
 [core]
 row_specialization = "dynamic"
 expert_parallel_size = 2
@@ -13,7 +11,7 @@ max_sequence_length = 6144
 activation_checkpointing = true
 max_policy_lag = 0
 max_train_rollout_logprob_abs_diff = 0.05
-diagnostic_interval = 1
+diagnostic_interval = 0
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
@@ -32,19 +30,22 @@ actor_num_gpus_per_node = 2
 num_gpus_per_node = 3
 rollout_num_gpus = 1
 rollout_num_gpus_per_engine = 1
+colocate = false
+fully_async = false
+offload_train = false
 offload_rollout = false
 micro_batch_size = 1
 rollout_batch_size = 16
 n_samples_per_prompt = 4
 global_batch_size = 64
-num_rollout = 2
+num_rollout = 100
 rollout_temperature = 1.0
 rollout_seed = 17
 rollout_max_prompt_len = 2048
 rollout_max_response_len = 4096
 rollout_max_context_len = 6144
 eval_prompt_data = ["heldout", "/data/eval.jsonl"]
-eval_interval = 2
+eval_interval = 20
 eval_temperature = 0.0
 n_samples_per_eval_prompt = 1
 eval_max_response_len = 4096
@@ -60,14 +61,40 @@ sglang_cuda_graph_backend_decode = "full"
 sglang_cuda_graph_max_bs_decode = 64
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
+sglang_attention_backend = "triton"
 sglang_log_level = "info"
 check_weight_update_equal = true
 update_weight_buffer_size = 1073741824
 update_weights_interval = 1
 loss_type = "policy_loss"
 advantage_estimator = "grpo"
+# Match the established full-SFT GSM8K objective. Serving capacity is independent.
+use_rollout_logprobs = false
+disable_grpo_std_normalization = true
+eps_clip = 0.2
+eps_clip_high = 0.28
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.95
+adam_eps = 0.00000001
+clip_grad = 1.0
+lr_decay_style = "constant"
+lr_warmup_iters = 0
 lr = 0.000001
-lr_decay_iters = 2
+lr_decay_iters = 100
 seed = 17
-save = "/data/metrics"
+save = "/data/checkpoints"
+# Native saves are synchronous; measured full-SFT checkpoint size is about 222 GB.
+# Save at the final update initially; choose a recovery cadence for longer runs.
+save_interval = 100
 save_debug_rollout_data = "/data/rollouts/{rollout_id}.pt"
+
+# Offline files are retained without credentials. Set mode/team for online W&B.
+use_wandb = true
+wandb_mode = "offline"
+wandb_project = "olmo-rl-comparison"
+wandb_group = "core-disaggregated"
+wandb_dir = "/data/wandb"
+wandb_always_use_train_step = true

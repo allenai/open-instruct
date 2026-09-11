@@ -12,6 +12,10 @@ accounts for every `MilesSmokeConfig` field, including controls that belong to
 preparation, launch, or diagnostics rather than training arguments. Native parser
 acceptance does not establish backend support or GPU qualification.
 
+Start with the [colocated dev/test and disaggregated training profiles](../configs/miles/README.md).
+The full-SFT starter now exposes 64 concurrent requests and sizes its graph and
+cache limits together; previous measured comparison configs remain frozen.
+
 ## Editing and inspecting a run
 
 ```bash

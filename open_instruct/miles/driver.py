@@ -11,7 +11,7 @@ from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 from open_instruct import logger_utils
-from open_instruct.miles.timing import stage
+from open_instruct.miles.timing import evaluation_stage, stage
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -64,9 +64,10 @@ async def train(args):
             await publish()
         evaluation = EvalDispatcher(args, learner, manager)
         if args.eval_interval is not None and not args.skip_eval_before_train:
-            await evaluation.dispatch(
-                args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
-            )
+            with evaluation_stage(args, args.start_rollout_id, initial=True):
+                await evaluation.dispatch(
+                    args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
+                )
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
             # In async mode the managed producer fills the bounded queue while
             # learning runs; dequeue happens only after the preceding publication.
@@ -92,7 +93,8 @@ async def train(args):
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)
             if should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout):
-                await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
+                with evaluation_stage(args, rollout_id):
+                    await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
             if (
                 args.debug_exit_after_rollout is not None
                 and rollout_id - args.start_rollout_id + 1 >= args.debug_exit_after_rollout
