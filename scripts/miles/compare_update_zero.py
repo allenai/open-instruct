@@ -187,6 +187,28 @@ def compare_captures(left, right):
                 "interpretation": "Populated caches include warmup/history; equal or empty caches do not prove equal kernels for every launch.",
             }
         )
+    invocation_records = {
+        side: value.get("autotune_invocations") for side, value in (("left", left), ("right", right))
+    }
+    result["autotune_invocations"] = {
+        "available_both": all(value is not None for value in invocation_records.values())
+    }
+    if result["autotune_invocations"]["available_both"]:
+        for side, record in invocation_records.items():
+            for invocation in record["invocations"]:
+                if invocation["pinned"]:
+                    require(
+                        invocation["configuration"]
+                        == record["profile"]["pinned_configurations"][invocation["kernel"]],
+                        f"{side}: invoked pinned configuration differs",
+                    )
+        result["autotune_invocations"].update(
+            {
+                "exact_invocation_sequence": invocation_records["left"]["invocations"]
+                == invocation_records["right"]["invocations"],
+                "records": invocation_records,
+            }
+        )
     require(("next_token_logits" in left) == ("next_token_logits" in right), "Next-token logit capture differs")
     if "next_token_logits" in left:
         a, b = left["next_token_logits"], right["next_token_logits"]
@@ -213,7 +235,7 @@ def load_capture(directory, capture_id, expected_ids):
         data["sources"] == metadata["sources"] and data["controls"] == metadata["controls"],
         f"{capture_id}: source/control metadata differs",
     )
-    for field in ("autotune_configs", "autotune_policy"):
+    for field in ("autotune_configs", "autotune_policy", "autotune_invocations"):
         require(data.get(field) == metadata.get(field), f"{capture_id}: autotune metadata differs")
     expected_positions = sorted(
         set(range(min(16, len(expected_ids)))) | set(range(max(0, len(expected_ids) - 128), len(expected_ids)))

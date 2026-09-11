@@ -185,3 +185,17 @@ def test_autotune_choice_comparison_is_explicit_about_missing_and_empty():
     left["autotune_configs"] = {"kernel": {"shape": {"num_warps": 4}}}
     right["autotune_configs"] = {"kernel": {"shape": {"num_warps": 8}}}
     assert "kernel" in compare.compare_captures(left, right)["autotune_observations"]["changed_configs"]
+
+
+def test_actual_pinned_invocations_checked_separately_from_cache_snapshot():
+    left, right = trace(), trace()
+    for value in (left, right):
+        value["autotune_invocations"] = {
+            "profile": {"pinned_configurations": {"fla.kernel": {"kwargs": {"BK": 32}}}},
+            "invocations": [{"kernel": "fla.kernel", "pinned": True, "configuration": {"kwargs": {"BK": 32}}}],
+        }
+    result = compare.compare_captures(left, right)
+    assert result["autotune_invocations"]["exact_invocation_sequence"]
+    right["autotune_invocations"]["invocations"][0]["configuration"]["kwargs"]["BK"] = 64
+    with pytest.raises(ValueError, match="invoked pinned configuration differs"):
+        compare.compare_captures(left, right)

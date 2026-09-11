@@ -3,7 +3,7 @@
 Call install_import_hook() in each scheduler before external-model import, or
 attach_capture(model, root) immediately after model construction. The driver
 atomically writes ROOT/capture-request.json using arm_capture() before its /generate RPC.
-No model weights, kernels, routing choices, or outputs are modified.
+Without the explicit autotune-reference control, no model computation is modified.
 """
 
 import functools
@@ -85,6 +85,7 @@ def source_manifest():
                 "fla.",
                 "scripts.miles.update_zero_capture",
                 "update_zero_capture",
+                "update_zero_autotune",
             )
         ):
             filename = getattr(module, "__file__", None)
@@ -304,6 +305,9 @@ def attach_capture(model, root):
                 and ids.detach().cpu().tolist() == arm["input_ids"]
             ):
                 state["active"] = {**arm, "activations": {}, "routes": {}}
+        tuner_control = sys.modules.get("update_zero_autotune")
+        if tuner_control is not None and state["active"] is not None:
+            tuner_control.begin_capture(state["active"]["capture_id"])
         try:
             result = original(*args, **kwargs)
             active = state["active"]
@@ -350,6 +354,8 @@ def attach_capture(model, root):
                 active["sources"] = source_manifest()
                 active["autotune_configs"] = snapshot_autotune_configs()
                 active["autotune_policy"] = autotune_policy()
+                if tuner_control is not None:
+                    active["autotune_invocations"] = tuner_control.finish_capture()
                 path = destination / f"{active['capture_id']}.pt"
                 temporary = path.with_suffix(".tmp")
                 torch.save(active, temporary)
@@ -370,10 +376,17 @@ def attach_capture(model, root):
                         "sources": active["sources"],
                         "autotune_configs": active["autotune_configs"],
                         "autotune_policy": active["autotune_policy"],
+                        **(
+                            {"autotune_invocations": active["autotune_invocations"]}
+                            if "autotune_invocations" in active
+                            else {}
+                        ),
                     },
                 )
             return result
         finally:
+            if tuner_control is not None:
+                tuner_control.finish_capture()
             state["active"] = None
 
     model.forward = forward
@@ -389,6 +402,8 @@ def _patch_model(module):
 
     @functools.wraps(original)
     def initialize(self, *args, **kwargs):
+        if os.environ.get("OI_UPDATE_ZERO_AUTOTUNE_REFERENCE"):
+            importlib.import_module("update_zero_autotune").apply_from_environment()
         original(self, *args, **kwargs)
         attach_capture(self, Path(os.environ[TRACE_ENV]))
 
