@@ -43,7 +43,7 @@ with contextlib.suppress(Exception):
 from open_instruct import data_loader as data_loader_lib
 from open_instruct import grpo_utils, utils
 from open_instruct.data_loader import add_prompt_to_generator
-from open_instruct.data_types import EnvConfig, EnvConfigEntry
+from open_instruct.data_types import CollatedBatchData, EnvConfig, EnvConfigEntry
 from open_instruct.rubrics.evolving_rubric_step import RUBRIC_TABLE_COLUMNS, RUBRIC_TABLE_KEY
 
 # isort: on
@@ -583,6 +583,129 @@ class PolicyTrainerRayProcess(RayProcess):
         self.local_metrics["_token_count"] = token_counts.sum().item()
         self.local_metrics["lr"] = self.scheduler.get_last_lr()[0]
 
+    def _train_sample_liger_grpo(
+        self,
+        data_BT: CollatedBatchData,
+        i: int,
+        response_mask_BT: torch.Tensor,
+        loss_denominator: float,
+        ref_logprobs_BT: list[torch.Tensor],
+        old_logprobs_BT: list[torch.Tensor | None],
+        epoch_idx: int,
+        num_mini_batches: int,
+        local_step: int,
+        accumulation_steps: int,
+        grad_norms: list[float],
+        loss_stats_B: dict[str, torch.Tensor],
+        rho_histograms: dict[str, list[torch.Tensor]],
+    ) -> int:
+        """Train on a single sample using the tiled lm-head GRPO loss path.
+
+        Reproduces the non-tiled objective (``masked_mean(pg + beta * kl, mask, None,
+        loss_denominator) * (world_size // sp)``) while avoiding full-vocabulary logits.
+        Returns the updated ``local_step``.
+        """
+        response_mask_bool = response_mask_BT.bool()
+        vllm_logprobs_BT = grpo_utils.mask_logprobs(data_BT.vllm_logprobs[i][:, 1:], response_mask_BT)
+        # Resolve old (behavior) logprobs identically to the non-tiled path. The current
+        # policy's logprobs are only needed for the single-minibatch, non-vLLM, first-epoch case.
+        # Compute them tile-by-tile (backbone hidden states + chunked lm-head) rather than via
+        # forward_for_logprobs, which would materialize full-vocab logits and defeat the tiled loss.
+        if num_mini_batches == 1 and not self.args.use_vllm_logprobs and epoch_idx == 0:
+            with torch.no_grad():
+                hidden_states_old = grpo_utils.forward_for_liger_hidden_states(
+                    self.model, data_BT.query_responses[i], None, data_BT.position_ids[i]
+                )
+                _, lm_head_old = grpo_utils.get_causal_lm_backbone_and_lm_head(self.model)
+                old_labels = data_BT.query_responses[i][:, 1:].clone()
+                old_labels[old_labels == self.pad_token_id] = 0
+                current_logprobs_BT = grpo_utils.tiled_token_logprobs(
+                    lm_head_old,
+                    hidden_states_old,
+                    old_labels,
+                    self.streaming_config.temperature,
+                    max(1, int(self.args.liger_grpo_loss_chunk_size)),
+                )
+            current_logprobs_BT = grpo_utils.mask_logprobs(current_logprobs_BT, response_mask_BT)
+        else:
+            current_logprobs_BT = vllm_logprobs_BT
+        old_logprob_BT = grpo_utils.resolve_old_logprob(
+            old_logprobs_BT,
+            i,
+            epoch_idx,
+            num_mini_batches,
+            self.args.use_vllm_logprobs,
+            vllm_logprobs_BT,
+            current_logprobs_BT,
+        )
+
+        # Truncated-importance-sampling correction ρ (all-ones when use_rho_correction is off),
+        # computed from the resolved old logprobs exactly as in the non-tiled path.
+        rho_BT = grpo_utils.compute_rho_correction(
+            old_logprob_BT, vllm_logprobs_BT, response_mask_BT, data_BT.advantages[i][:, 1:], self.args
+        )
+        grpo_utils.accumulate_rho_histograms(rho_histograms, rho_BT)
+
+        hidden_states = grpo_utils.forward_for_liger_hidden_states(
+            self.model, data_BT.query_responses[i], None, data_BT.position_ids[i]
+        )
+        _, lm_head = grpo_utils.get_causal_lm_backbone_and_lm_head(self.model)
+
+        selected_token_ids = data_BT.query_responses[i][:, 1:]
+        selected_token_ids = torch.where(response_mask_bool, selected_token_ids, torch.zeros_like(selected_token_ids))
+        advantages_BT = data_BT.advantages[i][:, 1:]
+        advantages_BT = torch.where(response_mask_bool, advantages_BT, torch.zeros_like(advantages_BT))
+        old_logprob_BT = torch.where(response_mask_bool, old_logprob_BT, torch.zeros_like(old_logprob_BT))
+        ref_logprob_BT = None
+        if self.args.load_ref_policy:
+            ref_logprob_BT = torch.where(response_mask_bool, ref_logprobs_BT[i], torch.zeros_like(ref_logprobs_BT[i]))
+
+        dp_factor = self.args.world_size // self.args.sequence_parallel_size
+        loss_scale = torch.tensor(float(dp_factor), device=hidden_states.device, dtype=torch.float32)
+        loss_denom = torch.tensor(loss_denominator, device=hidden_states.device, dtype=torch.float32)
+
+        loss, pg_avg, kl_avg, clipfrac, ratio_avg = grpo_utils.tiled_grpo_lm_head_loss(
+            lm_head=lm_head,
+            hidden_states=hidden_states,
+            selected_token_ids=selected_token_ids,
+            response_mask=response_mask_bool,
+            advantages=advantages_BT,
+            old_logprobs=old_logprob_BT,
+            ref_logprobs=ref_logprob_BT,
+            temperature=self.streaming_config.temperature,
+            beta=self.args.beta if self.args.load_ref_policy else 0.0,
+            kl_estimator=self.args.kl_estimator,
+            clip_lower=self.args.clip_lower,
+            clip_higher=self.args.clip_higher,
+            shards=max(1, int(self.args.liger_grpo_loss_chunk_size)),
+            loss_scale=loss_scale,
+            loss_denom=loss_denom,
+            loss_fn=self.args.loss_fn,
+            rho_weights=rho_BT.weights,
+        )
+
+        torch.cuda.empty_cache()
+        is_accumulation_boundary = (local_step + 1) % accumulation_steps == 0
+        self.model.set_gradient_accumulation_boundary(is_accumulation_boundary)
+        self.model.backward(loss)
+        if is_accumulation_boundary:
+            self.model.step()
+            grad_norms.append(float(self.model.get_global_grad_norm()))
+        local_step += 1
+
+        with torch.no_grad():
+            loss_stats_B["loss/total_avg"][i] = loss.detach()
+            loss_stats_B["loss/policy_avg"][i] = pg_avg
+            loss_stats_B["policy/clipfrac_avg"][i] = clipfrac
+            loss_stats_B["val/ratio"][i] = ratio_avg
+            if self.args.load_ref_policy and ref_logprob_BT is not None:
+                for j in range(4):
+                    loss_stats_B[f"objective/kl{j}_avg"][i] = kl_avg[j]
+                loss_stats_B["loss/kl_avg"][i] = kl_avg[self.args.kl_estimator] * self.args.beta
+            for key, value in rho_BT.metrics.items():
+                loss_stats_B[key][i] = masked_mean(value, response_mask_BT)
+        return local_step
+
     def step(self):
         """Execute one training step: fetch data from the dataloader and train on it.
 
@@ -664,6 +787,25 @@ class PolicyTrainerRayProcess(RayProcess):
                     # retrieve the loss denominator for the current batch
                     batch_start = (i // accumulation_steps) * accumulation_steps
                     loss_denominator = accumulation_token_counts[batch_start]
+
+                    if self.args.use_liger_grpo_loss:
+                        local_step = self._train_sample_liger_grpo(
+                            data_BT,
+                            i,
+                            response_mask_BT,
+                            float(loss_denominator),
+                            ref_logprobs_BT,
+                            old_logprobs_BT,
+                            epoch_idx,
+                            num_mini_batches,
+                            local_step,
+                            accumulation_steps,
+                            grad_norms,
+                            loss_stats_B,
+                            rho_histograms,
+                        )
+                        continue
+
                     # Pass attention_mask=None so HF constructs the correct 3D intra-document
                     # mask from position_ids internally for packed sequences.
                     local_logprobs_BT, entropy_BT = grpo_utils.forward_for_logprobs(
