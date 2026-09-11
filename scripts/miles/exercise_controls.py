@@ -179,6 +179,17 @@ def read_jsonl(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def validate_publications(config, publications, updates):
+    expected = [(0, False)]
+    interval = config.core.diagnostic_interval
+    for version in range(1, updates + 1):
+        expected.append((version, False))
+        if config.miles.get("check_weight_update_equal", False) and interval > 0 and version % interval == 0:
+            expected.append((version, True))
+    if [(row["version"], row["repeated_version"]) for row in publications] != expected:
+        raise ValueError("Missing or unexpected publication/verification round trip")
+
+
 def audit(campaign, output, arm, updates, report_path=None):
     config = configuration(campaign, output, arm, updates)
     if RunConfig.load(output / "run.toml").arguments() != config.arguments():
@@ -236,9 +247,7 @@ def audit(campaign, output, arm, updates, report_path=None):
                 raise ValueError("Trainer consumed different versions or sample count")
         contracts[str(rank)] = rows
     publications = read_jsonl(output / "metrics/publication.jsonl")
-    expected = [(i, False) for i in range(updates + 1)] + ([(updates, True)] if arm == "controls" else [])
-    if [(row["version"], row["repeated_version"]) for row in publications] != expected:
-        raise ValueError("Missing or repeated publication")
+    validate_publications(config, publications, updates)
     stages = read_jsonl(output / "metrics/driver_timing.jsonl")
     if any(not row["passed"] for row in stages):
         raise ValueError("A measured driver stage failed")

@@ -10,10 +10,11 @@ from pathlib import Path
 from scripts.miles.launch_gsm8k_parity import ROOT
 
 
-def specification(image, experiment):
+def specification(image, experiment, replay_only=False):
     if not re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", experiment):
         raise ValueError("Use an immutable experiment ID")
     retained = f"/weka/oe-training-default/robertb/open-instruct/control-exercise/{experiment}"
+    arms = "replay-admission64" if replay_only else "controls sync async"
     command = f"""set -euo pipefail
 cd /opt/core-rl
 export CUDA_VISIBLE_DEVICES=
@@ -27,7 +28,7 @@ worker=Path('scripts/miles/exercise_controls.py')
 Path('/output/provenance.json').write_text(json.dumps(dict(retained_experiment='{experiment}',
     auditor_sha256=hashlib.sha256(worker.read_bytes()).hexdigest()),indent=2))
 INNER
-for arm in controls sync async; do
+for arm in {arms}; do
   deadline=$((SECONDS + 7200))
   while [ ! -f {retained}/$arm/elapsed.json ]; do
     if (( SECONDS > deadline )); then echo "Timed out waiting for $arm"; exit 1; fi
@@ -36,6 +37,7 @@ for arm in controls sync async; do
   done
   updates=24
   if [ "$arm" = controls ]; then updates=4; fi
+  if [ "$arm" = replay-admission64 ]; then updates=8; fi
   python -m scripts.miles.exercise_controls audit {ROOT} {retained}/$arm "$arm" --updates "$updates" --report /output/$arm/audit.json
 done
 """
@@ -64,8 +66,9 @@ def main():
     parser.add_argument("image")
     parser.add_argument("experiment")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--replay-only", action="store_true")
     args = parser.parse_args()
-    document = json.dumps(specification(args.image, args.experiment), indent=2) + "\n"
+    document = json.dumps(specification(args.image, args.experiment, args.replay_only), indent=2) + "\n"
     if args.render_only:
         print(document, end="")
         return

@@ -15,7 +15,8 @@ that compare supplied IDs with the actual router outputs, and counts router call
 in scoring, training and backward recomputation. It has synchronization overhead
 and is not enabled in normal starter profiles.
 
-Acceptance requires all eight updates and nine publications; independent token,
+Acceptance requires all eight updates, nine distinct policy versions, and eight
+additional same-version reset/republish verification round trips; independent token,
 reward and policy-version audits; complete per-rank/per-sample/per-routed-layer
 coverage; zero mismatched expert IDs; and observed returned routes during backward
 recomputation. Gradient diagnostics are retained each update. Passing routing

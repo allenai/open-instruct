@@ -6,7 +6,7 @@ import pytest
 import torch
 from olmo_core.nn.moe.v2 import replay
 from olmo_core.nn.moe.v2.router import MoERouterConfigV2
-from scripts.miles import exercise_controls, launch_control_exercise
+from scripts.miles import exercise_controls, launch_control_exercise, launch_control_reaudit
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
@@ -95,3 +95,29 @@ def test_audit_rejects_incomplete_replay(fault):
             replay_diagnostics.audit_contracts({"0": rows}, 1, 1)
     else:
         assert replay_diagnostics.audit_contracts({"0": rows}, 1, 1)["passed"]
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "extra", "wrong_version"])
+def test_replay_publication_verification_roundtrips(tmp_path, fault):
+    config = exercise_controls.configuration(tmp_path, tmp_path, "replay-admission64", 8)
+    rows = [{"version": 0, "repeated_version": False}]
+    for version in range(1, 9):
+        rows.extend([{"version": version, "repeated_version": False}, {"version": version, "repeated_version": True}])
+    if fault == "missing":
+        rows.pop()
+    elif fault == "extra":
+        rows.append(rows[-1])
+    elif fault == "wrong_version":
+        rows[-1] = {"version": 7, "repeated_version": True}
+    if fault:
+        with pytest.raises(ValueError, match="publication"):
+            exercise_controls.validate_publications(config, rows, 8)
+    else:
+        exercise_controls.validate_publications(config, rows, 8)
+
+
+def test_replay_reaudit_is_cpu_only_on_saturn():
+    (task,) = launch_control_reaudit.specification("image", "01M2931SC4WNX57GB3AXWKV03W", replay_only=True)["tasks"]
+    assert task["constraints"]["cluster"] == ["ai2/saturn"]
+    assert task["resources"].get("gpuCount", 0) == 0
+    assert "for arm in replay-admission64; do" in task["arguments"][0]
