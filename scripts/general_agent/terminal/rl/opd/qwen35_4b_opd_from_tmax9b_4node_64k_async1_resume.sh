@@ -1,46 +1,37 @@
 #!/bin/bash
 
-# OPD arm B of the open-instruct-vs-slime comparison, on cu13/B300/holmes.
-# = arm A (--async_steps 1; jupiter run 01M244GSZXDJ552JYMWJ9E8WBW) PLUS
-#   --opd_student_logprobs learner: the student side of the reverse-KL advantage
-#   is a detached forward of the CURRENT trainer policy (same tiled path +
-#   lm_head_fp32 as the teacher) instead of the vLLM rollout logprobs. This is
-#   slime's OPD signal exactly (use_rollout_logprobs=False): no staleness, no
-#   vLLM-vs-HF numerics in the advantage. Costs one extra no-grad 4B forward
-#   per step (~+30% time/training). Watch debug/opd_student_learner_vs_vllm_
-#   logprob_diff_mean for how far the two student estimates actually are.
-# Everything else identical to the vjgol9zb baseline (DPPO tv/0.1 kept, so the
-# surrogate ratio is still anchored on vLLM; only the KL's student side moves).
+# RESUME of OPD arm A (async_steps 1, jupiter/cu12) -- the original experiment
+# 01M244GSZXDJ552JYMWJ9E8WBW was launched without --min_runtime, got preempted at
+# step ~36 after 8h and then sat in Jupiter's queue. This relaunch adds
+# --min_runtime 28800s + --auto_resume and points --checkpoint_state_dir at the
+# ORIGINAL run's trainer state so it continues from the last saved state (same
+# step counter). Training args are byte-identical to
+# qwen35_4b_opd_from_tmax9b_4node_64k_async1.sh.
 #
-# Holmes/cu13 deltas (from qwen35_9b_dppo_repro_4node_64k_holmes_cu13.sh):
-# cluster ai2/holmes, workspace ai2/oe-agents-holmes, --min_runtime 8h +
-# --auto_resume, --attn_implementation flash_4, triton GDN prefill, explicit
-# checkpoint_state_dir with state_freq 5. Image: branch opd_cuda13.
-#
-#   ./scripts/train/build_image_and_launch_dirty.sh --cuda-version 13 \
-#       scripts/general_agent/terminal/rl/opd/qwen35_4b_opd_from_tmax9b_4node_64k_async1_learnerkl_holmes_cu13.sh
-#   # or, image already built:
-#   bash scripts/general_agent/terminal/rl/opd/qwen35_4b_opd_from_tmax9b_4node_64k_async1_learnerkl_holmes_cu13.sh \
-#       shashankg/open-instruct-integration-test-opd_cuda13-cuda13
-#
-# MIRROR_URL is a comma-separated list (tried in order); all three verified live
-# + warmed 2026-09-09 (registry-mirror-oe-agents-{1,2,3}-20260909). Jupiter
-# mirrors are reachable from holmes.
+# Run from a worktree whose mason.py has --min_runtime/--auto_resume (opd_cuda13 /
+# opd_cuda13_sync); the IMAGE is the cu12 one the original used:
+#   bash scripts/general_agent/terminal/rl/opd/qwen35_4b_opd_from_tmax9b_4node_64k_async1_resume.sh shashankg/open-instruct-opd
+# Stop the original experiment first so two jobs never share the state dir.
 
 BEAKER_IMAGE="${1:?Usage: $0 <beaker-image>}"
+
+# Trainer state of the original arm-A experiment 01M244GSZXDJ552JYMWJ9E8WBW (mason
+# auto-assigned this dir at its submit). latest = global_step31 at relaunch time.
+STATE_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/1788992839_360741
+RESUME_STEP=$(cat "$STATE_DIR/latest" 2>/dev/null || echo none)
 
 MODEL=hamishivi/Qwen3.5-4B
 TOKENIZER=hamishivi/Qwen3.5-4B
 TEACHER_MODEL=allenai/tmax-9b
 
-EXP_NAME=swerl_qwen35_4b_opd_tmax9b_4node_64k_async1_learnerkl_holmes  # <=64 chars (wandb tag limit)
+EXP_NAME=swerl_qwen35_4b_opd_from_tmax9b_4node_64k_async1
 
 uv run python mason.py \
-       --cluster ai2/holmes \
+       --cluster ai2/jupiter \
        --image "$BEAKER_IMAGE" \
-       --description "OPD arm B: async_steps 1 + learner-side student logprobs in the reverse KL (slime-matched; baseline vjgol9zb = async 4 + vLLM student) -- base Qwen3.5-4B <- tmax-9b pure distill; holmes/cu13/B300; 4-node 64k" \
+       --description "OPD arm A RESUME from ${RESUME_STEP} (+min_runtime 8h/auto_resume): async_steps 1 (baseline vjgol9zb used 4) -- base Qwen3.5-4B <- tmax-9b pure distill; jupiter/cu12; 4-node 64k" \
        --pure_docker_mode \
-       --workspace ai2/oe-agents-holmes \
+       --workspace ai2/oe-agents \
        --priority urgent \
        --preemptible \
        --min_runtime 28800s \
@@ -88,7 +79,6 @@ uv run python mason.py \
     --opd_teacher_model_name_or_path $TEACHER_MODEL \
     --opd_kl_coef 1.0 \
     --opd_pure \
-    --opd_student_logprobs learner \
     --filter_zero_std_samples false \
     --temperature 1.0 \
     --learning_rate 1e-6 \
@@ -96,7 +86,6 @@ uv run python mason.py \
     --lr_scheduler_type constant \
     --deepspeed_stage 3 \
     --sequence_parallel_size 4 \
-    --attn_implementation flash_4 \
     --num_epochs 1 \
     --num_learners_per_node 8 8 \
     --vllm_num_engines 16 \
@@ -121,8 +110,8 @@ uv run python mason.py \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/qwen35_4b_opd_tmax9b_async1_learnerkl_holmes_001 \
-    --checkpoint_state_freq 5 \
+    --checkpoint_state_dir "$STATE_DIR" \
+    --checkpoint_state_freq 10 \
     --inflight_updates true \
     --lm_head_fp32 true \
     --use_liger_grpo_loss \
