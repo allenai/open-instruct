@@ -1,0 +1,124 @@
+{
+  "fixture_sha256": "fc4b538938b267c442b61a3eea397ca83fb9743111863c5ff918f7ac58ced63b",
+  "validation": {
+    "passed": true,
+    "tensors": 56,
+    "preclip_norm": 68.82677087559524,
+    "clip_factor": 7.264615009167548e-05,
+    "router_norm": 0.0020859516609552575,
+    "max_abs_errors": {
+      "clip": 0.0,
+      "moment1": 0.0,
+      "moment2": 0.0,
+      "adam": 7.450580596923828e-09
+    }
+  },
+  "optimizer_steps": 1,
+  "production_optimizer": "OLMoDDPOptimizer",
+  "preclip_norm": 68.82676696777344,
+  "consumed_sample_ids": [
+    "fixed-0",
+    "fixed-1",
+    "fixed-2",
+    "fixed-3"
+  ],
+  "shifted_scores": [
+    {
+      "response_target_ids": [
+        5,
+        6,
+        7
+      ],
+      "logit_positions": [
+        4,
+        5,
+        6
+      ],
+      "actual_log_probs": [
+        -5.5459394454956055,
+        -5.501461982727051,
+        -5.482251167297363
+      ]
+    },
+    {
+      "response_target_ids": [
+        17,
+        18,
+        19,
+        20
+      ],
+      "logit_positions": [
+        5,
+        6,
+        7,
+        8
+      ],
+      "actual_log_probs": [
+        -5.527464389801025,
+        -5.291159629821777,
+        -5.291874408721924,
+        -5.771222114562988
+      ]
+    },
+    {
+      "response_target_ids": [
+        29,
+        30,
+        31,
+        32,
+        33
+      ],
+      "logit_positions": [
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "actual_log_probs": [
+        -5.710878372192383,
+        -5.4383463859558105,
+        -5.590758323669434,
+        -5.62418270111084,
+        -5.733184814453125
+      ]
+    },
+    {
+      "response_target_ids": [
+        41,
+        42,
+        43,
+        44,
+        45,
+        46
+      ],
+      "logit_positions": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "actual_log_probs": [
+        -5.886532783508301,
+        -5.846078395843506,
+        -5.775766849517822,
+        -5.794791221618652,
+        -5.353776454925537,
+        -5.767752647399902
+      ]
+    }
+  ],
+  "schema_source_sha256": "b8315bfd781f1321ced145c30738a38a2e2ab9fc2bd541f8e41e85e869a8af1b",
+  "core_actor_source_sha256": "4cbeee9291910093960223ac2aa01e5167f1a46ae046dd19ad39fff27c852c5b",
+  "core_factory_source_sha256": "27898e1c2fda95a6c5b1abe09da9f075e87ca35cfd0417cc7e58665f8516c14d",
+  "objective_inputs": "immutable advantages/rollout old_log_probs, actual current Core forward",
+  "limitations": "EP1 fixed-input objective/optimizer; excludes rewards, generation, and replay",
+  "capture_sha256": "f794c94f1d29088336f5d3e2e9cb9695d911ea7b1ffb095e345736f04c1bce97",
+  "artifact_directory": "/tmp/miles-validation/core-policy-contract-02-r2",
+  "runtime": "open-instruct:miles-core-contract-followup; local RTX4090; source mounts Core hero and olmo-miles fixed-input schema",
+  "policy_objective": 2.6927995532751083,
+  "policy_clip_fraction": 0.6208333969116211,
+  "validation_tests": "8 focused tests passed; actual one-GPU actor step exited0"
+}
