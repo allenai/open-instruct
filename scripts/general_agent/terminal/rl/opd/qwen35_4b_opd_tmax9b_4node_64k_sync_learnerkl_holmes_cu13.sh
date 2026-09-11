@@ -18,6 +18,12 @@
 #   bash scripts/general_agent/terminal/rl/opd/qwen35_4b_opd_tmax9b_4node_64k_sync_learnerkl_holmes_cu13.sh \
 #       shashankg/open-instruct-integration-test-opd_cuda13_sync-cuda13
 #
+# RAY_enable_open_telemetry=0: Ray 2.5x's OTel metric recorder has a getenv race that
+# segfaults sandbox env actors at startup -> EnvironmentPool.__init__ ActorDiedError ->
+# silent hang (hit on the 2026-09-10 restart of this run). We read metrics via wandb.
+# STATE_DIR is script-owned so relaunches resume automatically; the description
+# carries the resume step.
+#
 # MIRROR_URL is a comma-separated list (tried in order); all three verified live
 # + warmed 2026-09-09 (registry-mirror-oe-agents-{1,2,3}-20260909).
 
@@ -28,11 +34,13 @@ TOKENIZER=hamishivi/Qwen3.5-4B
 TEACHER_MODEL=allenai/tmax-9b
 
 EXP_NAME=swerl_qwen35_4b_opd_tmax9b_4node_64k_sync_learnerkl_holmes  # <=64 chars (wandb tag limit)
+STATE_DIR=/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/qwen35_4b_opd_tmax9b_sync_learnerkl_holmes_001
+RESUME_STEP=$(cat "$STATE_DIR/latest" 2>/dev/null || echo fresh)
 
 uv run python mason.py \
        --cluster ai2/holmes \
        --image "$BEAKER_IMAGE" \
-       --description "OPD arm C: SYNCHRONOUS (async_steps 0) + learner-side student logprobs in the reverse KL (fully slime-matched sampling; arm B = async 1) -- base Qwen3.5-4B <- tmax-9b pure distill; holmes/cu13/B300; 4-node 64k" \
+       --description "OPD arm C (state ${RESUME_STEP}; RAY_enable_open_telemetry=0): SYNCHRONOUS (async_steps 0) + learner-side student logprobs in the reverse KL (fully slime-matched sampling; arm B = async 1) -- base Qwen3.5-4B <- tmax-9b pure distill; holmes/cu13/B300; 4-node 64k" \
        --pure_docker_mode \
        --workspace ai2/oe-agents-holmes \
        --priority urgent \
@@ -42,6 +50,7 @@ uv run python mason.py \
        --num_nodes 4 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
+       --env RAY_enable_open_telemetry=0 \
        --env BEAKER_ALLOW_SUBCONTAINERS=1 \
        --env PYTORCH_ALLOC_CONF=expandable_segments:True \
        --env BEAKER_SKIP_DOCKER_SOCKET=1 \
@@ -115,7 +124,7 @@ uv run python mason.py \
     --system_prompt_override_file scripts/train/debug/envs/swerl_vanillux_sandbox_system_prompt.txt \
     --backend_timeout 1200 \
     --vllm_gdn_prefill_backend triton \
-    --checkpoint_state_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint_states/shashankg/qwen35_4b_opd_tmax9b_sync_learnerkl_holmes_001 \
+    --checkpoint_state_dir "$STATE_DIR" \
     --checkpoint_state_freq 5 \
     --inflight_updates false \
     --lm_head_fp32 true \
