@@ -1107,14 +1107,45 @@ index a5b6c138e90f6364ee91398aec58d71295f96921..3fd11d56723979f8cdbb94f52f2c5f15
      """Regression test for the fully_async weight-update crash: sglang
      returns 400 (not an exception) while requests are still pending, so the
 diff --git a/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py b/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py
-index cdc4e07ca170e3ed6fb7613697fe00a0d0183273..62e064773600f101e7888e634adcdbd57254c3bd 100644
+index cdc4e07ca170e3ed6fb7613697fe00a0d0183273..edff03d9a69a21f3ab6fee782a6936eeac652c0b 100644
 --- a/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py
 +++ b/tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py
-@@ -132,3 +132,4 @@ def test_bshd_cp2_tokens_are_single_sliced(monkeypatch):
-         ]
+@@ -65,10 +65,7 @@ def _patch_state(monkeypatch, state: SimpleNamespace) -> None:
+ 
+ 
+ def _expected_thd_counts(state: SimpleNamespace, local_total: int) -> torch.Tensor:
+-    sliced_lengths = [
+-        slice_with_cp(t, 0, "thd", parallel_state=state).numel()
+-        for t in (torch.arange(1, length + 1, dtype=torch.long) for length in LENGTHS)
+-    ]
++    sliced_lengths = [slice_with_cp(t, 0, "thd", parallel_state=state).numel() for t in (torch.arange(1, length + 1, dtype=torch.long) for length in LENGTHS)]
+     expected = torch.zeros(N_ADAPTERS, dtype=torch.int32)
+     for slot, sliced_length in zip(SLOTS, sliced_lengths, strict=True):
+         expected[slot] += sliced_length
+@@ -90,6 +87,9 @@ def test_thd_cp2_adapter_token_counts(monkeypatch, cp_rank):
+     assert counts.dtype == torch.int32
+     assert counts.tolist() == _expected_thd_counts(state, local_total).tolist()
+     assert int(counts.sum()) == local_total, "counts must cover every rank-local token incl. padding"
++    assert out["padding_mask"].dtype == torch.bool
++    assert out["padding_mask"].shape == out["tokens"].shape
++    assert int((~out["padding_mask"]).sum()) == sum(slice_with_cp(torch.zeros(length, dtype=torch.bool), True, "thd", parallel_state=state).numel() - int(slice_with_cp(torch.zeros(length, dtype=torch.bool), True, "thd", parallel_state=state).sum()) for length in LENGTHS)
+ 
+ 
+ def test_thd_cp2_counts_identical_across_ranks(monkeypatch):
+@@ -125,10 +125,7 @@ def test_bshd_cp2_tokens_are_single_sliced(monkeypatch):
+         qkv_format="bshd",
      )
+ 
+-    expected = torch.stack(
+-        [
+-            slice_with_cp(torch.arange(1, length + 1, dtype=torch.long), 0, "bshd", max_seqlen, parallel_state=state)
+-            for length in LENGTHS
+-        ]
+-    )
++    expected = torch.stack([slice_with_cp(torch.arange(1, length + 1, dtype=torch.long), 0, "bshd", max_seqlen, parallel_state=state) for length in LENGTHS])
      assert torch.equal(out["tokens"], expected)
-+    assert torch.equal(out["padding_mask"], expected.eq(0))
++    expected_padding_mask = torch.stack([slice_with_cp(torch.zeros(length, dtype=torch.bool), True, "bshd", max_seqlen, parallel_state=state) for length in LENGTHS])
++    assert torch.equal(out["padding_mask"], expected_padding_mask)
 diff --git a/tests/fast/ray/test_actor_group_shared_ppo.py b/tests/fast/ray/test_actor_group_shared_ppo.py
 index f8ee09c6256747889d4f72b793df4bb951ed634e..6b3e81438629e55fd604019502f413b12bf1912e 100644
 --- a/tests/fast/ray/test_actor_group_shared_ppo.py

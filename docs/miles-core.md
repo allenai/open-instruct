@@ -27,7 +27,7 @@ flowchart LR
 
 ## Reproduce the sources
 
-The lock in `runtime/miles/runtime.lock.json` records exact bases and patch hashes. Core starts at Jacob's **`jacobm/moe-v2-core-gdn2`**, `169b8f9d06bce0276143876c82f630af483b03b7`. MILES starts at `dbbab1566ae438f7202fff653eae938e07b1d4b6`. The Core patch adds an arbitrary-objective gradient lifecycle, explicit replay across backward recomputation, HF model construction using the branch's existing KDA and latent-MoE components, and dense-model HF conversion support. KDA/latent tensor conversion is already provided by this Core base. The MILES patch includes the existing olmo-miles compatibility patches plus the explicit Core backend and lifecycle hooks.
+The lock in `runtime/miles/runtime.lock.json` records exact bases and patch hashes. The original adapter started at Jacob's **`jacobm/moe-v2-core-gdn2`**, `169b8f9d06bce0276143876c82f630af483b03b7`. The current adapter is ported onto **`codex/small-hero-hf-20260909`**, base `b1fd2c9746e88baeb20e372bdca340d788d0f7e5`, preserving the earlier KDA/latent model support. MILES starts at `dbbab1566ae438f7202fff653eae938e07b1d4b6`. The Core patch adds an arbitrary-objective gradient lifecycle, explicit replay across backward recomputation, HF model construction using the branch's existing KDA and latent-MoE components, and dense-model HF conversion support. KDA/latent tensor conversion is provided by the Core lineage. The MILES patch includes the existing olmo-miles compatibility patches plus the explicit Core backend and lifecycle hooks.
 
 ```bash
 python scripts/miles/prepare_runtime.py runtime/miles/sources
@@ -47,9 +47,11 @@ The builder verifies the base image's immutable Docker ID. It fetches Core/MILES
 
 For an inventory against our customized olmo-miles stack and bounded starting
 configurations, see [Core run starters](../configs/miles/README.md) and
-[feature parity](miles-feature-parity.md).
-The profiles distinguish tiny resident development, the measured SFT EP2
-synchronous shape, and an explicitly unqualified bounded-async candidate.
+[feature parity](miles-feature-parity.md). The [project state](miles-project-state.md)
+identifies the canonical working branches and disposition of older worktrees.
+The profiles distinguish tiny resident development and full-SFT EP2 synchronous
+and bounded-async training. Admission-64 sync/async trials passed; longer combined
+async/replay/restart and full-model colocation still need qualification.
 
 `configs/miles/dense.toml` is an example with explicit mounted input/output paths. `configs/miles/prompts.jsonl` and `verifiers.json` show the prepared-data and mixed-verifier contracts. The reward registry is trusted run configuration. Samples select registered verifier names, targets, and weights, and cannot name arbitrary import paths.
 
@@ -71,8 +73,10 @@ Rollout routing replay requires both `use_rollout_routing_replay=true` and
 strips expert-ID requests; an actual trial failed before an optimizer update
 with missing routes, and configuration now rejects that combination early.
 This is separate from Megatron's `use_routing_replay` flag, which Core rejects.
-The tiny live replay and separate-process restart passed; full-model replay
-and final-token auxiliary equivalence still require qualification.
+Tiny live replay with restart and full-model EP2 synchronous replay have passed.
+The latter completed eight updates and 512 samples with exact expert IDs through
+recomputation. Final-token auxiliary equivalence and combined async/replay/restart
+remain outside that qualification.
 
 The [additional datasource trials](miles-feature-parity.md#additional-datasource-trials)
 use pinned math and legacy IF datasets with the same SFT model and an independent

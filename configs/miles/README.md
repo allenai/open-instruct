@@ -112,8 +112,10 @@ Initial and every-20-update heldout evaluation use greedy decoding with the same
 4096-token response cap. Full rollout dumps and offline W&B are retained.
 
 The training starter saves once at update 100. Core currently writes synchronous
-native checkpoints; the measured full-SFT checkpoint was about 222 GB and its
-save boundary took roughly nine minutes. Set a more frequent recovery cadence
+native checkpoints; the measured full-SFT checkpoint was about 222 GB. The qualified optimized
+writer saved it in 118.5 seconds versus 437.1 seconds for its matched baseline;
+fresh-process load took 144.3 seconds. These are the fixed-input EP2 results in
+the [checkpoint qualification](../../docs/measurements/miles-checkpoint-perf-20260911.md). Set a more frequent recovery cadence
 when appropriate and budget that cost. Do not copy olmo-miles' `async_save=true`;
 Core rejects it. Automatic Beaker restart and HF export are not supplied by this
 TOML. See the [run-control guide](../../docs/miles-run-controls.md) for supported

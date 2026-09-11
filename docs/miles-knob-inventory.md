@@ -3,7 +3,9 @@
 Audit of all **136** `MilesSmokeConfig` fields at olmo-miles revision
 `07887b783ab254577a6656168dc0e0d21aebfe3d` (`src/olmo_miles/config.py`).
 
-See the [run-control guide](miles-run-controls.md) for semantics and examples.
+See the [run-control guide](miles-run-controls.md) for semantics and examples, and
+the [September 11 capability audit](measurements/miles-feature-parity-audit-20260911.md)
+for runtime consumers, qualification, workflow gaps and corrected unsupported controls.
 “Native pass-through” means the pinned parser exposes the corresponding option;
 it is not a claim that every combination is qualified on Core. Baseline run-spec
 sections for task recipes, conversion, HF export and Beaker lifecycle are covered
@@ -16,7 +18,7 @@ in that guide separately from this dataclass inventory.
 | `prompt_data` | Native pass-through: `miles.prompt_data`. |
 | `output_dir` | Split: `miles.save`, debug-rollout paths, W&B directory and launch output paths. |
 | `trainer_num_nodes` | `miles.actor_num_nodes`. |
-| `placement_mode` | `miles.colocate`; Core colocation keeps the trainer resident, not offloaded. |
+| `placement_mode` | `miles.colocate`; both normal wrappers keep the trainer resident. Core optional trainer offload remains unsupported; full-model Core colocation is unqualified. |
 | `rollout_num_gpus` | Native pass-through: `miles.rollout_num_gpus`. |
 | `rollout_gpus_per_node` | `miles.num_gpus_per_node`. |
 | `num_gpus` | `miles.actor_num_gpus_per_node`. |
@@ -32,14 +34,14 @@ in that guide separately from this dataclass inventory.
 | `recompute_mode` | Core block recomputation on/off; no Megatron selective-mode translation. |
 | `recompute_modules` | Unsupported: Megatron module names do not describe Core block recomputation. |
 | `micro_batch_size` | `miles.micro_batch_size=1`; larger microbatches are rejected. |
-| `use_rollout_logprobs` | Native pass-through: `miles.use_rollout_logprobs`. |
+| `use_rollout_logprobs` | Selects rollout probabilities as the shared loss anchor. Core still performs trainer scoring for agreement checks; this flag does not skip that pass. |
 | `calculate_per_token_loss` | Native pass-through: `miles.calculate_per_token_loss`. |
 | `accumulate_allreduce_grads_in_fp32` | Core optimizer/reduction implementation owns precision; no equivalent user switch. |
 | `replay_rollout_data` | `miles.load_debug_rollout_data`. |
 | `replay_rollout_data_subsample` | `miles.load_debug_rollout_data_subsample`. |
 | `trainer_flash_attention_version` | `core.attention_backend` chooses the Core attention implementation (for example torch or flash_4). |
 | `dynamic_batching` | `miles.use_dynamic_batch_size`; true is rejected for Core. |
-| `data_pad_size_multiplier` | Native spelling exists; Core defaults to 1 and accumulates unpadded samples. Megatron DeepEP padding is not required. |
+| `data_pad_size_multiplier` | Native spelling exists but does not control Core model padding. Core defaults to 1 and accumulates unpadded samples; Megatron DeepEP padding is not required. |
 | `num_rollouts` | `miles.num_rollout`. |
 | `debug_exit_after_rollout` | Native pass-through: `miles.debug_exit_after_rollout`. |
 | `debug_disable_optimizer` | Rejected: Core always performs its optimizer step. |
@@ -102,7 +104,7 @@ in that guide separately from this dataclass inventory.
 | `check_weight_update_equal` | Native pass-through: `miles.check_weight_update_equal`. |
 | `colocated_live_weight_export` | Core owns live export/IPC; no baseline Megatron monkey-patch switch. |
 | `colocated_weight_update_pipeline_depth` | Only 1 accepted; Megatron pipeline overlap is not implemented by Core. |
-| `fully_async` | Native pass-through: `miles.fully_async`. |
+| `fully_async` | Implemented bounded-async Core path; requires disaggregation and positive lag. Baseline wrapper enables TIS automatically; Core async starter instead selects rollout log probabilities. |
 | `max_weight_staleness` | `core.max_policy_lag`, in optimizer steps; explicit native alias must agree. |
 | `tis_clip` | Native pass-through: `miles.tis_clip`. |
 | `tis_clip_low` | Native pass-through: `miles.tis_clip_low`. |
@@ -139,7 +141,7 @@ in that guide separately from this dataclass inventory.
 | `code_service_workers` | Code-service deployment setting; not a trainer argument. |
 | `code_service_source_revision` | Image/service provenance setting; not a trainer argument. |
 | `eval_interval` | Native pass-through: `miles.eval_interval`. |
-| `skip_eval_before_train` | Native pass-through: `miles.skip_eval_before_train`. |
+| `skip_eval_before_train` | Native pass-through. Core repeats restored initial-state eval when false; baseline wrapper automatically skips initial eval on resume. |
 | `seed` | Native pass-through: `miles.seed`. |
 | `comparison_id` | Experiment metadata / W&B group or run name; no native comparison_id argument. |
 | `wandb_project` | `miles.wandb_project` plus explicit `use_wandb=true` to enable tracking. |

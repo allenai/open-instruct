@@ -51,6 +51,18 @@ def test_structured_json_and_nargs_are_distinct():
         {"sglang_cuda_graph_backend_decode": "nonsense"},
         {"update_weight_transfer_mode": "disk-delta"},
         {"async_save": True},
+        {"no_save_optim": True},
+        {"reset_optimizer_states": True},
+        {"override_lr_scheduler": True},
+        {"use_checkpoint_lr_scheduler": False},
+        {"compute_advantages_and_returns": False},
+        {"skip_actor_forward_only": True},
+        {"keep_old_actor": True},
+        {"dp_replicate_size": 2},
+        {"deterministic_mode": True},
+        {"lora_train_only": True},
+        {"lora_rank": 8},
+        {"save_hf": "/data/hf/{rollout_id}"},
         {"update_weights_interval": 2},
         {"debug_skip_weight_update": True},
         {"gradient_checkpointing": False},
@@ -129,3 +141,22 @@ def test_row_specialization_is_explicit_and_validated():
     assert value.plan()["core"]["row_specialization"] == "dynamic"
     with pytest.raises(ValueError, match="row_specialization"):
         CoreConfig(row_specialization="auto")
+
+
+def test_supported_resume_and_snapshot_options_compile():
+    argv = config(
+        no_save_optim=False,
+        reset_optimizer_states=False,
+        override_lr_scheduler=False,
+        use_checkpoint_lr_scheduler=True,
+        compute_advantages_and_returns=True,
+        skip_actor_forward_only=False,
+        dp_replicate_size=1,
+        deterministic_mode=False,
+        lora_train_only=False,
+        lora_rank=0,
+        eval_hf_dir="/data/snapshots",
+    ).arguments()
+    assert "--eval-hf-dir" in argv
+    assert "--no-save-optim" not in argv
+    assert "--disable-compute-advantages-and-returns" not in argv

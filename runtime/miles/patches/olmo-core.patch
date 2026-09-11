@@ -1,3 +1,615 @@
+diff --git a/docs/measurements/swiglu-runtime-rows-20260911/README.md b/docs/measurements/swiglu-runtime-rows-20260911/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1cb7e4c9da7b2e7553a395427813f619e85af887
+--- /dev/null
++++ b/docs/measurements/swiglu-runtime-rows-20260911/README.md
+@@ -0,0 +1,44 @@
++# Runtime row capacity in the forward SwiGLU kernel
++
++Historical prototype evidence, preserved from `5bfa0618f584`. The production
++implementation was subsequently integrated in `307d20590` with an explicit
++`row_specialization` choice. This probe describes the original unconditional
++prototype; it is not a current runtime configuration guide. Current Core keeps
++the static default, while the open-instruct profiles opt into dynamic rows.
++
++This isolated change starts at Core290d2ca, which includes eager intermediate
++rounding for scoring. It makes forward `rows` a runtime scalar with Triton
++`do_not_specialize`, and obtains the unchanged row stride from `tl.num_programs(0)`.
++The launch grid, masks, arithmetic modes and backward kernel remain unchanged.
++Using runtime rows alone would leave a second shape key: capped grid size was also
++passed as the `ROW_PROGRAMS` constexpr for capacities below16,384 rows.
++
++An RTX4090 probe used hidden952, BF16 and twelve capacities spanning1 to31,007,
++including tile and grid-cap boundaries. Both eager-rounding and fused modes produced
++bitwise identical outputs to the original kernel, including untouched tail rows.
++Each original mode generated12 JIT misses and12 cubins; each new mode generated1
++miss and1 cubin. Repeated capacity sweeps generated none. Sum of first-call wall
++seconds was1.565→0.0913 for fused mode and1.067→0.0875 for eager-rounding mode.
++These are local kernel diagnostics, not model throughput measurements. Repeated
++CUDA-stream launch times remain approximately0.010ms at small capacities and0.205ms
++at31,007 rows; this includes host launch gaps and is not isolated GPU active time.
++
++`result.json` retains raw per-capacity timings and both source hashes. `probe.py`
++expects the original source exported as `/validation/swiglu_before_runtime_rows.py`,
++imports the candidate from `olmo_core`, and writes its report under `/validation`.
++For a fresh run, set a new empty `TRITON_CACHE_DIR` before starting Python. Export
++the baseline with `git show 290d2ca:src/olmo_core/kernels/swiglu.py`.
++The probe requires Torch/Triton and one CUDA GPU; it launches no optimizer/model job.
++
++Validation:15 GPU kernel tests pass, including a new regression requiring a shared
++binary across odd/aligned capacities and both sides of the capped-grid boundary.
++Existing forward/backward and eager-rounding checks remain in that suite. Active
++MILES runtime pins and running Beaker images were not changed. FLA compilation is
++separate and this change does not claim to remove the complete historical score cost.
++
++The broader compiled pairwise-activation suite is not clean in this runtime:
++`test_compiled_pairwise_activation` fails its exact gradient comparison on6 of
++2,097,152 BF16 elements (maximum0.00390625); four architecture-specific cases skip.
++The identical failure reproduces on unchanged290d2ca with the same indices and values.
++That test uses `ops/swiglu_pairwise`, not the modified valid-prefix kernel. It is a
++pre-existing qualification limitation, not fixed or hidden by this patch.
+diff --git a/docs/measurements/swiglu-runtime-rows-20260911/probe.py b/docs/measurements/swiglu-runtime-rows-20260911/probe.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..34f6088275cd2de2c434ea95f5be50667f26c962
+--- /dev/null
++++ b/docs/measurements/swiglu-runtime-rows-20260911/probe.py
+@@ -0,0 +1,113 @@
++import hashlib
++import importlib.util
++import json
++import time
++from pathlib import Path
++from unittest import mock
++
++import torch
++from olmo_core.kernels import swiglu as candidate
++from triton.runtime import cache, jit
++
++spec = importlib.util.spec_from_file_location(
++    "swiglu_before_runtime_rows", "/validation/swiglu_before_runtime_rows.py"
++)
++baseline = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(baseline)
++capacities = (1, 16, 17, 32, 37, 41, 1024, 16383, 16384, 16385, 21023, 31007)
++original_compile = jit.JITFunction._do_compile
++original_put = cache.FileCacheManager.put
++results = []
++for mode in (False, True):
++    inputs = []
++    torch.manual_seed(17)
++    for rows in capacities:
++        x = torch.randn(rows, 1904, device="cuda", dtype=torch.bfloat16)
++        count = torch.tensor(max(0, rows - 3), device="cuda", dtype=torch.long)
++        inputs.append((x, count))
++    expected = []
++    for name, module in [("baseline", baseline), ("candidate", candidate)]:
++        observations = []
++        for phase in ("first", "repeat"):
++            misses = []
++            writes = []
++            times = []
++            kernel_ms = []
++
++            def observe(fn, *args, **kwargs):
++                start = time.perf_counter()
++                try:
++                    return original_compile(fn, *args, **kwargs)
++                finally:
++                    misses.append(
++                        {
++                            "kernel": fn.fn.__module__ + "." + fn.fn.__name__,
++                            "seconds": time.perf_counter() - start,
++                        }
++                    )
++
++            def put(manager, data, filename, binary=True):
++                result = original_put(manager, data, filename, binary=binary)
++                writes.append(filename)
++                return result
++
++            with (
++                mock.patch.object(jit.JITFunction, "_do_compile", observe),
++                mock.patch.object(cache.FileCacheManager, "put", put),
++            ):
++                for i, (x, count) in enumerate(inputs):
++                    out = torch.full((x.shape[0], 952), 77.0, device="cuda", dtype=torch.bfloat16)
++                    torch.cuda.synchronize()
++                    start = time.perf_counter()
++                    module.swiglu_valid_prefix(x, count, out=out, match_eager_rounding=mode)
++                    torch.cuda.synchronize()
++                    times.append(time.perf_counter() - start)
++                    if name == "baseline" and phase == "first":
++                        expected.append(out.clone())
++                    else:
++                        assert torch.equal(expected[i], out), (mode, name, phase, capacities[i])
++                    a, b = (
++                        torch.cuda.Event(enable_timing=True),
++                        torch.cuda.Event(enable_timing=True),
++                    )
++                    a.record()
++                    for _ in range(30):
++                        module.swiglu_valid_prefix(x, count, out=out, match_eager_rounding=mode)
++                    b.record()
++                    torch.cuda.synchronize()
++                    kernel_ms.append(a.elapsed_time(b) / 30)
++            observations.append(
++                {
++                    "phase": phase,
++                    "call_wall_seconds": times,
++                    "total_call_wall_seconds": sum(times),
++                    "jit_misses": misses,
++                    "cubin_writes": sum(f.endswith(".cubin") for f in writes),
++                    "warm_launch_stream_ms": kernel_ms,
++                    "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time",
++                }
++            )
++        results.append(
++            {"mode_eager_rounding": mode, "implementation": name, "passes": observations}
++        )
++report = {
++    "passed": True,
++    "device": torch.cuda.get_device_name(),
++    "capacities": capacities,
++    "hidden": 952,
++    "all_baseline_candidate_outputs_bitwise_equal": True,
++    "scope": "Local4090 forward-only standalone kernel; no model or optimizer update; changing capacities and fixed width. Both arithmetic modes preserve baseline bytes including untouched tails.",
++    "baseline_source_sha256": hashlib.sha256(Path(baseline.__file__).read_bytes()).hexdigest(),
++    "candidate_source_sha256": hashlib.sha256(Path(candidate.__file__).read_bytes()).hexdigest(),
++    "results": results,
++}
++Path("/validation/swiglu-runtime-rows-probe.json").write_text(json.dumps(report, indent=2) + "\n")
++for r in results:
++    print(
++        r["mode_eager_rounding"],
++        r["implementation"],
++        [
++            (q["phase"], len(q["jit_misses"]), q["cubin_writes"], q["total_call_wall_seconds"])
++            for q in r["passes"]
++        ],
++    )
+diff --git a/docs/measurements/swiglu-runtime-rows-20260911/result.json b/docs/measurements/swiglu-runtime-rows-20260911/result.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..77ace088e9db55a5cb20ef1405b30fecabe0cfeb
+--- /dev/null
++++ b/docs/measurements/swiglu-runtime-rows-20260911/result.json
+@@ -0,0 +1,437 @@
++{
++  "passed": true,
++  "device": "NVIDIA GeForce RTX 4090",
++  "capacities": [
++    1,
++    16,
++    17,
++    32,
++    37,
++    41,
++    1024,
++    16383,
++    16384,
++    16385,
++    21023,
++    31007
++  ],
++  "hidden": 952,
++  "all_baseline_candidate_outputs_bitwise_equal": true,
++  "scope": "Local4090 forward-only standalone kernel; no model or optimizer update; changing capacities and fixed width. Both arithmetic modes preserve baseline bytes including untouched tails.",
++  "baseline_source_sha256": "edfaa30b2d2b9796289e83f0afb771770bcee01ae8258c338927f469a9db534c",
++  "candidate_source_sha256": "9e8c934017431bf386120b36b4282a5bfd3098538aab3b8d10a332e680f4e259",
++  "results": [
++    {
++      "mode_eager_rounding": false,
++      "implementation": "baseline",
++      "passes": [
++        {
++          "phase": "first",
++          "call_wall_seconds": [
++            0.5780760780908167,
++            0.08766867406666279,
++            0.08870712900534272,
++            0.09367865975946188,
++            0.0906825689598918,
++            0.08957561384886503,
++            0.09012297494336963,
++            0.09270610893145204,
++            0.08833565982058644,
++            0.08844622783362865,
++            0.08779142517596483,
++            0.08885595994070172
++          ],
++          "total_call_wall_seconds": 1.5646470803767443,
++          "jit_misses": [
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.30809158831834793
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08735808916389942
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08838618500158191
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.09334385022521019
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.09036124404519796
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08925531059503555
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08973511401563883
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.09223059378564358
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08794081583619118
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08802927285432816
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08736370876431465
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08835075795650482
++            }
++          ],
++          "cubin_writes": 12,
++          "warm_launch_stream_ms": [
++            0.012517333030700684,
++            0.01226026713848114,
++            0.011878400047620138,
++            0.012145066261291504,
++            0.01174186666806539,
++            0.011784533659617106,
++            0.012288000186284382,
++            0.09464106559753419,
++            0.0942080020904541,
++            0.09475839932759603,
++            0.1355775992075602,
++            0.20616532961527506
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        },
++        {
++          "phase": "repeat",
++          "call_wall_seconds": [
++            3.5697128623723984e-05,
++            2.2753141820430756e-05,
++            1.922622323036194e-05,
++            2.0689330995082855e-05,
++            1.89049169421196e-05,
++            1.887604594230652e-05,
++            2.7822796255350113e-05,
++            0.00012248102575540543,
++            0.0001266789622604847,
++            0.00013661710545420647,
++            0.0001557641662657261,
++            0.00022616563364863396
++          ],
++          "total_call_wall_seconds": 0.0009316764771938324,
++          "jit_misses": [],
++          "cubin_writes": 0,
++          "warm_launch_stream_ms": [
++            0.013380266229311625,
++            0.009941333532333374,
++            0.009705600142478944,
++            0.009778133034706116,
++            0.009805867075920105,
++            0.009659733374913533,
++            0.009929600358009338,
++            0.09217173258463542,
++            0.09238613446553548,
++            0.09246506690979003,
++            0.13350826899210613,
++            0.20481707255045573
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        }
++      ]
++    },
++    {
++      "mode_eager_rounding": false,
++      "implementation": "candidate",
++      "passes": [
++        {
++          "phase": "first",
++          "call_wall_seconds": [
++            0.09047455666586757,
++            2.0959880203008652e-05,
++            1.6781967133283615e-05,
++            1.6922131180763245e-05,
++            1.6120262444019318e-05,
++            1.6139820218086243e-05,
++            2.3033004254102707e-05,
++            0.00011665979400277138,
++            0.00011385511606931686,
++            0.00011366419494152069,
++            0.00014769798144698143,
++            0.00022775912657380104
++          ],
++          "total_call_wall_seconds": 0.09130414994433522,
++          "jit_misses": [
++            {
++              "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
++              "seconds": 0.08966880012303591
++            }
++          ],
++          "cubin_writes": 1,
++          "warm_launch_stream_ms": [
++            0.012793599565823873,
++            0.009839999675750732,
++            0.009644800424575805,
++            0.009588266412417093,
++            0.009544533491134644,
++            0.009649067123730978,
++            0.009642666578292847,
++            0.09227840105692546,
++            0.09252160390218099,
++            0.09269866943359376,
++            0.13341760635375977,
++            0.20525333086649578
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        },
++        {
++          "phase": "repeat",
++          "call_wall_seconds": [
++            3.0477996915578842e-05,
++            1.5960074961185455e-05,
++            1.526903361082077e-05,
++            1.5027821063995361e-05,
++            1.5097670257091522e-05,
++            1.5047844499349594e-05,
++            2.2361986339092255e-05,
++            0.00011575780808925629,
++            0.00011193100363016129,
++            0.00011332286521792412,
++            0.00014639506116509438,
++            0.00022394070401787758
++          ],
++          "total_call_wall_seconds": 0.0008405898697674274,
++          "jit_misses": [],
++          "cubin_writes": 0,
++          "warm_launch_stream_ms": [
++            0.010038399696350097,
++            0.009770666559537252,
++            0.009634133179982502,
++            0.00960213343302409,
++            0.009846400221188862,
++            0.009649067123730978,
++            0.009731200337409974,
++            0.09232853253682455,
++            0.09230186939239501,
++            0.09259520371754965,
++            0.1335317293802897,
++            0.20493440628051757
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        }
++      ]
++    },
++    {
++      "mode_eager_rounding": true,
++      "implementation": "baseline",
++      "passes": [
++        {
++          "phase": "first",
++          "call_wall_seconds": [
++            0.08714938629418612,
++            0.08668476110324264,
++            0.0952834328636527,
++            0.09030448785051703,
++            0.08911852492019534,
++            0.09040228091180325,
++            0.08662199322134256,
++            0.08674763003364205,
++            0.09047105116769671,
++            0.08891652384772897,
++            0.08803062606602907,
++            0.0875111180357635
++          ],
++          "total_call_wall_seconds": 1.0672418163158,
++          "jit_misses": [
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08673201082274318
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08636661199852824
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.09492816403508186
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08991855103522539
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08877120027318597
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.090019088704139
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08625118480995297
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08632685663178563
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.09000614518299699
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08847632491961122
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08756767399609089
++            },
++            {
++              "kernel": "swiglu_before_runtime_rows._swiglu_valid_prefix_kernel",
++              "seconds": 0.08701691729947925
++            }
++          ],
++          "cubin_writes": 12,
++          "warm_launch_stream_ms": [
++            0.012424533565839132,
++            0.01174186666806539,
++            0.011878400047620138,
++            0.013108266393343608,
++            0.013038933277130127,
++            0.011742933591206869,
++            0.011878400047620138,
++            0.0942026694615682,
++            0.09423360029856363,
++            0.09413973490397136,
++            0.1355829397837321,
++            0.20585813522338867
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        },
++        {
++          "phase": "repeat",
++          "call_wall_seconds": [
++            2.8624199330806732e-05,
++            1.994706690311432e-05,
++            1.9647181034088135e-05,
++            2.3823697119951248e-05,
++            1.9636936485767365e-05,
++            1.8895138055086136e-05,
++            2.6910565793514252e-05,
++            0.00012145796790719032,
++            0.00011644884943962097,
++            0.00011516595259308815,
++            0.000149622093886137,
++            0.0002307649701833725
++          ],
++          "total_call_wall_seconds": 0.0008909446187317371,
++          "jit_misses": [],
++          "cubin_writes": 0,
++          "warm_launch_stream_ms": [
++            0.009991466999053955,
++            0.009946667154630025,
++            0.009608532985051472,
++            0.009526399771372478,
++            0.009655466675758362,
++            0.009687466422716777,
++            0.010709333419799804,
++            0.09190080165863038,
++            0.09180586338043213,
++            0.09224212964375814,
++            0.13325013319651285,
++            0.20473492940266927
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        }
++      ]
++    },
++    {
++      "mode_eager_rounding": true,
++      "implementation": "candidate",
++      "passes": [
++        {
++          "phase": "first",
++          "call_wall_seconds": [
++            0.0866946610622108,
++            1.989724114537239e-05,
++            2.2102147340774536e-05,
++            1.6792211681604385e-05,
++            1.6240868717432022e-05,
++            1.600012183189392e-05,
++            2.3022759705781937e-05,
++            0.00011705001816153526,
++            0.00012705940753221512,
++            0.00011527677997946739,
++            0.00014816923066973686,
++            0.00022422196343541145
++          ],
++          "total_call_wall_seconds": 0.08754049381241202,
++          "jit_misses": [
++            {
++              "kernel": "olmo_core.kernels.swiglu._swiglu_valid_prefix_kernel",
++              "seconds": 0.08634696621447802
++            }
++          ],
++          "cubin_writes": 1,
++          "warm_launch_stream_ms": [
++            0.011615999539693196,
++            0.009809066851933798,
++            0.009548800190289815,
++            0.009550933043162029,
++            0.009479467074076335,
++            0.009502933422724406,
++            0.009658666451772054,
++            0.09207466443379721,
++            0.0922986666361491,
++            0.09240106741587321,
++            0.13345173199971516,
++            0.20495786666870117
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        },
++        {
++          "phase": "repeat",
++          "call_wall_seconds": [
++            2.2463034838438034e-05,
++            1.6281381249427795e-05,
++            1.6652047634124756e-05,
++            1.6490928828716278e-05,
++            1.8153805285692215e-05,
++            1.5739817172288895e-05,
++            2.213194966316223e-05,
++            0.00011585839092731476,
++            0.00011196080595254898,
++            0.0001120399683713913,
++            0.0001471070572733879,
++            0.00023074494674801826
++          ],
++          "total_call_wall_seconds": 0.0008456241339445114,
++          "jit_misses": [],
++          "cubin_writes": 0,
++          "warm_launch_stream_ms": [
++            0.009910399715105692,
++            0.009755733609199523,
++            0.010057600339253743,
++            0.00981119970480601,
++            0.009828266501426697,
++            0.009846400221188862,
++            0.009532800316810608,
++            0.09199679692586263,
++            0.09204906622568766,
++            0.0923957347869873,
++            0.13332266807556153,
++            0.2052288055419922
++          ],
++          "warm_launch_scope": "CUDA stream elapsed per repeated Python launch; includes launch gaps, not isolated kernel active time"
++        }
++      ]
++    }
++  ]
++}
 diff --git a/src/olmo_core/distributed/checkpoint/contiguous_planner.py b/src/olmo_core/distributed/checkpoint/contiguous_planner.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..b4e24a9c5b8e54b2e434d8396b81bc1f722015a5

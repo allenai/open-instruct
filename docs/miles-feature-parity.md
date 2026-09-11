@@ -1,254 +1,192 @@
 # MILES/Core defaults and feature parity
 
-For the current CLI/API surface, overrides and slide-level run controls, see the
-[run-control guide](miles-run-controls.md) and [complete knob inventory](miles-knob-inventory.md).
+The Core backend supports ordinary synchronous and bounded-async RL, live weight
+publication, native checkpoint/resume, and rollout router replay on the tested
+EP2 configuration. The main remaining differences from **our customized
+`~/proj/olmo-miles`** are preparation/launch workflows, recovery operations,
+checkpoint policies, and trainer topology/batching support. Shared MILES or
+SGLang flags do not automatically provide the baseline's custom adapters.
 
-Current experiment status and the restored matched Megatron comparison are tracked
-in [the active-work ledger](miles-active-work.md). The architecture-specific hero
-port is documented in [hero support](miles-hero-support.md).
+This September 11 review uses olmo-miles
+`07887b783ab254577a6656168dc0e0d21aebfe3d`. The current implementation is on
+`robertb/miles-hero-support`, with Core `robertb/miles-hero-adapter` and MILES
+`robertb/olmo-core-backend`. The adapter originated on Jacob's
+`moe-v2-core-gdn2` work and was ported to the later hero HF-support branch.
+[runtime.lock.json](../runtime/miles/runtime.lock.json) owns the exact source
+pins; individual measurement records identify the revisions actually exercised.
 
-This compares the Core integration with **our customized `~/proj/olmo-miles`
-implementation**, including its Megatron adapters, serving optimizations and
-operational tooling. It does not compare against unmodified upstream MILES.
-The review used olmo-miles `07887b783ab254577a6656168dc0e0d21aebfe3d` on
-September 10, 2026. Core starts from Jacob's `moe-v2-core-gdn2` branch;
-[runtime.lock.json](../runtime/miles/runtime.lock.json) owns the exact runtime pins.
-
-“Implemented” means there is code for the capability. “Validated” always names
-the scope of the evidence. Parser acceptance alone is neither runtime support
-nor a qualification. The live evidence ledger is
-[validation.json](../runtime/miles/validation.json), with the
-[contract checks](miles-core.md#training-contract-checks) defining the numerical
-acceptance work. Existing GRPO entrypoints remain available.
+Use the [detailed audit](measurements/miles-feature-parity-audit-20260911.md),
+[run-control guide](miles-run-controls.md), and
+[complete knob inventory](miles-knob-inventory.md) for option mappings and limits.
+“Implemented,” “profile default,” and “qualified on a particular workload” are
+separate claims. Parser acceptance is not runtime qualification. Existing
+open-instruct GRPO, SFT and DPO entrypoints remain separate.
 
 ## Starting profiles
 
-The [starter index](../configs/miles/README.md) identifies the default tiny
-colocated dev/test profile and the longer disaggregated training starter. The
-short profiles below remain qualification exercises, not a model-capacity table. They use the actual `[core]`/`[miles]` configuration
-schema and preserve open-instruct verifier dispatch. No additional config
-inheritance or environment-variable substitution is implied.
+The [starter index](../configs/miles/README.md) describes preparation, overrides
+and engine scaling. These are standalone `[core]`/`[miles]` TOMLs, without implicit
+inheritance or environment-variable expansion.
 
-| Profile | Topology and purpose | Starting shape | Evidence / limitation |
-| --- | --- | --- | --- |
-| [tiny-resident](../configs/miles/profiles/tiny-resident.toml) | One GPU shared by a tiny Core model and one SGLang engine | 1 prompt × 4 responses; 2 updates; context 512, response 256; eager decode; Torch attention | This profile passed two updates plus a separate-process third update through the public entrypoint with schema-2 checkpoints on the random tiny KDA/latent fixture. Memory fit remains model-dependent. All-zero rewards validate plumbing, not policy learning. |
-| [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two Core EP ranks plus one dedicated SGLang GPU | 16 prompts × 4 responses; 2 updates; context 6144, response 4096; admission/decode graphs through batch 64; FA4 | Based on the successful full SFT path. Admission is raised from the historical four to 64, with 524288 KV tokens and 128 recurrent slots; capacity and scheduling passed the 12-update B300 pair; this two-update eval/diagnostics recipe is a separate combination. |
-| [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Same three-GPU allocation; bounded asynchronous generation | 16 prompts × 4 responses; 4 updates; context 2560, response 512; lag ≤1; one collection buffered; eager decode; admission 64 | Candidate for async qualification only. Core's bounded queue and ledger have targeted tests; full-model async endurance, restart and failures need their own run. Replay stays off. |
+| Profile | Default shape | Qualification and remaining scope |
+| --- | --- | --- |
+| [tiny-resident](../configs/miles/profiles/tiny-resident.toml) | One shared GPU; 1 prompt × 4 responses; two updates, native saves, eager decode | Tiny hybrid-MoE updates and separate-process continuation passed. Zero task rewards establish plumbing, not learning. |
+| [train-disaggregated](../configs/miles/profiles/train-disaggregated.toml) | Two B300 Core EP ranks + one TP1 engine; 16 prompts × 4 responses; admission 64; 100 updates; initial/every-20 heldout eval; final native save; offline W&B | Full-model capacity and synchronous scheduling passed a 12-update trial. That trial did not exercise the complete 100-update starter's eval/save lifecycle. |
+| [train-disaggregated-async](../configs/miles/profiles/train-disaggregated-async.toml) | Same hardware/batch; lag ≤1 optimizer step; buffer factor one; retry; rollout behavior logprobs | Full-model bounded async passed 24-update and admission-64 12-update exercises. Combined replay/restart/failure endurance remains separate. |
+| [sft-b300-ep2-sync](../configs/miles/profiles/sft-b300-ep2-sync.toml) | Two updates, initial/final eval, diagnostics; same admission 64 | Short correctness recipe; no optimizer checkpoint requested. |
+| [sft-b300-ep2-async-candidate](../configs/miles/profiles/sft-b300-ep2-async-candidate.toml) | Four updates; 512-token responses; eager decode; admission 64 | Short lifecycle variant. Its name does not mean all Core async support remains unqualified. |
 
-The additional [train-disaggregated](../configs/miles/profiles/train-disaggregated.toml)
-starter uses the same 64-completion/64-admission shape, 100 updates, initial and
-every-20-update heldout evaluation, a final native checkpoint and offline W&B.
-It keeps the established GSM8K objective explicit. See the starter index for
-the standalone async training example, overrides and the memory constraints on engine scaling.
+Full-SFT profiles refer to the existing 18.5B-total KDA/latent model, not hero.
+They reserve 2048 prompt + 4096 response tokens, except the short async variant.
+The ordinary Core and olmo-miles colocated configurations **both keep the trainer
+resident**: the baseline explicitly emits `--no-offload-train`. Core's difference
+is its unqualified full-model colocation footprint and unsupported optional
+trainer/optimizer offload, not a different default swapping policy.
 
-All profiles explicitly select `core.row_specialization="dynamic"` for forward-only
-routed-expert scoring; Core defaults remain static. See the
-[row-specialization integration](measurements/miles-core-row-specialization-20260911.md)
-for isolation, rollback and qualification scope.
+Profiles select dynamic forward-only SwiGLU rows, microbatch one, activation
+recomputation, router auxiliary coefficient 0.01, z-loss coefficient 1e-5,
+streaming export, and 1 GiB publication buckets. Shared Core's row-specialization
+default remains static. The wrapper enables the qualified arithmetic checkpoint
+planner, compact storage and balanced replicated ownership; compiler-cache
+persistence remains opt-in.
 
-All profiles keep trainer offload disabled (the compiler explicitly supplies
-`--no-offload-train`), microbatch size one, activation recomputation enabled,
-router auxiliary coefficient 0.01 and z-loss coefficient 1e-5. They enable initial
-serving equality, a 0.05 active-token mean logprob-difference guard and
-per-step diagnostics in the short qualification profiles; the longer training
-starter keeps extra diagnostic republications off. With serving checks enabled, each diagnostic publication
-adds a snapshot/reset/republish round trip; include its extra transfer time when
-measuring performance. The logprob tolerance is inherited from our bounded
-checks; it is not a universal acceptable drift, particularly under async lag.
-A violation should trigger diagnosis, not automatic relaxation.
+The synchronous starter uses actor-recomputed policy logprobs. The Core async
+starter uses rollout behavior logprobs directly and leaves TIS off. **The
+olmo-miles async recipe instead uses trainer-recomputed scoring plus TIS**
+(with optional clipping/alternative correction). Similar placement, lag and
+batch sizes therefore do not establish identical objectives. The measured Core
+sync/async scheduling pair used rollout logprobs in both arms to control that
+comparison. Also, Core's 16 prompts × 4 responses differs from an 8 × 8 recipe
+despite both containing 64 samples. Neither replay nor a larger group is an
+inference-only performance switch.
 
-The synchronous SFT profile uses the same actor-recomputed logprob baseline
-as the successful trial. The async candidate explicitly uses rollout behavior
-log probabilities as its policy-ratio denominator; stale data must not silently be
-treated as current-policy data. Neither profile turns on replay, TIS, reference
-KL, reward shaping or a changed advantage estimator. Those are independent
-algorithmic choices requiring their own acceptance, not throughput toggles.
-
-Before running, copy a profile and replace every `/data` path with a fresh,
-mounted run directory. Prepare its HF descriptor (weights, config, tokenizer and
-exact RL chat template), rendered `train.jsonl`, and trusted `verifiers.json`.
-The synchronous SFT profile also expects a disjoint `eval.jsonl`. Inputs use
-`input`, `label`, and `metadata`; metadata identifies registered verifiers and
-targets. Do not render the template a second time or include reference assistant
-answers in prompts. The existing
-[SFT preparation script](../scripts/miles/sft_gsm8k.py) demonstrates the exact
-checkpoint/template and immutable GSM8K revision used for the successful run.
+Copy a profile, replace `/data` paths, and prepare an HF descriptor with the exact
+tokenizer/chat template, rendered `train.jsonl`, disjoint eval data where needed,
+and trusted `verifiers.json`. Apply the chat template once and exclude reference
+assistant answers from prompts. [SFT preparation](../scripts/miles/sft_gsm8k.py)
+records the checkpoint, template and immutable source identities.
 
 ```bash
-# CPU-safe compilation: does not check installed runtime or input files.
 python -m open_instruct.miles plan /path/to/run.toml
-# Inside the pinned runtime, with the real HF descriptor visible:
 python -m open_instruct.miles validate /path/to/run.toml
 python -m open_instruct.miles train /path/to/run.toml
 ```
 
-Run FA4's real forward/backward preflight before the B300 profiles, as the
-[SFT launcher](../scripts/miles/launch_sft_trial.py) does. Beaker launches still go
-through the repository's committed image-build wrapper. These TOMLs do not
-allocate GPUs, mount WEKA, configure Beaker retries or set compiler caches.
-CPU-only preparation requiring WEKA belongs on `ai2/saturn`; this does not
-change GPU job placement.
-
-The two SFT profiles intentionally omit `save_interval`: `save` provides a
-metrics destination, not optimizer-checkpoint durability. The tiny profile
-saves every rollout to exercise native checkpoint completion. For a restart,
-keep topology/model settings fixed, set `miles.load` to that checkpoint root,
-and choose a total `num_rollout` and original LR horizon that cover the intended
-continuation. A production run must choose and measure real checkpoint cadence;
-these bounded SFT defaults provide no recovery checkpoint.
+`plan` compiles configuration without checking installed runtime or data;
+`validate` checks the installed MILES parser and backend configuration; neither
+proves model memory fit. Beaker submission uses the committed
+`./scripts/train/build_image_and_launch.sh --miles` workflow. Allocation,
+mounts and automatic resubmission are launch concerns, not implicit TOML actions.
+GPU exercises use urgent Holmes in `ai2/open-instruct-dev` with positive minimum
+runtime; CPU-only WEKA work belongs on Saturn. Run the real attention
+forward/backward preflight for the target hardware.
 
 ## Additional datasource trials
 
-[The datasource harness](../scripts/miles/datasource_trials.py) has pinned
+The [datasource harness](../scripts/miles/datasource_trials.py) consumes pinned
 [math](../configs/miles/tasks/math.toml) and
 [legacy IF](../configs/miles/tasks/ifeval.toml) task specifications. These task
-TOMLs are inputs to the harness, not standalone Core run configurations. It
-selects the first 24 unique in-budget prompts from at most 256 rows, uses eight
-for two updates, and reserves sixteen for before/after evaluation. It records
-actual source indices and prepared-data hashes; this bounded length-selected
-slice is not the full dataset or a decontaminated benchmark.
+TOMLs are preparation inputs, not standalone training configs. It selects 24
+unique in-budget prompts from at most 256 source rows: eight for two updates and
+sixteen held out for before/after evaluation. Hashes and actual row indices are
+retained; this is a bounded slice, not a decontaminated benchmark.
 
-Local qualification completed for both sources on a fresh random 13.66M-parameter
-KDA + latent-MoE model: two updates and 64 independently audited responses per
-source, with exact policy-version and diagnostic-republication checks. All
-responses reached the 32-token cap, every training group had zero reward
-variance, and the policy objective was zero; these runs exercise source/reward
-and auxiliary-update plumbing, not task learning. The IF GPU lifecycle completed
-but its first audit hit an async-helper bug; the corrected helper successfully
-re-audited the unchanged outputs. Math completed with exit code zero. See the
-[combined measurements](measurements/miles-core-datasources-local-20260910.json)
-for raw contract metrics, source hashes, verifier fixtures, and limitations.
-The full-SFT datasource launcher below remains a separate qualification step.
+Both [local tiny-model trials](measurements/miles-core-datasources-local-20260910.json)
+and [full-SFT EP2 trials](measurements/miles-core-datasources-sft-20260910.json)
+passed independent audits. The full-SFT allocation
+[01M26GC6F3TRRQEXR9HJQR0XGG](https://beaker.org/ex/01M26GC6F3TRRQEXR9HJQR0XGG)
+ran two updates and audited 64 training/eval responses per task, starting each
+from the original SFT checkpoint. Math reached the response cap on 63/64 answers;
+this qualifies integration, not useful math learning.
 
-After the numerical and verifier preflights pass and changes are committed:
+A separate [GSM8K/math/IF mixture](measurements/miles-mixture-20260910.json)
+passed two EP2 updates with 48 training and 12 eval responses. Each source had
+at least one mixed-reward training group. Every math training response reached
+8192 tokens, and six heldout questions cannot support a learning conclusion.
+
+After committing, the existing bounded launcher remains available:
 
 ```bash
 MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
   ./scripts/train/build_image_and_launch.sh --miles \
   scripts/train/debug/miles_core_datasources.sh
-# Append --task math or --task ifeval to run just one datasource.
 ```
 
-The [launcher](../scripts/miles/launch_datasource_trial.py) runs math then IF
-sequentially within one three-GPU Holmes allocation. Each starts independently
-from the same SFT source through a fresh shared HF descriptor with the verified
-RL template; the second task does not continue the first task's updated model.
-It runs verifier fixtures before model startup, then prepares, validates and
-runs each task with per-step diagnostics and independent response audits. The
-pinned image isolates symbolic-math dependencies from the trainer. Default wall
-time is bounded to 90 minutes for both tasks, or 45 minutes for one task, with
-no automatic restart. Reports are copied into the Beaker result; weights and
-responses stay on WEKA. A failed task stops the allocation, preserving completed
-reports for diagnosis. Preparing a launch is not evidence that it passed.
+Append `--task math` or `--task ifeval` to select one task. Broader olmo-miles
+catalog/recipe/manifest adoption, generated arithmetic, code-service lifecycle
+and judge-service qualification remain work. The baseline's 41 static-source
+and generated-arithmetic gates mostly used a tiny development model; judge
+transport was tested against a mock service. Neither those gates nor existing
+open-instruct verifier classes imply a complete Core task bridge.
 
 ## What carries over, and what still needs work
 
-The sources named below are files in the reviewed olmo-miles checkout. Local
-Core implementation links point to this repository's adapter. Baseline features
-may themselves have limits; their presence is not a blanket performance claim.
-
-| Capability | Customized olmo-miles baseline | Core integration and acceptance still needed |
+| Capability | Implemented and qualified here | Remaining difference or acceptance |
 | --- | --- | --- |
-| Native KDA / latent MoE | Custom Megatron/Bridge model representation and conversion | Core already owns the architecture; adapter constructs it from HF and loads native weights. Full SFT EP2 two-update run passed; longer runs remain. [models](../open_instruct/miles/models.py) |
-| HF initialization / export | HF↔Megatron conversion, config manifests and parity tooling | HF→native Core import and native→HF export replace Bridge. Exact initial serving-weight equality and tiny round trips passed. Broader configurations and conversion parity remain. |
-| RL objective / accumulation | MILES Megatron schedule plus Olmo-specific auxiliary-loss wiring | New arbitrary-objective Core hook, rank/microbatch normalization and optimizer lifecycle. Independent fixed-batch contract suite passed. Native EP1/EP2 moments and recomputation passed twelve replayed-route arms; matched Megatron measurements remain. [EP evidence](measurements/miles-core-native-ep-20260910.json) [actor](../open_instruct/miles/actor.py), [contract](../open_instruct/miles/contract.py) |
-| MoE auxiliary losses | Explicit 0.01 balancing / 1e-5 z-loss and backend scaling | Same coefficients; Core per-sequence router objective with an explicit model-token denominator. Policy-only, auxiliary-only and combined gradient tests matter separately. Equal coefficients do not establish equal training semantics. |
-| Router replay | Layer mapping, replay layout and serving/trainer alignment fixes; live replay has dedicated baseline evidence | `use_rollout_routing_replay` connects captured routes to Core's override and recomputation context. This differs from Megatron's `use_routing_replay`, which Core rejects. Router-gradient tests exist. The first live SGLang attempt failed before updating because the pinned SGLang router stripped expert-ID requests; configuration now requires `use_miles_router=true` for rollout replay. The retry passed two updates, separate-process restart, a third update and a 12-response route/reward audit. Full-model synchronous EP2 replay subsequently passed eight updates, 512 samples and an independent audit including recomputation; TP/PP/CP remain 1. Final unscored-token auxiliary semantics remain unqualified. [Full-model evidence](measurements/miles-core-replay-full-sft-20260911.md) [Evidence](measurements/miles-core-replay-local-20260910.json) |
-| Efficient weight sync | Custom direct exporter, flattened transport, 1 GiB bucket screens and publication instrumentation | Streaming Core exporter replaces Megatron export; existing transport design is reused. EP2 SFT warm publications of 37.0 GB took 3.82/3.83 s. No per-step disk HF conversion. These are one-run measurements, not backend speed parity. [publication](../open_instruct/miles/publication.py) |
-| Resident colocation | Trainer stays resident; rollout memory can be offloaded; graph/offload hooks validated in baseline | Tiny resident colocation passed. Full SFT colocation and rollout offload transitions need their own memory/update test. Do not copy baseline EP2 memory fractions onto Core without measurement. |
-| Trainer offload | Not required by the tested baseline resident configuration | Rejected by Core, including CPU optimizer offload. There is no hidden support inherited from the MILES flag. |
-| Disaggregated placement | Dedicated serving pool, including validated baseline async shapes | Tiny EP1/EP2 and full SFT EP2+one engine passed within one node. Multi-node and scaling curves remain. |
-| Bounded async | Policy clocks, group admission, recovery ledger; baseline multistep/endurance evidence | Managed producer and homogeneous-policy queue with lag reservation; publication pauses and durable pending prompt ledger. Targeted tests exist; full-model async endurance is not established. [async buffer](../open_instruct/miles/async_buffer.py), [driver](../open_instruct/miles/driver.py) |
-| Multiple updates per collection | Explicit steps-per-rollout clock and restart protocol | Config requires complete optimizer batches and sufficient lag budget; adapter splits the collection. Multi-step live async parity needs a separate test; defaults keep one step per collection. |
-| Decode CUDA graphs | Decode-only graph/offload compatibility and matched performance screens | Disaggregated full SFT ran with sizes 1/2/4; prefill disabled. Full-model colocated graph/offload lifecycle remains unqualified. Replay may change graph compatibility; qualify it separately. |
-| Prefix / recurrent caches | Tuned KDA state pools and radix behavior; replay recipes deliberately disable prefix caching | Profiles disable radix caching and bound recurrent slots. Prefix caching is not promoted without route/logprob and publication invalidation tests. |
-| Compiler cache lifecycle | WEKA-backed, fingerprinted restore/publish of node-local compiler artifacts | No equivalent launch lifecycle yet. Current SFT and datasource launchers use temporary HF cache and incur substantial cold compilation. Raw TOML options do not implement cache persistence. |
-| Microbatch throughput / packing | Baseline measured larger fixed microbatches; dynamic packing has its own router-loss limitations | Core accepts only one unpadded sequence per microbatch and rejects dynamic batching. Batching/packing needs independent token masks, auxiliary denominators, routing and same-update tests. |
-| Expert / dense parallelism | Megatron parallel runtime plus optional optimized DeepEP/DeepGEMM path | Native Core MoE DDP with expert parallelism and sharded optimizer state; non-MoE models use FSDP. EP2 tiny and SFT paths exercised; trainer TP/PP/CP >1 rejected. Megatron optimized/compatibility backend flags have no direct Core meaning. |
-| Native checkpoint / restart | Megatron tensors, optimizer, scheduler, RNG, data cursor and policy-clock sidecar | Native Core state plus scheduler/RNG, durable cursor, completion marker and architecture/topology checks. Tiny separate-process restart passed; full SFT restart and longer failure recovery remain. [checkpoint](../open_instruct/miles/checkpoint.py) |
-| Asynchronous checkpoint writes | Background staging/storage and cadence instrumentation; baseline default every 15 rollouts | Core driver completes synchronous checkpoint boundaries. Background writer/retention/capacity management are additional work; do not advertise async-save parity. |
-| Serving fault recovery | Customized health probes, replay-compatible recovery and failure evidence | Some serving machinery is inherited, but Core recovery with restored weight versions and in-flight group accounting is not qualified. Automatic trainer-cell recovery is explicitly unsupported. |
-| Reward and source mixtures | Prepared RL manifests, source recipes, verifier dispatch and coverage inventory | Trusted registry calls open-instruct verifier classes; multiple weighted components supported. Bounded immutable-revision math and legacy IF each completed a local tiny-model two-update/64-response lifecycle and independent audit. Advantages were zero; this is plumbing qualification, not full-SFT task performance. See [measurements](measurements/miles-core-datasources-local-20260910.json). [rewards](../open_instruct/miles/rewards.py) |
-| Code / judge rewards | Baseline has code/judge infrastructure and domain-specific acceptance work | Verifier adapter is a connection point, not a running sandbox or judge service. Symbolic math now uses an isolated subprocess/dependency path; code/judge service setup, limits, cleanup, timeouts and representative live reward checks remain required. |
-| Multi-turn tools | Baseline and upstream have distinct rollout/environment integrations | Token masks survive the Core adapter, but complete open-instruct environment/tool bridge remains to migrate and qualify. |
-| Evaluation | Native and HF export paths, fixed heldouts and broader evaluation tooling | MILES dispatcher reused; before/after 16-question GSM8K plus independent 64-response audit passed. Full task matrix, external evaluation workflows and learning-quality conclusions remain. |
-| Tracking / observability | Comparison dashboards, run-event streams, phase timing and recovery metrics | MILES tracking plus publication and per-rank training-contract JSONL; gradient/update probes on demand. Baseline dashboard schemas, export events, reward service cost and recovery dashboards are not all ported. |
-| SFT / DPO handoff | Baseline supports its own SFT/conversion workflows | Open-instruct's existing SFT/DPO paths remain separate. Starting from SFT works; this backend integration is not a DPO or release-recipe reproduction. |
+| Training contract | Native Core objective/accumulation, optimizer, masked response loss, auxiliary losses and clocks; fixed-batch, EP1/EP2, recomputation and full-SFT runs. [Contract checks](miles-core.md#training-contract-checks) | Matching coefficients do not equate auxiliary normalization/padding semantics. Replay fixes expert selection, not the entire numerical objective. |
+| Router replay | R3 captures serving routes and reuses them for scoring, training and recomputation. Full-model EP2 synchronous eight-update/512-sample audit passed with zero expert-ID mismatches and finite nonzero router gradients. [Evidence](measurements/miles-core-replay-full-sft-20260911.md) | R2 (`use_routing_replay`) unsupported; TP/PP/CP remain one. Final unscored token uses a synthetic route; its auxiliary contribution is not serving-equivalent. Combined async/replay/restart endurance and selected-gate-score diagnostics remain. |
+| Weight publication | Native Core → HF-named tensors → flattened NCCL buckets; colocated IPC. Exact weight checks; roughly 37 GB full-model publications measured in seconds. [Implementation](../open_instruct/miles/publication.py) | No per-step disk HF conversion. Alternative RDT/p2p/disk transports and pipeline depth two unsupported; multi-engine/multinode scaling needs measurement. |
+| Placement and offload | Tiny resident colocation and full-SFT EP2 disaggregation passed | Full-model colocation/rollout-offload lifecycle unqualified; Core trainer/optimizer offload unsupported. More SGLang engines are configurable, not yet a measured scaling result. |
+| Bounded async | Managed producer, homogeneous prompt groups, lag reservation, pending-prompt cursor, publication pause and clean teardown. [24-update and 12-update pairs](measurements/miles-control-exercise-20260911.md) passed | Baseline additionally has 45-update basic endurance and combined replay/recovery/restart evidence. Core needs those combinations, not another claim of missing basic async. |
+| Multiple updates per collection | Complete optimizer-batch splitting and sufficient lag enforced | Full-model combined multistep/async/replay/restart not yet qualified; baseline has an EP2 initial/restart gate. |
+| Serving admission and graphs | Actual 64 concurrent requests, decode graphs through 64, 524288 KV slots and 128 recurrent slots passed the larger B300 trial without observed OOM/retractions. [Evidence](measurements/miles-admission64-20260911.json) | Prefix caching remains disabled in profiles; cache/replay/publication invalidation and full-model colocated graphs need their own acceptance. |
+| Compiler caches | Optional fingerprinted per-worker Triton restore into node-local storage and publication after successful teardown. Real tiny Core/SGLang two-lifetime trial passed. [Evidence](measurements/miles-startup-tiny-20260911.json) | Off by default; full-SFT/multinode and TP>1 serving qualification pending. Broader compiler families are not covered by the worker integration. [Cache guide](miles-compiler-cache.md) |
+| Native checkpoint/resume | Schema-2 architecture/topology checks, optimizer/scheduler/RNG/cursor, completion marker. Full-model fast save/read gate passed exact restored state and two subsequent fixed-input updates/HF exports. [Evidence](measurements/miles-checkpoint-fast-audit-20260911.json) | Synchronous saves, same topology. Background writes, retention and token-per-expert cadence absent. Process writer unqualified at full model. Exact continuation used separate persistent per-rank caches; it does not promise identical future sampled rollouts. |
+| HF export | Canonical conversion and `actor.export_hf`; evaluation snapshots via `eval_hf_dir` | No baseline-style final export workflow. `save_hf` is rejected rather than implying native saves create HF output. |
+| Recovery | Pending prompt tracking and some inherited engine management | Baseline's bounded retry/stage-timeout/communicator-replacement/republish driver is not ported. Upstream health flags alone do not provide that contract. Trainer-cell recovery unsupported. |
+| Batching and parallelism | Unpadded microbatch one with accumulation; MoE DDP/EP and separate dense FSDP backend | Dynamic batching, packing and trainer TP/PP/CP >1 unsupported. EP8/multinode unqualified. Our customized Olmo Megatron replay also restricts TP/PP/CP; general Megatron features are not baseline qualification. |
+| Rewards and tools | Trusted weighted verifier registry, isolated bounded math workers, full-SFT math/IF/mixture gates; tool-token masks tested | Code/judge service lifecycle and broader sources remain. No complete multi-turn environment bridge; baseline's adopted catalog also does not establish such a bridge. |
+| Evaluation | Fixed heldout GSM8K runs with retained questions/generations; shared-engine and snapshot dispatcher | Admission 64 now applies to shared eval, but the warm 128-question <60 s target has not been measured in the admission-only run. External/dedicated evaluation workflows need qualification. |
+| Reporting and workflow | MILES W&B/dashboard interfaces, rollout dumps, contract/publication/startup/eval JSONL; grouped offline W&B exercise passed | No general baseline `run/status`, task/manifest preparation, sample-summary or automatic resume workflow; service/recovery dashboards are incomplete. |
+| Model/hardware breadth | Prior SFT KDA/latent on B300 EP2; isolated standard dense Olmo3 path with local conversion/update/resume tests; exact hero native/HF conversion | Full hero optimized probability gate remains unresolved despite controlled-operator diagnostic parity. Full hero RL, original Olmo3 recipe and Core H100 MoE qualification remain. Baseline H100 evidence uses a smaller model and a different trainer backend. [Hero support](miles-hero-support.md) |
+
+Unsupported native options are rejected by the
+[configuration contract](../open_instruct/miles/config.py), including retained old
+actors, LoRA, optimizer-free save/reset alternatives and direct `save_hf`.
+Do not infer support from their presence in the upstream option inventory.
+The latest Core/MILES consolidation pins do not expand any GPU qualification's
+recorded scope.
 
 ## Which performance defaults should transfer
 
-The baseline's documented findings are useful hypotheses, but Core changes
-training memory and execution. Transfer settings with the matching contract:
-
-- **Keep 1 GiB publication buckets and streaming export.** Baseline
-  `docs/measurements/weight-sync-buffer-screen.md` established that starting point;
-  our full SFT run also used it. Compare steady-window phase timings and exact
-  weights before changing bucket size or transport overlap.
-- **Capture decode only, at the actual concurrency.** Baseline
-  `docs/measurements/decode-cuda-graph-screen.md` measured benefit. Our first
-  attempt at generic graph enablement also captured many unwanted prefill sizes;
-  the successful Core run explicitly disabled prefill and capped decode at four.
-- **Choose response length first, then reserve the prompt budget.** Baseline
-  `docs/topology-and-length-guide.md` distinguishes context from response length
-  and total from active parameters. The SFT profile reserves 2048+4096 tokens.
-  Shortening responses to make a test cheaper changes the task, so report cap
-  hits and do not interpret truncated scores as task-quality parity.
-- **Size client admission, engine admission, graphs and both cache pools together.**
-  The new full-SFT baseline admits all 64 completions, reserves 524288 total KV
-  tokens and 128 recurrent slots, and captures decode graphs through 64. Historical
-  runs used four requests, 32768 tokens and eight slots. The larger baseline passed the 12-update sync/async B300 trial. Tiny fixtures retain four requests/4096 tokens. The collection and optimizer batch rise from 16 to 64 to supply enough work;
-  each additional engine needs more queued samples to sustain the same occupancy;
-  dedicated memory fraction stays 0.6, rather than copying 0.85 blindly.
-- **Use recomputation initially.** Disable it only in a measured memory and
-  same-update comparison. Core's microbatch one stays explicit until larger
-  batches preserve the complete loss/replay contract.
-- **Persist compiler artifacts with provenance, not a shared writable hot cache.**
-  Port the baseline restore-to-node-local/publish-on-success approach. Key it by
-  compiled image/runtime, GPU architecture, kernel versions and compiler inputs;
-  use a WEKA TTL root such as `tmp-30d`. Dataset/tokenizer caches are a separate
-  cache and need their own revision identity. Do not copy Megatron compiler
-  artifacts into Core without an exact compatibility key.
-
-The Core SFT timing record is
-[measurements/miles-core-sft-20260910.json](measurements/miles-core-sft-20260910.json).
-Its graph-enabled generation and earlier eager failure are different runs;
-those values cannot establish a matched end-to-end speedup against Megatron.
+- **Serving capacity:** the 64-completion/admission pair measured warm throughput
+  of 1856 response tokens/s synchronous and 2281 asynchronous, about 23% higher
+  with async. Eight warm observations and completion-order differences limit
+  extrapolation. The historical smaller-batch comparison changes both admission
+  and optimizer batch, so it is not an isolated concurrency speedup.
+- **Dynamic rows:** identical full-model scoring across 154,531 logprobs;
+  changing-batch scoring improved 3.72× in the bounded static/dynamic screen.
+  Later scheduling runs showed nearly flat score time against tokens. Other
+  kernels can still compile. [Measurement](measurements/miles-control-exercise-20260911.md)
+- **Checkpoints:** qualified direct save fell from 437.128 to 118.466 seconds;
+  fresh-process load took 144.307 seconds. The approximately 222 GB checkpoint
+  still makes cadence a real cost. These are checkpoint timers, not an entire
+  Ray startup/restart measurement. [Record](measurements/miles-checkpoint-perf-20260911.md)
+- **Caches:** the tiny public-entrypoint cold/restored trial reduced driver-entry
+  to first update from 173.57 to 67.34 seconds. This establishes worker lifecycle
+  and reuse; full-model improvement remains to measure before default promotion.
+- **Diagnostics:** snapshot/reset/republish and replay checks add overhead.
+  Compare ordinary runs separately from correctness exercises, and report async
+  generation wait as consumer stalls rather than total inference work.
 
 ## Promotion order
 
-The [qualification plan](miles-qualification-plan.md) specifies bounded experiment
-shapes, the cross-backend comparison contract and criteria for promoting each
-default. The sequence below summarizes those gates.
+1. Close researcher workflow gaps: prepared catalog/manifest adoption, launch and
+   durable resume, and an explicit final HF-export lifecycle. Keep unsupported
+   options rejected until wired.
+2. Port bounded serving recovery and exercise async + replay + checkpoint/restart
+   with fault injection and prompt/version conservation. Then extend multistep
+   and endurance qualification.
+3. Finish full-model compiler-cache qualification and measure high-concurrency
+   evaluation during an ordinary run. Promote defaults only with retained evidence.
+4. Broaden datasource/service gates in bounded groups, starting with real code
+   execution and mock judge transport before substantive judge evaluation.
+5. Treat batching/packing, higher topology, full-model colocation, H100 and hero
+   training as separate changes with numerical and lifecycle gates.
 
-1. Extend the passing fixed-global-batch gates (native EP, recomputation,
-   optimizer moments, isolated auxiliary gradients and tiny restart) to a matched
-   batch through the customized Megatron trainer under matched semantics.
-2. Qualify each new data/verifier family with immutable revisions and independent
-   reward audits. Include nonzero policy signal, per-source denominators,
-   truncation and latency; then test a mixed-source collection.
-3. Establish full-model checkpoint/restart and several consecutive updates.
-   Capture compiler-cache cold/warm cost and real save latency before promoting
-   a persistent-cache and checkpoint-cadence default.
-4. Complete live route replay alignment, including prompt/response offset,
-   every routed layer, replay through recomputation and the unscored final
-   generated token. Compare router policy/auxiliary gradients with replay off/on.
-5. Qualify bounded async on the already qualified task/model: lag distribution,
-   useful versus discarded groups, publication integrity, restart ledger and
-   injected serving failures. Then test multiple optimizer steps per collection.
-6. Measure full-model resident colocation and graph/offload transitions against
-   the same disaggregated workload. Optimize batching/packing only after its
-   same-update contract passes. Keep multi-node and larger topologies separate.
-
-Relevant baseline sources in `~/proj/olmo-miles` are
-`docs/runtime-integration.md`, `docs/checkpointing.md`,
-`docs/disaggregated-rollout.md`, `docs/topology-and-length-guide.md`,
-`docs/rl-dataset-status.md`, `docs/measurements/async-multistep-20260907.md`,
-`examples/qualification/async-multistep-b300.toml`, and
-`src/olmo_miles/runtime/{compiler_cache,cache_lifecycle}.py`.
-The baseline's Olmo 3 recipe review is useful for task mixture and stage budgets,
-but does not certify this different KDA model or the Core training objective.
-
-All three templates were loaded with `RunConfig` and passed the actual pinned
-MILES argument parser using a local tiny KDA/latent HF descriptor in place of the
-external input path. This validates configuration compatibility, not the target
-model's memory fit, data contents, serving startup or completed training.
+The [qualification plan](miles-qualification-plan.md) gives acceptance principles;
+completed measurements above supersede its older pending milestones. Relevant
+baseline evidence lives in `~/proj/olmo-miles/docs/rl-dataset-status.md`,
+`docs/measurements/async-multistep-20260907.md`,
+`docs/measurements/v02-discrete-experiments-20260905.md`,
+`docs/hardware-profiles.md`, and `docs/checkpointing.md`.

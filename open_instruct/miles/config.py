@@ -136,6 +136,16 @@ class RunConfig:
             "fp16": False,
             "keep_fp32_master": True,
             "async_save": False,
+            "no_save_optim": False,
+            "reset_optimizer_states": False,
+            "override_lr_scheduler": False,
+            "use_checkpoint_lr_scheduler": True,
+            "compute_advantages_and_returns": True,
+            "skip_actor_forward_only": False,
+            "keep_old_actor": False,
+            "dp_replicate_size": 1,
+            "deterministic_mode": False,
+            "lora_train_only": False,
             "debug_disable_optimizer": False,
             "debug_skip_weight_update": False,
             "update_weights_interval": 1,
@@ -153,6 +163,13 @@ class RunConfig:
         }.items():
             if name in options:
                 raise ValueError(f"Core RL does not consume miles.{name}; use {replacement}")
+        if options.get("lora_rank", 0) > 0:
+            raise ValueError("Core RL does not implement LoRA; miles.lora_rank must be nonpositive")
+        if options.get("save_hf") is not None:
+            raise ValueError(
+                "Core RL does not implement miles.save_hf; use miles.eval_hf_dir for snapshot evaluation "
+                "or export the native checkpoint separately"
+            )
         if "max_weight_staleness" in options and options["max_weight_staleness"] != self.core.max_policy_lag:
             raise ValueError("miles.max_weight_staleness must equal core.max_policy_lag (optimizer steps)")
         if not options.get("hf_checkpoint"):

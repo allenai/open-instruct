@@ -71,7 +71,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 
 | Dial from olmo-miles | open-instruct control and semantics |
 | --- | --- |
-| Placement | `colocate=false` gives separate trainer/serving GPU allocations; they need not be separate physical nodes. `colocate=true` shares GPUs. **Core stays resident**: trainer offload is unsupported, so this differs from the baseline's alternating offload recipe. |
+| Placement | `colocate=false` gives separate trainer/serving GPU allocations; they need not be separate physical nodes. `colocate=true` shares GPUs. **Core stays resident**: trainer offload is unsupported. The current olmo-miles colocated compiler also keeps the trainer resident; full-model colocation is qualified there but only tiny-model colocation is qualified here. |
 | Trainer GPUs / EP | `actor_num_nodes`, `actor_num_gpus_per_node`; `core.expert_parallel_size` must divide their product. Dense Olmo 3 uses its separate Core backend and EP=1. |
 | Inference GPUs / TP / EP | `rollout_num_gpus`, `num_gpus_per_node`, `rollout_num_gpus_per_engine` (TP), `sglang_ep_size`. GPU count per engine determines how many engines fit the allocation. |
 | Synchronous / bounded async | `fully_async`; async requires resident disaggregated engines and positive `core.max_policy_lag`. |
@@ -104,7 +104,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 | --- | --- |
 | Save / restart | `save`, `save_interval`, `load`. Saves are synchronous native Core checkpoints with completion manifests and a rollout/policy cursor. `async_save=true` is rejected. Baseline NVRX saves, retention and token-per-expert cadence are not ported. |
 | Native MoE checkpoint writer | Arithmetic metadata planning, compact storage, and balanced replicated ownership are enabled by default. Opt out with `core.checkpoint_constant_memory_planning=false`, `core.checkpoint_compact_storage=false`, and `core.checkpoint_dedup_save_to_lowest_rank=true`. Each switch is independent. Profiling (`core.checkpoint_profile`) and spawned workers (`core.checkpoint_process_count`) remain opt-in; `core.checkpoint_thread_count` controls thread buckets. The separate dense trainer keeps its own checkpoint path and rejects policy overrides. See the [qualification record](measurements/miles-checkpoint-perf-20260911.md). |
-| Final HF export | The actor has HF export support; the public driver does not provide olmo-miles' `export_hf` post-run lifecycle. Do not assume a native save produces a final standalone HF checkpoint. |
+| Final HF export | The actor has HF export support, and `eval_hf_dir` requests snapshot export for evaluation. The public driver has no olmo-miles `export_hf` post-run lifecycle. `save_hf` is rejected because native saves do not produce that output. |
 | Auto resume / launch | Beaker placement, priority, min runtime, mounts, compiler caches and restart policy remain launch-script controls. Use `build_image_and_launch.sh --miles`. TOML training configuration does not submit or automatically resume a Beaker job. |
 | Weight publication | `update_weight_buffer_size`, `core.stream_moe_export`, `core.weight_sync_mode` (`flattened` / `per_tensor`); colocation uses IPC. Core publishes every collection (`update_weights_interval=1`); skipping publication is rejected. Megatron disk-delta/p2p/rdt transports and pipeline-depth=2 are rejected rather than silently ignored. |
 | W&B | `use_wandb`, `wandb_project`, `wandb_team`, `wandb_group`, `wandb_run_name`, `wandb_mode`, `wandb_dir`, `wandb_always_use_train_step`; the Core metrics adapter and rollout hooks determine reported metric definitions. |
@@ -116,6 +116,30 @@ All names below are under `[miles]` unless prefixed `core.`.
 Inherited FSDP knobs `gradient_checkpointing`, `attn_implementation`, and
 `warmup_ratio` are rejected with pointers to the corresponding Core/shared settings,
 rather than accepted and ignored.
+
+The configuration audit also found native options with no Core implementation.
+Both TOML compilation and direct native CLI parsing now reject optimizer-state
+omission/reset, scheduler overrides, disabled advantage computation, skipped
+actor scoring, retained old actors, LoRA training, FSDP replication meshes, and
+the generic `deterministic_mode` toggle. Supported resume restores optimizer and
+scheduler state; use the separate serving determinism and collective diagnostic
+controls when appropriate. These rejections prevent silent changes in the claimed
+training contract; they do not add the missing capabilities.
+
+`use_rollout_logprobs=true` changes the policy-ratio denominator, but **does not
+skip Core's scoring forward**. That forward still supplies agreement diagnostics.
+Our async starter selects this behavior anchor with TIS off; olmo-miles' async
+compiler selects TIS and rejects that anchor option. Likewise, our starter's
+16 prompts × 4 responses differs from the historical 8 × 8 baseline even though
+both produce 64 samples. Preserve these distinctions in learning comparisons.
+Core also repeats an initial evaluation after resume when it is enabled, whereas
+olmo-miles suppresses that duplicate; account for the extra point and cost.
+
+`save_debug_rollout_data` works. The inherited `save_debug_train_data` field has
+no Core writer; `dump_details` must not be interpreted as retaining a Core trainer
+payload. Use the adapter's contract JSONL and retained rollout diagnostics.
+The [full parity audit](measurements/miles-feature-parity-audit-20260911.md)
+separates these interface gaps from measured runtime capabilities.
 
 The adapter owns `train_backend`, `olmo_core_config`, `data_source_path` and
 `custom_async_data_buffer_path`; conflicting overrides are rejected. Custom reward,
