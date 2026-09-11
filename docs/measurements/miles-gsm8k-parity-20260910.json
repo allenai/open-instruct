@@ -1,6 +1,6 @@
 {
   "campaign": "gsm8k-core-megatron-20260910-v1",
-  "status": "in progress: Core and matched Megatron r3 running",
+  "status": "Core100 completed and independently audited; Megatronr3 running",
   "shared_root": "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1",
   "preparation_sha256": "1d8a22500fffdd9a7461c445998815d5e85cf9dd79859d93313798472c0e76e0",
   "preparation_experiment": "01M26N8Q8BFN4887X2CKMDWEV2",
@@ -42,9 +42,30 @@
         "total": 128,
         "at_response_cap": 16,
         "mean_response_tokens": 1501.2
+      },
+      {
+        "completed_updates": 100,
+        "correct": 93,
+        "total": 128,
+        "at_response_cap": 24,
+        "mean_response_tokens": 1664.35,
+        "policy_version": 100
       }
     ],
-    "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/un6so0cr"
+    "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/un6so0cr",
+    "completion": {
+      "optimizer_steps": 100,
+      "publication_count": 101,
+      "rollout_files": 106,
+      "elapsed_seconds": 11743.024263829924,
+      "completed": true
+    },
+    "exit_code": 0,
+    "audit": {
+      "experiment": "01M273WX44116N75JM210NKX9G",
+      "valid": true,
+      "evidence": "miles-gsm8k-core-final-20260910.json"
+    }
   },
   "megatron": {
     "experiment": "01M26YNP5E64YGNXR85TA2RP4Q",

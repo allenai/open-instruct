@@ -9,7 +9,7 @@ separate authorization.
 
 | Track | State | Next evidence needed |
 | --- | --- | --- |
-| Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128→102/128→97/128 at0/20/40/60/80 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
+| Old SFT, Core,100 GSM8K updates | [Completed, exit0](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/101/94/102/97/93 out of128 at0/20/40/60/80/100 | [Independent audit passed](measurements/miles-gsm8k-core-final-20260910.json):1,600training and768held-out responses;100steps/101publications. User notified. |
 | Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe; held-out96/128→93/128 at0/20; Core97/128→101/128 | Full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
 | Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis completed](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
@@ -93,3 +93,18 @@ impact on that run is not yet quantified.
 [Full-model layerwise follow-up](https://beaker.org/ex/01M273R04XVRRQZA0HMRD2M5ZG)
 is running after the scoring correction; ordinary HF/SGLang qualification remains
 separate from the controlled-HF diagnostic.
+
+[Full-SFT async four-update trial](https://beaker.org/ex/01M274MRNFSFF34QRYRGAASH52)
+and [matching synchronous scheduling control](https://beaker.org/ex/01M274P7X8F52HTW6SNEPTRD4T)
+are running from source `778a91cd9` with corrected Core scoring. Both use rollout
+probabilities as the policy anchor, eager serving, 4096 response tokens, and no
+evaluation/checkpoint saves. Async permits one step of lag and completion-order
+prompt selection; audits require unique prepared prompts and complete groups.
+These are scheduling checks, not a replacement 100-update learning comparison.
+Twelve adversarial/config tests and both real pinned-parser checks passed.
+
+The corrected hero layerwise control matches all KDA-only blocks on the same HF
+input. Remaining first drift begins at full-attention block7. An explicit
+[HF SDPA control](https://beaker.org/ex/01M274P8Z2D9A6FQ0BSHGBX6NK) is running to
+separate attention implementation arithmetic; the original serving gate is not
+being widened.
