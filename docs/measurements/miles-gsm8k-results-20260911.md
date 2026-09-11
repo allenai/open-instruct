@@ -27,7 +27,8 @@ The final gap is 14 questions, or 10.938 points. The difference in endpoint chan
 is 15 questions, or 11.719 points. Core temporarily led at updates20 and60, so the
 endpoints should be read with the complete curve. There is one training seed per
 backend and only128 held-out questions; this does not estimate between-run variance.
-The optimizer learning rate was the same constant1e-6 in both systems.
+Held-out evaluation used greedy temperature0 and one completion per question in
+both systems. The optimizer learning rate was the same constant1e-6 in both systems.
 
 At the final evaluation,84 questions were correct in both systems,9 only in Core,
 23 only in Megatron, and12 in neither. Within Core,12 initially wrong questions
@@ -80,13 +81,26 @@ separate forward kernels, EP communication, log-prob extraction, and compilation
 Until that report exists,44.328s must not be described as pure GPU forward time,
 nor as pure Python/Ray orchestration time.
 
+The structured comparison also retains the95 individual Core score/optimizer/
+publication boundaries. Its generic parser publication summary includes version5;
+the table uses corrected post-update versions6–100 for rollouts5–99, explicitly
+recorded in `corrected_publication_warm_indices`.
+
 Phase means are diagnostic, not additive. They use different boundaries and some
 use different index conventions; subtracting them from a cycle mean does not
-measure orchestration. No GPU utilization percentage or pure decode throughput
-was measured for this pair. Generated lengths and sampler implementations differ,
+measure orchestration. Across the matched95 rollout batches, Core generated2,735,986 response tokens and
+Megatron2,862,836. Dividing those token totals by native collection time gives
+782.8 and762.4 response tokens/s respectively. This modest2.7% rate difference
+includes rewards, dumps, scheduling and stragglers; it is not pure decoder
+throughput. No GPU utilization percentage was measured for this pair. Generated lengths and sampler implementations differ,
 so rollout seconds are an operational comparison, not an isolated SGLang benchmark.
-Cold checkpoint I/O and evaluation are separate from the warm comparison. Their
-available boundary measurements are recorded in the configuration/timing inventory.
+Cold startup substantially offsets the warm-cycle difference in total runtime:
+process start→initial publication took652.7s for Core and1918.8s for Megatron;
+process start→initial evaluation summary took940.5s and2221.6s. These are broad
+startup boundaries, not isolated checkpoint-read timers. Subsequent publication→
+evaluation-summary intervals ranged230.5–280.6s for Core and197.4–298.8s for
+Megatron, with changing response lengths. All six evaluation boundaries are in
+[the retained timeline](miles-gsm8k-startup-eval-boundaries-20260911.json).
 Neither100-update run saved resumable checkpoints, so this pair cannot measure save
 throughput. A separate full-model check subsequently verified exact save/fresh-load state
 integrity on both ranks, with a222GB native checkpoint and about532s for the

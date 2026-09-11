@@ -11606,5 +11606,922 @@
   "allocated_runtime_seconds": {
     "core": 11922.131943,
     "megatron": 10844.651858
+  },
+  "core_training_boundary_measurements": {
+    "source": "Same-rollout native generation-end and rank0 actor timestamps; optimizer publication is version rollout+1. These measure broad boundaries, not pure GPU time.",
+    "log_sha256": "476287fae362898f55abbbb7be04bfed2a5a6ca297776ffe2a016faf53ab1976",
+    "rows": [
+      {
+        "rollout": 5,
+        "collection_to_score_s": 47.146,
+        "score_to_optimizer_log_s": 7.788,
+        "recorded_train_s": 7.759465186856687,
+        "optimizer_to_publication_s": 2.919,
+        "recorded_publication_s": 2.8890519929118454
+      },
+      {
+        "rollout": 6,
+        "collection_to_score_s": 49.312,
+        "score_to_optimizer_log_s": 6.132,
+        "recorded_train_s": 6.104158519767225,
+        "optimizer_to_publication_s": 2.92,
+        "recorded_publication_s": 2.8899142518639565
+      },
+      {
+        "rollout": 7,
+        "collection_to_score_s": 49.962,
+        "score_to_optimizer_log_s": 5.865,
+        "recorded_train_s": 5.839055760763586,
+        "optimizer_to_publication_s": 2.924,
+        "recorded_publication_s": 2.897875406779349
+      },
+      {
+        "rollout": 8,
+        "collection_to_score_s": 48.898,
+        "score_to_optimizer_log_s": 7.838,
+        "recorded_train_s": 7.810929407831281,
+        "optimizer_to_publication_s": 3.945,
+        "recorded_publication_s": 3.918685458600521
+      },
+      {
+        "rollout": 9,
+        "collection_to_score_s": 48.244,
+        "score_to_optimizer_log_s": 6.776,
+        "recorded_train_s": 6.747313447296619,
+        "optimizer_to_publication_s": 3.046,
+        "recorded_publication_s": 3.024164179805666
+      },
+      {
+        "rollout": 10,
+        "collection_to_score_s": 44.407,
+        "score_to_optimizer_log_s": 5.346,
+        "recorded_train_s": 5.326842158101499,
+        "optimizer_to_publication_s": 2.812,
+        "recorded_publication_s": 2.786038222257048
+      },
+      {
+        "rollout": 11,
+        "collection_to_score_s": 50.186,
+        "score_to_optimizer_log_s": 9.107,
+        "recorded_train_s": 9.072273360099643,
+        "optimizer_to_publication_s": 3.032,
+        "recorded_publication_s": 3.006258828099817
+      },
+      {
+        "rollout": 12,
+        "collection_to_score_s": 48.835,
+        "score_to_optimizer_log_s": 6.13,
+        "recorded_train_s": 6.096216479782015,
+        "optimizer_to_publication_s": 4.406,
+        "recorded_publication_s": 4.376994897145778
+      },
+      {
+        "rollout": 13,
+        "collection_to_score_s": 48.951,
+        "score_to_optimizer_log_s": 6.041,
+        "recorded_train_s": 6.0134066650643945,
+        "optimizer_to_publication_s": 3.016,
+        "recorded_publication_s": 2.9940764238126576
+      },
+      {
+        "rollout": 14,
+        "collection_to_score_s": 49.104,
+        "score_to_optimizer_log_s": 7.17,
+        "recorded_train_s": 7.137492003384978,
+        "optimizer_to_publication_s": 4.303,
+        "recorded_publication_s": 4.2741336561739445
+      },
+      {
+        "rollout": 15,
+        "collection_to_score_s": 50.635,
+        "score_to_optimizer_log_s": 8.665,
+        "recorded_train_s": 8.635778540745378,
+        "optimizer_to_publication_s": 3.087,
+        "recorded_publication_s": 3.057392241898924
+      },
+      {
+        "rollout": 16,
+        "collection_to_score_s": 45.327,
+        "score_to_optimizer_log_s": 6.003,
+        "recorded_train_s": 5.974590860772878,
+        "optimizer_to_publication_s": 2.874,
+        "recorded_publication_s": 2.8467008899897337
+      },
+      {
+        "rollout": 17,
+        "collection_to_score_s": 47.448,
+        "score_to_optimizer_log_s": 6.108,
+        "recorded_train_s": 6.066115856170654,
+        "optimizer_to_publication_s": 2.72,
+        "recorded_publication_s": 2.6915655871853232
+      },
+      {
+        "rollout": 18,
+        "collection_to_score_s": 50.773,
+        "score_to_optimizer_log_s": 6.201,
+        "recorded_train_s": 6.1685469266958535,
+        "optimizer_to_publication_s": 2.753,
+        "recorded_publication_s": 2.723785216920078
+      },
+      {
+        "rollout": 19,
+        "collection_to_score_s": 49.736,
+        "score_to_optimizer_log_s": 7.29,
+        "recorded_train_s": 7.260713253170252,
+        "optimizer_to_publication_s": 2.703,
+        "recorded_publication_s": 2.674105695914477
+      },
+      {
+        "rollout": 20,
+        "collection_to_score_s": 44.569,
+        "score_to_optimizer_log_s": 5.346,
+        "recorded_train_s": 5.323405941948295,
+        "optimizer_to_publication_s": 3.964,
+        "recorded_publication_s": 3.9377392642199993
+      },
+      {
+        "rollout": 21,
+        "collection_to_score_s": 48.758,
+        "score_to_optimizer_log_s": 6.73,
+        "recorded_train_s": 6.703840501140803,
+        "optimizer_to_publication_s": 4.16,
+        "recorded_publication_s": 4.132233071140945
+      },
+      {
+        "rollout": 22,
+        "collection_to_score_s": 50.474,
+        "score_to_optimizer_log_s": 6.278,
+        "recorded_train_s": 6.253242157865316,
+        "optimizer_to_publication_s": 4.215,
+        "recorded_publication_s": 4.18627391429618
+      },
+      {
+        "rollout": 23,
+        "collection_to_score_s": 49.929,
+        "score_to_optimizer_log_s": 6.203,
+        "recorded_train_s": 6.174630437046289,
+        "optimizer_to_publication_s": 2.836,
+        "recorded_publication_s": 2.8079776652157307
+      },
+      {
+        "rollout": 24,
+        "collection_to_score_s": 48.42,
+        "score_to_optimizer_log_s": 5.909,
+        "recorded_train_s": 5.885371888056397,
+        "optimizer_to_publication_s": 2.631,
+        "recorded_publication_s": 2.603327553719282
+      },
+      {
+        "rollout": 25,
+        "collection_to_score_s": 48.628,
+        "score_to_optimizer_log_s": 6.713,
+        "recorded_train_s": 6.683332389686257,
+        "optimizer_to_publication_s": 2.765,
+        "recorded_publication_s": 2.737728022970259
+      },
+      {
+        "rollout": 26,
+        "collection_to_score_s": 40.175,
+        "score_to_optimizer_log_s": 5.29,
+        "recorded_train_s": 5.267270043026656,
+        "optimizer_to_publication_s": 2.519,
+        "recorded_publication_s": 2.4898963309824467
+      },
+      {
+        "rollout": 27,
+        "collection_to_score_s": 48.906,
+        "score_to_optimizer_log_s": 5.874,
+        "recorded_train_s": 5.84622900839895,
+        "optimizer_to_publication_s": 2.585,
+        "recorded_publication_s": 2.5565166287124157
+      },
+      {
+        "rollout": 28,
+        "collection_to_score_s": 48.909,
+        "score_to_optimizer_log_s": 5.752,
+        "recorded_train_s": 5.7300703739747405,
+        "optimizer_to_publication_s": 2.517,
+        "recorded_publication_s": 2.4929225756786764
+      },
+      {
+        "rollout": 29,
+        "collection_to_score_s": 47.648,
+        "score_to_optimizer_log_s": 7.049,
+        "recorded_train_s": 7.0215170327574015,
+        "optimizer_to_publication_s": 2.746,
+        "recorded_publication_s": 2.7174999667331576
+      },
+      {
+        "rollout": 30,
+        "collection_to_score_s": 45.363,
+        "score_to_optimizer_log_s": 7.213,
+        "recorded_train_s": 7.188284300733358,
+        "optimizer_to_publication_s": 2.764,
+        "recorded_publication_s": 2.7401487631723285
+      },
+      {
+        "rollout": 31,
+        "collection_to_score_s": 47.722,
+        "score_to_optimizer_log_s": 6.022,
+        "recorded_train_s": 5.993522858712822,
+        "optimizer_to_publication_s": 2.678,
+        "recorded_publication_s": 2.649952278006822
+      },
+      {
+        "rollout": 32,
+        "collection_to_score_s": 44.248,
+        "score_to_optimizer_log_s": 5.86,
+        "recorded_train_s": 5.8377023953944445,
+        "optimizer_to_publication_s": 2.525,
+        "recorded_publication_s": 2.4992898842319846
+      },
+      {
+        "rollout": 33,
+        "collection_to_score_s": 46.312,
+        "score_to_optimizer_log_s": 5.825,
+        "recorded_train_s": 5.801440434064716,
+        "optimizer_to_publication_s": 2.765,
+        "recorded_publication_s": 2.7387140071950853
+      },
+      {
+        "rollout": 34,
+        "collection_to_score_s": 47.182,
+        "score_to_optimizer_log_s": 5.978,
+        "recorded_train_s": 5.95391380880028,
+        "optimizer_to_publication_s": 2.7,
+        "recorded_publication_s": 2.6757059558294713
+      },
+      {
+        "rollout": 35,
+        "collection_to_score_s": 49.309,
+        "score_to_optimizer_log_s": 5.817,
+        "recorded_train_s": 5.793879605829716,
+        "optimizer_to_publication_s": 2.796,
+        "recorded_publication_s": 2.767126905731857
+      },
+      {
+        "rollout": 36,
+        "collection_to_score_s": 43.42,
+        "score_to_optimizer_log_s": 7.475,
+        "recorded_train_s": 7.447182103060186,
+        "optimizer_to_publication_s": 3.694,
+        "recorded_publication_s": 3.6657288880087435
+      },
+      {
+        "rollout": 37,
+        "collection_to_score_s": 45.771,
+        "score_to_optimizer_log_s": 5.727,
+        "recorded_train_s": 5.705190998967737,
+        "optimizer_to_publication_s": 2.672,
+        "recorded_publication_s": 2.6458685067482293
+      },
+      {
+        "rollout": 38,
+        "collection_to_score_s": 45.153,
+        "score_to_optimizer_log_s": 6.148,
+        "recorded_train_s": 6.120547127909958,
+        "optimizer_to_publication_s": 2.661,
+        "recorded_publication_s": 2.6299467920325696
+      },
+      {
+        "rollout": 39,
+        "collection_to_score_s": 49.557,
+        "score_to_optimizer_log_s": 5.922,
+        "recorded_train_s": 5.8971646898426116,
+        "optimizer_to_publication_s": 2.734,
+        "recorded_publication_s": 2.711021862924099
+      },
+      {
+        "rollout": 40,
+        "collection_to_score_s": 44.624,
+        "score_to_optimizer_log_s": 5.726,
+        "recorded_train_s": 5.703534324187785,
+        "optimizer_to_publication_s": 3.931,
+        "recorded_publication_s": 3.9015099927783012
+      },
+      {
+        "rollout": 41,
+        "collection_to_score_s": 45.835,
+        "score_to_optimizer_log_s": 5.891,
+        "recorded_train_s": 5.867392581887543,
+        "optimizer_to_publication_s": 3.948,
+        "recorded_publication_s": 3.918699885252863
+      },
+      {
+        "rollout": 42,
+        "collection_to_score_s": 43.02,
+        "score_to_optimizer_log_s": 5.672,
+        "recorded_train_s": 5.647755838930607,
+        "optimizer_to_publication_s": 4.076,
+        "recorded_publication_s": 4.046244343277067
+      },
+      {
+        "rollout": 43,
+        "collection_to_score_s": 47.509,
+        "score_to_optimizer_log_s": 5.444,
+        "recorded_train_s": 5.421657425817102,
+        "optimizer_to_publication_s": 4.026,
+        "recorded_publication_s": 4.003328548744321
+      },
+      {
+        "rollout": 44,
+        "collection_to_score_s": 46.536,
+        "score_to_optimizer_log_s": 5.93,
+        "recorded_train_s": 5.9026610921137035,
+        "optimizer_to_publication_s": 4.062,
+        "recorded_publication_s": 4.033017570152879
+      },
+      {
+        "rollout": 45,
+        "collection_to_score_s": 46.051,
+        "score_to_optimizer_log_s": 5.671,
+        "recorded_train_s": 5.64763171877712,
+        "optimizer_to_publication_s": 3.87,
+        "recorded_publication_s": 3.8407041979953647
+      },
+      {
+        "rollout": 46,
+        "collection_to_score_s": 50.096,
+        "score_to_optimizer_log_s": 6.083,
+        "recorded_train_s": 6.054301491938531,
+        "optimizer_to_publication_s": 3.953,
+        "recorded_publication_s": 3.9241328039206564
+      },
+      {
+        "rollout": 47,
+        "collection_to_score_s": 43.611,
+        "score_to_optimizer_log_s": 5.616,
+        "recorded_train_s": 5.592584943398833,
+        "optimizer_to_publication_s": 3.985,
+        "recorded_publication_s": 3.961098534055054
+      },
+      {
+        "rollout": 48,
+        "collection_to_score_s": 47.498,
+        "score_to_optimizer_log_s": 5.89,
+        "recorded_train_s": 5.869129826314747,
+        "optimizer_to_publication_s": 4.018,
+        "recorded_publication_s": 3.987904481589794
+      },
+      {
+        "rollout": 49,
+        "collection_to_score_s": 41.078,
+        "score_to_optimizer_log_s": 5.654,
+        "recorded_train_s": 5.629001030232757,
+        "optimizer_to_publication_s": 3.896,
+        "recorded_publication_s": 3.8692890857346356
+      },
+      {
+        "rollout": 50,
+        "collection_to_score_s": 35.358,
+        "score_to_optimizer_log_s": 5.432,
+        "recorded_train_s": 5.411627106834203,
+        "optimizer_to_publication_s": 3.797,
+        "recorded_publication_s": 3.7687920462340117
+      },
+      {
+        "rollout": 51,
+        "collection_to_score_s": 45.784,
+        "score_to_optimizer_log_s": 9.657,
+        "recorded_train_s": 9.629702661186457,
+        "optimizer_to_publication_s": 3.921,
+        "recorded_publication_s": 3.893043383024633
+      },
+      {
+        "rollout": 52,
+        "collection_to_score_s": 46.081,
+        "score_to_optimizer_log_s": 5.964,
+        "recorded_train_s": 5.939947973005474,
+        "optimizer_to_publication_s": 3.96,
+        "recorded_publication_s": 3.9368541250005364
+      },
+      {
+        "rollout": 53,
+        "collection_to_score_s": 44.872,
+        "score_to_optimizer_log_s": 5.684,
+        "recorded_train_s": 5.658974752295762,
+        "optimizer_to_publication_s": 4.029,
+        "recorded_publication_s": 4.005754068028182
+      },
+      {
+        "rollout": 54,
+        "collection_to_score_s": 43.9,
+        "score_to_optimizer_log_s": 5.986,
+        "recorded_train_s": 5.960951175075024,
+        "optimizer_to_publication_s": 4.101,
+        "recorded_publication_s": 4.072622009087354
+      },
+      {
+        "rollout": 55,
+        "collection_to_score_s": 43.592,
+        "score_to_optimizer_log_s": 5.727,
+        "recorded_train_s": 5.702856219839305,
+        "optimizer_to_publication_s": 5.212,
+        "recorded_publication_s": 5.189144970383495
+      },
+      {
+        "rollout": 56,
+        "collection_to_score_s": 43.418,
+        "score_to_optimizer_log_s": 6.398,
+        "recorded_train_s": 6.379943607840687,
+        "optimizer_to_publication_s": 4.278,
+        "recorded_publication_s": 4.25620953226462
+      },
+      {
+        "rollout": 57,
+        "collection_to_score_s": 47.206,
+        "score_to_optimizer_log_s": 6.02,
+        "recorded_train_s": 5.993234265130013,
+        "optimizer_to_publication_s": 2.756,
+        "recorded_publication_s": 2.734000557102263
+      },
+      {
+        "rollout": 58,
+        "collection_to_score_s": 39.316,
+        "score_to_optimizer_log_s": 5.913,
+        "recorded_train_s": 5.888581627048552,
+        "optimizer_to_publication_s": 2.755,
+        "recorded_publication_s": 2.7273019473068416
+      },
+      {
+        "rollout": 59,
+        "collection_to_score_s": 44.837,
+        "score_to_optimizer_log_s": 8.155,
+        "recorded_train_s": 8.094890584237874,
+        "optimizer_to_publication_s": 5.854,
+        "recorded_publication_s": 5.818716524168849
+      },
+      {
+        "rollout": 60,
+        "collection_to_score_s": 48.379,
+        "score_to_optimizer_log_s": 6.076,
+        "recorded_train_s": 6.050226700026542,
+        "optimizer_to_publication_s": 5.219,
+        "recorded_publication_s": 5.191729446873069
+      },
+      {
+        "rollout": 61,
+        "collection_to_score_s": 46.44,
+        "score_to_optimizer_log_s": 6.092,
+        "recorded_train_s": 6.060057116206735,
+        "optimizer_to_publication_s": 4.295,
+        "recorded_publication_s": 4.2679814817383885
+      },
+      {
+        "rollout": 62,
+        "collection_to_score_s": 45.941,
+        "score_to_optimizer_log_s": 5.785,
+        "recorded_train_s": 5.7641116748563945,
+        "optimizer_to_publication_s": 4.296,
+        "recorded_publication_s": 4.264470818918198
+      },
+      {
+        "rollout": 63,
+        "collection_to_score_s": 43.415,
+        "score_to_optimizer_log_s": 6.07,
+        "recorded_train_s": 6.044363456312567,
+        "optimizer_to_publication_s": 4.209,
+        "recorded_publication_s": 4.181381265167147
+      },
+      {
+        "rollout": 64,
+        "collection_to_score_s": 49.377,
+        "score_to_optimizer_log_s": 6.081,
+        "recorded_train_s": 6.0534114530310035,
+        "optimizer_to_publication_s": 4.311,
+        "recorded_publication_s": 4.2824564962647855
+      },
+      {
+        "rollout": 65,
+        "collection_to_score_s": 46.135,
+        "score_to_optimizer_log_s": 8.502,
+        "recorded_train_s": 8.466209803707898,
+        "optimizer_to_publication_s": 5.688,
+        "recorded_publication_s": 5.661117514129728
+      },
+      {
+        "rollout": 66,
+        "collection_to_score_s": 42.306,
+        "score_to_optimizer_log_s": 5.544,
+        "recorded_train_s": 5.524720015004277,
+        "optimizer_to_publication_s": 3.923,
+        "recorded_publication_s": 3.894721370190382
+      },
+      {
+        "rollout": 67,
+        "collection_to_score_s": 42.378,
+        "score_to_optimizer_log_s": 6.219,
+        "recorded_train_s": 6.188549340702593,
+        "optimizer_to_publication_s": 3.973,
+        "recorded_publication_s": 3.942822093144059
+      },
+      {
+        "rollout": 68,
+        "collection_to_score_s": 36.905,
+        "score_to_optimizer_log_s": 5.883,
+        "recorded_train_s": 5.8618469927459955,
+        "optimizer_to_publication_s": 4.046,
+        "recorded_publication_s": 4.016100672073662
+      },
+      {
+        "rollout": 69,
+        "collection_to_score_s": 42.498,
+        "score_to_optimizer_log_s": 5.684,
+        "recorded_train_s": 5.66229850705713,
+        "optimizer_to_publication_s": 3.777,
+        "recorded_publication_s": 3.7538785212673247
+      },
+      {
+        "rollout": 70,
+        "collection_to_score_s": 46.231,
+        "score_to_optimizer_log_s": 6.045,
+        "recorded_train_s": 6.017278668936342,
+        "optimizer_to_publication_s": 5.601,
+        "recorded_publication_s": 5.575983300805092
+      },
+      {
+        "rollout": 71,
+        "collection_to_score_s": 45.995,
+        "score_to_optimizer_log_s": 5.891,
+        "recorded_train_s": 5.868495137896389,
+        "optimizer_to_publication_s": 4.001,
+        "recorded_publication_s": 3.96442118473351
+      },
+      {
+        "rollout": 72,
+        "collection_to_score_s": 44.029,
+        "score_to_optimizer_log_s": 5.927,
+        "recorded_train_s": 5.903098580893129,
+        "optimizer_to_publication_s": 5.627,
+        "recorded_publication_s": 5.596968492027372
+      },
+      {
+        "rollout": 73,
+        "collection_to_score_s": 42.292,
+        "score_to_optimizer_log_s": 5.919,
+        "recorded_train_s": 5.893731731921434,
+        "optimizer_to_publication_s": 4.045,
+        "recorded_publication_s": 4.015772191807628
+      },
+      {
+        "rollout": 74,
+        "collection_to_score_s": 36.655,
+        "score_to_optimizer_log_s": 5.929,
+        "recorded_train_s": 5.90701380232349,
+        "optimizer_to_publication_s": 3.805,
+        "recorded_publication_s": 3.782677107024938
+      },
+      {
+        "rollout": 75,
+        "collection_to_score_s": 39.106,
+        "score_to_optimizer_log_s": 5.479,
+        "recorded_train_s": 5.45437831338495,
+        "optimizer_to_publication_s": 5.635,
+        "recorded_publication_s": 5.612321552820504
+      },
+      {
+        "rollout": 76,
+        "collection_to_score_s": 40.3,
+        "score_to_optimizer_log_s": 5.37,
+        "recorded_train_s": 5.346718682907522,
+        "optimizer_to_publication_s": 3.995,
+        "recorded_publication_s": 3.9663799512200058
+      },
+      {
+        "rollout": 77,
+        "collection_to_score_s": 41.282,
+        "score_to_optimizer_log_s": 5.578,
+        "recorded_train_s": 5.557509866077453,
+        "optimizer_to_publication_s": 4.009,
+        "recorded_publication_s": 3.9796401667408645
+      },
+      {
+        "rollout": 78,
+        "collection_to_score_s": 40.629,
+        "score_to_optimizer_log_s": 5.796,
+        "recorded_train_s": 5.773695710115135,
+        "optimizer_to_publication_s": 3.992,
+        "recorded_publication_s": 3.963072383776307
+      },
+      {
+        "rollout": 79,
+        "collection_to_score_s": 36.337,
+        "score_to_optimizer_log_s": 5.84,
+        "recorded_train_s": 5.8144945641979575,
+        "optimizer_to_publication_s": 4.011,
+        "recorded_publication_s": 3.9887204892002046
+      },
+      {
+        "rollout": 80,
+        "collection_to_score_s": 42.84,
+        "score_to_optimizer_log_s": 7.805,
+        "recorded_train_s": 7.777398107107729,
+        "optimizer_to_publication_s": 5.519,
+        "recorded_publication_s": 5.493889067787677
+      },
+      {
+        "rollout": 81,
+        "collection_to_score_s": 41.297,
+        "score_to_optimizer_log_s": 6.015,
+        "recorded_train_s": 5.987513896077871,
+        "optimizer_to_publication_s": 4.028,
+        "recorded_publication_s": 4.004638862796128
+      },
+      {
+        "rollout": 82,
+        "collection_to_score_s": 37.849,
+        "score_to_optimizer_log_s": 5.767,
+        "recorded_train_s": 5.743813255801797,
+        "optimizer_to_publication_s": 4.011,
+        "recorded_publication_s": 3.9860133370384574
+      },
+      {
+        "rollout": 83,
+        "collection_to_score_s": 41.288,
+        "score_to_optimizer_log_s": 5.693,
+        "recorded_train_s": 5.671556944958866,
+        "optimizer_to_publication_s": 3.991,
+        "recorded_publication_s": 3.9681392977945507
+      },
+      {
+        "rollout": 84,
+        "collection_to_score_s": 36.517,
+        "score_to_optimizer_log_s": 5.864,
+        "recorded_train_s": 5.8441207450814545,
+        "optimizer_to_publication_s": 3.937,
+        "recorded_publication_s": 3.9135587043128908
+      },
+      {
+        "rollout": 85,
+        "collection_to_score_s": 38.174,
+        "score_to_optimizer_log_s": 5.693,
+        "recorded_train_s": 5.669408719055355,
+        "optimizer_to_publication_s": 3.781,
+        "recorded_publication_s": 3.753803945146501
+      },
+      {
+        "rollout": 86,
+        "collection_to_score_s": 39.327,
+        "score_to_optimizer_log_s": 6.97,
+        "recorded_train_s": 6.940859274938703,
+        "optimizer_to_publication_s": 4.05,
+        "recorded_publication_s": 4.021062049083412
+      },
+      {
+        "rollout": 87,
+        "collection_to_score_s": 48.673,
+        "score_to_optimizer_log_s": 5.56,
+        "recorded_train_s": 5.537013289984316,
+        "optimizer_to_publication_s": 3.967,
+        "recorded_publication_s": 3.941328771878034
+      },
+      {
+        "rollout": 88,
+        "collection_to_score_s": 43.33,
+        "score_to_optimizer_log_s": 7.95,
+        "recorded_train_s": 7.924187440890819,
+        "optimizer_to_publication_s": 3.939,
+        "recorded_publication_s": 3.914674728643149
+      },
+      {
+        "rollout": 89,
+        "collection_to_score_s": 37.359,
+        "score_to_optimizer_log_s": 5.855,
+        "recorded_train_s": 5.830374218989164,
+        "optimizer_to_publication_s": 3.993,
+        "recorded_publication_s": 3.9705129200592637
+      },
+      {
+        "rollout": 90,
+        "collection_to_score_s": 43.687,
+        "score_to_optimizer_log_s": 7.817,
+        "recorded_train_s": 7.780486670322716,
+        "optimizer_to_publication_s": 4.083,
+        "recorded_publication_s": 4.059021608904004
+      },
+      {
+        "rollout": 91,
+        "collection_to_score_s": 39.13,
+        "score_to_optimizer_log_s": 5.874,
+        "recorded_train_s": 5.851897730957717,
+        "optimizer_to_publication_s": 3.958,
+        "recorded_publication_s": 3.9341925270855427
+      },
+      {
+        "rollout": 92,
+        "collection_to_score_s": 33.616,
+        "score_to_optimizer_log_s": 4.8,
+        "recorded_train_s": 4.773666561115533,
+        "optimizer_to_publication_s": 4.049,
+        "recorded_publication_s": 4.020041590090841
+      },
+      {
+        "rollout": 93,
+        "collection_to_score_s": 36.956,
+        "score_to_optimizer_log_s": 4.907,
+        "recorded_train_s": 4.881954187061638,
+        "optimizer_to_publication_s": 3.99,
+        "recorded_publication_s": 3.962083606980741
+      },
+      {
+        "rollout": 94,
+        "collection_to_score_s": 38.13,
+        "score_to_optimizer_log_s": 4.743,
+        "recorded_train_s": 4.719688749872148,
+        "optimizer_to_publication_s": 3.978,
+        "recorded_publication_s": 3.9483715523965657
+      },
+      {
+        "rollout": 95,
+        "collection_to_score_s": 39.312,
+        "score_to_optimizer_log_s": 4.733,
+        "recorded_train_s": 4.707658350933343,
+        "optimizer_to_publication_s": 5.187,
+        "recorded_publication_s": 5.163813438266516
+      },
+      {
+        "rollout": 96,
+        "collection_to_score_s": 37.234,
+        "score_to_optimizer_log_s": 4.625,
+        "recorded_train_s": 4.598956186790019,
+        "optimizer_to_publication_s": 4.026,
+        "recorded_publication_s": 4.002365234307945
+      },
+      {
+        "rollout": 97,
+        "collection_to_score_s": 41.393,
+        "score_to_optimizer_log_s": 4.917,
+        "recorded_train_s": 4.887977070175111,
+        "optimizer_to_publication_s": 4.017,
+        "recorded_publication_s": 3.987452767789364
+      },
+      {
+        "rollout": 98,
+        "collection_to_score_s": 43.164,
+        "score_to_optimizer_log_s": 5.702,
+        "recorded_train_s": 5.681988498196006,
+        "optimizer_to_publication_s": 4.057,
+        "recorded_publication_s": 4.025729768909514
+      },
+      {
+        "rollout": 99,
+        "collection_to_score_s": 35.66,
+        "score_to_optimizer_log_s": 8.562,
+        "recorded_train_s": 8.535630099009722,
+        "optimizer_to_publication_s": 4.156,
+        "recorded_publication_s": 4.127031795214862
+      }
+    ],
+    "summary": {
+      "collection_to_score_s": {
+        "mean": 44.32847368421053,
+        "median": 44.872,
+        "min": 33.616,
+        "max": 50.773
+      },
+      "score_to_optimizer_log_s": {
+        "mean": 6.185957894736842,
+        "median": 5.919,
+        "min": 4.625,
+        "max": 9.657
+      },
+      "recorded_train_s": {
+        "mean": 6.159951125109862,
+        "median": 5.893731731921434,
+        "min": 4.598956186790019,
+        "max": 9.629702661186457
+      },
+      "optimizer_to_publication_s": {
+        "mean": 3.768315789473684,
+        "median": 3.964,
+        "min": 2.517,
+        "max": 5.854
+      },
+      "recorded_publication_s": {
+        "mean": 3.7413165522886342,
+        "median": 3.9377392642199993,
+        "min": 2.4898963309824467,
+        "max": 5.818716524168849
+      }
+    },
+    "n": 95
+  },
+  "corrected_publication_warm_indices": {
+    "core_versions": [
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100
+    ],
+    "scope": "Post-update publications for rollout indices5..99; excludes initialpublication. Backend native perf conventions differ.",
+    "core_mean_seconds": 3.7413165522886342
+  },
+  "generation_workload": {
+    "scope": "Actual generated response tokens divided by corresponding native rollout collection time; includes rewards/dumps and scheduling/stragglers, not pure decoder throughput.",
+    "arms": {
+      "core": {
+        "warm_response_tokens": 2735986,
+        "warm_responses": 1520,
+        "collection_seconds": 3494.9047849178314,
+        "aggregate_response_tokens_per_collection_second": 782.8499396627556
+      },
+      "megatron": {
+        "warm_response_tokens": 2862836,
+        "warm_responses": 1520,
+        "collection_seconds": 3755.096490383148,
+        "aggregate_response_tokens_per_collection_second": 762.3868008003951
+      }
+    }
   }
 }
