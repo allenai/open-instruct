@@ -12,7 +12,7 @@ from pathlib import Path
 from scripts.miles import launch_update_zero_compare
 
 
-def specification(image, core_root, megatron_root, *, wait_seconds=0):
+def specification(image, core_root, megatron_root, *, wait_seconds=0, backend="both"):
     document = launch_update_zero_compare.specification(image, core_root, megatron_root, evidence_only=True)
     files = {"__init__.py": b""}
     for name in ("compare_trainer_routes.py", "compare_update_zero.py", "update_zero_capture.py"):
@@ -36,7 +36,10 @@ def specification(image, core_root, megatron_root, *, wait_seconds=0):
     }
     encoded = base64.b64encode(json.dumps(provenance).encode()).decode()
     lines.append(f"printf %s {shlex.quote(encoded)} | base64 -d > /output/provenance.json")
-    for backend, root in (("olmo_core", core_root), ("megatron", megatron_root)):
+    participants = (("olmo_core", core_root), ("megatron", megatron_root))
+    for name, root in participants:
+        if backend != "both" and name != backend:
+            continue
         lines.append(
             shlex.join(
                 [
@@ -45,9 +48,9 @@ def specification(image, core_root, megatron_root, *, wait_seconds=0):
                     "scripts.miles.compare_trainer_routes",
                     root,
                     "--backend",
-                    backend,
+                    name,
                     "--output",
-                    f"/output/{backend}.json",
+                    f"/output/{name}.json",
                     "--wait-seconds",
                     str(wait_seconds),
                 ]
@@ -71,13 +74,21 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--core-root", required=True)
     parser.add_argument("--megatron-root", required=True)
+    parser.add_argument("--backend", choices=("both", "olmo_core", "megatron"), default="both")
     parser.add_argument("--wait-seconds", type=int, default=0)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="compare-native-routes-") as directory:
         path = Path(directory) / "experiment.json"
         path.write_text(
             json.dumps(
-                specification(args.image, args.core_root, args.megatron_root, wait_seconds=args.wait_seconds), indent=2
+                specification(
+                    args.image,
+                    args.core_root,
+                    args.megatron_root,
+                    wait_seconds=args.wait_seconds,
+                    backend=args.backend,
+                ),
+                indent=2,
             )
             + "\n"
         )
