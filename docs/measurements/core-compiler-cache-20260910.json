@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "scope": "One real Triton vector-add kernel, separate fresh Docker processes, RTX 4090; no Core training/performance qualification",
+  "implementation_stage": "GPU screen precedes final conservative environment-prefix expansion and remote-cache rejection; final lifecycle suite has 33 passing CPU tests",
+  "raw_directory": "/tmp/miles-validation/compiler-cache-probe",
+  "raw_sha256": {
+    "cold.json": "a8c2951c793416cbb7c3ee708e6007b94ca798ab08b443b5022266658e506d60",
+    "restored.json": "c9e15b283087eef95dea3e0d11b3328d7df07d458ae657e99c6723fa48c21efe",
+    "cold-kernel.json": "a0be7ebf9a693beae5b45ab8a64d828770f91911905f35ee13db44730ee8b6b6",
+    "restored-kernel.json": "10594dd5c400611faad3b5347a3d9a85825f93ff82c65eb22635f375eea6b9f2"
+  },
+  "image": "sha256:ec7e8e715c2cd9bd69b3b3c87ab44ba17d20077bcf0870f8264a8ebfb80b2fdf",
+  "runtime_lock_sha256": "8586c50000356d8978ab36da255f38d34a29a231a98d0021a7c01a84aedb1ec6",
+  "source_identity": {
+    "miles": {
+      "files": 379,
+      "sha256": "21bb8ec96dd0ee8f2e79808b0369ee3c4bc0c34db6a0c22bffddedb29c1b669d"
+    },
+    "olmo-core": {
+      "files": 690,
+      "sha256": "4dc5612886dc7865096fcc3bf0957710d62423256cd0c10aa739c1f14778e220"
+    },
+    "olmo-sglang": {
+      "files": 25,
+      "sha256": "627b7c14b61fb2c4fc89a632e2b8ffab32da992b06db325250d0c0cd45a97802"
+    },
+    "open-instruct": {
+      "files": 147,
+      "sha256": "5744eaa22b73b8d94b537b987703857c8ca73317fb9f175ca6908f94f9c34096"
+    },
+    "qualification": {
+      "files": 23,
+      "sha256": "480cf89d2371a1cc5da96e8199b8cba16bd5d204833ffb373562a2c331a13200"
+    }
+  },
+  "toolchain": {
+    "cc": {
+      "returncode": 0,
+      "text": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+    },
+    "cxx": {
+      "returncode": 0,
+      "text": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+    },
+    "driver": {
+      "returncode": 0,
+      "text": "580.173.02"
+    },
+    "libc": [
+      "glibc",
+      "2.39"
+    ],
+    "machine": "x86_64",
+    "nvcc": {
+      "returncode": 0,
+      "text": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Wed_Aug_20_01:58:59_PM_PDT_2025\nCuda compilation tools, release 13.0, V13.0.88\nBuild cuda_13.0.r13.0/compiler.36424714_0"
+    },
+    "packages": {
+      "fla-core": null,
+      "flash-attn": null,
+      "flash-attn-4": "4.0.0b27",
+      "flash-linear-attention": "0.5.2",
+      "sglang": "0.5.19.dev49+g3145136",
+      "tilelang": "0.1.9",
+      "torch": "2.13.0+cu130",
+      "transformer-engine": "2.17.0",
+      "triton": "3.7.1"
+    },
+    "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]",
+    "torch_hardware": {
+      "gpus": [
+        {
+          "major": 8,
+          "memory": 25250627584,
+          "minor": 9,
+          "name": "NVIDIA GeForce RTX 4090",
+          "sm_count": 128
+        }
+      ],
+      "torch_cuda": "13.0",
+      "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb"
+    }
+  },
+  "fingerprint": "4e1c130a8c190c7d750cca97abf04da0c38da2685d344e6c1b7427137f9e40d9",
+  "numerically_exact_both": true,
+  "cold_kernel": {
+    "schema_version": 1,
+    "numerically_exact": true,
+    "first_launch_seconds": 0.5209527458064258,
+    "compiler_writes": [
+      "cuda_utils.cpython-312-x86_64-linux-gnu.so",
+      "add_kernel.source",
+      "add_kernel.ttir",
+      "add_kernel.ttgir",
+      "add_kernel.llir",
+      "add_kernel.ptx",
+      "add_kernel.cubin",
+      "add_kernel.json",
+      "__grp__add_kernel.json"
+    ],
+    "expected_compiler_writes": "present",
+    "triton_version": "3.7.1",
+    "torch_version": "2.13.0+cu130",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "valid": true
+  },
+  "restored_kernel": {
+    "schema_version": 1,
+    "numerically_exact": true,
+    "first_launch_seconds": 0.23675363697111607,
+    "compiler_writes": [],
+    "expected_compiler_writes": "absent",
+    "triton_version": "3.7.1",
+    "torch_version": "2.13.0+cu130",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "valid": true
+  },
+  "cold": {
+    "probe_seconds": 1.0134560451842844,
+    "command_seconds": 2.054286589846015,
+    "input_recheck_seconds": 0.06718390807509422,
+    "total_seconds": 3.1436426220461726,
+    "publish": [
+      {
+        "family": "triton",
+        "generation": "1fa2ad284f16e222a57cb57b1b307c956b4f6db30b34b1b5d80798239b7ee4a0",
+        "local_bytes": 83648,
+        "seconds": 0.006722239311784506,
+        "status": "published"
+      },
+      {
+        "family": "tilelang",
+        "seconds": 0.00022745877504348755,
+        "status": "empty"
+      },
+      {
+        "family": "torchinductor",
+        "seconds": 0.00018904684111475945,
+        "status": "empty"
+      },
+      {
+        "family": "fa4",
+        "seconds": 0.00017490005120635033,
+        "status": "empty"
+      },
+      {
+        "family": "deepep",
+        "seconds": 0.00017707422375679016,
+        "status": "empty"
+      },
+      {
+        "family": "deepgemm",
+        "seconds": 0.00016621407121419907,
+        "status": "empty"
+      }
+    ]
+  },
+  "restored": {
+    "probe_seconds": 1.064634925685823,
+    "command_seconds": 1.740998080931604,
+    "input_recheck_seconds": 0.06602814793586731,
+    "total_seconds": 2.884097431320697,
+    "restore": [
+      {
+        "archive_bytes": 29211,
+        "family": "triton",
+        "generation": "1fa2ad284f16e222a57cb57b1b307c956b4f6db30b34b1b5d80798239b7ee4a0",
+        "local_bytes": 83648,
+        "relocated_groups": 1,
+        "seconds": 0.0025827810168266296,
+        "status": "hit"
+      },
+      {
+        "family": "tilelang",
+        "seconds": 9.103212505578995e-05,
+        "status": "miss"
+      },
+      {
+        "family": "torchinductor",
+        "seconds": 5.576480180025101e-05,
+        "status": "miss"
+      },
+      {
+        "family": "fa4",
+        "seconds": 4.970375448465347e-05,
+        "status": "miss"
+      },
+      {
+        "family": "deepep",
+        "seconds": 4.871189594268799e-05,
+        "status": "miss"
+      },
+      {
+        "family": "deepgemm",
+        "seconds": 4.896288737654686e-05,
+        "status": "miss"
+      }
+    ],
+    "publish": [
+      {
+        "family": "triton",
+        "generation": "1fa2ad284f16e222a57cb57b1b307c956b4f6db30b34b1b5d80798239b7ee4a0",
+        "local_bytes": 83648,
+        "seconds": 0.007629981264472008,
+        "status": "unchanged"
+      },
+      {
+        "family": "tilelang",
+        "seconds": 0.00021954486146569252,
+        "status": "empty"
+      },
+      {
+        "family": "torchinductor",
+        "seconds": 0.00018427707254886627,
+        "status": "empty"
+      },
+      {
+        "family": "fa4",
+        "seconds": 0.0001664143055677414,
+        "status": "empty"
+      },
+      {
+        "family": "deepep",
+        "seconds": 0.0001606331206858158,
+        "status": "empty"
+      },
+      {
+        "family": "deepgemm",
+        "seconds": 0.0001642000861465931,
+        "status": "empty"
+      }
+    ]
+  },
+  "private_roots_distinct": true,
+  "limitations": [
+    "One small kernel and one timing observation per mode",
+    "No real other-family compiler artifacts generated",
+    "No Ray remote worker propagation or multi-node lifecycle",
+    "No full Core cold/restored optimizer-step screen or WEKA archive timing"
+  ]
+}
