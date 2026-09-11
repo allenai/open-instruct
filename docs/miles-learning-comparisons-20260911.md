@@ -80,7 +80,7 @@ before launching the Core reproduction. Source recovery and preparation passed; 
 
 | Run | Beaker | Source | W&B |
 |---|---|---|---|
-| Abhishek Core500 |[01M279ZFM6RBC223RJJ6QHN9MP](https://beaker.org/ex/01M279ZFM6RBC223RJJ6QHN9MP) |OI1ceaf0d35; Core290d2ca |Pending startup |
+| Abhishek Core500 |[01M279ZFM6RBC223RJJ6QHN9MP](https://beaker.org/ex/01M279ZFM6RBC223RJJ6QHN9MP) |OI1ceaf0d35; Core290d2ca |[on25j3v2](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/on25j3v2) |
 | Abhishek Megatron500 |[01M278B5E9HME181B04HT6391P](https://beaker.org/ex/01M278B5E9HME181B04HT6391P) |olmo-miles aa114a1; explicit8h override |[bhyj1mec](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/bhyj1mec) |
 | Light SFT Core200 |[01M2794XP15PHQSWN6M499NQYS](https://beaker.org/ex/01M2794XP15PHQSWN6M499NQYS) |OI290f8abb1; Core290d2ca |[jb8bzz71](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/jb8bzz71) |
 | Original Core100 scorer profile |[01M279F38FPRHMTYQQYWQ17GSN](https://beaker.org/ex/01M279F38FPRHMTYQQYWQ17GSN) |Worker1ceaf0d35; frozen image01M26N80T0V9PREQTS87J849P8 |No training run |
@@ -88,4 +88,4 @@ before launching the Core reproduction. Source recovery and preparation passed; 
 The original100-update pair is complete and independently audited: Core97→93/128,
 Megatron96→107/128. [Final learning/performance report](measurements/miles-gsm8k-results-20260911.md).
 These are completed results; the three new learning allocations above do not yet
-have final results. Status snapshot:2026-09-11 approximately04:02UTC.
+have final results. Status snapshot:2026-09-11 approximately04:09UTC. Core500 passed its resolved-configuration and storage checks; see [startup evidence](measurements/miles-core500-startup-20260911.json). Initial publication and evaluation are pending.
