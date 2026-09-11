@@ -164,3 +164,17 @@ exact fresh-process save/export/resume and next-update log probabilities with th
 `checkpoint_profile` also logs total native load and individual DCP load-pass durations.
 The first full-model experiment uses the original reader throughout; a separate full-model
 run is required before promoting the read-side optimization.
+
+
+## Baseline continuation finding
+
+The first full-model baseline restored every recorded model/optimizer/history/RNG/cursor
+byte exactly on both ranks, and both HF exports matched. The strict continuation gate
+failed: rank 0's pre-update-3 scoring differed, rank 1's matched, and subsequent gradients
+changed both ranks' final states. This is evidence of execution reproducibility drift
+with identical restored state, not missing checkpoint tensors.
+
+Both ranks shared a Triton autotuning cache. A rank-specific persistent cache is the next
+hypothesis test; it does not relax the exactness gate. The first faster-reader trial
+`01M28Y59M19RG252HTEY4BZ16D` was stopped during startup so it can be replaced with this
+controlled setup. The original four-arm job continues to measure save phases.

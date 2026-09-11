@@ -51,6 +51,17 @@ def runtime_lock():
     return json.loads(path.read_text())
 
 
+def autotune_cache_fingerprints():
+    directory = os.environ.get("TRITON_CACHE_DIR")
+    if not directory:
+        return {}
+    root = Path(directory)
+    return {
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(root.rglob("*.autotune.json"))
+    }
+
+
 def tensor_record(value):
     """Hash local bytes in bounded CPU transfers; never gather global EP/DP tensors."""
     local = value.to_local() if isinstance(value, DTensor) else value
@@ -421,6 +432,8 @@ def run(root, phase, backend, *, checkpoint_options=None, continue_after_save=Fa
             "exports": exports,
             "save_timings": save_timings,
             "checkpoint_bytes": sum(p.stat().st_size for p in checkpoint_files if p.is_file()),
+            "triton_cache_dir": os.environ.get("TRITON_CACHE_DIR"),
+            "autotune_cache": autotune_cache_fingerprints(),
             "scheduler_horizon": HORIZON,
             "runtime_lock": runtime_lock(),
             "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

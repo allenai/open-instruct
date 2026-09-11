@@ -79,5 +79,6 @@ def test_launch_bounds_and_modes():
     assert task["context"]["priority"] == "urgent"
     assert task["context"]["minRuntime"] == "60m"
     assert "for mode in baseline balanced" in task["arguments"][0]
+    assert "--no-python scripts/miles/checkpoint_rank.sh" in task["arguments"][0]
     with pytest.raises(ValueError):
         launcher.specification("image", modes=["bogus"])

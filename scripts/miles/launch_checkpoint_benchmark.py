@@ -36,7 +36,7 @@ for mode in __MODES__; do
   root=$RUN_ROOT/$mode
   python -m scripts.miles.checkpoint_benchmark prepare "$root" --hf __HF__
   for phase in split resumed; do
-    torchrun --standalone --nproc-per-node=2 -m scripts.miles.checkpoint_benchmark run "$root" --phase "$phase" --mode "$mode" --backend flash_4
+    torchrun --standalone --nproc-per-node=2 --no-python scripts/miles/checkpoint_rank.sh run "$root" --phase "$phase" --mode "$mode" --backend flash_4
   done
   # Retain all measurement arms even when the strict exactness gate fails.
   python -m scripts.miles.checkpoint_benchmark audit "$root" --world 2 || touch "$RUN_ROOT/failed-$mode"
