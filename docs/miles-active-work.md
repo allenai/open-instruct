@@ -12,7 +12,9 @@ separate authorization.
 | Old SFT, Core,100 GSM8K updates | [Running](https://beaker.org/ex/01M26P6XX6SN886DCVZ68WMQK2); heldout97/128→101/128→94/128→102/128 at0/20/40/60 | Finish100; audit every rollout, reward, policy version, publication and optimizer step. Notify the user when it finishes. |
 | Same SFT, olmo-miles/Megatron,100 updates | [r3 running](https://beaker.org/ex/01M26YNP5E64YGNXR85TA2RP4Q); same shared data and recipe | Initial evaluation and full curve; audit `megatron-r3`, then compare both curves, truncation and measured cadence/allocation time. |
 | Hero native/HF conversion | [step75500 passed](https://beaker.org/ex/01M26YP78T0JJ545H914AEYDDZ); both directions exact after export cast, 23,441 tensors | [Recorded conversion evidence](measurements/miles-hero-conversion-20260910.json); 579 seconds, 72 GiB peak RSS. |
-| Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. Diagnose before training qualification. |
+| Hero serving |85 local tests and tiny Core/HF/SGLang parity passed; live gain/scale updates passed | [Full-checkpoint TP1 scoring failed its 0.1 logprob gate](https://beaker.org/ex/01M26ZBDKPDBRJ03TYT6V2GYRJ). All eight greedy tokens match; Core max full-vocabulary error 0.5473, SGLang max top-20 error 0.5619. [Layerwise Core/HF diagnosis submitted](https://beaker.org/ex/01M270S3NYZE11QW0H03NHQGP7); diagnose before training qualification. |
+| Native reduction/clipping stress | [EP1/EP2 job submitted](https://beaker.org/ex/01M270A2J2E3WC60978EM8G5SV); 15 CPU tests and both local EP1 variants passed | Compare reconstructed gradients on every rank, independently counted global norm, active clipping and both Adam moments. |
+| Three-source mixture | [Two-update 8192-response trial submitted](https://beaker.org/ex/01M270TQ57VM13CMYAP8AYAZA8); 16 focused tests passed | Audit GSM8K/math/legacy-IF identities, rewards, four-response groups, cap hits and per-source policy signal. |
 | Standard dense Olmo3 | Isolated standard trainer plus local full/sliding HF math and real update/resume passed | Full-checkpoint serving and a bounded training trial when prioritized; no claim of a full recipe run yet. |
 
 The first Megatron attempt failed at initialization; r2 was stopped at the user's
@@ -32,9 +34,10 @@ The detailed acceptance sequence remains in
 [miles-qualification-plan.md](miles-qualification-plan.md), and feature/default
 coverage in [miles-feature-parity.md](miles-feature-parity.md):
 
-- Mixed open-instruct datasource manifest and per-source policy-signal audit.
-  The prior full-SFT math slice was almost entirely capped at4096 tokens, so
-  longer-response qualification is needed before comparing math quality.
+- Mixed open-instruct datasource GPU qualification is now submitted above.
+  The prior full-SFT math slice was almost entirely capped at4096 tokens; the
+  new8192-token limit is a measured extension, not an assumption that math
+  responses will now be uncapped.
 - Fixed-token Core/Megatron gradient and optimizer-state comparison, including
   auxiliary-loss semantics. A similar GSM8K curve cannot substitute for this.
 - Full-model EP2 durable continuation and same-next-update comparison.
