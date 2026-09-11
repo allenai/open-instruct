@@ -29,6 +29,33 @@ Megatron arguments in `/tmp/miles-gsm8k-parity-megatron-r3.log`; the actual imag
 SGLang `ServerArgs` and Megatron checkpoint code; and full retained Core logs. Avoid
 reading current working-tree defaults as though they were used by these allocations.
 
+## Runtime library inventory
+
+Core100 inherits compiled base image `01M24E7MSDGN2QFW1T8Z31BCKS`, Docker ID
+`sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629`.
+A direct local inspection of that exact image and the r3 candidate inventory found:
+
+| Library | Frozen Core100 | Frozen Megatron r3 |
+|---|---|---|
+| PyTorch / CUDA wheel |2.13.0+cu130 |2.13.0+cu130 |
+| Triton |3.7.1 |3.7.1 |
+| FlashAttention4 |4.0.0b27 |4.0.0b27 |
+| Flash Linear Attention |0.5.2, source `9c8e42e762fce087c27b673af4922795d9edb85e` | Same |
+| SGLang |0.5.19.dev49+g3145136, source `3145136dcd1238754e0ea2b2ffd546532119c71c` | Same |
+| olmo-sglang adapter |`81a312ee8326e279a4641e03542ef971a5ffb863` | Same |
+| MILES |Base `dbbab1566ae438f7202fff653eae938e07b1d4b6` plus OI patch, development `64ba71950c973e458f22a8d10541475940c911b0` | Base `dbbab1566ae438f7202fff653eae938e07b1d4b6` plus olmo-miles runtime adapters |
+| Transformer Engine |2.17.0, source `4329ff84bfbdaa778a33cba02a15fb0807c64689` | Same installed package; Megatron actively uses TE |
+| Megatron-LM base |Installed `235952df607b3820716e5e67728a5ab470ca33ae`, not Core trainer | Same base, adapter patch stack applied |
+| Megatron-Bridge |Installed `db723bae699dae5d29003ec4789c67730a343c32`, not Core trainer | Same source, used by Megatron |
+| olmo-megatron |Installed `b84044ffb0d52620ec1599eda19d8f3d1de816b4`, not Core trainer | Repaired BF16-storage/FP32-router-compute `ba5615df741a24ba4aee678d0e853306b3502282` |
+| Ray / Transformers |2.58.0 /5.12.1 | Same |
+
+The Core source overlay replaces Core and MILES Python sources; it does not rebuild
+these compiled libraries. Package/version equality still does not establish kernel-path
+equality: trainer factories, padding and attention wrappers differ. FA4's installed
+package version is available here; a distinct upstream commit was not asserted without
+a recorded build source. These are frozen100 inventories, not the newer hero/500 runtime.
+
 ## Shared recipe
 
 | Dimension | Both100-update allocations |
@@ -119,6 +146,14 @@ it caused this timing gap. A bounded EP2 same-batch CUDA/CPU profiler is the nex
 measurement, keeping ingress, per-forward communication, logprob extraction and postscore
 checks separate. No profiling-based attribution has yet been established.
 
+A concrete compilation hypothesis remains: frozen `kernels/swiglu.py` marks
+`rows=x.shape[0]` as a Triton constexpr. Different routed row capacities can therefore
+produce separate no-grad kernel specializations; gradient-enabled eager SwiGLU does not
+use this kernel. There is no autotuner in this wrapper and its valid-count scalar stays
+on CUDA (loaded in-kernel), so this wrapper does not synchronize that count to the CPU.
+Count JIT misses, actual cache writes and cold-versus-identical-batch repeated timing
+before attributing latency to compilation; the future rounding fix retains this shape key.
+
 ## Longer500 campaign
 
 The new campaign changes horizon to500 updates and repeats the same400 prompts in five
@@ -129,9 +164,11 @@ calls of4 prompts, verified every ID modulo400, all4 completions per group, and 
 
 Megatron config `examples/qualification/gsm8k-abhishek-500-20260911.toml` at baseline
 commits1b426fd/aa114a1 preserves the optimizer/data recipe, explicitly aligns PyTorch
-sampling, token pool32768 and prefill chunk16384 with Core500, uses min runtime12h, and saves synchronously
-every100 updates with rolling latest retention. The public baseline launch schema has no
-hard deadline;18h requires external monitoring unless a supported task override is used.
+sampling, token pool32768 and prefill chunk16384 with Core500, requests the eight-hour server maximum, and saves synchronously
+every100 updates with rolling latest retention. The first12h request was rejected before experiment creation by Beaker's eight-hour cap.
+The successful submission uses sourceaa114a1 with explicit `--min-runtime8h`; subsequent
+readable-config commitf45f243 records8h directly. The public baseline launch schema has no
+hard deadline;18h is monitored.
 Core uses corrected runtime290d2ca and currently retains five native checkpoints. This
 retention difference must remain explicit in disk usage and allocation-time comparisons.
 
