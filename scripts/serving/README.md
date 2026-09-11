@@ -123,6 +123,44 @@ shards. What it encodes, each of which cost us real time to learn:
 
 ---
 
+## Measured: DCP validated, and a correction the roofline missed
+
+GLM-5.2 was re-run on identical prompts with the only change being
+`--decode-context-parallel-size 8` alongside `--tensor-parallel-size 8`. vLLM's
+own counters, sampled during generation:
+
+```
+Avg generation throughput: 4706.9 tok/s   Running: 162 reqs  Waiting:  94  KV: 99.9%
+Avg generation throughput: 3042.7 tok/s   Running:  90 reqs  Waiting: 166  KV: 99.8%
+Avg generation throughput: 2127.0 tok/s   Running:  54 reqs  Waiting: 202  KV: 99.1%
+Avg generation throughput: 1428.3 tok/s   Running:  30 reqs  Waiting: 226  KV: 96.9%
+```
+
+**Prediction: ~197 concurrent sequences, 3,594-6,468 tok/s. Measured: 162
+concurrent, 4,707 tok/s.** Both inside the predicted band, against a pre-DCP rate
+of roughly one completed trace every three minutes. DCP is confirmed as the
+dominant lever for MLA models.
+
+**The correction: this workload is KV-capacity-bound, and it degrades over
+time.** `Running` falls from 162 to 30 while `Waiting` climbs from 94 to 226 and
+KV utilisation stays pinned at 97-100%. The planner assumes a fixed average
+context per sequence; in a long-reasoning workload each surviving sequence's
+cache keeps growing, so concurrency decays as the short traces retire and the
+long ones accumulate. Peak throughput is therefore a poor predictor of
+end-to-end wall clock -- GLM sustained 4,707 tok/s early and 1,428 tok/s later
+in the same run.
+
+Two consequences worth acting on:
+
+* **Client concurrency above what KV can hold buys nothing.** At `Waiting: 226`
+  of 256 in flight, the extra requests are queued, not served. Concurrency should
+  be sized to measured KV capacity, not set optimistically.
+* **`--max-model-len` is a throughput knob, not just a correctness one.** Qwen's
+  p99 trace was 45,437 tokens and DeepSeek's 37,113 against a 131,072 cap. Sizing
+  the context to the measured p99 rather than the model maximum would roughly
+  double concurrency for the MLA models. Verify the truncation rate stays near
+  zero before doing this.
+
 ## Calibration and honesty
 
 The throughput model is a memory-bandwidth roofline: per decode step each GPU
