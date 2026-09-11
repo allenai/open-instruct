@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "experiment": "01M27EWCG7P03CNY40E5WSXX1D",
+  "job": "01M27EWCKM5KCBKHCN4X567HS6",
+  "result": "01M27EWCGC9XG2XST3GDM1QDMS",
+  "source": "0088943ff",
+  "root": "/weka/oe-training-default/robertb/open-instruct/light-sft1000-gsm8k/20260911-v1-r3",
+  "status_at_recording": "running",
+  "completed_steps_observed": 3,
+  "wandb": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/gvsqfrzt",
+  "staging": {
+    "source": "/weka/oe-training-default/robertb/open-instruct/light-sft1000-gsm8k/20260911-v1-r3/hf",
+    "destination": "/tmp/light-sft-hf",
+    "files": {
+      "chat_template.jinja": {
+        "bytes": 2613,
+        "sha256": "f5186d42d99c8a0445d37fd8a6c7ccf07fe3e24a29ce622d8bd245da9507b12b"
+      },
+      "config.json": {
+        "bytes": 2466,
+        "sha256": "55c5084f071f04f65bc4b167339d260ce2530d336da2620130318512a06eb69d"
+      },
+      "configuration_olmo3moe.py": {
+        "bytes": 8474,
+        "sha256": "1aeb3af76a87ed44f37d095bfde43870510c31e48a9b98ae0a3e2d8beafc1e94"
+      },
+      "generation_config.json": {
+        "bytes": 223,
+        "sha256": "9821bdd08edfa3ca88f12b231f261fe186ee54331163400c60ebefa92c069721"
+      },
+      "model.safetensors": {
+        "bytes": 37057064824,
+        "sha256": "724f9de6189bc0b7b699e68a4dc1aaaf80ff7a380d1ad11c99f4aa53c96eb12a"
+      },
+      "modeling_olmo3moe.py": {
+        "bytes": 55990,
+        "sha256": "4b3831e61ca4e85fbe904686006548113cae4e00032622add24e86595908de46"
+      },
+      "olmo-miles-hf-staging.json": {
+        "bytes": 535,
+        "sha256": "627fe27adec61f81f497f19e9b1ce8adff7fd773802b80db5f4f451da495dd3e"
+      },
+      "tokenizer.json": {
+        "bytes": 7137175,
+        "sha256": "7738a25c46a6043a0e2e605138851baa450269ce9d800af6ca9bf6192e45510c"
+      },
+      "tokenizer_config.json": {
+        "bytes": 6968,
+        "sha256": "d5ecebde2e4bb28af2d069a00175d9947df12903a57f34e09b145b5dd78648da"
+      }
+    },
+    "elapsed_seconds": 128.2631451957859,
+    "verified_full_payload": true,
+    "prepared_source_root": "/weka/oe-training-default/robertb/open-instruct/light-sft1000-gsm8k/20260911-v1-r3",
+    "retry_root": "/weka/oe-training-default/robertb/open-instruct/light-sft1000-gsm8k/20260911-v1-r3"
+  },
+  "native_initial": {
+    "correct": 32,
+    "count": 128,
+    "capped": 7,
+    "temperature": 1
+  },
+  "full_raw_initial": {
+    "correct": 229,
+    "count": 1319,
+    "accuracy": 0.17361637604245642,
+    "temperature": 0,
+    "strict_identity_token_reward_version_validation_passed": true,
+    "historical_initial_correct": 230
+  },
+  "optimizer_steps": [
+    {
+      "train/loss": 0.0,
+      "train/pg_loss": 0.0,
+      "train/pg_clipfrac": 0.0,
+      "train/ppo_kl": 0.0,
+      "train/ess_ratio": 1.0,
+      "train/train_rollout_logprob_abs_diff": 0.027232669293880463,
+      "train/train_rollout_kl": 0.0012137133162468672,
+      "train/policy_objective": 0.0,
+      "train/auxiliary_load_balancing": 0.20012690007686612,
+      "train/auxiliary_router_z": 0.0002876996773481369,
+      "train/step_seconds": 184.20779130095616,
+      "train/collection_score_mean_abs": 0.022489157214102853,
+      "train/collection_score_active_tokens": 2746,
+      "train/collection_score_max_abs": 0.44494199752807617,
+      "train/collection_score_p50_upper_overflow": 0,
+      "train/collection_score_p50_upper": 0.004999999888241291,
+      "train/collection_score_p95_upper_overflow": 0,
+      "train/collection_score_p95_upper": 0.25,
+      "train/collection_score_p99_upper_overflow": 0,
+      "train/collection_score_p99_upper": 0.25,
+      "train/completed_steps": 1,
+      "train/published_step": 0,
+      "train/rollout_id": 0,
+      "train/lr-pg_0": 1e-06,
+      "train/lr-pg_1": 1e-06,
+      "train/lr_used-pg_0": 1e-06,
+      "train/lr_used-pg_1": 1e-06,
+      "train/grad_norm": 1.5781782865524292,
+      "train/step": 0
+    },
+    {
+      "train/loss": 0.0,
+      "train/pg_loss": 0.0,
+      "train/pg_clipfrac": 0.0,
+      "train/ppo_kl": 0.0,
+      "train/ess_ratio": 1.0,
+      "train/train_rollout_logprob_abs_diff": 0.036774083971977234,
+      "train/train_rollout_kl": 0.002523210598155856,
+      "train/policy_objective": 0.0,
+      "train/auxiliary_load_balancing": 0.19948638319969178,
+      "train/auxiliary_router_z": 0.0002946051978319884,
+      "train/step_seconds": 12.043990017380565,
+      "train/collection_score_mean_abs": 0.025491829106469042,
+      "train/collection_score_active_tokens": 3418,
+      "train/collection_score_max_abs": 0.6978607177734375,
+      "train/collection_score_p50_upper_overflow": 0,
+      "train/collection_score_p50_upper": 0.004999999888241291,
+      "train/collection_score_p95_upper_overflow": 0,
+      "train/collection_score_p95_upper": 0.25,
+      "train/collection_score_p99_upper_overflow": 0,
+      "train/collection_score_p99_upper": 0.25,
+      "train/completed_steps": 2,
+      "train/published_step": 1,
+      "train/rollout_id": 1,
+      "train/lr-pg_0": 1e-06,
+      "train/lr-pg_1": 1e-06,
+      "train/lr_used-pg_0": 1e-06,
+      "train/lr_used-pg_1": 1e-06,
+      "train/grad_norm": 2.05015230178833,
+      "train/step": 1
+    },
+    {
+      "train/loss": 0.0,
+      "train/pg_loss": 0.0,
+      "train/pg_clipfrac": 0.0,
+      "train/ppo_kl": 0.0,
+      "train/ess_ratio": 1.0,
+      "train/train_rollout_logprob_abs_diff": 0.02424081787467003,
+      "train/train_rollout_kl": 0.001131539698690176,
+      "train/policy_objective": 0.0,
+      "train/auxiliary_load_balancing": 0.1998727488517761,
+      "train/auxiliary_router_z": 0.0002608084056153893,
+      "train/step_seconds": 11.73692252393812,
+      "train/collection_score_mean_abs": 0.021199021272403536,
+      "train/collection_score_active_tokens": 3439,
+      "train/collection_score_max_abs": 0.4681438207626343,
+      "train/collection_score_p50_upper_overflow": 0,
+      "train/collection_score_p50_upper": 0.004999999888241291,
+      "train/collection_score_p95_upper_overflow": 0,
+      "train/collection_score_p95_upper": 0.25,
+      "train/collection_score_p99_upper_overflow": 0,
+      "train/collection_score_p99_upper": 0.25,
+      "train/completed_steps": 3,
+      "train/published_step": 2,
+      "train/rollout_id": 2,
+      "train/lr-pg_0": 1e-06,
+      "train/lr-pg_1": 1e-06,
+      "train/lr_used-pg_0": 1e-06,
+      "train/lr_used-pg_1": 1e-06,
+      "train/grad_norm": 2.0165884494781494,
+      "train/step": 2
+    }
+  ],
+  "interpretation": "Scalar zero centered policy objective at ratio1 is not evidence of zero policy gradients; first batch had3 mixed groups and5 uniform-zero groups. Endpoints are initial-policy observations, not completed learning results.",
+  "serving_resolved": {
+    "requested_max_total_tokens": 771285,
+    "profiled_max_total_tokens": 769295,
+    "weight_load_seconds": [
+      16.34,
+      16.05
+    ],
+    "decode_graph_capture_seconds": [
+      82.68,
+      82.81
+    ]
+  },
+  "tokenization_preparation_experiment": "01M27EPRWX671101TEC8746RS7",
+  "all_8920_prompt_proofs_passed": true,
+  "previous_failed_experiments": [
+    "01M2794XP15PHQSWN6M499NQYS",
+    "01M27CRJHT06S0BQZRY4BHZE36"
+  ]
+}

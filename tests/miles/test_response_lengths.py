@@ -4,6 +4,7 @@ import copy
 
 import pytest
 from scripts.miles import analyze_response_lengths as analysis
+from scripts.miles import response_length_transitions as conditional
 
 
 def fixture():
@@ -68,3 +69,20 @@ def test_quantile_and_group_centering():
     assert result["mean_reward"] == 7 / 8
     assert result["wrong_length"]["count"] == 1
     assert analysis.percentile([1, 2, 3, 4], 0.9) == pytest.approx(3.7)
+
+
+def test_paired_transition_keeps_question_identity_and_excludes_caps():
+    before = [
+        {"id": "a", "reward": 1, "at_cap": False, "response_tokens": 100},
+        {"id": "b", "reward": 1, "at_cap": True, "response_tokens": 4096},
+    ]
+    after = [
+        {"id": "b", "reward": 0, "at_cap": False, "response_tokens": 50},
+        {"id": "a", "reward": 1, "at_cap": False, "response_tokens": 80},
+    ]
+    rows = conditional.transitions(before, after)
+    assert rows["correct_both_and_uncapped_both"]["count"] == 1
+    assert rows["correct_both_and_uncapped_both"]["paired_change"]["mean"] == -20
+    assert rows["correct_to_wrong"]["pairs"][0]["id"] == "b"
+    with pytest.raises(AssertionError):
+        conditional.transitions(before, [after[0], after[0]])
