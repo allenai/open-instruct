@@ -27,6 +27,7 @@ export RUN_ROOT={ROOT}
 python -m scripts.miles.light_sft_gsm8k validate
 cp "$RUN_ROOT/preparation.json" /output/
 cp "$RUN_ROOT/historical.json" /output/
+cp "$RUN_ROOT/checkpoint-inventory.json" /output/
 """
     elif stage == "audit":
         command += """python -m scripts.miles.light_sft_gsm8k audit

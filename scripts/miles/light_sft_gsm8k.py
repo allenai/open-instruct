@@ -6,6 +6,7 @@ import dataclasses
 import importlib
 import json
 import os
+import re
 import struct
 import sys
 import time
@@ -128,6 +129,12 @@ def checkpoint_descriptor(root, source):
     }
 
 
+def normalize_answer(value):
+    cleaned = re.sub(r"(\d),(\d)", r"\1\2", value)
+    numbers = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", cleaned)
+    return numbers[-1] if numbers else cleaned
+
+
 def offline_rows(requests, tokenizer):
     rows, evidence = [], []
     for record in requests:
@@ -146,7 +153,7 @@ def offline_rows(requests, tokenizer):
             or request["generation_kwargs"] != expected
             or request["stop_sequences"] != ["Question:", "\n\n"]
             or request["provider_request"]["endpoint"] != "/completions"
-            or record["label"] != doc["short_answer"]
+            or record["label"] != normalize_answer(doc["short_answer"])
         ):
             raise ValueError("Historical full-test request semantics differ")
         ids = tokenizer.encode(prompt, add_special_tokens=False)
@@ -187,6 +194,7 @@ def prepare(root, historical_result):
     old = history()
     source = Path(old["manifest"]["model"]["hf_checkpoint"])
     descriptor = checkpoint_descriptor(root, source)
+    write_immutable(root / "checkpoint-inventory.json", json_bytes(descriptor))
     tokenizer = importlib.import_module("transformers").AutoTokenizer.from_pretrained(
         root / "hf", trust_remote_code=True
     )
@@ -240,6 +248,7 @@ def prepare(root, historical_result):
         "offline/token-proofs.json",
         "historical.json",
         "verifiers.json",
+        "checkpoint-inventory.json",
     ]
     report = {
         "schema_version": 1,
@@ -274,6 +283,7 @@ def verify(root):
         "offline/token-proofs.json",
         "historical.json",
         "verifiers.json",
+        "checkpoint-inventory.json",
     }
     if set(report["files"]) != required:
         raise ValueError("Incomplete preparation hash inventory")
@@ -439,7 +449,19 @@ def main():
     parser.add_argument("--historical-result", type=Path, default=Path("/historical-offline"))
     args = parser.parse_args()
     if args.stage == "prepare":
-        print(json.dumps(prepare(args.root, args.historical_result), indent=2))
+        report = prepare(args.root, args.historical_result)
+        print(
+            "LIGHT_SFT_PREPARED",
+            json.dumps(
+                {
+                    "root": str(args.root),
+                    "records": {key: value["records"] for key, value in report["partitions"].items()},
+                    "checkpoint": report["descriptor"],
+                    "preparation_sha256": digest((args.root / "preparation.json").read_bytes()),
+                }
+            ),
+            flush=True,
+        )
     elif args.stage == "audit":
         audit = importlib.import_module("scripts.miles.analyze_gsm8k_parity").audit
         report = audit(

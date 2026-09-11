@@ -141,3 +141,11 @@ def test_runtime_history_is_inside_docker_copied_configs():
     root = light_sft_gsm8k.HISTORY_PATH.parents[3]
     assert light_sft_gsm8k.HISTORY_PATH.relative_to(root).parts[:2] == ("configs", "miles")
     assert "COPY configs/miles /opt/core-rl/configs/miles" in (root / "runtime/miles/Dockerfile").read_text()
+
+
+def test_archived_comma_answer_normalization():
+    row = request()
+    row["label"] = "1450000"
+    row["doc"]["short_answer"] = "1,450,000"
+    rows, _ = light_sft_gsm8k.offline_rows([row], Tokenizer())
+    assert rows[0]["label"] == "1450000"
