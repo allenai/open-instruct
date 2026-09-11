@@ -13,7 +13,10 @@ from pathlib import Path
 
 
 def run(*args, cwd=None):
-    return subprocess.run(args, cwd=cwd, check=True, text=True, capture_output=True).stdout.strip()
+    try:
+        return subprocess.run(args, cwd=cwd, check=True, text=True, capture_output=True).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"Runtime source command failed: {exc.stderr.strip()}") from exc
 
 
 def copy_embedded_source(source, target):

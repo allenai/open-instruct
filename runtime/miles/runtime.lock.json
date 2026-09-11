@@ -26,7 +26,13 @@
       "development_commit": "b1a7743035794040c1632f83e9ebc013d8c94d1e",
       "embedded_path": "/src/olmo-sglang",
       "patch": "patches/olmo-sglang.patch",
-      "patch_sha256": "9ab54e50fd124d412261b581ccc04572023ccb2f56288e3ec7a6185ccd157359"
+      "patch_sha256": "f48a39c75745642ced106c0580ec971a99a6abb68d6c798d1a314eb9efb8da62",
+      "patch_paths": [
+        "src",
+        "tools",
+        "docs"
+      ],
+      "note": "Base image omits original test files; runtime delta covers src/tools/docs. Full tests live at development_commit."
     }
   }
 }
