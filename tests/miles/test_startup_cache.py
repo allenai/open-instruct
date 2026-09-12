@@ -124,7 +124,7 @@ def test_trial_resource_bounds():
 def test_cache_is_opt_out_and_uses_olmo_miles_ttl_namespace():
     assert CoreConfig().compiler_cache is True
     assert CoreConfig(compiler_cache=False).compiler_cache is False
-    assert startup.DEFAULT_SHARED == "/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl"
+    assert startup.DEFAULT_SHARED == "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
     startup.cache.validate_shared_root(Path(startup.DEFAULT_SHARED))
 
 

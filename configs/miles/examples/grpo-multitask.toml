@@ -115,8 +115,10 @@ rollout_max_prompt_len = 2048
 seed = 17
 disable_grpo_std_normalization = true
 
-# Opt in separately after qualifying cache reuse for your runtime and hardware.
+# Persistent Triton caches shared by every user of this runtime image; the
+# fingerprint keys on image, sources, model and run shape, so a mismatch is a
+# cold miss rather than a wrong hit. Omit shared_root to use this default.
 [compiler_cache]
-enabled = false
-shared_root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/compiler-cache/tmp-30d"
+enabled = true
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 restore = true

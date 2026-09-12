@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-CACHE_ROOT = "/weka/oe-training-default/robertb/tmp-30d/open-instruct-core-compiler-cache"
+CACHE_ROOT = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 
 
 def specification(image):

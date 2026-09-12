@@ -39,7 +39,7 @@ For a self-contained portability screen, the included probe executes an exact FP
 
 ```bash
 cache_args=(
-  --shared-root /weka/oe-training-default/robertb/tmp-30d/core-compiler-cache
+  --shared-root /weka/oe-training-default/open-instruct-compiler-cache/tmp-7d/standalone
   --local-parent /tmp
   --image "$IMMUTABLE_IMAGE_ID"
   --runtime-lock runtime/miles/runtime.lock.json
@@ -79,7 +79,7 @@ The MILES/Core driver now has a worker-level Triton lifecycle controlled by
 `core.compiler_cache`, enabled by default. Set it to `false` to opt out.
 Enabled runs use
 `core.compiler_cache_root`, or the mounted default
-`/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl`.
+`/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d`.
 With no default WEKA mount, automatic persistence is skipped and logged.
 `core.compiler_cache_restore=false` supplies the cold control while still
 publishing after success. `core.compiler_cache_diagnostics=true` records actual
@@ -202,10 +202,10 @@ whole-command savings above already include this cost.
 
 ### Shared path, retention, and archive format
 
-The default shares olmo-miles' cache namespace and exact TTL convention:
+The default is a shared, user-independent root that follows olmo-miles' TTL naming convention:
 
 ```text
-/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl/
+/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d/
   core-v1/<fingerprint>/triton/
     CURRENT
     .publish.lock
@@ -215,7 +215,7 @@ The default shares olmo-miles' cache namespace and exact TTL convention:
   runs/<run-id>/<worker-report>.json
 ```
 
-The `tmp-30d` component marks artifacts and reports for the existing WEKA TTL
+The `tmp-7d` component marks artifacts and reports for the existing WEKA TTL
 cleanup system. No separate cleanup daemon or retention metadata file is added.
 Missing/expired artifacts simply cause a cold miss. Custom WEKA roots must have
 an exact `tmp-N[hdwmy]` component, and roots must be absolute. Invalid retention
@@ -223,7 +223,7 @@ paths now fail configuration validation before launching workers or creating rep
 
 Olmo-miles also uses versioned, fingerprinted, checksummed immutable generations,
 but its layout starts with `v1/<family>/<fingerprint>` and archives use Zstandard
-(`cache.tar.zst`). Core currently uses gzip and its separate `core-rl/core-v1`
+(`cache.tar.zst`). Core currently uses gzip and its separate `core-v1`
 namespace; the archive formats are deliberately not treated as interchangeable.
 The TTL naming convention is the same.
 
@@ -232,7 +232,7 @@ The researcher interface exposes the default and opt-out as:
 ```toml
 [compiler_cache]
 enabled = true
-# shared_root = "/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl"
+# shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 ```
 
 Low-level files use `[core] compiler_cache = true` instead. Set the corresponding

@@ -174,7 +174,7 @@ eval and JSON controls. A parser-only pass is not a new GPU training result.
 Core RL now enables persistent Triton caches by default. Structured run files use
 `[compiler_cache] enabled = false` to opt out; low-level files use
 `[core] compiler_cache = false`. The default shared directory is
-`/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl`, following
-olmo-miles' WEKA TTL naming convention. Custom WEKA roots require a TTL component
+`/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d`, following
+the WEKA TTL naming convention olmo-miles uses. Custom WEKA roots require a TTL component
 and are validated before launch. See the [cache guide](miles-compiler-cache.md)
 for measured cold/restored startup, worker compatibility, and remaining scope limits.

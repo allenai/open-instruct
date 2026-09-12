@@ -25,7 +25,7 @@ from open_instruct.miles import compiler_cache as cache
 
 logger = logger_utils.setup_logger(__name__)
 ENV = "OI_CORE_STARTUP_CACHE"
-DEFAULT_SHARED = "/weka/oe-training-default/olmo-miles/compiler-cache/tmp-30d/core-rl"
+DEFAULT_SHARED = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 
 
 def prepare(args):

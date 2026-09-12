@@ -129,7 +129,7 @@ row_specialization = "dynamic"
 
 [compiler_cache]
 enabled = true
-shared_root = "/weka/oe-training-default/robertb/open-instruct/compiler-cache/tmp-30d"
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 restore = true
 
 [core]
