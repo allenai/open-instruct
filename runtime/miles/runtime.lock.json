@@ -23,10 +23,10 @@
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
       "revision": "81a312ee8326e279a4641e03542ef971a5ffb863",
-      "development_commit": "11ae9f6c4c131ded0ab67420e4f30ea67b924e99",
+      "development_commit": "a5447d1f7df63e73740e761cd51e84f6768d8093",
       "embedded_path": "/src/olmo-sglang",
       "patch": "patches/olmo-sglang.patch",
-      "patch_sha256": "e1bb9d06028986c754782a832b6a78d6313e80ccaf7f466200d8a7e8a12d9751",
+      "patch_sha256": "58545c307f92ac9f5b52d2c07ecbfaac0fd85d259c97d19f18411807c34328c8",
       "patch_paths": [
         "src",
         "tools",
