@@ -102,6 +102,12 @@ router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
 weight_sync_mode = "flattened"
+# Publish routed experts as one stacked tensor per layer and projection
+# (measured 2.6 s -> 0.35 s per publication with 2 GiB buckets).
+expert_publication = "fused"
+# The standalone scoring pass is skipped for this recipe; spot-check it
+# against the training forward every 20 updates instead of the default 50.
+scoring_check_interval = 20
 
 [miles]
 rollout_temperature = 1.0
