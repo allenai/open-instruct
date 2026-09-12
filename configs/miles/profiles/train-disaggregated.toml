@@ -16,6 +16,9 @@ diagnostic_interval = 0
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
+# Qualified 2026-09-12 on the full 512-expert model: stacked per-layer experts cut
+# publication from 2.6 s to 0.35 s with 2 GiB buckets; HF exports stay per-expert.
+expert_publication = "fused"
 weight_sync_mode = "flattened"
 reward_config = "/data/verifiers.json"
 
@@ -65,7 +68,7 @@ sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"
 sglang_log_level = "info"
 check_weight_update_equal = true
-update_weight_buffer_size = 1073741824
+update_weight_buffer_size = 2147483648
 update_weights_interval = 1
 loss_type = "policy_loss"
 advantage_estimator = "grpo"
