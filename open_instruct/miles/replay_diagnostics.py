@@ -56,8 +56,9 @@ def checked_context(actor, module, batch, context):
                     rollout_id=actor.clock.next_rollout_id,
                     phase="training" if module.model.training else "scoring",
                     tokens=int(batch["tokens"].numel()),
-                    captured_tokens=int(batch["tokens"].numel()) - 1,
-                    synthetic_tail_tokens=1,
+                    captured_tokens=int(batch["tokens"].numel()) - len(batch.get("total_lengths", [None])),
+                    synthetic_tail_tokens=len(batch.get("total_lengths", [None])),
+                    samples=len(batch.get("total_lengths", [None])),
                     mismatches=mismatch_count,
                     layers=calls,
                 ),
@@ -80,14 +81,16 @@ def audit_contracts(contracts, updates, local_samples):
         for update in range(updates):
             for phase in ("scoring", "training"):
                 selected = [r for r in replay if r["rollout_id"] == update and r["phase"] == phase]
-                if len(selected) != local_samples:
+                if sum(r.get("samples", 1) for r in selected) != local_samples:
                     raise ValueError(f"Incomplete replay coverage: rank {rank}, update {update}, {phase}")
                 for row in selected:
                     names = set(row["layers"])
                     if not names or (inventory is not None and names != inventory):
                         raise ValueError("Replay routed-layer inventory differs")
                     inventory = names
-                    if row["mismatches"] or row["captured_tokens"] != row["tokens"] - 1:
+                    if row["mismatches"] or row["captured_tokens"] != row["tokens"] - row.get(
+                        "synthetic_tail_tokens", 1
+                    ):
                         raise ValueError("Replayed expert IDs or token alignment differ")
                     for counts in row["layers"].values():
                         minimum = 2 if phase == "training" else 1

@@ -50,6 +50,9 @@ gpus = 8
 trainer_num_nodes = 1
 expert_parallel_size = 8
 micro_batch_size = 1
+# Experimental on the packing branch; see docs/miles-sequence-packing.md.
+sequence_packing = true
+packing_max_tokens = 6144
 activation_recompute = true
 trainer_flash_attention_version = 4
 

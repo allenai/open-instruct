@@ -215,7 +215,9 @@ def test_all_researcher_examples_compile_to_native_arguments():
         run = RunSpec.load(path)
         config = run.compile()
         assert config.arguments()
-        assert config.miles["rollout_batch_size"] == config.miles["n_samples_per_prompt"] == 8
+        expected_prompts = 64 if path.name == "grpo-async-disaggregated.toml" else 8
+        assert config.miles["rollout_batch_size"] == expected_prompts
+        assert config.miles["n_samples_per_prompt"] == 8
         if config.miles["fully_async"]:
             assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False

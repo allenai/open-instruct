@@ -49,18 +49,28 @@ def policy_versions(batch: dict[str, Any]) -> list[int]:
 
 def router_routes(model, batch):
     routes = batch.get("rollout_routed_experts")
-    if routes is None or len(routes) != 1 or not isinstance(routes[0], torch.Tensor):
+    lengths = batch.get("total_lengths", [batch["tokens"].numel()])
+    if routes is None or len(routes) != len(lengths):
         raise ValueError("Rollout router replay requires expert IDs for every sample")
-    routes = routes[0]
-    tokens = batch["tokens"].shape[1]
-    if routes.dtype not in (torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64):
-        raise ValueError("Replay expert IDs must be integers")
-    if routes.ndim != 3 or routes.shape[0] != tokens - 1:
-        raise ValueError("MILES replay must contain [tokens-1, layers, top_k] expert IDs")
-    # MILES records routing for next-token prediction inputs. The last response
-    # token has no scored successor; use a valid, deterministic assignment there.
-    final = torch.arange(routes.shape[-1], device=routes.device).expand(1, routes.shape[1], -1)
-    routes = torch.cat((routes, final), dim=0)
+    padded = []
+    for sample, length in zip(routes, lengths, strict=True):
+        if not isinstance(sample, torch.Tensor) or sample.dtype not in (
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ):
+            raise ValueError("Replay expert IDs must be integer tensors")
+        if sample.ndim != 3 or sample.shape[0] != length - 1:
+            raise ValueError("MILES replay must contain [tokens-1, layers, top_k] expert IDs per sample")
+        # Every document has its own unscored final token, including interior
+        # documents in a pack. Never use the following sample's first assignment.
+        final = torch.arange(sample.shape[-1], device=sample.device).expand(1, sample.shape[1], -1)
+        padded.append(torch.cat((sample, final), dim=0))
+    routes = torch.cat(padded, dim=0)
+    if routes.shape[0] != batch["tokens"].numel():
+        raise ValueError("Replay routes do not cover packed tokens")
     mapping = {}
     for name, _ in model.named_modules():
         if name.endswith(".routed_experts_router"):
