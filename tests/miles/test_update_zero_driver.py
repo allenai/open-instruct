@@ -251,11 +251,11 @@ def test_trainer_probe_runs_after_initial_weight_comparison(driver, tmp_path, mo
     assert events.index("trainer.routes") < events.index("learner.dispose")
 
 
-def test_retained_training_payload_rejects_changed_bytes_before_loading(driver, tmp_path):
+def test_retained_training_payload_rejects_changed_bytes_before_loading(driver, tmp_path, monkeypatch):
     path = tmp_path / "core/rollouts/0.pt"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"wrong retained artifact")
-    driver.importlib.import_module = lambda name: SimpleNamespace()
+    monkeypatch.setattr(driver.importlib, "import_module", lambda name: SimpleNamespace())
     driver.torch.load = lambda *args, **kwargs: pytest.fail("Changed artifact must not be loaded")
     with pytest.raises(ValueError, match="artifact hash changed"):
         driver.trainer_route_payloads(tmp_path, {})

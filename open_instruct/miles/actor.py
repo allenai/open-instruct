@@ -20,7 +20,7 @@ from torch import distributed as dist
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
-from open_instruct.miles import checkpoint, contract, data, models, publication, replay_diagnostics, scheduler
+from open_instruct.miles import checkpoint, config, contract, data, models, publication, replay_diagnostics, scheduler
 from open_instruct.miles import metrics as training_metrics
 from open_instruct.miles.state import PolicyClock
 from open_instruct.miles.timing import startup_stage
@@ -73,7 +73,97 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         if not args.colocate and args.olmo_core.weight_sync_mode == "flattened":
             updater = publication.FlattenedDistributedUpdater
         self.weight_updater = updater(args, self.model)
+        self._scoring_pass()
         return self.clock.next_rollout_id
+
+    def _scoring_pass(self):
+        """Resolve once whether every update runs the standalone scoring pass."""
+        decision = getattr(self, "_scoring_decision", None)
+        if decision is not None:
+            return decision
+        args = self.args
+        decision = config.scoring_pass(
+            args.olmo_core,
+            {
+                "global_batch_size": args.global_batch_size,
+                "rollout_batch_size": getattr(args, "rollout_batch_size", None) or 0,
+                "n_samples_per_prompt": getattr(args, "n_samples_per_prompt", None) or 1,
+                "kl_coef": getattr(args, "kl_coef", 0) or 0,
+                "use_rollout_logprobs": bool(getattr(args, "use_rollout_logprobs", False)),
+            },
+        )
+        hf_config = getattr(self, "hf_config", None)
+        if not decision.standalone and hf_config is not None:
+            stochastic = config.stochastic_fields(hf_config.to_dict())
+            if stochastic:
+                decision = config.ScoringPass(
+                    True,
+                    "stochastic model configuration: " + ", ".join(stochastic),
+                    decision.optimizer_steps_per_collection,
+                )
+        logger.info("Core scoring pass: %s", json.dumps(decision.as_dict(), sort_keys=True))
+        self._scoring_decision = decision
+        self._scoring_checks = 0
+        return decision
+
+    def _scoring_check_due(self, decision):
+        if decision.standalone:
+            return False
+        return config.scoring_check_due(self.args.olmo_core, self._scoring_checks, self.clock.completed_steps)
+
+    @contextlib.contextmanager
+    def _actor_forward_skipped(self, skipped):
+        """Let MILES take old log-probabilities from the training forward for this update.
+
+        MILES' parser only accepts its native flag for the Megatron backend; this
+        adapter implements the same contract, so the attribute is set here for the
+        duration of the update and restored afterwards, including on failure.
+        """
+        previous = getattr(self.args, "skip_actor_forward_only", False)
+        self.args.skip_actor_forward_only = skipped
+        try:
+            yield
+        finally:
+            self.args.skip_actor_forward_only = previous
+
+    def _training_log_probs(self, logits, batch):
+        with torch.no_grad():
+            result = miles_loss.get_log_probs_and_entropy(
+                logits.detach(),
+                args=self.args,
+                unconcat_tokens=batch["unconcat_tokens"],
+                total_lengths=batch["total_lengths"],
+                response_lengths=batch["response_lengths"],
+                max_seq_lens=batch["max_seq_lens"],
+            )
+        return [value.detach() for value in result["log_probs"]]
+
+    def _score_contract(self, rollout, rollout_id, source):
+        """Validate the behavior-policy agreement gate and profile before any weight change."""
+        self._agree(lambda: contract.validate_training_data(rollout))
+        agreement = self._agree(lambda: data.score_agreement(rollout))
+        dist.all_reduce(agreement)
+        difference = self._agree(
+            lambda: data.validate_score_agreement(agreement, self.args.olmo_core.max_train_rollout_logprob_abs_diff)
+        )
+        logger.info("Core behavior-policy agreement: mean_abs=%s active_tokens=%s", difference, int(agreement[1]))
+        profile = contract.probability_profile(rollout)
+        logger.info(
+            "Core score contract: %s",
+            contract.record(self.args, {"event": "scores", "rollout_id": rollout_id, "source": source, **profile}),
+        )
+        return difference, agreement, profile
+
+    def _check_training_scores(self, rollout, training_scores):
+        # Agree on local shape/finite-value failures before entering tensor collectives.
+        sums, maximum = self._agree(
+            lambda: contract.scoring_check(rollout["log_probs"], training_scores, rollout["loss_masks"])
+        )
+        dist.all_reduce(sums)
+        dist.all_reduce(maximum, op=dist.ReduceOp.MAX)
+        return self._agree(
+            lambda: contract.validate_scoring_check(sums, maximum, self.args.olmo_core.scoring_check_tolerance)
+        )
 
     def _get_parallel_config(self):
         return self.train_parallel_config
@@ -133,139 +223,172 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 self._agree(lambda: self._validate_replay_batches(batches))
             versions = self._agree(lambda: data.policy_versions(rollout))
             self._agree(lambda: self.clock.validate_versions(versions, self.args.olmo_core.max_policy_lag))
-            torch.cuda.synchronize()
-            score_started = time.perf_counter()
-            rollout["log_probs"] = self._score(self.train_module, batches, use_replay=True)
-            torch.cuda.synchronize()
-            contract.record(
-                self.args,
-                {
-                    "event": "score_timing",
-                    "rollout_id": rollout_id,
-                    "seconds": time.perf_counter() - score_started,
-                    "model_tokens": sum(batch["tokens"].numel() for batch in batches),
-                    "row_specialization": self.args.olmo_core.row_specialization,
-                },
-            )
-            self._agree(lambda: contract.validate_training_data(rollout))
-            agreement = self._agree(lambda: data.score_agreement(rollout))
-            dist.all_reduce(agreement)
-            difference = self._agree(
-                lambda: data.validate_score_agreement(
-                    agreement, self.args.olmo_core.max_train_rollout_logprob_abs_diff
+            decision = self._scoring_pass()
+            checked = self._scoring_check_due(decision)
+            standalone = decision.standalone or checked
+            if not decision.standalone and len(batches) != local_batch:
+                raise ValueError("Skipping the standalone scoring pass requires one optimizer step per collection")
+            difference = agreement = profile = None
+            if standalone:
+                torch.cuda.synchronize()
+                score_started = time.perf_counter()
+                rollout["log_probs"] = self._score(self.train_module, batches, use_replay=True)
+                torch.cuda.synchronize()
+                contract.record(
+                    self.args,
+                    {
+                        "event": "score_timing",
+                        "rollout_id": rollout_id,
+                        "seconds": time.perf_counter() - score_started,
+                        "model_tokens": sum(batch["tokens"].numel() for batch in batches),
+                        "row_specialization": self.args.olmo_core.row_specialization,
+                    },
                 )
-            )
-            logger.info("Core behavior-policy agreement: mean_abs=%s active_tokens=%s", difference, int(agreement[1]))
-            profile = contract.probability_profile(rollout)
-            logger.info(
-                "Core score contract: %s",
-                contract.record(self.args, {"event": "scores", "rollout_id": rollout_id, **profile}),
-            )
+                difference, agreement, profile = self._score_contract(rollout, rollout_id, "standalone")
             if self.ref_module is not None:
                 rollout["ref_log_probs"] = self._score(self.ref_module, batches, use_replay=False)
-            miles_loss.compute_advantages_and_returns(self.args, rollout)
-            self._agree(lambda: contract.validate_training_data(rollout))
-            batches = data.sample_batches(rollout, self.args.olmo_core.max_sequence_length)
-            for start in range(0, len(batches), local_batch):
-                step_batches = batches[start : start + local_batch]
-                step_versions = [version for batch in step_batches for version in data.policy_versions(batch)]
-                self._agree(
-                    lambda current=step_versions: self.clock.validate_versions(
-                        current, self.args.olmo_core.max_policy_lag
-                    )
-                )
-                normalization = contract.step_normalization(step_batches, self.args.global_batch_size)
-                for batch in step_batches:
-                    batch["aux_loss_div_factor"] = normalization.auxiliary_denominator
-                interval = self.args.olmo_core.diagnostic_interval
-                diagnostic = interval > 0 and self.clock.completed_steps % interval == 0
-                probe = contract.ParameterProbe(self.model) if diagnostic else None
-                lr_used = self.lr_scheduler.get_last_lr()
-                self._agree(lambda: contract.validate_schedule(self.clock, self.lr_scheduler))
-                started = time.perf_counter()
-                contract.auxiliary_metrics(self.model, reset=True)
-                self.train_module.zero_grads()
-
-                count = len(step_batches)
-
-                def objective(module, batch, count=count, normalization=normalization):
-                    logits = self._forward(module, batch)
-                    loss, _, metrics = miles_loss.loss_function(
-                        self.args, batch, count, logits, apply_megatron_loss_scaling=False
-                    )
-                    if self.args.calculate_per_token_loss:
-                        loss = normalization.scale_token_loss(loss)
-                    self._agree(lambda: self._validate_loss(loss))
-                    return loss, training_metrics.loss_metrics(metrics, loss)
-
-                metrics = self.train_module.train_batch_with_loss(step_batches, objective, self._replay_context)
-                gradient_stats = self._agree(probe.gradients) if probe is not None else None
-                aux_metrics = self._agree(lambda: contract.auxiliary_metrics(self.model))
-                self.train_module.optim_step()
-                try:
-                    contract.validate_step_transition(self.clock, self.optimizer, step_batches[0]["tokens"].device)
-                except ValueError:
-                    contract.record(
-                        self.args,
-                        {
-                            "event": "optimizer_rejected",
-                            "step": self.clock.completed_steps,
-                            "local_optimizer_skipped": bool(getattr(self.optimizer, "step_skipped", False)),
-                        },
-                    )
-                    raise
-                self.clock.optimizer_step(True)
-                self.lr_scheduler.step()
-                update_stats = self._agree(probe.updates) if probe is not None else None
-                logger.info(
-                    "Core step contract: %s",
-                    contract.record(
-                        self.args,
-                        {
-                            "event": "optimizer",
-                            "step": self.clock.completed_steps,
-                            "rollout_id": rollout_id,
-                            "normalization": vars(normalization),
-                            "auxiliary_denominator": normalization.auxiliary_denominator,
-                            "reduction": "token" if self.args.calculate_per_token_loss else "response",
-                            "local_policy_objective": sum(float(m["normalized_policy_objective"]) for m in metrics),
-                            "local_auxiliary_objective": aux_metrics,
-                            "local_behavior_versions": sorted(set(step_versions)),
-                            "local_microbatches": count,
-                            "lr_used": lr_used,
-                            "lr_next": self.lr_scheduler.get_last_lr(),
-                            "published_step": self.clock.published_step,
-                            "optimizer_skipped": False,
-                            "elapsed_seconds": time.perf_counter() - started,
-                            "local_pre_optimizer_gradients": gradient_stats,
-                            "sampled_model_updates": update_stats,
-                        },
-                    ),
-                )
-                self.train_module._trainer.global_step = self.clock.completed_steps
-                losses = training_metrics.aggregate_losses(metrics)
-                summary = training_metrics.step_summary(metrics, aux_metrics, time.perf_counter() - started)
-                logged = self._agree(
-                    lambda losses=losses,
-                    summary=summary,
-                    lr_used=lr_used,
-                    gradient_stats=gradient_stats: training_metrics.log_step(
-                        self.args,
-                        losses=losses,
-                        summary=summary,
-                        scores=training_metrics.score_metrics(difference, int(agreement[1]), profile),
-                        clock=self.clock,
-                        rollout_id=rollout_id,
-                        lr_used=lr_used,
-                        lr_next=self.lr_scheduler.get_last_lr(),
-                        optimizer_metrics=self.train_module._trainer.metrics,
-                        gradient_stats=gradient_stats,
-                    )
-                )
-                if logged is not None:
-                    logger.info("Core optimizer step %s: %s", self.clock.completed_steps, logged)
+            with self._actor_forward_skipped(not standalone):
+                self._train_steps(rollout, rollout_id, local_batch, decision, checked, difference, agreement, profile)
             self.clock.next_rollout_id = rollout_id + 1
         self._heartbeat.bump()
+
+    def _train_steps(self, rollout, rollout_id, local_batch, decision, checked, difference, agreement, profile):
+        # Without the standalone pass, old log-probabilities come from the training
+        # forward itself. That is exact only at unchanged weights, which the caller
+        # guarantees by admitting exactly one optimizer step per collection.
+        capture = not decision.standalone
+        scoring_mode = "standalone" if decision.standalone else ("checked" if checked else "skipped")
+        miles_loss.compute_advantages_and_returns(self.args, rollout)
+        self._agree(lambda: contract.validate_training_data(rollout))
+        batches = data.sample_batches(rollout, self.args.olmo_core.max_sequence_length)
+        for start in range(0, len(batches), local_batch):
+            step_batches = batches[start : start + local_batch]
+            step_versions = [version for batch in step_batches for version in data.policy_versions(batch)]
+            self._agree(
+                lambda current=step_versions: self.clock.validate_versions(current, self.args.olmo_core.max_policy_lag)
+            )
+            normalization = contract.step_normalization(step_batches, self.args.global_batch_size)
+            for batch in step_batches:
+                batch["aux_loss_div_factor"] = normalization.auxiliary_denominator
+            interval = self.args.olmo_core.diagnostic_interval
+            diagnostic = interval > 0 and self.clock.completed_steps % interval == 0
+            probe = contract.ParameterProbe(self.model) if diagnostic else None
+            lr_used = self.lr_scheduler.get_last_lr()
+            self._agree(lambda: contract.validate_schedule(self.clock, self.lr_scheduler))
+            started = time.perf_counter()
+            contract.auxiliary_metrics(self.model, reset=True)
+            self.train_module.zero_grads()
+
+            count = len(step_batches)
+
+            def objective(module, batch, count=count, normalization=normalization):
+                logits = self._forward(module, batch)
+                if capture:
+                    batch["training_log_probs"] = self._training_log_probs(logits, batch)
+                loss, _, metrics = miles_loss.loss_function(
+                    self.args, batch, count, logits, apply_megatron_loss_scaling=False
+                )
+                if self.args.calculate_per_token_loss:
+                    loss = normalization.scale_token_loss(loss)
+                self._agree(lambda: self._validate_loss(loss))
+                return loss, training_metrics.loss_metrics(metrics, loss)
+
+            metrics = self.train_module.train_batch_with_loss(step_batches, objective, self._replay_context)
+            if capture:
+                training_scores = self._agree(
+                    lambda step_batches=step_batches: [
+                        score for batch in step_batches for score in batch.pop("training_log_probs")
+                    ]
+                )
+                if checked:
+                    # The standalone pass anchored this update; measure how far the
+                    # gradient-enabled forward drifted from it before any weight change.
+                    report = self._check_training_scores(rollout, training_scores)
+                    logger.info(
+                        "Core scoring check: %s",
+                        contract.record(
+                            self.args,
+                            {
+                                "event": "scoring_check",
+                                "rollout_id": rollout_id,
+                                "step": self.clock.completed_steps,
+                                **report,
+                            },
+                        ),
+                    )
+                    self._scoring_checks += 1
+                else:
+                    rollout["log_probs"] = training_scores
+                    difference, agreement, profile = self._score_contract(rollout, rollout_id, "training_forward")
+            gradient_stats = self._agree(probe.gradients) if probe is not None else None
+            aux_metrics = self._agree(lambda: contract.auxiliary_metrics(self.model))
+            self.train_module.optim_step()
+            try:
+                contract.validate_step_transition(self.clock, self.optimizer, step_batches[0]["tokens"].device)
+            except ValueError:
+                contract.record(
+                    self.args,
+                    {
+                        "event": "optimizer_rejected",
+                        "step": self.clock.completed_steps,
+                        "local_optimizer_skipped": bool(getattr(self.optimizer, "step_skipped", False)),
+                    },
+                )
+                raise
+            self.clock.optimizer_step(True)
+            self.lr_scheduler.step()
+            update_stats = self._agree(probe.updates) if probe is not None else None
+            logger.info(
+                "Core step contract: %s",
+                contract.record(
+                    self.args,
+                    {
+                        "event": "optimizer",
+                        "step": self.clock.completed_steps,
+                        "rollout_id": rollout_id,
+                        "normalization": vars(normalization),
+                        "auxiliary_denominator": normalization.auxiliary_denominator,
+                        "reduction": "token" if self.args.calculate_per_token_loss else "response",
+                        "scoring_pass": scoring_mode,
+                        "local_policy_objective": sum(float(m["normalized_policy_objective"]) for m in metrics),
+                        "local_auxiliary_objective": aux_metrics,
+                        "local_behavior_versions": sorted(set(step_versions)),
+                        "local_microbatches": count,
+                        "lr_used": lr_used,
+                        "lr_next": self.lr_scheduler.get_last_lr(),
+                        "published_step": self.clock.published_step,
+                        "optimizer_skipped": False,
+                        "elapsed_seconds": time.perf_counter() - started,
+                        "local_pre_optimizer_gradients": gradient_stats,
+                        "sampled_model_updates": update_stats,
+                    },
+                ),
+            )
+            self.train_module._trainer.global_step = self.clock.completed_steps
+            losses = training_metrics.aggregate_losses(metrics)
+            summary = training_metrics.step_summary(metrics, aux_metrics, time.perf_counter() - started)
+            logged = self._agree(
+                lambda losses=losses,
+                summary=summary,
+                lr_used=lr_used,
+                gradient_stats=gradient_stats,
+                difference=difference,
+                agreement=agreement,
+                profile=profile: training_metrics.log_step(
+                    self.args,
+                    losses=losses,
+                    summary=summary,
+                    scores=training_metrics.score_metrics(difference, int(agreement[1]), profile),
+                    clock=self.clock,
+                    rollout_id=rollout_id,
+                    lr_used=lr_used,
+                    lr_next=self.lr_scheduler.get_last_lr(),
+                    optimizer_metrics=self.train_module._trainer.metrics,
+                    gradient_stats=gradient_stats,
+                )
+            )
+            if logged is not None:
+                logger.info("Core optimizer step %s: %s", self.clock.completed_steps, logged)
 
     def _validate_replay_batches(self, batches):
         # Validate every rank's external routes before any EP forward collective.

@@ -8,6 +8,9 @@ runtime/miles/sources/
 !scripts/
 !scripts/miles/
 !scripts/miles/**
+!scripts/train/
+!scripts/train/debug/
+!scripts/train/debug/**
 !configs/
 !configs/miles/
 !configs/miles/**

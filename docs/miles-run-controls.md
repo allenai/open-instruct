@@ -86,6 +86,7 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Producer capacity | `async_data_buffer_capacity_factor`, `async_max_concurrent_samples`, `async_unused_samples_handler`, `rollout_submission_granularity`. The Core buffer enforces homogeneous policy versions within prompt groups. |
 | Collection / optimizer batch | `rollout_batch_size * n_samples_per_prompt` is samples per collection; `global_batch_size` is samples per optimizer step. Collections must contain whole steps and the lag budget must cover their final step. `num_rollout` counts collections. |
 | Scoring row specialization | `core.row_specialization` (`static` / `dynamic`), resolved at model construction. Core defaults to static; the starting RL profiles select dynamic to avoid compiling for every activation-buffer capacity. Arithmetic and direct wave/backward callers are unchanged. |
+| Standalone scoring pass | Runs only when the recipe needs it: more than one optimizer step per collection (`rollout_batch_size × n_samples_per_prompt / global_batch_size`), a nonzero `kl_coef`, or dropout in the model configuration. Otherwise old log-probabilities are read from the training forward at unchanged weights (or from rollout log-probabilities when `use_rollout_logprobs=true`), the trainer-anchor PPO ratio is 1 at this forward (a rollout anchor can still differ), and the behavior-policy agreement gate runs on the training forward before the optimizer step. `core.scoring_pass_required=true` forces the pass every update. Skipped runs still run the pass on the first update of every process and every `core.scoring_check_interval` updates (default 50; 0 keeps only the first), comparing it to the training forward and failing above `core.scoring_check_tolerance` (default 1e-3 mean absolute). `plan` reports the decision under `scoring_pass`; each optimizer record carries `scoring_pass` as `standalone`, `checked` or `skipped`. |
 | Microbatch / recomputation | `micro_batch_size=1`; `core.activation_checkpointing`. Core accumulates unpadded samples; `max_tokens_per_gpu` is rejected because it does not control Core batching. Megatron packing, selective recompute modules and dynamic microbatch selection do not translate directly. |
 | Lengths | Set `rollout_max_response_len`, `rollout_max_context_len`, `rollout_max_prompt_len`, `sglang_context_length`, and `core.max_sequence_length` consistently. The baseline's single context knob populated several of these. |
 | Admission / cache | `sglang_server_concurrency`, `sglang_max_running_requests`, `sglang_mem_fraction_static`, `sglang_max_total_tokens`, `sglang_max_mamba_cache_size`; `sglang_disable_radix_cache=false` enables radix cache. |
@@ -126,15 +127,19 @@ rather than accepted and ignored.
 
 The configuration audit also found native options with no Core implementation.
 Both TOML compilation and direct native CLI parsing now reject optimizer-state
-omission/reset, scheduler overrides, disabled advantage computation, skipped
-actor scoring, retained old actors, LoRA training, FSDP replication meshes, and
+omission/reset, scheduler overrides, disabled advantage computation, the raw
+`skip_actor_forward_only` flag, retained old actors, LoRA training, FSDP replication meshes, and
 the generic `deterministic_mode` toggle. Supported resume restores optimizer and
 scheduler state; use the separate serving determinism and collective diagnostic
 controls when appropriate. These rejections prevent silent changes in the claimed
 training contract; they do not add the missing capabilities.
 
-`use_rollout_logprobs=true` changes the policy-ratio denominator, but **does not
-skip Core's scoring forward**. That forward still supplies agreement diagnostics.
+`use_rollout_logprobs=true` changes the policy-ratio denominator; scoring-pass
+eligibility is decided separately by the recipe checks above. On skipped updates,
+the training forward supplies agreement diagnostics before the optimizer step.
+TIS still compares detached trainer scores against rollout scores and can clip.
+See the [scoring-pass merge review](measurements/miles-scoring-pass-merge-20260912.md)
+for the GPU evidence, integration checks, and remaining test dependency gap.
 The maintained async starter now selects trainer-scored old logprobs with TIS,
 matching olmo-miles' async correction. Full-SFT starters also restore the historical
 8 prompts × 8 responses. Earlier measurements used 16 × 4 and rollout logprobs

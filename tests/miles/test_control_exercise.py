@@ -39,6 +39,7 @@ def test_toml_roundtrip_and_native_parser(tmp_path, arm, monkeypatch):
     monkeypatch.setattr("sys.argv", ["control-exercise", *config.arguments()])
     args = arguments.parse_args()
     assert args.olmo_core.row_specialization == "dynamic"
+    assert args.olmo_core.scoring_pass_required, "historical exercise audits every standalone scoring pass"
     assert args.num_rollout == 4
     if arm == "controls":
         assert args.use_tis and not args.use_rollout_logprobs

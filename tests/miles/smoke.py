@@ -85,4 +85,15 @@ manifest = json.loads((root / "save/core-latest.json").read_text())
 assert manifest["rollout_id"] == (2 if options.resume else 1)
 complete = json.loads((root / "save/core" / f"rollout_{manifest['rollout_id']:07d}" / "complete.json").read_text())
 assert complete["clock"]["completed_steps"] == (3 if options.resume else 2)
-print("MILES_CORE_E2E_PASSED")
+# One optimizer step per collection and zero KL: the standalone scoring pass runs only
+# on each process's first update (a check), and the resumed process checks again.
+records = [json.loads(line) for line in (root / "save/training_contract_rank0.jsonl").read_text().splitlines()]
+modes = [record["scoring_pass"] for record in records if record["event"] == "optimizer"]
+sources = [record["source"] for record in records if record["event"] == "scores"]
+checks = [record for record in records if record["event"] == "scoring_check"]
+expected_modes = ["checked", "skipped"] + (["checked"] if options.resume else [])
+assert modes == expected_modes, modes
+assert sources == ["standalone", "training_forward"] + (["standalone"] if options.resume else []), sources
+assert [check["step"] for check in checks] == [0] + ([2] if options.resume else []), checks
+assert all(check["mean_abs"] <= args.olmo_core.scoring_check_tolerance for check in checks), checks
+print("MILES_CORE_E2E_PASSED", json.dumps({"scoring_pass": modes, "scoring_checks": checks}))

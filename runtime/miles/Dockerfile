@@ -10,6 +10,8 @@ RUN python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sour
 COPY open_instruct /opt/core-rl/open_instruct
 COPY tests/miles /opt/core-rl/tests/miles
 COPY scripts/miles /opt/core-rl/scripts/miles
+COPY scripts/train/debug /opt/core-rl/scripts/train/debug
+COPY runtime/miles/Dockerfile /opt/core-rl/runtime/miles/Dockerfile
 COPY configs/miles /opt/core-rl/configs/miles
 ENV PYTHONPATH=/opt/core-rl/sources/olmo-sglang/src:/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles
 WORKDIR /opt/core-rl

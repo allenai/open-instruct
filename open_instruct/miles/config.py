@@ -40,6 +40,12 @@ class CoreConfig:
     max_policy_lag: int = 0
     router_aux_loss_weight: float = 0.01
     router_z_loss_weight: float = 1e-5
+    # The standalone pre-update scoring pass is skipped when the recipe makes it
+    # redundant (see scoring_pass); these control the override and the periodic
+    # standalone-versus-training check that guards the skipped path.
+    scoring_pass_required: bool = False
+    scoring_check_interval: int = 50
+    scoring_check_tolerance: float = 1e-3
 
     def __post_init__(self):
         if self.compiler_cache_root is not None:
@@ -48,11 +54,17 @@ class CoreConfig:
             cache.validate_shared_root(Path(self.compiler_cache_root))
         if self.row_specialization not in ("static", "dynamic"):
             raise ValueError("core.row_specialization must be static or dynamic")
-        if type(self.diagnostic_interval) is not int or self.diagnostic_interval < 0:
-            raise ValueError("core.diagnostic_interval must be a nonnegative integer")
+        for name in ("diagnostic_interval", "scoring_check_interval"):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 0:
+                raise ValueError(f"core.{name} must be a nonnegative integer")
         limit = self.max_train_rollout_logprob_abs_diff
         if limit is not None and (not math.isfinite(limit) or limit < 0):
             raise ValueError("core.max_train_rollout_logprob_abs_diff must be finite and nonnegative")
+        tolerance = self.scoring_check_tolerance
+        if type(tolerance) is bool or not isinstance(tolerance, (int, float)) or not math.isfinite(tolerance):
+            raise ValueError("core.scoring_check_tolerance must be a finite number")
+        if tolerance < 0:
+            raise ValueError("core.scoring_check_tolerance must be nonnegative")
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
             raise ValueError("core.weight_sync_mode must be flattened or per_tensor")
         for name in (
@@ -66,6 +78,7 @@ class CoreConfig:
             "checkpoint_compact_storage",
             "checkpoint_dedup_save_to_lowest_rank",
             "checkpoint_constant_memory_planning",
+            "scoring_pass_required",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"core.{name} must be a boolean")
@@ -91,6 +104,60 @@ class CoreConfig:
             for field in dataclasses.fields(self)
             if field.name.startswith("checkpoint_") and getattr(self, field.name) is not None
         }
+
+
+@dataclasses.dataclass(frozen=True)
+class ScoringPass:
+    """Whether every update runs the standalone pre-update scoring pass."""
+
+    standalone: bool
+    reason: str
+    optimizer_steps_per_collection: int | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+def scoring_pass(core: CoreConfig, options: dict[str, Any]) -> ScoringPass:
+    """Decide from the static recipe whether the standalone scoring pass carries information.
+
+    The pass produces the old log-probabilities for the PPO ratio. With exactly one
+    optimizer step per collection and no KL term in the advantages, those values are
+    the training forward's own log-probabilities at unchanged weights, so the trainer
+    reads them there instead. Rollout log-probabilities as the anchor make the pass
+    diagnostic-only as well. Model-level conditions (dropout) are checked by the trainer,
+    which can see the loaded configuration.
+    """
+    samples = options.get("global_batch_size")
+    collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
+    steps = collection // samples if collection and samples else None
+    if core.scoring_pass_required:
+        return ScoringPass(True, "core.scoring_pass_required", steps)
+    if steps is None:
+        return ScoringPass(True, "unknown collection size; one optimizer step per collection is unproven", steps)
+    if steps != 1:
+        return ScoringPass(True, f"{steps} optimizer steps per collection need the pre-update anchor", steps)
+    if options.get("kl_coef", 0) != 0:
+        return ScoringPass(True, "kl_coef needs actor log-probabilities before advantages", steps)
+    anchor = (
+        "rollout log-probabilities"
+        if options.get("use_rollout_logprobs", False)
+        else "the training forward at unchanged weights"
+    )
+    return ScoringPass(
+        False, f"one optimizer step per collection with zero KL; old log-probabilities are {anchor}", steps
+    )
+
+
+def stochastic_fields(model_config: dict[str, Any]) -> list[str]:
+    """Model settings that make a forward pass non-repeatable, so no single old log-probability exists."""
+    return sorted(name for name, value in model_config.items() if "dropout" in name and value)
+
+
+def scoring_check_due(core: CoreConfig, checks_done: int, completed_steps: int) -> bool:
+    """Check the first update of every process (including after resume), then on the interval."""
+    interval = core.scoring_check_interval
+    return checks_done == 0 or (interval > 0 and completed_steps % interval == 0)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -264,5 +331,10 @@ class RunConfig:
                 "samples_per_collection": collection or None,
                 "samples_per_optimizer_step": options["global_batch_size"],
                 "optimizer_steps_per_collection": collection // options["global_batch_size"] if collection else None,
+            },
+            "scoring_pass": {
+                **scoring_pass(self.core, options).as_dict(),
+                "check_interval": self.core.scoring_check_interval,
+                "check_tolerance": self.core.scoring_check_tolerance,
             },
         }

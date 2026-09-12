@@ -43,7 +43,11 @@ def configuration(campaign, output, arm, updates):
     config = dataclasses.replace(
         config,
         core=dataclasses.replace(
-            config.core, row_specialization="dynamic", max_policy_lag=int(is_async(arm)), diagnostic_interval=0
+            config.core,
+            row_specialization="dynamic",
+            max_policy_lag=int(is_async(arm)),
+            diagnostic_interval=0,
+            scoring_pass_required=True,
         ),
     )
     config.miles.update(
@@ -94,6 +98,9 @@ def configuration(campaign, output, arm, updates):
             Path(__file__).resolve().parents[2] / "configs/miles/profiles/train-disaggregated.toml"
         )
         config.miles.update({key: starter.miles[key] for key in ADMISSION_KEYS})
+        # Preserve this historical 16 x 4 measurement recipe as starter defaults evolve.
+        # It also measures standalone scoring on every collection by design.
+        config.miles.update(rollout_batch_size=16, n_samples_per_prompt=4, global_batch_size=64)
     if arm == "replay-admission64":
         config = dataclasses.replace(
             config, core=dataclasses.replace(config.core, replay_diagnostics=True, diagnostic_interval=1)
