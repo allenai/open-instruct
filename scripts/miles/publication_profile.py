@@ -189,6 +189,12 @@ async def profile(args, output):
         primary_error = sys.exc_info()[1]
         cleanup_errors = []
         if learner is not None:
+            # Retire the trainer-to-engine NCCL group collectively before either side
+            # is disposed, as the training driver does; disposal otherwise hangs.
+            try:
+                await asyncio.wait_for(learner._broadcast("close_weight_transport"), timeout=60)
+            except Exception as error:
+                cleanup_errors.append(error)
             try:
                 await asyncio.wait_for(learner.dispose(), timeout=180)
             except Exception as error:
