@@ -48,10 +48,12 @@ def main():
     parser.add_argument("image")
     parser.add_argument("root", type=Path)
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--auditor", choices=("workflow", "olmo3"), default="workflow")
     args = parser.parse_args()
     if not args.root.is_relative_to("/weka/oe-training-default"):
         parser.error("This bounded audit launcher mounts oe-training-default only")
-    source = Path(__file__).with_name("audit_workflow.py").read_bytes()
+    filename = "audit_workflow.py" if args.auditor == "workflow" else "audit_olmo3_gsm8k.py"
+    source = Path(__file__).with_name(filename).read_bytes()
     document = json.dumps(specification(args.image, args.root, source), indent=2)
     if args.render_only:
         print(document)
