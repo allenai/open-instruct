@@ -151,6 +151,12 @@ def _score_response(result: Any, *, config: CodeVerifierConfig) -> float:
 
 async def code_score(args: Any, prediction: str, target: Any, *, stdio: bool = False) -> float:
     """Execute one completion against its tests and return its pass-rate reward."""
+    score, _ = await execute(args, prediction, target, stdio=stdio)
+    return score
+
+
+async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = False) -> tuple[float, dict]:
+    """Score one completion and describe the service outcome for per-sample diagnostics."""
     config = code_verifier_config(args, stdio=stdio)
     payload = {
         "program": extract_python_code(prediction),
@@ -159,11 +165,20 @@ async def code_score(args: Any, prediction: str, target: Any, *, stdio: bool = F
     }
     timeout = max(30.0, min(300.0, config.max_execution_time * 10))
 
+    diagnostics = {
+        "status": "ok",
+        "http_status": None,
+        "program_chars": len(payload["program"]),
+        "tests": len(target) if isinstance(target, list) else -1,
+        "stdio": stdio,
+    }
+
     def request() -> Any:
         try:
             response = _get_session().post(
                 config.api_url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout
             )
+            diagnostics["http_status"] = response.status_code
             response.raise_for_status()
             return response.json()
         except requests.HTTPError as error:
@@ -181,6 +196,7 @@ async def code_score(args: Any, prediction: str, target: Any, *, stdio: bool = F
                     len(payload["program"]),
                     len(target) if isinstance(target, list) else -1,
                 )
+                diagnostics["status"] = "rejected"
                 return {"results": []}
             raise RuntimeError(f"code verifier request failed for {config.api_url}: {error}") from error
         except Exception as error:
@@ -190,7 +206,7 @@ async def code_score(args: Any, prediction: str, target: Any, *, stdio: bool = F
     score = _score_response(result, config=config)
     if not math.isfinite(score):
         raise RuntimeError(f"code verifier returned non-finite score {score!r}")
-    return score
+    return score, diagnostics
 
 
 @dataclass
@@ -213,4 +229,5 @@ class CodeVerifier:
             code_max_execution_time=self.config.max_execution_time,
             code_pass_rate_reward_threshold=self.config.pass_rate_reward_threshold,
         )
-        return SimpleNamespace(score=await code_score(args, prediction, label, stdio=self.config.stdio), cost=0.0)
+        score, diagnostics = await execute(args, prediction, label, stdio=self.config.stdio)
+        return SimpleNamespace(score=score, cost=0.0, diagnostics=diagnostics)

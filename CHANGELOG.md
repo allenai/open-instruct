@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- MILES/Core RL code verification records each sample's code-service outcome in `metadata.verifier_diagnostics` and logs per-collection `rollout/code_verifier/*` metrics (samples, rejections by HTTP status); transient gateway errors are retried on the scoring POSTs, and a 4xx or 500 for a sample scores it zero instead of failing the run (PR URL pending).
 - MILES/Core RL async publication boundary aborts engine requests and retries the producer join when the first join exceeds the health-check budget, instead of failing the run; `scripts/miles/analyze_async_run.py` summarizes an async run's per-update timing, rollout statistics and evaluations from its Beaker log (PR URL pending).
 - MILES/Core RL compiler-cache persistence now defaults to a shared, user-independent WEKA root, `/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d`, and the researcher examples enable it; per-user `YOUR_USERNAME` cache roots are gone. The previous default directory under `olmo-miles/compiler-cache` did not exist on WEKA, so default-on persistence had been a cold miss every run (PR URL pending).
 - MILES/Core RL weight publication records per-bucket broadcast and engine-load timings, and `core.expert_publication = "fused"` publishes routed experts as one stacked tensor per layer and projection in the serving engine's layout instead of per-expert slices, cutting the engine's per-tensor loading work by the expert count (PR URL pending).

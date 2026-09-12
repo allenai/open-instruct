@@ -297,6 +297,8 @@ async def _score(args, sample):
         score = _finite(result.score, "verifier score")
         total += weight * score
         components.append({"name": name, "score": score, "weight": weight, "cost": result.cost})
+        if isinstance(getattr(result, "diagnostics", None), dict):
+            metadata.setdefault("verifier_diagnostics", {})[name] = result.diagnostics
     total = _finite(total, "combined reward")
     metadata["reward_components"] = components
     return total

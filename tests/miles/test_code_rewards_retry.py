@@ -59,3 +59,11 @@ def test_service_errors_still_fail_after_retries(monkeypatch):
         _score(monkeypatch, 503)
     with pytest.raises(RuntimeError, match="code verifier request failed"):
         _score(monkeypatch, 429)
+
+
+def test_verifier_reports_diagnostics(monkeypatch):
+    monkeypatch.setattr(code_rewards, "_get_session", lambda: _Session(413))
+    verifier = code_rewards.CodeVerifier(code_rewards.ServiceConfig(api_url="https://svc/test_program", stdio=True))
+    result = asyncio.run(verifier.async_call([], "def f(): pass", ["assert True"]))
+    assert result.score == 0.0
+    assert result.diagnostics["status"] == "rejected" and result.diagnostics["http_status"] == 413
