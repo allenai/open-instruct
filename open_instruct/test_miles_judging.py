@@ -1,8 +1,10 @@
 """Ownership, failure and reward contracts, with real local HTTP and subprocesses."""
 
 import asyncio
+import importlib
 import json
 import os
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -235,3 +237,13 @@ def test_missing_reference_and_unused_bindings_are_rejected(document, tmp_path):
     path.write_text(json.dumps({"metadata": {"verifiers": []}}) + "\n")
     with pytest.raises(ValueError, match="absent"):
         judge_registry.validate_data({"prompt_data": str(path)}, value)
+
+
+@pytest.mark.parametrize("stage", ["prepare", "inspect", "audit"])
+def test_cpu_judge_stages_always_use_saturn(document, stage):
+    module = importlib.import_module("scripts.miles.launch_judge_preparation")
+    task = module.specification("image", RunSpec.from_dict(document), stage)["tasks"][0]
+    assert task["constraints"]["cluster"] == ["ai2/saturn"]
+    assert "gpuCount" not in task["resources"] and "replicas" not in task
+    assert "preflight_attention" not in task["arguments"][0]
+    subprocess.run(["bash", "-n"], input=task["arguments"][0], text=True, check=True)

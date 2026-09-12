@@ -35,7 +35,9 @@ def audit(root):
     require(len(canaries) == 4, "Both rubric controls must have completed")
     torch = importlib.import_module("torch")
     prepared = {
-        split: {row["input"]: row for row in audit_workflow.read_jsonl(path)}
+        split: {
+            row["input"]: row for row in [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
+        }
         for split, path in (
             ("train", root / "prepared/data/train.jsonl"),
             ("eval", Path(miles["eval_prompt_data"][1])),

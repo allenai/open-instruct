@@ -56,10 +56,12 @@ in `runtime/miles/runtime.lock.json`. Alternatively, set `MILES_EXISTING_IMAGE`
 to a compatible immutable Beaker image ID; aliases are rejected. The submitting
 host needs the Beaker CLI and credentials, plus Docker when building.
 
-The config launcher currently allocates one Beaker node: one shared GPU for
-tiny development or two trainer GPUs plus one serving GPU for the full-SFT
-examples. A topology needing multiple nodes is rejected before image building;
-use the existing qualified campaign launcher for that layout.
+The config launcher supports single-node runs and replicated disaggregated
+allocations with independent trainer, rollout and named-judge GPU counts.
+See [multi-node placement and managed judges](miles-managed-judges.md) for the
+ownership rules, limits and tiny qualification configuration. `plan` reports
+per-node assignments and unused GPUs; multi-node/managed runs currently require
+`launch.auto_resume=false`.
 
 `status` reports the latest Beaker attempt, all experiment details and whether
 the current config matches the submitted config. Receipts live under
@@ -133,6 +135,7 @@ prove that a model fits the selected GPUs.
 | `[inference]` | Colocation, engine topology, batch geometry, lengths and SGLang admission/cache/graph controls. |
 | `[optimizer]` | LR, schedule, Adam, clipping, KL and entropy coefficients. |
 | `[async]` | Scheduling, allowed weight age, buffer capacity and off-policy correction. |
+| `[judges]`, `[rubrics]`, `[judging]` | Named fixed-weight SGLang services, versioned grading profiles and prepared-verifier bindings. |
 | `[tracking]` | W&B mode/project/group/team. Examples retain offline files without requiring credentials. |
 | `[runtime]`, `[compiler_cache]` | Core runtime selection and compiler-cache policy. |
 | `[core]`, `[miles]` | Explicit adapter/native options without a structured alias. Unknown or unsupported controls fail validation. |
