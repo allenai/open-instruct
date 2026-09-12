@@ -42,7 +42,7 @@ def core_arguments(root, output):
     gsm8k_parity = importlib.import_module("scripts.miles.gsm8k_parity")
     config = gsm8k_parity.configuration(root)
     config.miles.update(
-        num_rollout=0,
+        num_rollout=1,  # validation floor; the profile never calls train
         wandb_mode="disabled",
         save=str(output / "metrics"),
         save_debug_rollout_data=str(output / "unused-rollouts/{rollout_id}.pt"),
@@ -135,8 +135,8 @@ def summarize(publications):
 
 
 async def profile(args, output):
-    if args.num_rollout != 0 or args.fully_async or args.offload_rollout or args.colocate:
-        raise ValueError("Only the synchronous disaggregated resident configuration with zero updates is supported")
+    if args.fully_async or args.offload_rollout or args.colocate:
+        raise ValueError("Only the synchronous disaggregated resident configuration is supported")
     if not args.check_weight_update_equal:
         raise ValueError("The full serving-weight comparison must remain enabled")
     write_json(output / "resolved-arguments.json", vars(args))
