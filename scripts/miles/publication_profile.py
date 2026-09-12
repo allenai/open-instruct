@@ -12,6 +12,7 @@ check runs at the end to show the sweep loaded nothing incorrectly.
 """
 
 import asyncio
+import dataclasses
 import importlib
 import json
 import os
@@ -50,6 +51,8 @@ def core_arguments(root, output):
         wandb_dir=str(output / "unused-wandb"),
     )
     config.miles.pop("use_wandb", None)
+    experts = os.environ.get("OI_PUBLICATION_PROFILE_EXPERTS", "per_expert")
+    config = dataclasses.replace(config, core=dataclasses.replace(config.core, expert_publication=experts))
     sys.argv = [sys.argv[0], *config.arguments()]
     return arguments.parse_args()
 

@@ -79,9 +79,11 @@ def build_train_module(args, *, common, optim, hf_config, hf_state):
     return module
 
 
-def iter_export_state(module, hf, *, stream_moe=True):
+def iter_export_state(module, hf, *, stream_moe=True, fused_experts=False):
+    if fused_experts and not stream_moe:
+        raise ValueError("Fused expert publication requires the streaming MoE export")
     if stream_moe:
-        yield from olmo3.iter_olmo3_moe_hf_state(module.model, hf)
+        yield from olmo3.iter_olmo3_moe_hf_state(module.model, hf, fused_experts=fused_experts)
     else:
         yield from olmo3.gather_olmo3_moe_hf_state(module.model, hf, cpu=True).items()
 

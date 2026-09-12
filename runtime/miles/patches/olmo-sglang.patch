@@ -8624,7 +8624,7 @@ index 8c31075004cc296b8a257e1283dde7522e7349e3..e042ee610e7da4a9fce7ced73ddf0ada
          if not 1 <= config.linear_key_head_dim <= 256:
              raise NotImplementedError(
 diff --git a/src/olmo_sglang/models/olmo3_moe.py b/src/olmo_sglang/models/olmo3_moe.py
-index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d10c4ad174 100644
+index acc19484798d0387215ef105bf6aa21e2e48173e..2b475a401ad6cde87c194aa9a2eca0fe060b127e 100644
 --- a/src/olmo_sglang/models/olmo3_moe.py
 +++ b/src/olmo_sglang/models/olmo3_moe.py
 @@ -10,8 +10,10 @@ from __future__ import annotations
@@ -8786,7 +8786,7 @@ index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d1
              ),
              prefix=add_prefix("layers", prefix),
          )
-@@ -589,81 +633,102 @@ class Olmo3MoeForCausalLM(nn.Module):
+@@ -589,81 +633,133 @@ class Olmo3MoeForCausalLM(nn.Module):
          )
  
      def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
@@ -8819,8 +8819,16 @@ index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d1
 +        """
 +        resolver = self._weight_targets
 +        if resolver is None:
++            fused_layers = {
++                f"{module_name}.{attribute}": module
++                for module_name, module in self.named_modules()
++                if isinstance(module, FusedMoE)
++                for attribute in ("w13_weight", "w2_weight")
++            }
 +            resolver = self._weight_targets = WeightTargets(
-+                dict(self.named_parameters()), self.config.n_routed_experts
++                dict(self.named_parameters()),
++                self.config.n_routed_experts,
++                fused_layers=fused_layers,
 +            )
          loaded_params: set[str] = set()
          for name, loaded_weight, *rest in weights:
@@ -8841,6 +8849,12 @@ index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d1
 +                    shard_id=shard_id,
 +                    expert_id=expert_id,
 +                )
++            elif kind == "fused":
++                # One stacked tensor per layer and projection: [E, 2H, D] with gate
++                # rows first for w13, [E, D, H] for w2, in the engine's own layout.
++                resolver.fused_layers[mapped_name].weight_loader_fused(
++                    param, loaded_weight, mapped_name, shard_id=shard_id
++                )
 +            else:
 +                weight_loader = getattr(param, "weight_loader", default_weight_loader)
 +                weight_loader(param, loaded_weight, **loader_kwargs)
@@ -8848,9 +8862,7 @@ index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d1
 +        return loaded_params
 +
 +    _weight_targets: "WeightTargets | None" = None
- 
--            name = name.replace(".linear_attn.", ".self_attn.")
--            for param_name, weight_name, shard_id in stacked_params_mapping:
++
 +
 +STACKED_PARAMS_MAPPING = (
 +    (".qkv_proj", ".q_proj", "q"),
@@ -8864,8 +8876,15 @@ index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d1
 +)
 +_EXPERT_SHARDS = {"gate_proj": "w1", "down_proj": "w2", "up_proj": "w3"}
 +_EXPERT_WEIGHT = re.compile(r"\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.")
++_FUSED_EXPERT_WEIGHT = re.compile(r"\.mlp\.experts\.(gate_up_proj|down_proj)\.")
++_FUSED_TARGETS = {
++    "gate_up_proj": ("experts.w13_", "w13"),
++    "down_proj": ("experts.w2_", "w2"),
++}
 +
-+
+ 
+-            name = name.replace(".linear_attn.", ".self_attn.")
+-            for param_name, weight_name, shard_id in stacked_params_mapping:
 +class WeightTargets:
 +    """Resolve HF checkpoint names to SGLang parameters without scanning mappings.
 +
@@ -8874,9 +8893,15 @@ index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d1
 +    name; unknown names raise ``KeyError`` exactly as the scanning loader did.
 +    """
 +
-+    def __init__(self, params: dict[str, torch.nn.Parameter], num_experts: int):
++    def __init__(
++        self,
++        params: dict[str, torch.nn.Parameter],
++        num_experts: int,
++        fused_layers: dict[str, Any] | None = None,
++    ):
 +        self.params = params
 +        self.num_experts = num_experts
++        self.fused_layers = fused_layers or {}
 +        self._cache: dict[str, tuple[str, str, Any, int | None] | None] = {}
 +
 +    def resolve(self, name: str) -> tuple[str, str, Any, int | None] | None:
@@ -8941,6 +8966,12 @@ index acc19484798d0387215ef105bf6aa21e2e48173e..a1be11a2ad3978d007a725e4a78745d1
 -        return loaded_params
 +                if mapped_name in self.params:
 +                    return ("stacked", mapped_name, shard_id, None)
++        fused = _FUSED_EXPERT_WEIGHT.search(name)
++        if fused is not None:
++            prefix, shard_id = _FUSED_TARGETS[fused.group(1)]
++            mapped_name = name.replace(f"experts.{fused.group(1)}.", prefix)
++            if mapped_name in self.fused_layers and mapped_name in self.params:
++                return ("fused", mapped_name, shard_id, None)
 +        match = _EXPERT_WEIGHT.search(name)
 +        if match is not None and int(match.group(1)) < self.num_experts:
 +            expert_id, projection = int(match.group(1)), match.group(2)

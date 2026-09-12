@@ -45,10 +45,15 @@ class CoreConfig:
     scoring_pass_required: bool = False
     scoring_check_interval: int = 50
     scoring_check_tolerance: float = 1e-3
+    # Publication layout for routed experts: per-expert HF slices, or one stacked
+    # tensor per layer and projection in the serving engine's fused layout.
+    expert_publication: str = "per_expert"
 
     def __post_init__(self):
         if self.row_specialization not in ("static", "dynamic"):
             raise ValueError("core.row_specialization must be static or dynamic")
+        if self.expert_publication not in ("per_expert", "fused"):
+            raise ValueError("core.expert_publication must be per_expert or fused")
         for name in ("diagnostic_interval", "scoring_check_interval"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 0:
                 raise ValueError(f"core.{name} must be a nonnegative integer")

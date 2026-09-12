@@ -92,10 +92,14 @@ def build_train_module(args, source=None):
     return module, hf, config
 
 
-def iter_export_state(module, hf, *, stream_moe=True):
-    """Yield HF weights through the selected trainer's native conversion path."""
+def iter_export_state(module, hf, *, stream_moe=True, fused_experts=False):
+    """Yield HF weights through the selected trainer's native conversion path.
+
+    ``fused_experts`` yields routed experts stacked per layer in the serving
+    engine's layout, for publication only; HF exports keep per-expert slices.
+    """
     kind = getattr(module, "_miles_model_backend", "moe" if hf.model_type == "olmo3moe" else "standard")
-    yield from _backend(kind).iter_export_state(module, hf, stream_moe=stream_moe)
+    yield from _backend(kind).iter_export_state(module, hf, stream_moe=stream_moe, fused_experts=fused_experts)
 
 
 def export_state(module, hf):

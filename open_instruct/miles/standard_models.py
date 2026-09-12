@@ -100,7 +100,9 @@ def build_train_module(args, *, common, optim, hf_config, hf_state):
     return module
 
 
-def iter_export_state(module, hf, *, stream_moe=True):
+def iter_export_state(module, hf, *, stream_moe=True, fused_experts=False):
+    if fused_experts:
+        raise ValueError("Fused expert publication applies to routed MoE models only")
     for name, value in module.model.state_dict().items():
         native = value.full_tensor() if isinstance(value, DTensor) else value
         yield from convert.convert_state_to_hf(hf, {name: native}).items()

@@ -8,6 +8,7 @@ import torch
 from scripts.miles import launch_publication_profile, publication_profile
 
 from open_instruct.miles import actor, publication
+from open_instruct.miles.config import CoreConfig
 
 
 def _record(buffer_bytes, total, details):
@@ -104,3 +105,21 @@ def test_specification_records_nccl_transport_and_mounts_weka():
     assert "export NCCL_DEBUG=INFO" in script and "NCCL_DEBUG_FILE=/output/nccl/" in script
     assert "test ! -e " in script and "publication_profile.py" in script
     json.dumps(spec)
+
+
+@pytest.mark.parametrize("value", ["per_expert", "fused"])
+def test_expert_publication_accepts_both_layouts(value):
+    assert CoreConfig(expert_publication=value).expert_publication == value
+
+
+def test_expert_publication_rejects_other_values():
+    with pytest.raises(ValueError, match="expert_publication"):
+        CoreConfig(expert_publication="stacked")
+
+
+def test_launcher_passes_the_expert_layout_to_the_profile():
+    spec = launch_publication_profile.specification("user/image", experts="fused")
+    assert "export OI_PUBLICATION_PROFILE_EXPERTS=fused" in spec["tasks"][0]["arguments"][0]
+    assert "(fused experts)" in spec["description"]
+    with pytest.raises(ValueError):
+        launch_publication_profile.specification("user/image", experts="stacked")

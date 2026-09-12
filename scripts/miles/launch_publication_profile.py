@@ -10,11 +10,14 @@ from pathlib import Path
 ROOT = "/weka/oe-training-default/robertb/open-instruct/gsm8k-parity/20260910-core-megatron-v1"
 
 
-def specification(image, *, campaign="publication-profile-20260912-v1"):
+def specification(image, *, campaign="publication-profile-20260912-v1", experts="per_expert"):
+    if experts not in ("per_expert", "fused"):
+        raise ValueError("experts must be per_expert or fused")
     output = ROOT + "/" + campaign
     env = {
         "OI_PUBLICATION_PROFILE_ROOT": ROOT,
         "OI_PUBLICATION_PROFILE_OUTPUT": output,
+        "OI_PUBLICATION_PROFILE_EXPERTS": experts,
         "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models",
         "WANDB_MODE": "disabled",
         "TOKENIZERS_PARALLELISM": "false",
@@ -48,7 +51,7 @@ def specification(image, *, campaign="publication-profile-20260912-v1"):
     ]
     return {
         "version": "v2",
-        "description": "Full-model Core publication profile: broadcast versus engine load per bucket, bucket-size sweep, NCCL transport",
+        "description": f"Full-model Core publication profile ({experts} experts): broadcast versus engine load per bucket, bucket-size sweep, NCCL transport",
         "tasks": [
             {
                 "name": "publication-profile",
@@ -70,9 +73,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument("--campaign", default="publication-profile-20260912-v1")
+    parser.add_argument("--experts", choices=("per_expert", "fused"), default="per_expert")
     parser.add_argument("--render-only", action="store_true")
     options = parser.parse_args()
-    spec = specification(options.image, campaign=options.campaign)
+    spec = specification(options.image, campaign=options.campaign, experts=options.experts)
     if options.render_only:
         print(json.dumps(spec, indent=2))
         return

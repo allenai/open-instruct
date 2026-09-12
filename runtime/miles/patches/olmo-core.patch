@@ -1223,7 +1223,7 @@ index 050b1e0bc30e06a119c8726735e754178f84a010..7cb0bba538fbb035bbcab104d492c5eb
          self.w_out = nn.Linear(
              n_heads * self.head_dim, d_model, bias=bias, dtype=dtype, device=init_device
 diff --git a/src/olmo_core/nn/hf/convert.py b/src/olmo_core/nn/hf/convert.py
-index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18539da513 100644
+index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0dfe189201a5d94aa1c950ee70b9ad1f39bf4d21 100644
 --- a/src/olmo_core/nn/hf/convert.py
 +++ b/src/olmo_core/nn/hf/convert.py
 @@ -1,6 +1,6 @@
@@ -1293,7 +1293,7 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
      "llama": {
          f"blocks.{LAYER}.attention_norm.weight": StateMappingTemplate(
              f"blocks.{LAYER}.attention_norm.weight",
-@@ -934,11 +958,21 @@ def convert_olmo3moe_state_from_hf(
+@@ -934,18 +958,38 @@ def convert_olmo3moe_state_from_hf(
  
  @beta_feature
  def convert_olmo3moe_state_to_hf(
@@ -1308,6 +1308,8 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
 +def iter_olmo3moe_state_to_hf(
 +    config: PretrainedConfig,
 +    olmo_core_state: Mapping[str, Any],
++    *,
++    fused_experts: bool = False,
 +) -> Iterator[tuple[str, torch.Tensor]]:
      """
 -    Convert an *unsharded* OLMo-core MoE-v2 state dict to HF ``olmo3moe`` format.
@@ -1318,7 +1320,22 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
  
      Inverse of :func:`convert_olmo3moe_state_from_hf`. Splits the fused
      ``w_up_gate`` routed-expert weight into per-expert HF ``up_proj``/``gate_proj``
-@@ -960,20 +994,18 @@ def convert_olmo3moe_state_to_hf(
+     and reshapes ``w_down`` into per-expert HF ``down_proj``.
+ 
++    With ``fused_experts`` the routed experts of each layer are yielded as two
++    stacked tensors instead of ``3 * n_routed_experts`` slices:
++    ``mlp.experts.gate_up_proj.weight`` of shape ``[E, 2 * moe_hidden, d]`` with
++    gate rows before up rows, and ``mlp.experts.down_proj.weight`` of shape
++    ``[E, d, moe_hidden]``. That is the serving engine's fused expert layout, for
++    online weight publication; it is not the HF checkpoint format.
++
+     :param config: The Hugging Face ``Olmo3MoeConfig``.
+     :param olmo_core_state: An unsharded OLMo-core model state dict.
++    :param fused_experts: Yield stacked per-layer expert tensors.
+     """
+     n_layers: int = config.num_hidden_layers
+     n_experts: int = config.n_routed_experts
+@@ -960,20 +1004,18 @@ def convert_olmo3moe_state_to_hf(
      peri_ln = getattr(config, "use_peri_ln", False)
      used: set[str] = set()
  
@@ -1344,7 +1361,7 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
          else:
              attention_map = {
                  "w_q.weight": "q_proj.weight",
-@@ -988,38 +1020,42 @@ def convert_olmo3moe_state_to_hf(
+@@ -988,38 +1030,42 @@ def convert_olmo3moe_state_to_hf(
              if getattr(config, "scalable_softmax", False):
                  attention_map["ssmax_scale"] = "ssmax_scale"
              for olmo_suffix, hf_suffix in attention_map.items():
@@ -1407,7 +1424,7 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
                  )
              else:
                  dense_hidden = config.dense_mlp_intermediate_size
-@@ -1028,20 +1064,22 @@ def convert_olmo3moe_state_to_hf(
+@@ -1028,20 +1074,22 @@ def convert_olmo3moe_state_to_hf(
                      used,
                      f"{olmo_prefix}shared_experts.w_up_gate",
                  ).reshape(d_model, 2 * dense_hidden)
@@ -1439,16 +1456,25 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
  
          w_up_gate = _take(olmo_core_state, used, f"{olmo_prefix}routed_experts.w_up_gate").reshape(
              n_experts, 2 * moe_hidden, routed_d_model
-@@ -1052,29 +1090,34 @@ def convert_olmo3moe_state_to_hf(
+@@ -1051,30 +1099,42 @@ def convert_olmo3moe_state_to_hf(
+         w_down = _take(olmo_core_state, used, f"{olmo_prefix}routed_experts.w_down").reshape(
              n_experts, moe_hidden, routed_d_model
          )
-         for e in range(n_experts):
+-        for e in range(n_experts):
 -            hf_state[f"{prefix}mlp.experts.{e}.up_proj.weight"] = w_up[e].contiguous()
 -            hf_state[f"{prefix}mlp.experts.{e}.gate_proj.weight"] = w_gate[e].contiguous()
 -            hf_state[f"{prefix}mlp.experts.{e}.down_proj.weight"] = w_down[e].T.contiguous()
-+            yield f"{prefix}mlp.experts.{e}.up_proj.weight", w_up[e].contiguous()
-+            yield f"{prefix}mlp.experts.{e}.gate_proj.weight", w_gate[e].contiguous()
-+            yield f"{prefix}mlp.experts.{e}.down_proj.weight", w_down[e].T.contiguous()
++        if fused_experts:
++            yield (
++                f"{prefix}mlp.experts.gate_up_proj.weight",
++                torch.cat((w_gate, w_up), dim=1).contiguous(),
++            )
++            yield f"{prefix}mlp.experts.down_proj.weight", w_down.transpose(1, 2).contiguous()
++        else:
++            for e in range(n_experts):
++                yield f"{prefix}mlp.experts.{e}.up_proj.weight", w_up[e].contiguous()
++                yield f"{prefix}mlp.experts.{e}.gate_proj.weight", w_gate[e].contiguous()
++                yield f"{prefix}mlp.experts.{e}.down_proj.weight", w_down[e].T.contiguous()
 +
 +        del w_up_gate, w_up, w_gate, w_down
  
@@ -1489,7 +1515,7 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
                  )
  
          if has_shared:
-@@ -1084,15 +1127,14 @@ def convert_olmo3moe_state_to_hf(
+@@ -1084,15 +1144,14 @@ def convert_olmo3moe_state_to_hf(
              ).reshape(d_model, 2 * shared_hidden)
              shared_up = shared_up_gate[:, :shared_hidden]
              shared_gate = shared_up_gate[:, shared_hidden:]
@@ -1510,10 +1536,10 @@ index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0637ad836eb58c27697a2a8d7adc6a18
  def _convert_state(
 diff --git a/src/olmo_core/nn/moe/v2/olmo3.py b/src/olmo_core/nn/moe/v2/olmo3.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..4980964a5a85b5a85044db334b70699806237d71
+index 0000000000000000000000000000000000000000..70ce863e0db43c4e93ac4c05073aab881e3fff03
 --- /dev/null
 +++ b/src/olmo_core/nn/moe/v2/olmo3.py
-@@ -0,0 +1,740 @@
+@@ -0,0 +1,744 @@
 +"""Olmo3Moe builders and correctness-first OLMoDDP/HF weight interchange."""
 +
 +from __future__ import annotations
@@ -2244,16 +2270,20 @@ index 0000000000000000000000000000000000000000..4980964a5a85b5a85044db334b706998
 +
 +
 +def iter_olmo3_moe_hf_state(
-+    model: torch.nn.Module, hf_config: PretrainedConfig
++    model: torch.nn.Module, hf_config: PretrainedConfig, *, fused_experts: bool = False
 +) -> Iterator[tuple[str, torch.Tensor]]:
 +    """Stream HF tensors on the model device using the canonical converter.
 +
 +    All EP ranks must consume the iterator in the same order. No complete model
 +    CPU replica is staged. The current expert slabs and consumer's output bucket
 +    still need device memory; this is not an arbitrarily small-memory exporter.
++    ``fused_experts`` yields each layer's routed experts as two stacked tensors
++    in the serving engine's layout instead of per-expert slices.
 +    """
 +    hf_config = _config_for_native_dense_layout(_unwrap_model(model), hf_config)
-+    yield from iter_olmo3moe_state_to_hf(hf_config, _GatheredMoEState(model, hf_config))
++    yield from iter_olmo3moe_state_to_hf(
++        hf_config, _GatheredMoEState(model, hf_config), fused_experts=fused_experts
++    )
 diff --git a/src/olmo_core/nn/moe/v2/replay.py b/src/olmo_core/nn/moe/v2/replay.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..07a0fd9ae8a5eed4dac0bb6523d82f02ce95490f
@@ -3187,6 +3217,69 @@ index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a6
 +    reference = x.detach().clone().requires_grad_()
 +    (reference[:, :8] * F.silu(reference[:, 8:])).sum().backward()
 +    torch.testing.assert_close(x.grad, reference.grad, rtol=0, atol=0)
+diff --git a/src/test/nn/hf/olmo3moe_conversion_test.py b/src/test/nn/hf/olmo3moe_conversion_test.py
+index cebe601fa015e0591703e9f0d0eb4e2c6df947a8..a3cbd01c3422ab077dd9e4e94e7f18bea041290b 100644
+--- a/src/test/nn/hf/olmo3moe_conversion_test.py
++++ b/src/test/nn/hf/olmo3moe_conversion_test.py
+@@ -12,6 +12,7 @@ import pytest
+ import torch
+ 
+ from olmo_core.nn.hf.convert import (
++    iter_olmo3moe_state_to_hf,
+     convert_olmo3moe_state_from_hf,
+     convert_olmo3moe_state_to_hf,
+ )
+@@ -174,3 +175,50 @@ def test_legacy_latent_moe_dimension_is_normalized():
+     }
+     _normalize_legacy_latent_moe_config(config)
+     assert config["block"]["latent_moe"] == {"latent_dim": 320, "bias": False}
++
++
++def _reassemble_fused_experts(fused):
++    """Expand stacked per-layer expert tensors back into per-expert HF names."""
++    per_expert = {}
++    for name, tensor in fused.items():
++        if name.endswith("mlp.experts.gate_up_proj.weight"):
++            prefix = name[: -len("experts.gate_up_proj.weight")]
++            hidden = tensor.shape[1] // 2
++            for e in range(tensor.shape[0]):
++                per_expert[f"{prefix}experts.{e}.gate_proj.weight"] = tensor[e, :hidden]
++                per_expert[f"{prefix}experts.{e}.up_proj.weight"] = tensor[e, hidden:]
++        elif name.endswith("mlp.experts.down_proj.weight"):
++            prefix = name[: -len("experts.down_proj.weight")]
++            for e in range(tensor.shape[0]):
++                per_expert[f"{prefix}experts.{e}.down_proj.weight"] = tensor[e]
++        else:
++            per_expert[name] = tensor
++    return per_expert
++
++
++def test_olmo3moe_fused_expert_export_is_the_per_expert_export_stacked():
++    config = _fake_config()
++    hf = _synthetic_hf_state(config)
++    olmo = convert_olmo3moe_state_from_hf(config, hf)
++
++    per_expert = convert_olmo3moe_state_to_hf(config, olmo)
++    fused = dict(iter_olmo3moe_state_to_hf(config, olmo, fused_experts=True))
++
++    assert len(fused) < len(per_expert)
++    n_experts = config.n_routed_experts
++    moe_hidden = config.moe_intermediate_size
++    routed_dim = getattr(config, "latent_moe_dim", None) or config.hidden_size
++    stacked = [name for name in fused if name.endswith("mlp.experts.gate_up_proj.weight")]
++    assert stacked and all(
++        fused[name].shape == (n_experts, 2 * moe_hidden, routed_dim) and fused[name].is_contiguous()
++        for name in stacked
++    )
++    down = [name for name in fused if name.endswith("mlp.experts.down_proj.weight")]
++    assert down and all(
++        fused[name].shape == (n_experts, routed_dim, moe_hidden) and fused[name].is_contiguous()
++        for name in down
++    )
++    reassembled = _reassemble_fused_experts(fused)
++    assert set(reassembled) == set(per_expert)
++    for key, tensor in per_expert.items():
++        assert torch.equal(reassembled[key], tensor), f"fused layout mismatch for '{key}'"
 diff --git a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py b/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py
 index b98ed4185e41e9157f82bffad82522aeb00a1e95..69a76a69f20684514489a5eb3424ef42f87df703 100644
 --- a/src/test/nn/moe/v2/ep_checkpoint_reshard_test.py

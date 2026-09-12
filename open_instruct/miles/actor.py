@@ -441,7 +441,10 @@ class OLMoCoreTrainRayActor(TrainRayActor):
 
         bucket, size = [], 0
         for name, tensor in models.iter_export_state(
-            self.train_module, self.hf_config, stream_moe=self.args.olmo_core.stream_moe_export
+            self.train_module,
+            self.hf_config,
+            stream_moe=self.args.olmo_core.stream_moe_export,
+            fused_experts=self.args.olmo_core.expert_publication == "fused",
         ):
             tensor_count += 1
             byte_count += tensor.nbytes
@@ -481,6 +484,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 stream_moe_export=self.args.olmo_core.stream_moe_export,
                 transport="ipc" if self.args.colocate else self.args.olmo_core.weight_sync_mode,
                 buffer_bytes=self.args.update_weight_buffer_size,
+                expert_publication=self.args.olmo_core.expert_publication,
             )
             if bucket_details:
                 timings.update(

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- MILES/Core RL weight publication records per-bucket broadcast and engine-load timings, and `core.expert_publication = "fused"` publishes routed experts as one stacked tensor per layer and projection in the serving engine's layout instead of per-expert slices, cutting the engine's per-tensor loading work by the expert count (PR URL pending).
 - MILES/Core RL skips the standalone pre-update scoring pass when the recipe makes it redundant (one optimizer step per collection, zero `kl_coef`, no dropout), reading old log-probabilities from the training forward instead; `core.scoring_pass_required` forces it, and a sampled standalone-versus-training check (`core.scoring_check_interval`, `core.scoring_check_tolerance`) guards the skipped path (PR URL pending).
 - Support SFT of `allenai/Olmo-Hybrid-7B` on the olmo-core path: an `olmo3_hybrid_7B` config and HF <-> olmo-core state conversion for `model_type: olmo_hybrid`, neither of which olmo-core provides (https://github.com/allenai/open-instruct/pull/1822).
 - Expose `--save_async` and `--dist_timeout_hours` for the olmo-core SFT path; both were hardcoded, and the 24h default timeout meant a mid-training stall held its GPUs invisibly (https://github.com/allenai/open-instruct/pull/1821).

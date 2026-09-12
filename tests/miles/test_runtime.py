@@ -556,3 +556,61 @@ def test_multiple_steps_per_collection_keep_the_standalone_pass(parsed_args, tmp
         assert not [r for r in records if r["event"] == "scoring_check"]
     finally:
         dist.destroy_process_group()
+
+
+def _reassemble_fused_experts(fused):
+    """Expand stacked per-layer expert tensors into per-expert HF names."""
+    per_expert = {}
+    for name, tensor in fused.items():
+        if name.endswith("mlp.experts.gate_up_proj.weight"):
+            prefix = name[: -len("experts.gate_up_proj.weight")]
+            hidden = tensor.shape[1] // 2
+            for e in range(tensor.shape[0]):
+                per_expert[f"{prefix}experts.{e}.gate_proj.weight"] = tensor[e, :hidden]
+                per_expert[f"{prefix}experts.{e}.up_proj.weight"] = tensor[e, hidden:]
+        elif name.endswith("mlp.experts.down_proj.weight"):
+            prefix = name[: -len("experts.down_proj.weight")]
+            for e in range(tensor.shape[0]):
+                per_expert[f"{prefix}experts.{e}.down_proj.weight"] = tensor[e]
+        else:
+            per_expert[name] = tensor
+    return per_expert
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_fused_expert_publication_is_the_per_expert_export_stacked(parsed_args, tmp_path, monkeypatch):
+    """The publication layout carries exactly the HF per-expert weights, reordered."""
+    dist.init_process_group("gloo", init_method=f"file://{tmp_path}/fused-rendezvous", rank=0, world_size=1)
+    try:
+        group = GroupInfo(rank=0, size=1, group=dist.group.WORLD, gloo_group=dist.group.WORLD)
+        trivial = GroupInfo(rank=0, size=1, group=None)
+        parallel.set_parallel_state(
+            parallel.ParallelState(
+                intra_dp=group,
+                intra_dp_cp=group,
+                cp=trivial,
+                tp=trivial,
+                pp=trivial,
+                ep=trivial,
+                etp=trivial,
+                indep_dp=trivial,
+            )
+        )
+        module, hf_config, _ = models.build_train_module(parsed_args)
+        if hf_config.model_type != "olmo3moe":
+            with pytest.raises(ValueError, match="routed MoE"):
+                next(iter(models.iter_export_state(module, hf_config, fused_experts=True)))
+            return
+        per_expert = {k: v.detach().clone() for k, v in models.iter_export_state(module, hf_config)}
+        fused = {k: v.detach().clone() for k, v in models.iter_export_state(module, hf_config, fused_experts=True)}
+        moe_layers = [name for name in fused if name.endswith("mlp.experts.gate_up_proj.weight")]
+        assert moe_layers, "fixture must contain routed experts"
+        assert len(fused) == len(per_expert) - len(moe_layers) * (3 * hf_config.n_routed_experts - 2)
+        reassembled = _reassemble_fused_experts(fused)
+        assert set(reassembled) == set(per_expert)
+        for name, tensor in per_expert.items():
+            torch.testing.assert_close(reassembled[name], tensor, rtol=0, atol=0)
+        with pytest.raises(ValueError, match="streaming"):
+            next(iter(models.iter_export_state(module, hf_config, stream_moe=False, fused_experts=True)))
+    finally:
+        dist.destroy_process_group()
