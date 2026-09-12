@@ -67,6 +67,20 @@ researcher examples retain their 8 × 8 batch; this bounded exercise is an excep
    reachable cause consistent with its timeline, not direct observation of that
    exception in the GPU run.
 
+The failed attempt's [rank 0](miles-multinode-judges-20260912/failed-attempt/training_contract_rank0.jsonl),
+[rank 1](miles-multinode-judges-20260912/failed-attempt/training_contract_rank1.jsonl),
+[publication](miles-multinode-judges-20260912/failed-attempt/publication.jsonl), and
+[stage timing](miles-multinode-judges-20260912/failed-attempt/driver_timing.jsonl)
+records are retained. They explicitly record final evaluation as failed.
+
+A local continuation monitor, `/tmp/watch-multinode-judge-retry.py`, waits for both
+retry replicas to exit zero, then launches the committed `--stage audit` through
+the standard build wrapper using the exact retry image. This read-only audit runs
+on Saturn and checks retained samples, reward accounting, policy versions, both
+rank contracts, placements and cleanup. It issues no new judge requests.
+Monitor state/log: `/tmp/multinode-r2-monitor.json` and `.log`; successful audit
+results go under `/tmp/multinode-r2-audit-results`. A submitted retry is not a pass.
+
 ## Observed training checks (failed final-evaluation attempt)
 
 Both ranks completed updates 1 and 2, with finite objectives, no skipped steps,
