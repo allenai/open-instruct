@@ -1,0 +1,4705 @@
+{
+  "initial_publication": {
+    "broadcast_seconds": 1.3125879890285432,
+    "buckets": 39,
+    "buffer_bytes": 1073741824,
+    "bytes": 37028386304,
+    "engine_seconds": 0.26515107974410057,
+    "expert_publication": "fused",
+    "export_pack_seconds": 0.17707268660888076,
+    "finalize_seconds": 0.03467224771156907,
+    "pause_connect_seconds": 0.033434262964874506,
+    "repeated_version": false,
+    "stream_moe_export": true,
+    "tensors": 523,
+    "total_seconds": 1.8356934450566769,
+    "transport": "flattened",
+    "transport_collectives": 39,
+    "transport_load_seconds": 1.590513851493597,
+    "version": 0
+  },
+  "publications": [
+    {
+      "broadcast_seconds": 1.3125879890285432,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 1.293987115379423,
+          "bytes": 652628032,
+          "engine_seconds": 0.008668157737702131,
+          "seconds": 1.3037094362080097,
+          "tensors": 48
+        },
+        {
+          "broadcast_seconds": 0.0009435578249394894,
+          "bytes": 1247805440,
+          "engine_seconds": 0.008528069127351046,
+          "seconds": 0.009874296840280294,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005620922893285751,
+          "bytes": 671844896,
+          "engine_seconds": 0.007412776816636324,
+          "seconds": 0.008428202010691166,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0005115079693496227,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006281374953687191,
+          "seconds": 0.007045928388834,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004921420477330685,
+          "bytes": 671844896,
+          "engine_seconds": 0.007169225253164768,
+          "seconds": 0.008078422863036394,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004879492335021496,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006113317795097828,
+          "seconds": 0.006848324090242386,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004586228169500828,
+          "bytes": 656783872,
+          "engine_seconds": 0.007034541107714176,
+          "seconds": 0.007806400768458843,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.00048112403601408005,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006484907120466232,
+          "seconds": 0.007200181018561125,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044159404933452606,
+          "bytes": 671844896,
+          "engine_seconds": 0.007535608019679785,
+          "seconds": 0.008360530249774456,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004932829178869724,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0065415590070188046,
+          "seconds": 0.007284743711352348,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004795077256858349,
+          "bytes": 671844896,
+          "engine_seconds": 0.007531824987381697,
+          "seconds": 0.00841156579554081,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004789913073182106,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006007293704897165,
+          "seconds": 0.0067174239084124565,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044553494080901146,
+          "bytes": 671844896,
+          "engine_seconds": 0.0073803081177175045,
+          "seconds": 0.008215949870646,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0005013030022382736,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0059320079162716866,
+          "seconds": 0.0066600460559129715,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004487154074013233,
+          "bytes": 671844896,
+          "engine_seconds": 0.008063821587711573,
+          "seconds": 0.008925704751163721,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0005086762830615044,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006417025811970234,
+          "seconds": 0.007153127808123827,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004602354019880295,
+          "bytes": 656783872,
+          "engine_seconds": 0.006724882870912552,
+          "seconds": 0.0075048040598630905,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0005120630376040936,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006269986741244793,
+          "seconds": 0.007010639179497957,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004686182364821434,
+          "bytes": 671844896,
+          "engine_seconds": 0.006854647770524025,
+          "seconds": 0.0076930709183216095,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004955660551786423,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00604262575507164,
+          "seconds": 0.006768927909433842,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045852363109588623,
+          "bytes": 671844896,
+          "engine_seconds": 0.0074035790748894215,
+          "seconds": 0.00824357895180583,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048135221004486084,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00634872168302536,
+          "seconds": 0.007059592287987471,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005266829393804073,
+          "bytes": 671844896,
+          "engine_seconds": 0.00744834216311574,
+          "seconds": 0.00839207787066698,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004882919602096081,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0064489287324249744,
+          "seconds": 0.007175305858254433,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004583182744681835,
+          "bytes": 671844896,
+          "engine_seconds": 0.007122569717466831,
+          "seconds": 0.007943603210151196,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004771789535880089,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0061148409731686115,
+          "seconds": 0.006822326220571995,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004600309766829014,
+          "bytes": 656783872,
+          "engine_seconds": 0.006885665003210306,
+          "seconds": 0.007645828183740377,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.00045403512194752693,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00648878701031208,
+          "seconds": 0.007172402925789356,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004642140120267868,
+          "bytes": 671844896,
+          "engine_seconds": 0.007241162937134504,
+          "seconds": 0.008100000210106373,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048268726095557213,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006166146602481604,
+          "seconds": 0.00687915924936533,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004472332075238228,
+          "bytes": 671844896,
+          "engine_seconds": 0.006916640792042017,
+          "seconds": 0.0077514671720564365,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.000482416246086359,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006505423691123724,
+          "seconds": 0.007220719009637833,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004425467923283577,
+          "bytes": 671844896,
+          "engine_seconds": 0.007286753039807081,
+          "seconds": 0.008102379739284515,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048255082219839096,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006021791137754917,
+          "seconds": 0.006737902294844389,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004525170661509037,
+          "bytes": 671844896,
+          "engine_seconds": 0.006840249989181757,
+          "seconds": 0.007703306153416634,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048014894127845764,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005683484952896833,
+          "seconds": 0.00639660470187664,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045506982132792473,
+          "bytes": 656783872,
+          "engine_seconds": 0.006864048074930906,
+          "seconds": 0.007643416058272123,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004718019627034664,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006373273208737373,
+          "seconds": 0.007071486674249172,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004641888663172722,
+          "bytes": 634490880,
+          "engine_seconds": 0.005996708758175373,
+          "seconds": 0.00675496831536293,
+          "tensors": 6
+        }
+      ],
+      "buckets": 39,
+      "buffer_bytes": 1073741824,
+      "bytes": 37028386304,
+      "engine_seconds": 0.26515107974410057,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.17707268660888076,
+      "finalize_seconds": 0.03467224771156907,
+      "pause_connect_seconds": 0.033434262964874506,
+      "repeated_version": false,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 1.8356934450566769,
+      "transport": "flattened",
+      "transport_collectives": 39,
+      "transport_load_seconds": 1.590513851493597,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.03159830393269658,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0007140170782804489,
+          "bytes": 256714240,
+          "engine_seconds": 0.006629030220210552,
+          "seconds": 0.007792368996888399,
+          "tensors": 2
+        },
+        {
+          "broadcast_seconds": 0.00047396915033459663,
+          "bytes": 267200000,
+          "engine_seconds": 0.006661061197519302,
+          "seconds": 0.007439916022121906,
+          "tensors": 4
+        },
+        {
+          "broadcast_seconds": 0.0004648258909583092,
+          "bytes": 128713792,
+          "engine_seconds": 0.008250670973211527,
+          "seconds": 0.009227294940501451,
+          "tensors": 42
+        },
+        {
+          "broadcast_seconds": 0.0005050348117947578,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007475649006664753,
+          "seconds": 0.008229738101363182,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047461315989494324,
+          "bytes": 623902720,
+          "engine_seconds": 0.00632746797055006,
+          "seconds": 0.007085323333740234,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043795909732580185,
+          "bytes": 47942176,
+          "engine_seconds": 0.007241753861308098,
+          "seconds": 0.008053824305534363,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00048111798241734505,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006350480020046234,
+          "seconds": 0.007066943217068911,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004830029793083668,
+          "bytes": 623902720,
+          "engine_seconds": 0.005911612883210182,
+          "seconds": 0.006663895212113857,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004693716764450073,
+          "bytes": 47942176,
+          "engine_seconds": 0.007019919343292713,
+          "seconds": 0.00784780504181981,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004797917790710926,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006090804003179073,
+          "seconds": 0.006804103031754494,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047434400767087936,
+          "bytes": 623902720,
+          "engine_seconds": 0.00624680332839489,
+          "seconds": 0.007014404982328415,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004516551271080971,
+          "bytes": 32881152,
+          "engine_seconds": 0.0066187940537929535,
+          "seconds": 0.007383731193840504,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.000478541012853384,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006232300773262978,
+          "seconds": 0.006942213978618383,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005044089630246162,
+          "bytes": 623902720,
+          "engine_seconds": 0.006187058985233307,
+          "seconds": 0.006968434900045395,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004499792121350765,
+          "bytes": 47942176,
+          "engine_seconds": 0.006980591919273138,
+          "seconds": 0.007793855853378773,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00047273607924580574,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006270958576351404,
+          "seconds": 0.006981783080846071,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045061204582452774,
+          "bytes": 623902720,
+          "engine_seconds": 0.006205989047884941,
+          "seconds": 0.006924147251993418,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005058418028056622,
+          "bytes": 47942176,
+          "engine_seconds": 0.007020346354693174,
+          "seconds": 0.00817166268825531,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005068350583314896,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005831442773342133,
+          "seconds": 0.0065892781130969524,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045090680941939354,
+          "bytes": 623902720,
+          "engine_seconds": 0.005829575005918741,
+          "seconds": 0.006559199653565884,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043890904635190964,
+          "bytes": 47942176,
+          "engine_seconds": 0.00701452000066638,
+          "seconds": 0.007832915056496859,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.000485158059746027,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00617566192522645,
+          "seconds": 0.00689678406342864,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004948601126670837,
+          "bytes": 623902720,
+          "engine_seconds": 0.0060328030958771706,
+          "seconds": 0.0067968182265758514,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004439372569322586,
+          "bytes": 47942176,
+          "engine_seconds": 0.006848563905805349,
+          "seconds": 0.007669858168810606,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004994990304112434,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005973826162517071,
+          "seconds": 0.006726173218339682,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004786849021911621,
+          "bytes": 623902720,
+          "engine_seconds": 0.006074995268136263,
+          "seconds": 0.006833628285676241,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000458782073110342,
+          "bytes": 32881152,
+          "engine_seconds": 0.006618047133088112,
+          "seconds": 0.007391782943159342,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0005070441402494907,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006547675933688879,
+          "seconds": 0.007290129084140062,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005196412093937397,
+          "bytes": 623902720,
+          "engine_seconds": 0.00636662170290947,
+          "seconds": 0.007164700888097286,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004752557724714279,
+          "bytes": 47942176,
+          "engine_seconds": 0.0066604409366846085,
+          "seconds": 0.007515747100114822,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005128961056470871,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006103374995291233,
+          "seconds": 0.006855775602161884,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004764283075928688,
+          "bytes": 623902720,
+          "engine_seconds": 0.005890341009944677,
+          "seconds": 0.006635474041104317,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004885750822722912,
+          "bytes": 47942176,
+          "engine_seconds": 0.007142955902963877,
+          "seconds": 0.007993679959326982,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004994627088308334,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006854398176074028,
+          "seconds": 0.0076293908059597015,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005772020667791367,
+          "bytes": 623902720,
+          "engine_seconds": 0.0069518620148301125,
+          "seconds": 0.007887747138738632,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005639432929456234,
+          "bytes": 47942176,
+          "engine_seconds": 0.008006629068404436,
+          "seconds": 0.008995200041681528,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005648918449878693,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0068711768835783005,
+          "seconds": 0.007730565965175629,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000575781799852848,
+          "bytes": 623902720,
+          "engine_seconds": 0.006855119951069355,
+          "seconds": 0.007840268779546022,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0007006637752056122,
+          "bytes": 47942176,
+          "engine_seconds": 0.007876046001911163,
+          "seconds": 0.00901032891124487,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005856519564986229,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006877721752971411,
+          "seconds": 0.007765596266835928,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005642320029437542,
+          "bytes": 623902720,
+          "engine_seconds": 0.00695169297978282,
+          "seconds": 0.007871485780924559,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005450891330838203,
+          "bytes": 32881152,
+          "engine_seconds": 0.007475400809198618,
+          "seconds": 0.00838498491793871,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0005861278623342514,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0158053832128644,
+          "seconds": 0.016690196003764868,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005846759304404259,
+          "bytes": 623902720,
+          "engine_seconds": 0.007028511259704828,
+          "seconds": 0.007961442694067955,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005596638657152653,
+          "bytes": 47942176,
+          "engine_seconds": 0.007760060951113701,
+          "seconds": 0.008772162720561028,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005631712265312672,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007172442972660065,
+          "seconds": 0.008089213166385889,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005995859391987324,
+          "bytes": 623902720,
+          "engine_seconds": 0.006895305123180151,
+          "seconds": 0.007839601021260023,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005385209806263447,
+          "bytes": 47942176,
+          "engine_seconds": 0.007822195999324322,
+          "seconds": 0.008791697211563587,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005473052151501179,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0070800818502902985,
+          "seconds": 0.007931631989777088,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005641779862344265,
+          "bytes": 623902720,
+          "engine_seconds": 0.007064607925713062,
+          "seconds": 0.007981361821293831,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005426579155027866,
+          "bytes": 47942176,
+          "engine_seconds": 0.007766271010041237,
+          "seconds": 0.008736155927181244,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005784798413515091,
+          "bytes": 1247805440,
+          "engine_seconds": 0.008307626005262136,
+          "seconds": 0.00917162699624896,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005974280647933483,
+          "bytes": 623902720,
+          "engine_seconds": 0.00691194785758853,
+          "seconds": 0.007860695011913776,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005962350405752659,
+          "bytes": 47942176,
+          "engine_seconds": 0.007722945883870125,
+          "seconds": 0.008823499083518982,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0006358260288834572,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007233752869069576,
+          "seconds": 0.008184157777577639,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005804379470646381,
+          "bytes": 623902720,
+          "engine_seconds": 0.0067964778281748295,
+          "seconds": 0.007734311278909445,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005483198910951614,
+          "bytes": 32881152,
+          "engine_seconds": 0.007782509084790945,
+          "seconds": 0.008728544693440199,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0005990588106215,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006932973861694336,
+          "seconds": 0.00782618997618556,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005921879783272743,
+          "bytes": 623902720,
+          "engine_seconds": 0.007106071803718805,
+          "seconds": 0.008043269161134958,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005982900038361549,
+          "bytes": 10588160,
+          "engine_seconds": 0.007368294056504965,
+          "seconds": 0.00830661365762353,
+          "tensors": 5
+        }
+      ],
+      "buckets": 60,
+      "buffer_bytes": 268435456,
+      "bytes": 37028386304,
+      "engine_seconds": 0.42010964546352625,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.16297864075750113,
+      "finalize_seconds": 0.0377389807254076,
+      "pause_connect_seconds": 0.015660634264349937,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.6881102281622589,
+      "transport": "flattened",
+      "transport_collectives": 60,
+      "transport_load_seconds": 0.47173132933676243,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.030848145950585604,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0006621479988098145,
+          "bytes": 256714240,
+          "engine_seconds": 0.008031780831515789,
+          "seconds": 0.009045714978128672,
+          "tensors": 2
+        },
+        {
+          "broadcast_seconds": 0.000580956693738699,
+          "bytes": 267200000,
+          "engine_seconds": 0.007553220260888338,
+          "seconds": 0.00847962824627757,
+          "tensors": 4
+        },
+        {
+          "broadcast_seconds": 0.0005497261881828308,
+          "bytes": 128713792,
+          "engine_seconds": 0.011667372658848763,
+          "seconds": 0.012744576204568148,
+          "tensors": 42
+        },
+        {
+          "broadcast_seconds": 0.0005893241614103317,
+          "bytes": 1247805440,
+          "engine_seconds": 0.008300392888486385,
+          "seconds": 0.009181074798107147,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005827108398079872,
+          "bytes": 623902720,
+          "engine_seconds": 0.006874660030007362,
+          "seconds": 0.007820339873433113,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00048774806782603264,
+          "bytes": 47942176,
+          "engine_seconds": 0.007331398315727711,
+          "seconds": 0.008181140758097172,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004638838581740856,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006157365161925554,
+          "seconds": 0.0069066379219293594,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004689302295446396,
+          "bytes": 623902720,
+          "engine_seconds": 0.01575356675311923,
+          "seconds": 0.016466624569147825,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00039467262104153633,
+          "bytes": 47942176,
+          "engine_seconds": 0.006024600006639957,
+          "seconds": 0.006742991041392088,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004110001027584076,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005189078859984875,
+          "seconds": 0.00579950911924243,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0003972328267991543,
+          "bytes": 623902720,
+          "engine_seconds": 0.00561964325606823,
+          "seconds": 0.006236842833459377,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0003828410990536213,
+          "bytes": 32881152,
+          "engine_seconds": 0.005909095052629709,
+          "seconds": 0.006567848846316338,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004224157892167568,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005596883129328489,
+          "seconds": 0.0062258257530629635,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004010922275483608,
+          "bytes": 623902720,
+          "engine_seconds": 0.0051107448525726795,
+          "seconds": 0.005735090002417564,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043309060856699944,
+          "bytes": 47942176,
+          "engine_seconds": 0.0060639032162725925,
+          "seconds": 0.006843145936727524,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004610489122569561,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005700868088752031,
+          "seconds": 0.006391569972038269,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004644771106541157,
+          "bytes": 623902720,
+          "engine_seconds": 0.006185536738485098,
+          "seconds": 0.006911410950124264,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00042003998532891273,
+          "bytes": 47942176,
+          "engine_seconds": 0.006105400156229734,
+          "seconds": 0.006850722711533308,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004041357897222042,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005289298947900534,
+          "seconds": 0.005875658243894577,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000376909039914608,
+          "bytes": 623902720,
+          "engine_seconds": 0.005250181071460247,
+          "seconds": 0.005842374637722969,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0003634849563241005,
+          "bytes": 47942176,
+          "engine_seconds": 0.0059433141723275185,
+          "seconds": 0.006628258619457483,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004111756570637226,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005476060323417187,
+          "seconds": 0.006070431787520647,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000381973572075367,
+          "bytes": 623902720,
+          "engine_seconds": 0.005497032310813665,
+          "seconds": 0.006091861054301262,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00037701521068811417,
+          "bytes": 47942176,
+          "engine_seconds": 0.006026212126016617,
+          "seconds": 0.006728698033839464,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004176679067313671,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005293215159326792,
+          "seconds": 0.005918264854699373,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00042688800022006035,
+          "bytes": 623902720,
+          "engine_seconds": 0.00580082181841135,
+          "seconds": 0.006478562019765377,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000546205323189497,
+          "bytes": 32881152,
+          "engine_seconds": 0.007446393836289644,
+          "seconds": 0.008345501963049173,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0005849939770996571,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007123897783458233,
+          "seconds": 0.008010240271687508,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000565381720662117,
+          "bytes": 623902720,
+          "engine_seconds": 0.007005674298852682,
+          "seconds": 0.007919736206531525,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005607688799500465,
+          "bytes": 47942176,
+          "engine_seconds": 0.008203017991036177,
+          "seconds": 0.009244236163794994,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005813837051391602,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00708429329097271,
+          "seconds": 0.007955073844641447,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005826307460665703,
+          "bytes": 623902720,
+          "engine_seconds": 0.007011718116700649,
+          "seconds": 0.007943782955408096,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005558640696108341,
+          "bytes": 47942176,
+          "engine_seconds": 0.008345367852598429,
+          "seconds": 0.009319979697465897,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0006034891121089458,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006964368745684624,
+          "seconds": 0.00785825401544571,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00056115398183465,
+          "bytes": 623902720,
+          "engine_seconds": 0.006929962895810604,
+          "seconds": 0.007827768102288246,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005480097606778145,
+          "bytes": 47942176,
+          "engine_seconds": 0.007570094894617796,
+          "seconds": 0.008549322374165058,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005635288543999195,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007001809775829315,
+          "seconds": 0.007865834049880505,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005381111986935139,
+          "bytes": 623902720,
+          "engine_seconds": 0.006985914893448353,
+          "seconds": 0.007932144682854414,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005391249433159828,
+          "bytes": 47942176,
+          "engine_seconds": 0.007921804208308458,
+          "seconds": 0.008914705831557512,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0006015808321535587,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007315285969525576,
+          "seconds": 0.00821126764640212,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005840873345732689,
+          "bytes": 623902720,
+          "engine_seconds": 0.007009770721197128,
+          "seconds": 0.007943976670503616,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005344296805560589,
+          "bytes": 32881152,
+          "engine_seconds": 0.0075582400895655155,
+          "seconds": 0.008456375915557146,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0006369850598275661,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007480625994503498,
+          "seconds": 0.008420976810157299,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005832146853208542,
+          "bytes": 623902720,
+          "engine_seconds": 0.0070438990369439125,
+          "seconds": 0.007976122200489044,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0006916578859090805,
+          "bytes": 47942176,
+          "engine_seconds": 0.008034192956984043,
+          "seconds": 0.009137824177742004,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005649188533425331,
+          "bytes": 1247805440,
+          "engine_seconds": 0.01684974180534482,
+          "seconds": 0.01766142901033163,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00048490287736058235,
+          "bytes": 623902720,
+          "engine_seconds": 0.0058959173038601875,
+          "seconds": 0.006642053369432688,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005220440216362476,
+          "bytes": 47942176,
+          "engine_seconds": 0.007837833371013403,
+          "seconds": 0.008784960024058819,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.000601314939558506,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007162667345255613,
+          "seconds": 0.008040640037506819,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000550256110727787,
+          "bytes": 623902720,
+          "engine_seconds": 0.007092416286468506,
+          "seconds": 0.007972733117640018,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005302531644701958,
+          "bytes": 47942176,
+          "engine_seconds": 0.008037444204092026,
+          "seconds": 0.008989355061203241,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005755648016929626,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007246886380016804,
+          "seconds": 0.008111524861305952,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005616350099444389,
+          "bytes": 623902720,
+          "engine_seconds": 0.007039397023618221,
+          "seconds": 0.007952518295496702,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005764863453805447,
+          "bytes": 47942176,
+          "engine_seconds": 0.014883496798574924,
+          "seconds": 0.01751949591562152,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0006292583420872688,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007290777750313282,
+          "seconds": 0.008213542401790619,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005686050280928612,
+          "bytes": 623902720,
+          "engine_seconds": 0.006946891080588102,
+          "seconds": 0.007832814939320087,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004842150956392288,
+          "bytes": 32881152,
+          "engine_seconds": 0.006916568148881197,
+          "seconds": 0.007730406709015369,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.000514972023665905,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006144401151686907,
+          "seconds": 0.006903389003127813,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004901411011815071,
+          "bytes": 623902720,
+          "engine_seconds": 0.006343682762235403,
+          "seconds": 0.007121541071683168,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004983870312571526,
+          "bytes": 10588160,
+          "engine_seconds": 0.006319478154182434,
+          "seconds": 0.007095738779753447,
+          "tensors": 5
+        }
+      ],
+      "buckets": 60,
+      "buffer_bytes": 268435456,
+      "bytes": 37028386304,
+      "engine_seconds": 0.4357955791056156,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.16374941915273666,
+      "finalize_seconds": 0.03146154712885618,
+      "pause_connect_seconds": 0.015110165812075138,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.6974915331229568,
+      "transport": "flattened",
+      "transport_collectives": 60,
+      "transport_load_seconds": 0.4871700699441135,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.028073309920728207,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0004979181103408337,
+          "bytes": 256714240,
+          "engine_seconds": 0.006983861792832613,
+          "seconds": 0.0077397688291966915,
+          "tensors": 2
+        },
+        {
+          "broadcast_seconds": 0.00048295315355062485,
+          "bytes": 267200000,
+          "engine_seconds": 0.006549657788127661,
+          "seconds": 0.007312965113669634,
+          "tensors": 4
+        },
+        {
+          "broadcast_seconds": 0.0004449659027159214,
+          "bytes": 128713792,
+          "engine_seconds": 0.007277264259755611,
+          "seconds": 0.008147843182086945,
+          "tensors": 42
+        },
+        {
+          "broadcast_seconds": 0.0004556109197437763,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006869405973702669,
+          "seconds": 0.007557004224509001,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004595271311700344,
+          "bytes": 623902720,
+          "engine_seconds": 0.005889264866709709,
+          "seconds": 0.006638944149017334,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004489361308515072,
+          "bytes": 47942176,
+          "engine_seconds": 0.006715552881360054,
+          "seconds": 0.007522898260504007,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00048317015171051025,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0058973319828510284,
+          "seconds": 0.0066178529523313046,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00048252521082758904,
+          "bytes": 623902720,
+          "engine_seconds": 0.00598863186314702,
+          "seconds": 0.006738482974469662,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004441780038177967,
+          "bytes": 47942176,
+          "engine_seconds": 0.006720737088471651,
+          "seconds": 0.0075271157547831535,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004692990332841873,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006239716894924641,
+          "seconds": 0.006934088189154863,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044293375685811043,
+          "bytes": 623902720,
+          "engine_seconds": 0.005934099201112986,
+          "seconds": 0.006635698024183512,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004470963031053543,
+          "bytes": 32881152,
+          "engine_seconds": 0.006439931690692902,
+          "seconds": 0.00716937892138958,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004723682068288326,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006262579932808876,
+          "seconds": 0.00696345791220665,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004914733581244946,
+          "bytes": 623902720,
+          "engine_seconds": 0.006700192578136921,
+          "seconds": 0.00746825709939003,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005835839547216892,
+          "bytes": 47942176,
+          "engine_seconds": 0.0060913641937077045,
+          "seconds": 0.007509210146963596,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004868609830737114,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006662815343588591,
+          "seconds": 0.007391538005322218,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004954813048243523,
+          "bytes": 623902720,
+          "engine_seconds": 0.006233239080756903,
+          "seconds": 0.006997695658355951,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004561571404337883,
+          "bytes": 47942176,
+          "engine_seconds": 0.006681254133582115,
+          "seconds": 0.007505875080823898,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004788283258676529,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0059771160595119,
+          "seconds": 0.006689641624689102,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004930440336465836,
+          "bytes": 623902720,
+          "engine_seconds": 0.00594731792807579,
+          "seconds": 0.0067149060778319836,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044911401346325874,
+          "bytes": 47942176,
+          "engine_seconds": 0.006806128658354282,
+          "seconds": 0.0076249442063272,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004707346670329571,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005753391422331333,
+          "seconds": 0.006475042551755905,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047496194019913673,
+          "bytes": 623902720,
+          "engine_seconds": 0.005920095834881067,
+          "seconds": 0.006652669049799442,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044318800792098045,
+          "bytes": 47942176,
+          "engine_seconds": 0.006792732048779726,
+          "seconds": 0.007602620869874954,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00047527579590678215,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005895039066672325,
+          "seconds": 0.0065979789942502975,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004626419395208359,
+          "bytes": 623902720,
+          "engine_seconds": 0.00608693715184927,
+          "seconds": 0.006803137715905905,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045597413554787636,
+          "bytes": 32881152,
+          "engine_seconds": 0.006535334978252649,
+          "seconds": 0.007304246071726084,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004940279759466648,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006096357945352793,
+          "seconds": 0.006825889926403761,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00048739882186055183,
+          "bytes": 623902720,
+          "engine_seconds": 0.006012872327119112,
+          "seconds": 0.006764994002878666,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043969880789518356,
+          "bytes": 47942176,
+          "engine_seconds": 0.006741113029420376,
+          "seconds": 0.0075499811209738255,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00048062577843666077,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006018766202032566,
+          "seconds": 0.006727971136569977,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004592509940266609,
+          "bytes": 623902720,
+          "engine_seconds": 0.005712873302400112,
+          "seconds": 0.006431563291698694,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046025868505239487,
+          "bytes": 47942176,
+          "engine_seconds": 0.0067629460245370865,
+          "seconds": 0.007580092176795006,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004891152493655682,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006041636690497398,
+          "seconds": 0.006768472958356142,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004911487922072411,
+          "bytes": 623902720,
+          "engine_seconds": 0.006016125902533531,
+          "seconds": 0.006773724220693111,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044182082638144493,
+          "bytes": 47942176,
+          "engine_seconds": 0.016182308085262775,
+          "seconds": 0.016963522881269455,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004042331129312515,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0065466430969536304,
+          "seconds": 0.007177399937063456,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004253569059073925,
+          "bytes": 623902720,
+          "engine_seconds": 0.005732192657887936,
+          "seconds": 0.006403831765055656,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004448867402970791,
+          "bytes": 47942176,
+          "engine_seconds": 0.0068980553187429905,
+          "seconds": 0.007707864977419376,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00047150207683444023,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005914170760661364,
+          "seconds": 0.006625913083553314,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004774858243763447,
+          "bytes": 623902720,
+          "engine_seconds": 0.005969415418803692,
+          "seconds": 0.00671532703563571,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044910889118909836,
+          "bytes": 32881152,
+          "engine_seconds": 0.006697401404380798,
+          "seconds": 0.00744234211742878,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004607769660651684,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006271588150411844,
+          "seconds": 0.006962083745747805,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045578181743621826,
+          "bytes": 623902720,
+          "engine_seconds": 0.006556465290486813,
+          "seconds": 0.0072736782021820545,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005608280189335346,
+          "bytes": 47942176,
+          "engine_seconds": 0.006723369006067514,
+          "seconds": 0.007641491945832968,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00047853821888566017,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005922127049416304,
+          "seconds": 0.006637001875787973,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046957889571785927,
+          "bytes": 623902720,
+          "engine_seconds": 0.005985233932733536,
+          "seconds": 0.006736544892191887,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004587159492075443,
+          "bytes": 47942176,
+          "engine_seconds": 0.0067988429218530655,
+          "seconds": 0.007620702963322401,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00044894590973854065,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0061393310315907,
+          "seconds": 0.0068175820633769035,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004769456572830677,
+          "bytes": 623902720,
+          "engine_seconds": 0.006145715247839689,
+          "seconds": 0.006887790281325579,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004485533572733402,
+          "bytes": 47942176,
+          "engine_seconds": 0.007162537891417742,
+          "seconds": 0.007975604850798845,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00046495208516716957,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006288468837738037,
+          "seconds": 0.006997501943260431,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004561757668852806,
+          "bytes": 623902720,
+          "engine_seconds": 0.00591241242364049,
+          "seconds": 0.006646027788519859,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004492090083658695,
+          "bytes": 47942176,
+          "engine_seconds": 0.0068070050328969955,
+          "seconds": 0.007609305437654257,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004824991337954998,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005931293126195669,
+          "seconds": 0.006637790240347385,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044155213981866837,
+          "bytes": 623902720,
+          "engine_seconds": 0.005748520139604807,
+          "seconds": 0.0064463005401194096,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004572952166199684,
+          "bytes": 32881152,
+          "engine_seconds": 0.006598461885005236,
+          "seconds": 0.007348380982875824,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004526139236986637,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006369453854858875,
+          "seconds": 0.007067653816193342,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004667527973651886,
+          "bytes": 623902720,
+          "engine_seconds": 0.00602534506469965,
+          "seconds": 0.006770201027393341,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047887396067380905,
+          "bytes": 10588160,
+          "engine_seconds": 0.005891095846891403,
+          "seconds": 0.006638361141085625,
+          "tensors": 5
+        }
+      ],
+      "buckets": 60,
+      "buffer_bytes": 268435456,
+      "bytes": 37028386304,
+      "engine_seconds": 0.38847113959491253,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.1581799858249724,
+      "finalize_seconds": 0.029656092170625925,
+      "pause_connect_seconds": 0.012728276196867228,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.6345808883197606,
+      "transport": "flattened",
+      "transport_collectives": 60,
+      "transport_load_seconds": 0.4340161560103297,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.028115457855165005,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0004852297715842724,
+          "bytes": 536869920,
+          "engine_seconds": 0.00779350521042943,
+          "seconds": 0.00861365208402276,
+          "tensors": 16
+        },
+        {
+          "broadcast_seconds": 0.0004558442160487175,
+          "bytes": 115758112,
+          "engine_seconds": 0.006876285653561354,
+          "seconds": 0.007721005938947201,
+          "tensors": 32
+        },
+        {
+          "broadcast_seconds": 0.0004820241592824459,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007091803941875696,
+          "seconds": 0.007797791622579098,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044145993888378143,
+          "bytes": 623902720,
+          "engine_seconds": 0.0059116980992257595,
+          "seconds": 0.0066105080768466,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045304931700229645,
+          "bytes": 47942176,
+          "engine_seconds": 0.006938658654689789,
+          "seconds": 0.007730016019195318,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004552002064883709,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006125678773969412,
+          "seconds": 0.006809672340750694,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046987226232886314,
+          "bytes": 623902720,
+          "engine_seconds": 0.005896855145692825,
+          "seconds": 0.00662679597735405,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004596998915076256,
+          "bytes": 47942176,
+          "engine_seconds": 0.006832701154053211,
+          "seconds": 0.007637009024620056,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004807291552424431,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0063375430181622505,
+          "seconds": 0.00705595500767231,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004729037173092365,
+          "bytes": 623902720,
+          "engine_seconds": 0.006317216902971268,
+          "seconds": 0.0070707062259316444,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046254973858594894,
+          "bytes": 32881152,
+          "engine_seconds": 0.0064724101684987545,
+          "seconds": 0.007236235309392214,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004638158716261387,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006251234095543623,
+          "seconds": 0.006964990869164467,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004927981644868851,
+          "bytes": 623902720,
+          "engine_seconds": 0.006837689783424139,
+          "seconds": 0.0076447343453764915,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005334997549653053,
+          "bytes": 47942176,
+          "engine_seconds": 0.006981783080846071,
+          "seconds": 0.007901879027485847,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.000479377806186676,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006009039934724569,
+          "seconds": 0.006724067963659763,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005323938094079494,
+          "bytes": 623902720,
+          "engine_seconds": 0.005814614240080118,
+          "seconds": 0.00662490539252758,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004293401725590229,
+          "bytes": 47942176,
+          "engine_seconds": 0.006822788156569004,
+          "seconds": 0.007601727265864611,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.000501491129398346,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007003959733992815,
+          "seconds": 0.007782178930938244,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000584698747843504,
+          "bytes": 623902720,
+          "engine_seconds": 0.007242216262966394,
+          "seconds": 0.00813374388962984,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004948489367961884,
+          "bytes": 47942176,
+          "engine_seconds": 0.00910271517932415,
+          "seconds": 0.009949652012437582,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004957341589033604,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006568775977939367,
+          "seconds": 0.007316508796066046,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005834400653839111,
+          "bytes": 623902720,
+          "engine_seconds": 0.007162041030824184,
+          "seconds": 0.008077480364590883,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0006038839928805828,
+          "bytes": 47942176,
+          "engine_seconds": 0.008086056914180517,
+          "seconds": 0.009075203910470009,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004906686954200268,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005758710205554962,
+          "seconds": 0.006498367991298437,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046972930431365967,
+          "bytes": 623902720,
+          "engine_seconds": 0.006191608961671591,
+          "seconds": 0.007004022132605314,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046332692727446556,
+          "bytes": 32881152,
+          "engine_seconds": 0.006405365187674761,
+          "seconds": 0.007168218959122896,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.00047680316492915154,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006101788952946663,
+          "seconds": 0.006824851967394352,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004737880080938339,
+          "bytes": 623902720,
+          "engine_seconds": 0.015372178051620722,
+          "seconds": 0.01610026601701975,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00041407113894820213,
+          "bytes": 47942176,
+          "engine_seconds": 0.006305738817900419,
+          "seconds": 0.0070554958656430244,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004595150239765644,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006270829122513533,
+          "seconds": 0.006966806948184967,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004566316492855549,
+          "bytes": 623902720,
+          "engine_seconds": 0.006316586397588253,
+          "seconds": 0.007048237603157759,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044604064896702766,
+          "bytes": 47942176,
+          "engine_seconds": 0.006924737244844437,
+          "seconds": 0.007707252167165279,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00047975173220038414,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006298022344708443,
+          "seconds": 0.007030828855931759,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004529310390353203,
+          "bytes": 623902720,
+          "engine_seconds": 0.005825264845043421,
+          "seconds": 0.006549397017806768,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045792292803525925,
+          "bytes": 47942176,
+          "engine_seconds": 0.006950523238629103,
+          "seconds": 0.007755861151963472,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004820111207664013,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005981700029224157,
+          "seconds": 0.0067014009691774845,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005021910183131695,
+          "bytes": 623902720,
+          "engine_seconds": 0.006002319976687431,
+          "seconds": 0.006771043874323368,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004464341327548027,
+          "bytes": 47942176,
+          "engine_seconds": 0.006704728119075298,
+          "seconds": 0.007494539953768253,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00048439018428325653,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006055812817066908,
+          "seconds": 0.006772628985345364,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004889429546892643,
+          "bytes": 623902720,
+          "engine_seconds": 0.006175725255161524,
+          "seconds": 0.006931804120540619,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043372204527258873,
+          "bytes": 32881152,
+          "engine_seconds": 0.006776850670576096,
+          "seconds": 0.007500344887375832,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.00047827791422605515,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005997915286570787,
+          "seconds": 0.006704290863126516,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004896880127489567,
+          "bytes": 623902720,
+          "engine_seconds": 0.006165516097098589,
+          "seconds": 0.006912814918905497,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005376827903091908,
+          "bytes": 47942176,
+          "engine_seconds": 0.006864988245069981,
+          "seconds": 0.007757103070616722,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.000470183789730072,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005810248199850321,
+          "seconds": 0.006507804151624441,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045541999861598015,
+          "bytes": 623902720,
+          "engine_seconds": 0.005374101921916008,
+          "seconds": 0.006116596981883049,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004470581188797951,
+          "bytes": 47942176,
+          "engine_seconds": 0.00671271001920104,
+          "seconds": 0.007507590111345053,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004864819347858429,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005955901928246021,
+          "seconds": 0.006665042135864496,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044818175956606865,
+          "bytes": 623902720,
+          "engine_seconds": 0.006000267341732979,
+          "seconds": 0.0067044952884316444,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004360917955636978,
+          "bytes": 47942176,
+          "engine_seconds": 0.006817586254328489,
+          "seconds": 0.0075919427908957005,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004669269546866417,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006129222922027111,
+          "seconds": 0.006824424024671316,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047951703891158104,
+          "bytes": 623902720,
+          "engine_seconds": 0.006146798375993967,
+          "seconds": 0.006891888100653887,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044234516099095345,
+          "bytes": 47942176,
+          "engine_seconds": 0.006919696927070618,
+          "seconds": 0.007729154080152512,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004553222097456455,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006425254046916962,
+          "seconds": 0.007110014092177153,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004659411497414112,
+          "bytes": 623902720,
+          "engine_seconds": 0.005935962777584791,
+          "seconds": 0.006668638903647661,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004585939459502697,
+          "bytes": 32881152,
+          "engine_seconds": 0.006417525000870228,
+          "seconds": 0.007164723705500364,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.00047303875908255577,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005769933108240366,
+          "seconds": 0.006486135069280863,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004526060074567795,
+          "bytes": 623902720,
+          "engine_seconds": 0.005946406628936529,
+          "seconds": 0.006663528736680746,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047934381291270256,
+          "bytes": 10588160,
+          "engine_seconds": 0.006111993920058012,
+          "seconds": 0.0068506039679050446,
+          "tensors": 5
+        }
+      ],
+      "buckets": 59,
+      "buffer_bytes": 536870912,
+      "bytes": 37028386304,
+      "engine_seconds": 0.3903977903537452,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.1576649989001453,
+      "finalize_seconds": 0.029333957936614752,
+      "pause_connect_seconds": 0.012535449117422104,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.6349794226698577,
+      "transport": "flattened",
+      "transport_collectives": 59,
+      "transport_load_seconds": 0.4354445808567107,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.02851847419515252,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0005299649201333523,
+          "bytes": 536869920,
+          "engine_seconds": 0.007600763812661171,
+          "seconds": 0.008459306787699461,
+          "tensors": 16
+        },
+        {
+          "broadcast_seconds": 0.00044852588325738907,
+          "bytes": 115758112,
+          "engine_seconds": 0.007117616944015026,
+          "seconds": 0.007942312397062778,
+          "tensors": 32
+        },
+        {
+          "broadcast_seconds": 0.00046770786866545677,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007076608017086983,
+          "seconds": 0.007781158201396465,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004619448445737362,
+          "bytes": 623902720,
+          "engine_seconds": 0.0060687437653541565,
+          "seconds": 0.006802036892622709,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00042954878881573677,
+          "bytes": 47942176,
+          "engine_seconds": 0.006973406299948692,
+          "seconds": 0.007728896103799343,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004564458504319191,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0060537513345479965,
+          "seconds": 0.006742103956639767,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004637152887880802,
+          "bytes": 623902720,
+          "engine_seconds": 0.006276837084442377,
+          "seconds": 0.007031518965959549,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045170867815613747,
+          "bytes": 47942176,
+          "engine_seconds": 0.006594700273126364,
+          "seconds": 0.007374313194304705,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.000455404631793499,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006109266076236963,
+          "seconds": 0.006805090233683586,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044468510895967484,
+          "bytes": 623902720,
+          "engine_seconds": 0.005892238114029169,
+          "seconds": 0.0065986826084554195,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043831486254930496,
+          "bytes": 32881152,
+          "engine_seconds": 0.006618354003876448,
+          "seconds": 0.007348781917244196,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004645399749279022,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006105857901275158,
+          "seconds": 0.006806158926337957,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004534199833869934,
+          "bytes": 623902720,
+          "engine_seconds": 0.006085407920181751,
+          "seconds": 0.006821602117270231,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004213671199977398,
+          "bytes": 47942176,
+          "engine_seconds": 0.006838029250502586,
+          "seconds": 0.007582494989037514,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004471438005566597,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006270604208111763,
+          "seconds": 0.006944292224943638,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045753689482808113,
+          "bytes": 623902720,
+          "engine_seconds": 0.006274389103055,
+          "seconds": 0.006994219962507486,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043301191180944443,
+          "bytes": 47942176,
+          "engine_seconds": 0.006752930115908384,
+          "seconds": 0.00753446388989687,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00047893868759274483,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005789099261164665,
+          "seconds": 0.006503251846879721,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045606493949890137,
+          "bytes": 623902720,
+          "engine_seconds": 0.006113520823419094,
+          "seconds": 0.006837068125605583,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004478069022297859,
+          "bytes": 47942176,
+          "engine_seconds": 0.006813182961195707,
+          "seconds": 0.007609983906149864,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005253171548247337,
+          "bytes": 1247805440,
+          "engine_seconds": 0.018178710713982582,
+          "seconds": 0.018915971741080284,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00042204372584819794,
+          "bytes": 623902720,
+          "engine_seconds": 0.005551213398575783,
+          "seconds": 0.006227190140634775,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004479731433093548,
+          "bytes": 47942176,
+          "engine_seconds": 0.006543704774230719,
+          "seconds": 0.007335289381444454,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004614167846739292,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006059571169316769,
+          "seconds": 0.00676815677434206,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004389788955450058,
+          "bytes": 623902720,
+          "engine_seconds": 0.005917680915445089,
+          "seconds": 0.00662553496658802,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044014398008584976,
+          "bytes": 32881152,
+          "engine_seconds": 0.006616055965423584,
+          "seconds": 0.007336128037422895,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004475838504731655,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006536158267408609,
+          "seconds": 0.007221650797873735,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000431867316365242,
+          "bytes": 623902720,
+          "engine_seconds": 0.006161791738122702,
+          "seconds": 0.006873025093227625,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004271427169442177,
+          "bytes": 47942176,
+          "engine_seconds": 0.0071052443236112595,
+          "seconds": 0.007880454882979393,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00046863919124007225,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006244079675525427,
+          "seconds": 0.006952828262001276,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045456504449248314,
+          "bytes": 623902720,
+          "engine_seconds": 0.0062819537706673145,
+          "seconds": 0.007004134822636843,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004427698440849781,
+          "bytes": 47942176,
+          "engine_seconds": 0.006633558310568333,
+          "seconds": 0.007416382897645235,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004812469705939293,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005950030870735645,
+          "seconds": 0.006663798820227385,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045523978769779205,
+          "bytes": 623902720,
+          "engine_seconds": 0.006170641165226698,
+          "seconds": 0.006891346070915461,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046674860641360283,
+          "bytes": 47942176,
+          "engine_seconds": 0.006750788073986769,
+          "seconds": 0.0075520421378314495,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00048136385157704353,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005790704395622015,
+          "seconds": 0.0064950729720294476,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004286556504666805,
+          "bytes": 623902720,
+          "engine_seconds": 0.005949666257947683,
+          "seconds": 0.0066443090327084064,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000437246635556221,
+          "bytes": 47942176,
+          "engine_seconds": 0.006687842309474945,
+          "seconds": 0.00748759089037776,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00046111783012747765,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006173263303935528,
+          "seconds": 0.006860104855149984,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004398589953780174,
+          "bytes": 623902720,
+          "engine_seconds": 0.006040722131729126,
+          "seconds": 0.0067478688433766365,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045255105942487717,
+          "bytes": 32881152,
+          "engine_seconds": 0.006415007170289755,
+          "seconds": 0.007159410044550896,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004494539462029934,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006029705051332712,
+          "seconds": 0.006706321146339178,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044732633978128433,
+          "bytes": 623902720,
+          "engine_seconds": 0.00619014585390687,
+          "seconds": 0.006906068883836269,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005370820872485638,
+          "bytes": 47942176,
+          "engine_seconds": 0.0064488002099096775,
+          "seconds": 0.00733276316896081,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004664571024477482,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006194359622895718,
+          "seconds": 0.0069007850252091885,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004343809559941292,
+          "bytes": 623902720,
+          "engine_seconds": 0.006170887965708971,
+          "seconds": 0.0068757189437747,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000451698899269104,
+          "bytes": 47942176,
+          "engine_seconds": 0.006865161005407572,
+          "seconds": 0.007657651789486408,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.000487007200717926,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005796846002340317,
+          "seconds": 0.0065132188610732555,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044093886390328407,
+          "bytes": 623902720,
+          "engine_seconds": 0.006173721980303526,
+          "seconds": 0.006870743352919817,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046020280569791794,
+          "bytes": 47942176,
+          "engine_seconds": 0.006904399022459984,
+          "seconds": 0.007720867171883583,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004851659759879112,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006172122899442911,
+          "seconds": 0.006885353941470385,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004604998975992203,
+          "bytes": 623902720,
+          "engine_seconds": 0.0059218090027570724,
+          "seconds": 0.0066415187902748585,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000492412131279707,
+          "bytes": 47942176,
+          "engine_seconds": 0.00676479609683156,
+          "seconds": 0.007611495908349752,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0005027116276323795,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00621960312128067,
+          "seconds": 0.006964303087443113,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043572578579187393,
+          "bytes": 623902720,
+          "engine_seconds": 0.006109775975346565,
+          "seconds": 0.006813178304582834,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0018515558913350105,
+          "bytes": 32881152,
+          "engine_seconds": 0.006903614848852158,
+          "seconds": 0.009122143033891916,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.0004862588830292225,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005980631336569786,
+          "seconds": 0.006707863882184029,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004974468611180782,
+          "bytes": 623902720,
+          "engine_seconds": 0.006078449077904224,
+          "seconds": 0.006854719948023558,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005118809640407562,
+          "bytes": 10588160,
+          "engine_seconds": 0.006034087855368853,
+          "seconds": 0.0067960042506456375,
+          "tensors": 5
+        }
+      ],
+      "buckets": 59,
+      "buffer_bytes": 536870912,
+      "bytes": 37028386304,
+      "engine_seconds": 0.38614261290058494,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.1566930217668414,
+      "finalize_seconds": 0.030586136039346457,
+      "pause_connect_seconds": 0.012173288967460394,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.6306395740248263,
+      "transport": "flattened",
+      "transport_collectives": 59,
+      "transport_load_seconds": 0.43118674820289016,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.027044089511036873,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0005040550604462624,
+          "bytes": 536869920,
+          "engine_seconds": 0.007750089280307293,
+          "seconds": 0.008573351893574,
+          "tensors": 16
+        },
+        {
+          "broadcast_seconds": 0.0004508490674197674,
+          "bytes": 115758112,
+          "engine_seconds": 0.006671112962067127,
+          "seconds": 0.007508669048547745,
+          "tensors": 32
+        },
+        {
+          "broadcast_seconds": 0.00045384373515844345,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006846998352557421,
+          "seconds": 0.0075223613530397415,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044179288670420647,
+          "bytes": 623902720,
+          "engine_seconds": 0.005672518163919449,
+          "seconds": 0.006385008804500103,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045196572318673134,
+          "bytes": 47942176,
+          "engine_seconds": 0.006802634336054325,
+          "seconds": 0.007600971031934023,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004978859797120094,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006164887920022011,
+          "seconds": 0.006896801758557558,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044289277866482735,
+          "bytes": 623902720,
+          "engine_seconds": 0.0060638319700956345,
+          "seconds": 0.006775505840778351,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004471917636692524,
+          "bytes": 47942176,
+          "engine_seconds": 0.014619010966271162,
+          "seconds": 0.015396929811686277,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004464169032871723,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005863936152309179,
+          "seconds": 0.006539554800838232,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004681237041950226,
+          "bytes": 623902720,
+          "engine_seconds": 0.005742357112467289,
+          "seconds": 0.00646841898560524,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044425763189792633,
+          "bytes": 32881152,
+          "engine_seconds": 0.006403596140444279,
+          "seconds": 0.007138666231185198,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.00046050315722823143,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006211071740835905,
+          "seconds": 0.006922777742147446,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004490679129958153,
+          "bytes": 623902720,
+          "engine_seconds": 0.00601196801289916,
+          "seconds": 0.006730556953698397,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044498126953840256,
+          "bytes": 47942176,
+          "engine_seconds": 0.006572957616299391,
+          "seconds": 0.007340189069509506,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004739607684314251,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006242378149181604,
+          "seconds": 0.006950354669243097,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045594992116093636,
+          "bytes": 623902720,
+          "engine_seconds": 0.0057786209508776665,
+          "seconds": 0.006499809212982655,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004543107934296131,
+          "bytes": 47942176,
+          "engine_seconds": 0.006791142281144857,
+          "seconds": 0.007584866136312485,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00046423496678471565,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005865857005119324,
+          "seconds": 0.006561078131198883,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004751458764076233,
+          "bytes": 623902720,
+          "engine_seconds": 0.006111913360655308,
+          "seconds": 0.00685492530465126,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000445500947535038,
+          "bytes": 47942176,
+          "engine_seconds": 0.006661109160631895,
+          "seconds": 0.007454561069607735,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00046506617218255997,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005902459844946861,
+          "seconds": 0.00659192493185401,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044259103015065193,
+          "bytes": 623902720,
+          "engine_seconds": 0.006184102036058903,
+          "seconds": 0.006897228769958019,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004450739361345768,
+          "bytes": 47942176,
+          "engine_seconds": 0.006971259135752916,
+          "seconds": 0.007768855895847082,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004729987122118473,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005922734271734953,
+          "seconds": 0.006618842948228121,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004397137090563774,
+          "bytes": 623902720,
+          "engine_seconds": 0.005902268923819065,
+          "seconds": 0.006596325896680355,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044403597712516785,
+          "bytes": 32881152,
+          "engine_seconds": 0.00623432919383049,
+          "seconds": 0.006965291686356068,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.00048163486644625664,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005929740145802498,
+          "seconds": 0.006648646201938391,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004638032987713814,
+          "bytes": 623902720,
+          "engine_seconds": 0.0058487229980528355,
+          "seconds": 0.006586139090359211,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044270511716604233,
+          "bytes": 47942176,
+          "engine_seconds": 0.006484335754066706,
+          "seconds": 0.0072737387381494045,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00046072108671069145,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0059335180558264256,
+          "seconds": 0.006627178285270929,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004450129345059395,
+          "bytes": 623902720,
+          "engine_seconds": 0.005521918181329966,
+          "seconds": 0.006235593929886818,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044213375076651573,
+          "bytes": 47942176,
+          "engine_seconds": 0.0066200378350913525,
+          "seconds": 0.007409780751913786,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00046491390094161034,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006059727165848017,
+          "seconds": 0.00675536785274744,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004648580215871334,
+          "bytes": 623902720,
+          "engine_seconds": 0.006147274747490883,
+          "seconds": 0.006880312226712704,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004410231485962868,
+          "bytes": 47942176,
+          "engine_seconds": 0.0065350099466741085,
+          "seconds": 0.007307505700737238,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004768609069287777,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005862894933670759,
+          "seconds": 0.006581523921340704,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047946302220225334,
+          "bytes": 623902720,
+          "engine_seconds": 0.006251459009945393,
+          "seconds": 0.00699811615049839,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044817617163062096,
+          "bytes": 47942176,
+          "engine_seconds": 0.00674272608011961,
+          "seconds": 0.007535418961197138,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00047809164971113205,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006124371197074652,
+          "seconds": 0.006843987852334976,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044779200106859207,
+          "bytes": 623902720,
+          "engine_seconds": 0.0056303818710148335,
+          "seconds": 0.006356909871101379,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043495185673236847,
+          "bytes": 32881152,
+          "engine_seconds": 0.006418804172426462,
+          "seconds": 0.007139948196709156,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.00045818276703357697,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00609402684494853,
+          "seconds": 0.006797288078814745,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00048104580491781235,
+          "bytes": 623902720,
+          "engine_seconds": 0.005949174053966999,
+          "seconds": 0.006707725115120411,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005332771688699722,
+          "bytes": 47942176,
+          "engine_seconds": 0.006622880697250366,
+          "seconds": 0.007521656807512045,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004746359772980213,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00616918271407485,
+          "seconds": 0.00687365373596549,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004379977472126484,
+          "bytes": 623902720,
+          "engine_seconds": 0.00599963404238224,
+          "seconds": 0.00670752814039588,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044717593118548393,
+          "bytes": 47942176,
+          "engine_seconds": 0.006850142031908035,
+          "seconds": 0.0076424856670200825,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00048010610044002533,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005865618120878935,
+          "seconds": 0.006586133968085051,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046051107347011566,
+          "bytes": 623902720,
+          "engine_seconds": 0.006150843109935522,
+          "seconds": 0.006866345182061195,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043440796434879303,
+          "bytes": 47942176,
+          "engine_seconds": 0.006857943255454302,
+          "seconds": 0.007649657782167196,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.00048017920926213264,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005822751671075821,
+          "seconds": 0.006540368776768446,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004651467315852642,
+          "bytes": 623902720,
+          "engine_seconds": 0.00602647615596652,
+          "seconds": 0.006749485153704882,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044614216312766075,
+          "bytes": 47942176,
+          "engine_seconds": 0.006773652974516153,
+          "seconds": 0.007570155896246433,
+          "tensors": 26
+        },
+        {
+          "broadcast_seconds": 0.0004898542538285255,
+          "bytes": 1247805440,
+          "engine_seconds": 0.019164437893778086,
+          "seconds": 0.019863497000187635,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00038973474875092506,
+          "bytes": 623902720,
+          "engine_seconds": 0.005381233058869839,
+          "seconds": 0.005985504947602749,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004052720032632351,
+          "bytes": 32881152,
+          "engine_seconds": 0.006392939947545528,
+          "seconds": 0.007087948266416788,
+          "tensors": 17
+        },
+        {
+          "broadcast_seconds": 0.00047174375504255295,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005913435947149992,
+          "seconds": 0.006619828753173351,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004530958831310272,
+          "bytes": 623902720,
+          "engine_seconds": 0.005980427842587233,
+          "seconds": 0.006698444951325655,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00048102810978889465,
+          "bytes": 10588160,
+          "engine_seconds": 0.005879280157387257,
+          "seconds": 0.006625758949667215,
+          "tensors": 5
+        }
+      ],
+      "buckets": 59,
+      "buffer_bytes": 536870912,
+      "bytes": 37028386304,
+      "engine_seconds": 0.3879701476544142,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.157213413156569,
+      "finalize_seconds": 0.029069945216178894,
+      "pause_connect_seconds": 0.012813846115022898,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.6305149560794234,
+      "transport": "flattened",
+      "transport_collectives": 59,
+      "transport_load_seconds": 0.4314174628816545,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.01953233638778329,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.00045351171866059303,
+          "bytes": 652628032,
+          "engine_seconds": 0.009253744035959244,
+          "seconds": 0.010148282162845135,
+          "tensors": 48
+        },
+        {
+          "broadcast_seconds": 0.00046586478129029274,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006956304889172316,
+          "seconds": 0.007658209186047316,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044853705912828445,
+          "bytes": 671844896,
+          "engine_seconds": 0.006606457754969597,
+          "seconds": 0.007405669894069433,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004711099900305271,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005798590835183859,
+          "seconds": 0.006513621192425489,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044899480417370796,
+          "bytes": 671844896,
+          "engine_seconds": 0.006688315887004137,
+          "seconds": 0.007483691908419132,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00046662474051117897,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005723343230783939,
+          "seconds": 0.006431590300053358,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046014925464987755,
+          "bytes": 656783872,
+          "engine_seconds": 0.006334069184958935,
+          "seconds": 0.007080433424562216,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004887860268354416,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005879335105419159,
+          "seconds": 0.006604640744626522,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044222408905625343,
+          "bytes": 671844896,
+          "engine_seconds": 0.006787496153265238,
+          "seconds": 0.007574480026960373,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00046962499618530273,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006153659895062447,
+          "seconds": 0.006870705168694258,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000440182164311409,
+          "bytes": 671844896,
+          "engine_seconds": 0.006184833589941263,
+          "seconds": 0.006969748064875603,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004666280001401901,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005459078121930361,
+          "seconds": 0.00616028718650341,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043437210842967033,
+          "bytes": 671844896,
+          "engine_seconds": 0.0068287658505141735,
+          "seconds": 0.007614921312779188,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004728911444544792,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005831875838339329,
+          "seconds": 0.006540528032928705,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044366996735334396,
+          "bytes": 671844896,
+          "engine_seconds": 0.006803567986935377,
+          "seconds": 0.007598229218274355,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00045249704271554947,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006066352128982544,
+          "seconds": 0.0067696478217840195,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004484960809350014,
+          "bytes": 656783872,
+          "engine_seconds": 0.006169188767671585,
+          "seconds": 0.006919940002262592,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004784790799021721,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0059688822366297245,
+          "seconds": 0.006685721222311258,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043884292244911194,
+          "bytes": 671844896,
+          "engine_seconds": 0.006966693326830864,
+          "seconds": 0.007760379929095507,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00046282121911644936,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005851050838828087,
+          "seconds": 0.006538982968777418,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043244101107120514,
+          "bytes": 671844896,
+          "engine_seconds": 0.006787028629332781,
+          "seconds": 0.007567272987216711,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047125574201345444,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006165565922856331,
+          "seconds": 0.006895086728036404,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004831901751458645,
+          "bytes": 671844896,
+          "engine_seconds": 0.007457612082362175,
+          "seconds": 0.008264759089797735,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0019031288102269173,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006043071858584881,
+          "seconds": 0.008166356012225151,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004606819711625576,
+          "bytes": 671844896,
+          "engine_seconds": 0.006905595771968365,
+          "seconds": 0.007717907894402742,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048670312389731407,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005861389916390181,
+          "seconds": 0.006586642935872078,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004604891873896122,
+          "bytes": 656783872,
+          "engine_seconds": 0.006575333885848522,
+          "seconds": 0.007324468810111284,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004619020037353039,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005989423952996731,
+          "seconds": 0.006701615173369646,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046288687735795975,
+          "bytes": 671844896,
+          "engine_seconds": 0.006671189796179533,
+          "seconds": 0.007505604065954685,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004624882712960243,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005777115002274513,
+          "seconds": 0.00646230997517705,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046708201989531517,
+          "bytes": 671844896,
+          "engine_seconds": 0.006605606991797686,
+          "seconds": 0.007438262924551964,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047168927267193794,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006150562781840563,
+          "seconds": 0.006846596021205187,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000541499350219965,
+          "bytes": 671844896,
+          "engine_seconds": 0.006816735025495291,
+          "seconds": 0.007713791914284229,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048064906150102615,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005859427619725466,
+          "seconds": 0.006572965998202562,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004565892741084099,
+          "bytes": 671844896,
+          "engine_seconds": 0.0069006988778710365,
+          "seconds": 0.0077323829755187035,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047988537698984146,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006114920601248741,
+          "seconds": 0.006849247962236404,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044500594958662987,
+          "bytes": 656783872,
+          "engine_seconds": 0.006290842778980732,
+          "seconds": 0.007013858295977116,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.000470062717795372,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006180264055728912,
+          "seconds": 0.006879606284201145,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004803990013897419,
+          "bytes": 634490880,
+          "engine_seconds": 0.017906587105244398,
+          "seconds": 0.01861701300367713,
+          "tensors": 6
+        }
+      ],
+      "buckets": 39,
+      "buffer_bytes": 1073741824,
+      "bytes": 37028386304,
+      "engine_seconds": 0.261370578315109,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.15540616307407618,
+      "finalize_seconds": 0.030166354961693287,
+      "pause_connect_seconds": 0.012427902780473232,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.4901862107217312,
+      "transport": "flattened",
+      "transport_collectives": 39,
+      "transport_load_seconds": 0.2921854588203132,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.01836823672056198,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.000459528062492609,
+          "bytes": 652628032,
+          "engine_seconds": 0.009401168208569288,
+          "seconds": 0.01033068634569645,
+          "tensors": 48
+        },
+        {
+          "broadcast_seconds": 0.0004863450303673744,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006905596703290939,
+          "seconds": 0.007632901892066002,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045055896043777466,
+          "bytes": 671844896,
+          "engine_seconds": 0.0066594891250133514,
+          "seconds": 0.007459414191544056,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047357426956295967,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0059778811410069466,
+          "seconds": 0.006684195250272751,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044425809755921364,
+          "bytes": 671844896,
+          "engine_seconds": 0.006610548123717308,
+          "seconds": 0.007405353710055351,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048705190420150757,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005777230020612478,
+          "seconds": 0.00649460032582283,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004565832205116749,
+          "bytes": 656783872,
+          "engine_seconds": 0.006236787885427475,
+          "seconds": 0.006971294060349464,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004633353091776371,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005683739669620991,
+          "seconds": 0.006382223684340715,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004449663683772087,
+          "bytes": 671844896,
+          "engine_seconds": 0.006749397609382868,
+          "seconds": 0.007541314698755741,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.000457199290394783,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006564853712916374,
+          "seconds": 0.0072486139833927155,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004449533298611641,
+          "bytes": 671844896,
+          "engine_seconds": 0.006864734925329685,
+          "seconds": 0.007646986749023199,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048389704897999763,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005880070850253105,
+          "seconds": 0.006605952978134155,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044635916128754616,
+          "bytes": 671844896,
+          "engine_seconds": 0.0064616757445037365,
+          "seconds": 0.007241659332066774,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004665539599955082,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005707311909645796,
+          "seconds": 0.006416010670363903,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045027630403637886,
+          "bytes": 671844896,
+          "engine_seconds": 0.006365254055708647,
+          "seconds": 0.00715860677883029,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00046641984954476357,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0063207983039319515,
+          "seconds": 0.007023259066045284,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004561101086437702,
+          "bytes": 656783872,
+          "engine_seconds": 0.0067788721062242985,
+          "seconds": 0.00752902589738369,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004775547422468662,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005929857026785612,
+          "seconds": 0.00664045475423336,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045472709462046623,
+          "bytes": 671844896,
+          "engine_seconds": 0.006653354037553072,
+          "seconds": 0.007463054731488228,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00046597234904766083,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005806253757327795,
+          "seconds": 0.006506547797471285,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004491941072046757,
+          "bytes": 671844896,
+          "engine_seconds": 0.0065440768375992775,
+          "seconds": 0.007331482600420713,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0005178130231797695,
+          "bytes": 1247805440,
+          "engine_seconds": 0.01282275514677167,
+          "seconds": 0.01359175518155098,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005832300521433353,
+          "bytes": 671844896,
+          "engine_seconds": 0.006593735888600349,
+          "seconds": 0.007558677811175585,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004831971600651741,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0058443848975002766,
+          "seconds": 0.006566185038536787,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044060591608285904,
+          "bytes": 671844896,
+          "engine_seconds": 0.006744856014847755,
+          "seconds": 0.00755756301805377,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004787081852555275,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006183153949677944,
+          "seconds": 0.006908247247338295,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046680495142936707,
+          "bytes": 656783872,
+          "engine_seconds": 0.006453900132328272,
+          "seconds": 0.007227998226881027,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004649530164897442,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0060072531923651695,
+          "seconds": 0.0067043667659163475,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044408999383449554,
+          "bytes": 671844896,
+          "engine_seconds": 0.006444051396101713,
+          "seconds": 0.007251590956002474,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047159893438220024,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006016872823238373,
+          "seconds": 0.00671347975730896,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005850442685186863,
+          "bytes": 671844896,
+          "engine_seconds": 0.00680564297363162,
+          "seconds": 0.007761282380670309,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047752074897289276,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006252631079405546,
+          "seconds": 0.0069533446803689,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045162299647927284,
+          "bytes": 671844896,
+          "engine_seconds": 0.00659826910123229,
+          "seconds": 0.007416122127324343,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004734811373054981,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00577209796756506,
+          "seconds": 0.006484339013695717,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004368978552520275,
+          "bytes": 671844896,
+          "engine_seconds": 0.0066616348922252655,
+          "seconds": 0.007463796995580196,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.000490858219563961,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005741636734455824,
+          "seconds": 0.006469403393566608,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004465957172214985,
+          "bytes": 656783872,
+          "engine_seconds": 0.006192489061504602,
+          "seconds": 0.006915570702403784,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.00046808691695332527,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00608163932338357,
+          "seconds": 0.006778954062610865,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000501709058880806,
+          "bytes": 634490880,
+          "engine_seconds": 0.0058936309069395065,
+          "seconds": 0.0066519491374492645,
+          "tensors": 6
+        }
+      ],
+      "buckets": 39,
+      "buffer_bytes": 1073741824,
+      "bytes": 37028386304,
+      "engine_seconds": 0.2549895872361958,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.15530439373105764,
+      "finalize_seconds": 0.03101138910278678,
+      "pause_connect_seconds": 0.0119354291819036,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.48293987195938826,
+      "transport": "flattened",
+      "transport_collectives": 39,
+      "transport_load_seconds": 0.28468826599419117,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.01879445882514119,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.00044358009472489357,
+          "bytes": 652628032,
+          "engine_seconds": 0.015065559186041355,
+          "seconds": 0.015952750109136105,
+          "tensors": 48
+        },
+        {
+          "broadcast_seconds": 0.0004228590987622738,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006717335898429155,
+          "seconds": 0.007348537910729647,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045360391959547997,
+          "bytes": 671844896,
+          "engine_seconds": 0.006823166273534298,
+          "seconds": 0.007640597876161337,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004719453863799572,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005874634720385075,
+          "seconds": 0.006581095978617668,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004431731067597866,
+          "bytes": 671844896,
+          "engine_seconds": 0.006894772872328758,
+          "seconds": 0.007696487009525299,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004947986453771591,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006008227355778217,
+          "seconds": 0.006747498642653227,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004524262621998787,
+          "bytes": 656783872,
+          "engine_seconds": 0.006478878669440746,
+          "seconds": 0.007228843867778778,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004716329276561737,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006108399014919996,
+          "seconds": 0.006807859055697918,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043540215119719505,
+          "bytes": 671844896,
+          "engine_seconds": 0.006825292948633432,
+          "seconds": 0.007618068717420101,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00048095081001520157,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005493234843015671,
+          "seconds": 0.0062082428485155106,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045091472566127777,
+          "bytes": 671844896,
+          "engine_seconds": 0.0066954223439097404,
+          "seconds": 0.007505657151341438,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047155097126960754,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006027007941156626,
+          "seconds": 0.006717395037412643,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004415479488670826,
+          "bytes": 671844896,
+          "engine_seconds": 0.0068490211851894855,
+          "seconds": 0.007652563042938709,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004848530516028404,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005848790984600782,
+          "seconds": 0.006568875163793564,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00046738842502236366,
+          "bytes": 671844896,
+          "engine_seconds": 0.0063501158729195595,
+          "seconds": 0.007171840872615576,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047797709703445435,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0062329829670488834,
+          "seconds": 0.00694109033793211,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004375223070383072,
+          "bytes": 656783872,
+          "engine_seconds": 0.006586624775081873,
+          "seconds": 0.00731382891535759,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.00048546865582466125,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005805497989058495,
+          "seconds": 0.006524696014821529,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0008795289322733879,
+          "bytes": 671844896,
+          "engine_seconds": 0.006091708783060312,
+          "seconds": 0.007304094731807709,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047273794189095497,
+          "bytes": 1247805440,
+          "engine_seconds": 0.0058798049576580524,
+          "seconds": 0.006584033835679293,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00044013839215040207,
+          "bytes": 671844896,
+          "engine_seconds": 0.006774597801268101,
+          "seconds": 0.007560429163277149,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0005018226802349091,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006149756256490946,
+          "seconds": 0.006887343246489763,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005900631658732891,
+          "bytes": 671844896,
+          "engine_seconds": 0.00662893895059824,
+          "seconds": 0.009387006983160973,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004784190095961094,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006189529784023762,
+          "seconds": 0.00690277386456728,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004502558149397373,
+          "bytes": 671844896,
+          "engine_seconds": 0.006544172298163176,
+          "seconds": 0.007356320042163134,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004742383025586605,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005769046023488045,
+          "seconds": 0.006476140581071377,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00045928824692964554,
+          "bytes": 656783872,
+          "engine_seconds": 0.0062368628568947315,
+          "seconds": 0.0069886757992208,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.00048158131539821625,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006041356828063726,
+          "seconds": 0.006752735935151577,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004511340521275997,
+          "bytes": 671844896,
+          "engine_seconds": 0.0068206689320504665,
+          "seconds": 0.0076208943501114845,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004879850894212723,
+          "bytes": 1247805440,
+          "engine_seconds": 0.007193659897893667,
+          "seconds": 0.00793443713337183,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00047019077464938164,
+          "bytes": 671844896,
+          "engine_seconds": 0.00677487812936306,
+          "seconds": 0.007583048660308123,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.00047990167513489723,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005898390896618366,
+          "seconds": 0.006612710189074278,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.000525408424437046,
+          "bytes": 671844896,
+          "engine_seconds": 0.006347693968564272,
+          "seconds": 0.0072246999479830265,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004887962713837624,
+          "bytes": 1247805440,
+          "engine_seconds": 0.006168440915644169,
+          "seconds": 0.006888636853545904,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.00043960707262158394,
+          "bytes": 671844896,
+          "engine_seconds": 0.006612950004637241,
+          "seconds": 0.007392941042780876,
+          "tensors": 27
+        },
+        {
+          "broadcast_seconds": 0.0004773191176354885,
+          "bytes": 1247805440,
+          "engine_seconds": 0.00598547700792551,
+          "seconds": 0.0066953301429748535,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0004417109303176403,
+          "bytes": 656783872,
+          "engine_seconds": 0.006290771998465061,
+          "seconds": 0.0070424373261630535,
+          "tensors": 18
+        },
+        {
+          "broadcast_seconds": 0.0004913830198347569,
+          "bytes": 1247805440,
+          "engine_seconds": 0.005599582102149725,
+          "seconds": 0.006328410003334284,
+          "tensors": 1
+        },
+        {
+          "broadcast_seconds": 0.0005253530107438564,
+          "bytes": 634490880,
+          "engine_seconds": 0.0063669937662780285,
+          "seconds": 0.007151334080845118,
+          "tensors": 6
+        }
+      ],
+      "buckets": 39,
+      "buffer_bytes": 1073741824,
+      "bytes": 37028386304,
+      "engine_seconds": 0.2550502480007708,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.15492600155994296,
+      "finalize_seconds": 0.030280284583568573,
+      "pause_connect_seconds": 0.012622343376278877,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.48472936917096376,
+      "transport": "flattened",
+      "transport_collectives": 39,
+      "transport_load_seconds": 0.28690036246553063,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.009282646235078573,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0005062767304480076,
+          "bytes": 1900433472,
+          "engine_seconds": 0.009509997442364693,
+          "seconds": 0.01165908481925726,
+          "tensors": 49
+        },
+        {
+          "broadcast_seconds": 0.0004970859736204147,
+          "bytes": 1919650336,
+          "engine_seconds": 0.007333789020776749,
+          "seconds": 0.009091246873140335,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044888677075505257,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0066170659847557545,
+          "seconds": 0.007411240134388208,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004745679907500744,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006340895313769579,
+          "seconds": 0.0071195815689861774,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004648817703127861,
+          "bytes": 1919650336,
+          "engine_seconds": 0.00655787717550993,
+          "seconds": 0.007377253379672766,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004500136710703373,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006613426376134157,
+          "seconds": 0.007419771980494261,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044991401955485344,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006801626179367304,
+          "seconds": 0.007587296888232231,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00045909686014056206,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006727475207298994,
+          "seconds": 0.007528333924710751,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044495705515146255,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006399643141776323,
+          "seconds": 0.007163617294281721,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004450068809092045,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0067147803492844105,
+          "seconds": 0.0075011951848864555,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004557673819363117,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006502303760498762,
+          "seconds": 0.007296204101294279,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004654889926314354,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0068369898945093155,
+          "seconds": 0.007683148141950369,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004668799228966236,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006853200029581785,
+          "seconds": 0.007651891093701124,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004479610361158848,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006564225070178509,
+          "seconds": 0.007315960247069597,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004524039104580879,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006861190777271986,
+          "seconds": 0.007665145210921764,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044474098831415176,
+          "bytes": 1919650336,
+          "engine_seconds": 0.00673356419429183,
+          "seconds": 0.007528059184551239,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004528132267296314,
+          "bytes": 1919650336,
+          "engine_seconds": 0.00666604470461607,
+          "seconds": 0.007495154161006212,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0005234740674495697,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006503982003778219,
+          "seconds": 0.007389100268483162,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004338519647717476,
+          "bytes": 1904589312,
+          "engine_seconds": 0.00660028588026762,
+          "seconds": 0.007329865358769894,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004985770210623741,
+          "bytes": 634490880,
+          "engine_seconds": 0.00585278170183301,
+          "seconds": 0.0066093266941607,
+          "tensors": 6
+        }
+      ],
+      "buckets": 20,
+      "buffer_bytes": 2147483648,
+      "bytes": 37028386304,
+      "engine_seconds": 0.135591144207865,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.15265157027170062,
+      "finalize_seconds": 0.031520090997219086,
+      "pause_connect_seconds": 0.012695020996034145,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.3506895350292325,
+      "transport": "flattened",
+      "transport_collectives": 20,
+      "transport_load_seconds": 0.1538224765099585,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.009017106145620346,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.00045608682557940483,
+          "bytes": 1900433472,
+          "engine_seconds": 0.009799706283956766,
+          "seconds": 0.010707562789320946,
+          "tensors": 49
+        },
+        {
+          "broadcast_seconds": 0.00045007001608610153,
+          "bytes": 1919650336,
+          "engine_seconds": 0.007196973077952862,
+          "seconds": 0.007983965333551168,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004497901536524296,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0065958136692643166,
+          "seconds": 0.007391768973320723,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00043424777686595917,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006335454992949963,
+          "seconds": 0.0070585208013653755,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.00046643195673823357,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0066021280363202095,
+          "seconds": 0.007418437860906124,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044663436710834503,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006414742674678564,
+          "seconds": 0.007231951225548983,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044813891872763634,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006773791275918484,
+          "seconds": 0.007586351130157709,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00045711128041148186,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006661331746727228,
+          "seconds": 0.007498899009078741,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044518522918224335,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006205494981259108,
+          "seconds": 0.006953118834644556,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.00044287415221333504,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006858767010271549,
+          "seconds": 0.0076579079031944275,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.000444081611931324,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006627116352319717,
+          "seconds": 0.007419336121529341,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004337090067565441,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006924020126461983,
+          "seconds": 0.007710329722613096,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00045581115409731865,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006882928777486086,
+          "seconds": 0.007691734936088324,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044883694499731064,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006871841847896576,
+          "seconds": 0.007642738055437803,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.00044850027188658714,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0070420741103589535,
+          "seconds": 0.00784364202991128,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004695700481534004,
+          "bytes": 1919650336,
+          "engine_seconds": 0.007049987092614174,
+          "seconds": 0.00787008786574006,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00045208167284727097,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0067461151629686356,
+          "seconds": 0.0075496952049434185,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004470949061214924,
+          "bytes": 1919650336,
+          "engine_seconds": 0.00665224390104413,
+          "seconds": 0.007437719963490963,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00044215191155672073,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006415816955268383,
+          "seconds": 0.007185822352766991,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004786979407072067,
+          "bytes": 634490880,
+          "engine_seconds": 0.006015286315232515,
+          "seconds": 0.006750007160007954,
+          "tensors": 6
+        }
+      ],
+      "buckets": 20,
+      "buffer_bytes": 2147483648,
+      "bytes": 37028386304,
+      "engine_seconds": 0.1366716343909502,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.15229685278609395,
+      "finalize_seconds": 0.03281396394595504,
+      "pause_connect_seconds": 0.012243052013218403,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.34994375705718994,
+      "transport": "flattened",
+      "transport_collectives": 20,
+      "transport_load_seconds": 0.15258959727361798,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.009274850133806467,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0004509780555963516,
+          "bytes": 1900433472,
+          "engine_seconds": 0.009560417849570513,
+          "seconds": 0.01048618694767356,
+          "tensors": 49
+        },
+        {
+          "broadcast_seconds": 0.0004640398547053337,
+          "bytes": 1919650336,
+          "engine_seconds": 0.00733649916946888,
+          "seconds": 0.009914178866893053,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004550130106508732,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006639620754867792,
+          "seconds": 0.007440988905727863,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00045514199882745743,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006424039136618376,
+          "seconds": 0.0071876319125294685,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004650694318115711,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006777073722332716,
+          "seconds": 0.007589907851070166,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00046525709331035614,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006846371106803417,
+          "seconds": 0.007673745974898338,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00046243611723184586,
+          "bytes": 1919650336,
+          "engine_seconds": 0.00705671077594161,
+          "seconds": 0.007868578657507896,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.000493491068482399,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006794629618525505,
+          "seconds": 0.007636860944330692,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.000504086259752512,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006717872805893421,
+          "seconds": 0.007538114208728075,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004566572606563568,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006696538999676704,
+          "seconds": 0.00753879826515913,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004600747488439083,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006767443846911192,
+          "seconds": 0.007570227608084679,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00045152613893151283,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0067785559222102165,
+          "seconds": 0.007587107829749584,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004587559960782528,
+          "bytes": 1919650336,
+          "engine_seconds": 0.0069224899634718895,
+          "seconds": 0.007738959975540638,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00045372918248176575,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006454627029597759,
+          "seconds": 0.007224844302982092,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.00044383294880390167,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006815920118242502,
+          "seconds": 0.007616548798978329,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00047891121357679367,
+          "bytes": 1919650336,
+          "engine_seconds": 0.007046791724860668,
+          "seconds": 0.007874309085309505,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004562167450785637,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006942247040569782,
+          "seconds": 0.007759372238069773,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.00046506617218255997,
+          "bytes": 1919650336,
+          "engine_seconds": 0.006808422971516848,
+          "seconds": 0.007636284921318293,
+          "tensors": 28
+        },
+        {
+          "broadcast_seconds": 0.0004461207427084446,
+          "bytes": 1904589312,
+          "engine_seconds": 0.006269651930779219,
+          "seconds": 0.007015278097242117,
+          "tensors": 19
+        },
+        {
+          "broadcast_seconds": 0.0004884460940957069,
+          "bytes": 634490880,
+          "engine_seconds": 0.005769031122326851,
+          "seconds": 0.0065248082391917706,
+          "tensors": 6
+        }
+      ],
+      "buckets": 20,
+      "buffer_bytes": 2147483648,
+      "bytes": 37028386304,
+      "engine_seconds": 0.13742495561018586,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.15237700520083308,
+      "finalize_seconds": 0.031743437983095646,
+      "pause_connect_seconds": 0.012336898129433393,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.3518803911283612,
+      "transport": "flattened",
+      "transport_collectives": 20,
+      "transport_load_seconds": 0.15542273363098502,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.005020925309509039,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0005944459699094296,
+          "bytes": 3820083808,
+          "engine_seconds": 0.012338671833276749,
+          "seconds": 0.017856820952147245,
+          "tensors": 77
+        },
+        {
+          "broadcast_seconds": 0.0005285637453198433,
+          "bytes": 3824239648,
+          "engine_seconds": 0.00808657193556428,
+          "seconds": 0.013334730640053749,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.000506310723721981,
+          "bytes": 3839300672,
+          "engine_seconds": 0.00852187117561698,
+          "seconds": 0.01376344496384263,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.00047542108222842216,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007760080974549055,
+          "seconds": 0.011721311137080193,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.00048272544518113136,
+          "bytes": 3824239648,
+          "engine_seconds": 0.0072508277371525764,
+          "seconds": 0.011265272740274668,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.000486867967993021,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007436105981469154,
+          "seconds": 0.011463857721537352,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.000482895877212286,
+          "bytes": 3824239648,
+          "engine_seconds": 0.007388987112790346,
+          "seconds": 0.011549385264515877,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.0004735393449664116,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007602867670357227,
+          "seconds": 0.011702070944011211,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0004967129789292812,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007489033974707127,
+          "seconds": 0.011528184171766043,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0004934421740472317,
+          "bytes": 2539080192,
+          "engine_seconds": 0.006784763187170029,
+          "seconds": 0.008564410731196404,
+          "tensors": 25
+        }
+      ],
+      "buckets": 10,
+      "buffer_bytes": 4294967296,
+      "bytes": 37028386304,
+      "engine_seconds": 0.08065978158265352,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.15098405862227082,
+      "finalize_seconds": 0.039134256076067686,
+      "pause_connect_seconds": 0.01254657143726945,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.32541470415890217,
+      "transport": "flattened",
+      "transport_collectives": 10,
+      "transport_load_seconds": 0.12274948926642537,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.004874862264841795,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.000541978981345892,
+          "bytes": 3820083808,
+          "engine_seconds": 0.012126641348004341,
+          "seconds": 0.016202758997678757,
+          "tensors": 77
+        },
+        {
+          "broadcast_seconds": 0.00048683304339647293,
+          "bytes": 3824239648,
+          "engine_seconds": 0.008048377931118011,
+          "seconds": 0.012137487065047026,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.000476181972771883,
+          "bytes": 3839300672,
+          "engine_seconds": 0.008446848951280117,
+          "seconds": 0.012503815349191427,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0004727933555841446,
+          "bytes": 3839300672,
+          "engine_seconds": 0.0076322597451508045,
+          "seconds": 0.011541915126144886,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.00046780798584222794,
+          "bytes": 3824239648,
+          "engine_seconds": 0.007654520217329264,
+          "seconds": 0.011426866054534912,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.00048788636922836304,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007716738618910313,
+          "seconds": 0.011835172772407532,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.00046294787898659706,
+          "bytes": 3824239648,
+          "engine_seconds": 0.007214628159999847,
+          "seconds": 0.011282060761004686,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.00048058992251753807,
+          "bytes": 3839300672,
+          "engine_seconds": 0.010344371199607849,
+          "seconds": 0.014495597686618567,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0005155899561941624,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007725629024207592,
+          "seconds": 0.011679442133754492,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.000482252798974514,
+          "bytes": 2539080192,
+          "engine_seconds": 0.00669199088588357,
+          "seconds": 0.008577530272305012,
+          "tensors": 25
+        }
+      ],
+      "buckets": 10,
+      "buffer_bytes": 4294967296,
+      "bytes": 37028386304,
+      "engine_seconds": 0.08360200608149171,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.14241559850052,
+      "finalize_seconds": 0.041031948290765285,
+      "pause_connect_seconds": 0.014118080027401447,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.3192484858445823,
+      "transport": "flattened",
+      "transport_collectives": 10,
+      "transport_load_seconds": 0.1216826462186873,
+      "version": 0
+    },
+    {
+      "broadcast_seconds": 0.004939769860357046,
+      "bucket_details": [
+        {
+          "broadcast_seconds": 0.0005860049277544022,
+          "bytes": 3820083808,
+          "engine_seconds": 0.012300133239477873,
+          "seconds": 0.016323398798704147,
+          "tensors": 77
+        },
+        {
+          "broadcast_seconds": 0.00047172000631690025,
+          "bytes": 3824239648,
+          "engine_seconds": 0.008539662230759859,
+          "seconds": 0.012408795300871134,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.0004947972483932972,
+          "bytes": 3839300672,
+          "engine_seconds": 0.00866649579256773,
+          "seconds": 0.012446783017367125,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0005082031711935997,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007896333932876587,
+          "seconds": 0.011925235856324434,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0004726918414235115,
+          "bytes": 3824239648,
+          "engine_seconds": 0.007608400192111731,
+          "seconds": 0.011613728012889624,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.0004809959791600704,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007823812775313854,
+          "seconds": 0.01191104156896472,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0004591881297528744,
+          "bytes": 3824239648,
+          "engine_seconds": 0.007449521217495203,
+          "seconds": 0.01151023106649518,
+          "tensors": 47
+        },
+        {
+          "broadcast_seconds": 0.0004743831232190132,
+          "bytes": 3839300672,
+          "engine_seconds": 0.007819086778908968,
+          "seconds": 0.011720027308911085,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0004908982664346695,
+          "bytes": 3839300672,
+          "engine_seconds": 0.0077396840788424015,
+          "seconds": 0.01176242996007204,
+          "tensors": 56
+        },
+        {
+          "broadcast_seconds": 0.0005008871667087078,
+          "bytes": 2539080192,
+          "engine_seconds": 0.01765269972383976,
+          "seconds": 0.019980672281235456,
+          "tensors": 25
+        }
+      ],
+      "buckets": 10,
+      "buffer_bytes": 4294967296,
+      "bytes": 37028386304,
+      "engine_seconds": 0.09349582996219397,
+      "expert_publication": "fused",
+      "export_pack_seconds": 0.14256217377260327,
+      "finalize_seconds": 0.039117901120334864,
+      "pause_connect_seconds": 0.012862537987530231,
+      "repeated_version": true,
+      "stream_moe_export": true,
+      "tensors": 523,
+      "total_seconds": 0.32614531414583325,
+      "transport": "flattened",
+      "transport_collectives": 10,
+      "transport_load_seconds": 0.13160234317183495,
+      "version": 0
+    }
+  ],
+  "schedule": [
+    {
+      "buffer_bytes": 268435456,
+      "label": "256MiB",
+      "repeat": 0
+    },
+    {
+      "buffer_bytes": 268435456,
+      "label": "256MiB",
+      "repeat": 1
+    },
+    {
+      "buffer_bytes": 268435456,
+      "label": "256MiB",
+      "repeat": 2
+    },
+    {
+      "buffer_bytes": 536870912,
+      "label": "512MiB",
+      "repeat": 0
+    },
+    {
+      "buffer_bytes": 536870912,
+      "label": "512MiB",
+      "repeat": 1
+    },
+    {
+      "buffer_bytes": 536870912,
+      "label": "512MiB",
+      "repeat": 2
+    },
+    {
+      "buffer_bytes": 1073741824,
+      "label": "1GiB",
+      "repeat": 0
+    },
+    {
+      "buffer_bytes": 1073741824,
+      "label": "1GiB",
+      "repeat": 1
+    },
+    {
+      "buffer_bytes": 1073741824,
+      "label": "1GiB",
+      "repeat": 2
+    },
+    {
+      "buffer_bytes": 2147483648,
+      "label": "2GiB",
+      "repeat": 0
+    },
+    {
+      "buffer_bytes": 2147483648,
+      "label": "2GiB",
+      "repeat": 1
+    },
+    {
+      "buffer_bytes": 2147483648,
+      "label": "2GiB",
+      "repeat": 2
+    },
+    {
+      "buffer_bytes": 4294967296,
+      "label": "4GiB",
+      "repeat": 0
+    },
+    {
+      "buffer_bytes": 4294967296,
+      "label": "4GiB",
+      "repeat": 1
+    },
+    {
+      "buffer_bytes": 4294967296,
+      "label": "4GiB",
+      "repeat": 2
+    }
+  ],
+  "summary": {
+    "broadcast_gigabytes_per_second": 2032.2713213070888,
+    "by_buffer_bytes": {
+      "1073741824": {
+        "buckets_per_publication": 39,
+        "mean_broadcast_seconds": 0.01889834397782882,
+        "mean_engine_seconds": 0.25713680451735854,
+        "mean_total_seconds": 0.48595181728402775,
+        "publications": 3
+      },
+      "2147483648": {
+        "buckets_per_publication": 20,
+        "mean_broadcast_seconds": 0.009191534171501795,
+        "mean_engine_seconds": 0.136562578069667,
+        "mean_total_seconds": 0.3508378944049279,
+        "publications": 3
+      },
+      "268435456": {
+        "buckets_per_publication": 60,
+        "mean_broadcast_seconds": 0.030173253268003464,
+        "mean_engine_seconds": 0.41479212138801813,
+        "mean_total_seconds": 0.6733942165349921,
+        "publications": 3
+      },
+      "4294967296": {
+        "buckets_per_publication": 10,
+        "mean_broadcast_seconds": 0.004945185811569293,
+        "mean_engine_seconds": 0.0859192058754464,
+        "mean_total_seconds": 0.32360283471643925,
+        "publications": 3
+      },
+      "536870912": {
+        "buckets_per_publication": 59,
+        "mean_broadcast_seconds": 0.0278926738537848,
+        "mean_engine_seconds": 0.3881701836362481,
+        "mean_total_seconds": 0.6320446509247025,
+        "publications": 3
+      }
+    },
+    "engine_seconds_regression": {
+      "intercept_seconds": 0.006311934999098373,
+      "points": 564,
+      "r_squared": 0.10516916356778228,
+      "seconds_per_gigabyte": 3.4094221444713026e-05,
+      "seconds_per_tensor": 3.427336277028655e-05
+    },
+    "interpretation": "engine_seconds is the wait after the broadcast completes until the engine responds (reconstruct plus load_weights); broadcast_seconds covers request dispatch, engine receive posting, and the NCCL transfer. seconds_per_tensor versus seconds_per_gigabyte attributes engine time to per-tensor work versus bytes."
+  }
+}

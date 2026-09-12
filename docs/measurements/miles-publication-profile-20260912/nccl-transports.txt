@@ -1,0 +1,8 @@
+     32 1[2] -> 0[0] via P2P/CUMEM
+     32 0[0] -> 1[2] via P2P/CUMEM
+      8 1[1] -> 0[0] [send] via NET/IB/1/GDRDMA
+      8 1[1] -> 0[0] [receive] via NET/IB/0/GDRDMA/flush=None
+      8 0[0] -> 1[1] [send] via NET/IB/0/GDRDMA/Shared
+      8 0[0] -> 1[1] [send] via NET/IB/0/GDRDMA
+      8 0[0] -> 1[1] [receive] via NET/IB/1/GDRDMA/Shared/flush=None
+      8 0[0] -> 1[1] [receive] via NET/IB/1/GDRDMA/flush=None
