@@ -1,0 +1,13 @@
+{"stage": "startup_cache_prepare", "rollout_id": null, "started_unix": 1789185050.0612185, "seconds": 0.20028786605689675, "passed": true}
+{"stage": "placement", "rollout_id": null, "started_unix": 1789185050.261638, "seconds": 0.856153549044393, "passed": true}
+{"stage": "serving_startup", "rollout_id": null, "started_unix": 1789185051.7633495, "seconds": 245.41583501698915, "passed": true}
+{"stage": "trainer_startup", "rollout_id": null, "started_unix": 1789185297.1812665, "seconds": 124.21099811699241, "passed": true}
+{"stage": "initial_publication", "rollout_id": null, "started_unix": 1789185421.3946397, "seconds": 20.36978085990995, "passed": true}
+{"stage": "evaluation", "rollout_id": 0, "started_unix": 1789185441.766581, "seconds": 165.08164837793447, "passed": true, "details": {"phase": "initial", "scope": "blocking_shared_engine_evaluation", "configured_serving": {"rollout_num_gpus": 1, "rollout_num_gpus_per_engine": 1, "sglang_server_concurrency": 16, "sglang_max_running_requests": 16, "sglang_max_total_tokens": 524288, "sglang_max_mamba_cache_size": 128, "sglang_cuda_graph_max_bs_decode": 64, "sglang_mem_fraction_static": 0.6, "sglang_context_length": 6144, "sglang_disable_radix_cache": true}}}
+{"stage": "generation_wait", "rollout_id": 0, "started_unix": 1789185606.8499715, "seconds": 152.971202746965, "passed": true}
+{"stage": "training", "rollout_id": 0, "started_unix": 1789185759.823542, "seconds": 488.88406806299463, "passed": true}
+{"stage": "publication", "rollout_id": 0, "started_unix": 1789186248.7095914, "seconds": 30.753431448945776, "passed": true}
+{"stage": "generation_wait", "rollout_id": 1, "started_unix": 1789186279.4649065, "seconds": 0.7334414310753345, "passed": true}
+{"stage": "training", "rollout_id": 1, "started_unix": 1789186280.2005427, "seconds": 43.92935718304943, "passed": true}
+{"stage": "publication", "rollout_id": 1, "started_unix": 1789186324.1313725, "seconds": 43.03511282906402, "passed": true}
+{"stage": "evaluation", "rollout_id": 1, "started_unix": 1789186367.1686244, "seconds": 158.62625221302733, "passed": false, "details": {"phase": "periodic", "scope": "blocking_shared_engine_evaluation", "configured_serving": {"rollout_num_gpus": 1, "rollout_num_gpus_per_engine": 1, "sglang_server_concurrency": 16, "sglang_max_running_requests": 16, "sglang_max_total_tokens": 524288, "sglang_max_mamba_cache_size": 128, "sglang_cuda_graph_max_bs_decode": 64, "sglang_mem_fraction_static": 0.6, "sglang_context_length": 6144, "sglang_disable_radix_cache": true}}}
