@@ -3,14 +3,14 @@
 # EP8, cross-node publication to eight engines and the trainer step at 512
 # sequences, and exercises checkpoint save, manual resume and final HF export.
 schema_version = 1
-name = "two-node-async-gsm8k-20260912"
+name = "two-node-async-gsm8k-20260912-r2"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/two-node-async-gsm8k-20260912"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/two-node-async-gsm8k-20260912-r2"
 export_hf = true
 
 [launch]
