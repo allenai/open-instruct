@@ -1,33 +1,10 @@
-# Native checkpoint drift: bounded implementation and remaining gate
+# This document has moved
 
-The implementation uses CPU tensor reads and reductions; no training forward, GPU allocation or new GPU job is required. The purpose is to compare each saved checkpoint against the shared initial HF values by canonical parameter, layer and functional group, keeping model-visible storage and FP32 master changes separate.
+Read [checkpoint-drift](miles/checkpoint-drift.md). Current MILES documentation starts at [the MILES index](miles/index.md).
 
-`scripts/miles/checkpoint_drift.py` provides chunked float64 norm/dot accumulators and strict canonical shape/inventory validation. It reports absolute L2, relative L2 against the initial reference, RMS change per parameter, maximum absolute change, changed-value fraction, and change-direction cosine. Cross-backend discrepancy is divided by each backend's change norm separately. Group totals sum squared norms and parameter counts; they do not average per-tensor relative errors. Undefined zero denominators and directions are null. No acceptance threshold is imposed.
-
-## Core reader: implemented and tested
-
-The native file is `core/metrics/core/rollout_0000099/model/.metadata` plus `.distcp` shards for completed update 100, with `complete.json` in its parent. Subsequent saves use rollout 199,299,399,499. `scripts/miles/core_checkpoint_stream.py` reuses Core `load_keys` for one flattened FP32 master at a time, uses a meta-device native factory to verify exact parameter inventory/shapes/dtypes, and applies the existing `iter_olmo3moe_state_to_hf` converter. It preserves fused-QKV geometry, latent expert ordering, up/gate packing and shared-expert transposes. Unknown, missing or mis-sized keys fail rather than being guessed.
-
-The existing full-model durability checkpoint metadata was inspected without reading tensor payloads. It contains 503 `.main` keys, 503 first moments, 503 second moments and503 step scalars. All 503 main keys match the factory. The largest master slab is 2,495,610,880 bytes. Native storage comprises 471 BF16 parameters and 32 FP32 parameters. There is no separate saved BF16 model state: the model-view stream is explicitly **reconstructed from masters using each native parameter's storage dtype**, supported by the separately qualified optimizer-copy/save/restore contract. The FP32 parameters are preserved. [Exact inventory check provenance](measurements/miles-checkpoint-drift-layout-20260911.json).
-
-Six tests pass, including a real tiny flat DCP save/read with KDA, full attention, latent routed experts and a shared-expert dense layer. The canonical master stream exactly matches the original HF tensors, including expert order; the model-storage stream matches the declared per-parameter casts. Separate tests catch shape/inventory/nonfinite errors, distinguish sub-BF16 master changes from rounded storage, and verify both directional denominators and parameter-count normalization.
-
-## Megatron and the actual comparison: pending completed native save
-
-The active 500 run has not yet produced its first completed 100 checkpoint at the latest inspection (rollout 90 exists). The retained path will be `diagnostic-retained/megatron/iter_0000099`, after the parent's retention job verifies the save completed and the next rollout appeared. Final iteration 499 remains in the native checkpoint tree. No incomplete/live-write checkpoint is an analysis input.
-
-Before reading Mega payloads, inspect its DCP metadata and identify explicit model keys and optimizer master keys, shapes and shard offsets. Reuse `OlmoDirectWeightExporter` for the exact existing physical-layer→logical-layer mapping and grouped-expert layout conversion. Do not infer master names from a different SFT checkpoint format. Qualify that adapter with a tiny native roundtrip and the already retained initial fixed-batch canonical equality proof, then compare a bounded router/normalization subset before all layers. Cross-backend cosines must not be interpreted or published until these canonical alignment checks pass.
-
-The first complete run should use a 32-GiB CPU allocation on Saturn with WEKA access, reading only immutable completed snapshots and the shared HF checkpoint. One Core expert slab is 2.5GB; several temporary slabs may coexist in the converter, so memory must be measured during the bounded subset. Chunked reductions avoid full-model float64 copies. Read timings, byte counts, peak RSS, metadata hashes, conversion revisions, source checkpoint/model-config identity and category labels belong in the final report. No copied canonical full-model checkpoint is required: native streams can be matched by canonical name/layer and reduced while bounded tensors are resident.
-
-`compare-canonical` currently accepts three already canonical safetensors directories for qualified use. It is a utility, not a completed native Core/Megatron 500 analysis. Shared HF values are the reference, not a silently inferred optimizer-start state; any original F32→BF16 rounding must be separately recorded. The initial model inventories and conversion proofs must agree before calling backend differences “update drift.”
-
-### Megatron reader qualification at 06:55 UTC
-
-`megatron_checkpoint_stream.py` now reads named DCP model keys with the native exporter and a bounded LRU cache. An actual tiny native checkpoint after one update was read back through this adapter: all 56 canonical HF tensors exactly matched the live exported model, with 41 native reads and 1,527,696 bytes read. [Readback result](measurements/miles-megatron-checkpoint-readback-20260911.json). This qualifies that tiny model layout; full-checkpoint metadata and dtype checks remain required. Optimizer masters are still excluded because the flat bucket-to-parameter layout has not been proved. Do not infer it from model sizes.
-
-### Bounded update-100 subset
-
-`compare_native_small_drift.py` verifies both completion boundaries and Core's committed cursor, then compares routers, normalization weights and KDA `A_log`/`dt_bias` against the shared initial HF checkpoint. It also verifies the full canonical name inventory. Core uses the ordinary converter with meta tensors for excluded inputs; selected tensors must be real CPU tensors and excluded outputs must remain meta. A real tiny DCP test proves the subset equals the ordinary full conversion while reading only selected native payloads. Megatron uses its qualified model reader. Reports include per-tensor dtypes, both directional denominators, payload byte counts, source/metadata hashes, time and peak RSS.
-
-This first stage intentionally excludes expert/attention matrices and Megatron optimizer masters. It uses reconstructed Core model storage, not Core masters compared against Megatron model storage. The CPU/Saturn launcher uses the Core500 image, explicit source hashes for the existing Megatron exporter, 2 CPUs/32 GiB, and waits up to two hours for both completed snapshots. It never reads partially written snapshots or changes the training jobs.
+<!-- Preserve historical section links. -->
+<a id="native-checkpoint-drift-bounded-implementation-and-remaining-gate"></a>
+<a id="core-reader-implemented-and-tested"></a>
+<a id="megatron-and-the-actual-comparison-pending-completed-native-save"></a>
+<a id="megatron-reader-qualification-at-0655-utc"></a>
+<a id="bounded-update-100-subset"></a>

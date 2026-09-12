@@ -6,9 +6,20 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 
 ## Implemented Variants
 
-- `grpo.py` is the recommended GRPO implementation, built on OLMo-core's native training infrastructure (FSDP). It uses Ray for distributed training with vLLM inference.
-- `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing) with DeepSpeed.
+For new runs on supported models/workloads, prefer [MILES + OLMo-core](../miles/index.md).
+Check its [support matrix](../miles/models-and-checkpoints.md); the existing paths
+remain available for their recipes and required capabilities.
 
+| Entrypoint | Trainer | Inference | Interface |
+|---|---|---|---|
+| `python -m open_instruct.miles` | OLMo-core adapter | SGLang | Structured TOML; plan/validate/run/train/status |
+| `grpo.py` | Direct OLMo-core FSDP integration | vLLM | Existing Open Instruct CLI/config classes |
+| `grpo_fast.py` | DeepSpeed | vLLM | Existing Open Instruct CLI/config classes |
+
+The rest of this page documents the two existing vLLM paths and historical
+reproduction runs. Their flags, dependencies and performance claims do not apply
+automatically to MILES. Use [MILES launch instructions](../miles/launching.md) and
+[configuration reference](../miles/configuration.md) for that path.
 
 ## `grpo.py` (OLMo-core)
 

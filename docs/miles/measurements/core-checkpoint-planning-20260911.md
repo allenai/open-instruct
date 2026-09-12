@@ -1,0 +1,9 @@
+# Core500 update-100 save: planning latency observation
+
+> Historical evidence. For current operating instructions, start at the [MILES guide](../index.md).
+
+At 07:19:39 UTC the active Core500 job completed optimizer update 100. At 07:22–07:24 UTC, both trainer stack samples were still inside `torch.distributed.checkpoint.create_default_local_save_plan`, through `DTensor.__create_write_items__` and `compute_local_shape_and_global_offset`. No completion marker had appeared. This is a progress observation, not a declared deadlock or a completed timing result.
+
+The exact running PyTorch implementation's `_get_shard_size_and_offsets` constructs `torch.arange(shard_offsets, shard_offsets + shard_size)` even for ordinary contiguous `Shard` placements. `_compute_local_shape_and_global_offset` retains/composes these per-element index vectors and eventually reads only the first offset. Thus metadata planning can allocate work proportional to the flattened parameter size, even though a contiguous shard's starting offset can be computed arithmetically. Core's largest FP32 master slab is approximately 2.5 GB; the corresponding int64 index vector can also be large. This is a candidate for a narrowly gated future optimization, with fallback for strided, uneven or symbolic layouts and exact metadata/save/restore parity tests.
+
+No planner or active training code was changed. The CPU drift job waits for the committed save marker and will not analyze the partial save. Local stack evidence: `/tmp/miles-core500-save-stacks.txt`. Job: `01M279ZFQZGCXK4TSQ7DBB5JN3`, experiment `01M279ZFM6RBC223RJJ6QHN9MP`; verified own container `e4daec577bb7` on Holmes488. Actual source inspected: `/usr/local/lib/python3.12/dist-packages/torch/distributed/tensor/_utils.py`, functions `_get_shard_size_and_offsets` and `_compute_local_shape_and_global_offset`.

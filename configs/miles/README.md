@@ -1,6 +1,6 @@
 # Core run configurations
 
-Start with the [researcher workflow](../../docs/miles-workflow.md) and the
+Start with the [researcher workflow](../../docs/miles/workflow.md) and the
 [structured examples](examples). They use the same section layout as olmo-miles
 for model, data, trainer, inference, objective, tracking and launch. The profiles
 below remain the low-level `[core]` / `[miles]` equivalents.
@@ -63,7 +63,7 @@ The collection is `rollout_batch_size=8` × `n_samples_per_prompt=8` = 64,
 and `global_batch_size=64` gives one optimizer update per collection. Compared with the previous maintained 16 × 4 starter this preserves the
 optimizer batch size while restoring the historical 8 × 8 group geometry. The
 earlier 16-completion comparison runs used a smaller optimizer batch; compare
-token throughput and do not attribute learning differences solely to admission. Trainer microbatch remains one, accumulating unpadded samples.
+token throughput and do not attribute learning differences solely to admission. Trainer microbatch remains one; structured production async now enables document-isolated packing. These historical low-level profiles are distinct recipes.
 The short async candidate reserves 262144 tokens for its 2560-token context.
 
 To add a second dedicated TP1 engine on the same node:
@@ -125,11 +125,11 @@ The training starter saves once at update 100. Core currently writes synchronous
 native checkpoints; the measured full-SFT checkpoint was about 222 GB. The qualified optimized
 writer saved it in 118.5 seconds versus 437.1 seconds for its matched baseline;
 fresh-process load took 144.3 seconds. These are the fixed-input EP2 results in
-the [checkpoint qualification](../../docs/measurements/miles-checkpoint-perf-20260911.md). Set a more frequent recovery cadence
+the [checkpoint qualification](../../docs/miles/measurements/checkpoint-perf-20260911.md). Set a more frequent recovery cadence
 when appropriate and budget that cost. Do not copy olmo-miles' `async_save=true`;
 Core rejects it. Automatic Beaker restart and HF export are not supplied by this
-TOML. See the [run-control guide](../../docs/miles-run-controls.md) for supported
-resume settings and the [compiler-cache guide](../../docs/miles-compiler-cache.md)
+TOML. See the [run-control guide](../../docs/miles/run-controls.md) for supported
+resume settings and the [compiler-cache guide](../../docs/miles/compiler-cache.md)
 for cache reuse with provenance.
 
 On Beaker, launch through the committed `scripts/train/build_image_and_launch.sh --miles` workflow. GPU defaults are `ai2/holmes`, workspace `ai2/open-instruct-dev`,

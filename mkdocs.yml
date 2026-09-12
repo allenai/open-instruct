@@ -64,6 +64,9 @@ markdown_extensions:
   # - pymdownx.tabbed
 
 
+hooks:
+  - scripts/miles/docs_site.py
+
 plugins:
   - search
 nav:
@@ -88,6 +91,22 @@ nav:
     - algorithms/reward_modeling.md
     - verify-tokenization.md
     - slack-alerts.md
+  - MILES + OLMo-core:
+    - Start here: miles/index.md
+    - Workflow: miles/workflow.md
+    - Launching: miles/launching.md
+    - Configuration: miles/configuration.md
+    - Native options: miles/native-options.md
+    - Models and checkpoints: miles/models-and-checkpoints.md
+    - Topology: miles/topology.md
+    - Data and evaluation: miles/data-and-evaluation.md
+    - Managed judges: miles/managed-judges.md
+    - Operations: miles/operations.md
+    - Architecture: miles/architecture.md
+    - Packing: miles/sequence-packing.md
+    - Compiler cache: miles/compiler-cache.md
+    - Measurements: miles/measurements/index.md
+    - Historical plans: miles/plans/index.md
   - Not Maintained:
     - algorithms/synthetic_preference_dataset.md
 

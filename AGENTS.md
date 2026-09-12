@@ -1,3 +1,13 @@
+# GRPO documentation routing
+
+For new GRPO runs on supported models, start at [docs/miles/index.md](docs/miles/index.md).
+It links the support matrix, example TOMLs, complete laptop/Beaker-session launch
+instructions and configuration reference. MILES uses SGLang and its own Core
+adapter; `grpo.py` and `grpo_fast.py` use the separate vLLM paths. Check support
+before selecting a backend. Dated measurements/plans are evidence, not defaults.
+Use the MILES committed-image wrapper described there for MILES launches; the
+existing debug scripts below apply to their named implementation.
+
 # Bash commands
 - `uv run pytest`: Run the tests.
 - `make style && make quality` run the linter + formatter.

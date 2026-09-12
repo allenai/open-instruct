@@ -39,7 +39,7 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
 - [2023-09-17] Supported [LoRA](https://arxiv.org/abs/2106.09685) and [QLoRA](https://arxiv.org/abs/2305.14314) finetuning. See [here](#parameter-efficient-finetuning) for more details.
 - [2023-08-18] Added support for [ToxiGen](https://github.com/microsoft/TOXIGEN)/[TruthfulQA](https://github.com/sylinrl/TruthfulQA) evaluation. Check our `scripts/eval/` for examples of running them.
-- [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](./scripts/data/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
+- [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](scripts/data/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
 - [2023-08-06] Supported LLaMa 2 finetuning and FlashAttention-2 by bumping the version of transformers and many other dependencies.
 - [2023-06-29] Added [licensing info](#licensing) for our released models.
 - [2023-06-09] Released Tülu (a suite of LLaMa models fully-finetuned on a strong mix of datasets) and many other checkpoints on HuggingFace [[Links]](#released-checkpoints).
@@ -47,7 +47,7 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 ## Setup
 
-Our setup follows our [Dockerfile](./Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
+Our setup follows our [Dockerfile](Dockerfile). *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.*
 
 ### Installation with uv
 
@@ -74,7 +74,7 @@ If you are internally at AI2, you may launch experiments using our always-up-to-
 
 ## Training
 
-After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](./docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](./docs/tulu1_tulu2.md).
+After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](docs/tulu1_tulu2.md).
 
 ### Finetuning
 
@@ -98,20 +98,57 @@ bash scripts/train/tulu3/dpo_8b.sh
 
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
-We train with `open_instruct/grpo_fast.py`. Launch via `scripts/train/build_image_and_launch.sh`, which builds the Beaker image from your current commit and runs the chosen script:
+For new runs on supported models, use **MILES + OLMo-core with SGLang**.
+Open Instruct supplies the run configuration and data/reward integration; MILES
+coordinates rollouts, and the Core adapter trains the model. Check
+[model support and qualification limits](docs/miles/models-and-checkpoints.md) first.
+
+| Path | Trainer / inference | Use it for |
+|---|---|---|
+| `python -m open_instruct.miles` | OLMo-core / SGLang | Preferred supported-model workflow; TOML, async, multi-node placement and named judges |
+| `open_instruct/grpo.py` | OLMo-core / vLLM | Existing native Core recipes and capabilities outside the MILES support matrix |
+| `open_instruct/grpo_fast.py` | DeepSpeed / vLLM | Existing DeepSpeed recipes and their reproduction workflows |
+
+See the [GRPO implementation guide](docs/algorithms/grpo.md) for the alternatives.
+The MILES runtime has separate pinned dependencies; the general Docker image
+and the older GRPO CLI flags are not interchangeable with it.
 
 ```bash
-# Single-GPU smoke test on Beaker (small model, fast).
-./scripts/train/build_image_and_launch.sh scripts/train/debug/single_gpu_on_beaker.sh
-
-# Two-node 8xGPU run (Qwen2.5-7B on code RLVR).
-./scripts/train/build_image_and_launch.sh scripts/train/debug/large_test_script.sh
+# Python 3.12, from the checkout. Edit checkpoint and output paths after copying.
+mkdir -p "$HOME/miles-runs"
+cp configs/miles/examples/grpo-basic.toml "$HOME/miles-runs/check.toml"
+python -m open_instruct.miles plan "$HOME/miles-runs/check.toml"
+python -m open_instruct.miles validate "$HOME/miles-runs/check.toml"
+# After selecting/building a compatible image and authenticating Beaker:
+python -m open_instruct.miles run "$HOME/miles-runs/check.toml"
 ```
+
+Use the [launch guide](docs/miles/launching.md) for laptop or Beaker-session setup.
+The [async training starter](configs/miles/examples/grpo-async-disaggregated.toml)
+requests one eight-GPU trainer node and one eight-GPU inference node. The tiny
+colocated example above is intended for development.
+
+## MILES documentation
+
+[Start here](docs/miles/index.md) for the agent reading order and full index.
+Current instructions are separate from historical evidence.
+
+| Document | Use it when |
+|---|---|
+| [Workflow and examples](docs/miles/workflow.md) | Choosing and editing a run recipe |
+| [Launching jobs](docs/miles/launching.md) | Submitting from a laptop or Beaker session |
+| [Configuration reference](docs/miles/configuration.md) | Looking up every structured/Core field and native passthrough |
+| [Models and checkpoints](docs/miles/models-and-checkpoints.md) | Checking support, conversion, save/resume and export |
+| [Topology and capacity](docs/miles/topology.md) | Sizing trainer/engine pools, async, packing and admission |
+| [Data and evaluation](docs/miles/data-and-evaluation.md) | Selecting tasks, mixtures, judges and held-out evaluation |
+| [Operations](docs/miles/operations.md) | Monitoring, troubleshooting and verifying completion |
+| [Architecture and development](docs/miles/architecture.md) | Understanding hooks, runtime images and local validation |
+| [Measurements](docs/miles/measurements/index.md) | Reviewing evidence and its qualification limits |
 
 
 ## Contamination checks
 
-We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
+We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](decontamination/README.md) for more details.
 
 ### Developing
 When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
@@ -154,9 +191,9 @@ uv run pre-commit run --all-files
 
 ## Licensing
 
-This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
+This codebase is licensed under Apache 2.0 as given in [LICENSE](LICENSE).
 
-The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](./assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
 
 V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
 
@@ -234,7 +271,3 @@ OLMo 3:
       url={https://arxiv.org/abs/2512.13961},
 }
 ```
-
-### Experimental MILES / OLMo-core RL
-
-See [the implementation and validation status](docs/miles-core.md) for the separate Core RL runtime, native MILES configuration, and reproducible source patches. Full GRPO replacement acceptance remains incomplete.
