@@ -92,3 +92,48 @@ Local quality follow-up: repaired two existing type errors in code-service
 program-length diagnostics without changing scoring behavior. Eight focused
 code/fixture tests, full Open Instruct formatting/lint and type checks passed.
 This small follow-up is not baked into the currently running image.
+
+## Expanded EP and inference-pool coverage
+
+The user authorized larger GPU allocations and additional EP/engine coverage.
+Retain the original readiness cases while adding a controlled sizing comparison:
+
+| Trainers | EP | TP1 policy engines | Physical nodes / GPUs | Purpose |
+| --- | --- | --- | --- | --- |
+| 8 | 8 | 8 | 2 / 16 | Packed/replayed baseline |
+| 8 | 8 | 16 | 3 / 24 | Does a second inference node reduce trainer starvation? |
+| 8 | 8 | 24 | 4 / 32 | Staged follow-up only if 16 still starves the trainer |
+| 8 | 4 | 8 | 2 / 16 | Same trainer GPU count, different EP grouping |
+
+Each has 12 collections of 64 prompts x 8 responses, global batch 512, the same
+immutable math/IF/function-code/stdio-code mixture, seed, weights, 4096 response
+cap, 6144 pack/context budget, replay, async lag 2, TIS, 64 requests per engine,
+and cache-off serving. Initial/final eval remains enabled. Save/export are off
+for timing. These are shape/throughput exercises, not learning comparisons.
+The judge mixture remains a separate test: judge grading can impose an independent
+bottleneck, so this sweep cannot by itself prescribe the judged-mixture pool.
+
+Compare warm training/publication time, generation wait and its tail, consumed
+response tokens per second, per-engine admission/queue/load, lag and discarded
+work, peak memory, and total allocated GPU-hours per consumed token. Keep startup,
+compilation and evaluations separate. Phase busy fraction is not SM utilization.
+If 12 collections do not contain enough warm observations, mark sizing provisional.
+
+A useful initial decision rule is the smallest pool within 10% of the best measured
+warm cadence, with generation wait below 10% of the cycle and acceptable lag/loss
+contracts. Also report the fastest option regardless of cost. Fit a rough production
+rate versus trainer demand estimate, then check it against actual multi-node runs;
+do not extrapolate linear engine scaling or assume 8 trainer GPUs imply 8 engines.
+Keep batch/group size fixed while sizing. Extra concurrency, mixed chunks, radix,
+and alternate EP are separate comparisons rather than simultaneous confounders.
+
+### First-wave finding
+
+Case 2 failed before training. Its judge was healthy, but Ray GCS could not be
+reached at the advertised physical host address. Inspection found that the launcher
+used host networking only for multiple replicas, while a single-node judge run
+also enters the cluster bootstrap that advertises host IPs. Enable host networking
+for all cluster-bootstrap jobs, with a single-node judge regression test. Retry
+uses a fresh output root. This is a launcher fix; the existing pinned training
+image can be reused because networking is encoded in the submitted Beaker spec.
+Case 1 has reached generation. No full learning/lifecycle pass yet.

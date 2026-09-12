@@ -87,6 +87,16 @@ def test_task_replication_and_secret_free_ownership(document):
         assert not any("BEAKER_TOKEN" in v["name"] for v in task["envVars"])
 
 
+def test_single_node_judge_bootstrap_uses_host_networking(document):
+    document["trainer"] = {"gpus": 2, "expert_parallel_size": 2}
+    document["inference"].update(gpus=2)
+    tasks = launch.specification("image", RunSpec.from_dict(document))["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["resources"]["gpuCount"] == 5
+    assert tasks[0]["hostNetworking"] is True
+    assert "open_instruct.miles.cluster" in tasks[0]["arguments"][0]
+
+
 def test_wrong_ray_node_gpu_layout_fails():
     nodes = [
         {"Alive": True, "NodeManagerAddress": "10.0.0.1", "Resources": {"GPU": 8}},
