@@ -1,0 +1,36 @@
+questions: 1319
+
+== change class (by answer mode and its mass), with what happened to the greedy answer
+class                      n  share  ΔH bits    TV  novel   g+   g-  ΔpassR
+unchanged                373  0.283     0.01  0.04   0.03   16   16   0.002
+sharpened_correct        352  0.267    -0.66  0.24   0.04   39   20   0.197
+diffused                 256  0.194     0.86  0.32   0.29   27   48  -0.103
+moved_to_correct         215  0.163     0.11  0.63   0.30   84   23   0.438
+moved_wrong_to_wrong      87  0.066     0.77  0.71   0.54   12   12   0.019
+moved_from_correct        19  0.014     0.16  0.51   0.36    1    8  -0.309
+sharpened_wrong           17  0.013    -0.67  0.37   0.12    3    1  -0.066
+
+== aggregate information measures
+mean answer entropy start 0.646 bits, end 0.702 bits
+mean total-variation distance between start and end answer distributions: 0.298
+mean end mass on answers never sampled at start (exploration): 0.168
+mean start mass on answers no longer sampled (abandonment): 0.176
+questions where the correct answer was found (absent in all 8 start samples, present at end): 92
+questions where the correct answer was lost (present at start, absent at end): 22
+
+== by start difficulty (correct samples of 8 at start): where the gradient signal was
+ start k/8     n  end pass   Δpass     ΔH    TV  novel  found  sharp  moved+  moved-  trunc0
+         0   152     0.226   0.226   0.94  0.61   0.54     92      5      38       0    0.79
+         1    88     0.403   0.278   0.39  0.65   0.30      0      6      43       0    0.67
+         2    78     0.508   0.258   0.18  0.57   0.26      0      4      50       0    0.58
+         3    70     0.616   0.241  -0.20  0.52   0.23      0      8      50       1    0.43
+         4    83     0.691   0.191  -0.37  0.46   0.19      0     33      34       7    0.32
+         5    98     0.777   0.152  -0.37  0.34   0.13      0     69       0       8    0.26
+         6   155     0.850   0.100  -0.37  0.26   0.11      0    111       0       2    0.15
+         7   228     0.899   0.024  -0.16  0.16   0.08      0    133       0       1    0.07
+         8   367     0.960  -0.040   0.16  0.04   0.04      0      0       0       0    0.00
+
+== truncation as a confound
+questions with no truncated sample at either checkpoint: 525
+  mean Δpass 0.018, ΔH -0.04 bits, TV 0.096, novel 0.044
+  classes: {'unchanged': 310, 'sharpened_correct': 107, 'diffused': 88, 'moved_to_correct': 14, 'sharpened_wrong': 5, 'moved_wrong_to_wrong': 1}
