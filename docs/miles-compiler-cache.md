@@ -101,7 +101,22 @@ row setting remains independent of persistence.
 
 After successful driver cleanup (including shutdown of serving children), small
 Ray tasks pinned to the original nodes publish immutable generations and clean
-private copies. Failed training does not publish. Cache miss/rejection compiles
+private copies. Publication runs at most two tasks per node, with one shared
+240-second wait budget across all workers (including queued tasks), instead of
+120 seconds sequentially for every rank. Expired tasks are explicitly cancelled
+in Ray with retries disabled. This budget covers the Ray publication wait;
+reading/writing the small completion report is separate.
+
+Snapshotting, extracting old generations, merging, hashing and gzip compression
+happen on local disk. Only the finished archive and manifest are uploaded to
+shared storage before atomically advancing `CURRENT`. The gzip archive format
+and integrity/relocation checks remain compatible with existing generations.
+Logs identify task submission/start, lock wait, merge, compression, upload and
+pointer phases; completed reports include file counts, bytes and phase timings.
+[Local proxy and timeout validation](measurements/miles-cache-publication-20260912/README.md)
+cover the reliability change; WEKA performance remains to be observed on the next run.
+
+Failed training does not publish. Cache miss/rejection compiles
 locally; publication failures are recorded, not treated as RL failures.
 `compiler-cache.json` in the run's metric directory records each worker's cache
 outcome and diagnostic counters. Raw worker identity/restore records remain in

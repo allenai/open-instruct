@@ -429,3 +429,42 @@ def test_corrupt_cache_is_cold_fallback_but_never_repaired_implicitly(tmp_path, 
     assert report["restore"][0]["status"] == "rejected"
     assert report["publish"][0]["status"] == "rejected"
     assert report["status"] == "completed" and archive.read_bytes() == b"corrupt"
+
+
+def test_publication_stages_tree_locally_and_upload_failure_keeps_current(tmp_path, monkeypatch):
+    local = private(tmp_path, "local")
+    shared = tmp_path / "shared"
+    write(local, "triton/kernel", b"first")
+    first = cache.publish(shared, local, KEY, "triton")
+    write(local, "triton/new", b"second")
+    original_snapshot = cache.snapshot
+    original_copy = cache.shutil.copy2
+
+    def snapshot(source, destination, family):
+        assert destination.is_relative_to(local)
+        return original_snapshot(source, destination, family)
+
+    def failed_upload(source, destination, *args, **kwargs):
+        if Path(destination).is_relative_to(shared):
+            assert Path(destination).name in {"cache.tar.gz", "manifest.json"}
+            if Path(destination).name == "manifest.json":
+                raise OSError("injected upload failure")
+        return original_copy(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(cache, "snapshot", snapshot)
+    monkeypatch.setattr(cache.shutil, "copy2", failed_upload)
+    with pytest.raises(OSError, match="injected upload"):
+        cache.publish(shared, local, KEY, "triton")
+    base = cache.artifact_root(shared, KEY, "triton")
+    assert (base / "CURRENT").read_text().strip() == first["generation"]
+    assert len(list((base / "generations").iterdir())) == 1
+    restored = private(tmp_path, "restored")
+    assert cache.restore(shared, restored, KEY, "triton")["status"] == "hit"
+    assert (restored / "triton/kernel").read_bytes() == b"first"
+    assert not (restored / "triton/new").exists()
+    monkeypatch.setattr(cache.shutil, "copy2", original_copy)
+    events = []
+    result = cache.publish(shared, local, KEY, "triton", progress=events.append)
+    assert result["files"] == 2 and result["archive_bytes"] > 0
+    assert {"lock_wait", "merge", "archive_local", "upload", "pointer", "complete"} <= {e["phase"] for e in events}
+    assert result["phase_seconds"]["upload"] >= 0

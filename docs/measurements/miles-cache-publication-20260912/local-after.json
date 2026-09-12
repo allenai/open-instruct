@@ -1,0 +1,44 @@
+{
+  "cold": {
+    "family": "triton",
+    "status": "published",
+    "generation": "dbc36e06c3f6f79a4bface022064717c360243498d5f3aff55b274af9bf38d98",
+    "local_bytes": 269234221,
+    "files": 5386,
+    "archive_bytes": 52241589,
+    "phase_seconds": {
+      "prepare": 0.00019082892686128616,
+      "lock_wait": 4.689209163188934e-06,
+      "merge": 2.32393134618178,
+      "archive_local": 1.315227756742388,
+      "upload": 0.025070084258913994,
+      "pointer": 0.0001361258327960968
+    },
+    "seconds": 3.664758253376931
+  },
+  "unchanged": {
+    "family": "triton",
+    "status": "unchanged",
+    "generation": "dbc36e06c3f6f79a4bface022064717c360243498d5f3aff55b274af9bf38d98",
+    "local_bytes": 269234221,
+    "files": 5386,
+    "archive_bytes": 52241589,
+    "phase_seconds": {
+      "prepare": 0.00017282506451010704,
+      "lock_wait": 8.836854249238968e-06,
+      "merge": 3.273694678209722,
+      "verify_existing": 1.1357365669682622,
+      "pointer": 0.0002861879765987396
+    },
+    "seconds": 4.410249894950539
+  },
+  "restore": {
+    "family": "triton",
+    "status": "hit",
+    "seconds": 1.2239986509084702,
+    "generation": "dbc36e06c3f6f79a4bface022064717c360243498d5f3aff55b274af9bf38d98",
+    "archive_bytes": 52241589,
+    "local_bytes": 269234221,
+    "relocated_groups": 662
+  }
+}

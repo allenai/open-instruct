@@ -1,0 +1,55 @@
+{
+  "report_dir": "/tmp/cache-ray-proxy-ojj8f5mo/reports",
+  "success": true,
+  "workers": [
+    {
+      "activity": {},
+      "files_after": 1,
+      "publish": {
+        "family": "triton",
+        "generation": "52f58f6e51113bca56330782d306fc26d0b5d1907d23f6631102c6b96e5ac9e7",
+        "local_bytes": 8000,
+        "seconds": 0.0017557539977133274,
+        "status": "published"
+      },
+      "restore": {
+        "status": "cold"
+      },
+      "setup_seconds": 0,
+      "slot": "worker-0"
+    },
+    {
+      "activity": {},
+      "files_after": 1,
+      "publish": {
+        "family": "triton",
+        "generation": "52f58f6e51113bca56330782d306fc26d0b5d1907d23f6631102c6b96e5ac9e7",
+        "local_bytes": 8000,
+        "seconds": 0.0009976471774280071,
+        "status": "published"
+      },
+      "restore": {
+        "status": "cold"
+      },
+      "setup_seconds": 0,
+      "slot": "worker-1"
+    },
+    {
+      "activity": {},
+      "files_after": 1,
+      "publish": {
+        "family": "triton",
+        "generation": "52f58f6e51113bca56330782d306fc26d0b5d1907d23f6631102c6b96e5ac9e7",
+        "local_bytes": 8000,
+        "seconds": 0.0010688109323382378,
+        "status": "published"
+      },
+      "restore": {
+        "status": "cold"
+      },
+      "setup_seconds": 0,
+      "slot": "worker-2"
+    }
+  ],
+  "wall_seconds": 0.21109838737174869
+}

@@ -4,6 +4,7 @@ The setup hook has no training imports. Ray calls it before deserializing the
 actor, and each logical worker restores into a fresh, node-local directory.
 """
 
+import asyncio
 import dataclasses
 import importlib
 import json
@@ -25,6 +26,9 @@ from open_instruct.miles import compiler_cache as cache
 
 logger = logger_utils.setup_logger(__name__)
 ENV = "OI_CORE_STARTUP_CACHE"
+# One budget for all workers; no per-rank multiplication at shutdown.
+PUBLICATION_TIMEOUT_SECONDS = 240
+PUBLISHERS_PER_NODE = 2
 DEFAULT_SHARED = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
 
 
@@ -213,50 +217,111 @@ def publish_worker(report):
         raise ValueError("Unexpected worker cache directory")
     result = dict(slot=report["slot"], restore=report["restore"], setup_seconds=report["setup_seconds"])
     try:
-        result["files_after"] = len(cache.inventory(local / "triton"))
+        logger.info("Core compiler cache publication started: slot=%s local=%s", report["slot"], local)
+        # Publication validates/hashes the snapshot; counting here need not hash it again.
+        result["files_after"] = sum(path.is_file() for path in (local / "triton").rglob("*"))
         activity = {}
         for path in local.glob("activity-*.jsonl"):
             for line in path.read_text().splitlines():
                 event = json.loads(line)["event"]
                 activity[event] = activity.get(event, 0) + 1
         result["activity"] = activity
-        result["publish"] = cache.publish(Path(report["shared"]), local, report["fingerprint"], "triton")
+
+        def progress(event):
+            logger.info("Core compiler cache publication: slot=%s %s", report["slot"], json.dumps(event))
+
+        result["publish"] = cache.publish(
+            Path(report["shared"]), local, report["fingerprint"], "triton", progress=progress
+        )
     except Exception as error:
-        result["publish"] = {"status": "rejected", "reason": str(error)}
+        result["publish"] = {"status": "rejected", "reason": f"{type(error).__name__}: {error}"}
     else:
         shutil.rmtree(local)
     return result
 
 
-async def finish(args, *, success):
-    """Publish only after the driver's successful teardown, on each owning node."""
-    policy = getattr(args, "olmo_core_startup_cache", None)
-    if not policy:
-        return
-    report = {"success": success, "workers": [], "report_dir": policy["report_dir"]}
-    if success:
-        ray = importlib.import_module("ray")
-        strategies = importlib.import_module("ray.util.scheduling_strategies")
-        asyncio = importlib.import_module("asyncio")
-        for path in sorted(Path(policy["report_dir"]).glob("*.json")):
-            worker = json.loads(path.read_text())
-            if "fingerprint" not in worker:
-                report["workers"].append(worker)
-                continue
-            try:
+async def _publish_all(workers):
+    ray = importlib.import_module("ray")
+    strategies = importlib.import_module("ray.util.scheduling_strategies")
+    limits = {worker["node_id"]: asyncio.Semaphore(PUBLISHERS_PER_NODE) for worker in workers}
+
+    async def one(worker):
+        task = None
+        try:
+            async with limits[worker["node_id"]]:
+                logger.info(
+                    "Core compiler cache publication queued: slot=%s node=%s", worker["slot"], worker["node_id"]
+                )
                 task = (
-                    ray.remote(num_cpus=0)(publish_worker)
+                    ray.remote(num_cpus=0, max_retries=0)(publish_worker)
                     .options(
                         scheduling_strategy=strategies.NodeAffinitySchedulingStrategy(worker["node_id"], soft=False)
                     )
                     .remote(worker)
                 )
-                result = await asyncio.wait_for(task, timeout=120)
-            except Exception as error:
-                result = {"slot": worker["slot"], "publish": {"status": "unavailable", "reason": str(error)}}
-            report["workers"].append(result)
+                return await task
+        except asyncio.CancelledError:
+            if task is not None:
+                # asyncio cancellation alone does not terminate the synchronous
+                # Ray function. Kill it so it cannot keep publishing after teardown.
+                ray.cancel(task, force=True)
+            raise
+        except Exception as error:
+            return {
+                "slot": worker["slot"],
+                "publish": {"status": "unavailable", "reason": f"{type(error).__name__}: {error}"},
+            }
+
+    tasks = [asyncio.create_task(one(worker)) for worker in workers]
+    if not tasks:
+        return []
+    try:
+        _, pending = await asyncio.wait(tasks, timeout=PUBLICATION_TIMEOUT_SECONDS)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    return [
+        {
+            "slot": worker["slot"],
+            "publish": {
+                "status": "unavailable",
+                "reason": f"TimeoutError: shared {PUBLICATION_TIMEOUT_SECONDS}s publication budget expired; pending task cancelled",
+            },
+        }
+        if task in pending
+        else task.result()
+        for worker, task in zip(workers, tasks, strict=True)
+    ]
+
+
+async def finish(args, *, success):
+    """Best-effort publication after teardown, with one bounded wait for all nodes."""
+    policy = getattr(args, "olmo_core_startup_cache", None)
+    if not policy:
+        return
+    started = time.monotonic()
+    report = {"success": success, "workers": [], "report_dir": policy["report_dir"]}
+    try:
+        if success:
+            workers = []
+            for path in sorted(Path(policy["report_dir"]).glob("*.json")):
+                worker = json.loads(path.read_text())
+                if "fingerprint" not in worker:
+                    report["workers"].append(worker)
+                else:
+                    workers.append(worker)
+            report["workers"].extend(await _publish_all(workers))
+    except Exception as error:
+        report["publication_error"] = f"{type(error).__name__}: {error}"
+        logger.warning("Core compiler cache publication unavailable: %s", report["publication_error"])
+    report["seconds"] = time.monotonic() - started
     if getattr(args, "save", None):
-        target = Path(args.save) / "compiler-cache.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(cache.encoded(report))
+        try:
+            target = Path(args.save) / "compiler-cache.json"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(cache.encoded(report))
+        except Exception as error:
+            logger.warning("Core compiler cache report could not be saved: %s: %s", type(error).__name__, error)
     logger.info("Core compiler cache completion: %s", json.dumps(report))

@@ -1,0 +1,30 @@
+{
+  "report_dir": "/tmp/cache-ray-fault-6cgngzyz/reports",
+  "seconds": 2.003057999070734,
+  "success": true,
+  "workers": [
+    {
+      "publish": {
+        "reason": "TimeoutError: shared 2s publication budget expired; pending task cancelled",
+        "status": "unavailable"
+      },
+      "slot": "worker-0"
+    },
+    {
+      "publish": {
+        "reason": "TimeoutError: shared 2s publication budget expired; pending task cancelled",
+        "status": "unavailable"
+      },
+      "slot": "worker-1"
+    },
+    {
+      "publish": {
+        "reason": "TimeoutError: shared 2s publication budget expired; pending task cancelled",
+        "status": "unavailable"
+      },
+      "slot": "worker-2"
+    }
+  ],
+  "wall_seconds": 2.005177096929401,
+  "old_generations_preserved_after_unlock": true
+}
