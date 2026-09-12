@@ -424,6 +424,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         dist.barrier()
         pause_done = time.perf_counter()
         transfer_seconds, tensor_count, byte_count, bucket_count = 0.0, 0, 0, 0
+        bucket_details = []
 
         def send(bucket):
             nonlocal transfer_seconds, bucket_count
@@ -431,8 +432,12 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             before = time.perf_counter()
             updater.update_bucket_weights(bucket, weight_version=self.clock.completed_steps)
             torch.cuda.synchronize()
-            transfer_seconds += time.perf_counter() - before
+            elapsed = time.perf_counter() - before
+            transfer_seconds += elapsed
             bucket_count += 1
+            detail = getattr(updater, "last_bucket_timing", None)
+            if detail is not None:
+                bucket_details.append({**detail, "seconds": elapsed})
 
         bucket, size = [], 0
         for name, tensor in models.iter_export_state(
@@ -475,13 +480,30 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 else tensor_count,
                 stream_moe_export=self.args.olmo_core.stream_moe_export,
                 transport="ipc" if self.args.colocate else self.args.olmo_core.weight_sync_mode,
+                buffer_bytes=self.args.update_weight_buffer_size,
             )
-            logger.info("Core weight publication: %s", json.dumps(timings, sort_keys=True))
+            if bucket_details:
+                timings.update(
+                    broadcast_seconds=sum(d["broadcast_seconds"] for d in bucket_details),
+                    engine_seconds=sum(d["engine_seconds"] for d in bucket_details),
+                    bucket_details=bucket_details,
+                )
+            logger.info(
+                "Core weight publication: %s",
+                json.dumps({k: v for k, v in timings.items() if k != "bucket_details"}, sort_keys=True),
+            )
             if self.args.save:
                 path = Path(self.args.save) / "publication.jsonl"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("a") as output:
                     output.write(json.dumps(timings) + "\n")
+
+    def configure_publication(self, buffer_bytes):
+        """Set the publication bucket size for subsequent updates; used by profiling drivers."""
+        if type(buffer_bytes) is not int or buffer_bytes < 1:
+            raise ValueError("Publication buffer size must be a positive integer number of bytes")
+        self.args.update_weight_buffer_size = buffer_bytes
+        return buffer_bytes
 
     def close_weight_transport(self):
         """Collectively retire the serving communicator before engines are stopped."""
