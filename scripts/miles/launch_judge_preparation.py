@@ -11,7 +11,7 @@ from open_instruct.miles import launch, topology
 from open_instruct.miles.run_spec import RunSpec
 
 
-def specification(image, spec, stage):
+def specification(image, spec, stage, prepare_module="scripts.miles.prepare_judge_exercise"):
     document = launch.specification(
         image, spec, hostnames=[f"planning-{i}" for i in range(topology.plan(spec)["replicas"])]
     )
@@ -32,7 +32,7 @@ def specification(image, spec, stage):
     task["context"].update(minRuntime="20m", autoResume=False)
     task["timeout"] = "30m"
     if stage == "prepare":
-        entrypoint = "python -m scripts.miles.prepare_judge_exercise /output/submitted-run.json"
+        entrypoint = f"python -m {prepare_module} /output/submitted-run.json"
     elif stage == "audit":
         entrypoint = (
             "python -m scripts.miles.audit_judge_exercise "
@@ -72,9 +72,10 @@ def main():
     parser.add_argument("image")
     parser.add_argument("config", type=Path)
     parser.add_argument("--stage", choices=("prepare", "inspect", "audit"), default="prepare")
+    parser.add_argument("--prepare-module", default="scripts.miles.prepare_judge_exercise")
     args = parser.parse_args()
     spec = RunSpec.load(args.config)
-    document = specification(args.image, spec, args.stage)
+    document = specification(args.image, spec, args.stage, prepare_module=args.prepare_module)
     with tempfile.TemporaryDirectory() as temporary:
         path = Path(temporary) / "experiment.json"
         path.write_text(json.dumps(document))
