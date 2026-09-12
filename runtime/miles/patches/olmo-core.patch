@@ -1222,6 +1222,25 @@ index 050b1e0bc30e06a119c8726735e754178f84a010..7cb0bba538fbb035bbcab104d492c5eb
          )
          self.w_out = nn.Linear(
              n_heads * self.head_dim, d_model, bias=bias, dtype=dtype, device=init_device
+diff --git a/src/olmo_core/nn/attention/flash_attn_api.py b/src/olmo_core/nn/attention/flash_attn_api.py
+index 6471d6b5bba1a6222f94fbc266d82d5b53e37555..897a4793fa742b5500d2b89cceb7fc0a4e17bc80 100644
+--- a/src/olmo_core/nn/attention/flash_attn_api.py
++++ b/src/olmo_core/nn/attention/flash_attn_api.py
+@@ -499,10 +499,10 @@ def dispatch_flash_attn_4(
+             _flatten_batch_dim(q),
+             _flatten_batch_dim(k),
+             _flatten_batch_dim(v),
+-            cu_seqlens_q,
+-            cu_seqlens_k,
+-            max_seqlen_q,
+-            max_seqlen_k,
++            cu_seqlens_q=cu_seqlens_q,
++            cu_seqlens_k=cu_seqlens_k,
++            max_seqlen_q=max_seqlen_q,
++            max_seqlen_k=max_seqlen_k,
+             softmax_scale=softmax_scale,
+             causal=causal,
+             window_size=window_size,
 diff --git a/src/olmo_core/nn/hf/convert.py b/src/olmo_core/nn/hf/convert.py
 index 8a35e9a1cfeacca27438ab1c5303b680e1c5095a..0dfe189201a5d94aa1c950ee70b9ad1f39bf4d21 100644
 --- a/src/olmo_core/nn/hf/convert.py
@@ -3217,6 +3236,57 @@ index 06138448ec852fa8c552e27c9187835bafe09cfc..a37c111cae49ecb38c4a4ece8150f5a6
 +    reference = x.detach().clone().requires_grad_()
 +    (reference[:, :8] * F.silu(reference[:, 8:])).sum().backward()
 +    torch.testing.assert_close(x.grad, reference.grad, rtol=0, atol=0)
+diff --git a/src/test/nn/attention/flash_attn_api_test.py b/src/test/nn/attention/flash_attn_api_test.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8c1f43e24a50a9bc87110cdfa1ecb94b73400c2d
+--- /dev/null
++++ b/src/test/nn/attention/flash_attn_api_test.py
+@@ -0,0 +1,45 @@
++from types import SimpleNamespace
++
++import pytest
++import torch
++
++from olmo_core.nn.attention import flash_attn_api
++
++
++@pytest.mark.parametrize("separate_metadata", [False, True])
++def test_flash4_varlen_metadata_is_keyword_bound(monkeypatch, separate_metadata):
++    """FA4 may insert optional qv before the sequence metadata arguments."""
++    q = torch.randn(1, 7, 2, 8)
++    cu_q = torch.tensor([0, 3, 7], dtype=torch.int32)
++    cu_k = cu_q.clone() if separate_metadata else cu_q
++
++    def varlen(
++        q,
++        k,
++        v,
++        qv=None,
++        cu_seqlens_q=None,
++        cu_seqlens_k=None,
++        max_seqlen_q=None,
++        max_seqlen_k=None,
++        **kwargs,
++    ):
++        assert qv is None
++        assert cu_seqlens_q is cu_q
++        assert cu_seqlens_k is cu_k
++        assert max_seqlen_q == 4
++        assert max_seqlen_k == 4
++        assert q.shape == (7, 2, 8)
++        assert kwargs["causal"]
++        return q, None
++
++    monkeypatch.setattr(
++        flash_attn_api, "flash_attn_4", SimpleNamespace(flash_attn_varlen_func=varlen)
++    )
++    metadata = (
++        dict(cu_seqlens_q=cu_q, cu_seqlens_k=cu_k, max_seqlen_q=4, max_seqlen_k=4)
++        if separate_metadata
++        else dict(cu_seqlens=cu_q, max_seqlen=4)
++    )
++    result = flash_attn_api.dispatch_flash_attn_4(q, q, q, causal=True, **metadata)
++    torch.testing.assert_close(result, q.flatten(0, 1))
 diff --git a/src/test/nn/hf/olmo3moe_conversion_test.py b/src/test/nn/hf/olmo3moe_conversion_test.py
 index cebe601fa015e0591703e9f0d0eb4e2c6df947a8..a3cbd01c3422ab077dd9e4e94e7f18bea041290b 100644
 --- a/src/test/nn/hf/olmo3moe_conversion_test.py

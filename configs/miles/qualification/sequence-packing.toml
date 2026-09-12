@@ -1,15 +1,15 @@
-# Full-SFT B300 training: one node of Core trainers (EP8) and one node of TP1 SGLang engines.
-# Replace YOUR_USERNAME/model source before launch; inspect `plan` first.
+# Three-GPU live async packing exercise: EP2 trainers + TP1 SGLang, three updates.
+# Uses the full-SFT KDA checkpoint, 16 responses/update and short generation caps.
 schema_version = 1
-name = "grpo-async-disaggregated"
+name = "sequence-packing-smoke-20260912-r2"
 
 [model]
-source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/policy-hf"
+source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/grpo-async-disaggregated"
-export_hf = true
+root = "/weka/oe-training-default/robertb/open-instruct/runs/sequence-packing-smoke-20260912-r2"
+export_hf = false
 
 [launch]
 workspace = "ai2/open-instruct-dev"
@@ -17,11 +17,9 @@ budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "urgent"
 min_runtime = "1h"
-timeout = "8h"
-# Multi-node runs currently require auto_resume = false; resume by relaunching
-# with the same output root once a checkpoint exists.
+timeout = "1h"
 auto_resume = false
-gpus_per_replica = 8
+gpus_per_replica = 3
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
@@ -33,43 +31,36 @@ shuffle = true
 
 [[data.tasks]]
 task = "gsm8k"
-train_count = 6400
-eval_count = 128
+train_count = 16
+eval_count = 4
 
 [training]
-num_rollouts = 100
+num_rollouts = 3
 skip_eval_before_train = false
-eval_interval = 20
-save_checkpoints = true
-# Core saves synchronously. Choose a more frequent cadence for recovery.
-save_interval = 100
+eval_interval = 3
+save_checkpoints = false
 
 [trainer]
-# One full node of trainers with expert parallelism across all eight GPUs.
-gpus = 8
+gpus = 2
 trainer_num_nodes = 1
-expert_parallel_size = 8
+expert_parallel_size = 2
 micro_batch_size = 1
-# Validated basic packing; see docs/miles-sequence-packing.md.
 sequence_packing = true
-packing_max_tokens = 6144
+packing_max_tokens = 4096
 activation_recompute = true
 trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-# One full node of TP1 engines: 512 responses per collection give each its 64 slots.
-gpus = 8
+gpus = 1
 rollout_tensor_parallel_size = 1
-# 64 prompts x 8 responses per collection, one optimizer update per collection;
-# the same step shape as the open-instruct Olmo 3 RL recipes.
-rollout_batch_size = 64
-samples_per_prompt = 8
-global_batch_size = 512
-max_response_length = 4096
-max_context_length = 6144
-sglang_server_concurrency = 64
-sglang_max_running_requests = 64
+rollout_batch_size = 8
+samples_per_prompt = 2
+global_batch_size = 16
+max_response_length = 512
+max_context_length = 1536
+sglang_server_concurrency = 16
+sglang_max_running_requests = 16
 sglang_max_total_tokens = 524288
 sglang_max_mamba_cache_size = 128
 sglang_mem_fraction_static = 0.6
@@ -110,17 +101,17 @@ router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
 weight_sync_mode = "flattened"
-# Publish routed experts as one stacked tensor per layer and projection
-# (measured 2.6 s -> 0.35 s per publication with 2 GiB buckets).
 expert_publication = "fused"
-# The standalone scoring pass is skipped for this recipe; spot-check it
-# against the training forward every 20 updates instead of the default 50.
-scoring_check_interval = 20
+scoring_check_interval = 50
+diagnostic_interval = 1
+replay_diagnostics = true
 
 [miles]
+use_rollout_routing_replay = true
+use_miles_router = true
 rollout_temperature = 1.0
 rollout_seed = 17
-rollout_max_prompt_len = 2048
+rollout_max_prompt_len = 1024
 seed = 17
 disable_grpo_std_normalization = true
 
@@ -130,12 +121,8 @@ max_weight_staleness = 2
 async_data_buffer_capacity_factor = 2.0
 async_unused_samples_handler = "retry"
 rollout_submission_granularity = "group"
-# Core scores the old policy; TIS corrects the behavior-policy mismatch.
 off_policy_correction = "tis"
 
-# Persistent Triton caches shared by every user of this runtime image; the
-# fingerprint keys on image, sources, model and run shape, so a mismatch is a
-# cold miss rather than a wrong hit. Omit shared_root to use this default.
 [compiler_cache]
 enabled = true
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

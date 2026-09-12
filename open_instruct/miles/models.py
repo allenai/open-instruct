@@ -67,10 +67,11 @@ def build_train_module(args, source=None):
     if kind == "moe":
         backend.prepare_model_config(config, hf, args.olmo_core)
     model = config.build(init_device="meta")
+    forward_capacity = args.olmo_core.packing_max_tokens or args.olmo_core.max_sequence_length
     common = dict(
         model=model,
-        rank_microbatch_size=args.olmo_core.max_sequence_length,
-        max_sequence_length=args.olmo_core.max_sequence_length,
+        rank_microbatch_size=forward_capacity,
+        max_sequence_length=forward_capacity,
         compile_model=False,
         device=torch.device("cuda", torch.cuda.current_device()),
         max_grad_norm=args.clip_grad,

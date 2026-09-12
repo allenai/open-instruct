@@ -37,8 +37,33 @@ def finite(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def load_rollout(path):
+    """Read our replay dumps without allowing arbitrary pickle globals.
+
+    MILES serializes expert assignments as NumPy int32 arrays, not tensors.
+    Scope the minimal reconstruction allowlist to this load only.
+    """
+    torch = importlib.import_module("torch")
+    numpy = importlib.import_module("numpy")
+    multiarray = importlib.import_module("numpy._core.multiarray")
+    with torch.serialization.safe_globals(
+        [multiarray._reconstruct, numpy.ndarray, numpy.dtype, type(numpy.dtype("int32"))]
+    ):
+        return torch.load(path, map_location="cpu", weights_only=True)
+
+
 def validate_counters(
-    contracts, publications, stages, *, updates, batch_size, world, diagnostic_interval=1, equality=True, max_lag=1
+    contracts,
+    publications,
+    stages,
+    *,
+    updates,
+    batch_size,
+    world,
+    diagnostic_interval=1,
+    equality=True,
+    max_lag=1,
+    packing_token_budget=None,
 ):
     """Check exact clocks and full-rank coverage, rather than relying on process exit."""
     require(diagnostic_interval == 1, "This bounded auditor requires per-step diagnostics")
@@ -56,7 +81,29 @@ def validate_counters(
             require(
                 normal["samples"] == batch_size and normal["world_size"] == world, "Wrong normalization batch/world"
             )
-            require(step["local_microbatches"] == batch_size // world, "Wrong rank microbatch count")
+            if packing_token_budget is None:
+                require(step["local_microbatches"] == batch_size // world, "Wrong rank microbatch count")
+            else:
+                packs = [row for row in rows if row.get("event") == "packing" and row.get("step") == index + 1]
+                require(len(packs) == 1, "Missing/repeated packing event")
+                packed = packs[0]
+                require(
+                    packed["samples"] == batch_size // world and packed["rollout_id"] == index,
+                    "Wrong packed sample membership",
+                )
+                require(
+                    type(packed["packs"]) is int and 1 <= packed["packs"] <= packed["samples"], "Invalid packing count"
+                )
+                require(packed["packs"] == step["local_microbatches"], "Packing/optimizer microbatch count mismatch")
+                require(
+                    packed["token_budget"] == packing_token_budget
+                    and 0 < packed["max_pack_tokens"] <= packing_token_budget,
+                    "Packing exceeded its budget",
+                )
+                require(
+                    0 < packed["model_tokens"] <= packed["packs"] * packed["max_pack_tokens"],
+                    "Invalid packed token count",
+                )
             require(step["published_step"] == index, "Optimizer consumed an unexpected publication boundary")
             versions = step["local_behavior_versions"]
             require(
@@ -86,6 +133,21 @@ def validate_counters(
                     )
             require(all(finite(lr) and lr > 0 for lr in step["lr_used"]), "Invalid learning rate")
         result[str(rank)] = steps
+    if packing_token_budget is not None:
+        for index in range(updates):
+            selected = [
+                next(r for r in contracts[str(rank)] if r.get("event") == "packing" and r.get("step") == index + 1)
+                for rank in range(world)
+            ]
+            require(len({r["packs"] for r in selected}) == 1, "Packed ranks have different microbatch schedules")
+            expected_tokens = sum(r["model_tokens"] for r in selected)
+            require(
+                all(
+                    result[str(rank)][index]["normalization"]["model_tokens"] == expected_tokens
+                    for rank in range(world)
+                ),
+                "Packed/global token counts differ",
+            )
     expected_publications = [(0, False)]
     for version in expected_steps:
         expected_publications.append((version, False))
@@ -301,7 +363,42 @@ def audit(root, *, counters_only=False):
         diagnostic_interval=core["diagnostic_interval"],
         equality=miles.get("check_weight_update_equal", False),
         max_lag=core["max_policy_lag"],
+        packing_token_budget=(core.get("packing_max_tokens") or core["max_sequence_length"])
+        if core.get("sequence_packing")
+        else None,
     )
+    if core.get("sequence_packing"):
+        packing_report = {}
+        for rank, rows in contracts.items():
+            events = [r for r in rows if r.get("event") == "packing"]
+            require(len(events) == updates, "Unexpected packing-event count")
+            require(any(r["packs"] < r["samples"] for r in events), "Packing never combined samples")
+            if core.get("replay_diagnostics"):
+                for update in range(updates):
+                    replay = [
+                        r
+                        for r in rows
+                        if r.get("event") == "replay_routes" and r["phase"] == "training" and r["rollout_id"] == update
+                    ]
+                    require(len(replay) == events[update]["packs"], "Missing packed training replay observations")
+                    require(sum(r["samples"] for r in replay) == batch // world, "Missing packed replay samples")
+                    for row in replay:
+                        require(
+                            row["mismatches"] == 0
+                            and row["synthetic_tail_tokens"] == row["samples"]
+                            and row["captured_tokens"] == row["tokens"] - row["samples"],
+                            "Packed replay alignment mismatch",
+                        )
+                        minimum = 2 if core["activation_checkpointing"] else 1
+                        require(
+                            row["layers"]
+                            and all(
+                                c["entered"] >= minimum and c["grad_enabled"] >= 1 for c in row["layers"].values()
+                            ),
+                            "Packed replay recomputation not observed",
+                        )
+            packing_report[rank] = events
+        report["packing"] = packing_report
     report.update(
         root=str(root),
         configured_updates=updates,
@@ -322,7 +419,6 @@ def audit(root, *, counters_only=False):
         report.update(passed=True, qualification="counters_only", unavailable_prepared_sources=unavailable_sources)
         report["limitations"].append("Samples, token identity, rewards and heldout membership were not audited.")
         return report
-    torch = importlib.import_module("torch")
     verifier = importlib.import_module("open_instruct.ground_truth_utils").GSM8KVerifier()
     training = prepared_rows(artifact(miles["prompt_data"]))
     evaluation = {}
@@ -339,7 +435,7 @@ def audit(root, *, counters_only=False):
     dump_paths = []
     for rollout in range(updates):
         path = artifact(miles["save_debug_rollout_data"].format(rollout_id=rollout))
-        payload = torch.load(path, map_location="cpu", weights_only=True)
+        payload = load_rollout(path)
         require(payload.get("rollout_id") == rollout, "Training dump rollout ID mismatch")
         result = audit_samples(
             payload["samples"],
@@ -374,7 +470,7 @@ def audit(root, *, counters_only=False):
     eval_reports = []
     for dump_id, policy_version in ((0, 0), (updates - 1, updates)):
         path = artifact(miles["save_debug_rollout_data"].format(rollout_id=f"eval_{dump_id}"))
-        payload = torch.load(path, map_location="cpu", weights_only=True)
+        payload = load_rollout(path)
         require(payload.get("rollout_id") == dump_id, "Evaluation dump rollout ID mismatch")
         result = audit_samples(
             payload["samples"],

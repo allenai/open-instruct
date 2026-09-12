@@ -20,7 +20,17 @@ from torch import distributed as dist
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
-from open_instruct.miles import checkpoint, config, contract, data, models, publication, replay_diagnostics, scheduler
+from open_instruct.miles import (
+    checkpoint,
+    config,
+    contract,
+    data,
+    models,
+    packing,
+    publication,
+    replay_diagnostics,
+    scheduler,
+)
 from open_instruct.miles import metrics as training_metrics
 from open_instruct.miles.state import PolicyClock
 from open_instruct.miles.timing import startup_stage
@@ -189,8 +199,33 @@ class OLMoCoreTrainRayActor(TrainRayActor):
 
     def _forward(self, module, batch):
         forward = getattr(module, "model_forward_no_pipeline", None) or module.model_forward
-        # One unpadded sample per forward avoids auxiliary losses on artificial padding.
-        return forward(batch["tokens"], loss_div_factor=batch.get("aux_loss_div_factor", batch["tokens"].numel()))
+        boundaries = {key: batch[key] for key in ("doc_lens", "max_doc_lens") if key in batch}
+        return forward(
+            batch["tokens"], loss_div_factor=batch.get("aux_loss_div_factor", batch["tokens"].numel()), **boundaries
+        )
+
+    def _batch_steps(self, rollout):
+        samples = self._agree(lambda: data.sample_batches(rollout, self.args.olmo_core.max_sequence_length))
+        local_batch = self.args.global_batch_size // dist.get_world_size()
+        self._agree(lambda: self._validate_step_batches(samples, local_batch))
+        contract.validate_batch_schedule(len(samples), local_batch, samples[0]["tokens"].device)
+        steps = [samples[i : i + local_batch] for i in range(0, len(samples), local_batch)]
+        if not self.args.olmo_core.sequence_packing:
+            return steps
+        budget = self.args.olmo_core.packing_max_tokens or self.args.olmo_core.max_sequence_length
+        result = []
+        for step in steps:
+            plan = self._agree(lambda step=step: packing.plan([b["tokens"].numel() for b in step], budget))
+            count = torch.tensor(len(plan), device=step[0]["tokens"].device, dtype=torch.int64)
+            dist.all_reduce(count, op=dist.ReduceOp.MAX)
+            result.append(
+                self._agree(
+                    lambda step=step, plan=plan, count=int(count): [
+                        packing.combine(step, indices) for indices in packing.equalize(plan, count)
+                    ]
+                )
+            )
+        return result
 
     def _score(self, module, batches, *, use_replay):
         scores = []
@@ -215,10 +250,9 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             raise ValueError("Trainer retry, witnesses, and external critic data are not supported")
         rollout, store = miles_data.get_rollout_data(self.args, rollout_data_ref)
         with store:
-            batches = self._agree(lambda: data.sample_batches(rollout, self.args.olmo_core.max_sequence_length))
+            steps = self._batch_steps(rollout)
+            batches = [batch for step in steps for batch in step]
             local_batch = self.args.global_batch_size // dist.get_world_size()
-            self._agree(lambda: self._validate_step_batches(batches, local_batch))
-            contract.validate_batch_schedule(len(batches), local_batch, batches[0]["tokens"].device)
             if self.args.use_rollout_routing_replay:
                 self._agree(lambda: self._validate_replay_batches(batches))
             versions = self._agree(lambda: data.policy_versions(rollout))
@@ -226,7 +260,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             decision = self._scoring_pass()
             checked = self._scoring_check_due(decision)
             standalone = decision.standalone or checked
-            if not decision.standalone and len(batches) != local_batch:
+            if not decision.standalone and len(steps) != 1:
                 raise ValueError("Skipping the standalone scoring pass requires one optimizer step per collection")
             difference = agreement = profile = None
             if standalone:
@@ -260,9 +294,21 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         scoring_mode = "standalone" if decision.standalone else ("checked" if checked else "skipped")
         miles_loss.compute_advantages_and_returns(self.args, rollout)
         self._agree(lambda: contract.validate_training_data(rollout))
-        batches = data.sample_batches(rollout, self.args.olmo_core.max_sequence_length)
-        for start in range(0, len(batches), local_batch):
-            step_batches = batches[start : start + local_batch]
+        for step_batches in self._batch_steps(rollout):
+            if self.args.olmo_core.sequence_packing:
+                budget = self.args.olmo_core.packing_max_tokens or self.args.olmo_core.max_sequence_length
+                logger.info(
+                    "Core sequence packing: %s",
+                    contract.record(
+                        self.args,
+                        {
+                            "event": "packing",
+                            "step": self.clock.completed_steps + 1,
+                            "rollout_id": rollout_id,
+                            **packing.measurements(step_batches, budget),
+                        },
+                    ),
+                )
             step_versions = [version for batch in step_batches for version in data.policy_versions(batch)]
             self._agree(
                 lambda current=step_versions: self.clock.validate_versions(current, self.args.olmo_core.max_policy_lag)
@@ -275,6 +321,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             probe = contract.ParameterProbe(self.model) if diagnostic else None
             lr_used = self.lr_scheduler.get_last_lr()
             self._agree(lambda: contract.validate_schedule(self.clock, self.lr_scheduler))
+            torch.cuda.reset_peak_memory_stats()
             started = time.perf_counter()
             contract.auxiliary_metrics(self.model, reset=True)
             self.train_module.zero_grads()
@@ -367,6 +414,15 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             self.train_module._trainer.global_step = self.clock.completed_steps
             losses = training_metrics.aggregate_losses(metrics)
             summary = training_metrics.step_summary(metrics, aux_metrics, time.perf_counter() - started)
+            if self.args.olmo_core.sequence_packing:
+                summary.update(
+                    {
+                        "packing/packs_per_rank": count,
+                        "packing/samples_per_pack": normalization.samples / normalization.world_size / count,
+                        "packing/tokens_per_pack": normalization.model_tokens / normalization.world_size / count,
+                        "packing/rank0_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                    }
+                )
             logged = self._agree(
                 lambda losses=losses,
                 summary=summary,

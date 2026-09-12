@@ -140,7 +140,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
     async def _join_worker(self, timeout: float) -> list[Any]:
         assert self._worker is not None
         self._worker.cancel()
-        return await asyncio.wait_for(asyncio.gather(self._worker, return_exceptions=True), timeout)
+        return list(await asyncio.wait_for(asyncio.gather(self._worker, return_exceptions=True), timeout))
 
     async def prepare_publication(self) -> list[int]:
         """Cancel/join unfinished groups; keep completed buffered groups intact."""

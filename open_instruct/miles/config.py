@@ -36,6 +36,8 @@ class CoreConfig:
     attention_backend: str = "torch"
     activation_checkpointing: bool = True
     max_sequence_length: int = 8192
+    sequence_packing: bool = False
+    packing_max_tokens: int | None = None
     max_policy_lag: int = 0
     router_aux_loss_weight: float = 0.01
     router_z_loss_weight: float = 1e-5
@@ -87,6 +89,7 @@ class CoreConfig:
             "checkpoint_dedup_save_to_lowest_rank",
             "checkpoint_constant_memory_planning",
             "scoring_pass_required",
+            "sequence_packing",
         ):
             validation.boolean(getattr(self, name), f"core.{name}")
         for name in ("checkpoint_thread_count", "checkpoint_process_count"):
@@ -97,6 +100,8 @@ class CoreConfig:
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise InputError(f"core.{name} must be a positive integer")
+        if self.packing_max_tokens is not None:
+            validation.integer(self.packing_max_tokens, "core.packing_max_tokens", minimum=1)
         if type(self.max_policy_lag) is not int or self.max_policy_lag < 0:
             raise InputError("core.max_policy_lag must be a nonnegative integer")
         for name in ("router_aux_loss_weight", "router_z_loss_weight"):
@@ -210,8 +215,17 @@ class RunConfig:
             if key in self.miles:
                 raise InputError(f"miles.{key} is managed by the Core backend")
         cli_options.encode_options(self.miles)
+        if self.core.packing_max_tokens is not None:
+            if not self.core.sequence_packing:
+                raise InputError("core.packing_max_tokens requires sequence_packing=true")
+            if self.core.packing_max_tokens < self.core.max_sequence_length:
+                raise InputError("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = cli_options.normalize_options(self.miles)
         validation.runtime_values(options)
+        prompt_limit = options.get("rollout_max_prompt_len")
+        context_limit = options.get("rollout_max_context_len")
+        if prompt_limit is not None and context_limit is not None and prompt_limit >= context_limit:
+            raise InputError("rollout_max_prompt_len must be smaller than rollout_max_context_len")
         for name, expected in {
             "optimizer": "adam",
             "fp16": False,
@@ -294,8 +308,9 @@ class RunConfig:
             raise InputError("Core RL requires a fixed reference policy")
         if options.get("offload_train", False):
             raise InputError("Core trainer offload has not been qualified; set offload_train=false")
-        if options.get("qkv_format", "bshd") != "bshd":
-            raise InputError("The Core backend currently uses bshd layout")
+        layout = "thd" if self.core.sequence_packing else "bshd"
+        if options.get("qkv_format", layout) != layout:
+            raise InputError(f"Core sequence_packing={self.core.sequence_packing} requires qkv_format={layout}")
         if options.get("micro_batch_size", 1) != 1 or options.get("use_dynamic_batch_size", False):
             raise InputError("Use micro_batch_size=1; Core accumulates unpadded response samples")
         for name in ("tensor_model_parallel_size", "pipeline_model_parallel_size", "context_parallel_size"):
@@ -330,7 +345,7 @@ class RunConfig:
             "actor_num_nodes": 1,
             "actor_num_gpus_per_node": 1,
             "micro_batch_size": 1,
-            "qkv_format": "bshd",
+            "qkv_format": "thd" if self.core.sequence_packing else "bshd",
             "offload_train": False,
             "data_pad_size_multiplier": 1,
             **cli_options.normalize_options(self.miles),

@@ -1,0 +1,166 @@
+{
+  "passed": true,
+  "world": 1,
+  "checkpointing": false,
+  "arms": [
+    {
+      "name": "ep1-pack0-aux0-ac0",
+      "packed": false,
+      "auxiliary": false,
+      "packs": 8,
+      "samples": 8,
+      "scores": {
+        "mean_abs": 0.0,
+        "max_abs": 0.0,
+        "tokens": 79
+      },
+      "isolation": null,
+      "step_seconds": [
+        106.49166323198006,
+        0.2540003131143749
+      ],
+      "errors": null
+    },
+    {
+      "name": "ep1-pack1-aux0-ac0",
+      "packed": true,
+      "auxiliary": false,
+      "packs": 3,
+      "samples": 8,
+      "scores": {
+        "mean_abs": 0.0,
+        "max_abs": 0.0,
+        "tokens": 79
+      },
+      "isolation": {
+        "mean_abs": 0.0,
+        "max_abs": 0.0,
+        "tokens": 72
+      },
+      "step_seconds": [
+        75.19367013312876,
+        0.1648076451383531
+      ],
+      "errors": [
+        {
+          "dense/grad": {
+            "relative_l2_error": 0.0014548953822292369,
+            "difference_l2": 0.008503274046575748,
+            "reference_l2": 5.844594841965036,
+            "max_abs_error": 0.00048828125
+          },
+          "expert/grad": {
+            "relative_l2_error": 0.0017303544125807774,
+            "difference_l2": 0.003531319574172075,
+            "reference_l2": 2.0408071020001075,
+            "max_abs_error": 0.0001068115234375
+          },
+          "router/grad": {
+            "relative_l2_error": 0.0019775451021976282,
+            "difference_l2": 6.532335788623873e-07,
+            "reference_l2": 0.000330325502127084,
+            "max_abs_error": 2.0116567611694336e-07
+          }
+        },
+        {
+          "dense/grad": {
+            "relative_l2_error": 0.019773150416615794,
+            "difference_l2": 0.08796674312530241,
+            "reference_l2": 4.448797549801781,
+            "max_abs_error": 0.00372314453125
+          },
+          "expert/grad": {
+            "relative_l2_error": 0.017445484849578044,
+            "difference_l2": 0.029656904769359508,
+            "reference_l2": 1.6999759551008882,
+            "max_abs_error": 0.000732421875
+          },
+          "router/grad": {
+            "relative_l2_error": 0.01949807579523205,
+            "difference_l2": 7.178701075143596e-06,
+            "reference_l2": 0.0003681748471251217,
+            "max_abs_error": 1.1101365089416504e-06
+          }
+        },
+        {
+          "dense/exp_avg": {
+            "relative_l2_error": 0.010180889494940606,
+            "difference_l2": 0.008831705872375542,
+            "reference_l2": 0.8674788069121523,
+            "max_abs_error": 0.0003930663806386292
+          },
+          "dense/exp_avg_sq": {
+            "relative_l2_error": 0.010870155679155887,
+            "difference_l2": 0.0002608944168984486,
+            "reference_l2": 0.024000982561705884,
+            "max_abs_error": 6.309151649475098e-05
+          },
+          "dense/main": {
+            "relative_l2_error": 6.619430850593306e-05,
+            "difference_l2": 0.0026058853902192793,
+            "reference_l2": 39.36721221259847,
+            "max_abs_error": 0.0002127811312675476
+          },
+          "expert/exp_avg": {
+            "relative_l2_error": 0.009071151931201114,
+            "difference_l2": 0.0029831648349404522,
+            "reference_l2": 0.328862845376844,
+            "max_abs_error": 7.324220496229827e-05
+          },
+          "expert/exp_avg_sq": {
+            "relative_l2_error": 0.009685949459610488,
+            "difference_l2": 1.617540266850671e-05,
+            "reference_l2": 0.0016699862760957656,
+            "max_abs_error": 9.579525794833899e-07
+          },
+          "expert/main": {
+            "relative_l2_error": 0.00016974118406837133,
+            "difference_l2": 0.0016853653140857976,
+            "reference_l2": 9.929030030843524,
+            "max_abs_error": 0.0002560298889875412
+          },
+          "router/exp_avg": {
+            "relative_l2_error": 0.01167885635574781,
+            "difference_l2": 7.201967580614299e-07,
+            "reference_l2": 6.166671942214455e-05,
+            "max_abs_error": 1.1235533747822046e-07
+          },
+          "router/exp_avg_sq": {
+            "relative_l2_error": 0.01640680382187136,
+            "difference_l2": 1.3485348863957263e-11,
+            "reference_l2": 8.219363753213405e-10,
+            "max_abs_error": 4.7606155129109595e-12
+          },
+          "router/main": {
+            "relative_l2_error": 0.00010430132267485834,
+            "difference_l2": 4.679914915881427e-05,
+            "reference_l2": 0.44869180906461437,
+            "max_abs_error": 2.465769648551941e-05
+          }
+        }
+      ]
+    },
+    {
+      "name": "ep1-pack1-aux1-ac0",
+      "packed": true,
+      "auxiliary": true,
+      "packs": 3,
+      "samples": 8,
+      "scores": {
+        "mean_abs": 0.0,
+        "max_abs": 0.0,
+        "tokens": 79
+      },
+      "isolation": {
+        "mean_abs": 0.0,
+        "max_abs": 0.0,
+        "tokens": 72
+      },
+      "step_seconds": [
+        0.20264593604952097,
+        0.16521754208952188
+      ],
+      "errors": null
+    }
+  ]
+}

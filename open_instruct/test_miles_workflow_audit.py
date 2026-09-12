@@ -271,3 +271,44 @@ def test_same_prompt_in_distinct_groups_can_have_different_versions():
     )
     assert report["versions"] == {7: 0, 8: 1}
     assert report["ids"] == ["p"]
+
+
+def test_packed_counter_gate_checks_schedule_and_token_accounting():
+    contracts, publications, stages = counters()
+    for rows in contracts.values():
+        events = []
+        for step in rows:
+            step["local_microbatches"] = 8
+            step["normalization"]["model_tokens"] = 2048
+            events.append(
+                {
+                    "event": "packing",
+                    "step": step["step"],
+                    "rollout_id": step["rollout_id"],
+                    "samples": 32,
+                    "packs": 8,
+                    "model_tokens": 1024,
+                    "token_budget": 256,
+                    "max_pack_tokens": 128,
+                }
+            )
+        rows.extend(events)
+
+    def check():
+        return audit.validate_counters(
+            contracts, publications, stages, updates=4, batch_size=64, world=2, packing_token_budget=256
+        )
+
+    assert check()["publication_count"] == 9
+    packed = contracts["1"][-1]
+    packed["packs"] = 7
+    with pytest.raises(ValueError, match="microbatch count"):
+        check()
+    contracts["1"][3]["local_microbatches"] = 7
+    packed["max_pack_tokens"] = 256
+    with pytest.raises(ValueError, match="different microbatch"):
+        check()
+    contracts["1"][3]["local_microbatches"] = packed["packs"] = 8
+    packed["model_tokens"] -= 1
+    with pytest.raises(ValueError, match="token counts differ"):
+        check()
