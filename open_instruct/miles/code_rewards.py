@@ -109,7 +109,7 @@ def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfi
 RETRY = requests.adapters.Retry(
     total=8,
     backoff_factor=1.0,
-    status_forcelist=[500, 502, 503, 504],
+    status_forcelist=[502, 503, 504],
     allowed_methods=frozenset({"GET", "POST"}),
     raise_on_status=False,
 )
@@ -168,10 +168,13 @@ async def code_score(args: Any, prediction: str, target: Any, *, stdio: bool = F
             return response.json()
         except requests.HTTPError as error:
             status = getattr(error.response, "status_code", None)
-            if status is not None and 400 <= status < 500 and status != 429:
+            if status is not None and (400 <= status < 500 and status != 429 or status == 500):
                 # A client error is a property of this sample (an oversized test
-                # payload, for instance), not of the service: score it zero, as
-                # the standard open-instruct verifier does, and keep training.
+                # payload, for instance), and the code service answers 500 when
+                # executing a program raises inside its harness; neither is a
+                # service outage. Score the sample zero, as the standard
+                # open-instruct verifier does, and keep training. Gateway errors
+                # (502-504) and 429 are retried and then fail the run.
                 logger.warning(
                     "code verifier rejected a sample with HTTP %s (program %d chars, %d tests); scoring it zero",
                     status,

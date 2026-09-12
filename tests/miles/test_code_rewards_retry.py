@@ -13,7 +13,7 @@ def test_retry_policy_covers_the_scoring_posts():
     retry = code_rewards.RETRY
     assert "POST" in retry.allowed_methods
     assert retry.total >= 5
-    assert {500, 502, 503, 504} <= set(retry.status_forcelist)
+    assert {502, 503, 504} <= set(retry.status_forcelist)
     # Enough backoff to outlast a gateway hiccup, not so much that a dead service hangs a run forever.
     assert 60 <= sum(min(retry.backoff_factor * 2**i, 120) for i in range(retry.total)) <= 600
 
@@ -51,6 +51,7 @@ def _score(monkeypatch, status):
 def test_client_errors_score_the_sample_zero(monkeypatch):
     assert _score(monkeypatch, 413) == 0.0
     assert _score(monkeypatch, 400) == 0.0
+    assert _score(monkeypatch, 500) == 0.0  # the harness raised while running this program
 
 
 def test_service_errors_still_fail_after_retries(monkeypatch):
