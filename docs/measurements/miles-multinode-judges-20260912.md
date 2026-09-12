@@ -155,3 +155,32 @@ on Saturn through the build wrapper using the same immutable image. It records
 state at `/tmp/multinode-r3-monitor.json`; the launch checkout is frozen at
 `/tmp/oi-multinode-native-launch`. Do not remove that checkout while the monitor
 is active. The earlier `-r2` wrapper run has its own independent monitor.
+
+## Progress and audit-loader correction
+
+The wrapper retry `01M29Y35Z257VCZ6KQTW7G3PY0` finished both GPU replicas
+with exit 0 at approximately 05:26 UTC on September 12. Its logs contain no
+router quarantine messages. The follow-up Saturn audit
+`01M2A19CZENZN9WF6SK6RSTFSA` failed loading the first rollout: restricted
+PyTorch deserialization did not allow the NumPy int32 expert-assignment arrays
+retained by router replay. The earlier counter/placement/cleanup gates passed
+before this load. Full sample validation was not completed by that audit.
+
+Commit `2c4be8e394b587d3c243c1caec8f9aba9980c57f` scopes a minimal NumPy
+reconstruction allowlist to the loader and keeps `weights_only=True`. Two new
+runtime regressions verify int32 replay round-trip and rejection of unknown
+pickle classes, with no allowlist leakage. Nineteen workflow-audit tests, lint,
+and type checks passed. The corrected audit image is
+`01M2A1ZQSQVABE9NBEK4KZ26WA`; r2's rerun is
+[01M2A1ZYTM0KTTPB07GNJE2J1A](https://beaker.org/ex/01M2A1ZYTM0KTTPB07GNJE2J1A).
+The r3 continuation now uses that same corrected audit image from frozen checkout
+`/tmp/oi-mixed-audit-fixed`, retaining the original training image/run artifacts.
+
+As of the 05:34 UTC r3 logs, both optimizer updates completed with nonzero finite
+dense/expert/router gradients and parameter changes. Mean trainer/rollout score
+gaps were 0.00943 and 0.00783, below the 0.05 gate. Native fused publication
+sent 523 tensors/20 buckets; fresh versions 1 and 2 took 1.09 and 1.34 seconds
+in the Core publication timer, versus r2's 29,669 tensors/35 buckets and
+3.89/2.67 seconds. These are tiny-run observations, not a controlled steady-state
+benchmark or the full driver publication stage (which includes other checks).
+Final evaluation/cleanup and corrected retained-sample audits remain pending.
