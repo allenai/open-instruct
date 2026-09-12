@@ -137,3 +137,13 @@ for all cluster-bootstrap jobs, with a single-node judge regression test. Retry
 uses a fresh output root. This is a launcher fix; the existing pinned training
 image can be reused because networking is encoded in the submitted Beaker spec.
 Case 1 has reached generation. No full learning/lifecycle pass yet.
+
+
+Sizing wave submitted: EP8/I8 `01M2BZ6Q7ZRE6QY9FDR0DSAZCX`, EP8/I16
+`01M2BZ6W14S0V6YXPN6EB7T238`, EP4/I8 `01M2BZ711YRWVYZA9MS1WAX1NX`.
+EP4 is queued on the workspace slot limit (scheduler reports 57/64 occupied),
+not a cluster-capacity inference. Single-node judge retry:
+`01M2BZ6J54ACHF4MTNZ7PHR15Y`. Six GPU experiments total submitted, including
+three new sizing cases and the original failed judge attempt. EP8/I24 remains
+conditional. Original ten-attempt estimate will not silently trigger more launches;
+the added sizing family is explicitly tracked under the user's expanded GPU scope.
