@@ -1,6 +1,6 @@
 # Opt-in runtime-row SwiGLU integration
 
-The active Core worktree is `robertb/miles-hero-adapter`, based on
+The active Core worktree is `robertb/miles-rl-adapter`, based on
 `codex/small-hero-hf-20260909` at `b1fd2c9746e88baeb20e372bdca340d788d0f7e5`.
 The earlier `robertb/miles-adapter` branch remains based on Jacob's
 `jacobm/moe-v2-core-gdn2` at `169b8f9d06bce0276143876c82f630af483b03b7`.

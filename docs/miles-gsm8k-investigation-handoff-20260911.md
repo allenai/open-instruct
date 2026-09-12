@@ -89,7 +89,7 @@ Performance is a separate investigation: original warm cycles91.1s Core vs68.2s 
 
 ## Evidence and workspaces
 
-Primary working tree: `/home/robert/proj/open-instruct/.worktrees/miles-hero-integration` (`robertb/miles-hero-support`). Core: sibling `miles-core-hero`; MILES fork: sibling `miles-runtime` (`allenai/miles.git`); baseline: sibling `olmo-miles-gsm8k-parity`; repaired Megatron: sibling `olmo-megatron-gsm8k-parity`. Inspect frozen SHAs above rather than current defaults. Do not edit dirty original olmo-miles/olmo-megatron checkouts.
+Primary working tree: `/home/robert/proj/open-instruct/.worktrees/miles-integration` (`robertb/miles-olmo-core`). Core: sibling `miles-core-adapter`; MILES fork: sibling `miles-runtime` (`allenai/miles.git`); baseline: sibling `olmo-miles-gsm8k-parity`; repaired Megatron: sibling `olmo-megatron-gsm8k-parity`. Inspect frozen SHAs above rather than current defaults. Do not edit dirty original olmo-miles/olmo-megatron checkouts.
 
 Start with:
 

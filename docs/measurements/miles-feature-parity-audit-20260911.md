@@ -16,7 +16,7 @@ not establish learning equivalence or production endurance.
 
 The baseline is `/home/robert/proj/olmo-miles` at
 `07887b783ab254577a6656168dc0e0d21aebfe3d`. The integration is the
-`robertb/miles-hero-support` working branch. The consolidated runtime pins are:
+`robertb/miles-olmo-core` working branch. The consolidated runtime pins are:
 
 | Repository | Development revision | Change during consolidation |
 | --- | --- | --- |

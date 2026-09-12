@@ -30,8 +30,8 @@ Earlier pending statements below describe intermediate measurements, superseded 
 
 Isolated branches: `robertb/miles-checkpoint-perf` in open-instruct and OLMo-core.
 Bases: open-instruct `12235d54d`, Core `307d20590`.
-The implementation is integrated into `robertb/miles-hero-support` (open-instruct)
-and `robertb/miles-hero-adapter` (Core), with all performance options disabled by default.
+The implementation is integrated into `robertb/miles-olmo-core` (open-instruct)
+and `robertb/miles-rl-adapter` (Core), with all performance options disabled by default.
 
 The initial trial preserves production defaults. Candidate save options are explicit harness
 arguments, not new run-profile defaults:

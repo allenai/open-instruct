@@ -9,7 +9,7 @@ SGLang flags do not automatically provide the baseline's custom adapters.
 
 This September 11 review uses olmo-miles
 `07887b783ab254577a6656168dc0e0d21aebfe3d`. The current implementation is on
-`robertb/miles-hero-support`, with Core `robertb/miles-hero-adapter` and MILES
+`robertb/miles-olmo-core`, with Core `robertb/miles-rl-adapter` and MILES
 `robertb/olmo-core-backend`. The adapter originated on Jacob's
 `moe-v2-core-gdn2` work and was ported to the later hero HF-support branch.
 [runtime.lock.json](../runtime/miles/runtime.lock.json) owns the exact source

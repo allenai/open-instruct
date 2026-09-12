@@ -1,6 +1,6 @@
 # Hero support in the MILES / OLMo-core integration
 
-The hero work is isolated on `robertb/miles-hero-support`. The older SFT GSM8K
+The hero checkpoint work is on the integration branch `robertb/miles-olmo-core`. The older SFT GSM8K
 trial continues with its original image and checkpoint.
 
 ## Architecture and source lineage

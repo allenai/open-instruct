@@ -6,9 +6,9 @@ have their existing `qmoe-int` branches. No branch was renamed to Git `main`.
 
 | Repository | Working branch | Working directory |
 | --- | --- | --- |
-| open-instruct | `robertb/miles-hero-support` | `~/proj/open-instruct/.worktrees/miles-hero-integration` |
+| open-instruct | `robertb/miles-olmo-core` | `~/proj/open-instruct/.worktrees/miles-integration` |
 | MILES | `robertb/olmo-core-backend` | `~/proj/open-instruct/.worktrees/miles-runtime` |
-| OLMo-core | `robertb/miles-hero-adapter` | `~/proj/open-instruct/.worktrees/miles-core-hero` |
+| OLMo-core | `robertb/miles-rl-adapter` | `~/proj/open-instruct/.worktrees/miles-core-adapter` |
 
 The [runtime lock](../runtime/miles/runtime.lock.json) and checked-in source
 patches reconstruct the dependency revisions. Local sibling worktrees are not

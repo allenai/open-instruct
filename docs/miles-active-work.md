@@ -23,9 +23,9 @@ The active r3 recipe changes only run/output/W&B identities from r2. The repaire
 router precision image is retained. Earlier failed/stopped attempts are not
 learning curves or steady-state throughput measurements.
 
-Hero implementation lives in `.worktrees/miles-hero-integration` on
-`robertb/miles-hero-support`. Core changes are isolated in `miles-core-hero`;
-serving changes are isolated in `olmo-sglang-hero`. The original Core100 image and
+The integration lives in `.worktrees/miles-integration` on
+`robertb/miles-olmo-core`. Core changes are isolated in `miles-core-adapter`;
+serving changes are isolated in `miles-serving`. The original Core100 image and
 source remain unchanged. `runtime/miles/runtime.lock.json` records the hero pins.
 
 ## Other open work retained

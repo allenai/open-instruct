@@ -122,7 +122,7 @@ This exercise is not the repository GPU-pytest suite.
 The next exercise (`-r3`) uses MILES `d29c04a944216c6309770fc9cf0d6ca37c066e17`
 on `allenai/miles:robertb/olmo-core-backend`. This branch already descended from
 the fetched fork primary; rebasing reported it up to date. The Open Instruct
-change starts from project primary `446189de7` (`robertb/miles-hero-support`),
+change starts from project primary `446189de7` (`robertb/miles-olmo-core`),
 including the merged scoring-pass and publication work. Core remains
 `cfc42934d818036728d63f7ccdcd3b541eab9880`; serving remains
 `02ccb5dcf641cbabc9b78a5bc65dacf8690707a7`. No generic upstream-main rebase or
