@@ -274,3 +274,9 @@ def test_changed_source_during_preparation_never_commits(environment, tmp_path, 
     with pytest.raises(ValueError, match="changed while preparing"):
         prepare(environment, {"rl_manifest": str(path)})
     assert not environment[1].exists()
+
+
+def test_jsonl_unicode_separators_are_content_not_record_boundaries():
+    rows = [{"input": "before\u2028middle\u2029after\u0085end"}, {"input": "second"}]
+    raw = ("\r\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n").encode()
+    assert run_data._rows(raw) == rows

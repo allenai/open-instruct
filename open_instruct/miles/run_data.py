@@ -124,7 +124,9 @@ def _read_json_object(path, inputs):
 
 def _rows(raw, source="Data JSONL"):
     try:
-        lines = raw.decode().splitlines()
+        # Unicode paragraph/line separators are valid inside JSON strings.
+        # JSONL record boundaries are LF, optionally preceded by CR.
+        lines = raw.decode().split("\n")
     except UnicodeError as error:
         raise InputError(f"{source} must be UTF-8 JSONL.") from error
     values = []
