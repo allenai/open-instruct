@@ -70,3 +70,25 @@ The preparation-only correction explicitly uses one eval row per MoE domain and
 hash-validates an already completed sibling fixture before reuse. This requires a
 second short CPU preparation job beyond the original one-job estimate; GPU budget
 remains untouched. Training source and runtime dependency pins are unchanged.
+
+### Candidate B / first GPU wave
+
+Source `c143bea53fc1`, immutable image `01M2BX9JPT44DGQ9QWY5C0HF52`.
+Saturn preparation retry `01M2BX9TAJD31D652BVSDP7DF4` passed, exit 0: 48 dense
+training prompts + 4 eval; 64 MoE training prompts + 6 eval; six successful code
+canaries (correct/wrong in both formats, syntax error and bounded execution timeout).
+The original successful dense fixture was verified without modification.
+
+GPU attempt 1: dense case 1, `01M2BXECF7QDB19Z2F9071W6K9` (4 GPUs).
+GPU attempt 2: cold mixed MoE case 2, `01M2BXF4PWKTPKNP7GYKHN1HZP` (5 GPUs).
+Both submitted through the documented CLI/wrapper, urgent Holmes, 1h minimum,
+no auto-resume. Both scheduled; training results pending. Eight GPU attempt slots
+remain. Cases 3–4 are staged but not submitted.
+
+Launch receipts, both preparation reports and test logs are retained under
+`docs/miles/measurements/colleague-20260912/`.
+
+Local quality follow-up: repaired two existing type errors in code-service
+program-length diagnostics without changing scoring behavior. Eight focused
+code/fixture tests, full Open Instruct formatting/lint and type checks passed.
+This small follow-up is not baked into the currently running image.

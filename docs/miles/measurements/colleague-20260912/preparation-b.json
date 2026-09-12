@@ -1,0 +1,214 @@
+{
+  "code_canaries": [
+    {
+      "diagnostics": {
+        "http_status": 200,
+        "program_chars": 24,
+        "status": "ok",
+        "stdio": false,
+        "tests": 1
+      },
+      "expected": 1,
+      "name": "function-correct",
+      "score": 1.0
+    },
+    {
+      "diagnostics": {
+        "http_status": 200,
+        "program_chars": 22,
+        "status": "ok",
+        "stdio": false,
+        "tests": 1
+      },
+      "expected": 0,
+      "name": "function-wrong",
+      "score": 0.0
+    },
+    {
+      "diagnostics": {
+        "http_status": 200,
+        "program_chars": 10,
+        "status": "ok",
+        "stdio": true,
+        "tests": 1
+      },
+      "expected": 1,
+      "name": "stdio-correct",
+      "score": 1.0
+    },
+    {
+      "diagnostics": {
+        "http_status": 200,
+        "program_chars": 10,
+        "status": "ok",
+        "stdio": true,
+        "tests": 1
+      },
+      "expected": 0,
+      "name": "stdio-wrong",
+      "score": 0.0
+    },
+    {
+      "diagnostics": {
+        "http_status": 200,
+        "program_chars": 11,
+        "status": "ok",
+        "stdio": false,
+        "tests": 1
+      },
+      "expected": 0,
+      "name": "syntax-error",
+      "score": 0.0
+    },
+    {
+      "diagnostics": {
+        "http_status": 200,
+        "program_chars": 16,
+        "status": "ok",
+        "stdio": true,
+        "tests": 1
+      },
+      "expected": 0,
+      "name": "execution-timeout",
+      "score": 0.0
+    }
+  ],
+  "concurrent_imports": [
+    {
+      "model_type": "olmo3moe",
+      "pid": 13,
+      "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef",
+      "token_ids": [
+        1128,
+        3311,
+        1176,
+        12,
+        817,
+        47058,
+        649,
+        661
+      ]
+    },
+    {
+      "model_type": "olmo3moe",
+      "pid": 18,
+      "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef",
+      "token_ids": [
+        1128,
+        3311,
+        1176,
+        12,
+        817,
+        47058,
+        649,
+        661
+      ]
+    },
+    {
+      "model_type": "olmo3moe",
+      "pid": 16,
+      "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef",
+      "token_ids": [
+        1128,
+        3311,
+        1176,
+        12,
+        817,
+        47058,
+        649,
+        661
+      ]
+    },
+    {
+      "model_type": "olmo3moe",
+      "pid": 17,
+      "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef",
+      "token_ids": [
+        1128,
+        3311,
+        1176,
+        12,
+        817,
+        47058,
+        649,
+        661
+      ]
+    }
+  ],
+  "dense": {
+    "counts": {
+      "eval": {
+        "ifeval": 2,
+        "math": 2
+      },
+      "train": {
+        "ifeval": 24,
+        "math": 24
+      }
+    },
+    "dropped": {},
+    "normalized_content_and_identity_disjoint": true,
+    "outputs": {
+      "eval.jsonl": "5c17c9329935e475d639a192d5ecf37d8ae18d977321550e598248f1a0cf247a",
+      "train.jsonl": "14962bd7f3a09b8c4483128c073b57487a69f14af13c2835b363d9c266e85a5c",
+      "verifiers.json": "33ecc88ffa035a48818c4684f563c7581d412d83b8108ef3c876a6f62a4e0415"
+    },
+    "template_sha256": "eba6e269f669706e5c788e370160dad953137f3fa7014fa69d03c7b3ad9f0e72"
+  },
+  "elapsed_seconds": 75.6685140132904,
+  "inventories": [
+    {
+      "descriptor_sha256": "b200a2848166fc4e50f683dba90f7523ac4aeed8ff9bab8794f4195fb6f6b5b0",
+      "path": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-7b-think-dpo-oi-template",
+      "shards": {
+        "model-00001-of-00003.safetensors": 4969984976,
+        "model-00002-of-00003.safetensors": 4981161496,
+        "model-00003-of-00003.safetensors": 4644917240
+      },
+      "weight_values_checked": false
+    },
+    {
+      "descriptor_sha256": "b94297059ada18b47012e67320f59d37da820f9f7ab6343c4e32c15baa0c008c",
+      "path": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+      "shards": {
+        "model.safetensors": 37032095328
+      },
+      "weight_values_checked": false
+    }
+  ],
+  "moe": {
+    "counts": {
+      "eval": {
+        "code": 1,
+        "code_stdio": 1,
+        "general-quality": 1,
+        "general-quality_ref": 1,
+        "ifeval": 1,
+        "math": 1
+      },
+      "train": {
+        "code": 8,
+        "code_stdio": 8,
+        "general-quality": 8,
+        "general-quality_ref": 8,
+        "ifeval": 16,
+        "math": 16
+      }
+    },
+    "dropped": {},
+    "normalized_content_and_identity_disjoint": true,
+    "outputs": {
+      "eval.jsonl": "3c36a565579ca451cbc0e753f8f0d7307ecab322849186fa56671453d1541553",
+      "train.jsonl": "d20a370c2b055f91b02d8f892957060b90cce3f64984ed8b53234d3dc809cf8a",
+      "verifiers.json": "84fc2f1f5801edbcd11327578fe9ca241b9b45861ec1ccda6f2b5a3b82f5deb0"
+    },
+    "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef"
+  },
+  "passed": true,
+  "source_hashes": {
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/eval.jsonl": "4749d16830bb23100f80e2f7896e03936b0db1c6e6b7414885123497e1a045d4",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/rl-manifest.json": "7a588b35cf31c056488943f6500a6021ecdf08309cb7fe35115262a13c7233e0",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/train.jsonl": "2815fb41cf1033ba9b21ba8b5c2c3b8f07a07a72f2ad09a66d3872e015c5b3e3"
+  },
+  "started": 1789253732.6540112
+}
