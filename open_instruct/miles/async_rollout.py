@@ -15,6 +15,7 @@
 """Lifecycle-safe adapter for MILES' fully asynchronous rollout producer."""
 
 import asyncio
+import time
 from contextlib import suppress
 from typing import Any
 
@@ -30,6 +31,10 @@ from open_instruct.miles.errors import GenerationInterrupted
 logger = logger_utils.setup_logger(__name__)
 
 _QUIESCE_LOG_INTERVAL_SECONDS = 30.0
+# A producer join that outlives the health-check budget gets one retry after the
+# engines abort their in-flight requests, which is what releases a generation
+# task still waiting on a response.
+_PUBLICATION_JOIN_RETRY_SECONDS = 180.0
 
 
 class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
@@ -120,15 +125,44 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         self._scheduler.on_submit([group])
         return asyncio.create_task(self._generate_group(group))
 
+    async def _abort_engine_requests(self, timeout: float) -> None:
+        """Ask every engine to abort its in-flight requests; unreachable engines are logged."""
+        urls = await asyncio.wait_for(get_worker_urls(self.args), timeout)
+
+        async def abort(url):
+            try:
+                await asyncio.wait_for(post(f"{url}/abort_request", {"abort_all": True}, max_retries=1), timeout)
+            except (httpx.HTTPError, TimeoutError):
+                logger.warning("Async publication abort could not reach worker=%s", url)
+
+        await asyncio.gather(*(abort(url) for url in urls))
+
+    async def _join_worker(self, timeout: float) -> list[Any]:
+        assert self._worker is not None
+        self._worker.cancel()
+        return await asyncio.wait_for(asyncio.gather(self._worker, return_exceptions=True), timeout)
+
     async def prepare_publication(self) -> list[int]:
         """Cancel/join unfinished groups; keep completed buffered groups intact."""
         self._publication_paused = True
         self._producer_resumed.clear()
         self.state.aborted = True
         timeout = self.args.rollout_health_check_timeout
+        aborted_engines = False
         if self._worker is not None:
-            self._worker.cancel()
-            results = await asyncio.wait_for(asyncio.gather(self._worker, return_exceptions=True), timeout)
+            started = time.monotonic()
+            try:
+                results = await self._join_worker(timeout)
+            except TimeoutError:
+                logger.warning(
+                    "Async producer join exceeded %.0fs with %d active group(s); aborting engine requests and retrying",
+                    timeout,
+                    len(self._active_tasks),
+                )
+                await self._abort_engine_requests(timeout)
+                aborted_engines = True
+                results = await self._join_worker(_PUBLICATION_JOIN_RETRY_SECONDS)
+            logger.info("Async producer joined for publication in %.2fs", time.monotonic() - started)
 
             for result in results:
                 if isinstance(result, BaseException) and not isinstance(
@@ -138,15 +172,8 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
             self._worker = None
         identities = list(dict.fromkeys([*self._producing_groups, *self._interrupted_groups]))
         if identities:
-            urls = await asyncio.wait_for(get_worker_urls(self.args), timeout)
-
-            async def abort(url):
-                try:
-                    await asyncio.wait_for(post(f"{url}/abort_request", {"abort_all": True}, max_retries=1), timeout)
-                except (httpx.HTTPError, TimeoutError):
-                    logger.warning("Async publication abort could not reach worker=%s", url)
-
-            await asyncio.gather(*(abort(url) for url in urls))
+            if not aborted_engines:
+                await self._abort_engine_requests(timeout)
             self.data_source.requeue_pending_groups(identities)
         self._producing_groups.clear()
         self._interrupted_groups.clear()
