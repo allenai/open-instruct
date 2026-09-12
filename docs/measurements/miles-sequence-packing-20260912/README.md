@@ -99,4 +99,4 @@ test now compares exact membership and still rejects unrecognized pickle types.
 
 Not yet qualified: EP8 performance, long-context memory limits, learning quality,
 checkpoint/resume with packing, hero/dense architecture coverage, and larger/multi-node
-production batches. Compiler-cache publication is an open follow-up as described above.
+production batches. The compiler-cache follow-up now has a [locally qualified reliability fix](../miles-cache-publication-20260912/README.md); WEKA timing remains to be observed on the next run.

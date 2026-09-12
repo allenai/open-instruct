@@ -298,19 +298,33 @@ def restore(shared, local, key, family):
         return {"family": family, "status": "rejected", "seconds": time.monotonic() - started, "reason": str(error)}
 
 
-def publish(shared, local, key, family):
+def publish(shared, local, key, family, *, progress=None):
     """Run only after the entire local child process tree has stopped writing."""
     started = time.monotonic()
+    phases = {}
+    phase = "prepare"
+    phase_started = started
+
+    def mark(name):
+        nonlocal phase, phase_started
+        now = time.monotonic()
+        phases[phase] = phases.get(phase, 0) + now - phase_started
+        phase, phase_started = name, now
+        if progress is not None:
+            progress({"phase": name, "seconds": now - started, "phase_seconds": dict(phases)})
+
     base = artifact_root(shared, key, family)
     base.mkdir(parents=True, exist_ok=True)
     with (base / ".publish.lock").open("a+b") as lock:
+        mark("lock_wait")
         fcntl.flock(lock, fcntl.LOCK_EX)
-        with tempfile.TemporaryDirectory(prefix=".merge-", dir=base) as directory:
+        mark("merge")
+        with tempfile.TemporaryDirectory(prefix=".merge-", dir=local) as directory:
             stage = Path(directory)
             # Corrupt current generations are never overwritten/repaired implicitly.
             extract_verified(base, key, family, stage)
             existing = inventory(stage)
-            with tempfile.TemporaryDirectory(prefix=".incoming-", dir=base) as incoming_directory:
+            with tempfile.TemporaryDirectory(prefix=".incoming-", dir=local) as incoming_directory:
                 incoming_root = Path(incoming_directory)
                 snapshot(local / family, incoming_root, family)
                 incoming = inventory(incoming_root)
@@ -329,10 +343,12 @@ def publish(shared, local, key, family):
             generations.mkdir(exist_ok=True)
             target = generations / generation
             if target.exists():
-                with tempfile.TemporaryDirectory(prefix=".verify-", dir=base) as verification:
+                mark("verify_existing")
+                with tempfile.TemporaryDirectory(prefix=".verify-", dir=local) as verification:
                     extract_verified(base, key, family, Path(verification), generation=generation)
             else:
-                with tempfile.TemporaryDirectory(prefix=".publish-", dir=generations) as temporary:
+                mark("archive_local")
+                with tempfile.TemporaryDirectory(prefix=".archive-", dir=local) as temporary:
                     prepared = Path(temporary)
                     archive = prepared / "cache.tar.gz"
                     with tarfile.open(archive, "w:gz", compresslevel=1) as output:
@@ -348,17 +364,29 @@ def publish(shared, local, key, family):
                         "created_unix": time.time(),
                     }
                     (prepared / "manifest.json").write_bytes(encoded(manifest))
-                    os.rename(prepared, target)
+                    mark("upload")
+                    # Only two bulk files cross the shared filesystem. All tree
+                    # extraction, relocation, hashing and compression stay local.
+                    with tempfile.TemporaryDirectory(prefix=".publish-", dir=generations) as upload_directory:
+                        upload = Path(upload_directory)
+                        shutil.copy2(archive, upload / archive.name)
+                        shutil.copy2(prepared / "manifest.json", upload / "manifest.json")
+                        os.rename(upload, target)
+            mark("pointer")
             current = base / "CURRENT"
             old = current.read_text().strip() if current.exists() else None
             with tempfile.NamedTemporaryFile("w", dir=base, prefix=".CURRENT-", delete=False) as stream:
                 stream.write(generation + "\n")
                 pointer = Path(stream.name)
             os.replace(pointer, current)
+            mark("complete")
             return {
                 "family": family,
                 "status": "unchanged" if old == generation else "published",
                 "generation": generation,
                 "local_bytes": sum(item["size"] for item in files.values()),
+                "files": len(files),
+                "archive_bytes": (target / "cache.tar.gz").stat().st_size,
+                "phase_seconds": phases,
                 "seconds": time.monotonic() - started,
             }

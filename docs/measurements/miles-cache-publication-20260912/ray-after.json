@@ -1,0 +1,86 @@
+{
+  "report_dir": "/tmp/cache-ray-proxy-hu9t3m8e/reports",
+  "seconds": 0.1914670430123806,
+  "success": true,
+  "workers": [
+    {
+      "activity": {},
+      "files_after": 1,
+      "publish": {
+        "archive_bytes": 314,
+        "family": "triton",
+        "files": 1,
+        "generation": "52f58f6e51113bca56330782d306fc26d0b5d1907d23f6631102c6b96e5ac9e7",
+        "local_bytes": 8000,
+        "phase_seconds": {
+          "archive_local": 0.0006742887198925018,
+          "lock_wait": 5.73168508708477e-05,
+          "merge": 0.0008314652368426323,
+          "pointer": 0.0001253858208656311,
+          "prepare": 0.00022835005074739456,
+          "upload": 0.000240993220359087
+        },
+        "seconds": 0.00219517108052969,
+        "status": "published"
+      },
+      "restore": {
+        "status": "cold"
+      },
+      "setup_seconds": 0,
+      "slot": "worker-0"
+    },
+    {
+      "activity": {},
+      "files_after": 1,
+      "publish": {
+        "archive_bytes": 314,
+        "family": "triton",
+        "files": 1,
+        "generation": "52f58f6e51113bca56330782d306fc26d0b5d1907d23f6631102c6b96e5ac9e7",
+        "local_bytes": 8000,
+        "phase_seconds": {
+          "archive_local": 0.0006362870335578918,
+          "lock_wait": 5.1687005907297134e-05,
+          "merge": 0.0007915999740362167,
+          "pointer": 0.00010731164366006851,
+          "prepare": 0.00015388987958431244,
+          "upload": 0.00022360123693943024
+        },
+        "seconds": 0.002000735141336918,
+        "status": "published"
+      },
+      "restore": {
+        "status": "cold"
+      },
+      "setup_seconds": 0,
+      "slot": "worker-1"
+    },
+    {
+      "activity": {},
+      "files_after": 1,
+      "publish": {
+        "archive_bytes": 314,
+        "family": "triton",
+        "files": 1,
+        "generation": "52f58f6e51113bca56330782d306fc26d0b5d1907d23f6631102c6b96e5ac9e7",
+        "local_bytes": 8000,
+        "phase_seconds": {
+          "archive_local": 0.0003231181763112545,
+          "lock_wait": 3.200024366378784e-05,
+          "merge": 0.0006057298742234707,
+          "pointer": 9.532878175377846e-05,
+          "prepare": 0.0001128828153014183,
+          "upload": 0.0002125101163983345
+        },
+        "seconds": 0.0014150729402899742,
+        "status": "published"
+      },
+      "restore": {
+        "status": "cold"
+      },
+      "setup_seconds": 0,
+      "slot": "worker-2"
+    }
+  ],
+  "wall_seconds": 0.19239447824656963
+}

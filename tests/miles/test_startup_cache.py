@@ -143,3 +143,76 @@ def test_invalid_retention_path_cannot_create_reports():
         pytest.raises(ValueError, match="expiry"),
     ):
         startup.prepare(args)
+
+
+def test_publication_has_one_budget_and_cancels_ray_tasks(tmp_path, monkeypatch):
+    descriptor = policy(tmp_path)
+    workers = [dict(slot=f"rank-{n}", node_id="0" * 56, fingerprint="a" * 64) for n in range(4)]
+    for n, worker in enumerate(workers):
+        (Path(descriptor["report_dir"]) / f"{n}.json").write_text(json.dumps(worker))
+    submitted = []
+    cancelled = []
+
+    class Remote:
+        def options(self, **kwargs):
+            return self
+
+        def remote(self, worker):
+            future = asyncio.get_running_loop().create_future()
+            submitted.append(future)
+            return future
+
+    fake_ray = SimpleNamespace(
+        remote=lambda **kwargs: lambda fn: Remote(), cancel=lambda task, **kwargs: cancelled.append((task, kwargs))
+    )
+    original_import = startup.importlib.import_module
+    monkeypatch.setattr(
+        startup.importlib, "import_module", lambda name: fake_ray if name == "ray" else original_import(name)
+    )
+    monkeypatch.setattr(startup, "PUBLICATION_TIMEOUT_SECONDS", 0.02)
+    args = SimpleNamespace(olmo_core_startup_cache=descriptor, save=str(tmp_path))
+    asyncio.run(startup.finish(args, success=True))
+    report = json.loads((tmp_path / "compiler-cache.json").read_text())
+    assert report["success"] is True
+    assert len(submitted) == startup.PUBLISHERS_PER_NODE
+    assert cancelled == [(task, {"force": True}) for task in submitted]
+    assert len(report["workers"]) == 4
+    assert all("TimeoutError: shared 0.02s" in w["publish"]["reason"] for w in report["workers"])
+
+
+def test_publication_handles_mixed_results_and_keeps_training_success(tmp_path, monkeypatch):
+    descriptor = policy(tmp_path)
+    for n in range(3):
+        (Path(descriptor["report_dir"]) / f"{n}.json").write_text(
+            json.dumps(dict(slot=str(n), node_id="0" * 56, fingerprint="a" * 64))
+        )
+
+    class Remote:
+        def options(self, **kwargs):
+            return self
+
+        def remote(self, worker):
+            future = asyncio.get_running_loop().create_future()
+            if worker["slot"] == "1":
+                future.set_exception(OSError("node disappeared"))
+            else:
+                future.set_result({"slot": worker["slot"], "publish": {"status": "published"}})
+            return future
+
+    fake_ray = SimpleNamespace(remote=lambda **kwargs: lambda fn: Remote())
+    original_import = startup.importlib.import_module
+    monkeypatch.setattr(
+        startup.importlib, "import_module", lambda name: fake_ray if name == "ray" else original_import(name)
+    )
+    args = SimpleNamespace(olmo_core_startup_cache=descriptor, save=str(tmp_path))
+    asyncio.run(startup.finish(args, success=True))
+    report = json.loads((tmp_path / "compiler-cache.json").read_text())
+    assert report["success"] is True
+    assert [w["publish"]["status"] for w in report["workers"]] == ["published", "unavailable", "published"]
+    assert report["workers"][1]["publish"]["reason"] == "OSError: node disappeared"
+
+
+def test_optional_cache_report_failure_cannot_fail_completed_training(tmp_path, monkeypatch):
+    args = SimpleNamespace(olmo_core_startup_cache=policy(tmp_path), save=str(tmp_path))
+    monkeypatch.setattr(Path, "write_bytes", mock.Mock(side_effect=OSError("shared filesystem unavailable")))
+    asyncio.run(startup.finish(args, success=False))

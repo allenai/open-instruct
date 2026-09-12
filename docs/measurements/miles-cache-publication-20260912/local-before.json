@@ -1,0 +1,37 @@
+{
+  "files": 5386,
+  "bytes": 269405679,
+  "source": "/home/robert/.triton/cache",
+  "proxy": "local SSD, whole kernel directories, >=256MiB",
+  "gzip": {
+    "seconds": 1.287156178150326,
+    "archive_bytes": 52274066
+  },
+  "zstd": {
+    "seconds": 0.32929806783795357,
+    "archive_bytes": 36090801
+  },
+  "cold": {
+    "family": "triton",
+    "status": "published",
+    "generation": "dbc36e06c3f6f79a4bface022064717c360243498d5f3aff55b274af9bf38d98",
+    "local_bytes": 269234221,
+    "seconds": 3.5566930677741766
+  },
+  "unchanged": {
+    "family": "triton",
+    "status": "unchanged",
+    "generation": "dbc36e06c3f6f79a4bface022064717c360243498d5f3aff55b274af9bf38d98",
+    "local_bytes": 269234221,
+    "seconds": 4.700809142086655
+  },
+  "restore": {
+    "family": "triton",
+    "status": "hit",
+    "seconds": 1.1207286440767348,
+    "generation": "dbc36e06c3f6f79a4bface022064717c360243498d5f3aff55b274af9bf38d98",
+    "archive_bytes": 52242485,
+    "local_bytes": 269234221,
+    "relocated_groups": 662
+  }
+}
