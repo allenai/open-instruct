@@ -31,7 +31,7 @@ shuffle = true
 
 [[data.tasks]]
 task = "gsm8k"
-train_count = 400
+train_count = 6400
 eval_count = 128
 
 [training]
@@ -54,10 +54,11 @@ trainer_flash_attention_version = 4
 placement_mode = "disaggregated"
 gpus = 1
 rollout_tensor_parallel_size = 1
-# Restore the historical 8 prompts x 8 responses, one optimizer update/collection.
-rollout_batch_size = 8
+# 64 prompts x 8 responses per collection, one optimizer update per collection;
+# the same step shape as the open-instruct Olmo 3 RL recipes.
+rollout_batch_size = 64
 samples_per_prompt = 8
-global_batch_size = 64
+global_batch_size = 512
 max_response_length = 4096
 max_context_length = 6144
 sglang_server_concurrency = 64
@@ -118,7 +119,7 @@ disable_grpo_std_normalization = true
 
 [async]
 fully_async = true
-max_weight_staleness = 1
+max_weight_staleness = 2
 async_data_buffer_capacity_factor = 2.0
 async_unused_samples_handler = "retry"
 rollout_submission_granularity = "group"
