@@ -245,3 +245,24 @@ Cluster submission remains through the committed
 `open-instruct-dev`, urgent priority and a minimum runtime. CPU-only preparation
 that accesses WEKA must run on Saturn. No cluster jobs were launched for this
 branch's tiny-model qualification.
+
+
+### Full-scale first attempt: diagnostic failure
+
+The first [7B attempt](https://beaker.org/ex/01M2A28EYHS4BYYK5TPDJTQNPT)
+loaded and published successfully, then scored 15/16 on the held-out subset
+before training. Standalone scoring and the gradient-enabled forward agreed
+exactly on 17,695 active response tokens. The post-optimizer parameter probe
+failed because it retained FSDP's temporary full parameters, whose storage
+backward had released. The optimizer call and in-memory clock increment had
+already happened, but no completed-step record, updated publication, or native
+checkpoint was committed. This does not yet qualify distributed training.
+
+The adapter now captures persistent named parameters at train-module construction
+and uses those references for diagnostic gradients and sampled updates. A CPU
+regression explicitly frees a temporary view; a CUDA FSDP regression checks three
+scoring/backward/optimizer cycles against independently measured local gradients
+and updates, with both reshard-after-forward settings. The retry profile is
+`qualification/olmo3-think-gsm8k-robertb-20260912-r2.toml`; its specialized debug
+launcher runs that test on two GPUs before the regular workflow and preserves
+the failed run's output directory.

@@ -89,6 +89,10 @@ def build_train_module(args, source=None):
         )
     module._trainer = MetricSink()
     module._miles_model_backend = kind
+    # Capture optimizer-owned parameters before any forward. FSDP temporarily
+    # exposes unsharded Parameters during scoring, then releases their storage
+    # after backward. Diagnostics must retain the persistent local shards.
+    module._miles_named_parameters = list(module.model.named_parameters())
     del hf_model
     return module, hf, config
 

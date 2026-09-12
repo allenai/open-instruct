@@ -186,10 +186,12 @@ class ParameterProbe:
     Gradient values are read before Core optimizer intake (and thus before its
     EP-MP rescaling). Updates sample at most 256 entries of each named parameter.
     FP8 weight stores outside named_parameters are explicitly outside coverage.
+    Pass persistent named parameters captured at train-module initialization,
+    before FSDP can replace model-visible parameters with temporary full views.
     """
 
-    def __init__(self, model):
-        self.parameters = list(model.named_parameters())
+    def __init__(self, named_parameters):
+        self.parameters = list(named_parameters)
         self.before = {}
         for name, parameter in self.parameters:
             flat = _local(parameter.detach()).reshape(-1)
