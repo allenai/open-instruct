@@ -9,7 +9,7 @@ three B300 GPUs on `holmes-cs-aus-503`, source `8f84ff3ed` (branch
 experts, 29,669 HF tensors, 37.0 GB BF16). Zero optimizer updates. Driver:
 `scripts/miles/publication_profile.py`; launcher
 `scripts/train/debug/miles_publication_profile.sh`. Raw records in
-[this directory](../../measurements/miles-publication-profile-20260912): `profile.json`,
+[this directory](publication-profile-20260912): `profile.json`,
 `publication.jsonl`, `final-weight-comparison.json`, `nccl-transports.txt`,
 `nccl-gpu-topology.txt`.
 
