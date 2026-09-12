@@ -7,7 +7,7 @@ Status is evidence as of submission/startup, not a completed qualification.
 | --- | --- | --- |
 | CPU preparation A | [01M2BX13SSQNY91TWM39GWP562](https://beaker.org/ex/01M2BX13SSQNY91TWM39GWP562) | Failed: only one eligible general-quality held-out prompt, two requested. Dense fixture and service/import canaries passed. |
 | CPU preparation B | [01M2BX9TAJD31D652BVSDP7DF4](https://beaker.org/ex/01M2BX9TAJD31D652BVSDP7DF4) | Passed: explicit one-per-domain MoE eval quota; completed dense fixture reused only after content/hash checks. |
-| 1: dense KL/multi-update, 1T + 3I | [01M2BXECF7QDB19Z2F9071W6K9](https://beaker.org/ex/01M2BXECF7QDB19Z2F9071W6K9) | Scheduled and resources acquired; startup pending. |
+| 1: dense KL/multi-update, 1T + 3I | [01M2BXECF7QDB19Z2F9071W6K9](https://beaker.org/ex/01M2BXECF7QDB19Z2F9071W6K9) | Started; attention preflight passed, creating Ray placement group. |
 | 2: MoE packing/replay/six-task/judge, 2T + 2I + 1J | [01M2BXF4PWKTPKNP7GYKHN1HZP](https://beaker.org/ex/01M2BXF4PWKTPKNP7GYKHN1HZP) | Started, loading managed judge. No training result yet. |
 | 3: matching warm cache | Not submitted | Requires case 2 cache publication and audit. |
 | 4: radix bundle | Not submitted | Requires case 2 numerical/service audit. |

@@ -82,7 +82,7 @@ The original successful dense fixture was verified without modification.
 GPU attempt 1: dense case 1, `01M2BXECF7QDB19Z2F9071W6K9` (4 GPUs).
 GPU attempt 2: cold mixed MoE case 2, `01M2BXF4PWKTPKNP7GYKHN1HZP` (5 GPUs).
 Both submitted through the documented CLI/wrapper, urgent Holmes, 1h minimum,
-no auto-resume. Both scheduled; training results pending. Eight GPU attempt slots
+no auto-resume. Both started; training results pending. Eight GPU attempt slots
 remain. Cases 3–4 are staged but not submitted.
 
 Launch receipts, both preparation reports and test logs are retained under
