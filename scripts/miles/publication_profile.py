@@ -35,7 +35,8 @@ REPEATS = 3
 
 def write_json(path, value):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(value, indent=2, sort_keys=True))
+    # Parsed arguments carry dataset config objects; record them by repr rather than fail.
+    Path(path).write_text(json.dumps(value, indent=2, sort_keys=True, default=repr))
 
 
 def core_arguments(root, output):
