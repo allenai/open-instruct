@@ -1,0 +1,12 @@
+........                                                                 [100%]
+=============================== warnings summary ===============================
+../../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+../../usr/local/lib/python3.12/dist-packages/_pytest/cacheprovider.py:469
+  /usr/local/lib/python3.12/dist-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: cache could not write path /opt/core-rl/.pytest_cache/v/cache/nodeids: [Errno 30] Read-only file system: '/opt/core-rl/.pytest_cache/v/cache/nodeids'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+8 passed, 15 warnings in 10.47s

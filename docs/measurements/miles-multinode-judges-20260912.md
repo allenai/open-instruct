@@ -1,7 +1,13 @@
 # Tiny multi-node mixed-task and named-judge exercise
 
 Status: the first training attempt completed both optimizer updates but failed
-during final evaluation. A retry with the managed router is being prepared.
+during final evaluation. The managed-router retry is submitted as
+[01M29Y35Z257VCZ6KQTW7G3PY0](https://beaker.org/ex/01M29Y35Z257VCZ6KQTW7G3PY0).
+Its [frozen receipt](miles-multinode-judges-20260912/retry-launch.json) pins source
+`12114873a35a5ef70cffa703a2d73feddd87622d` and image `01M29Y2K67XY242HKHC7AW4KB4`.
+It uses the same prepared data and a fresh output root with suffix `-r2`.
+The retry includes the publication changes independently merged into the working
+branch; fused publication remains disabled in this qualification config.
 
 This exercises the researcher TOML launcher on real Dolci data. It is deliberately
 small: two updates on two physical Holmes B300 nodes, with two Core EP2 trainer
@@ -91,4 +97,8 @@ inference nodes, independently of trainer GPU count. Homogeneous node allocation
 can leave unused GPUs: 8+7+1 packs into 16; 8+8+1 currently reserves 24.
 
 Local validation: 147 focused tests and `make style && make quality` passed.
+Eight real-runtime router/async tests also passed inside the exact retry image;
+[retained output](miles-multinode-judges-20260912/router-tests.txt).
+The saturation fixture observes the parent’s `PoolTimeout`, then verifies the
+managed router reaches the healthy server while generation stays in flight.
 This exercise is not the repository GPU-pytest suite.

@@ -1,0 +1,302 @@
+{
+  "allocation": {
+    "allocated_gpus": 4,
+    "gpus_per_replica": 2,
+    "judge_gpus": 1,
+    "nodes": [
+      {
+        "judges": {},
+        "ray_gpus": 2,
+        "rollout_gpus": 0,
+        "trainer_gpus": 2
+      },
+      {
+        "judges": {
+          "general": 1
+        },
+        "ray_gpus": 1,
+        "rollout_gpus": 1,
+        "trainer_gpus": 0
+      }
+    ],
+    "policy_gpus": 3,
+    "replicas": 2,
+    "unused_gpus": 0
+  },
+  "experiment_id": "01M29Y35Z257VCZ6KQTW7G3PY0",
+  "image": "01M29Y2K67XY242HKHC7AW4KB4",
+  "placements": [
+    {
+      "gpus": 2,
+      "hostnames": [
+        "holmes-cs-aus-503.reviz.ai2.in",
+        "holmes-cs-aus-516.reviz.ai2.in",
+        "holmes-cs-aus-486.reviz.ai2.in",
+        "holmes-cs-aus-488.reviz.ai2.in",
+        "holmes-cs-aus-490.reviz.ai2.in",
+        "holmes-cs-aus-492.reviz.ai2.in",
+        "holmes-cs-aus-494.reviz.ai2.in",
+        "holmes-cs-aus-496.reviz.ai2.in",
+        "holmes-cs-aus-498.reviz.ai2.in",
+        "holmes-cs-aus-500.reviz.ai2.in",
+        "holmes-cs-aus-502.reviz.ai2.in",
+        "holmes-cs-aus-505.reviz.ai2.in",
+        "holmes-cs-aus-507.reviz.ai2.in",
+        "holmes-cs-aus-509.reviz.ai2.in",
+        "holmes-cs-aus-511.reviz.ai2.in",
+        "holmes-cs-aus-513.reviz.ai2.in",
+        "holmes-cs-aus-515.reviz.ai2.in",
+        "holmes-cs-aus-518.reviz.ai2.in",
+        "holmes-cs-aus-520.reviz.ai2.in",
+        "holmes-cs-aus-523.reviz.ai2.in",
+        "holmes-cs-aus-525.reviz.ai2.in",
+        "holmes-cs-aus-527.reviz.ai2.in",
+        "holmes-cs-aus-529.reviz.ai2.in",
+        "holmes-cs-aus-531.reviz.ai2.in",
+        "holmes-cs-aus-533.reviz.ai2.in",
+        "holmes-cs-aus-535.reviz.ai2.in",
+        "holmes-cs-aus-537.reviz.ai2.in",
+        "holmes-cs-aus-539.reviz.ai2.in",
+        "holmes-cs-aus-541.reviz.ai2.in",
+        "holmes-cs-aus-543.reviz.ai2.in",
+        "holmes-cs-aus-545.reviz.ai2.in",
+        "holmes-cs-aus-547.reviz.ai2.in",
+        "holmes-cs-aus-549.reviz.ai2.in",
+        "holmes-cs-aus-551.reviz.ai2.in",
+        "holmes-cs-aus-553.reviz.ai2.in",
+        "holmes-cs-aus-555.reviz.ai2.in"
+      ],
+      "task": "multinode-judges-20260912-r2-replica-0"
+    },
+    {
+      "gpus": 2,
+      "hostnames": [
+        "holmes-cs-aus-521.reviz.ai2.in",
+        "holmes-cs-aus-485.reviz.ai2.in",
+        "holmes-cs-aus-487.reviz.ai2.in",
+        "holmes-cs-aus-489.reviz.ai2.in",
+        "holmes-cs-aus-491.reviz.ai2.in",
+        "holmes-cs-aus-493.reviz.ai2.in",
+        "holmes-cs-aus-495.reviz.ai2.in",
+        "holmes-cs-aus-497.reviz.ai2.in",
+        "holmes-cs-aus-499.reviz.ai2.in",
+        "holmes-cs-aus-501.reviz.ai2.in",
+        "holmes-cs-aus-504.reviz.ai2.in",
+        "holmes-cs-aus-506.reviz.ai2.in",
+        "holmes-cs-aus-508.reviz.ai2.in",
+        "holmes-cs-aus-510.reviz.ai2.in",
+        "holmes-cs-aus-512.reviz.ai2.in",
+        "holmes-cs-aus-514.reviz.ai2.in",
+        "holmes-cs-aus-517.reviz.ai2.in",
+        "holmes-cs-aus-519.reviz.ai2.in",
+        "holmes-cs-aus-522.reviz.ai2.in",
+        "holmes-cs-aus-524.reviz.ai2.in",
+        "holmes-cs-aus-526.reviz.ai2.in",
+        "holmes-cs-aus-528.reviz.ai2.in",
+        "holmes-cs-aus-530.reviz.ai2.in",
+        "holmes-cs-aus-532.reviz.ai2.in",
+        "holmes-cs-aus-534.reviz.ai2.in",
+        "holmes-cs-aus-536.reviz.ai2.in",
+        "holmes-cs-aus-538.reviz.ai2.in",
+        "holmes-cs-aus-540.reviz.ai2.in",
+        "holmes-cs-aus-542.reviz.ai2.in",
+        "holmes-cs-aus-544.reviz.ai2.in",
+        "holmes-cs-aus-546.reviz.ai2.in",
+        "holmes-cs-aus-548.reviz.ai2.in",
+        "holmes-cs-aus-550.reviz.ai2.in",
+        "holmes-cs-aus-552.reviz.ai2.in",
+        "holmes-cs-aus-554.reviz.ai2.in",
+        "holmes-cs-aus-556.reviz.ai2.in"
+      ],
+      "task": "multinode-judges-20260912-r2-replica-1"
+    }
+  ],
+  "requested_image": "robertb/open-instruct-miles-core-12114873a35a",
+  "revision": "12114873a35a5ef70cffa703a2d73feddd87622d",
+  "spec": {
+    "async": {
+      "async_data_buffer_capacity_factor": 2.0,
+      "async_unused_samples_handler": "retry",
+      "fully_async": true,
+      "max_weight_staleness": 1,
+      "off_policy_correction": "tis",
+      "rollout_submission_granularity": "group"
+    },
+    "compiler_cache": {
+      "enabled": true,
+      "restore": true,
+      "shared_root": "/weka/oe-training-default/robertb/open-instruct/compiler-cache/tmp-30d"
+    },
+    "conversion": {
+      "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/multinode-judges-20260912-r2/prepared/hf"
+    },
+    "core": {
+      "diagnostic_interval": 1,
+      "max_train_rollout_logprob_abs_diff": 0.05,
+      "router_aux_loss_weight": 0.01,
+      "router_z_loss_weight": 1e-05,
+      "stream_moe_export": true,
+      "weight_sync_mode": "flattened"
+    },
+    "data": {
+      "eval_prompt_data": [
+        "mixed",
+        "/weka/oe-training-default/robertb/open-instruct/data/multinode-judges-20260912/eval.jsonl"
+      ],
+      "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/multinode-judges-20260912/train.jsonl",
+      "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/multinode-judges-20260912/verifiers.json",
+      "seed": 17,
+      "shuffle": false
+    },
+    "inference": {
+      "check_weight_update_equal": true,
+      "global_batch_size": 16,
+      "gpus": 1,
+      "max_context_length": 6144,
+      "max_response_length": 4096,
+      "placement_mode": "disaggregated",
+      "rollout_batch_size": 8,
+      "rollout_tensor_parallel_size": 1,
+      "samples_per_prompt": 2,
+      "sglang_attention_backend": "triton",
+      "sglang_cuda_graph_backend_decode": "disabled",
+      "sglang_cuda_graph_backend_prefill": "disabled",
+      "sglang_cuda_graph_max_bs_decode": 64,
+      "sglang_disable_radix_cache": true,
+      "sglang_max_mamba_cache_size": 128,
+      "sglang_max_running_requests": 16,
+      "sglang_max_total_tokens": 524288,
+      "sglang_mem_fraction_static": 0.6,
+      "sglang_sampling_backend": "pytorch",
+      "sglang_server_concurrency": 16,
+      "update_weight_buffer_size": 1073741824
+    },
+    "judges": {
+      "general": {
+        "backend": "sglang",
+        "chat_template": "qwen3-no-thinking",
+        "gpus": 1,
+        "max_concurrent_calls": 16,
+        "max_context_length": 40960,
+        "mode": "managed",
+        "model": "Qwen/Qwen3-32B",
+        "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge",
+        "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+        "tensor_parallel_size": 1,
+        "timeout": 120
+      }
+    },
+    "judging": {
+      "bindings": {
+        "general-quality": {
+          "judge": "general",
+          "rubric": "quality"
+        },
+        "general-quality_ref": {
+          "judge": "general",
+          "rubric": "reference_quality"
+        }
+      }
+    },
+    "launch": {
+      "auto_resume": false,
+      "budget": "ai2/oe-other",
+      "cluster": "ai2/holmes",
+      "coordination": {
+        "heartbeat_timeout": 120,
+        "startup_timeout": 1200
+      },
+      "env": {
+        "NCCL_IB_HCA": "^=mlx5_bond_0",
+        "NCCL_SOCKET_IFNAME": "ib"
+      },
+      "gpus_per_replica": 2,
+      "min_runtime": "1h",
+      "priority": "urgent",
+      "secrets": {},
+      "shared_memory": "200 GiB",
+      "timeout": "2h",
+      "weka_mounts": [
+        {
+          "mount_path": "/weka/oe-training-default",
+          "weka": "oe-training-default"
+        },
+        {
+          "mount_path": "/weka/oe-adapt-default",
+          "weka": "oe-adapt-default"
+        }
+      ],
+      "workspace": "ai2/open-instruct-dev"
+    },
+    "miles": {
+      "calculate_per_token_loss": true,
+      "disable_grpo_std_normalization": true,
+      "rollout_max_prompt_len": 2048,
+      "rollout_seed": 17,
+      "rollout_temperature": 1.0,
+      "seed": 17,
+      "use_miles_router": true,
+      "use_rollout_routing_replay": true
+    },
+    "model": {
+      "format": "hf",
+      "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+    },
+    "name": "multinode-judges-20260912-r2",
+    "optimizer": {
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.95,
+      "adam_eps": 1e-08,
+      "clip_grad": 1.0,
+      "entropy_coef": 0.0,
+      "eps_clip": 0.2,
+      "eps_clip_high": 0.28,
+      "kl_loss_coef": 0.0,
+      "learning_rate": 1e-06,
+      "lr_decay_style": "constant",
+      "lr_warmup_iters": 0,
+      "weight_decay": 0.0
+    },
+    "output": {
+      "export_hf": false,
+      "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/multinode-judges-20260912-r2/export-hf",
+      "root": "/weka/oe-training-default/robertb/open-instruct/runs/multinode-judges-20260912-r2"
+    },
+    "rubrics": {
+      "quality": {
+        "max_response_tokens": 2048,
+        "profile": "open-instruct/general-quality",
+        "temperature": 1.0
+      },
+      "reference_quality": {
+        "max_response_tokens": 2048,
+        "profile": "open-instruct/general-quality_ref",
+        "temperature": 1.0
+      }
+    },
+    "runtime": {
+      "row_specialization": "dynamic"
+    },
+    "schema_version": 1,
+    "tracking": {
+      "wandb_group": "core-workflow-async",
+      "wandb_mode": "offline",
+      "wandb_project": "olmo-rl-comparison"
+    },
+    "trainer": {
+      "activation_recompute": true,
+      "expert_parallel_size": 2,
+      "gpus": 2,
+      "micro_batch_size": 1,
+      "trainer_flash_attention_version": 4,
+      "trainer_num_nodes": 1
+    },
+    "training": {
+      "eval_interval": 2,
+      "num_rollouts": 2,
+      "save_checkpoints": false,
+      "skip_eval_before_train": false
+    }
+  },
+  "spec_sha256": "c2668a9c5fb13777ac7f877fe5005817d4595f20ec139da9fb81fb5ba4b0834a"
+}
