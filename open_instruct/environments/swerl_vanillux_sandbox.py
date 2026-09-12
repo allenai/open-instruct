@@ -420,7 +420,10 @@ class SWERLVanilluxSandboxEnv(RLEnvironment):
             except SandboxOOMError as e:
                 logger.warning(f"[{self._task_id}] sandbox OOM: {e}")
                 return StepResult(
-                    result=("Sandbox container was killed by the OOM reaper. Ending episode with reward 0."),
+                    result=(
+                        "Sandbox container was killed (memory/pids limit exceeded or its init process died). "
+                        "Ending episode with reward 0."
+                    ),
                     reward=0.0,
                     done=True,
                     metadata={"oom_killed": True, "task_id": self._task_id},
@@ -550,6 +553,7 @@ class SWERLVanilluxSandboxEnvConfig(BaseEnvConfig):
     backend: str = "docker"
     image: str = "python:3.12-slim"
     mem_limit: str = "4g"
+    gateway_url: str = ""
     penalty: float = -0.05
     task_data_dir: str = ""
     task_data_hf_repo: str = ""

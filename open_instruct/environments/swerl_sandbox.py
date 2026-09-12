@@ -503,6 +503,7 @@ class SWERLSandboxEnvConfig(BaseEnvConfig):
     backend: str = "docker"
     image: str = "python:3.12-slim"
     mem_limit: str = "4g"
+    gateway_url: str = ""
     penalty: float = -0.05
     task_data_dir: str = ""
     task_data_hf_repo: str = ""

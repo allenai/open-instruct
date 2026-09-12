@@ -93,6 +93,7 @@ nav:
     - algorithms/grpo_fast_internals.md
     - algorithms/rl_with_environments.md
     - algorithms/rollout_loop_internals.md
+    - algorithms/gateway_sandbox_backend.md
     - algorithms/monitoring_and_debugging_runs.md
     - algorithms/terminal_rl_trajectory_analysis.md
     - algorithms/dr_research_rl_trajectory_analysis.md

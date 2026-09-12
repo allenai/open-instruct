@@ -43,7 +43,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
         | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
     && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
         | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-sdk \
+    && apt-get update -y && apt-get install -y --no-install-recommends google-cloud-cli \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 # Taken from https://beaker.org/api/v3/release (add | jq -r '.version' if you want it programmatically).
@@ -136,6 +136,17 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen python -m nltk.downloader punkt punkt_tab words
+
+# LiteRegistry gateway for the Terminal-RL sandbox fleet, co-located with the training job
+# (started on the Ray head by scripts/general_agent/terminal/rl/gateway/start_colocated_gateway.sh,
+# which resolves the fleet's Redis through the head registry on weka). It lives in its own venv:
+# literegistry pins starlette==1.3.1 and pulls streamlit/pandas, which the training env cannot take.
+ARG LITEREGISTRY_VERSION=1.0.49
+ENV LITEREGISTRY_GATEWAY_VENV=/opt/literegistry-gateway-venv
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    uv venv --python 3.12 "${LITEREGISTRY_GATEWAY_VENV}" && \
+    uv pip install --python "${LITEREGISTRY_GATEWAY_VENV}/bin/python" "literegistry==${LITEREGISTRY_VERSION}" && \
+    "${LITEREGISTRY_GATEWAY_VENV}/bin/python" -c "import literegistry.gateway, literegistry.head_registry; print('literegistry gateway venv OK')"
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs
