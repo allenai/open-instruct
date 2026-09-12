@@ -137,7 +137,9 @@ def specification(image, spec, *, hostnames=None):
         for rank in range(layout["replicas"]):
             replica = copy.deepcopy(task)
             replica["name"] += f"-replica-{rank}"
-            replica["constraints"]["hostname"] = hostnames[rank :: layout["replicas"]]
+            # The API makes cluster and hostname constraints mutually exclusive.
+            # Every hostname above was resolved from the requested cluster.
+            replica["constraints"] = {"hostname": hostnames[rank :: layout["replicas"]]}
             replica.update(hostNetworking=True, propagateFailure=True, propagatePreemption=True)
             replica["envVars"].extend(
                 [

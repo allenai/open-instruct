@@ -79,6 +79,7 @@ def test_task_replication_and_secret_free_ownership(document):
     assert tasks[0]["constraints"]["hostname"] == ["host-a", "host-c"]
     assert tasks[1]["constraints"]["hostname"] == ["host-b"]
     for rank, task in enumerate(tasks):
+        assert "cluster" not in task["constraints"]
         assert task["resources"]["gpuCount"] == 8
         assert all(task[key] for key in ("hostNetworking", "propagateFailure", "propagatePreemption"))
         assert "open_instruct.miles.cluster" in task["arguments"][0]
