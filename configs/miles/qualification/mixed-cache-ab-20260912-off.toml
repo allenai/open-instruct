@@ -2,14 +2,14 @@
 # Two nodes (8 Core trainers at EP8 + 8 TP1 engines), 64 x 8 collections, lag 2,
 # 20 updates, eval every 10, no saves. Same prepared prompts and seed in every arm.
 schema_version = 1
-name = "mixed-cache-ab-20260912-off"
+name = "mixed-cache-ab-20260912-off-r2"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/mixed-cache-ab-20260912-off"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/mixed-cache-ab-20260912-off-r2"
 export_hf = false
 
 [launch]

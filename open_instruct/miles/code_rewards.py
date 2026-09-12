@@ -25,6 +25,10 @@ from typing import Any
 
 import requests
 
+from open_instruct import logger_utils
+
+logger = logger_utils.setup_logger(__name__)
+
 _CODE_BLOCK_PATTERN = re.compile(r"```(?:python)?(.*?)```", re.DOTALL)
 _SESSION: Any = None
 
@@ -162,6 +166,20 @@ async def code_score(args: Any, prediction: str, target: Any, *, stdio: bool = F
             )
             response.raise_for_status()
             return response.json()
+        except requests.HTTPError as error:
+            status = getattr(error.response, "status_code", None)
+            if status is not None and 400 <= status < 500 and status != 429:
+                # A client error is a property of this sample (an oversized test
+                # payload, for instance), not of the service: score it zero, as
+                # the standard open-instruct verifier does, and keep training.
+                logger.warning(
+                    "code verifier rejected a sample with HTTP %s (program %d chars, %d tests); scoring it zero",
+                    status,
+                    len(payload["program"]),
+                    len(target) if isinstance(target, list) else -1,
+                )
+                return {"results": []}
+            raise RuntimeError(f"code verifier request failed for {config.api_url}: {error}") from error
         except Exception as error:
             raise RuntimeError(f"code verifier request failed for {config.api_url}: {error}") from error
 
