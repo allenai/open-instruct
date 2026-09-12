@@ -374,6 +374,19 @@ model_extra_args() {
         *Qwen3.5*)       echo "--language-model-only" ;;
         *GLM-5.2*)       echo "--kv-cache-dtype fp8" ;;
         *DeepSeek-V3.2*) echo "--tokenizer-mode deepseek_v32" ;;
+        # DeepSeek-V4-Flash settings come from vLLM 0.28.0's own eval config,
+        # tests/evals/gsm8k/configs/DeepSeek-V4-Flash-DSpark-confidence-TP4.yaml.
+        # The repo ships no jinja chat template, so --tokenizer-mode deepseek_v4
+        # is required for the server to render chat at all; the reasoning parser
+        # makes vLLM return reasoning_content separately, which generate_traces.py
+        # already prefers over splitting on </think>. indexer_kv_dtype=mxfp4
+        # shrinks the DSA indexer cache, which our own notes flag as a +23%
+        # KV surcharge on DeepSeek that the planner does not model.
+        # The upstream config also enables dspark speculative decoding; we skip it
+        # deliberately -- it points at a different checkpoint (…-DSpark) and uses
+        # probabilistic draft sampling with adaptive verification, which could
+        # perturb the output length distribution this study measures.
+        *DeepSeek-V4*)   echo "--tokenizer-mode deepseek_v4 --reasoning-parser deepseek_v4 --block-size 256 --attention_config.indexer_kv_dtype=mxfp4 --kv-cache-dtype fp8" ;;
         *)               echo "" ;;
     esac
 }
