@@ -28,6 +28,10 @@ gpus_per_replica = 8
 weka = "oe-training-default"
 mount_path = "/weka/oe-training-default"
 
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
 [launch.env]
 NCCL_SOCKET_IFNAME = "ib"
 NCCL_IB_HCA = "^=mlx5_bond_0"
