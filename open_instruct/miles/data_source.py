@@ -29,7 +29,6 @@ from miles.rollout.data_source import RolloutDataSourceWithBuffer
 from miles.utils.types import Sample
 
 from open_instruct import logger_utils
-from open_instruct.miles import managed_router
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -50,8 +49,6 @@ class DashboardDrainingRolloutDataSource:
     def __init__(self, args: Any) -> None:
         """Initialize the MILES buffered-data-source delegate."""
 
-        if getattr(args, "use_miles_router", False):
-            managed_router.install()
         self._delegate = RolloutDataSourceWithBuffer(args)
         self._cursor_lock = threading.RLock()
         self._pending_groups: dict[int, Any] = {}

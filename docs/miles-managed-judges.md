@@ -104,16 +104,17 @@ large inference pools, or sustained multi-node performance.
 
 ## Policy-engine health
 
-Core runs selecting MILES' raw-JSON router now use the managed router ported from
-olmo-miles. Generation and health use independent HTTP connection pools. Otherwise
-saturating the generation pool can make a healthy engine fail probes that never
-reach it. A local HTTP regression demonstrates this failure in the pinned parent
-and verifies the fix, retirement/re-registration, retryable 503 responses and
-joined shutdown. Health failure logs include the exception class.
+The pinned MILES fork now owns the raw-JSON router fix ported from olmo-miles.
+Open Instruct uses its native spawn target without a startup hook or subclass.
+Generation and health have independent HTTP connection pools: saturating the
+generation pool must not prevent probes from reaching healthy engines. Native
+regressions cover real HTTP saturation, retirement/re-registration, stale probe
+results, retryable 503 responses, cancellation counters and joined shutdown.
+Health failure logs include the exception class.
 
 Quarantine remains sticky until explicit worker registration; HTTP recovery alone
 cannot prove an engine has current policy weights. Registration epochs reject
-late probe results from retired incarnations. This wrapper does not independently
+late probe results from retired incarnations. This fix does not independently
 qualify engine replacement or enable fault tolerance. The bounded named-judge
 exercise and its failed attempts are recorded in the
 [measurement note](measurements/miles-multinode-judges-20260912.md).

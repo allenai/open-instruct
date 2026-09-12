@@ -1,14 +1,14 @@
 # Two nodes, four B300s: two Core EP2 trainer GPUs; one rollout and one fixed judge.
 # Two updates exercise plumbing, not learning. Prepare data on Saturn first.
 schema_version = 1
-name = "multinode-judges-20260912-r2"
+name = "multinode-judges-20260912-r3"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/multinode-judges-20260912-r2"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/multinode-judges-20260912-r3"
 export_hf = false
 
 [launch]
@@ -76,7 +76,7 @@ sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"
 check_weight_update_equal = true
-update_weight_buffer_size = 1073741824
+update_weight_buffer_size = 2147483648
 
 [optimizer]
 learning_rate = 0.000001
@@ -106,6 +106,8 @@ max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
+# Use the fused publication path qualified on the primary project branches.
+expert_publication = "fused"
 weight_sync_mode = "flattened"
 
 [miles]

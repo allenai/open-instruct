@@ -663,6 +663,210 @@ index 4e50149e1c6ed3f91eb7199f45986e739c3a5254..94ae2dcecf319c92b92eb0bcc37874aa
      @abc.abstractmethod
      def sleep(self, tags):
          raise NotImplementedError
+diff --git a/miles/router/router.py b/miles/router/router.py
+index 8782e63383e781af09cb46fe365407a3babd45fb..7f3240af0a8eaa2e8b8410cc820236158dae1c49 100644
+--- a/miles/router/router.py
++++ b/miles/router/router.py
+@@ -2,11 +2,12 @@ import argparse
+ import asyncio
+ import json
+ import logging
++from contextlib import suppress
+ 
+ import httpx
+ import setproctitle
+ import uvicorn
+-from fastapi import FastAPI, Request
++from fastapi import FastAPI, HTTPException, Request
+ from fastapi.responses import JSONResponse
+ from starlette.responses import Response
+ 
+@@ -46,6 +47,9 @@ class MilesRouter:
+         self.worker_failure_counts: dict[str, int] = {}
+         # Quarantined workers excluded from routing pool
+         self.dead_workers: set[str] = set()
++        self._retired: set[str] = set()
++        self._worker_epochs: dict[str, int] = {}
++        self._health_task: asyncio.Task | None = None
+ 
+         max_connections = getattr(args, "miles_router_max_connections", None)
+         if max_connections is None:
+@@ -60,28 +64,37 @@ class MilesRouter:
+             timeout=httpx.Timeout(timeout),
+         )
+ 
++        # Generation may occupy every data connection for minutes. Health must
++        # have its own transport, otherwise pool starvation looks like engine death.
++        engines = max(1, getattr(args, "rollout_num_gpus", 1) // getattr(args, "rollout_num_gpus_per_engine", 1))
++        self.health_client = httpx.AsyncClient(
++            limits=httpx.Limits(max_connections=max(4, 2 * engines)),
++            timeout=httpx.Timeout(getattr(args, "rollout_health_check_timeout", 5.0)),
++        )
++        self.app.router.on_shutdown.append(self.close)
+         self._setup_routes()
+ 
+     def _setup_routes(self):
+         """Setup all the HTTP routes except catch-all proxy"""
+         # sglang-router api
+         self.app.post("/add_worker")(self.add_worker)
++        self.app.post("/remove_worker")(self.remove_worker)
+         self.app.get("/list_workers")(self.list_workers)
+         # Catch-all route for proxying to SGLang - must be registered LAST
+         self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])(self.proxy)
+ 
+     async def _start_background_health_check(self):
+-        asyncio.create_task(self._health_check_loop())
++        self._health_task = asyncio.create_task(self._health_check_loop())
+ 
+     async def _check_worker_health(self, url):
+         """Encapsulated health check logic for better maintainability."""
+         try:
+-            response = await self.client.get(f"{url}/health", timeout=5.0)
++            response = await self.health_client.get(f"{url}/health")
+             if response.status_code == 200:
+                 return url, True
+             logger.debug(f"[miles-router] Worker {url} is unhealthy (Status: {response.status_code})")
+-        except Exception as e:
+-            logger.debug(f"[miles-router] Worker {url} health check failed: {e}")
++        except httpx.HTTPError as e:
++            logger.warning("[miles-router] Worker %s health check failed: %s", url, type(e).__name__)
+         return url, False
+ 
+     async def _health_check_loop(self):
+@@ -93,13 +106,21 @@ class MilesRouter:
+             try:
+                 await asyncio.sleep(interval)
+ 
+-                urls = [u for u in self.worker_request_counts if u not in self.dead_workers]
+-                if not urls:
++                epochs = {
++                    u: self._worker_epochs.get(u, 0)
++                    for u in self.worker_request_counts
++                    if u not in self.dead_workers and u not in self._retired
++                }
++                if not epochs:
+                     continue
+ 
+-                results = await asyncio.gather(*(self._check_worker_health(url) for url in urls))
++                results = await asyncio.gather(*(self._check_worker_health(url) for url in epochs))
+ 
+                 for url, is_healthy in results:
++                    # A probe started before retirement/re-registration cannot
++                    # quarantine the replacement at the same endpoint.
++                    if url in self._retired or self._worker_epochs.get(url, 0) != epochs[url]:
++                        continue
+                     if not is_healthy:
+                         failures = self.worker_failure_counts.get(url, 0) + 1
+                         self.worker_failure_counts[url] = failures
+@@ -142,14 +163,16 @@ class MilesRouter:
+         worker_url = self._use_url()
+         url = f"{worker_url}/{path}"
+ 
+-        if body is None:
+-            body = await request.body()
+-        if headers is None:
+-            headers = dict(request.headers)
+-        if body is not None:
+-            headers = {k: v for k, v in headers.items() if k.lower() not in ("content-length", "transfer-encoding")}
+-
+         try:
++            if body is None:
++                body = await request.body()
++            if headers is None:
++                headers = dict(request.headers)
++            if body is not None:
++                headers = {
++                    k: v for k, v in headers.items() if k.lower() not in ("content-length", "transfer-encoding")
++                }
++
+             response = await self.client.request(request.method, url, content=body, headers=headers)
+             content = await response.aread()
+             return {
+@@ -158,6 +181,9 @@ class MilesRouter:
+                 "status_code": response.status_code,
+                 "headers": dict(response.headers),
+             }
++        except httpx.RequestError as error:
++            logger.warning("[miles-router] Proxy transport failed: %s", type(error).__name__)
++            raise HTTPException(503, "Rollout worker unavailable", headers={"Retry-After": "1"}) from error
+         finally:
+             self._finish_url(worker_url)
+ 
+@@ -199,6 +225,15 @@ class MilesRouter:
+                 status_code=400, content={"error": "worker_url is required (use query ?url=... or JSON body)"}
+             )
+ 
++        if worker_url in self._retired and self.worker_request_counts.get(worker_url, 0):
++            raise HTTPException(409, "retired worker still has active requests; register a new endpoint")
++        # Registration is the caller's assertion that serving weights are ready;
++        # successful health probes alone never clear quarantine.
++        self._worker_epochs[worker_url] = self._worker_epochs.get(worker_url, 0) + 1
++        self._retired.discard(worker_url)
++        self.dead_workers.discard(worker_url)
++        self.worker_failure_counts[worker_url] = 0
++
+         # Add if new, keep a simple request count per worker
+         if worker_url not in self.worker_request_counts:
+             self.worker_request_counts[worker_url] = 0
+@@ -208,27 +243,43 @@ class MilesRouter:
+ 
+         return {"status": "success", "worker_urls": self.worker_request_counts}
+ 
++    async def remove_worker(self, request: Request):
++        """Retire an endpoint while preserving counters for in-flight requests."""
++        url = request.query_params.get("url") or request.query_params.get("worker_url")
++        if not url:
++            body = await request.body()
++            payload = json.loads(body) if body else {}
++            url = payload.get("url") or payload.get("worker_url")
++        if not url:
++            raise HTTPException(400, "worker_url is required")
++        self._retired.add(url)
++        self.dead_workers.add(url)
++        self._worker_epochs[url] = self._worker_epochs.get(url, 0) + 1
++        return {"status": "success"}
++
+     async def list_workers(self, request: Request):
+-        """List all registered workers"""
+-        return {"urls": list(self.worker_request_counts.keys())}
++        """Include quarantined endpoints for aborts, but exclude retired ones."""
++        return {"urls": [u for u in self.worker_request_counts if u not in self._retired]}
+ 
+     def _use_url(self):
+-        """Select worker URL with minimal active requests."""
+-
+-        if not self.dead_workers:
+-            # Healthy path: select from all workers
+-            url = min(self.worker_request_counts, key=self.worker_request_counts.get)
+-        else:
+-            # Degraded path: select from workers not in dead_workers
+-            valid_workers = (w for w in self.worker_request_counts if w not in self.dead_workers)
+-            try:
+-                url = min(valid_workers, key=self.worker_request_counts.get)
+-            except ValueError:
+-                raise RuntimeError("No healthy workers available in the pool") from None
+-
++        """Select the healthy, registered worker with the fewest active requests."""
++        workers = [u for u in self.worker_request_counts if u not in self.dead_workers and u not in self._retired]
++        if not workers:
++            raise HTTPException(503, "No healthy rollout workers available", headers={"Retry-After": "1"})
++        url = min(workers, key=self.worker_request_counts.get)
+         self.worker_request_counts[url] += 1
+         return url
+ 
++    async def close(self):
++        """Join health monitoring before closing its transport and the data pool."""
++        if self._health_task is not None:
++            self._health_task.cancel()
++            with suppress(asyncio.CancelledError):
++                await self._health_task
++            self._health_task = None
++        await self.health_client.aclose()
++        await self.client.aclose()
++
+     def _finish_url(self, url):
+         """Mark the request to the given URL as finished"""
+         assert url in self.worker_request_counts, f"URL {url} not recognized"
 diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
 index f0be5b7a17534c2f2eee230188f6febdf872f90e..7bf85968ea7664005a9e93d7f3396b451c10d5db 100644
 --- a/miles/utils/arguments.py
@@ -1249,6 +1453,259 @@ index bbeaf4efd854a429082a014ad89456c32688b829..2a3e55dbc1af3bd317ca13318cf08768
  # ---------------- RolloutManager._eval_checkpoint (the single snapshot path) ----------------
  
  
+diff --git a/tests/fast/router/test_router.py b/tests/fast/router/test_router.py
+index bcb840e13ecc1c67138cac50a8a181f5553a9720..27095b96a087eef58c471f9882fed834c508c5c8 100644
+--- a/tests/fast/router/test_router.py
++++ b/tests/fast/router/test_router.py
+@@ -3,6 +3,7 @@ from argparse import Namespace
+ 
+ import pytest
+ import requests
++from fastapi import HTTPException
+ 
+ from miles.router.router import MilesRouter
+ from miles.utils.http_utils import find_available_port
+@@ -151,8 +152,9 @@ class TestLoadBalancing:
+         router.worker_request_counts = {"http://w1:8000": 0}
+         router.dead_workers = {"http://w1:8000"}
+ 
+-        with pytest.raises(RuntimeError, match="No healthy workers"):
++        with pytest.raises(HTTPException) as error:
+             router._use_url()
++        assert error.value.status_code == 503
+ 
+ 
+ # TODO: extract main body inside `_health_check_loop`, then can test that function
+diff --git a/tests/fast/router/test_router_lifecycle.py b/tests/fast/router/test_router_lifecycle.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d4d02467acb60587748a427d2384e2aae760662e
+--- /dev/null
++++ b/tests/fast/router/test_router_lifecycle.py
+@@ -0,0 +1,224 @@
++"""Real HTTP saturation, quarantine, and shutdown checks in the pinned runtime."""
++
++import asyncio
++import threading
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from types import SimpleNamespace
++
++import httpx
++from miles.router.router import MilesRouter
++
++
++def test_busy_generation_cannot_starve_health_and_shutdown_joins_probe():
++    entered, release = threading.Event(), threading.Event()
++    health = []
++
++    class Handler(BaseHTTPRequestHandler):
++        def log_message(self, *_args):
++            pass
++
++        def reply(self):
++            self.send_response(200)
++            self.send_header("Content-Length", "2")
++            self.end_headers()
++            self.wfile.write(b"{}")
++
++        def do_POST(self):
++            self.rfile.read(int(self.headers.get("Content-Length", 0)))
++            entered.set()
++            release.wait(15)
++            self.reply()
++
++        def do_GET(self):
++            health.append(self.path)
++            self.reply()
++
++    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++    thread = threading.Thread(target=server.serve_forever, daemon=True)
++    thread.start()
++
++    async def exercise():
++        router = MilesRouter(
++            SimpleNamespace(
++                miles_router_max_connections=1,
++                miles_router_timeout=10,
++                rollout_num_gpus=1,
++                rollout_num_gpus_per_engine=1,
++                rollout_health_check_timeout=0.2,
++                rollout_health_check_interval=0.01,
++                miles_router_health_check_failure_threshold=2,
++            )
++        )
++        url = f"http://127.0.0.1:{server.server_port}"
++        router.worker_request_counts[url] = 0
++        generation = asyncio.create_task(router.client.post(url + "/generate", json={}))
++        try:
++            assert await asyncio.to_thread(entered.wait, 2)
++            assert await router._check_worker_health(url) == (url, True)
++            assert health == ["/health"] and not generation.done()
++            await router._start_background_health_check()
++            task = router._health_task
++            await asyncio.sleep(0.1)
++            assert len(health) > 2 and not router.dead_workers
++            release.set()
++            await generation
++            await router.close()
++            assert task.done() and task.cancelled()
++            assert router.client.is_closed and router.health_client.is_closed
++        finally:
++            release.set()
++            await asyncio.gather(generation, return_exceptions=True)
++            await router.close()
++
++    try:
++        asyncio.run(exercise())
++    finally:
++        release.set()
++        server.shutdown()
++        server.server_close()
++        thread.join(5)
++
++
++def test_retired_worker_has_503_until_explicit_registration():
++    async def exercise():
++        router = MilesRouter(
++            SimpleNamespace(
++                miles_router_max_connections=1,
++                miles_router_timeout=1,
++                rollout_num_gpus=1,
++                rollout_num_gpus_per_engine=1,
++            )
++        )
++        try:
++            async with httpx.AsyncClient(
++                transport=httpx.ASGITransport(app=router.app), base_url="http://router"
++            ) as client:
++                assert (await client.post("/generate", json={})).status_code == 503
++                assert (await client.post("/add_worker", json={"url": "http://engine"})).status_code == 200
++                router._use_url()
++                assert (await client.post("/remove_worker", params={"url": "http://engine"})).status_code == 200
++                assert (await client.get("/list_workers")).json() == {"urls": []}
++                assert (await client.post("/add_worker", json={"url": "http://engine"})).status_code == 409
++                router._finish_url("http://engine")
++                assert (await client.post("/generate", json={})).status_code == 503
++                assert (await client.post("/add_worker", json={"url": "http://engine"})).status_code == 200
++                assert router._use_url() == "http://engine"
++                router._finish_url("http://engine")
++                assert router.worker_request_counts == {"http://engine": 0}
++        finally:
++            await router.close()
++
++    asyncio.run(exercise())
++
++
++def test_engine_transport_failure_is_retryable_and_releases_counter():
++    async def exercise():
++        router = MilesRouter(
++            SimpleNamespace(
++                miles_router_max_connections=1,
++                miles_router_timeout=1,
++                rollout_num_gpus=1,
++                rollout_num_gpus_per_engine=1,
++            )
++        )
++
++        async def disconnected(request):
++            raise httpx.RemoteProtocolError("engine disappeared", request=request)
++
++        await router.client.aclose()
++        router.client = httpx.AsyncClient(transport=httpx.MockTransport(disconnected))
++        router.worker_request_counts["http://engine"] = 0
++        try:
++            async with httpx.AsyncClient(
++                transport=httpx.ASGITransport(app=router.app), base_url="http://router"
++            ) as client:
++                response = await client.post("/generate", json={})
++                assert response.status_code == 503 and response.headers["Retry-After"] == "1"
++                assert router.worker_request_counts == {"http://engine": 0}
++        finally:
++            await router.close()
++
++    asyncio.run(exercise())
++
++
++def test_late_probe_cannot_quarantine_replacement_and_failure_stays_quarantined():
++    async def exercise():
++        router = MilesRouter(
++            SimpleNamespace(
++                miles_router_max_connections=1,
++                miles_router_timeout=1,
++                rollout_health_check_interval=0.001,
++                miles_router_health_check_failure_threshold=1,
++            )
++        )
++        entered, release, applied = asyncio.Event(), asyncio.Event(), asyncio.Event()
++        calls = 0
++        second_release = asyncio.Event()
++
++        async def probe(url):
++            nonlocal calls
++            calls += 1
++            if calls == 1:
++                entered.set()
++                await release.wait()
++            else:
++                applied.set()
++                await second_release.wait()
++            return url, False
++
++        router._check_worker_health = probe
++        try:
++            async with httpx.AsyncClient(
++                transport=httpx.ASGITransport(app=router.app), base_url="http://router"
++            ) as client:
++                await client.post("/add_worker", json={"url": "http://engine"})
++                await router._start_background_health_check()
++                await asyncio.wait_for(entered.wait(), 1)
++                await client.post("/remove_worker", json={"url": "http://engine"})
++                await client.post("/add_worker", json={"url": "http://engine"})
++                release.set()
++                # A second probe starts only after the stale first result is processed.
++                await asyncio.wait_for(applied.wait(), 1)
++                assert not router.dead_workers
++                second_release.set()
++
++                async def wait_for_quarantine():
++                    while not router.dead_workers:
++                        await asyncio.sleep(0)
++
++                await asyncio.wait_for(wait_for_quarantine(), 1)
++                assert router.dead_workers == {"http://engine"}
++                assert (await client.get("/list_workers")).json() == {"urls": ["http://engine"]}
++                probes = calls
++                await asyncio.sleep(0.01)
++                assert calls == probes  # Quarantine requires registration, never automatic readmission.
++                await client.post("/add_worker", json={"url": "http://engine"})
++                assert not router.dead_workers and router.worker_failure_counts["http://engine"] == 0
++        finally:
++            release.set()
++            await router.close()
++
++    asyncio.run(exercise())
++
++
++def test_cancelled_request_body_releases_counter():
++    async def exercise():
++        router = MilesRouter(SimpleNamespace(miles_router_max_connections=1, miles_router_timeout=1))
++        router.worker_request_counts["http://engine"] = 0
++
++        class CancelledRequest:
++            async def body(self):
++                raise asyncio.CancelledError
++
++        try:
++            try:
++                await router.do_proxy(CancelledRequest(), "generate")
++            except asyncio.CancelledError:
++                pass
++            else:
++                raise AssertionError("request cancellation was swallowed")
++            assert router.worker_request_counts["http://engine"] == 0
++        finally:
++            await router.close()
++
++    asyncio.run(exercise())
 diff --git a/tests/fast/utils/test_arguments.py b/tests/fast/utils/test_arguments.py
 index 1fce1f9de197afe231342e5c4d897d7406615cba..231a5a61db1fceff37ba52ddde2fe696c65380e9 100644
 --- a/tests/fast/utils/test_arguments.py

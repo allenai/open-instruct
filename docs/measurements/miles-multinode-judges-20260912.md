@@ -116,3 +116,28 @@ Eight real-runtime router/async tests also passed inside the exact retry image;
 The saturation fixture observes the parent’s `PoolTimeout`, then verifies the
 managed router reaches the healthy server while generation stays in flight.
 This exercise is not the repository GPU-pytest suite.
+
+## Native MILES backport and optimization integration
+
+The next exercise (`-r3`) uses MILES `d29c04a944216c6309770fc9cf0d6ca37c066e17`
+on `allenai/miles:robertb/olmo-core-backend`. This branch already descended from
+the fetched fork primary; rebasing reported it up to date. The Open Instruct
+change starts from project primary `446189de7` (`robertb/miles-hero-support`),
+including the merged scoring-pass and publication work. Core remains
+`cfc42934d818036728d63f7ccdcd3b541eab9880`; serving remains
+`02ccb5dcf641cbabc9b78a5bc65dacf8690707a7`. No generic upstream-main rebase or
+compiled dependency upgrade is part of this backport.
+
+The independent health transport and worker lifecycle now live in MILES itself;
+the Open Instruct wrapper and installation hook are removed. The native router,
+manager, lifecycle, Open Instruct spawn-target and async tests passed together:
+34 passed in the pinned image with the new sources mounted. The test includes a
+real occupied one-connection generation pool while health requests reach the
+server, as well as stale-probe rejection, sticky quarantine and cancellation.
+
+The fresh `-r3` output root reuses the immutable prepared six-task dataset. It
+retains the two-update, two-node 2+1+1 topology, async/TIS/replay and equality
+checks. It enables the primary profiles' already-qualified fused expert
+publication and 2 GiB weight buckets. This exercises the integrated optimized
+runtime, so its timing is not an isolated router-only A/B comparison. GPU and
+retained-sample audit results are pending submission/completion.
