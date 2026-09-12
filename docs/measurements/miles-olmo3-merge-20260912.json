@@ -1,0 +1,88 @@
+{
+  "status": "merge_gates_passed_experimental_dense_support",
+  "rebased_onto": "d661d3a68ba95e5cd2a72034fe14b633eaae20f6",
+  "primary_branch": "robertb/miles-olmo-core",
+  "source_branch": "robertb/miles-olmo3-pre-rl",
+  "validated_source": "438a630e7cf1ed33575e2db1324ef6f0f7ddebea",
+  "runtime_lock": {
+    "schema_version": 1,
+    "status": "experimental hero support; conversion and serving qualification in progress",
+    "base_image": {
+      "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
+      "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"
+    },
+    "sources": {
+      "olmo-core": {
+        "repository": "https://github.com/allenai/OLMo-core.git",
+        "revision": "b1fd2c9746e88baeb20e372bdca340d788d0f7e5",
+        "development_commit": "3d35ab326b72d92e06137cc310631d9187d8a2c5",
+        "patch": "patches/olmo-core.patch",
+        "patch_sha256": "1e10df5671031af23b6695c61db85c64af7b88617953950a6c06fefbd0b69204"
+      },
+      "miles": {
+        "repository": "https://github.com/radixark/miles.git",
+        "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
+        "development_commit": "d29c04a944216c6309770fc9cf0d6ca37c066e17",
+        "patch": "patches/miles.patch",
+        "patch_sha256": "6e8b64eb285f1dbeb3d60cddd45d2b8477a06a351eb1653200f91bc1f269d1be"
+      },
+      "olmo-sglang": {
+        "repository": "https://github.com/allenai/olmo-sglang.git",
+        "revision": "81a312ee8326e279a4641e03542ef971a5ffb863",
+        "development_commit": "02ccb5dcf641cbabc9b78a5bc65dacf8690707a7",
+        "embedded_path": "/src/olmo-sglang",
+        "patch": "patches/olmo-sglang.patch",
+        "patch_sha256": "608c073cdc248ec1230863ad99df3dcfe84199fb90d89f9ace6b219941e0c175",
+        "patch_paths": [
+          "src",
+          "tools",
+          "docs"
+        ],
+        "note": "Base image omits original test files; runtime delta covers src/tools/docs. Full tests live at development_commit."
+      }
+    }
+  },
+  "cpu": {
+    "passed": 105,
+    "coverage": [
+      "Olmo 3 profiles",
+      "workflow",
+      "workflow audit",
+      "packing configuration",
+      "run specification",
+      "inference cache controls"
+    ]
+  },
+  "runtime": {
+    "passed": 81,
+    "deselected": 14,
+    "coverage": [
+      "dense and MoE shared actor updates/native resume",
+      "Olmo 3 YaRN configuration/export compatibility",
+      "loss contracts",
+      "FSDP parameter probes"
+    ],
+    "image": "open-instruct-miles-core-1e2ae7ffd5a1",
+    "source": "mounted working checkout with KDA validation fix"
+  },
+  "quality": "make style and make quality passed; focused script/test ruff checks passed",
+  "two_gpu_fsdp": {
+    "experiment": "01M2BHQ7R8F56YP3WZ214W0PYQ",
+    "image": "01M2BHQ0JCRADENSA5W1D0V2TD",
+    "exit_code": 0,
+    "tests_per_rank": 3,
+    "rank_count": 2,
+    "seconds_per_rank": [
+      39.0,
+      39.05
+    ],
+    "image_source": "1e2ae7ffd5a1",
+    "coverage": "Three cycles of scoring/backward/AdamW, both reshard-after-forward settings; local shard gradient/update norms match independent measurements."
+  },
+  "integration_fix": "KDA radix-cache restrictions now apply only when recurrent-state cache controls are supplied. The previous failure also reproduced on primary alone. Existing KDA restrictions continue to pass.",
+  "limitations": [
+    "Full-model 7B smoke used the earlier runtime and had zero advantages for all training groups.",
+    "Nonzero-gradient full-model 7B learning, fresh-process full-model optimizer resume, and fresh serving reload of the final export remain unqualified.",
+    "Dense packed-training numerical parity is not claimed by this merge gate."
+  ]
+}

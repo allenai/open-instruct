@@ -17,6 +17,10 @@ uses Core `3d35ab326b72d92e06137cc310631d9187d8a2c5` and MILES
 ranks using image `01M2BHQ0JCRADENSA5W1D0V2TD`. This checks the current training
 code and dependencies; the earlier full 7B smoke below used the older pins.
 
+The merge gates passed: 105 targeted CPU tests, 81 runtime tests, the two-GPU
+FSDP regression (three tests per rank), formatting, lint, and type checks. See
+[the merge evidence](measurements/miles-olmo3-merge-20260912.json).
+
 Integration testing also exposed a primary-branch validation regression: minimal
 and dense configurations were being required to specify a KDA recurrent-state
 cache strategy. KDA-specific validation now applies when recurrent-state cache
