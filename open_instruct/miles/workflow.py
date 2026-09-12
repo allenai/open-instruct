@@ -219,7 +219,26 @@ def execute(spec):
             root / "prepared" / "data",
             max_prompt_length=planned.miles.get("rollout_max_prompt_len", 2048),
             seed=planned.miles.get("seed", 17),
+            **(
+                {
+                    "registry_overrides": {
+                        name: {
+                            "factory": "open_instruct.miles.judge_registry.NamedJudgeVerifier",
+                            "config": {"name": name},
+                        }
+                        for name in spec.judges["judging"]["bindings"]
+                    }
+                }
+                if spec.judges["judging"]["bindings"]
+                else {}
+            ),
         )
+        if spec.judges["judging"]["bindings"]:
+            registry_module = importlib.import_module("open_instruct.miles.judge_registry")
+            resolved = registry_module.registry()
+            if resolved is None:
+                raise InputError("Named judges require the managed launcher (or a resolved registry)")
+            registry_module.validate_data(prepared, resolved)
         config = spec.compile({**prepared, "hf_checkpoint": hf})
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():

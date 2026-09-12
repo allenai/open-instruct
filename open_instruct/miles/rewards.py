@@ -22,6 +22,8 @@ import weakref
 from pathlib import Path
 from types import SimpleNamespace
 
+from open_instruct.miles import general_judge, judge_registry
+
 _MATH_FACTORIES = {
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.ground_truth_utils.StrictMathVerifier",
@@ -277,6 +279,13 @@ async def _score(args, sample):
         # response_length includes tool observations. Their tokens remain in the
         # trajectory, while the policy loss uses the separate MILES loss mask.
         tokens = sample.tokens[-sample.response_length :] if sample.response_length else []
+        if judge_registry.bound(name):
+            score = await general_judge.general_judge_score(
+                args, sample, name=name, target=copy.deepcopy(spec["target"])
+            )
+            total += weight * score
+            components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
+            continue
         result = await registry[name].async_call(
             tokens,
             sample.response,

@@ -65,9 +65,9 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     assert task["context"]["minRuntime"] == "1h"
 
 
-def test_topology_exceeding_one_node_fails_before_build(tmp_path):
+def test_multinode_auto_resume_requires_qualification(tmp_path):
     run = spec(tmp_path, inference={"placement_mode": "disaggregated", "gpus": 2}, launch={"gpus_per_replica": 3})
-    with pytest.raises(ValueError, match="one Beaker node"):
+    with pytest.raises(ValueError, match="auto_resume=false"):
         launch.specification(IMAGE_ID, run)
 
 

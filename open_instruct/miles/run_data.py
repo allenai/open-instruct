@@ -434,7 +434,15 @@ def _tasks(data, tokenizer, template, seed):
     return partitions, {"sources": provenance, "template_sha256": _sha(template.encode())}, None
 
 
-def prepare_data(data: dict, hf_checkpoint: Path, output: Path, *, max_prompt_length: int, seed: int) -> dict:
+def prepare_data(
+    data: dict,
+    hf_checkpoint: Path,
+    output: Path,
+    *,
+    max_prompt_length: int,
+    seed: int,
+    registry_overrides: dict | None = None,
+) -> dict:
     """Create or verify a completed immutable prepared-data directory.
 
     Adopted manifests retain source ordering, prompt contents and verifier targets;
@@ -457,6 +465,7 @@ def prepare_data(data: dict, hf_checkpoint: Path, output: Path, *, max_prompt_le
         "hf_files": inputs.copy(),
         "max_prompt_length": max_prompt_length,
         "seed": data.get("seed", seed),
+        **({"registry_overrides": registry_overrides} if registry_overrides else {}),
     }
     manifest_path = output / "manifest.json"
     if output.exists():
@@ -480,6 +489,10 @@ def prepare_data(data: dict, hf_checkpoint: Path, output: Path, *, max_prompt_le
         partitions, provenance, registry = _prepared(data, inputs)
     else:
         partitions, provenance, registry = _tasks(data, tokenizer, template, contract["seed"])
+    if registry_overrides:
+        registry = (
+            {name: {"factory": factory} for name, factory in FACTORIES.items()} if registry is None else registry
+        ) | registry_overrides
     known = registry if registry is not None else FACTORIES
     if not partitions.get("train"):
         raise InputError("Preparation requires nonempty training data")

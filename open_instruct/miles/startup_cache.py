@@ -101,6 +101,9 @@ def prepare(args):
 
 def worker_runtime_env(args, slot, env_vars):
     """Explicit per-actor environment, independent of Ray cluster inheritance."""
+    env_vars = dict(env_vars)
+    if "OI_MILES_JUDGE_REGISTRY" in os.environ:
+        env_vars["OI_MILES_JUDGE_REGISTRY"] = os.environ["OI_MILES_JUDGE_REGISTRY"]
     policy = getattr(args, "olmo_core_startup_cache", None)
     if not policy:
         return {"env_vars": env_vars}

@@ -6,9 +6,10 @@ import os
 import shlex
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
-from open_instruct.miles import workflow
+from open_instruct.miles import topology, workflow
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
@@ -23,15 +24,8 @@ def receipt_path(spec):
 
 def specification(image, spec):
     config = spec.compile()
-    miles = config.miles
-    trainer = miles["actor_num_nodes"] * miles["actor_num_gpus_per_node"]
-    allocated = trainer if miles["colocate"] else trainer + miles["rollout_num_gpus"]
-    capacity = spec.launch.get("gpus_per_replica", miles["num_gpus_per_node"])
-    if miles["actor_num_nodes"] != 1 or allocated > capacity:
-        raise InputError(
-            "The config launcher currently supports one Beaker node; this topology requires a multi-node "
-            "Ray launcher. Use a one-node example or the existing qualified campaign launcher."
-        )
+    layout = topology.plan(spec)
+    allocated = layout["gpus_per_replica"]
     mounts = spec.launch["weka_mounts"]
 
     def check_mounts(value, name="run"):
@@ -74,9 +68,15 @@ def specification(image, spec):
         f"python -c {shlex.quote(setup)}\n"
         f"trap {shlex.quote(cleanup)} EXIT\n"
         + preflight
-        + "python -m open_instruct.miles train /output/submitted-run.json 2>&1 | tee /output/run.log\n"
+        + (
+            "python -m open_instruct.miles.cluster /output/submitted-run.json"
+            if layout["replicas"] > 1 or spec.judges["judging"]["bindings"]
+            else "python -m open_instruct.miles train /output/submitted-run.json"
+        )
+        + " 2>&1 | tee /output/run.log\n"
     )
     env = {
+        "OI_MILES_LAUNCH_ID": uuid.uuid4().hex,
         "TOKENIZERS_PARALLELISM": "false",
         "OMP_NUM_THREADS": "2",
         "NCCL_CUMEM_ENABLE": "1",
@@ -102,6 +102,15 @@ def specification(image, spec):
         envVars=[{"name": key, "value": value} for key, value in env.items() if key not in spec.launch["secrets"]]
         + [{"name": key, "secret": value} for key, value in spec.launch["secrets"].items()],
     )
+    if layout["replicas"] > 1:
+        task.update(
+            replicas=layout["replicas"],
+            leaderSelection=True,
+            hostNetworking=True,
+            propagateFailure=True,
+            propagatePreemption=True,
+            synchronizedStartTimeout="20m",
+        )
     return dict(
         version="v2", budget=spec.launch["budget"], description=f"MILES/Core researcher run: {spec.name}", tasks=[task]
     )

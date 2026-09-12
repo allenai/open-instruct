@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles import options, run_data, validation
+from open_instruct.miles import judging, options, run_data, topology, validation
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.errors import InputError
 
@@ -158,6 +158,7 @@ class RunSpec:
     sections: dict[str, dict[str, Any]]
     core: dict[str, Any]
     miles: dict[str, Any]
+    judges: dict[str, Any]
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
@@ -175,7 +176,17 @@ class RunSpec:
         document = copy.deepcopy(payload)
         path = Path(config_path).expanduser().resolve()
         _apply_overrides(document, overrides)
-        allowed = {"schema_version", "name", "core", "miles", *WORKFLOW_SECTIONS, *RUN_SECTIONS}
+        allowed = {
+            "schema_version",
+            "name",
+            "core",
+            "miles",
+            *WORKFLOW_SECTIONS,
+            *RUN_SECTIONS,
+            "judges",
+            "rubrics",
+            "judging",
+        }
         if set(document) & {"validation", "conversion_validation"}:
             raise InputError(
                 "Megatron conversion/parity thresholds do not apply to Core; use separate Core parity probes"
@@ -233,6 +244,7 @@ class RunSpec:
             {section: _table(document, section) for section in RUN_SECTIONS},
             _table(document, "core", CORE_FIELDS),
             _table(document, "miles"),
+            judging.parse(document),
         )
         result.compile()
         return result
@@ -251,6 +263,7 @@ class RunSpec:
             **self.sections,
             "core": self.core,
             "miles": self.miles,
+            **self.judges,
         }
         payload = copy.deepcopy(payload)
         for section in (*RUN_SECTIONS, "core", "miles"):
@@ -330,6 +343,7 @@ class RunSpec:
             "env",
             "secrets",
             "timeout",
+            "coordination",
         }
         if unknown := set(launch) - allowed:
             raise InputError(f"Unknown [launch] fields: {sorted(unknown)}")
@@ -344,6 +358,12 @@ class RunSpec:
             timeout="3h",
         )
         launch = defaults | launch
+        coordination = launch.setdefault("coordination", {})
+        validation.mapping(coordination, "launch.coordination")
+        validation.fields(coordination, "launch.coordination", {"startup_timeout", "heartbeat_timeout"})
+        for key, default in (("startup_timeout", 1200), ("heartbeat_timeout", 120)):
+            coordination.setdefault(key, default)
+            _positive(coordination[key], f"launch.coordination.{key}")
         for key in ("workspace", "budget", "cluster", "priority", "min_runtime", "shared_memory", "timeout"):
             _text(launch[key], f"launch.{key}")
         if launch["priority"] not in ("low", "normal", "high", "urgent"):
@@ -361,6 +381,8 @@ class RunSpec:
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         reserved = {
+            "OI_MILES_LAUNCH_ID",
+            "OI_MILES_JUDGE_REGISTRY",
             "RAY_ADDRESS",
             "PYTHONPATH",
             "CUDA_VISIBLE_DEVICES",
@@ -698,6 +720,8 @@ class RunSpec:
             "launch": self.launch,
             "compiler_cache": self.compiler_cache,
             "runtime": runtime,
+            **self.judges,
+            "allocation": topology.plan(self),
             "runtime_validated": False,
             "stages": ["prepare_model", "prepare_data", "validate", "train"]
             + (["export_hf"] if self.output["export_hf"] else []),
