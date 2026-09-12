@@ -38,6 +38,13 @@ FIELD_MAP = {
     "max_weight_staleness": "core.max_policy_lag",
     "max_train_rollout_logprob_abs_diff": "core.max_train_rollout_logprob_abs_diff",
     "comparison_id": "miles.wandb_group",
+    # Serving prefix cache and request routing, named as in olmo-miles.
+    "mamba_radix_cache_strategy": "miles.sglang_mamba_radix_cache_strategy",
+    "router_policy": "miles.sglang_router_policy",
+    "router_cache_threshold": "miles.router_cache_threshold",
+    "router_balance_abs_threshold": "miles.router_balance_abs_threshold",
+    "router_balance_rel_threshold": "miles.router_balance_rel_threshold",
+    "enable_mixed_chunk": "miles.sglang_enable_mixed_chunk",
 }
 UNSUPPORTED_FIELDS = {
     "megatron_checkpoint": "use model.source/model.format or miles.load for a native Core RL resume",
@@ -518,6 +525,7 @@ class RunSpec:
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
         validation.runtime_values(miles)
+        validation.inference_capacity(miles)
         CoreConfig(**core)
         if "placement_mode" in controls:
             placement, origin = controls["placement_mode"]

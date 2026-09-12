@@ -159,3 +159,50 @@ def runtime_values(values):
         and values.get("lr_warmup_iters", 0) >= values["lr_decay_iters"]
     ):
         raise InputError("miles.lr_warmup_iters must be < miles.lr_decay_iters; leave at least one step after warmup.")
+
+
+# Each running request can hold this many KDA recurrent-state slots under the
+# branch-capable ``extra_buffer`` radix strategy (overlap allowance at chunk
+# boundaries and branches); the pool must leave room for retained prefixes.
+KDA_RADIX_STATE_SLOTS_PER_RUNNING_REQUEST = 5
+
+
+def inference_capacity(values):
+    """Port of olmo-miles' radix-cache and router capacity rules for the resolved options.
+
+    Only explicit values are checked; the pinned runtime supplies its own defaults
+    for anything absent.
+    """
+    running = values.get("sglang_max_running_requests")
+    slots = values.get("sglang_max_mamba_cache_size")
+    if values.get("sglang_disable_radix_cache", False):
+        if running is not None and slots is not None and slots < running:
+            raise InputError(
+                "miles.sglang_max_mamba_cache_size must be at least sglang_max_running_requests "
+                "when the radix cache is disabled"
+            )
+    else:
+        strategy = values.get("sglang_mamba_radix_cache_strategy")
+        if strategy != "extra_buffer":
+            raise InputError(
+                'the validated KDA radix path requires inference.mamba_radix_cache_strategy = "extra_buffer" '
+                "when the radix cache is enabled"
+            )
+        if values.get("sglang_attention_backend", "triton") != "triton":
+            raise InputError('the validated KDA radix path requires sglang_attention_backend = "triton"')
+        if values.get("sglang_page_size", 1) != 1:
+            raise InputError("the validated KDA radix path requires sglang_page_size = 1")
+        if values.get("sglang_disable_overlap_schedule", False):
+            raise InputError("the validated KDA radix path requires overlap scheduling enabled")
+        if running is not None and slots is not None and slots <= KDA_RADIX_STATE_SLOTS_PER_RUNNING_REQUEST * running:
+            raise InputError(
+                "miles.sglang_max_mamba_cache_size must exceed "
+                f"{KDA_RADIX_STATE_SLOTS_PER_RUNNING_REQUEST} * sglang_max_running_requests "
+                "when the radix cache is enabled, leaving at least one slot for a retained prefix state"
+            )
+    if "router_cache_threshold" in values:
+        number(values["router_cache_threshold"], "miles.router_cache_threshold", minimum=0.0, maximum=1.0)
+    if "router_balance_abs_threshold" in values:
+        integer(values["router_balance_abs_threshold"], "miles.router_balance_abs_threshold", minimum=0)
+    if "router_balance_rel_threshold" in values:
+        number(values["router_balance_rel_threshold"], "miles.router_balance_rel_threshold", minimum=1.0)
