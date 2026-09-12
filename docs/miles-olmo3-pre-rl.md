@@ -1,9 +1,36 @@
 # Published Olmo 3 through MILES and Core
 
-Branch: `robertb/miles-olmo3-pre-rl`, based on the integration branch at
-`738356e39`. This is preparation for a dense Olmo 3 recipe comparison. Tiny-model
+Branch: `robertb/miles-olmo3-pre-rl`, rebased onto the primary integration branch
+`robertb/miles-hero-support` at `446189de7` (original base `738356e39`). This is preparation for a dense Olmo 3 recipe comparison. Tiny-model
 qualification has passed; no full 7B training or learning comparison has run on
 this branch.
+
+## Rebase and GSM8K readiness
+
+The rebase completed without conflicts. The inherited runtime lock matches the
+primary Core branch at `cfc42934d818036728d63f7ccdcd3b541eab9880`, MILES at
+`df24d2ed5da4598264c6682f9dbe49aee64acc95`, and olmo-sglang at
+`02ccb5dcf641cbabc9b78a5bc65dacf8690707a7`. No dependency-branch changes were
+needed for dense Olmo 3.
+
+The rebased regression pass has 175 CPU and 77 runtime tests passing (10 skips,
+16 deselections), plus `make style quality`. The actual Ray/SGLang/Core tiny
+Olmo 3 run passed two updates and a fresh-process resume into update three using
+the new locked runtime sources; scoring/training-forward checks were bit exact.
+A real GSM8K preparation exercise
+used the published tokenizer and pinned original RL template: 64 train and
+16 held-out rows, no overlap, maximum prompt length 134 tokens, and 160 correct/
+incorrect-answer verifier checks passed. These held-out rows are excluded from
+our selected training subset of the RLVR source's **train split**, not the
+official GSM8K test set. Row identities and preparation hashes are retained in
+[the rebase/preflight record](measurements/miles-olmo3-rebase-20260912.json).
+
+We can proceed to the two-update 7B qualification config. Before submission,
+stage or verify the pinned weight snapshot on WEKA, replace the config's path
+placeholders, and build the image from this branch. No full-model weights were
+downloaded by the tokenizer/data preflight, and no Beaker run has been launched.
+The first 7B run remains a memory, long-context, distributed update and checkpoint
+qualification, before collecting learning curves.
 
 ## Implementation
 

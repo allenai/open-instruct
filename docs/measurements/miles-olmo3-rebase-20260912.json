@@ -1,0 +1,198 @@
+{
+  "integration_base": "446189de7",
+  "olmo3_rebased_implementation": "a3d1d270f",
+  "runtime_sources": {
+    "olmo-core": "cfc42934d818036728d63f7ccdcd3b541eab9880",
+    "miles": "df24d2ed5da4598264c6682f9dbe49aee64acc95",
+    "olmo-sglang": "02ccb5dcf641cbabc9b78a5bc65dacf8690707a7"
+  },
+  "cpu_tests": {
+    "passed": 175
+  },
+  "runtime_tests": {
+    "passed": 77,
+    "skipped": 10,
+    "deselected": 16
+  },
+  "style_quality": "passed",
+  "gsm8k_preflight": {
+    "model": "allenai/Olmo-3-7B-Think-DPO",
+    "revision": "7b18bf927b430ff06376fdfa5610eb3b1b6a5c38",
+    "weights_downloaded": false,
+    "train": 64,
+    "held_out": 16,
+    "overlap": 0,
+    "max_prompt_tokens": 134,
+    "reward_canaries": 160
+  },
+  "dataset_provenance": {
+    "sources": [
+      {
+        "dataset": "ai2-adapt-dev/rlvr_gsm8k_zs",
+        "eval_rows": [
+          6598,
+          397,
+          243,
+          2176,
+          3627,
+          5230,
+          6407,
+          4653,
+          1987,
+          4249,
+          4464,
+          1072,
+          6349,
+          6690,
+          7086,
+          3710
+        ],
+        "revision": "93ffaae6cd2acb8f821f6d4712651320a889b1b9",
+        "source_split": "train",
+        "task": "gsm8k",
+        "train_rows": [
+          7024,
+          573,
+          3159,
+          2386,
+          3087,
+          4969,
+          6850,
+          3573,
+          5624,
+          4477,
+          4933,
+          4417,
+          2042,
+          3011,
+          6429,
+          6423,
+          39,
+          2902,
+          5366,
+          4812,
+          1812,
+          1109,
+          767,
+          4695,
+          1755,
+          7246,
+          5553,
+          6508,
+          1796,
+          4042,
+          6482,
+          942,
+          5968,
+          7259,
+          6922,
+          1367,
+          7229,
+          6385,
+          5913,
+          6401,
+          5487,
+          3753,
+          6529,
+          6088,
+          3206,
+          4592,
+          5931,
+          4362,
+          7341,
+          5977,
+          6621,
+          393,
+          3118,
+          1298,
+          6395,
+          5896,
+          6090,
+          7165,
+          7366,
+          4970,
+          2834,
+          7248,
+          2202,
+          2505
+        ]
+      }
+    ],
+    "template_sha256": "eba6e269f669706e5c788e370160dad953137f3fa7014fa69d03c7b3ad9f0e72"
+  },
+  "prepared_sha256": {
+    "eval.jsonl": "5f25a2ec149ce71cfdd44c2cff52d118728c4cca4327a0edb0b134747d247323",
+    "train.jsonl": "ee23f65454655b9b0600de6cbd9e5d6bb1badd04e29c2541306019951d7f61c5",
+    "verifiers.json": "a600d55e47f71378af6f1e63b07c3b2c1e6b9fbd131fb39c9aa4f1c4cbdebc9c"
+  },
+  "tokenizer_files_sha256": {
+    "chat_template.jinja": "eba6e269f669706e5c788e370160dad953137f3fa7014fa69d03c7b3ad9f0e72",
+    "config.json": "b200a2848166fc4e50f683dba90f7523ac4aeed8ff9bab8794f4195fb6f6b5b0",
+    "special_tokens_map.json": "78afb564e81264029b25f9caf24bda2521d5bdaeff5cd3fdbc01d3da2e8ce2f2",
+    "tokenizer.json": "73fd5254624f39a88e3faac6a8e11300fc3c735ed37880d4f4f08db898eaecca",
+    "tokenizer_config.json": "bd8b666bb812d157a582eee0568d0468b9e24547ac7f895577200f019be52acf"
+  },
+  "preflight_scope": "Tokenizer and real pinned source rows, template rendering and verifier canaries. No 7B weights or full-model inference/training. Dataset read from mounted pinned parquet cache.",
+  "logs": {
+    "cpu": "/tmp/olmo3-rebase-cpu-tests.log",
+    "runtime": "/tmp/olmo3-rebase-runtime-tests.log",
+    "style": "/tmp/olmo3-rebase-style.log",
+    "data": "/tmp/olmo3-rebase-data-preflight.log",
+    "smoke": "/tmp/olmo3-rebase-smoke.log",
+    "resume": "/tmp/olmo3-rebase-resume.log"
+  },
+  "tiny_end_to_end": {
+    "updates": 3,
+    "initial_two_updates": "passed",
+    "fresh_process_resume_third_update": "passed",
+    "scope": "Synthetic tiny Olmo 3, one GPU, colocated IPC; current locked sources from the built runtime image",
+    "score_gaps": [
+      {
+        "rollout_id": 0,
+        "source": "standalone",
+        "active_tokens": 32,
+        "max_abs": 0.007677555084228516
+      },
+      {
+        "rollout_id": 1,
+        "source": "training_forward",
+        "active_tokens": 30,
+        "max_abs": 0.008037090301513672
+      },
+      {
+        "rollout_id": 2,
+        "source": "standalone",
+        "active_tokens": 32,
+        "max_abs": 0.006338596343994141
+      }
+    ],
+    "scoring_checks": [
+      {
+        "active_tokens": 32,
+        "edge": 0.001,
+        "event": "scoring_check",
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rank": 0,
+        "rollout_id": 0,
+        "schema_version": 1,
+        "step": 0,
+        "tokens_above_edge": 0,
+        "tolerance": 0.001
+      },
+      {
+        "active_tokens": 32,
+        "edge": 0.001,
+        "event": "scoring_check",
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rank": 0,
+        "rollout_id": 2,
+        "schema_version": 1,
+        "step": 2,
+        "tokens_above_edge": 0,
+        "tolerance": 0.001
+      }
+    ]
+  }
+}
