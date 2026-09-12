@@ -1,13 +1,16 @@
 # Tiny multi-node mixed-task and named-judge exercise
 
-Status: the first training attempt completed both optimizer updates but failed
-during final evaluation. The managed-router retry is submitted as
-[01M29Y35Z257VCZ6KQTW7G3PY0](https://beaker.org/ex/01M29Y35Z257VCZ6KQTW7G3PY0).
-Its [frozen receipt](miles-multinode-judges-20260912/retry-launch.json) pins source
-`12114873a35a5ef70cffa703a2d73feddd87622d` and image `01M29Y2K67XY242HKHC7AW4KB4`.
-It uses the same prepared data and a fresh output root with suffix `-r2`.
-The retry includes the publication changes independently merged into the working
-branch; fused publication remains disabled in this qualification config.
+Status: **both the wrapper retry (r2) and native MILES backport (r3) passed**.
+All four GPU replicas exited zero, and both corrected retained-sample audits
+passed on Saturn. The native implementation is the retained project path.
+
+| Run | GPU exercise | Corrected artifact audit | Retained report |
+| --- | --- | --- | --- |
+| r2: wrapper, per-expert publication | [passed](https://beaker.org/ex/01M29Y35Z257VCZ6KQTW7G3PY0) | [passed](https://beaker.org/ex/01M2A1ZYTM0KTTPB07GNJE2J1A) | [r2 audit](miles-multinode-judges-20260912/r2-audit.json) |
+| r3: native MILES, fused publication | [passed](https://beaker.org/ex/01M29ZPW6Z04D27MFTGMGB7GGD) | [passed](https://beaker.org/ex/01M2A2BHH3F428616A1D85AV4B) | [r3 audit](miles-multinode-judges-20260912/r3-audit.json) |
+
+The dated sections below retain the failure and repair history; their pending
+statuses describe what was known at that time.
 
 This exercises the researcher TOML launcher on real Dolci data. It is deliberately
 small: two updates on two physical Holmes B300 nodes, with two Core EP2 trainer
@@ -184,3 +187,31 @@ in the Core publication timer, versus r2's 29,669 tensors/35 buckets and
 3.89/2.67 seconds. These are tiny-run observations, not a controlled steady-state
 benchmark or the full driver publication stage (which includes other checks).
 Final evaluation/cleanup and corrected retained-sample audits remain pending.
+
+## Final qualification
+
+Both reports set `passed=true` and `full_sample_audit=true`. Each covers 32
+training responses across two updates, plus six initial and six final evaluation
+responses. All six task types were consumed in training. Both named judge
+bindings supplied actual trained rewards, reparsed from their retained replies.
+Prompt/label/verifier identity and token hashes matched prepared data, policy
+versions respected lag 1 (and exact evaluation versions), and reward components
+matched the trained totals. Both trainer ranks completed two finite, non-skipped
+optimizer updates with parameter changes. Each report records five publications,
+distinct-node placement, judge/policy GPU separation, four judge canaries, and
+successful final cleanup on both nodes. Neither completed run's logs contains a
+router quarantine message.
+
+Native r3 consumed: math 8, ifeval 10, function code 4, stdio code 4,
+general-quality 2, and reference-quality 4 training responses. Async selection
+produced a slightly different mix in r2: 8, 8, 4, 4, 4, 4 respectively.
+This is another reason these runs are not a strict numerical/performance A/B.
+
+Native r3's two driver cycles were 836.94 and 118.14 seconds; r2's were 879.43
+and 133.48 seconds. Initial/final mixed evaluation took 241.69/330.61 seconds
+in r3 and 234.66/441.33 seconds in r2. Startup/cold work dominates this tiny
+exercise; judge-backed evaluation is still expensive. These measurements do not
+establish sustained throughput. Qualification remains two EP2 updates, not
+EP8, long context, learning quality, checkpoint recovery, or injected failures.
+The audit reparses stochastic judge outputs and checks deterministic reward
+accounting; it does not independently rerun the deterministic verifiers.

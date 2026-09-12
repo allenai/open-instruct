@@ -98,8 +98,10 @@ include finite optimizer steps, policy refresh and actual judge replies; process
 exit alone is insufficient. Startup controls do not establish judge calibration
 or throughput for a production mixture.
 
-Implementation status: local ownership/HTTP/lifecycle tests pass; GPU exercise
-results will be recorded separately. This does not yet qualify EP8, 32K responses,
+Implementation status: the two-node, two-update EP2 mixed-task exercise passed
+with the native MILES router and both named judge bindings; its retained-sample
+audit also passed. See the [results](measurements/miles-multinode-judges-20260912.md).
+This does not yet qualify EP8, 32K responses,
 large inference pools, or sustained multi-node performance.
 
 ## Policy-engine health
