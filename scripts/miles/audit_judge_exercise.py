@@ -15,6 +15,21 @@ from open_instruct.miles import general_judge, workflow
 require = audit_workflow.require
 
 
+def load_rollout(path):
+    """Read our replay dumps without allowing arbitrary pickle globals.
+
+    MILES serializes expert assignments as NumPy int32 arrays, not tensors.
+    Scope the minimal reconstruction allowlist to this load only.
+    """
+    torch = importlib.import_module("torch")
+    numpy = importlib.import_module("numpy")
+    multiarray = importlib.import_module("numpy._core.multiarray")
+    with torch.serialization.safe_globals(
+        [multiarray._reconstruct, numpy.ndarray, numpy.dtype, type(numpy.dtype("int32"))]
+    ):
+        return torch.load(path, map_location="cpu", weights_only=True)
+
+
 def audit(root):
     root = Path(root)
     report = audit_workflow.audit(root, counters_only=True)
@@ -33,7 +48,6 @@ def audit(root):
     require(len(cleanup) == 2 and all(p.get("complete") for p in cleanup), "Missing replica cleanup")
     canaries = json.loads((attempt / "judge-canaries.json").read_text())
     require(len(canaries) == 4, "Both rubric controls must have completed")
-    torch = importlib.import_module("torch")
     prepared = {
         split: {
             row["input"]: row for row in [json.loads(line) for line in path.read_text().split("\n") if line.strip()]
@@ -46,7 +60,7 @@ def audit(root):
     domains, bindings, generations, dumps = collections.Counter(), collections.Counter(), [], []
     for label, clock, split in ((0, 0, "train"), (1, 1, "train"), ("eval_0", 0, "eval"), ("eval_1", 2, "eval")):
         path = Path(miles["save_debug_rollout_data"].format(rollout_id=label))
-        payload = torch.load(path, map_location="cpu", weights_only=True)
+        payload = load_rollout(path)
         samples = payload["samples"]
         require(len(samples) == (16 if split == "train" else len(prepared[split])), "Unexpected sample count")
         groups = collections.Counter()
