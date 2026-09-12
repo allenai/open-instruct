@@ -104,6 +104,11 @@ if [[ -z "${MIXER:-}" ]]; then
     exit 1
 fi
 TOKENIZER="${TOKENIZER:-allenai/dolma2-tokenizer-olmo35}"
+# Pinned: the tokenizer repo's chat template is edited upstream (six commits landed on main
+# between the 2026-09-11 and 2026-09-12 runs, changing the default system prompt, EOS
+# placement and argument rendering). Every run in this series trained and was evaluated with
+# this revision; set TOKENIZER_REVISION=main deliberately to pick up a newer template.
+TOKENIZER_REVISION="${TOKENIZER_REVISION:-56415cee534a924b0b777d70a888266f4eef65ec}"
 CHAT_TEMPLATE="${CHAT_TEMPLATE:-olmo123}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-65536}"
 SEED="${SEED:-33333}"
@@ -156,6 +161,7 @@ common_args=(
     --model_name_or_path "$MODEL"
     --config_name "$CONFIG_NAME"
     --tokenizer_name_or_path "$TOKENIZER"
+    --tokenizer_revision "$TOKENIZER_REVISION"
     --chat_template_name "$CHAT_TEMPLATE"
     --max_seq_length "$MAX_SEQ_LENGTH"
     --mixer_list $MIXER
@@ -174,7 +180,7 @@ case "$MODE" in
         # sees "not cached" and hashes differently from every later job: the simfc
         # tokenize wrote 0f8809b247-* while training looked for 77c92e2c0a-*. Pulling
         # those files before tokenizing puts both jobs on the same key.
-        WARM_CMD=(uv run hf download "$TOKENIZER" tokenizer_config.json tokenizer.json special_tokens_map.json vocab.json)
+        WARM_CMD=(uv run hf download "$TOKENIZER" --revision "$TOKENIZER_REVISION" tokenizer_config.json tokenizer.json special_tokens_map.json vocab.json)
         set -- $MIXER
         while (( $# >= 2 )); do
             WARM_CMD+=("&&" uv run hf download --repo-type dataset "$1" README.md)
