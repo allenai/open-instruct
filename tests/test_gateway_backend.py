@@ -10,6 +10,8 @@ from open_instruct.environments.backends import (
     _PENDING_MARKER,
     GatewayBackend,
     GatewayBackendError,
+    SandboxLostError,
+    SandboxOOMError,
     create_backend,
 )
 
@@ -32,8 +34,11 @@ class FakeGateway:
         self.closed = []
         self.container_counter = 0
         self.fail_next_posts: list[tuple[int, str]] = []  # (status_code, body)
+        self.fail_posts_skip = 0  # let this many posts through before applying fail_next_posts
         self.markerless_rounds = 0  # how many wait execs return neither marker (e.g. killed, exit 137)
         self.fail_cleanup_posts: list[tuple[int, str]] = []  # (status_code, body) for rm -rf execs only
+        self.launcher_results: list[dict] = []  # canned replica responses for launcher execs
+        self.probe_results: list[dict] = []  # canned replica responses for the `true` liveness probe
 
     def response(self, status_code, payload):
         response = MagicMock()
@@ -48,8 +53,11 @@ class FakeGateway:
     def post(self, url, json=None, timeout=None):
         self.requests.append((url, json))
         if self.fail_next_posts:
-            status, body = self.fail_next_posts.pop(0)
-            return self.response(status, body)
+            if self.fail_posts_skip > 0:
+                self.fail_posts_skip -= 1
+            else:
+                status, body = self.fail_next_posts.pop(0)
+                return self.response(status, body)
         if url.endswith("/affinity/handshake"):
             self.handshakes += 1
             self.container_counter += 1
@@ -62,7 +70,15 @@ class FakeGateway:
             return self.response(200, {"removed": True})
         assert url.endswith("/affinity/podman")
         command = json["command"]
+        if command == "true":
+            if self.probe_results:
+                return self.response(200, self.probe_results.pop(0))
+            return self.response(
+                200, {"stdout": "", "stderr": "", "exit_code": 0, "success": True, "timed_out": False}
+            )
         if "mkdir" in command and "cat >" in command and "LAUNCHED" in command:
+            if self.launcher_results:
+                return self.response(200, self.launcher_results.pop(0))
             return self.response(
                 200, {"stdout": "LAUNCHED\n", "stderr": "", "exit_code": 0, "success": True, "timed_out": False}
             )
@@ -282,9 +298,88 @@ def test_run_command_retries_markerless_wait(backend_and_gateway):
 
 
 def test_run_command_persistent_markerless_wait_raises(backend_and_gateway):
+    # Container answers the liveness probe: a slow replica, so a plain tool
+    # error (the episode continues).
     backend, fake = backend_and_gateway
     fake.markerless_rounds = 10
     with pytest.raises(GatewayBackendError, match="no marker"):
+        backend.run_command("echo doomed")
+    assert fake.handshakes == 1
+
+
+_CONTAINER_NOT_FOUND_404 = (
+    404,
+    '{"detail":{"error":"container_not_found","container_id":"' + "c" * 64 + '",'
+    '"message":"container does not exist or belongs to another instance"}}',
+)
+_STOPPED_CONTAINER_EXEC = {
+    "stdout": "",
+    "stderr": "Error: can only create exec sessions on running containers: container state improper",
+    "exit_code": 255,
+    "success": False,
+    "timed_out": False,
+}
+
+
+def test_container_removed_between_commands_ends_episode(backend_and_gateway):
+    # The replica's resource watchdog (or idle janitor) removed the container
+    # while the agent was thinking: the sandbox died under the agent's own
+    # commands, so end the episode like a DockerBackend OOM kill instead of
+    # silently continuing in a fresh, empty container.
+    backend, fake = backend_and_gateway
+    fake.fail_next_posts.append(_CONTAINER_NOT_FOUND_404)
+    with pytest.raises(SandboxLostError, match="removed by its replica"):
+        backend.run_command("echo doomed")
+    assert isinstance(SandboxLostError("x"), SandboxOOMError)  # env's OOM handler catches it
+    assert fake.handshakes == 1
+
+
+def test_sigkilled_wait_then_container_gone_ends_episode(backend_and_gateway):
+    # Watchdog kill mid-command: the wait exec comes back SIGKILLed (exit 137,
+    # no marker), then the container is gone.
+    backend, fake = backend_and_gateway
+    fake.markerless_rounds = 1  # exit 137
+    fake.fail_posts_skip = 2  # launcher + the SIGKILLed wait go through; the wait retry gets the 404
+    fake.fail_next_posts.append(_CONTAINER_NOT_FOUND_404)
+    with pytest.raises(SandboxLostError, match="sigkill_seen=True"):
+        backend.run_command("python hog.py")
+    assert fake.handshakes == 1
+
+
+def test_expired_binding_mid_command_still_rehandshakes(backend_and_gateway):
+    # No SIGKILL seen and the gateway (not the replica) lost the binding:
+    # infra-side loss, keep the restart-and-retry-once semantics.
+    backend, fake = backend_and_gateway
+    fake.fail_next_posts.append((404, '{"error":"strict affinity binding was not found or has expired"}'))
+    fake.scripted_results.append((0, "recovered\n", ""))
+    assert backend.run_command("echo recovered").stdout == "recovered\n"
+    assert fake.handshakes == 2
+
+
+def test_stopped_container_on_launch_ends_episode(backend_and_gateway):
+    # PID 1 of the sandbox died (agent ran `kill -9 1` / OOM took init): the
+    # container is stopped but not removed, every exec fails with exit 255.
+    backend, fake = backend_and_gateway
+    fake.launcher_results.append(_STOPPED_CONTAINER_EXEC)
+    with pytest.raises(SandboxLostError, match="is stopped"):
+        backend.run_command("echo doomed")
+    assert fake.handshakes == 1
+
+
+def test_persistent_markerless_wait_with_stopped_container_ends_episode(backend_and_gateway):
+    backend, fake = backend_and_gateway
+    fake.markerless_rounds = 10
+    fake.probe_results.append(_STOPPED_CONTAINER_EXEC)
+    with pytest.raises(SandboxLostError, match="is stopped"):
+        backend.run_command("echo doomed")
+
+
+def test_persistent_markerless_wait_with_removed_container_ends_episode(backend_and_gateway):
+    backend, fake = backend_and_gateway
+    fake.markerless_rounds = 3
+    fake.fail_posts_skip = 4  # launcher + 3 markerless waits go through; the liveness probe gets the 404
+    fake.fail_next_posts.append(_CONTAINER_NOT_FOUND_404)
+    with pytest.raises(SandboxLostError, match="is gone"):
         backend.run_command("echo doomed")
 
 
