@@ -1,7 +1,7 @@
 # Multi-node runs and named GPU judges
 
-The researcher launcher now compiles disaggregated runs into replicated Beaker
-tasks. Trainer GPU count, rollout GPU count and judge GPU count are independent.
+The researcher launcher now compiles disaggregated runs into coordinated Beaker
+tasks on distinct physical nodes. Trainer GPU count, rollout GPU count and judge GPU count are independent.
 The first exercise is intentionally two updates, not a learning run.
 
 ```bash
@@ -36,6 +36,12 @@ is already expressible with `inference.gpus`; engines must fit within a node and
 tensor parallelism must divide the node capacity. Multi-node colocation, separate
 evaluation GPU pools, cross-node serving TP and automatic coordinated restart
 remain unsupported. Set `launch.auto_resume=false` for multi-node/managed runs.
+
+At submission, the launcher snapshots the cluster inventory and partitions its
+hostnames into disjoint scheduling pools, one per task. This is necessary because
+Beaker replicas may share a physical node when each requests only part of a node.
+The receipt records the pools; the scheduler still chooses a host within each
+pool. Available hosts are spread across pools to reduce unnecessary queueing.
 
 Before Ray starts, replicas exchange addresses on WEKA and sort them numerically
 as MILES sorts placement bundles. Beaker replica zero is not assumed to own the
@@ -79,7 +85,8 @@ and publishes a heartbeat. Startup and heartbeat timeouts are configured in
 seconds through `launch.coordination.startup_timeout` (1200) and
 `heartbeat_timeout` (120). Peer failures propagate through shared records and
 Beaker's failure/preemption propagation. No Beaker API credential is necessary
-for the packed replica group. Normal completion uses a peer acknowledgement before
+for the packed replica group. Liveness uses SGLang's non-generating `/health` mode and three consecutive
+failures; actual grading requests retain their own hard deadlines. Normal completion uses a peer acknowledgement before
 tearing down Ray. Service failures stop training; no automatic reward-zero fallback.
 
 The driver checks model discovery and known-good versus known-bad answers through

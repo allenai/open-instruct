@@ -381,6 +381,8 @@ class RunSpec:
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
             raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         reserved = {
+            "OI_MILES_REPLICA_RANK",
+            "OI_MILES_REPLICA_COUNT",
             "OI_MILES_LAUNCH_ID",
             "OI_MILES_JUDGE_REGISTRY",
             "RAY_ADDRESS",

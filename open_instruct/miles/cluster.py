@@ -182,8 +182,8 @@ def run(path):
         raise RuntimeError(
             "This run directory already has a workflow; choose a new output.root before starting services"
         )
-    rank = int(os.environ.get("BEAKER_REPLICA_RANK", "0"))
-    count = int(os.environ.get("BEAKER_REPLICA_COUNT", "1"))
+    rank = int(os.environ.get("OI_MILES_REPLICA_RANK", os.environ.get("BEAKER_REPLICA_RANK", "0")))
+    count = int(os.environ.get("OI_MILES_REPLICA_COUNT", os.environ.get("BEAKER_REPLICA_COUNT", "1")))
     if count != layout["replicas"] or rank not in range(count):
         raise RuntimeError("Beaker replica topology differs from the submitted run")
     attempt = os.environ["OI_MILES_LAUNCH_ID"]

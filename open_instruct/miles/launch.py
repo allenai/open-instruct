@@ -1,6 +1,7 @@
 """Beaker submission and receipts for committed researcher run files."""
 
 import base64
+import copy
 import json
 import os
 import shlex
@@ -8,6 +9,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 
 from open_instruct.miles import topology, workflow
 from open_instruct.miles.errors import InputError
@@ -22,7 +24,29 @@ def receipt_path(spec):
     return directory / f"{spec.name}-{key}.json"
 
 
-def specification(image, spec):
+def cluster_hostnames(spec):
+    """Partition a live cluster inventory into disjoint scheduling pools.
+
+    Prefer spreading currently available nodes across pools. This is an inventory
+    snapshot, not a resource reservation; Beaker remains the scheduler.
+    """
+    response = json.loads(
+        subprocess.check_output(["beaker", "cluster", "get", spec.launch["cluster"], "--format", "json"], text=True)
+    )
+    cluster = response[0] if isinstance(response, list) else response
+    nodes = json.loads(subprocess.check_output(["beaker", "node", "list", "--format", "json"], text=True))
+    available = {
+        entry["nodeId"]: entry["slotCounts"].get("available", 0)
+        for entry in cluster.get("clusterOccupancy", {}).get("nodeOccupancies", [])
+    }
+    selected = [node for node in nodes if node.get("clusterId", node.get("cluster_id")) == cluster["id"]]
+    return [
+        node["hostname"]
+        for node in sorted(selected, key=lambda node: (-available.get(node["id"], 0), node["hostname"]))
+    ]
+
+
+def specification(image, spec, *, hostnames=None):
     config = spec.compile()
     layout = topology.plan(spec)
     allocated = layout["gpus_per_replica"]
@@ -84,7 +108,7 @@ def specification(image, spec):
         "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models",
         **spec.launch["env"],
     }
-    task = dict(
+    task: dict[str, Any] = dict(
         name=spec.name,
         image={"beaker": image},
         command=["bash", "-c"],
@@ -102,17 +126,28 @@ def specification(image, spec):
         envVars=[{"name": key, "value": value} for key, value in env.items() if key not in spec.launch["secrets"]]
         + [{"name": key, "secret": value} for key, value in spec.launch["secrets"].items()],
     )
+    tasks = [task]
     if layout["replicas"] > 1:
-        task.update(
-            replicas=layout["replicas"],
-            leaderSelection=True,
-            hostNetworking=True,
-            propagateFailure=True,
-            propagatePreemption=True,
-            synchronizedStartTimeout="20m",
-        )
+        hostnames = cluster_hostnames(spec) if hostnames is None else hostnames
+        if len(hostnames) < layout["replicas"] or len(set(hostnames)) != len(hostnames):
+            raise InputError("Multi-node launch requires enough distinct physical hostnames")
+        tasks = []
+        # Beaker replicas may share a node. Explicit tasks with disjoint hostname
+        # pools guarantee distinct physical nodes even for partial-node trials.
+        for rank in range(layout["replicas"]):
+            replica = copy.deepcopy(task)
+            replica["name"] += f"-replica-{rank}"
+            replica["constraints"]["hostname"] = hostnames[rank :: layout["replicas"]]
+            replica.update(hostNetworking=True, propagateFailure=True, propagatePreemption=True)
+            replica["envVars"].extend(
+                [
+                    {"name": "OI_MILES_REPLICA_RANK", "value": str(rank)},
+                    {"name": "OI_MILES_REPLICA_COUNT", "value": str(layout["replicas"])},
+                ]
+            )
+            tasks.append(replica)
     return dict(
-        version="v2", budget=spec.launch["budget"], description=f"MILES/Core researcher run: {spec.name}", tasks=[task]
+        version="v2", budget=spec.launch["budget"], description=f"MILES/Core researcher run: {spec.name}", tasks=tasks
     )
 
 
@@ -185,6 +220,15 @@ def submit(image, spec):
         revision=revision,
         spec_sha256=workflow.fingerprint(spec.to_dict()),
         spec=spec.to_dict(),
+        allocation=topology.plan(spec),
+        placements=[
+            {
+                "task": task["name"],
+                "hostnames": task["constraints"].get("hostname", []),
+                "gpus": task["resources"]["gpuCount"],
+            }
+            for task in document["tasks"]
+        ],
     )
     target = receipt_path(spec)
     if target.exists():

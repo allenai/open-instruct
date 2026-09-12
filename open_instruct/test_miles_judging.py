@@ -72,11 +72,18 @@ def test_numeric_node_order_and_disjoint_devices(document):
 
 
 def test_task_replication_and_secret_free_ownership(document):
-    task = launch.specification("image", RunSpec.from_dict(document))["tasks"][0]
-    assert task["replicas"] == 2 and task["resources"]["gpuCount"] == 8
-    assert all(task[key] for key in ("leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption"))
-    assert "open_instruct.miles.cluster" in task["arguments"][0]
-    assert not any("BEAKER_TOKEN" in v["name"] for v in task["envVars"])
+    tasks = launch.specification("image", RunSpec.from_dict(document), hostnames=["host-a", "host-b", "host-c"])[
+        "tasks"
+    ]
+    assert len(tasks) == 2
+    assert tasks[0]["constraints"]["hostname"] == ["host-a", "host-c"]
+    assert tasks[1]["constraints"]["hostname"] == ["host-b"]
+    for rank, task in enumerate(tasks):
+        assert task["resources"]["gpuCount"] == 8
+        assert all(task[key] for key in ("hostNetworking", "propagateFailure", "propagatePreemption"))
+        assert "open_instruct.miles.cluster" in task["arguments"][0]
+        assert {"name": "OI_MILES_REPLICA_RANK", "value": str(rank)} in task["envVars"]
+        assert not any("BEAKER_TOKEN" in v["name"] for v in task["envVars"])
 
 
 def test_wrong_ray_node_gpu_layout_fails():
@@ -245,6 +252,7 @@ def test_cpu_judge_stages_always_use_saturn(document, stage):
     task = module.specification("image", RunSpec.from_dict(document), stage)["tasks"][0]
     assert task["constraints"]["cluster"] == ["ai2/saturn"]
     assert "gpuCount" not in task["resources"] and "replicas" not in task
+    assert "hostname" not in task["constraints"]
     assert "preflight_attention" not in task["arguments"][0]
     subprocess.run(["bash", "-n"], input=task["arguments"][0], text=True, check=True)
 
