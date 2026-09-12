@@ -67,10 +67,23 @@ case "$MODE" in
         TRAIN_IMAGE="${TRAIN_IMAGE:-$(beaker account whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["name"])')/open-instruct-integration-test-pd-kda-moe-continued-sft-cuda13}"
         CONFIG="${CONFIG:-scripts/train/debug/kda_lc_sft.json}"
         TOKENIZER="${TOKENIZER:-allenai/dolma2-tokenizer-olmo35}"
+        # The export embeds the tokenizer and its chat template, which vLLM then serves with. The
+        # tokenizer repo's template is edited upstream, so pin the revision the checkpoint was
+        # trained with (the same default as the training launcher): the job downloads that
+        # snapshot to Weka and hands the converter the directory, since the converter itself
+        # takes no revision. A TOKENIZER that is already a local path is used as is.
+        TOKENIZER_REVISION="${TOKENIZER_REVISION:-56415cee534a924b0b777d70a888266f4eef65ec}"
+        if [[ "$TOKENIZER" == /* ]]; then
+            TOKENIZER_PREP=""
+            TOKENIZER_ARG="$TOKENIZER"
+        else
+            TOKENIZER_ARG="/weka/oe-adapt-default/$(beaker account whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["name"])')/tokenizers/$(basename "$TOKENIZER")-${TOKENIZER_REVISION:0:8}"
+            TOKENIZER_PREP="uv run hf download $TOKENIZER --revision $TOKENIZER_REVISION --local-dir $TOKENIZER_ARG && "
+        fi
         MAX_SEQ="${MAX_SEQ:-65536}"
         CONVERT_CLUSTERS="${CONVERT_CLUSTERS:-ai2/saturn ai2/neptune ai2/ceres}"
         WORKSPACE="${WORKSPACE:-$(workspace_for "$CONVERT_CLUSTERS")}"
-        echo "convert $DCP -> $HF_OUT (image $TRAIN_IMAGE, tokenizer $TOKENIZER, workspace $WORKSPACE)"
+        echo "convert $DCP -> $HF_OUT (image $TRAIN_IMAGE, tokenizer $TOKENIZER @ ${TOKENIZER_REVISION:0:8} -> $TOKENIZER_ARG, workspace $WORKSPACE)"
         # shellcheck disable=SC2086
         $PY mason.py \
             --cluster $CONVERT_CLUSTERS \
@@ -79,8 +92,7 @@ case "$MODE" in
             --description "Convert $(basename "$(dirname "$DCP")")/$(basename "$DCP") to HF (OLMoE3 KDA)" \
             --timeout "${JOB_TIMEOUT:-4h}" \
             --num_nodes 1 --gpus 0 --non_resumable --no_auto_dataset_cache \
-            -- uv run python scripts/train/debug/convert_moe_checkpoint_to_hf.py \
-            -i "$DCP" -o "$HF_OUT" -c "$CONFIG" -t "$TOKENIZER" -s "$MAX_SEQ" --skip-validation --device cpu
+            -- "${TOKENIZER_PREP}uv run python scripts/train/debug/convert_moe_checkpoint_to_hf.py -i $DCP -o $HF_OUT -c $CONFIG -t $TOKENIZER_ARG -s $MAX_SEQ --skip-validation --device cpu"
         ;;
     eval)
         HF_DIR="${1:?eval needs <hf_dir>}"
