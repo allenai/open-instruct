@@ -139,5 +139,19 @@ The fresh `-r3` output root reuses the immutable prepared six-task dataset. It
 retains the two-update, two-node 2+1+1 topology, async/TIS/replay and equality
 checks. It enables the primary profiles' already-qualified fused expert
 publication and 2 GiB weight buckets. This exercises the integrated optimized
-runtime, so its timing is not an isolated router-only A/B comparison. GPU and
-retained-sample audit results are pending submission/completion.
+runtime, so its timing is not an isolated router-only A/B comparison. The native-backport exercise is submitted as
+[01M29ZPW6Z04D27MFTGMGB7GGD](https://beaker.org/ex/01M29ZPW6Z04D27MFTGMGB7GGD),
+source `aff77a6bd9a9854bf37b83d2e4df62dea5cd008b`, image
+`01M29ZPAFZDZZYZ45GEMARYZJK`. Both replicas allocated distinct Holmes nodes.
+The [frozen receipt](miles-multinode-judges-20260912/native-router-launch.json)
+records the complete configuration and placement pools. The exact built image,
+without source mounts, also passed the
+[34 regression tests](miles-multinode-judges-20260912/native-router-tests.txt).
+`make style`, `make quality`, and 147 focused host tests passed.
+
+GPU and retained-sample audit results are pending. A local continuation monitor
+waits for both GPU replicas to exit zero, then launches the existing strict audit
+on Saturn through the build wrapper using the same immutable image. It records
+state at `/tmp/multinode-r3-monitor.json`; the launch checkout is frozen at
+`/tmp/oi-multinode-native-launch`. Do not remove that checkout while the monitor
+is active. The earlier `-r2` wrapper run has its own independent monitor.

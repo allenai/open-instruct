@@ -1,0 +1,57 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+cachedir: /tmp/pytest-cache
+rootdir: /opt/core-rl/sources/miles
+configfile: pyproject.toml
+plugins: anyio-4.14.2, asyncio-1.4.0, typeguard-4.6.0, hypothesis-6.168.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 34 items
+
+sources/miles/tests/fast/router/test_router.py .............             [ 38%]
+sources/miles/tests/fast/router/test_router_lifecycle.py .....           [ 52%]
+sources/miles/tests/fast/ray/rollout/test_router_manager.py ...........  [ 85%]
+sources/miles .....                                                      [100%]
+
+=============================== warnings summary ===============================
+../../usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================== slowest durations ===============================
+3.53s setup    tests/fast/router/test_router.py::TestHealthCheck::test_check_worker_health_success
+0.63s call     tests/fast/router/test_router_lifecycle.py::test_busy_generation_cannot_starve_health_and_shutdown_joins_probe
+0.49s teardown tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_multi_worker
+0.39s teardown tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_forwards_request
+0.39s teardown tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_health_endpoint
+0.23s setup    tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_health_endpoint
+0.22s setup    tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_forwards_request
+0.22s call     tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_multi_worker
+0.20s teardown tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_duplicate
+0.20s teardown tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_via_body
+0.20s teardown tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_missing_url
+0.20s teardown tests/fast/router/test_router.py::TestWorkerManagement::test_list_workers
+0.18s teardown tests/fast/router/test_router.py::TestHealthCheck::test_check_worker_health_success
+0.13s setup    tests/fast/router/test_router.py::TestWorkerManagement::test_list_workers
+0.12s setup    tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_multi_worker
+0.12s setup    tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_missing_url
+0.12s setup    tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_via_query_param
+0.12s setup    tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_duplicate
+0.12s setup    tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_via_body
+0.12s teardown tests/fast/router/test_router.py::TestWorkerManagement::test_add_worker_via_query_param
+0.04s call     tests/fast/router/test_router_lifecycle.py::test_late_probe_cannot_quarantine_replacement_and_failure_stays_quarantined
+0.02s call     ::test_pending_prompt_cursor_regenerates_without_skipping_or_reusing_output
+0.02s call     tests/fast/router/test_router_lifecycle.py::test_retired_worker_has_503_until_explicit_registration
+0.02s call     tests/fast/router/test_router_lifecycle.py::test_engine_transport_failure_is_retryable_and_releases_counter
+0.02s call     tests/fast/router/test_router.py::TestLoadBalancing::test_use_url_selects_min_load
+0.02s call     tests/fast/router/test_router.py::TestHealthCheck::test_check_worker_health_failure
+0.02s call     tests/fast/router/test_router_lifecycle.py::test_cancelled_request_body_releases_counter
+0.02s call     tests/fast/router/test_router.py::TestLoadBalancing::test_use_url_excludes_dead_workers
+0.02s call     tests/fast/router/test_router.py::TestLoadBalancing::test_use_url_raises_when_all_dead
+0.02s call     tests/fast/router/test_router.py::TestHealthCheck::test_check_worker_health_success
+0.01s call     ::test_interrupted_cursor_write_preserves_committed_file
+0.01s call     tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_forwards_request
+0.01s call     tests/fast/router/test_router.py::TestProxyIntegration::test_proxy_health_endpoint
+
+(69 durations < 0.005s hidden.  Use -vv to show these durations.)
+======================= 34 passed, 14 warnings in 8.55s ========================
