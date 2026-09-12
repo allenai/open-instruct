@@ -92,9 +92,10 @@ async def train(args, *, export_hf=None):
             if sentinel or should_run_periodic_action(
                 rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout
             ):
-                await manager.save.remote(rollout_id)
-                await learner.save_model(rollout_id, force_sync=True)
-                await learner.finalize_checkpoint(rollout_id)
+                with stage(args, "checkpoint", rollout_id):
+                    await manager.save.remote(rollout_id)
+                    await learner.save_model(rollout_id, force_sync=True)
+                    await learner.finalize_checkpoint(rollout_id)
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
             if (rollout_id + 1) % args.update_weights_interval == 0:
