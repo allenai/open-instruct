@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.miles import stage_olmo3
+from scripts.miles import launch_olmo3_preparation, stage_olmo3
 
 from open_instruct.miles import topology
 from open_instruct.miles.errors import InputError
@@ -55,3 +55,14 @@ def test_staging_preserves_snapshot_and_pins_original_prompt(tmp_path):
     assert json.loads((target / "tokenizer_config.json").read_text())["chat_template"] == template
     with pytest.raises(InputError, match="already exists"):
         stage_olmo3.stage(source, target)
+
+
+def test_checkpoint_preparation_is_cpu_only_on_saturn():
+    spec = RunSpec.load(ROOT / "configs/miles/qualification/olmo3-think-gsm8k-robertb-20260912.toml")
+    task = launch_olmo3_preparation.specification("test-image", spec)["tasks"][0]
+    assert task["constraints"] == {"cluster": ["ai2/saturn"]}
+    assert "gpuCount" not in task["resources"]
+    assert not task["context"]["autoResume"]
+    assert "preflight_attention" not in task["arguments"][0]
+    assert "scripts.miles.prepare_olmo3_checkpoint" in task["arguments"][0]
+    assert "open_instruct.miles train" not in task["arguments"][0]
