@@ -43,10 +43,19 @@ def prepare(spec, *, train_per_domain, eval_per_domain):
                 buckets[name].append(row)
                 seen.add(row["input"])
         short = {name: len(buckets[name]) for name in DOMAINS if len(buckets[name]) < quotas[split]}
-        if short:
-            raise ValueError(f"Insufficient {split} coverage: {short}")
+        if split == "train" and short:
+            raise ValueError(f"Insufficient train coverage: {short}")
+        if any(not buckets[name] for name in DOMAINS):
+            raise ValueError(f"A domain has no {split} rows: { {n: len(buckets[n]) for n in DOMAINS} }")
+        # The baseline manifest holds out only 16 identities per domain; take what exists.
         # Interleave domains so every collection of consecutive prompts is mixed.
-        selected[split] = [row for group in zip(*(buckets[name] for name in DOMAINS), strict=True) for row in group]
+        selected[split] = [
+            row
+            for index in range(max(len(buckets[name]) for name in DOMAINS))
+            for name in DOMAINS
+            if index < len(buckets[name])
+            for row in [buckets[name][index]]
+        ]
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
     for name in ("code", "code_stdio"):
         registry[name] = {
