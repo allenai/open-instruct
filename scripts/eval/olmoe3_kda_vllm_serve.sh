@@ -66,6 +66,10 @@ olmoe3_vllm_defaults() {
         if [ -x /opt/conda/bin/ptxas ]; then export TRITON_PTXAS_PATH=/opt/conda/bin/ptxas; else unset TRITON_PTXAS_PATH; fi
     fi
     export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    # vLLM gives its engine cores 600 s to come up by default; loading 35 GB of weights from
+    # Weka under contention has exceeded that (TBLite job 01M29RXQEJQXJ7PJYQJTNGHM3P). Give
+    # the cores the same budget as our own readiness wait.
+    export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-$SERVER_TIMEOUT_S}"
     export PORT SERVED_MODEL_NAME
     export OPENAI_BASE_URL="http://127.0.0.1:$PORT/v1"
 
