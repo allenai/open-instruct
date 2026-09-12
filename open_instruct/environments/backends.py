@@ -811,9 +811,22 @@ _WORK_DIR = "/tmp/.swerl_gateway"
 class GatewayBackendError(RuntimeError):
     """A gateway request failed or returned an invalid response."""
 
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(self, message: str, status_code: int | None = None, body: str = ""):
         super().__init__(message)
         self.status_code = status_code
+        self.body = body
+
+
+class SandboxLostError(SandboxOOMError):
+    """The sandbox container was killed or stopped mid-episode and cannot be recovered.
+
+    Raised by :class:`GatewayBackend` when the replica reports the session
+    container gone (removed by its resource watchdog / OOM reaper, or stopped
+    because its init process died). Subclasses :class:`SandboxOOMError` so
+    environments end the episode (reward 0, done=True) exactly like a
+    DockerBackend OOM kill, instead of silently continuing in a fresh, empty
+    container.
+    """
 
 
 class GatewaySessionLostError(GatewayBackendError):
@@ -837,6 +850,15 @@ class GatewayBackend(SandboxBackend):
     # session is treated as lost and re-handshaken instead of retried.
     _OWNER_LOST_MARKERS = ("no longer registered", "server is unavailable")
     _OWNER_LOST_ATTEMPTS = 3
+    # The replica removed the session container itself (resource watchdog /
+    # OOM reaper / idle janitor) while the gateway binding still existed.
+    # Unlike an expired binding or a dead replica, this is the sandbox dying
+    # under the agent's own commands, so it ends the episode (SandboxLostError)
+    # instead of re-handshaking into a fresh, empty container.
+    _CONTAINER_REMOVED_MARKER = "container_not_found"
+    # `podman exec` on a container whose init process died (agent killed PID 1,
+    # or the OOM killer took it): the container is stopped but not removed.
+    _CONTAINER_STOPPED_MARKERS = ("container state improper", "can only create exec sessions on running containers")
     _TIMING_LOGS = _env_flag("SWERL_SANDBOX_TIMING_LOGS", False)
     _TIMING_LOG_THRESHOLD_S = _env_float("SWERL_SANDBOX_TIMING_LOG_THRESHOLD_S", 1.0)
 
@@ -932,12 +954,15 @@ class GatewayBackend(SandboxBackend):
                     raise GatewaySessionLostError(
                         f"Gateway affinity session lost ({endpoint}): {response.text[:500]}",
                         status_code=response.status_code,
+                        body=response.text,
                     )
                 if response.status_code == 503 and any(m in response.text for m in self._OWNER_LOST_MARKERS):
                     owner_lost_answers += 1
                     if owner_lost_answers >= self._OWNER_LOST_ATTEMPTS:
                         raise GatewaySessionLostError(
-                            f"Gateway affinity owner gone ({endpoint}): {response.text[:500]}", status_code=503
+                            f"Gateway affinity owner gone ({endpoint}): {response.text[:500]}",
+                            status_code=503,
+                            body=response.text,
                         )
                 if response.status_code in (500, 502, 503, 504, 408):
                     last_error = GatewayBackendError(
@@ -1069,8 +1094,17 @@ class GatewayBackend(SandboxBackend):
             try:
                 result = self._run_command_once(command, effective_timeout)
             except GatewaySessionLostError as e:
-                # Mirrors DockerBackend's restart-and-retry-once semantics when
-                # the container disappears mid-episode.
+                if self._CONTAINER_REMOVED_MARKER in e.body:
+                    # The replica reaped the container (memory/pids budget or
+                    # idle janitor) between commands: same terminal condition
+                    # as DockerBackend's OOM kill.
+                    raise SandboxLostError(
+                        f"Sandbox container {(self._affinity_id or '?')[:12]} (image={self._image}) was removed "
+                        f"by its replica: {e.body[:300]}. Aborting episode."
+                    ) from e
+                # Binding expired / replica died: mirrors DockerBackend's
+                # restart-and-retry-once semantics when the container
+                # disappears mid-episode.
                 logger.warning(
                     "Gateway container disappeared before exec (%s). Restarting and retrying command once.", e
                 )
@@ -1114,6 +1148,7 @@ class GatewayBackend(SandboxBackend):
         )
         launch = self._exec(launcher, stdin=command, exec_timeout=30.0)
         if "LAUNCHED" not in launch.get("stdout", ""):
+            self._raise_if_container_stopped(launch)
             raise GatewayBackendError(
                 f"Gateway command launcher failed (exit={launch.get('exit_code')}): {launch.get('stderr', '')[:500]}"
             )
@@ -1130,14 +1165,33 @@ class GatewayBackend(SandboxBackend):
         # detached launcher and filesystem latency.
         deadline = time.monotonic() + effective_timeout + 60.0
         markerless_waits = 0
+        saw_sigkill = False
         while True:
-            response = self._exec(waiter, exec_timeout=_WAIT_EXEC_TIMEOUT_S, workdir="/")
+            try:
+                response = self._exec(waiter, exec_timeout=_WAIT_EXEC_TIMEOUT_S, workdir="/")
+            except GatewaySessionLostError as e:
+                if saw_sigkill or self._CONTAINER_REMOVED_MARKER in e.body:
+                    # The wait exec was SIGKILLed and/or the replica reports
+                    # the container gone: the resource watchdog reaped the
+                    # session under this command.
+                    raise SandboxLostError(
+                        f"Sandbox container {(self._affinity_id or '?')[:12]} (image={self._image}) was killed "
+                        f"while running a command (sigkill_seen={saw_sigkill}): {e.body[:300]}. Aborting episode."
+                    ) from e
+                raise
             stdout = response.get("stdout", "")
             if _DONE_MARKER in stdout:
                 break
             if _PENDING_MARKER not in stdout:
                 markerless_waits += 1
+                if response.get("exit_code") == 137:
+                    saw_sigkill = True
+                self._raise_if_container_stopped(response)
                 if markerless_waits >= _MAX_MARKERLESS_WAITS:
+                    # Repeated markerless waits are either a container being
+                    # torn down or a very slow replica; a trivial exec tells
+                    # them apart before this becomes a plain tool error.
+                    self._probe_container_alive()
                     raise GatewayBackendError(
                         f"Gateway wait exec returned no marker {markerless_waits}x in a row "
                         f"(exit={response.get('exit_code')}): "
@@ -1166,6 +1220,26 @@ class GatewayBackend(SandboxBackend):
         if exit_code == 124:
             stderr = f"Command timed out after {effective_timeout}s.\n" + stderr
         return ExecutionResult(stdout=out, stderr=stderr, exit_code=exit_code)
+
+    def _raise_if_container_stopped(self, response: dict) -> None:
+        """Map a replica exec failure on a stopped container to SandboxLostError."""
+        stderr = response.get("stderr", "") or ""
+        if any(marker in stderr for marker in self._CONTAINER_STOPPED_MARKERS):
+            raise SandboxLostError(
+                f"Sandbox container {(self._affinity_id or '?')[:12]} (image={self._image}) is stopped "
+                f"(its init process died): {stderr[:300]}. Aborting episode."
+            )
+
+    def _probe_container_alive(self) -> None:
+        """Run a trivial exec; raise SandboxLostError if the container is gone or stopped."""
+        try:
+            probe = self._exec("true", exec_timeout=15.0)
+        except GatewaySessionLostError as e:
+            raise SandboxLostError(
+                f"Sandbox container {(self._affinity_id or '?')[:12]} (image={self._image}) is gone: "
+                f"{e.body[:300]}. Aborting episode."
+            ) from e
+        self._raise_if_container_stopped(probe)
 
     def _cleanup_job_dir(self, quoted_dir: str) -> None:
         """Best-effort removal of a finished command's scratch dir.
