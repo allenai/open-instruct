@@ -15,8 +15,7 @@ scoring pass with a check every 20 updates, shared compiler cache root.
 | 1 | [01M2A9FYT22G9WC95EMMRKD1DJ](https://beaker.org/ex/01M2A9FYT22G9WC95EMMRKD1DJ) | `016318180` | 13 updates, then `TimeoutError` at the 13th publication boundary; both replicas exit 1/143. |
 | r2 | [01M2AEF27DB9TZXXSXHDA41AM3](https://beaker.org/ex/01M2AEF27DB9TZXXSXHDA41AM3) | `c91e63716` | **100 updates, four checkpoints, final HF export, exit 0 on both replicas.** [W&B](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/77seq45c) |
 
-Evidence: [r2 driver timings](../../measurements/miles-two-node-async-gsm8k-20260912/r2-driver_timing.jsonl),
-[r2 publication records](../../measurements/miles-two-node-async-gsm8k-20260912/r2-publication.jsonl),
+Evidence: [r2 summary](two-node-async-gsm8k-20260912/r2-summary.json),
 [r2 workflow state](two-node-async-gsm8k-20260912/r2-workflow.json), and the
 per-step summaries produced by `scripts/miles/analyze_async_run.py` from the Beaker
 logs ([attempt 1](two-node-async-gsm8k-20260912/attempt1-summary.json),
@@ -139,3 +138,6 @@ Not established: an eval of the update-25/50/75 native checkpoints (they need HF
 `auto_resume=false`; a manual relaunch against the saved root is the test), learning
 quality, the root cause of the one 30 s producer join stall, and a second-run compiler
 cache hit at this shape.
+
+The full r2 driver-timing and publication JSONL files were retained as local/runtime
+artifacts, not versioned files; use the committed summary and the run artifacts.
