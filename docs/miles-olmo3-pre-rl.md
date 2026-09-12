@@ -25,12 +25,18 @@ our selected training subset of the RLVR source's **train split**, not the
 official GSM8K test set. Row identities and preparation hashes are retained in
 [the rebase/preflight record](measurements/miles-olmo3-rebase-20260912.json).
 
-We can proceed to the two-update 7B qualification config. Before submission,
-stage or verify the pinned weight snapshot on WEKA, replace the config's path
-placeholders, and build the image from this branch. No full-model weights were
-downloaded by the tokenizer/data preflight, and no Beaker run has been launched.
-The first 7B run remains a memory, long-context, distributed update and checkpoint
-qualification, before collecting learning curves.
+The full checkpoint is now staged on WEKA: three shards, 14,596,063,712 bytes,
+with pinned revision and the original RL template. The Saturn preparation job
+[passed](https://beaker.org/ex/01M2A1Z8HQTKHM500H9SNE20Q1), including all 160
+reward canaries. The concrete
+[qualification config](../configs/miles/qualification/olmo3-think-gsm8k-robertb-20260912.toml)
+was submitted to [Beaker](https://beaker.org/ex/01M2A28EYHS4BYYK5TPDJTQNPT):
+Holmes, urgent, minimum runtime one hour, two Core GPUs and one SGLang GPU,
+two updates, initial/final held-out evaluation, native saves and final HF export.
+Its immutable image is `01M2A1Z1FVWZ4WB1ET7RDSJ5P6`, built from `311840575caf`.
+This is still a qualification run, not a completed learning comparison. See
+[the launch and preparation record](measurements/miles-olmo3-gsm8k-20260912.json)
+for source paths and resolved settings.
 
 ## Implementation
 
