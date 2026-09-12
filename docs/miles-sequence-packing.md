@@ -1,7 +1,8 @@
 # Sequence packing in the Core trainer
 
 Experimental feature branch `robertb/miles-sequence-packing`, based on project
-primary `016318180`. GPU qualification is pending. The primary branch's defaults
+primary `016318180`. The small GPU numerical gate passed; live async qualification
+is in progress. The primary branch's defaults
 have not been changed by this branch.
 
 ```toml
@@ -48,7 +49,10 @@ tokens, maximum pack size and fill fraction. W&B step metrics include pack count
 samples/tokens per pack and rank-zero peak allocated memory. Compare warmed
 trainer time and memory on identical samples; raw two-step wall time includes
 cold compilation and startup. EP8 throughput and larger pack budgets require
-separate measurement after the small gate.
+separate measurement after the small gate. Packing reduces the number of forwards
+and can improve kernel utilization; the existing unpadded path already processes
+only real tokens. It does not eliminate variable expert row counts or replace
+the dynamic-row SwiGLU specialization fix.
 
 ## Validation
 
@@ -70,3 +74,11 @@ on/off, fixed replay, document-isolation perturbations, two updates (checked the
 skipped scoring), policy-only gradient/Adam comparisons and the combined
 objective. Per-rank reports and contracts are retained even on failure. This is
 followed by a small real SGLang/Core async exercise once the numerical gate passes.
+
+
+Numerical results and run identities are recorded in
+[the measurement notes](measurements/miles-sequence-packing-20260912/README.md).
+The small real-model follow-up is configured in
+`configs/miles/qualification/sequence-packing.toml`: EP2 plus one TP1 SGLang engine,
+three async updates, 8 prompts × 2 responses, replay/recomputation, and a 4096-token
+pack budget. This tests plumbing, not GSM8K learning with its short generation cap.

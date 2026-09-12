@@ -1,0 +1,320 @@
+{
+  "ep1-pack0-aux0-ac0/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 56,
+      "score_timing": 1,
+      "scores": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 16,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep1-pack0-aux0-ac1/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 56,
+      "score_timing": 1,
+      "scores": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 16,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep1-pack1-aux0-ac0/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 29,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 16,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep1-pack1-aux0-ac1/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 29,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 16,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep1-pack1-aux1-ac0/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 29,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 16,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep1-pack1-aux1-ac1/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 29,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 16,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack0-aux0-ac0/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 28,
+      "score_timing": 1,
+      "scores": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack0-aux0-ac0/training_contract_rank1.jsonl": {
+    "event_counts": {
+      "replay_routes": 28,
+      "score_timing": 1,
+      "scores": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack0-aux0-ac1/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 28,
+      "score_timing": 1,
+      "scores": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack0-aux0-ac1/training_contract_rank1.jsonl": {
+    "event_counts": {
+      "replay_routes": 28,
+      "score_timing": 1,
+      "scores": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux0-ac0/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux0-ac0/training_contract_rank1.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux0-ac1/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux0-ac1/training_contract_rank1.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux1-ac0/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux1-ac0/training_contract_rank1.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 1,
+    "minimum_training_grad_enabled": 1,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux1-ac1/training_contract_rank0.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  },
+  "ep2-pack1-aux1-ac1/training_contract_rank1.jsonl": {
+    "event_counts": {
+      "replay_routes": 18,
+      "score_timing": 1,
+      "scores": 2,
+      "packing": 2,
+      "scoring_check": 1,
+      "optimizer": 2
+    },
+    "replay_mismatches": 0,
+    "training_replay_samples": 8,
+    "minimum_training_layer_entries": 2,
+    "minimum_training_grad_enabled": 2,
+    "scoring_modes": [
+      "checked",
+      "skipped"
+    ]
+  }
+}

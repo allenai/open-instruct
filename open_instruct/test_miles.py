@@ -43,6 +43,14 @@ def test_config_rejects_unimplemented_or_ambiguous_behavior(change):
         RunConfig(CoreConfig(), {"hf_checkpoint": "model", "global_batch_size": 8, **change}).arguments()
 
 
+@pytest.mark.parametrize("prompt_limit", [1536, 2048])
+def test_prompt_limit_leaves_room_for_a_response(prompt_limit):
+    options = dict(hf_checkpoint="model", global_batch_size=8, rollout_max_context_len=1536)
+    RunConfig(CoreConfig(), {**options, "rollout_max_prompt_len": 1024}).validate()
+    with pytest.raises(ValueError, match="must be smaller"):
+        RunConfig(CoreConfig(), {**options, "rollout_max_prompt_len": prompt_limit}).validate()
+
+
 def test_clock_counts_optimizer_steps_and_republication():
     clock = PolicyClock()
     clock.published()

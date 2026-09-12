@@ -1,14 +1,14 @@
 # Three-GPU live async packing exercise: EP2 trainers + TP1 SGLang, three updates.
 # Uses the full-SFT KDA checkpoint, 16 responses/update and short generation caps.
 schema_version = 1
-name = "sequence-packing-smoke-20260912"
+name = "sequence-packing-smoke-20260912-r2"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/sequence-packing-smoke-20260912"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/sequence-packing-smoke-20260912-r2"
 export_hf = false
 
 [launch]
@@ -111,7 +111,7 @@ use_rollout_routing_replay = true
 use_miles_router = true
 rollout_temperature = 1.0
 rollout_seed = 17
-rollout_max_prompt_len = 2048
+rollout_max_prompt_len = 1024
 seed = 17
 disable_grpo_std_normalization = true
 

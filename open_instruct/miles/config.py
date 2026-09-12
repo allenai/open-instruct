@@ -222,6 +222,10 @@ class RunConfig:
                 raise InputError("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = cli_options.normalize_options(self.miles)
         validation.runtime_values(options)
+        prompt_limit = options.get("rollout_max_prompt_len")
+        context_limit = options.get("rollout_max_context_len")
+        if prompt_limit is not None and context_limit is not None and prompt_limit >= context_limit:
+            raise InputError("rollout_max_prompt_len must be smaller than rollout_max_context_len")
         for name, expected in {
             "optimizer": "adam",
             "fp16": False,
