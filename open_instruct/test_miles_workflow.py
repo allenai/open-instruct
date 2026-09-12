@@ -19,6 +19,7 @@ class Spec:
         self.output = {"root": str(root), "export_hf": True, "hf_dir": str(root / "export")}
         self.launch = {"auto_resume": True}
         self.data = {"tasks": [{"task": "multiplication", "train_count": 1}]}
+        self.judges = {"judging": {"bindings": {}}}
 
     def to_dict(self):
         return {key: getattr(self, key) for key in ("model", "conversion", "output", "launch", "data")}

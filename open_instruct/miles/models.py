@@ -128,3 +128,10 @@ def replay_context(module, batch, *, enabled):
     if not enabled:
         return nullcontext()
     return _module_backend(module).replay_context(module, batch)
+
+
+def save_hf_config(hf, path):
+    if hf.model_type == "olmo3":
+        _backend("standard").save_hf_config(hf, path)
+    else:
+        hf.save_pretrained(path)

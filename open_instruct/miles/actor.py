@@ -593,7 +593,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         if dist.get_rank() == 0:
             target = Path(path)
             target.mkdir(parents=True, exist_ok=False)
-            self.hf_config.save_pretrained(target)
+            models.save_hf_config(self.hf_config, target)
             AutoTokenizer.from_pretrained(self.args.hf_checkpoint).save_pretrained(target)
             safetensors_torch.save_file(
                 {name: value.detach().cpu().contiguous().clone() for name, value in state.items()},
