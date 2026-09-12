@@ -93,6 +93,33 @@ Strings require TOML quotes inside shell quotes. There is no implicit environmen
 variable substitution. If structured names and native escape-hatch names
 address the same resolved option, different values are rejected rather than silently choosing a winner.
 
+## Input errors and debugging
+
+`plan` checks field names, scalar types, common numeric ranges and batch/GPU
+geometry on CPU. The same checks run before `run` builds an image. Unknown
+fields suggest a nearby spelling where possible; structured aliases retain
+context such as `optimizer.learning_rate` when reporting a native-option error.
+Booleans must be unquoted `true`/`false`, counts must be integers, and numeric
+controls must be finite. Zero-temperature evaluation and zero auxiliary-loss
+coefficients remain valid.
+
+Expected input failures print an actionable error and exit with status 2.
+Malformed JSONL reports the source file and line; invalid prepared rows report
+the partition and row. These file checks happen during preparation, where the
+mounted data and tokenizer are available. Paths are not required to exist on
+the submitting host.
+
+Use `--debug` on any command to include the traceback for an input error:
+
+```bash
+python -m open_instruct.miles validate run.toml --debug
+```
+
+Unexpected runtime failures still retain their tracebacks by default. Python
+callers can catch `open_instruct.miles.errors.InputError`, a `ValueError`
+subclass. These checks do not replace the pinned runtime's full validation or
+prove that a model fits the selected GPUs.
+
 ## Configuration sections
 
 | Section | What belongs here |

@@ -11,6 +11,9 @@ import math
 from functools import lru_cache
 from pathlib import Path
 
+from open_instruct.miles import validation
+from open_instruct.miles.errors import InputError
+
 
 def describe_parser(parser):
     records = []
@@ -64,18 +67,18 @@ def option_index():
 
 def resolve_option(name, value):
     index = option_index()
+    if not isinstance(name, str):
+        raise InputError("MILES option names must be strings; use underscores, for example global_batch_size.")
     if name not in index:
         close = difflib.get_close_matches(name, index, n=1)
         hint = f"; did you mean {close[0]}?" if close else ""
-        raise ValueError(f"Unknown MILES option: {name}{hint}")
+        raise InputError(f"Unknown MILES option: {name}{hint}")
     record = index[name]
     if record["kind"] == "alias_const":
-        if type(value) is not bool:
-            raise ValueError(f"miles.{name} must be a boolean")
+        validation.boolean(value, f"miles.{name}")
         value = record["const"] if value else None
     elif record["kind"] in ("boolean", "switch"):
-        if type(value) is not bool:
-            raise ValueError(f"miles.{name} must be a boolean")
+        validation.boolean(value, f"miles.{name}")
         if name != record["dest"]:
             flag = "--" + name.replace("_", "-")
             positive = not flag.startswith("--no-") if record["kind"] == "boolean" else record["const"]
@@ -84,13 +87,14 @@ def resolve_option(name, value):
 
 
 def normalize_options(options):
+    validation.mapping(options, "[miles]")
     result = {}
     seen = set()
     for name, value in options.items():
         record, value = resolve_option(name, value)
         dest = record["dest"]
         if dest in seen:
-            raise ValueError(f"Multiple spellings supplied for miles.{dest}; use one option name")
+            raise InputError(f"Multiple spellings supplied for miles.{dest}; use one option name")
         seen.add(dest)
         if record["kind"] != "alias_const" or value is not None:
             result[dest] = value
@@ -107,9 +111,9 @@ def _scalar(record, value):
     elif kind in ("str", "nullable_str"):
         valid = isinstance(value, str)
     if not valid or (isinstance(value, float) and not math.isfinite(value)):
-        raise ValueError(f"miles.{record['dest']} expects {kind or 'a scalar'}, got {value!r}")
+        raise InputError(f"miles.{record['dest']} expects {kind or 'a scalar'}, got {value!r}")
     if "choices" in record and value not in record["choices"]:
-        raise ValueError(f"miles.{record['dest']} must be one of {record['choices']}")
+        raise InputError(f"miles.{record['dest']} must be one of {record['choices']}")
     return str(value)
 
 
@@ -120,33 +124,41 @@ def encode_options(options):
         flag = record["flags"][0]
         kind = record["kind"]
         if kind == "unsupported":
-            raise ValueError(f"miles.{name} uses a custom/deprecated parser action; use its current native option")
+            raise InputError(f"miles.{name} uses a custom/deprecated parser action; use its current native option")
         if kind == "boolean":
             result.append(flag if value else next(f for f in record["flags"] if f.startswith("--no-")))
         elif kind == "switch":
             if value == record["const"]:
                 result.append(flag)
             elif value != record["default"]:
-                raise ValueError(f"miles.{name} cannot represent {value} with the pinned parser")
+                raise InputError(f"miles.{name} cannot represent {value} with the pinned parser")
         elif record["type"] in ("loads", "json_list_type", "parse_cuda_graph_config_arg") or (
-            name.endswith("json_model_override_args") and isinstance(value, dict)
+            name.endswith("json_model_override_args")
         ):
             # Both native JSON strings and structured TOML values are accepted.
-            parsed = json.loads(value) if isinstance(value, str) else value
+            try:
+                parsed = json.loads(value) if isinstance(value, str) else value
+                encoded = json.dumps(parsed, allow_nan=False, separators=(",", ":"))
+            except (ValueError, TypeError) as error:
+                raise InputError(
+                    f"miles.{name} must contain valid finite JSON; use a TOML inline table or a quoted JSON string."
+                ) from error
             if record["type"] == "json_list_type" and not isinstance(parsed, list):
-                raise ValueError(f"miles.{name} expects a JSON list")
-            result.extend([flag, json.dumps(parsed, allow_nan=False, separators=(",", ":"))])
+                raise InputError(f"miles.{name} expects a JSON list; use [value1, value2].")
+            result.extend([flag, encoded])
         else:
             values = value if kind == "append" else [value]
             if kind == "append" and (not isinstance(values, list) or not values):
-                raise ValueError(f"miles.{name} expects a nonempty list of occurrences")
+                raise InputError(f"miles.{name} expects a nonempty list of occurrences")
             for occurrence in values:
                 nargs = record["nargs"]
                 if nargs in ("+", "*") or isinstance(nargs, int):
                     if not isinstance(occurrence, list):
-                        raise ValueError(f"miles.{name} expects a list")
+                        raise InputError(f"miles.{name} expects a list")
                     if (nargs == "+" and not occurrence) or (isinstance(nargs, int) and len(occurrence) != nargs):
-                        raise ValueError(f"Invalid number of values for miles.{name}")
+                        raise InputError(
+                            f"Invalid number of values for miles.{name}: expected {nargs if isinstance(nargs, int) else 'at least one'}, got {len(occurrence)}."
+                        )
                     result.extend([flag, *[_scalar(record, item) for item in occurrence]])
                 else:
                     # Equals form also protects string values beginning with '--'.

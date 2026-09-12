@@ -38,7 +38,7 @@ def test_static_decision_follows_the_recipe(core, options, standalone, reason, s
         ("scoring_check_interval", -1, "scoring_check_interval"),
         ("scoring_check_interval", 2.0, "scoring_check_interval"),
         ("scoring_check_tolerance", float("nan"), "finite"),
-        ("scoring_check_tolerance", -0.5, "nonnegative"),
+        ("scoring_check_tolerance", -0.5, "finite number"),
         ("scoring_check_tolerance", True, "finite"),
         ("scoring_pass_required", "true", "boolean"),
     ],

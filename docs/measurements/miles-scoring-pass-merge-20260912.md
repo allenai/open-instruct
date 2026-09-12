@@ -3,7 +3,9 @@
 The feature branch `robertb/miles-scoring-pass` at `b7560295c` was reviewed against
 primary integration revision `aa7e99ff6`. It contains four commits based on
 `7aa5a3d51`; the merge also preserves the later workflow audits and compiler-cache
-changes on the primary branch.
+changes on the primary branch. The subsequent input-validation commit
+`855b22a0b` was also incorporated; scoring options now use its shared `InputError`
+validation so invalid inputs produce actionable CLI errors.
 
 ## GPU evidence supplied with the branch
 
@@ -51,7 +53,7 @@ two from image packaging. These are not all missing upstream dependencies.
 
 After fixes, the focused runtime suite passed **94 tests, 2 skipped**, including
 the distributed regression and all five restored modules. Local workflow/config
-checks passed **123 tests**; `make style && make quality` passed, including type
+checks initially passed **123 tests**; `make style && make quality` passed, including type
 checking. Eight additional real-MILES loss tests passed bit-for-bit on loss,
 gradients, and metrics with TIS clipping active, both policy anchors, both loss
 reductions, and reference KL enabled/disabled. A Docker COPY build using the
@@ -62,6 +64,14 @@ tests, and packaging additions mounted read-only.
 The final broader CPU runtime run passed **673 tests, 32 skipped, zero failed**
 with only the cross-backend policy-contract module excluded. GPU tests skip on
 this CPU rerun; the separate Beaker smoke above supplies the GPU evidence.
+
+After integrating `855b22a0b`, the combined workflow/config checks passed
+**205 tests**, including invalid scoring-tolerance inputs. The eight tests in
+`open_instruct/test_miles_core.py` passed separately in the pinned image (the
+host environment lacks the MoE-v2 Core modules). Lint and type checking passed
+on the combined tree. The complete runtime CPU rerun on that combined tree
+also passed **673 tests, 32 skipped, zero failures** (247 seconds, with CPU
+thread counts bounded to two).
 
 The launcher now excludes only `tests/miles/test_core_policy_contract.py`, which
 requires `olmo_miles.evaluation.policy_contract_schema` absent from the pinned

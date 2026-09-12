@@ -11,10 +11,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-import tomllib
-
-from open_instruct.miles import options, run_data
+from open_instruct.miles import options, run_data, validation
 from open_instruct.miles.config import CoreConfig, RunConfig
+from open_instruct.miles.errors import InputError
 
 RUN_SECTIONS = ("training", "trainer", "inference", "optimizer", "async", "tracking", "runtime")
 WORKFLOW_SECTIONS = {"model", "conversion", "data", "output", "launch", "compiler_cache"}
@@ -98,28 +97,23 @@ PATH_OPTIONS = {
 def _table(document, name, allowed=None, *, required=False):
     value = document.get(name, {})
     if not isinstance(value, dict) or (required and not value):
-        raise ValueError(f"[{name}] must be a {'nonempty ' if required else ''}table")
-    if allowed is not None and (unknown := set(value) - set(allowed)):
-        raise ValueError(f"Unknown [{name}] fields: {sorted(unknown)}")
+        raise InputError(f"[{name}] must be a {'nonempty ' if required else ''}table")
+    validation.mapping(value, f"[{name}]")
+    if allowed is not None:
+        validation.fields(value, f"[{name}]", allowed)
     return copy.deepcopy(value)
 
 
 def _text(value, name):
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must be a nonempty string")
-    return value
+    return validation.text(value, name)
 
 
 def _boolean(value, name):
-    if type(value) is not bool:
-        raise ValueError(f"{name} must be a boolean")
-    return value
+    return validation.boolean(value, name)
 
 
 def _positive(value, name):
-    if type(value) is not int or value < 1:
-        raise ValueError(f"{name} must be a positive integer")
-    return value
+    return validation.integer(value, name)
 
 
 def _path(value, base, name):
@@ -129,7 +123,7 @@ def _path(value, base, name):
 
 def _eval_paths(value, base):
     if not isinstance(value, list) or len(value) % 2:
-        raise ValueError("data.eval_prompt_data must alternate dataset names and JSONL paths")
+        raise InputError("data.eval_prompt_data must alternate dataset names and JSONL paths")
     return [
         _path(item, base, "data.eval_prompt_data") if index % 2 else _text(item, "eval dataset name")
         for index, item in enumerate(value)
@@ -138,19 +132,16 @@ def _eval_paths(value, base):
 
 def _apply_overrides(document, overrides):
     for override in overrides or []:
-        key, separator, raw = override.partition("=")
+        key, separator, raw = validation.text(override, "Override").partition("=")
         parts = key.split(".")
         if not separator or not all(re.fullmatch(r"[a-z][a-z0-9_]*", part) for part in parts):
-            raise ValueError("Overrides must be SECTION.KEY=TOML_VALUE")
-        try:
-            value = tomllib.loads("value=" + raw)["value"]
-        except tomllib.TOMLDecodeError as error:
-            raise ValueError(f"Invalid TOML value in override {key}; quote strings") from error
+            raise InputError("Overrides must be SECTION.KEY=TOML_VALUE")
+        value = validation.override_value(key, raw)
         current = document
         for part in parts[:-1]:
             current = current.setdefault(part, {})
             if not isinstance(current, dict):
-                raise ValueError(f"Override {key} traverses a non-table value")
+                raise InputError(f"Override {key} traverses a non-table value")
         current[parts[-1]] = value
 
 
@@ -171,8 +162,7 @@ class RunSpec:
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunSpec":
         path = Path(path).expanduser().resolve()
-        with path.open("rb") as stream:
-            document = tomllib.load(stream)
+        document = validation.read_document(path)
         return cls.from_dict(document, config_path=path, overrides=overrides)
 
     @classmethod
@@ -181,37 +171,36 @@ class RunSpec:
     ) -> "RunSpec":
         """Load a serialized specification; relative paths use the original config directory."""
         if not isinstance(payload, dict):
-            raise ValueError("Run specification must be a mapping")
+            raise InputError("Run specification must be a mapping")
         document = copy.deepcopy(payload)
         path = Path(config_path).expanduser().resolve()
         _apply_overrides(document, overrides)
         allowed = {"schema_version", "name", "core", "miles", *WORKFLOW_SECTIONS, *RUN_SECTIONS}
         if set(document) & {"validation", "conversion_validation"}:
-            raise ValueError(
+            raise InputError(
                 "Megatron conversion/parity thresholds do not apply to Core; use separate Core parity probes"
             )
-        if unknown := set(document) - allowed:
-            raise ValueError(f"Unknown run sections: {sorted(unknown)}")
+        validation.fields(document, "run sections", allowed)
         if type(document.get("schema_version")) is not int or document["schema_version"] != 1:
-            raise ValueError("schema_version must be 1")
+            raise InputError("schema_version must be 1")
         name = _text(document.get("name"), "name")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
-            raise ValueError("name must contain only letters, digits, dots, underscores and hyphens")
+            raise InputError("name must contain only letters, digits, dots, underscores and hyphens")
         base = path.parent
         model = _table(document, "model", {"source", "format", "hf_template", "reference_hf"}, required=True)
         model["source"] = _path(model.get("source"), base, "model.source")
         if model.get("reference_hf") is not None:
-            raise ValueError(
+            raise InputError(
                 "model.reference_hf describes baseline conversion validation, which is not implemented here; "
                 "use miles.ref_load for a frozen KL reference"
             )
         model.setdefault("format", "hf")
         if model["format"] not in ("hf", "olmo_core"):
-            raise ValueError("model.format must be hf or olmo_core; Megatron checkpoints are not Core inputs")
+            raise InputError("model.format must be hf or olmo_core; Megatron checkpoints are not Core inputs")
         if model["format"] == "olmo_core" and not model.get("hf_template"):
-            raise ValueError("model.hf_template is required for an olmo_core input")
+            raise InputError("model.hf_template is required for an olmo_core input")
         if model["format"] == "hf" and "hf_template" in model:
-            raise ValueError("model.hf_template applies only to olmo_core inputs")
+            raise InputError("model.hf_template applies only to olmo_core inputs")
         for key in ("hf_template",):
             if key in model:
                 model[key] = _path(model[key], base, f"model.{key}")
@@ -288,13 +277,15 @@ class RunSpec:
             "reward_config",
         }
         if unknown := set(data) - allowed:
-            raise ValueError(f"Unknown [data] fields: {sorted(unknown)}")
+            raise InputError(f"Unknown [data] fields: {sorted(unknown)}")
         selectors = [key for key in ("tasks", "recipe", "rl_manifest", "prompt_data") if key in data]
         if len(selectors) != 1:
-            raise ValueError("data must select exactly one of tasks, recipe, rl_manifest or prompt_data")
+            raise InputError(
+                f"data must select exactly one of tasks, recipe, rl_manifest or prompt_data; found {selectors or 'none'}. Remove competing selectors or add data.tasks."
+            )
         data.setdefault("seed", 17)
         if type(data["seed"]) is not int or data["seed"] < 0:
-            raise ValueError("data.seed must be a nonnegative integer")
+            raise InputError("data.seed must be a nonnegative integer")
         data["shuffle"] = _boolean(data.get("shuffle", True), "data.shuffle")
         for key in ("rl_manifest", "prompt_data", "reward_config"):
             if key in data:
@@ -305,23 +296,23 @@ class RunSpec:
             _text(data["recipe"], "data.recipe")
         if "tasks" in data:
             if not isinstance(data["tasks"], list) or not data["tasks"]:
-                raise ValueError("data.tasks must be a nonempty array of task tables")
+                raise InputError("data.tasks must be a nonempty array of task tables")
             names = []
-            for task in data["tasks"]:
+            for index, task in enumerate(data["tasks"]):
                 if not isinstance(task, dict) or set(task) - {"task", "train_count", "eval_count", "prompt_wrapper"}:
-                    raise ValueError("data.tasks entries accept task, train_count, eval_count and prompt_wrapper")
-                names.append(_text(task.get("task"), "data.tasks.task"))
+                    raise InputError("data.tasks entries accept task, train_count, eval_count and prompt_wrapper")
+                names.append(_text(task.get("task"), f"data.tasks[{index}].task"))
                 if "train_count" not in task and "eval_count" not in task:
-                    raise ValueError("Each task must set train_count or eval_count")
+                    raise InputError("Each task must set train_count or eval_count")
                 for key in ("train_count", "eval_count"):
                     if key in task:
-                        _positive(task[key], f"data.tasks.{key}")
+                        _positive(task[key], f"data.tasks[{index}].{key}")
                 if "prompt_wrapper" in task:
                     _text(task["prompt_wrapper"], "data.tasks.prompt_wrapper")
             if len(names) != len(set(names)):
-                raise ValueError("data.tasks must not repeat task names")
+                raise InputError("data.tasks must not repeat task names")
             if not any("train_count" in task for task in data["tasks"]):
-                raise ValueError("data.tasks must select training data")
+                raise InputError("data.tasks must select training data")
         return data
 
     @staticmethod
@@ -341,7 +332,7 @@ class RunSpec:
             "timeout",
         }
         if unknown := set(launch) - allowed:
-            raise ValueError(f"Unknown [launch] fields: {sorted(unknown)}")
+            raise InputError(f"Unknown [launch] fields: {sorted(unknown)}")
         defaults = dict(
             workspace="ai2/open-instruct-dev",
             budget="ai2/oe-other",
@@ -356,18 +347,19 @@ class RunSpec:
         for key in ("workspace", "budget", "cluster", "priority", "min_runtime", "shared_memory", "timeout"):
             _text(launch[key], f"launch.{key}")
         if launch["priority"] not in ("low", "normal", "high", "urgent"):
-            raise ValueError("launch.priority must be low, normal, high or urgent")
+            raise InputError("launch.priority must be low, normal, high or urgent")
         _boolean(launch["auto_resume"], "launch.auto_resume")
         if "gpus_per_replica" in launch:
             _positive(launch["gpus_per_replica"], "launch.gpus_per_replica")
         for key in ("env", "secrets"):
             launch.setdefault(key, {})
             if not isinstance(launch[key], dict) or any(not isinstance(value, str) for value in launch[key].values()):
-                raise ValueError(f"launch.{key} must map names to strings")
+                raise InputError(f"launch.{key} must map names to strings")
+            validation.mapping(launch[key], f"launch.{key}")
             if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in launch[key]):
-                raise ValueError(f"launch.{key} names must be valid environment-variable identifiers")
+                raise InputError(f"launch.{key} names must be valid environment-variable identifiers")
         if duplicate := set(launch["env"]) & set(launch["secrets"]):
-            raise ValueError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
+            raise InputError(f"launch.env and launch.secrets overlap: {sorted(duplicate)}")
         reserved = {
             "RAY_ADDRESS",
             "PYTHONPATH",
@@ -379,15 +371,15 @@ class RunSpec:
             "MASTER_PORT",
         }
         if managed := reserved & (set(launch["env"]) | set(launch["secrets"])):
-            raise ValueError(f"The launcher/runtime owns these environment variables: {sorted(managed)}")
+            raise InputError(f"The launcher/runtime owns these environment variables: {sorted(managed)}")
         launch.setdefault("weka_mounts", [{"weka": "oe-training-default", "mount_path": "/weka/oe-training-default"}])
         if not isinstance(launch["weka_mounts"], list):
-            raise ValueError("launch.weka_mounts must be an array of tables")
+            raise InputError("launch.weka_mounts must be an array of tables")
         seen_filesystems = set()
         seen_paths = []
         for mount in launch["weka_mounts"]:
             if not isinstance(mount, dict) or set(mount) != {"weka", "mount_path"}:
-                raise ValueError("Each launch.weka_mounts entry requires weka and mount_path")
+                raise InputError("Each launch.weka_mounts entry requires weka and mount_path")
             _text(mount["weka"], "launch.weka_mounts.weka")
             mount["mount_path"] = _path(mount["mount_path"], base, "launch.weka_mounts.mount_path")
             mount_path = Path(mount["mount_path"])
@@ -395,9 +387,9 @@ class RunSpec:
                 mount_path == previous or mount_path in previous.parents or previous in mount_path.parents
                 for previous in seen_paths
             ):
-                raise ValueError("launch.weka_mounts paths must be distinct, nonoverlapping and below filesystem root")
+                raise InputError("launch.weka_mounts paths must be distinct, nonoverlapping and below filesystem root")
             if mount["weka"] in seen_filesystems:
-                raise ValueError("launch.weka_mounts must not repeat a filesystem")
+                raise InputError("launch.weka_mounts must not repeat a filesystem")
             seen_filesystems.add(mount["weka"])
             seen_paths.append(mount_path)
         return launch
@@ -412,7 +404,7 @@ class RunSpec:
             "reward_config",
             "manifest",
         }:
-            raise ValueError(f"Unknown prepared fields: {sorted(unknown)}")
+            raise InputError(f"Unknown prepared fields: {sorted(unknown)}")
         root = Path(self.output["root"])
         base = self.config_path.parent
         values = {"core": {}, "miles": {}}
@@ -429,8 +421,16 @@ class RunSpec:
                 section == "core" and key in ("model_config", "reward_config", "compiler_cache_root")
             ):
                 value = _path(value, base, target)
+            try:
+                if section == "miles":
+                    options.encode_options({key: value})
+                    validation.runtime_values({key: value})
+                else:
+                    CoreConfig(**{key: value})
+            except InputError as error:
+                raise InputError(f"{origin}: {error}") from error
             if target in origins and values[section][key] != value:
-                raise ValueError(f"Conflicting settings for {target}: {origins[target]} and {origin}")
+                raise InputError(f"Conflicting settings for {target}: {origins[target]} and {origin}")
             origins[target] = origin
             values[section][key] = value
 
@@ -444,7 +444,7 @@ class RunSpec:
                         origin,
                     )
                 elif key in UNSUPPORTED_FIELDS:
-                    raise ValueError(f"{origin} is unsupported: {UNSUPPORTED_FIELDS[key]}")
+                    raise InputError(f"{origin} is unsupported: {UNSUPPORTED_FIELDS[key]}")
                 elif key in (
                     "placement_mode",
                     "max_context_length",
@@ -453,7 +453,7 @@ class RunSpec:
                     "policy_drift_action",
                 ):
                     if key in controls and controls[key][0] != value:
-                        raise ValueError(f"Conflicting settings for {key}")
+                        raise InputError(f"Conflicting settings for {key}")
                     controls[key] = (value, origin)
                 elif key in ("radix_cache", "disable_radix_cache"):
                     value = _boolean(value, origin)
@@ -462,11 +462,11 @@ class RunSpec:
                     put("core.diagnostic_interval", int(_boolean(value, origin)), origin)
                 elif key == "recompute_mode":
                     if value not in ("full", "off"):
-                        raise ValueError(f"{origin}: Core supports full/off block recomputation, not selective mode")
+                        raise InputError(f"{origin}: Core supports full/off block recomputation, not selective mode")
                     put("core.activation_checkpointing", value == "full", origin)
                 elif key == "trainer_flash_attention_version":
                     if type(value) is not int or value not in (2, 3, 4):
-                        raise ValueError(f"{origin} must be 2, 3 or 4")
+                        raise InputError(f"{origin} must be 2, 3 or 4")
                     put("core.attention_backend", f"flash_{value}", origin)
                 elif key == "dynamic_batching":
                     put("miles.use_dynamic_batch_size", _boolean(value, origin), origin)
@@ -493,11 +493,12 @@ class RunSpec:
         core, miles = values["core"], values["miles"]
         # Check explicit scalar types before doing any batch/topology arithmetic.
         options.encode_options(miles)
+        validation.runtime_values(miles)
         CoreConfig(**core)
         if "placement_mode" in controls:
             placement, origin = controls["placement_mode"]
             if placement not in ("colocated", "disaggregated"):
-                raise ValueError("inference.placement_mode must be colocated or disaggregated")
+                raise InputError("inference.placement_mode must be colocated or disaggregated")
             put("miles.colocate", placement == "colocated", origin)
         asynchronous = _boolean(miles.get("fully_async", False), "async.fully_async")
         miles.setdefault("colocate", not asynchronous)
@@ -511,14 +512,19 @@ class RunSpec:
         _positive(miles["rollout_num_gpus"], "inference.gpus")
         tp = _positive(miles["rollout_num_gpus_per_engine"], "inference.rollout_tensor_parallel_size")
         if miles["rollout_num_gpus"] % tp:
-            raise ValueError("inference.gpus must be divisible by rollout_tensor_parallel_size")
+            raise InputError(
+                f"inference.gpus={miles['rollout_num_gpus']} must be divisible by "
+                f"rollout_tensor_parallel_size={tp}; allocate a multiple of {tp} GPUs or lower tensor parallelism."
+            )
         if miles["colocate"] and miles["rollout_num_gpus"] != world:
-            raise ValueError("Colocated inference.gpus must equal the total trainer GPUs")
+            raise InputError(
+                f"Colocated inference.gpus must equal the total trainer GPUs ({world}); got {miles['rollout_num_gpus']}."
+            )
         allocated = world if miles["colocate"] else world + miles["rollout_num_gpus"]
         per_node = self.launch.get("gpus_per_replica", min(8, allocated))
         miles.setdefault("num_gpus_per_node", per_node)
         if miles["actor_num_gpus_per_node"] > miles["num_gpus_per_node"]:
-            raise ValueError("trainer.gpus exceeds the declared physical num_gpus_per_node")
+            raise InputError("trainer.gpus exceeds the declared physical num_gpus_per_node")
         core.setdefault("expert_parallel_size", min(2, world) if world % 2 == 0 else 1)
         core.setdefault("attention_backend", "flash_4")
         core.setdefault("row_specialization", "dynamic")
@@ -534,13 +540,19 @@ class RunSpec:
         miles.setdefault("rollout_max_response_len", min(4096, length // 2 if length <= 4096 else 4096))
         response = _positive(miles["rollout_max_response_len"], "inference.max_response_length")
         if response >= miles["rollout_max_context_len"]:
-            raise ValueError("max_response_length must be smaller than max_context_length")
+            raise InputError(
+                f"max_response_length={response} must be smaller than max_context_length={miles['rollout_max_context_len']}; "
+                "leave room for the prompt or increase the context limit."
+            )
         miles.setdefault("rollout_max_prompt_len", miles["rollout_max_context_len"] - response)
         if (
             miles["rollout_max_context_len"] > length
             or miles["rollout_max_context_len"] > miles["sglang_context_length"]
         ):
-            raise ValueError("Rollout context exceeds Core or SGLang context capacity")
+            raise InputError(
+                f"Rollout context {miles['rollout_max_context_len']} exceeds Core ({length}) or SGLang "
+                f"({miles['sglang_context_length']}) context capacity; use inference.max_context_length to set all three."
+            )
         defaults = {
             "fully_async": asynchronous,
             "offload_train": False,
@@ -600,10 +612,10 @@ class RunSpec:
         if miles.get("use_rollout_routing_replay"):
             miles.setdefault("use_miles_router", True)
         if controls.get("policy_drift_action", ("fail", ""))[0] != "fail":
-            raise ValueError("policy_drift_action=warn is not implemented by Core; select fail")
+            raise InputError("policy_drift_action=warn is not implemented by Core; select fail")
         correction = controls.get("off_policy_correction", ("tis", ""))[0]
         if correction != "tis":
-            raise ValueError(
+            raise InputError(
                 "off_policy_correction supports tis; other corrections require an explicitly qualified custom_tis_function_path"
             )
         if "off_policy_correction" in controls:
@@ -612,10 +624,12 @@ class RunSpec:
             put("miles.use_tis", True, controls["off_policy_correction"][1])
         miles.setdefault("use_tis", asynchronous and not miles["use_rollout_logprobs"])
         if miles["use_tis"] and miles["use_rollout_logprobs"]:
-            raise ValueError("use_tis and use_rollout_logprobs cannot both be enabled")
+            raise InputError(
+                "use_tis and use_rollout_logprobs cannot both be enabled; use use_tis=true with use_rollout_logprobs=false for trainer-scored correction."
+            )
         if asynchronous:
             if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
-                raise ValueError("Async training requires TIS or an explicit rollout-logprob policy anchor")
+                raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
             miles.setdefault("async_data_buffer_capacity_factor", 2.0)
             miles.setdefault("async_unused_samples_handler", "retry")
             miles.setdefault("rollout_submission_granularity", "group")
@@ -627,7 +641,7 @@ class RunSpec:
         if save_enabled:
             miles.setdefault("save_interval", miles["num_rollout"])
         elif "miles.save_interval" in origins:
-            raise ValueError("save_checkpoints=false conflicts with an explicit save_interval")
+            raise InputError("save_checkpoints=false conflicts with an explicit save_interval")
         generated = {
             "hf_checkpoint": self.conversion["hf_output"],
             "prompt_data": self.data.get("prompt_data", str(root / "prepared" / "data" / "train.jsonl")),
@@ -637,7 +651,7 @@ class RunSpec:
             value = str(prepared.get(key, generated[key]))
             target = f"core.{key}" if key == "reward_config" else f"miles.{key}"
             if target in origins and values[target.split(".")[0]][key] != value:
-                raise ValueError(f"{target} conflicts with workflow preparation; set model/data fields instead")
+                raise InputError(f"{target} conflicts with workflow preparation; set model/data fields instead")
             values[target.split(".")[0]][key] = value
         eval_data = prepared.get("eval_prompt_data", self.data.get("eval_prompt_data"))
         if eval_data is None and (
@@ -652,7 +666,9 @@ class RunSpec:
             miles.setdefault("n_samples_per_eval_prompt", 1)
             miles.setdefault("eval_max_response_len", response)
         elif miles.get("eval_interval") is not None:
-            raise ValueError("eval_interval requires prepared held-out data")
+            raise InputError(
+                "eval_interval requires prepared held-out data; set data.tasks[].eval_count or data.eval_prompt_data, or remove eval_interval."
+            )
         if "miles.wandb_mode" in origins and "miles.use_wandb" not in origins:
             miles["use_wandb"] = miles.get("wandb_mode") != "disabled"
         for key in PATH_OPTIONS:
@@ -664,7 +680,7 @@ class RunSpec:
         if "async_data_buffer_capacity_factor" in miles:
             capacity = miles["async_data_buffer_capacity_factor"]
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
-                raise ValueError("async_data_buffer_capacity_factor must be finite and positive")
+                raise InputError("async_data_buffer_capacity_factor must be finite and positive")
         result = RunConfig(CoreConfig(**core), miles)
         result.validate()
         return result
