@@ -110,7 +110,7 @@ uv run python mason.py \
     --truncated_importance_sampling_ratio_cap 0.0 \
     --seed 42 \
     --gradient_checkpointing \
-    --attn_implementation torch \
+    --attn_implementation flash_4 \
     --vllm_enable_prefix_caching \
     --push_to_hub false \
     --with_tracking \
