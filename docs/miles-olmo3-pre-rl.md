@@ -1,14 +1,35 @@
 # Published Olmo 3 through MILES and Core
 
-Branch: `robertb/miles-olmo3-pre-rl`, rebased onto the primary integration branch
-`robertb/miles-hero-support` at `446189de7` (original base `738356e39`). This is preparation for a dense Olmo 3 recipe comparison. Tiny-model
-qualification has passed; no full 7B training or learning comparison has run on
-this branch.
+Status: experimental dense Olmo 3 support for the primary
+`robertb/miles-olmo-core` integration branch, developed on
+`robertb/miles-olmo3-pre-rl`. The two-GPU 7B GSM8K smoke completed and its
+retained artifacts passed independent audit. Both sampled training batches had
+zero advantages, so nonzero-gradient 7B learning and fresh-process full-model
+optimizer resume remain unqualified.
 
-## Rebase and GSM8K readiness
+## Primary-branch integration
 
-The rebase completed without conflicts. The inherited runtime lock matches the
-primary Core branch at `cfc42934d818036728d63f7ccdcd3b541eab9880`, MILES at
+The September 12 refresh rebases onto `robertb/miles-olmo-core` at `d661d3a68`,
+including sequence packing and compiler-cache publication fixes. Its runtime
+uses Core `3d35ab326b72d92e06137cc310631d9187d8a2c5` and MILES
+`d29c04a944216c6309770fc9cf0d6ca37c066e17`. The bounded two-GPU FSDP
+[regression](https://beaker.org/ex/01M2BHQ7R8F56YP3WZ214W0PYQ) passed on both
+ranks using image `01M2BHQ0JCRADENSA5W1D0V2TD`. This checks the current training
+code and dependencies; the earlier full 7B smoke below used the older pins.
+
+Integration testing also exposed a primary-branch validation regression: minimal
+and dense configurations were being required to specify a KDA recurrent-state
+cache strategy. KDA-specific validation now applies when recurrent-state cache
+controls are supplied, retaining all existing capacity/backend restrictions.
+
+## Earlier rebase and GSM8K preparation
+
+The earlier qualification was based on `446189de7`, when the primary branch was
+still named `robertb/miles-hero-support`. The following records that runtime and
+the original preparation; current merge validation is described above.
+
+That rebase completed without conflicts. Its runtime lock matched the
+Core branch at `cfc42934d818036728d63f7ccdcd3b541eab9880`, MILES at
 `df24d2ed5da4598264c6682f9dbe49aee64acc95`, and olmo-sglang at
 `02ccb5dcf641cbabc9b78a5bc65dacf8690707a7`. No dependency-branch changes were
 needed for dense Olmo 3.
