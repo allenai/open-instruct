@@ -1,0 +1,67 @@
+{
+  "experiment": "01M2ACWT28D6KFPW3N2HJ742ZP",
+  "source_commit": "a318a75a8",
+  "core_commit": "3d35ab326",
+  "steps": [
+    {
+      "train/tis_clipfrac": 0.0,
+      "train/step_seconds": 188.78679351182655,
+      "train/packing/packs_per_rank": 2,
+      "train/packing/samples_per_pack": 4.0,
+      "train/packing/tokens_per_pack": 2393.75,
+      "train/packing/rank0_peak_allocated_bytes": 178416081920,
+      "train/collection_score_mean_abs": 0.006365612579121541,
+      "train/collection_score_max_abs": 0.1344752311706543,
+      "train/completed_steps": 1
+    },
+    {
+      "train/tis_clipfrac": 0.0,
+      "train/step_seconds": 40.68090432789177,
+      "train/packing/packs_per_rank": 2,
+      "train/packing/samples_per_pack": 4.0,
+      "train/packing/tokens_per_pack": 2167.25,
+      "train/packing/rank0_peak_allocated_bytes": 178416107008,
+      "train/collection_score_mean_abs": 0.006124107851659608,
+      "train/collection_score_max_abs": 0.12096786499023438,
+      "train/completed_steps": 2
+    },
+    {
+      "train/tis_clipfrac": 0.0,
+      "train/step_seconds": 2.1462957789190114,
+      "train/packing/packs_per_rank": 2,
+      "train/packing/samples_per_pack": 4.0,
+      "train/packing/tokens_per_pack": 2263.75,
+      "train/packing/rank0_peak_allocated_bytes": 178416174592,
+      "train/collection_score_mean_abs": 0.005632506536396316,
+      "train/collection_score_max_abs": 0.137040376663208,
+      "train/completed_steps": 3
+    }
+  ],
+  "compiler_cache": {
+    "success": true,
+    "workers": [
+      {
+        "slot": "serve-regular-rank0",
+        "publish": {
+          "status": "unavailable",
+          "reason": ""
+        }
+      },
+      {
+        "slot": "train-actor-cell0-rank0",
+        "publish": {
+          "status": "unavailable",
+          "reason": ""
+        }
+      },
+      {
+        "slot": "train-actor-cell0-rank1",
+        "publish": {
+          "status": "unavailable",
+          "reason": ""
+        }
+      }
+    ],
+    "report_dir": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d/runs/6f5ee1e7c2a34072bce44045134178f1"
+  }
+}

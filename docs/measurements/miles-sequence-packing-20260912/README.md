@@ -41,7 +41,7 @@ has an optional `qv` argument ahead of sequence metadata, which Core supplied
 positionally. Core now passes the four metadata arguments by keyword. Shared and
 separate metadata regression tests pass. The failed run remains retained.
 
-## Live async exercise: in progress
+## Live async exercise: passed
 
 [First live attempt](https://beaker.org/ex/01M2ACJE4Q5CXKN507QN00S80X), Open Instruct
 `82e7a0f27`, stopped at MILES argument validation: a 2048-token prompt cap
@@ -52,8 +52,41 @@ before launch. A fresh `-r2` output root preserves the first attempt. Config:
 EP2 trainers + one TP1 engine, 3 async updates, 8×2 responses, lag 2, TIS,
 4096-token pack budget, actual SGLang route capture/replay and recomputation.
 Full-SFT KDA checkpoint used by the comparison runs; short responses bound cost.
-A separate CPU audit on Saturn will verify retained samples, packing/replay,
-policy clocks, rewards, publication equality and cleanup.
+[Corrected live run](https://beaker.org/ex/01M2ACWT28D6KFPW3N2HJ742ZP), source
+`a318a75a8`, passed with exit 0. [Independent Saturn audit](https://beaker.org/ex/01M2AEGJJ24ARYVXZDHF4K7MNS)
+also exited 0; `live-audit.json` has `passed=true` and `full_sample_audit=true`.
+It checked all 48 consumed training responses (22,635 response tokens, 16 unique
+prompts), both four-question evaluation rounds, immutable preparation hashes,
+reward recomputation, masks, lag bounds, optimizer counters and seven publication
+events (initial plus update/equality repeat per step). Workflow completion and
+the Beaker exit establish successful run completion.
+
+Every rank/update used two packs for eight samples: four times fewer forwards,
+with unchanged real-token counts. All packed training replay observations passed
+expert-ID equality, sample-tail coverage, gradient-mode and recomputation checks.
+The first scoring-versus-training comparison was exactly zero over 8,015 active
+tokens. The next two updates skipped standalone scoring. All three consumed
+version-0 data, exercising lags 0, 1 and 2 without exceeding the configured bound.
+TIS was enabled; its clipping fraction happened to be zero in this short run.
+
+`live-runtime-summary.json` retains timing and memory observations. Rank-zero
+optimizer time was 188.78, 40.68 and 2.13 seconds; the first two included cold
+kernel compilation. Peak allocated trainer memory was about 166.2 GiB, including
+the model, optimizer, diagnostics and activations, not just packing overhead.
+Driver cycles were 362.64, 72.39 and 33.05 seconds; these also include publication
+and the expensive full serving-weight equality checks. There is no matched
+unpacked full-model timing arm, so these are observations, not a speedup claim.
+The small greedy evaluations took 9.39 and 6.45 seconds. Their scores (1/4 then
+3/4, all capped at 512 tokens) do not establish learning quality.
+
+The job ran for about 24m37s including startup and teardown. Compiler-cache
+publication timed out at 120 seconds for each of three workers, adding six
+minutes after trainer disposal. All three reported `publish.status=unavailable`;
+training still exited cleanly because cache publication is optional. Its cause
+was not isolated here. Cache reuse/publication needs a separate follow-up; this
+run does not qualify it or demonstrate warm startup. Serving's initial KDA
+warmup health timeouts recovered before engine admission, and later health
+probes stayed healthy.
 
 ## Local checks
 
@@ -64,4 +97,5 @@ PyTorch returns its set-backed serialization allowlist in a stable order; the
 test now compares exact membership and still rejects unrecognized pickle types.
 
 Not yet qualified: EP8 performance, long-context memory limits, learning quality,
-checkpoint/resume with packing, and larger/multi-node production batches.
+checkpoint/resume with packing, hero/dense architecture coverage, and larger/multi-node
+production batches. Compiler-cache publication is an open follow-up as described above.

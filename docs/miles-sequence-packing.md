@@ -1,8 +1,7 @@
 # Sequence packing in the Core trainer
 
 Experimental feature branch `robertb/miles-sequence-packing`, based on project
-primary `016318180`. The small GPU numerical gate passed; live async qualification
-is in progress. The primary branch's defaults
+primary `016318180`. The small GPU numerical gate and live async retained-data audit passed. The primary branch's defaults
 have not been changed by this branch.
 
 ```toml
@@ -72,8 +71,8 @@ It uses two Holmes GPUs, urgent priority, a positive minimum runtime, random
 local weights and no external datasets. It exercises EP1/EP2 with recomputation
 on/off, fixed replay, document-isolation perturbations, two updates (checked then
 skipped scoring), policy-only gradient/Adam comparisons and the combined
-objective. Per-rank reports and contracts are retained even on failure. This is
-followed by a small real SGLang/Core async exercise once the numerical gate passes.
+objective. Per-rank reports and contracts are retained even on failure. This was followed by a passing small real SGLang/Core async exercise and
+independent retained-data audit.
 
 
 Numerical results and run identities are recorded in
