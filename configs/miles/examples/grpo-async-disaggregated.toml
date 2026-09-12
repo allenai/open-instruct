@@ -1,4 +1,4 @@
-# Full-SFT B300 training: two Core trainer GPUs and one SGLang engine.
+# Full-SFT B300 training: one node of Core trainers (EP8) and one node of TP1 SGLang engines.
 # Replace YOUR_USERNAME/model source before launch; inspect `plan` first.
 schema_version = 1
 name = "grpo-async-disaggregated"
@@ -18,8 +18,10 @@ cluster = "ai2/holmes"
 priority = "urgent"
 min_runtime = "1h"
 timeout = "8h"
-auto_resume = true
-gpus_per_replica = 3
+# Multi-node runs currently require auto_resume = false; resume by relaunching
+# with the same output root once a checkpoint exists.
+auto_resume = false
+gpus_per_replica = 8
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
@@ -43,16 +45,18 @@ save_checkpoints = true
 save_interval = 100
 
 [trainer]
-gpus = 2
+# One full node of trainers with expert parallelism across all eight GPUs.
+gpus = 8
 trainer_num_nodes = 1
-expert_parallel_size = 2
+expert_parallel_size = 8
 micro_batch_size = 1
 activation_recompute = true
 trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 1
+# One full node of TP1 engines: 512 responses per collection give each its 64 slots.
+gpus = 8
 rollout_tensor_parallel_size = 1
 # 64 prompts x 8 responses per collection, one optimizer update per collection;
 # the same step shape as the open-instruct Olmo 3 RL recipes.
