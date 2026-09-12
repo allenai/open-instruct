@@ -247,3 +247,34 @@ def test_cpu_judge_stages_always_use_saturn(document, stage):
     assert "gpuCount" not in task["resources"] and "replicas" not in task
     assert "preflight_attention" not in task["arguments"][0]
     subprocess.run(["bash", "-n"], input=task["arguments"][0], text=True, check=True)
+
+
+def test_health_probe_tolerates_transient_failures_but_bounds_outage(document, tmp_path, monkeypatch):
+    owner = cluster.Supervisor(RunSpec.from_dict(document), tmp_path, 0, 1)
+    owner.health["general"] = "http://127.0.0.1/health"
+
+    def fail(*args, **kwargs):
+        raise TimeoutError("busy")
+
+    monkeypatch.setattr(cluster.urllib.request, "urlopen", fail)
+    owner.probe_health()
+    owner.probe_health()
+    assert owner.health_failures["general"] == 2
+
+    class Healthy:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(cluster.urllib.request, "urlopen", lambda *args, **kwargs: Healthy())
+    owner.probe_health()
+    assert owner.health_failures["general"] == 0
+    monkeypatch.setattr(cluster.urllib.request, "urlopen", fail)
+    owner.probe_health()
+    owner.probe_health()
+    with pytest.raises(RuntimeError, match="three consecutive"):
+        owner.probe_health()

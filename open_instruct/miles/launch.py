@@ -130,7 +130,11 @@ def collect_results(root, destination):
         )
         for name in sorted(files):
             path = Path(directory) / name
-            if path.is_symlink() or path.suffix not in (".json", ".jsonl") or path.stat().st_size > 32 * 1024 * 1024:
+            if (
+                path.is_symlink()
+                or path.suffix not in (".json", ".jsonl", ".log")
+                or path.stat().st_size > 32 * 1024 * 1024
+            ):
                 continue
             relative = path.relative_to(root)
             target = destination / "run" / relative

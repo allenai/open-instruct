@@ -72,6 +72,9 @@ class Supervisor:
         self.children = []
         self.logs = []
         self.health = {}
+        self.health_failures = {}
+        self.next_health = 0.0
+        self.log_offsets = {}
         self.stopping = threading.Event()
         self.failed = None
         self.thread = threading.Thread(target=self.heartbeat, daemon=True)
@@ -90,17 +93,41 @@ class Supervisor:
                 for _, process in self.children:
                     if not (self.root / "complete.json").exists() and process.poll() is not None:
                         raise RuntimeError(f"Managed process {process.args[:3]} exited with {process.returncode}")
-                if not (self.root / "complete.json").exists():
-                    for url in tuple(self.health.values()):
-                        with urllib.request.urlopen(url, timeout=10) as response:
-                            if response.status != 200:
-                                raise RuntimeError("Managed judge health failed")
+                if not (self.root / "complete.json").exists() and time.monotonic() >= self.next_health:
+                    self.probe_health()
+                    self.next_health = time.monotonic() + 10
             except BaseException as error:
                 self.failed = error
                 return
             self.stopping.wait(2)
 
+    def probe_health(self):
+        for name, url in tuple(self.health.items()):
+            try:
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    if response.status != 200:
+                        raise RuntimeError("Unhealthy HTTP response")
+                self.health_failures[name] = 0
+            except (OSError, RuntimeError) as error:
+                self.health_failures[name] = self.health_failures.get(name, 0) + 1
+                write(
+                    self.root / f"judge-health-{self.rank}.json",
+                    {"failures": self.health_failures, "error": str(error)},
+                )
+                if self.health_failures[name] >= 3:
+                    raise RuntimeError(f"Judge {name}: three consecutive liveness failures") from error
+
+    def relay_logs(self):
+        for stream in self.logs:
+            with Path(stream.name).open("rb") as reader:
+                reader.seek(self.log_offsets.get(stream.name, 0))
+                raw = reader.read(16384)
+                self.log_offsets[stream.name] = reader.tell()
+            if raw:
+                print(f"[{Path(stream.name).name}] " + raw.decode(errors="replace"), end="", flush=True)
+
     def check(self):
+        self.relay_logs()
         if self.failed:
             raise self.failed
         failures = list(self.root.glob("failed-*.json"))
@@ -151,6 +178,10 @@ class Supervisor:
 def run(path):
     spec = RunSpec.load(path)
     layout = topology.plan(spec)
+    if (Path(spec.output["root"]) / "workflow.json").exists() and not spec.launch["auto_resume"]:
+        raise RuntimeError(
+            "This run directory already has a workflow; choose a new output.root before starting services"
+        )
     rank = int(os.environ.get("BEAKER_REPLICA_RANK", "0"))
     count = int(os.environ.get("BEAKER_REPLICA_COUNT", "1"))
     if count != layout["replicas"] or rank not in range(count):
@@ -201,6 +232,7 @@ def run(path):
             judge_env = dict(env, CUDA_VISIBLE_DEVICES=",".join(devices))
             # The fixed judge is a standard Qwen model, not an Olmo extension.
             judge_env.pop("SGLANG_EXTERNAL_MODEL_PACKAGE", None)
+            judge_env["SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION"] = "false"
             supervisor.start("judge-" + name, command, judge_env)
             health[name] = f"http://127.0.0.1:{port}/health"
             write(root / f"judge-{name}.json", service)
@@ -282,10 +314,6 @@ def run(path):
             # authoritative and the peer heartbeat still bounds lost processes.
             while not (root / "complete.json").exists():
                 supervisor.check()
-                for url in health.values():
-                    with urllib.request.urlopen(url, timeout=10) as response:
-                        if response.status != 200:
-                            raise RuntimeError("Managed judge health failed")
                 time.sleep(2)
         # All replicas acknowledge completion before the head stops Ray.
         write(root / f"done-{rank}.json", {"status": "complete"})
