@@ -1,5 +1,5 @@
 {
-  "status": "retry_running",
+  "status": "completed_and_audited_zero_advantage_smoke",
   "preparation_experiment": "01M2A1Z8HQTKHM500H9SNE20Q1",
   "preparation_exit_code": 0,
   "preparation": {
@@ -236,6 +236,475 @@
         "passed": 23
       },
       "style_quality": "passed"
+    },
+    "result": {
+      "exit_code": 0,
+      "wall_seconds": 2126.633959,
+      "audit_experiment_id": "01M2BF6NSJ16KGWCQ350E8D2ZB",
+      "audit_passed": true,
+      "training_response_count": 16,
+      "training_rewards": [
+        1.0,
+        1.0
+      ],
+      "heldout_correct": [
+        14,
+        15
+      ],
+      "heldout_count": 16,
+      "training_had_nonzero_gradients": false,
+      "sampled_model_updates_l2": [
+        0.0,
+        0.0
+      ],
+      "standalone_vs_training_forward": {
+        "tokens": 14476,
+        "mean_abs": 0.0,
+        "max_abs": 0.0
+      },
+      "checkpoint": {
+        "clock": {
+          "completed_steps": 2,
+          "next_rollout_id": 2,
+          "published_step": 1
+        },
+        "path": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912-r2/checkpoints/core/rollout_0000001",
+        "world_size": 2
+      },
+      "optimizer_by_rank": {
+        "0": [
+          {
+            "auxiliary_denominator": 7588.0,
+            "elapsed_seconds": 42.04959966195747,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              0
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 14476,
+              "model_tokens": 15176,
+              "samples": 8,
+              "token_denominator": 14476,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "token",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "checked",
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 6724.0,
+            "elapsed_seconds": 2.019880391191691,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 12888,
+              "model_tokens": 13448,
+              "samples": 8,
+              "token_denominator": 12888,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "token",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "skipped",
+            "step": 2
+          }
+        ],
+        "1": [
+          {
+            "auxiliary_denominator": 7588.0,
+            "elapsed_seconds": 42.0494458838366,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              0
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 14476,
+              "model_tokens": 15176,
+              "samples": 8,
+              "token_denominator": 14476,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 1,
+            "reduction": "token",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "checked",
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 6724.0,
+            "elapsed_seconds": 2.020148911047727,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 12888,
+              "model_tokens": 13448,
+              "samples": 8,
+              "token_denominator": 12888,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 1,
+            "reduction": "token",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "skipped",
+            "step": 2
+          }
+        ]
+      },
+      "publications": [
+        {
+          "broadcast_seconds": 1.3701988058164716,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.1628330396488309,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.3914559450931847,
+          "finalize_seconds": 0.04599896678701043,
+          "pause_connect_seconds": 0.048627433367073536,
+          "repeated_version": false,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 3.0287831742316484,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 1.5427002809010446,
+          "version": 0
+        },
+        {
+          "broadcast_seconds": 0.011089725885540247,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.15987113351002336,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.5007054088637233,
+          "finalize_seconds": 0.04627571674063802,
+          "pause_connect_seconds": 0.024848570115864277,
+          "repeated_version": false,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.7524187830276787,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.180588168092072,
+          "version": 1
+        },
+        {
+          "broadcast_seconds": 0.010627778246998787,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.1685941144824028,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.4485660479404032,
+          "finalize_seconds": 0.04027235182002187,
+          "pause_connect_seconds": 0.016153969801962376,
+          "repeated_version": true,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.6917982418090105,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.1868052571080625,
+          "version": 1
+        },
+        {
+          "broadcast_seconds": 0.011344195809215307,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.159876708406955,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.4675148883834481,
+          "finalize_seconds": 0.043631305918097496,
+          "pause_connect_seconds": 0.021248876117169857,
+          "repeated_version": false,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.7112911459989846,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.17889553168788552,
+          "version": 2
+        },
+        {
+          "broadcast_seconds": 0.008776103612035513,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.1482975552789867,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 0.8565066517330706,
+          "finalize_seconds": 0.0382800973020494,
+          "pause_connect_seconds": 0.01810743333771825,
+          "repeated_version": true,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.0758219272829592,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.16292697889730334,
+          "version": 2
+        }
+      ],
+      "driver_timings": [
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 0.2034794520586729,
+          "stage": "startup_cache_prepare",
+          "started_unix": 1789197697.3987536
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 9.278136598877609,
+          "stage": "placement",
+          "started_unix": 1789197697.6023612
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 261.97803366789594,
+          "stage": "serving_startup",
+          "started_unix": 1789197708.1716504
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 80.27388350619003,
+          "stage": "trainer_startup",
+          "started_unix": 1789197970.1511002
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 15.995982731226832,
+          "stage": "initial_publication",
+          "started_unix": 1789198050.4266782
+        },
+        {
+          "details": {
+            "configured_serving": {
+              "rollout_num_gpus": 1,
+              "rollout_num_gpus_per_engine": 1,
+              "sglang_context_length": 34816,
+              "sglang_cuda_graph_max_bs_decode": 64,
+              "sglang_disable_radix_cache": true,
+              "sglang_max_mamba_cache_size": 128,
+              "sglang_max_running_requests": 8,
+              "sglang_max_total_tokens": 131072,
+              "sglang_mem_fraction_static": 0.6,
+              "sglang_server_concurrency": 8
+            },
+            "phase": "initial",
+            "scope": "blocking_shared_engine_evaluation"
+          },
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 694.9693075870164,
+          "stage": "evaluation",
+          "started_unix": 1789198066.4235651
+        },
+        {
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 127.20842841174453,
+          "stage": "generation_wait",
+          "started_unix": 1789198761.3943727
+        },
+        {
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 63.68449376616627,
+          "stage": "training",
+          "started_unix": 1789198888.6039433
+        },
+        {
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 19.95234142895788,
+          "stage": "publication",
+          "started_unix": 1789199014.2929823
+        },
+        {
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 90.07307127909735,
+          "stage": "generation_wait",
+          "started_unix": 1789199034.246318
+        },
+        {
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 2.095599525142461,
+          "stage": "training",
+          "started_unix": 1789199124.3202515
+        },
+        {
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 19.18805846525356,
+          "stage": "publication",
+          "started_unix": 1789199168.2406552
+        },
+        {
+          "details": {
+            "configured_serving": {
+              "rollout_num_gpus": 1,
+              "rollout_num_gpus_per_engine": 1,
+              "sglang_context_length": 34816,
+              "sglang_cuda_graph_max_bs_decode": 64,
+              "sglang_disable_radix_cache": true,
+              "sglang_max_mamba_cache_size": 128,
+              "sglang_max_running_requests": 8,
+              "sglang_max_total_tokens": 131072,
+              "sglang_mem_fraction_static": 0.6,
+              "sglang_server_concurrency": 8
+            },
+            "phase": "periodic",
+            "scope": "blocking_shared_engine_evaluation"
+          },
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 452.65434689167887,
+          "stage": "evaluation",
+          "started_unix": 1789199187.4301898
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 44.926410785876215,
+          "stage": "final_hf_export",
+          "started_unix": 1789199640.086219
+        }
+      ],
+      "wandb_url": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/gyqw63gw",
+      "limitations": [
+        "Every sampled training response earned reward 1.0. Group-centered advantages, recorded gradients, and sampled parameter changes were zero; this run does not qualify nonzero-gradient full-model learning.",
+        "The 14/16 to 15/16 held-out change is not evidence of learning.",
+        "The final HF export was written and its architecture/files audited; reloading that export in a fresh serving process has not been tested at full model scale.",
+        "Checkpoint topology, cursor hash, and rank-state presence passed; fresh-process full-model optimizer resume has not been tested."
+      ]
     }
   }
 }

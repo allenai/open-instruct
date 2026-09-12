@@ -266,3 +266,30 @@ and updates, with both reshard-after-forward settings. The retry profile is
 `qualification/olmo3-think-gsm8k-robertb-20260912-r2.toml`; its specialized debug
 launcher runs that test on two GPUs before the regular workflow and preserves
 the failed run's output directory.
+
+
+### Two-GPU FSDP retry completed
+
+The [retry](https://beaker.org/ex/01M2A7NQ68EAQ6Z6DVKE50070F) completed with
+exit code 0 in 35.4 minutes. Its two-GPU parameter-probe preflight passed on both
+ranks. Both training iterations, native checkpoint commits, policy publications
+0/1/2, final held-out evaluation, and HF export completed. The independent
+[Saturn audit](https://beaker.org/ex/01M2BF6NSJ16KGWCQ350E8D2ZB) passed retained
+reward recomputation, data separation, policy versions, optimizer clocks,
+checkpoint topology/cursor checks, and exported architecture/file checks.
+
+All 16 sampled training responses were correct. Both collections therefore had
+zero group-centered advantages, zero recorded gradient norms on both ranks, and
+zero sampled parameter changes. This qualifies the execution path through the
+optimizer and checkpoint writer, but **not nonzero-gradient full-model learning**.
+Held-out accuracy was 14/16 initially and 15/16 finally; that change must not be
+reported as RL improvement. Neither evaluation truncated. Initial and final
+evaluation together took 19.1 minutes. The first standalone/training-forward
+comparison was bit exact across 14,476 active response tokens.
+
+Before a learning comparison, exercise a broader set of training groups with
+mixed rewards and verify nonzero gradients and parameter updates. A fresh-process
+7B optimizer resume and fresh serving reload of the final export also remain
+unqualified; the earlier tiny-model resume checks do not establish those results.
+Detailed evidence is in
+[the run measurement](measurements/miles-olmo3-gsm8k-20260912.json).
