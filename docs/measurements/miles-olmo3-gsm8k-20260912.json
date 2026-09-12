@@ -1,5 +1,5 @@
 {
-  "status": "first_attempt_failed_post_optimizer_diagnostics",
+  "status": "retry_running",
   "preparation_experiment": "01M2A1Z8HQTKHM500H9SNE20Q1",
   "preparation_exit_code": 0,
   "preparation": {
@@ -215,5 +215,27 @@
     "initial_publication_seconds": 2.606604,
     "failure": "ParameterProbe retained temporary unsharded FSDP parameters; storage was released after backward. optim_step and the in-memory clock increment preceded probe.updates failure. No optimizer contract event, updated publication, or native checkpoint was committed.",
     "wandb_url": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/bjgnq5v1"
+  },
+  "retry": {
+    "experiment_id": "01M2A7NQ68EAQ6Z6DVKE50070F",
+    "job_id": "01M2A7NQAKBXRQ9KQDP9F3CK7K",
+    "image": "01M2A7NFCY2CX41M1HFS2KHGDX",
+    "revision": "1aa0e0301f19c882e581d440ecadc630958ded46",
+    "config": "configs/miles/qualification/olmo3-think-gsm8k-robertb-20260912-r2.toml",
+    "launcher": "scripts/train/debug/miles_olmo3_fsdp_trial.sh",
+    "url": "https://beaker.org/ex/01M2A7NQ68EAQ6Z6DVKE50070F",
+    "prelaunch_validation": {
+      "contract_and_parameter_probe": {
+        "passed": 15
+      },
+      "runtime": {
+        "passed": 47,
+        "deselected": 14
+      },
+      "profile_and_audit": {
+        "passed": 23
+      },
+      "style_quality": "passed"
+    }
   }
 }
