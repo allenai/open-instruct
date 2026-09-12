@@ -89,7 +89,7 @@ def source_rows():
     return manifest, partitions, inputs
 
 
-def select(spec, manifest, partitions, quotas, collections_count):
+def select(spec, manifest, partitions, quotas, collections_count, eval_per_domain=2):
     tokenizer = run_data._tokenizer(Path(spec.model["source"]))
     options = manifest["miles"]
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
@@ -109,7 +109,9 @@ def select(spec, manifest, partitions, quotas, collections_count):
         for index, source in enumerate(partitions[split]):
             metadata = copy.deepcopy(source[options["metadata_key"]])
             name = metadata["verifiers"][0]["name"]
-            count = quotas.get(name, 0) * multiplier if split == "train" else (2 if name in quotas else 0)
+            count = (
+                quotas.get(name, 0) * multiplier if split == "train" else (eval_per_domain if name in quotas else 0)
+            )
             if len(buckets[name]) >= count:
                 continue
             messages = run_data._messages({"messages": source[options["input_key"]]}, strip_answer=False)
@@ -140,7 +142,9 @@ def select(spec, manifest, partitions, quotas, collections_count):
             buckets[name].append(row)
             seen_content.add(content_id)
             seen_ids.add(identity)
-        required = {name: (count * multiplier if split == "train" else 2) for name, count in quotas.items()}
+        required = {
+            name: (count * multiplier if split == "train" else eval_per_domain) for name, count in quotas.items()
+        }
         if any(len(buckets[name]) < count for name, count in required.items()):
             raise ValueError(
                 f"Insufficient {split} coverage: required={required}, found={ {k: len(v) for k, v in buckets.items()} }"
@@ -148,13 +152,28 @@ def select(spec, manifest, partitions, quotas, collections_count):
         selected[split] = []
         for batch in range(multiplier):
             for name, quota in quotas.items():
-                count = quota if split == "train" else 2
+                count = quota if split == "train" else eval_per_domain
                 selected[split].extend(buckets[name][batch * count : (batch + 1) * count])
     output = Path(spec.data["prompt_data"]).parent
-    output.mkdir(parents=True, exist_ok=False)
-    for split, rows in selected.items():
-        (output / f"{split}.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    expected = {split + ".jsonl": "".join(json.dumps(row) + "\n" for row in rows) for split, rows in selected.items()}
     registry = {name: registry[name] for name in quotas}
+    if output.exists():
+        # A successful sibling fixture survives a later failure; never overwrite it.
+        if not (output / "preparation.json").is_file():
+            raise ValueError("Incomplete immutable fixture; choose a fresh fixture directory")
+        existing = json.loads((output / "preparation.json").read_text())
+        for name, expected_digest in existing["outputs"].items():
+            if digest((output / name).read_bytes()) != expected_digest:
+                raise ValueError("Existing fixture hash mismatch")
+        if (
+            any((output / name).read_text() != value for name, value in expected.items())
+            or json.loads((output / "verifiers.json").read_text()) != registry
+        ):
+            raise ValueError("Existing fixture differs from requested selection")
+        return existing
+    output.mkdir(parents=True, exist_ok=False)
+    for name, value in expected.items():
+        (output / name).write_text(value)
     workflow.write_json(output / "verifiers.json", registry)
     report = {
         "counts": {
@@ -199,6 +218,7 @@ def main():
             partitions,
             {"math": 4, "ifeval": 4, "code": 2, "code_stdio": 2, "general-quality": 2, "general-quality_ref": 2},
             4,
+            eval_per_domain=1,
         )
         report["passed"] = True
     finally:

@@ -56,3 +56,17 @@ A code HTTP rejection must not pass as a legitimate wrong-answer canary.
   fixed before submission. Dense multi-update collections also explicitly declare
   `core.max_policy_lag=1` as required by the policy-age contract.
 - GPU attempts used: 0. No new lifecycle or learning claim yet.
+
+### Candidate A / first preparation
+
+Source `af7aa8c1e99b`, image `01M2BX0VPAB4XDWTRVQNJP8BES`.
+Host tests 255 passed plus 3 fixture tests. Image runtime tests 94 passed, 2 skipped.
+Fresh dependency-free Python 3.12 validates all four initial configs.
+Saturn preparation `01M2BX13SSQNY91TWM39GWP562` exited 1: the requested two held-out
+rows per domain exceeded the one eligible general-quality row. Dense preparation,
+all six code canaries, concurrent imports and inventories succeeded. No GPU launch.
+
+The preparation-only correction explicitly uses one eval row per MoE domain and
+hash-validates an already completed sibling fixture before reuse. This requires a
+second short CPU preparation job beyond the original one-job estimate; GPU budget
+remains untouched. Training source and runtime dependency pins are unchanged.

@@ -46,6 +46,10 @@ def test_selection_rejects_normalized_overlap_and_rerenders(tmp_path, monkeypatc
     assert "prompt_token_ids" not in prepared["metadata"]
     assert "source_prompt_token_ids_sha256" in prepared["metadata"]
     assert partitions["train"][-1]["metadata"]["prompt_token_ids"] == [999]
+    assert preparation.select(spec, manifest, partitions, {"math": 1}, 1) == report
+    partitions["train"][-1]["messages"][0]["content"] = "changed training"
+    with pytest.raises(ValueError, match="differs from requested selection"):
+        preparation.select(spec, manifest, partitions, {"math": 1}, 1)
 
 
 def test_rejected_service_zero_does_not_pass_wrong_answer_canary(monkeypatch):
