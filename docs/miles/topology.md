@@ -57,6 +57,35 @@ graph capture, retractions, response tails, tokens/second and tokens/GPU-second.
 For prefix-cache policy see [run controls](run-controls.md); do not assume ordinary
 radix caching is interchangeable with KDA recurrent-state caching.
 
+## When radix caching is useful
+
+Radix caching is most promising for **long, repeatedly reused prompt prefixes**:
+shared system instructions, few-shot examples, repeated context, or multiple
+responses to the same prompt. Long prompts alone are insufficient if their token
+prefixes differ. Reuse also depends on requests reaching an engine with matching
+cached state, cache capacity/eviction, and invalidation when policy weights change.
+A cache-aware router can help request placement; it cannot create shared prefixes.
+
+The benefit is avoiding repeated prefix processing. For short prompts followed by
+long generated responses, that can be a small part of the workload. Judge latency,
+training, publication or decode can still determine end-to-end cadence. Compare
+warm update wall time and trainer data waits alongside cache hits and engine
+throughput; a higher engine throughput number alone does not establish a faster run.
+
+A preliminary 20-update comparison reported on September 12 found about **45 cached
+tokens per sample versus roughly 3,600 generated tokens**. Warm updates 3–20 took
+31.5 minutes with cache off and 32.0 minutes with radix plus cache-aware routing:
+no measurable end-to-end gain in that comparison, despite cache hits and increased
+reported engine throughput. This is a training-phase observation; both arms lost
+final evaluation to a code-service error. Matching mean trainer/behavior log-prob
+gaps (0.0241) do not establish tokenwise numerical identity. The full experiment
+report and mixed-chunk result were still pending when this guidance was added.
+
+Treat radix caching as workload-dependent tuning, particularly worth measuring
+when substantial prefixes repeat. Keep the example defaults until a representative
+comparison supports changing them. See [run controls](run-controls.md) for the
+radix switch and retain the model-specific KDA recurrent-cache requirements.
+
 The current evidence includes B300 EP1/EP2 numerical and lifecycle checks,
 full-SFT async/admission runs and small multi-node exercises. EP8 packing throughput,
 full-model colocation, new architectures and other GPU types require their own
