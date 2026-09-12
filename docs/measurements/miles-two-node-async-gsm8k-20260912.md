@@ -90,6 +90,41 @@ filtered in this stack. Trainer-versus-behavior mean log-probability gap was 0.0
 throughout at lag ≤ 2 (0.009 at lag 1 in earlier runs); TIS clipping was negligible
 (3e-5). All five standalone-versus-training scoring checks were exact.
 
+## Full GSM8K test evaluation of the start and update-100 checkpoints
+
+The 128-question in-run eval draws from the RLVR training pool and cannot resolve a
+few-point change. [`scripts/miles/gsm8k_test_eval.py`](../../scripts/miles/gsm8k_test_eval.py)
+served each checkpoint on eight TP1 engines with the training run's serving settings
+(prefill CUDA graphs disabled; the default `breakable` prefill backend pads token counts
+and crashed every engine on its first batch in
+[01M2B1K8D969NJDVTAXZ0WHTD7](https://beaker.org/ex/01M2B1K8D969NJDVTAXZ0WHTD7)) and
+scored all 1,319 official test questions with the run's `GSM8KVerifier`, greedy and with
+eight temperature-1 samples each. Prompt rendering was checked against all 128 prepared
+eval rows before generation. Job: [01M2B27XAEKC9V7F08GXR8KVRD](https://beaker.org/ex/01M2B27XAEKC9V7F08GXR8KVRD);
+[summary](miles-two-node-async-gsm8k-20260912/gsm8k-test-eval-summary.json); responses
+retained under the run root in `gsm8k-test-eval-20260912-r2/`.
+
+| Checkpoint | Greedy correct / 1319 | Greedy truncated at 4096 | Greedy mean tokens | pass@1 (T=1, n=8) | pass@8 | All 8 correct | None of 8 correct |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| start (SFT-65536) | 967 (0.733) | 20.6% | 2065 | 0.668 | 0.913 | 29.6% | 8.7% |
+| update 100 | 1021 (0.774) | 8.3% | 1115 | 0.744 | 0.942 | 42.7% | 5.8% |
+
+Paired greedy comparison: 839 correct in both, 182 correct only after training, 128
+correct only before, 170 in neither; net +54 questions (+4.1 points), exact McNemar
+p = 0.0026. The change is real, and the 128-question curve (106 → 101) had its sign wrong.
+
+Where the gain comes from: 130 of the 182 newly correct answers were truncated at the
+4096-token cap before training. On the 1,004 questions that neither checkpoint
+truncated, greedy accuracy moved from 0.897 to 0.871 (26 questions worse); that subset is
+selected on the outcome, so it is suggestive rather than conclusive, but it says the
+policy got terser rather than more accurate on problems it could already finish. Sampled
+pass@8 rose 0.913 → 0.942, and of the 115 questions the start never solved in eight
+samples, the trained model solves 62 at least once and 30 greedily, so the change is not
+only sharpening; the start's 26% sampled truncation rate is the confound there too.
+
+Note that the official test split is harder for this model than the in-run pool: 0.733
+greedy against 0.828 on the 128 prepared questions.
+
 ## Qualification scope
 
 Established by r2: EP8 startup, 100 finite optimizer steps with gradients in dense,
@@ -98,7 +133,7 @@ checkpoint saves, blocking shared-engine evaluation, final HF export, clean two-
 teardown, and the shared compiler-cache root receiving its first publication (7 trainer
 workers published; the cold miss was expected on a fresh root).
 
-Not established: resume from an EP8 checkpoint (multi-node runs require
+Not established: an eval of the update-25/50/75 native checkpoints (they need HF export first); resume from an EP8 checkpoint (multi-node runs require
 `auto_resume=false`; a manual relaunch against the saved root is the test), learning
 quality, the root cause of the one 30 s producer join stall, and a second-run compiler
 cache hit at this shape.

@@ -1,0 +1,107 @@
+{
+  "dataset": {
+    "source": [
+      "openai/gsm8k",
+      "main",
+      "test"
+    ],
+    "questions": 1319,
+    "fingerprint_sha256": "1f83abc2a05be038eb955af10a4c965796559dab2774418b2e0cd3fa0d41e16a"
+  },
+  "settings": {
+    "gpus": 8,
+    "sampled_n": 8,
+    "max_new_tokens": 4096,
+    "server_flags": [
+      "--tp-size",
+      "1",
+      "--trust-remote-code",
+      "--context-length",
+      "6144",
+      "--mem-fraction-static",
+      "0.6",
+      "--max-running-requests",
+      "64",
+      "--max-total-tokens",
+      "524288",
+      "--chunked-prefill-size",
+      "16384",
+      "--max-mamba-cache-size",
+      "128",
+      "--disable-radix-cache",
+      "--attention-backend",
+      "triton",
+      "--sampling-backend",
+      "pytorch",
+      "--cuda-graph-backend-decode",
+      "full",
+      "--cuda-graph-max-bs",
+      "64",
+      "--cuda-graph-backend-prefill",
+      "disabled",
+      "--skip-server-warmup"
+    ]
+  },
+  "checkpoints": {
+    "start": {
+      "model": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+      "questions": 1319,
+      "rendering_checked_against_prepared_rows": 128,
+      "timings": {
+        "engine_startup_seconds": 281.615328527987,
+        "greedy_seconds": 106.65147593803704,
+        "sampled_seconds": 760.043319799006
+      },
+      "greedy": {
+        "correct": 967,
+        "accuracy": 0.733131159969674,
+        "truncated": 0.20621683093252463,
+        "mean_tokens": 2065.2964366944657
+      },
+      "sampled": {
+        "n": 8,
+        "pass_at_1": 0.6679302501895376,
+        "pass_at_8": 0.9128127369219106,
+        "all_correct_fraction": 0.2964366944655042,
+        "all_wrong_fraction": 0.08718726307808947,
+        "truncated": 0.2625094768764215,
+        "mean_tokens": 2315.2311410159214
+      }
+    },
+    "update100": {
+      "model": "/weka/oe-training-default/robertb/open-instruct/runs/two-node-async-gsm8k-20260912-r2/export-hf",
+      "questions": 1319,
+      "rendering_checked_against_prepared_rows": 128,
+      "timings": {
+        "engine_startup_seconds": 153.69513824628666,
+        "greedy_seconds": 65.32760530989617,
+        "sampled_seconds": 517.827841903083
+      },
+      "greedy": {
+        "correct": 1021,
+        "accuracy": 0.7740712661106899,
+        "truncated": 0.08263836239575435,
+        "mean_tokens": 1114.9006823351024
+      },
+      "sampled": {
+        "n": 8,
+        "pass_at_1": 0.7434609552691432,
+        "pass_at_8": 0.9416224412433661,
+        "all_correct_fraction": 0.4268385140257771,
+        "all_wrong_fraction": 0.058377558756633814,
+        "truncated": 0.07297194844579227,
+        "mean_tokens": 1322.242892342684
+      }
+    }
+  },
+  "paired_greedy_first_vs_last": {
+    "first": "start",
+    "last": "update100",
+    "both_correct": 839,
+    "only_first": 128,
+    "only_second": 182,
+    "neither": 170,
+    "net_change": 54,
+    "mcnemar_exact_p": 0.0025546722979606015
+  }
+}
