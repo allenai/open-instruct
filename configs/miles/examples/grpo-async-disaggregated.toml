@@ -72,7 +72,7 @@ sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"
 check_weight_update_equal = true
-update_weight_buffer_size = 1073741824
+update_weight_buffer_size = 2147483648
 
 [optimizer]
 learning_rate = 0.000001
