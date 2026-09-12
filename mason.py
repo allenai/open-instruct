@@ -296,6 +296,10 @@ def get_env_vars(
         "WANDB_API_KEY",
         "BEAKER_TOKEN",
         "OPENAI_API_KEY",
+        # Lets jobs read gs:// paths (olmo-core's io layer speaks GCS natively).
+        # On-premise clusters have no GCE metadata server, so without this a job
+        # falls back to anonymous credentials and fails.
+        "GOOGLE_APPLICATION_CREDENTIALS",
         # litellm expects these env vars
         "AZURE_API_KEY",
         "AZURE_API_BASE",
