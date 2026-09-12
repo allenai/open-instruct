@@ -1,0 +1,24 @@
+{
+  "code_canaries": [
+    1.0,
+    0.0,
+    1.0,
+    0.0
+  ],
+  "counts": {
+    "eval": 6,
+    "train": 16
+  },
+  "outputs": {
+    "eval.jsonl": "ffb9f7777221c652d5b8898eb358dd457d26ce78f8c9379a14e3975d49781d06",
+    "train.jsonl": "b9a0011533f1e6af5270e975539202494b49a2865020b5b1f83d5ee1646630d9",
+    "verifiers.json": "89c377d9b6b201a37698e80396b8b557ccc4538b0e3c1f583e1db157ea9ddf8e"
+  },
+  "passed": true,
+  "sources": {
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/eval.jsonl": "4749d16830bb23100f80e2f7896e03936b0db1c6e6b7414885123497e1a045d4",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/rl-manifest.json": "7a588b35cf31c056488943f6500a6021ecdf08309cb7fe35115262a13c7233e0",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/train.jsonl": "2815fb41cf1033ba9b21ba8b5c2c3b8f07a07a72f2ad09a66d3872e015c5b3e3"
+  },
+  "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef"
+}

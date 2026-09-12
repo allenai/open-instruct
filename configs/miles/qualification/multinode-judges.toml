@@ -1,14 +1,14 @@
 # Two nodes, four B300s: two Core EP2 trainer GPUs; one rollout and one fixed judge.
 # Two updates exercise plumbing, not learning. Prepare data on Saturn first.
 schema_version = 1
-name = "multinode-judges-20260912"
+name = "multinode-judges-20260912-r2"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/multinode-judges-20260912"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/multinode-judges-20260912-r2"
 export_hf = false
 
 [launch]
