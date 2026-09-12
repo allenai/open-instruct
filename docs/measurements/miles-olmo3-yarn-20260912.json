@@ -1,0 +1,488 @@
+{
+  "scope": "Synthetic Olmo 3 YaRN, 1 RTX 4090, standard Core trainer. Not full 7B or multi-rank qualification.",
+  "reference": {
+    "reference": {
+      "transformers": "4.57.0",
+      "torch": "2.13.0+cu130",
+      "seed": 17,
+      "reference_source_sha256": "8d3ba411a89dbd3f703b24a117d03814de7952fdbd51a4cdf64186526f039464",
+      "semantics": "YaRN on full-attention layers; unscaled RoPE on sliding-attention layers",
+      "lengths": [
+        1,
+        15,
+        16,
+        17,
+        31,
+        32,
+        33,
+        64,
+        128
+      ],
+      "config": {
+        "return_dict": true,
+        "output_hidden_states": false,
+        "torchscript": false,
+        "dtype": "bfloat16",
+        "pruned_heads": {},
+        "tie_word_embeddings": false,
+        "chunk_size_feed_forward": 0,
+        "is_encoder_decoder": false,
+        "is_decoder": false,
+        "cross_attention_hidden_size": null,
+        "add_cross_attention": false,
+        "tie_encoder_decoder": false,
+        "architectures": [
+          "Olmo3ForCausalLM"
+        ],
+        "finetuning_task": null,
+        "id2label": {
+          "0": "LABEL_0",
+          "1": "LABEL_1"
+        },
+        "label2id": {
+          "LABEL_0": 0,
+          "LABEL_1": 1
+        },
+        "task_specific_params": null,
+        "problem_type": null,
+        "tokenizer_class": null,
+        "prefix": null,
+        "bos_token_id": 1,
+        "pad_token_id": 0,
+        "eos_token_id": 2,
+        "sep_token_id": null,
+        "decoder_start_token_id": null,
+        "max_length": 20,
+        "min_length": 0,
+        "do_sample": false,
+        "early_stopping": false,
+        "num_beams": 1,
+        "temperature": 1.0,
+        "top_k": 50,
+        "top_p": 1.0,
+        "typical_p": 1.0,
+        "repetition_penalty": 1.0,
+        "length_penalty": 1.0,
+        "no_repeat_ngram_size": 0,
+        "encoder_no_repeat_ngram_size": 0,
+        "bad_words_ids": null,
+        "num_return_sequences": 1,
+        "output_scores": false,
+        "return_dict_in_generate": false,
+        "forced_bos_token_id": null,
+        "forced_eos_token_id": null,
+        "remove_invalid_values": false,
+        "exponential_decay_length_penalty": null,
+        "suppress_tokens": null,
+        "begin_suppress_tokens": null,
+        "num_beam_groups": 1,
+        "diversity_penalty": 0.0,
+        "_name_or_path": "",
+        "transformers_version": "4.57.0",
+        "tf_legacy_loss": false,
+        "use_bfloat16": false,
+        "vocab_size": 256,
+        "max_position_embeddings": 256,
+        "hidden_size": 256,
+        "intermediate_size": 512,
+        "num_hidden_layers": 4,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 2,
+        "hidden_act": "silu",
+        "initializer_range": 0.02,
+        "use_cache": true,
+        "rope_theta": 500000,
+        "rope_scaling": {
+          "rope_type": "yarn",
+          "factor": 8.0,
+          "original_max_position_embeddings": 32,
+          "beta_fast": 32,
+          "beta_slow": 1,
+          "attention_factor": 1.2079441541679836
+        },
+        "attention_bias": false,
+        "attention_dropout": 0.0,
+        "rms_norm_eps": 1e-05,
+        "sliding_window": 16,
+        "layer_types": [
+          "sliding_attention",
+          "sliding_attention",
+          "sliding_attention",
+          "full_attention"
+        ],
+        "model_type": "olmo3",
+        "output_attentions": false
+      }
+    },
+    "core": [
+      {
+        "length": 1,
+        "relative_l2": 0.0,
+        "max_abs": 0.0,
+        "logprob_mean_abs": 0.0
+      },
+      {
+        "length": 15,
+        "relative_l2": 0.011252214200794697,
+        "max_abs": 0.013671875,
+        "logprob_mean_abs": 0.0028397783171385527
+      },
+      {
+        "length": 16,
+        "relative_l2": 0.011182015761733055,
+        "max_abs": 0.015625,
+        "logprob_mean_abs": 0.0028232340700924397
+      },
+      {
+        "length": 17,
+        "relative_l2": 0.011241994798183441,
+        "max_abs": 0.015625,
+        "logprob_mean_abs": 0.002843046560883522
+      },
+      {
+        "length": 31,
+        "relative_l2": 0.012532385997474194,
+        "max_abs": 0.017578125,
+        "logprob_mean_abs": 0.0031349812634289265
+      },
+      {
+        "length": 32,
+        "relative_l2": 0.012874589301645756,
+        "max_abs": 0.01953125,
+        "logprob_mean_abs": 0.0032047503627836704
+      },
+      {
+        "length": 33,
+        "relative_l2": 0.012911251746118069,
+        "max_abs": 0.01953125,
+        "logprob_mean_abs": 0.003211639355868101
+      },
+      {
+        "length": 64,
+        "relative_l2": 0.014607269316911697,
+        "max_abs": 0.0234375,
+        "logprob_mean_abs": 0.003633648157119751
+      },
+      {
+        "length": 128,
+        "relative_l2": 0.015732798725366592,
+        "max_abs": 0.029296875,
+        "logprob_mean_abs": 0.003970491234213114
+      }
+    ],
+    "hf_weight_roundtrip_exact": true
+  },
+  "smoke": {
+    "completed_steps": 3,
+    "fresh_process_resume": true,
+    "hf_exports": [
+      "export",
+      "export-resumed"
+    ],
+    "scores": [
+      {
+        "rollout_id": 0,
+        "source": "standalone",
+        "active_tokens": 32,
+        "max_abs": 0.007677555084228516
+      },
+      {
+        "rollout_id": 1,
+        "source": "training_forward",
+        "active_tokens": 30,
+        "max_abs": 0.008037090301513672
+      },
+      {
+        "rollout_id": 2,
+        "source": "standalone",
+        "active_tokens": 32,
+        "max_abs": 0.008494853973388672
+      }
+    ],
+    "scoring_checks": [
+      {
+        "active_tokens": 32,
+        "edge": 0.001,
+        "event": "scoring_check",
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rank": 0,
+        "rollout_id": 0,
+        "schema_version": 1,
+        "step": 0,
+        "tokens_above_edge": 0,
+        "tolerance": 0.001
+      },
+      {
+        "active_tokens": 32,
+        "edge": 0.001,
+        "event": "scoring_check",
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rank": 0,
+        "rollout_id": 2,
+        "schema_version": 1,
+        "step": 2,
+        "tokens_above_edge": 0,
+        "tolerance": 0.001
+      }
+    ],
+    "updates": [
+      {
+        "step": 1,
+        "lr_used": [
+          1e-06
+        ],
+        "normalization": {
+          "active_tokens": 32,
+          "model_tokens": 44,
+          "samples": 4,
+          "token_denominator": 32,
+          "world_size": 1
+        },
+        "optimizer_skipped": false,
+        "scoring_pass": "checked"
+      },
+      {
+        "step": 2,
+        "lr_used": [
+          1e-06
+        ],
+        "normalization": {
+          "active_tokens": 30,
+          "model_tokens": 42,
+          "samples": 4,
+          "token_denominator": 30,
+          "world_size": 1
+        },
+        "optimizer_skipped": false,
+        "scoring_pass": "skipped"
+      },
+      {
+        "step": 3,
+        "lr_used": [
+          1e-06
+        ],
+        "normalization": {
+          "active_tokens": 32,
+          "model_tokens": 44,
+          "samples": 4,
+          "token_denominator": 32,
+          "world_size": 1
+        },
+        "optimizer_skipped": false,
+        "scoring_pass": "checked"
+      }
+    ],
+    "publication": [
+      {
+        "version": 0,
+        "repeated_version": false,
+        "pause_connect_seconds": 0.12723169522359967,
+        "export_pack_seconds": 0.008886730298399925,
+        "transport_load_seconds": 0.009354924317449331,
+        "finalize_seconds": 0.005930361337959766,
+        "total_seconds": 0.1514039821922779,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 1,
+        "repeated_version": false,
+        "pause_connect_seconds": 0.007826389279216528,
+        "export_pack_seconds": 0.009104832075536251,
+        "transport_load_seconds": 0.007101481780409813,
+        "finalize_seconds": 0.005906687118113041,
+        "total_seconds": 0.029939550440758467,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 1,
+        "repeated_version": true,
+        "pause_connect_seconds": 0.0026302440091967583,
+        "export_pack_seconds": 0.008959276136010885,
+        "transport_load_seconds": 0.00530386995524168,
+        "finalize_seconds": 0.0047975340858101845,
+        "total_seconds": 0.02169101405888796,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 2,
+        "repeated_version": false,
+        "pause_connect_seconds": 0.005702822003513575,
+        "export_pack_seconds": 0.009756261482834816,
+        "transport_load_seconds": 0.008023080881685019,
+        "finalize_seconds": 0.006346726790070534,
+        "total_seconds": 0.029829001054167747,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 2,
+        "repeated_version": true,
+        "pause_connect_seconds": 0.002611808944493532,
+        "export_pack_seconds": 0.00879341410472989,
+        "transport_load_seconds": 0.005565552972257137,
+        "finalize_seconds": 0.005218768958002329,
+        "total_seconds": 0.02218964509665966,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 2,
+        "repeated_version": false,
+        "pause_connect_seconds": 0.006458493880927563,
+        "export_pack_seconds": 0.009508750401437283,
+        "transport_load_seconds": 0.009775792714208364,
+        "finalize_seconds": 0.007564852014183998,
+        "total_seconds": 0.033308058977127075,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 2,
+        "repeated_version": true,
+        "pause_connect_seconds": 0.0029164119623601437,
+        "export_pack_seconds": 0.009363113902509212,
+        "transport_load_seconds": 0.007500601001083851,
+        "finalize_seconds": 0.005728668067604303,
+        "total_seconds": 0.02550892485305667,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 3,
+        "repeated_version": false,
+        "pause_connect_seconds": 0.008733056019991636,
+        "export_pack_seconds": 0.009405313991010189,
+        "transport_load_seconds": 0.008988517802208662,
+        "finalize_seconds": 0.0054643889889121056,
+        "total_seconds": 0.03259136714041233,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      },
+      {
+        "version": 3,
+        "repeated_version": true,
+        "pause_connect_seconds": 0.0028375834226608276,
+        "export_pack_seconds": 0.008713137824088335,
+        "transport_load_seconds": 0.007786611095070839,
+        "finalize_seconds": 0.005256726872175932,
+        "total_seconds": 0.024594249203801155,
+        "tensors": 47,
+        "bytes": 1446144,
+        "buckets": 1,
+        "transport_collectives": 1,
+        "stream_moe_export": true,
+        "transport": "ipc"
+      }
+    ]
+  },
+  "commands": [
+    "python scripts/miles/olmo3_reference.py REFERENCE (Transformers 4.57.0)",
+    "python scripts/miles/olmo3_qualification.py REFERENCE (MILES/Core runtime)",
+    "python tests/miles/smoke.py OUTPUT --model-type olmo3",
+    "python tests/miles/smoke.py OUTPUT --model-type olmo3 --resume"
+  ],
+  "checkpoint": "allenai/Olmo-3-7B-Think-DPO",
+  "checkpoint_revision": "7b18bf927b430ff06376fdfa5610eb3b1b6a5c38",
+  "locked_runtime_repeat": {
+    "core_revision": "779b183d81d290e91fc289a47cd32fd9c0bd7311",
+    "miles_revision": "df24d2ed5da4598264c6682f9dbe49aee64acc95",
+    "core_reference_identical": true,
+    "smoke_passed": true,
+    "fresh_process_resume_passed": true,
+    "completed_steps": 3,
+    "scores": [
+      {
+        "rollout_id": 0,
+        "source": "standalone",
+        "active_tokens": 32,
+        "max_abs": 0.007677555084228516
+      },
+      {
+        "rollout_id": 1,
+        "source": "training_forward",
+        "active_tokens": 30,
+        "max_abs": 0.005717277526855469
+      },
+      {
+        "rollout_id": 2,
+        "source": "standalone",
+        "active_tokens": 32,
+        "max_abs": 0.007950305938720703
+      }
+    ],
+    "scoring_checks": [
+      {
+        "active_tokens": 32,
+        "edge": 0.001,
+        "event": "scoring_check",
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rank": 0,
+        "rollout_id": 0,
+        "schema_version": 1,
+        "step": 0,
+        "tokens_above_edge": 0,
+        "tolerance": 0.001
+      },
+      {
+        "active_tokens": 32,
+        "edge": 0.001,
+        "event": "scoring_check",
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "rank": 0,
+        "rollout_id": 2,
+        "schema_version": 1,
+        "step": 2,
+        "tokens_above_edge": 0,
+        "tolerance": 0.001
+      }
+    ],
+    "runtime_tests": {
+      "passed": 72,
+      "skipped": 10,
+      "deselected": 14
+    },
+    "cpu_tests": {
+      "passed": 175
+    },
+    "style_quality_passed": true
+  }
+}

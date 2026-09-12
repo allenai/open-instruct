@@ -142,7 +142,7 @@ def restore(actor):
 
 
 def comparable_model_config(value, *, parent=None):
-    """Exclude only validated SwiGLU execution selection from architecture equality.
+    """Canonicalize JSON layer indices and validated SwiGLU execution selection.
 
     Old manifests omit this field. Retain the original config in new manifests for
     provenance while allowing a static/dynamic rollback without changing weights.
@@ -153,6 +153,15 @@ def comparable_model_config(value, *, parent=None):
         return value
     result = {}
     for key, item in value.items():
+        if parent == "block_overrides":
+            # JSON object keys become strings on disk. YaRN supplies integer
+            # per-layer overrides in memory; compare without weakening geometry.
+            if type(key) is int and key >= 0:
+                key = str(key)
+            elif not isinstance(key, str) or not key.isascii() or not key.isdecimal() or str(int(key)) != key:
+                raise ValueError("Invalid saved block_overrides layer index")
+            if key in result:
+                raise ValueError("Duplicate block_overrides layer index")
         if parent == "routed_experts" and key == "row_specialization":
             if item not in ("static", "dynamic"):
                 raise ValueError("Invalid saved routed-expert row_specialization")

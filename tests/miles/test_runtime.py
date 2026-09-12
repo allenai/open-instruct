@@ -24,7 +24,7 @@ from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.state import PolicyClock
 
 
-@pytest.fixture(params=["qwen3", "kda", "kda_latent", "olmo3_full", "olmo3_sliding"])
+@pytest.fixture(params=["qwen3", "kda", "kda_latent", "olmo3_full", "olmo3_sliding", "olmo3_yarn", "olmo3_yarn_ac"])
 def parsed_args(tmp_path, monkeypatch, request):
     path = tmp_path / "hf"
     hf = Qwen3Config(
@@ -52,6 +52,16 @@ def parsed_args(tmp_path, monkeypatch, request):
             if request.param == "olmo3_full"
             else ["sliding_attention", "full_attention"],
         )
+        if request.param.startswith("olmo3_yarn"):
+            hf.rope_parameters = {
+                "rope_type": "yarn",
+                "rope_theta": 500000,
+                "factor": 8.0,
+                "original_max_position_embeddings": 32,
+                "beta_fast": 32,
+                "beta_slow": 1,
+                "attention_factor": 1.2079441541679836,
+            }
     elif request.param != "qwen3":
         _register_olmo3moe_auto_classes()
         hf = Olmo3MoeConfig(
@@ -92,7 +102,10 @@ def parsed_args(tmp_path, monkeypatch, request):
     model.save_pretrained(path)
     config = RunConfig(
         CoreConfig(
-            attention_backend="torch", max_sequence_length=128, activation_checkpointing=False, diagnostic_interval=1
+            attention_backend="torch",
+            max_sequence_length=128,
+            activation_checkpointing=request.param.endswith("_ac"),
+            diagnostic_interval=1,
         ),
         {
             "hf_checkpoint": str(path),

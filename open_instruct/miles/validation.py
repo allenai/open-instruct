@@ -181,7 +181,9 @@ def inference_capacity(values):
                 "miles.sglang_max_mamba_cache_size must be at least sglang_max_running_requests "
                 "when the radix cache is disabled"
             )
-    else:
+    elif "sglang_max_mamba_cache_size" in values or "sglang_mamba_radix_cache_strategy" in values:
+        # These constraints belong to explicitly configured recurrent-state
+        # caching. Dense attention and unresolved defaults have no KDA slots.
         strategy = values.get("sglang_mamba_radix_cache_strategy")
         if strategy != "extra_buffer":
             raise InputError(

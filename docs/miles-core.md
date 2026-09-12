@@ -25,6 +25,11 @@ flowchart LR
     O --> J[Native checkpoint plus durable prompt cursor]
 ```
 
+For the published dense Think-DPO checkpoint, see
+[Olmo 3 preparation and qualification](miles-olmo3-pre-rl.md). The standard
+Core adapter now supports its per-layer YaRN setup; full-model qualification
+is still pending.
+
 ## Reproduce the sources
 
 The lock in `runtime/miles/runtime.lock.json` records exact bases and patch hashes. The original adapter started at Jacob's **`jacobm/moe-v2-core-gdn2`**, `169b8f9d06bce0276143876c82f630af483b03b7`. The current adapter is ported onto **`codex/small-hero-hf-20260909`**, base `b1fd2c9746e88baeb20e372bdca340d788d0f7e5`, preserving the earlier KDA/latent model support. MILES starts at `dbbab1566ae438f7202fff653eae938e07b1d4b6`. The Core patch adds an arbitrary-objective gradient lifecycle, explicit replay across backward recomputation, HF model construction using the branch's existing KDA and latent-MoE components, and dense-model HF conversion support. KDA/latent tensor conversion is provided by the Core lineage. The MILES patch includes the existing olmo-miles compatibility patches plus the explicit Core backend and lifecycle hooks.

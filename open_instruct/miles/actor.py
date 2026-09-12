@@ -318,7 +318,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 batch["aux_loss_div_factor"] = normalization.auxiliary_denominator
             interval = self.args.olmo_core.diagnostic_interval
             diagnostic = interval > 0 and self.clock.completed_steps % interval == 0
-            probe = contract.ParameterProbe(self.model) if diagnostic else None
+            probe = contract.ParameterProbe(self.train_module._miles_named_parameters) if diagnostic else None
             lr_used = self.lr_scheduler.get_last_lr()
             self._agree(lambda: contract.validate_schedule(self.clock, self.lr_scheduler))
             torch.cuda.reset_peak_memory_stats()
@@ -593,7 +593,7 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         if dist.get_rank() == 0:
             target = Path(path)
             target.mkdir(parents=True, exist_ok=False)
-            self.hf_config.save_pretrained(target)
+            models.save_hf_config(self.hf_config, target)
             AutoTokenizer.from_pretrained(self.args.hf_checkpoint).save_pretrained(target)
             safetensors_torch.save_file(
                 {name: value.detach().cpu().contiguous().clone() for name, value in state.items()},

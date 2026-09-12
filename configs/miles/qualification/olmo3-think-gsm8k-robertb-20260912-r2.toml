@@ -1,0 +1,127 @@
+# Candidate 7B validation, not yet exercised at full model scale. See docs/miles-olmo3-pre-rl.md.
+# Dense Olmo 3 on Core FSDP; the proposed hardware still needs qualification.
+# Concrete two-update qualification; checkpoint prepared by the Saturn staging job.
+schema_version = 1
+name = "olmo3-think-gsm8k-20260912-r2"
+
+[model]
+# Stage the pinned Think-DPO snapshot with configs/miles/templates/olmo-thinker.jinja.
+# Checkpoint revision: 7b18bf927b430ff06376fdfa5610eb3b1b6a5c38.
+source = "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-7b-think-dpo-oi-template"
+format = "hf"
+
+[output]
+root = "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912-r2"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "1h"
+timeout = "8h"
+auto_resume = true
+gpus_per_replica = 3
+
+[launch.secrets]
+WANDB_API_KEY = "robertb_WANDB_API_KEY"
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[data]
+seed = 1
+shuffle = true
+
+[[data.tasks]]
+task = "gsm8k"
+train_count = 64
+eval_count = 16
+
+[training]
+num_rollouts = 2
+skip_eval_before_train = false
+eval_interval = 2
+save_checkpoints = true
+# Core saves synchronously. Choose a more frequent cadence for recovery.
+save_interval = 1
+
+[trainer]
+gpus = 2
+trainer_num_nodes = 1
+expert_parallel_size = 1
+micro_batch_size = 1
+activation_recompute = true
+trainer_flash_attention_version = 4
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 1
+rollout_tensor_parallel_size = 1
+# One optimizer update per collection; see the recipe mapping for batch scale.
+rollout_batch_size = 2
+samples_per_prompt = 4
+global_batch_size = 8
+max_response_length = 32768
+max_context_length = 34816
+sglang_server_concurrency = 8
+sglang_max_running_requests = 8
+# Dense 32-layer MHA uses about 0.5 MiB of BF16 KV per cached token.
+# This cap is about 64 GiB, before weights/workspace; qualify on B300.
+sglang_max_total_tokens = 131072
+sglang_mem_fraction_static = 0.6
+sglang_disable_radix_cache = true
+sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_max_bs_decode = 64
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_sampling_backend = "pytorch"
+sglang_attention_backend = "triton"
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+
+[optimizer]
+learning_rate = 0.000001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+adam_eps = 0.00000001
+clip_grad = 1.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+eps_clip = 0.2
+eps_clip_high = 0.272
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "olmo-rl-comparison"
+wandb_group = "olmo3-think-gsm8k-qualification"
+
+[core]
+diagnostic_interval = 1
+max_train_rollout_logprob_abs_diff = 0.05
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+weight_sync_mode = "flattened"
+
+[miles]
+eval_temperature = 0.0
+n_samples_per_eval_prompt = 1
+rollout_temperature = 1.0
+rollout_seed = 1
+rollout_max_prompt_len = 2048
+seed = 1
+disable_grpo_std_normalization = true
+calculate_per_token_loss = true
+use_rollout_routing_replay = false
+rollout_top_p = 1.0
+rollout_top_k = -1
+
+# Shared compiler artifacts use the existing TTL-managed cache policy.
+[compiler_cache]
+enabled = true
+shared_root = "/weka/oe-training-default/robertb/open-instruct/compiler-cache/tmp-30d"
+restore = true

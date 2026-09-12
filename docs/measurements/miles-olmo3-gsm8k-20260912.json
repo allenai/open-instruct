@@ -1,0 +1,710 @@
+{
+  "status": "completed_and_audited_zero_advantage_smoke",
+  "preparation_experiment": "01M2A1Z8HQTKHM500H9SNE20Q1",
+  "preparation_exit_code": 0,
+  "preparation": {
+    "model": "allenai/Olmo-3-7B-Think-DPO",
+    "prepared": {
+      "eval_prompt_data": [
+        "heldout",
+        "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912/prepared/data/eval.jsonl"
+      ],
+      "manifest": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912/prepared/data/manifest.json",
+      "prompt_data": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912/prepared/data/train.jsonl",
+      "reward_config": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912/prepared/data/verifiers.json"
+    },
+    "revision": "7b18bf927b430ff06376fdfa5610eb3b1b6a5c38",
+    "reward_canaries": 160,
+    "shards": [
+      "model-00001-of-00003.safetensors",
+      "model-00002-of-00003.safetensors",
+      "model-00003-of-00003.safetensors"
+    ],
+    "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-7b-think-dpo-7b18bf927b430ff06376fdfa5610eb3b1b6a5c38",
+    "staged": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-7b-think-dpo-oi-template",
+    "weight_bytes": 14596063712
+  },
+  "training_launch": {
+    "experiment_id": "01M2A28EYHS4BYYK5TPDJTQNPT",
+    "image": "01M2A1Z1FVWZ4WB1ET7RDSJ5P6",
+    "requested_image": "01M2A1Z1FVWZ4WB1ET7RDSJ5P6",
+    "revision": "311840575caf20c7849c3ce6b9b2e9b23c1f6f44",
+    "spec_sha256": "fd1979963aee3460810360a2372c7038ad976e213ea296b602130c4274010600",
+    "spec": {
+      "schema_version": 1,
+      "name": "olmo3-think-gsm8k-20260912",
+      "model": {
+        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-7b-think-dpo-oi-template",
+        "format": "hf"
+      },
+      "data": {
+        "seed": 1,
+        "shuffle": true,
+        "tasks": [
+          {
+            "task": "gsm8k",
+            "train_count": 64,
+            "eval_count": 16
+          }
+        ]
+      },
+      "output": {
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912",
+        "export_hf": true,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912/export-hf"
+      },
+      "launch": {
+        "workspace": "ai2/open-instruct-dev",
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "priority": "urgent",
+        "min_runtime": "1h",
+        "auto_resume": true,
+        "shared_memory": "200 GiB",
+        "timeout": "8h",
+        "gpus_per_replica": 3,
+        "secrets": {
+          "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+        },
+        "weka_mounts": [
+          {
+            "weka": "oe-training-default",
+            "mount_path": "/weka/oe-training-default"
+          }
+        ],
+        "coordination": {
+          "startup_timeout": 1200,
+          "heartbeat_timeout": 120
+        },
+        "env": {}
+      },
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912/prepared/hf"
+      },
+      "compiler_cache": {
+        "enabled": true,
+        "shared_root": "/weka/oe-training-default/robertb/open-instruct/compiler-cache/tmp-30d",
+        "restore": true
+      },
+      "training": {
+        "num_rollouts": 2,
+        "skip_eval_before_train": false,
+        "eval_interval": 2,
+        "save_checkpoints": true,
+        "save_interval": 1
+      },
+      "trainer": {
+        "gpus": 2,
+        "trainer_num_nodes": 1,
+        "expert_parallel_size": 1,
+        "micro_batch_size": 1,
+        "activation_recompute": true,
+        "trainer_flash_attention_version": 4
+      },
+      "inference": {
+        "placement_mode": "disaggregated",
+        "gpus": 1,
+        "rollout_tensor_parallel_size": 1,
+        "rollout_batch_size": 2,
+        "samples_per_prompt": 4,
+        "global_batch_size": 8,
+        "max_response_length": 32768,
+        "max_context_length": 34816,
+        "sglang_server_concurrency": 8,
+        "sglang_max_running_requests": 8,
+        "sglang_max_total_tokens": 131072,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_disable_radix_cache": true,
+        "sglang_cuda_graph_backend_decode": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 64,
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_sampling_backend": "pytorch",
+        "sglang_attention_backend": "triton",
+        "check_weight_update_equal": true,
+        "update_weight_buffer_size": 1073741824
+      },
+      "optimizer": {
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0,
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.999,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "kl_loss_coef": 0.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.272
+      },
+      "async": {},
+      "tracking": {
+        "wandb_mode": "online",
+        "wandb_project": "olmo-rl-comparison",
+        "wandb_group": "olmo3-think-gsm8k-qualification"
+      },
+      "runtime": {},
+      "core": {
+        "diagnostic_interval": 1,
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "router_aux_loss_weight": 0.0,
+        "router_z_loss_weight": 0.0,
+        "weight_sync_mode": "flattened"
+      },
+      "miles": {
+        "eval_temperature": 0.0,
+        "n_samples_per_eval_prompt": 1,
+        "rollout_temperature": 1.0,
+        "rollout_seed": 1,
+        "rollout_max_prompt_len": 2048,
+        "seed": 1,
+        "disable_grpo_std_normalization": true,
+        "calculate_per_token_loss": true,
+        "use_rollout_routing_replay": false,
+        "rollout_top_p": 1.0,
+        "rollout_top_k": -1
+      },
+      "judges": {},
+      "rubrics": {},
+      "judging": {
+        "bindings": {}
+      }
+    },
+    "allocation": {
+      "replicas": 1,
+      "gpus_per_replica": 3,
+      "allocated_gpus": 3,
+      "policy_gpus": 3,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "trainer_gpus": 2,
+          "rollout_gpus": 1,
+          "ray_gpus": 3,
+          "judges": {}
+        }
+      ],
+      "unused_gpus": 0
+    },
+    "placements": [
+      {
+        "task": "olmo3-think-gsm8k-20260912",
+        "hostnames": [],
+        "gpus": 3
+      }
+    ],
+    "receipt": "/home/robert/.cache/open-instruct/miles/launches/olmo3-think-gsm8k-20260912-ca2d6e0e62c2f7f4.json",
+    "url": "https://beaker.org/ex/01M2A28EYHS4BYYK5TPDJTQNPT"
+  },
+  "first_attempt_result": {
+    "exit_code": 1,
+    "initial_heldout": {
+      "correct": 15,
+      "questions": 16,
+      "score": 0.9375,
+      "mean_response_tokens": 2498.75,
+      "median_response_tokens": 1561,
+      "truncated": 0
+    },
+    "standalone_vs_training_forward": {
+      "active_response_tokens": 17695,
+      "mean_abs_logprob_difference": 0.0,
+      "max_abs_logprob_difference": 0.0
+    },
+    "trainer_vs_serving_max_abs_logprob_difference": 0.2489023208618164,
+    "initial_publication_seconds": 2.606604,
+    "failure": "ParameterProbe retained temporary unsharded FSDP parameters; storage was released after backward. optim_step and the in-memory clock increment preceded probe.updates failure. No optimizer contract event, updated publication, or native checkpoint was committed.",
+    "wandb_url": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/bjgnq5v1"
+  },
+  "retry": {
+    "experiment_id": "01M2A7NQ68EAQ6Z6DVKE50070F",
+    "job_id": "01M2A7NQAKBXRQ9KQDP9F3CK7K",
+    "image": "01M2A7NFCY2CX41M1HFS2KHGDX",
+    "revision": "1aa0e0301f19c882e581d440ecadc630958ded46",
+    "config": "configs/miles/qualification/olmo3-think-gsm8k-robertb-20260912-r2.toml",
+    "launcher": "scripts/train/debug/miles_olmo3_fsdp_trial.sh",
+    "url": "https://beaker.org/ex/01M2A7NQ68EAQ6Z6DVKE50070F",
+    "prelaunch_validation": {
+      "contract_and_parameter_probe": {
+        "passed": 15
+      },
+      "runtime": {
+        "passed": 47,
+        "deselected": 14
+      },
+      "profile_and_audit": {
+        "passed": 23
+      },
+      "style_quality": "passed"
+    },
+    "result": {
+      "exit_code": 0,
+      "wall_seconds": 2126.633959,
+      "audit_experiment_id": "01M2BF6NSJ16KGWCQ350E8D2ZB",
+      "audit_passed": true,
+      "training_response_count": 16,
+      "training_rewards": [
+        1.0,
+        1.0
+      ],
+      "heldout_correct": [
+        14,
+        15
+      ],
+      "heldout_count": 16,
+      "training_had_nonzero_gradients": false,
+      "sampled_model_updates_l2": [
+        0.0,
+        0.0
+      ],
+      "standalone_vs_training_forward": {
+        "tokens": 14476,
+        "mean_abs": 0.0,
+        "max_abs": 0.0
+      },
+      "checkpoint": {
+        "clock": {
+          "completed_steps": 2,
+          "next_rollout_id": 2,
+          "published_step": 1
+        },
+        "path": "/weka/oe-training-default/robertb/open-instruct/runs/olmo3-think-gsm8k-20260912-r2/checkpoints/core/rollout_0000001",
+        "world_size": 2
+      },
+      "optimizer_by_rank": {
+        "0": [
+          {
+            "auxiliary_denominator": 7588.0,
+            "elapsed_seconds": 42.04959966195747,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              0
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 14476,
+              "model_tokens": 15176,
+              "samples": 8,
+              "token_denominator": 14476,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 0,
+            "reduction": "token",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "checked",
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 6724.0,
+            "elapsed_seconds": 2.019880391191691,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 12888,
+              "model_tokens": 13448,
+              "samples": 8,
+              "token_denominator": 12888,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 0,
+            "reduction": "token",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "skipped",
+            "step": 2
+          }
+        ],
+        "1": [
+          {
+            "auxiliary_denominator": 7588.0,
+            "elapsed_seconds": 42.0494458838366,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              0
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 14476,
+              "model_tokens": 15176,
+              "samples": 8,
+              "token_denominator": 14476,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 0,
+            "rank": 1,
+            "reduction": "token",
+            "rollout_id": 0,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "checked",
+            "step": 1
+          },
+          {
+            "auxiliary_denominator": 6724.0,
+            "elapsed_seconds": 2.020148911047727,
+            "event": "optimizer",
+            "local_auxiliary_objective": {
+              "load_balancing": 0.0,
+              "router_z": 0.0
+            },
+            "local_behavior_versions": [
+              1
+            ],
+            "local_microbatches": 4,
+            "local_policy_objective": 0.0,
+            "local_pre_optimizer_gradients": {
+              "dense": {
+                "elements": 3649005568,
+                "local_l2": 0.0,
+                "missing_parameters": 0
+              }
+            },
+            "lr_next": [
+              1e-06
+            ],
+            "lr_used": [
+              1e-06
+            ],
+            "normalization": {
+              "active_tokens": 12888,
+              "model_tokens": 13448,
+              "samples": 8,
+              "token_denominator": 12888,
+              "world_size": 2
+            },
+            "optimizer_skipped": false,
+            "published_step": 1,
+            "rank": 1,
+            "reduction": "token",
+            "rollout_id": 1,
+            "sampled_model_updates": {
+              "dense": {
+                "sampled_elements": 90880,
+                "sampled_update_l2": 0.0
+              }
+            },
+            "schema_version": 1,
+            "scoring_pass": "skipped",
+            "step": 2
+          }
+        ]
+      },
+      "publications": [
+        {
+          "broadcast_seconds": 1.3701988058164716,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.1628330396488309,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.3914559450931847,
+          "finalize_seconds": 0.04599896678701043,
+          "pause_connect_seconds": 0.048627433367073536,
+          "repeated_version": false,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 3.0287831742316484,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 1.5427002809010446,
+          "version": 0
+        },
+        {
+          "broadcast_seconds": 0.011089725885540247,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.15987113351002336,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.5007054088637233,
+          "finalize_seconds": 0.04627571674063802,
+          "pause_connect_seconds": 0.024848570115864277,
+          "repeated_version": false,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.7524187830276787,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.180588168092072,
+          "version": 1
+        },
+        {
+          "broadcast_seconds": 0.010627778246998787,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.1685941144824028,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.4485660479404032,
+          "finalize_seconds": 0.04027235182002187,
+          "pause_connect_seconds": 0.016153969801962376,
+          "repeated_version": true,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.6917982418090105,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.1868052571080625,
+          "version": 1
+        },
+        {
+          "broadcast_seconds": 0.011344195809215307,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.159876708406955,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 1.4675148883834481,
+          "finalize_seconds": 0.043631305918097496,
+          "pause_connect_seconds": 0.021248876117169857,
+          "repeated_version": false,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.7112911459989846,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.17889553168788552,
+          "version": 2
+        },
+        {
+          "broadcast_seconds": 0.008776103612035513,
+          "buckets": 15,
+          "buffer_bytes": 1073741824,
+          "bytes": 14596022272,
+          "engine_seconds": 0.1482975552789867,
+          "expert_publication": "per_expert",
+          "export_pack_seconds": 0.8565066517330706,
+          "finalize_seconds": 0.0382800973020494,
+          "pause_connect_seconds": 0.01810743333771825,
+          "repeated_version": true,
+          "stream_moe_export": true,
+          "tensors": 355,
+          "total_seconds": 1.0758219272829592,
+          "transport": "flattened",
+          "transport_collectives": 15,
+          "transport_load_seconds": 0.16292697889730334,
+          "version": 2
+        }
+      ],
+      "driver_timings": [
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 0.2034794520586729,
+          "stage": "startup_cache_prepare",
+          "started_unix": 1789197697.3987536
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 9.278136598877609,
+          "stage": "placement",
+          "started_unix": 1789197697.6023612
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 261.97803366789594,
+          "stage": "serving_startup",
+          "started_unix": 1789197708.1716504
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 80.27388350619003,
+          "stage": "trainer_startup",
+          "started_unix": 1789197970.1511002
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 15.995982731226832,
+          "stage": "initial_publication",
+          "started_unix": 1789198050.4266782
+        },
+        {
+          "details": {
+            "configured_serving": {
+              "rollout_num_gpus": 1,
+              "rollout_num_gpus_per_engine": 1,
+              "sglang_context_length": 34816,
+              "sglang_cuda_graph_max_bs_decode": 64,
+              "sglang_disable_radix_cache": true,
+              "sglang_max_mamba_cache_size": 128,
+              "sglang_max_running_requests": 8,
+              "sglang_max_total_tokens": 131072,
+              "sglang_mem_fraction_static": 0.6,
+              "sglang_server_concurrency": 8
+            },
+            "phase": "initial",
+            "scope": "blocking_shared_engine_evaluation"
+          },
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 694.9693075870164,
+          "stage": "evaluation",
+          "started_unix": 1789198066.4235651
+        },
+        {
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 127.20842841174453,
+          "stage": "generation_wait",
+          "started_unix": 1789198761.3943727
+        },
+        {
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 63.68449376616627,
+          "stage": "training",
+          "started_unix": 1789198888.6039433
+        },
+        {
+          "passed": true,
+          "rollout_id": 0,
+          "seconds": 19.95234142895788,
+          "stage": "publication",
+          "started_unix": 1789199014.2929823
+        },
+        {
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 90.07307127909735,
+          "stage": "generation_wait",
+          "started_unix": 1789199034.246318
+        },
+        {
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 2.095599525142461,
+          "stage": "training",
+          "started_unix": 1789199124.3202515
+        },
+        {
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 19.18805846525356,
+          "stage": "publication",
+          "started_unix": 1789199168.2406552
+        },
+        {
+          "details": {
+            "configured_serving": {
+              "rollout_num_gpus": 1,
+              "rollout_num_gpus_per_engine": 1,
+              "sglang_context_length": 34816,
+              "sglang_cuda_graph_max_bs_decode": 64,
+              "sglang_disable_radix_cache": true,
+              "sglang_max_mamba_cache_size": 128,
+              "sglang_max_running_requests": 8,
+              "sglang_max_total_tokens": 131072,
+              "sglang_mem_fraction_static": 0.6,
+              "sglang_server_concurrency": 8
+            },
+            "phase": "periodic",
+            "scope": "blocking_shared_engine_evaluation"
+          },
+          "passed": true,
+          "rollout_id": 1,
+          "seconds": 452.65434689167887,
+          "stage": "evaluation",
+          "started_unix": 1789199187.4301898
+        },
+        {
+          "passed": true,
+          "rollout_id": null,
+          "seconds": 44.926410785876215,
+          "stage": "final_hf_export",
+          "started_unix": 1789199640.086219
+        }
+      ],
+      "wandb_url": "https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/gyqw63gw",
+      "limitations": [
+        "Every sampled training response earned reward 1.0. Group-centered advantages, recorded gradients, and sampled parameter changes were zero; this run does not qualify nonzero-gradient full-model learning.",
+        "The 14/16 to 15/16 held-out change is not evidence of learning.",
+        "The final HF export was written and its architecture/files audited; reloading that export in a fresh serving process has not been tested at full model scale.",
+        "Checkpoint topology, cursor hash, and rank-state presence passed; fresh-process full-model optimizer resume has not been tested."
+      ]
+    }
+  }
+}

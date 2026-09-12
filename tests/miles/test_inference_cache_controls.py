@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from open_instruct.miles import validation
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
@@ -67,3 +68,16 @@ def test_cache_off_still_needs_a_slot_per_running_request():
 def test_structured_and_native_names_cannot_disagree():
     with pytest.raises(InputError, match="Conflicting"):
         _miles(RADIX_ON + ['inference.sglang_router_policy="round_robin"'])
+
+
+@pytest.mark.parametrize(
+    "values",
+    [{}, {"sglang_disable_radix_cache": False, "sglang_attention_backend": "flashinfer", "sglang_page_size": 16}],
+)
+def test_dense_and_unspecified_caches_do_not_require_kda_controls(values):
+    validation.inference_capacity(values)
+
+
+def test_explicit_recurrent_pool_still_requires_qualified_radix_strategy():
+    with pytest.raises(InputError, match="extra_buffer"):
+        validation.inference_capacity({"sglang_disable_radix_cache": False, "sglang_max_mamba_cache_size": 332})
