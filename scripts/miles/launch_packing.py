@@ -24,6 +24,7 @@ def main():
     args = parser.parse_args()
     document = dict(
         version="v2",
+        budget="ai2/oe-other",
         description="Core packed versus unpacked KDA/latent MoE: EP1/EP2, replay, recomputation and gradients",
         tasks=[
             dict(

@@ -39,7 +39,9 @@ computed over the tokens in each packed forward. It is not equivalent to summing
 per-response balancing losses. Policy-only gradient comparisons therefore disable
 auxiliary coefficients; combined-objective checks require finite, nonzero updates
 and correct replay/normalization, not equality to the old auxiliary gradients.
-No Core/MILES source change or new auxiliary-loss implementation is required.
+No new auxiliary-loss implementation is required. The companion Core branch fixes
+the FlashAttention 4 variable-length call to bind sequence metadata by keyword;
+the pinned API inserts an optional `qv` argument ahead of that metadata.
 
 Packing events in `training_contract_rank*.jsonl` record samples, packs, real
 tokens, maximum pack size and fill fraction. W&B step metrics include pack count,

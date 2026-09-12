@@ -3,7 +3,6 @@
 import argparse
 import collections
 import hashlib
-import importlib
 import json
 import math
 from pathlib import Path
@@ -15,19 +14,7 @@ from open_instruct.miles import general_judge, workflow
 require = audit_workflow.require
 
 
-def load_rollout(path):
-    """Read our replay dumps without allowing arbitrary pickle globals.
-
-    MILES serializes expert assignments as NumPy int32 arrays, not tensors.
-    Scope the minimal reconstruction allowlist to this load only.
-    """
-    torch = importlib.import_module("torch")
-    numpy = importlib.import_module("numpy")
-    multiarray = importlib.import_module("numpy._core.multiarray")
-    with torch.serialization.safe_globals(
-        [multiarray._reconstruct, numpy.ndarray, numpy.dtype, type(numpy.dtype("int32"))]
-    ):
-        return torch.load(path, map_location="cpu", weights_only=True)
+load_rollout = audit_workflow.load_rollout
 
 
 def audit(root):
