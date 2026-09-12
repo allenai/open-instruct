@@ -1,0 +1,162 @@
+# PROPOSAL ONLY: the CPU plan compiles; the current Beaker launcher rejects this
+# two-node topology. Prepared Dolci data/registry and managed judge wiring are
+# not yet implemented here. See docs/miles-dolci-production-proposal.md.
+# Intended allocation: node A = 8 Core GPUs; node B = 7 rollout GPUs + 1 judge.
+# The judge is deliberately not hidden in Ray's 15 policy GPUs.
+schema_version = 1
+name = "core-dolci-think-200"
+
+[model]
+source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+format = "hf"
+
+[output]
+root = "/weka/oe-adapt-default/robertb/open-instruct/runs/core-dolci-think-200"
+export_hf = true
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "8h"
+# Provisional ceiling, NOT a runtime estimate or an authorized submission.
+# Reprice after representative mixed-domain throughput is measured.
+timeout = "48h"
+auto_resume = false
+shared_memory = "200 GiB"
+gpus_per_replica = 8
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[launch.env]
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+
+[launch.secrets]
+WANDB_API_KEY = "robertb_WANDB_API_KEY"
+
+[data]
+seed = 17
+shuffle = true
+# Target artifacts to create, not existing validated prepared files.
+prompt_data = "/weka/oe-adapt-default/robertb/open-instruct/data/dolci-think-production/train.jsonl"
+reward_config = "/weka/oe-adapt-default/robertb/open-instruct/data/dolci-think-production/verifiers.json"
+eval_prompt_data = [
+    "math", "/weka/oe-adapt-default/robertb/open-instruct/data/dolci-think-production/eval-math.jsonl",
+    "code", "/weka/oe-adapt-default/robertb/open-instruct/data/dolci-think-production/eval-code.jsonl",
+    "ifeval", "/weka/oe-adapt-default/robertb/open-instruct/data/dolci-think-production/eval-ifeval.jsonl",
+    "general", "/weka/oe-adapt-default/robertb/open-instruct/data/dolci-think-production/eval-general.jsonl",
+]
+
+[training]
+num_rollouts = 200
+skip_eval_before_train = false
+eval_interval = 20
+eval_max_response_length = 32768
+save_checkpoints = true
+save_interval = 50
+
+[trainer]
+gpus = 8
+trainer_num_nodes = 1
+expert_parallel_size = 8
+micro_batch_size = 1
+activation_recompute = true
+trainer_flash_attention_version = 4
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 7
+rollout_tensor_parallel_size = 1
+rollout_batch_size = 64
+samples_per_prompt = 8
+global_batch_size = 512
+max_response_length = 32768
+max_context_length = 34816
+# Candidate long-context admission; qualify memory and throughput, then increase.
+# This is not a reversal of the short-context admission-64 default.
+sglang_server_concurrency = 16
+sglang_max_running_requests = 16
+sglang_max_total_tokens = 1048576
+sglang_max_mamba_cache_size = 128
+sglang_mem_fraction_static = 0.6
+sglang_disable_radix_cache = true
+# Match the long-context baseline initially; graph enablement needs a screen.
+sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_sampling_backend = "pytorch"
+sglang_attention_backend = "triton"
+check_weight_update_equal = true
+update_weight_buffer_size = 1073741824
+
+[optimizer]
+learning_rate = 0.000001
+lr_decay_style = "constant"
+lr_warmup_iters = 0
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.95
+adam_eps = 0.00000001
+clip_grad = 1.0
+kl_loss_coef = 0.0
+entropy_coef = 0.0
+eps_clip = 0.2
+eps_clip_high = 0.272
+
+[async]
+fully_async = true
+max_weight_staleness = 1
+async_data_buffer_capacity_factor = 2.0
+async_unused_samples_handler = "retry"
+rollout_submission_granularity = "group"
+off_policy_correction = "tis"
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "olmo-rl-comparison"
+wandb_group = "core-dolci-think-production"
+wandb_team = "ai2-llm"
+
+[runtime]
+row_specialization = "dynamic"
+
+[compiler_cache]
+enabled = true
+shared_root = "/weka/oe-training-default/robertb/open-instruct/compiler-cache/tmp-30d"
+restore = true
+
+[core]
+diagnostic_interval = 20
+max_train_rollout_logprob_abs_diff = 0.05
+router_aux_loss_weight = 0.01
+router_z_loss_weight = 0.00001
+stream_moe_export = true
+weight_sync_mode = "flattened"
+scoring_pass_required = false
+scoring_check_interval = 50
+scoring_check_tolerance = 0.001
+
+[miles]
+rollout_temperature = 1.0
+rollout_top_p = 1.0
+rollout_top_k = -1
+rollout_seed = 17
+rollout_max_prompt_len = 2048
+seed = 17
+eval_temperature = 0.0
+n_samples_per_eval_prompt = 1
+disable_grpo_std_normalization = true
+calculate_per_token_loss = true
+use_rollout_routing_replay = true
+use_miles_router = true
+# Existing native hook; mixed-source filtering/refill still needs qualification.
+dynamic_sampling_filter_path = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
+tis_clip = 2.0
+tis_clip_low = 0.5
