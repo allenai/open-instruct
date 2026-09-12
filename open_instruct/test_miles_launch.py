@@ -231,3 +231,25 @@ def test_submission_script_accepts_frozen_json(tmp_path, monkeypatch):
     )
     launch_workflow.main()
     assert calls == [(IMAGE_ID, run.to_dict())]
+
+
+def test_status_requires_every_replica_and_ignores_older_attempts(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILES_LAUNCH_RECEIPTS", str(tmp_path / "receipts"))
+    run = spec(tmp_path)
+    workflow.write_json(
+        launch.receipt_path(run),
+        {"experiment_id": "multi", "allocation": {"replicas": 2}, "spec_sha256": workflow.fingerprint(run.to_dict())},
+    )
+    jobs = [
+        {"id": "old", "name": "replica-0", "status": {"created": "0", "exitCode": 143}},
+        {"id": "new", "name": "replica-0", "status": {"created": "1", "exitCode": 0}},
+    ]
+    monkeypatch.setattr(launch.subprocess, "check_output", lambda *args, **kwargs: json.dumps([{"jobs": jobs}]))
+    assert launch.status(run)["state"] == "pending"
+    jobs.append({"id": "other", "name": "replica-1", "status": {"created": "2", "started": "3"}})
+    assert launch.status(run)["state"] == "running"
+    jobs[-1]["status"]["exitCode"] = 0
+    result = launch.status(run)
+    assert result["state"] == "complete" and {job["id"] for job in result["current_jobs"]} == {"new", "other"}
+    jobs[-1]["status"]["exitCode"] = 1
+    assert launch.status(run)["state"] == "failed"

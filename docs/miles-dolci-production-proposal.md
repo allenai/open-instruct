@@ -1,8 +1,16 @@
 # Proposed Core Dolci Think mixed-domain run
 
-Status: reviewed on 2026-09-12 UTC against Open Instruct `e103cc7ed`. **Not
-submitted; not yet launchable.** The request is for a 200-update production-shaped
-mixed-source run. Working assumption: Olmo 3 **Think**, using the recent full-SFT
+Historical proposal, reviewed on 2026-09-12 UTC against Open Instruct
+`e103cc7ed`. The user subsequently clarified that **200 updates was arbitrary**;
+the immediate goal is a tiny real-data exercise of multi-node training and named
+judge placement. Multi-node launching, named judge sections and the strict reward
+bridge described as missing below have since been implemented. See the
+[current managed-judge guide](miles-managed-judges.md) and its
+[two-update configuration](../configs/miles/qualification/multinode-judges.toml).
+The 200-update configuration remains an unlaunched scaling proposal; its full
+data preparation, EP8 and long-context settings still need qualification.
+
+The remainder records the original production proposal and its then-current gaps. Working assumption: Olmo 3 **Think**, using the recent full-SFT
 KDA checkpoint, not SFT1000 or hero. This is an adaptation of the RL recipe;
 it does not reproduce the released dense model's SFT/DPO history.
 

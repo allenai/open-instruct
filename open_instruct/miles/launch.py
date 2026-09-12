@@ -261,12 +261,34 @@ def status(spec):
     if not jobs:
         jobs = [job for task in experiment.get("tasks", []) for job in task.get("jobs", [])]
     jobs.sort(key=lambda job: (job.get("status", {}).get("created", job.get("created", "")), job.get("id", "")))
+    latest_by_task = {}
+    for job in jobs:
+        latest_by_task[job.get("execution", {}).get("task") or job.get("name") or "main"] = job
+    current = list(latest_by_task.values())
+    expected = receipt.get("allocation", {}).get("replicas", 1)
+    codes = [job.get("status", {}).get("exitCode") for job in current]
+    if any(code is not None and code != 0 for code in codes):
+        state = "failed"
+    elif len(current) == expected and all(code == 0 for code in codes):
+        state = "complete"
+    elif any(
+        job.get("status", {}).get("started") and job.get("status", {}).get("exitCode") is None for job in current
+    ):
+        state = "running"
+    else:
+        state = "pending"
+    current = [
+        {key: job[key] for key in ("id", "name", "status", "node", "requests") if key in job} for job in current
+    ]
     jobs = [{key: job[key] for key in ("id", "name", "status", "node", "requests") if key in job} for job in jobs]
     return dict(
         receipt=str(target),
         experiment_id=receipt["experiment_id"],
         url=f"https://beaker.org/ex/{receipt['experiment_id']}",
         config_matches_submission=receipt["spec_sha256"] == workflow.fingerprint(spec.to_dict()),
+        state=state,
+        expected_replicas=expected,
+        current_jobs=current,
         latest_job=jobs[-1] if jobs else None,
         attempts=jobs,
     )
