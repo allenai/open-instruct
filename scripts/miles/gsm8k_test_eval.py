@@ -58,8 +58,15 @@ SERVER_FLAGS = [
     "triton",
     "--sampling-backend",
     "pytorch",
+    # Decode graphs through the admitted batch; prefill graphs disabled as in
+    # training. The default prefill backend pads token counts and crashes this
+    # model's attention reshape on the first batch.
+    "--cuda-graph-backend-decode",
+    "full",
     "--cuda-graph-max-bs",
     "64",
+    "--cuda-graph-backend-prefill",
+    "disabled",
     "--skip-server-warmup",
 ]
 
