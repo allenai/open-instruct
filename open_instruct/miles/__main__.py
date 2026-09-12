@@ -5,9 +5,9 @@ import importlib
 import json
 from pathlib import Path
 
-import tomllib
-
+from open_instruct.miles import validation
 from open_instruct.miles.config import RunConfig
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
 
@@ -23,17 +23,23 @@ def main() -> None:
         metavar="SECTION.KEY=VALUE",
         help="Override a setting with a TOML value; repeatable, quote strings",
     )
+    parser.add_argument("--debug", action="store_true", help="Show a full traceback for input errors")
     options = parser.parse_args()
-    payload = (
-        json.loads(options.config.read_text())
-        if options.config.suffix == ".json"
-        else tomllib.loads(options.config.read_text())
-    )
+    try:
+        execute(parser, options)
+    except InputError as error:
+        if options.debug:
+            raise
+        parser.error(f"{options.config}: {error}")
+
+
+def execute(parser, options):
+    payload = validation.read_document(options.config)
     structured = "schema_version" in payload or "model" in payload
     config = (
         RunSpec.from_dict(payload, config_path=options.config, overrides=options.overrides)
         if structured
-        else RunConfig.load(options.config, options.overrides)
+        else RunConfig.from_dict(payload, options.overrides)
     )
     if options.command == "plan":
         print(json.dumps(config.plan(), indent=2))

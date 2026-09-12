@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from open_instruct.miles import workflow
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.run_spec import RunSpec
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,7 +28,7 @@ def specification(image, spec):
     allocated = trainer if miles["colocate"] else trainer + miles["rollout_num_gpus"]
     capacity = spec.launch.get("gpus_per_replica", miles["num_gpus_per_node"])
     if miles["actor_num_nodes"] != 1 or allocated > capacity:
-        raise ValueError(
+        raise InputError(
             "The config launcher currently supports one Beaker node; this topology requires a multi-node "
             "Ray launcher. Use a one-node example or the existing qualified campaign launcher."
         )
@@ -45,7 +46,9 @@ def specification(image, spec):
             and value.startswith("/weka/")
             and not any(Path(value).is_relative_to(m["mount_path"]) for m in mounts)
         ):
-            raise ValueError(f"{name} requires a corresponding launch.weka_mounts entry")
+            raise InputError(
+                f"{name} ({value}) requires a corresponding launch.weka_mounts entry; add the WEKA filesystem and its mount_path."
+            )
 
     check_mounts(spec.to_dict())
     sensitive = [
@@ -54,7 +57,7 @@ def specification(image, spec):
         if name.upper().endswith(("_TOKEN", "_API_KEY", "_PASSWORD", "_SECRET", "_PRIVATE_KEY", "_ACCESS_KEY"))
     ]
     if sensitive:
-        raise ValueError(f"Use launch.secrets for credential environment variables: {sorted(sensitive)}")
+        raise InputError(f"Use launch.secrets for credential environment variables: {sorted(sensitive)}")
     payload = base64.b64encode(json.dumps(spec.to_dict()).encode()).decode()
     setup = (
         f"import base64,pathlib; pathlib.Path('/output/submitted-run.json').write_bytes(base64.b64decode({payload!r}))"
@@ -108,7 +111,7 @@ def collect_results(root, destination):
     """Keep small provenance/metric artifacts in Beaker; checkpoints stay on WEKA."""
     root, destination = Path(root), Path(destination)
     if destination.resolve().is_relative_to(root.resolve()):
-        raise ValueError("Result destination must be outside the run directory")
+        raise InputError("Result destination must be outside the run directory")
     copied = []
     for directory, dirs, files in os.walk(root, followlinks=False):
         # Checkpoint tensor trees and HF descriptors can contain tens of
@@ -184,7 +187,9 @@ def submit(image, spec):
 def status(spec):
     target = receipt_path(spec)
     if not target.is_file():
-        raise FileNotFoundError(f"No launch receipt: {target}")
+        raise InputError(
+            f"No launch receipt: {target}. Launch this run with the run command, or set MILES_LAUNCH_RECEIPTS to the directory holding its receipt."
+        )
     receipt = json.loads(target.read_text())
     response = json.loads(
         subprocess.check_output(

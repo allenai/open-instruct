@@ -14,6 +14,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from open_instruct.miles.errors import InputError
+
 
 def write_json(path, document):
     path = Path(path)
@@ -31,7 +33,9 @@ def model_identity(source):
     """Record checkpoint metadata and shard identity without hashing tens of GB."""
     source = Path(source)
     if not source.is_dir():
-        raise FileNotFoundError(f"Model directory does not exist: {source}")
+        raise InputError(
+            f"Model directory does not exist: {source}. Check model.source and its mount in launch.weka_mounts."
+        )
     files = []
     for path in sorted(source.rglob("*")):
         if not path.is_file() or path.name == "workflow-model.json":
@@ -42,7 +46,7 @@ def model_identity(source):
             item["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
         files.append(item)
     if not files:
-        raise ValueError(f"Empty model directory: {source}")
+        raise InputError(f"Empty model directory: {source}")
     return dict(path=str(source), files=files)
 
 
@@ -50,7 +54,7 @@ def prepare_model(spec):
     source = Path(spec.model["source"])
     target = Path(spec.conversion["hf_output"])
     if source.resolve() == target.resolve() or source.resolve() in target.resolve().parents:
-        raise ValueError("Prepared model output must not be inside its read-only source")
+        raise InputError("Prepared model output must not be inside its read-only source")
     template = spec.model.get("hf_template")
     identity = dict(source=model_identity(source), format=spec.model["format"], conversion=spec.conversion)
     if template:
@@ -63,19 +67,21 @@ def prepare_model(spec):
     if marker.exists():
         recorded = json.loads(marker.read_text())
         if recorded["identity"] != identity:
-            raise ValueError("Prepared model identity changed; choose a new output.root")
+            raise InputError("Prepared model identity changed; choose a new output.root")
         if recorded.get("prepared_files") != model_identity(target)["files"]:
-            raise ValueError("Prepared model files changed or lack an integrity inventory")
+            raise InputError("Prepared model files changed or lack an integrity inventory")
         return str(target)
     if target.exists():
-        raise FileExistsError(f"Refusing to adopt an incomplete or unrelated prepared model: {target}")
+        raise InputError(
+            f"Refusing to adopt an incomplete or unrelated prepared model: {target}. Choose a new output.root."
+        )
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = target.with_name(f".{target.name}.preparing-{uuid.uuid4().hex}")
     staging.mkdir()
     try:
         if spec.model["format"] == "hf":
             if not (source / "config.json").is_file() or not list(source.glob("*.safetensors")):
-                raise ValueError(f"Expected an HF config and safetensors weights in {source}")
+                raise InputError(f"Expected an HF config and safetensors weights in {source}")
             for path in source.iterdir():
                 if path.name == "workflow-model.json":
                     continue
@@ -104,7 +110,7 @@ def prepare_model(spec):
             else:
                 shutil.copyfile(template_path, staging / "chat_template.jinja")
         if model_identity(source) != identity["source"]:
-            raise ValueError("Source model changed during preparation")
+            raise InputError("Source model changed during preparation")
         write_json(staging / marker.name, {"identity": identity, "prepared_files": model_identity(staging)["files"]})
         staging.rename(target)
     except BaseException:
@@ -119,7 +125,7 @@ def _convert_native(spec, target):
     torch = importlib.import_module("torch")
     saved = converter.load_config(spec.model["source"])
     if not saved or "model" not in saved or "dataset" not in saved:
-        raise ValueError("Native input must include its saved model and tokenizer configuration")
+        raise InputError("Native input must include its saved model and tokenizer configuration")
     converter.convert_checkpoint_to_hf(
         spec.model["source"],
         target,
@@ -133,7 +139,14 @@ def _convert_native(spec, target):
 
 
 def parse_runtime(config):
-    native = importlib.import_module("miles.utils.arguments")
+    try:
+        native = importlib.import_module("miles.utils.arguments")
+    except ModuleNotFoundError as error:
+        if error.name not in {"miles", "miles.utils", "miles.utils.arguments"}:
+            raise
+        raise InputError(
+            "MILES is not installed in this environment. Use plan for local config checks; validate/train require the pinned MILES/Core runtime image."
+        ) from error
     original = sys.argv
     try:
         sys.argv = [original[0], *config.arguments()]
@@ -141,7 +154,9 @@ def parse_runtime(config):
     finally:
         sys.argv = original
     if args.train_backend != "olmo_core":
-        raise RuntimeError("Expected the pinned MILES runtime with the olmo_core backend patch")
+        raise InputError(
+            "This MILES installation does not select the olmo_core backend; use the pinned MILES/Core runtime image built by scripts/train/build_image_and_launch.sh --miles."
+        )
     if args.load:
         checkpoint = importlib.import_module("open_instruct.miles.checkpoint")
         _, manifest = checkpoint.resume_manifest(args.load)
@@ -164,18 +179,23 @@ def run_directory(spec):
         try:
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise RuntimeError(f"Another process owns this run: {root}") from error
+            raise InputError(
+                f"Another process owns this run: {root}. Wait for it to finish or choose a different output.root."
+            ) from error
         document = spec.to_dict()
         identity = fingerprint(document)
         path = root / "workflow.json"
         if path.exists():
             previous = json.loads(path.read_text())
             if previous["spec_sha256"] != identity:
-                raise ValueError("Run configuration changed; choose a new output.root")
+                raise InputError("Run configuration changed; choose a new output.root")
             if previous["status"] == "complete":
-                raise FileExistsError(f"Run already completed: {root}")
+                raise InputError(f"Run already completed: {root}. Choose a new output.root for another run.")
             if not spec.launch["auto_resume"]:
-                raise FileExistsError(f"Run already exists and launch.auto_resume is false: {root}")
+                raise InputError(
+                    f"Run already exists and launch.auto_resume is false: {root}. "
+                    "Set launch.auto_resume=true to resume, or choose a new output.root."
+                )
         state = dict(spec_sha256=identity, status="preparing", started_unix=time.time())
         write_json(root / "run-spec.json", document)
         write_json(root / "plan.json", spec.plan())

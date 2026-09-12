@@ -2,15 +2,14 @@
 
 import dataclasses
 import json
-import math
 import re
 from pathlib import Path
 from typing import Any
 
-import tomllib
-
 from open_instruct.miles import compiler_cache as cache
 from open_instruct.miles import options as cli_options
+from open_instruct.miles import validation
+from open_instruct.miles.errors import InputError
 
 
 @dataclasses.dataclass(frozen=True)
@@ -44,17 +43,26 @@ class CoreConfig:
     def __post_init__(self):
         if self.compiler_cache_root is not None:
             if not isinstance(self.compiler_cache_root, str) or not self.compiler_cache_root:
-                raise ValueError("core.compiler_cache_root must be a nonempty absolute path or unset")
-            cache.validate_shared_root(Path(self.compiler_cache_root))
+                raise InputError("core.compiler_cache_root must be a nonempty absolute path or unset")
+            try:
+                cache.validate_shared_root(Path(self.compiler_cache_root))
+            except ValueError as error:
+                raise InputError(f"core.compiler_cache_root: {error}") from error
+        validation.choice(
+            self.attention_backend, "core.attention_backend", ("torch", "flash_2", "flash_3", "flash_4", "te")
+        )
         if self.row_specialization not in ("static", "dynamic"):
-            raise ValueError("core.row_specialization must be static or dynamic")
+            raise InputError("core.row_specialization must be static or dynamic")
         if type(self.diagnostic_interval) is not int or self.diagnostic_interval < 0:
-            raise ValueError("core.diagnostic_interval must be a nonnegative integer")
+            raise InputError("core.diagnostic_interval must be a nonnegative integer")
         limit = self.max_train_rollout_logprob_abs_diff
-        if limit is not None and (not math.isfinite(limit) or limit < 0):
-            raise ValueError("core.max_train_rollout_logprob_abs_diff must be finite and nonnegative")
+        if limit is not None:
+            validation.number(limit, "core.max_train_rollout_logprob_abs_diff")
+        for name in ("model_config", "reward_config"):
+            if getattr(self, name) is not None:
+                validation.text(getattr(self, name), f"core.{name}")
         if self.weight_sync_mode not in ("flattened", "per_tensor"):
-            raise ValueError("core.weight_sync_mode must be flattened or per_tensor")
+            raise InputError("core.weight_sync_mode must be flattened or per_tensor")
         for name in (
             "compiler_cache",
             "compiler_cache_restore",
@@ -67,22 +75,20 @@ class CoreConfig:
             "checkpoint_dedup_save_to_lowest_rank",
             "checkpoint_constant_memory_planning",
         ):
-            if type(getattr(self, name)) is not bool:
-                raise ValueError(f"core.{name} must be a boolean")
+            validation.boolean(getattr(self, name), f"core.{name}")
         for name in ("checkpoint_thread_count", "checkpoint_process_count"):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 1):
-                raise ValueError(f"core.{name} must be a positive integer or unset")
+                raise InputError(f"core.{name} must be a positive integer or unset")
         for name in ("expert_parallel_size", "max_sequence_length"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
-                raise ValueError(f"core.{name} must be a positive integer")
+                raise InputError(f"core.{name} must be a positive integer")
         if type(self.max_policy_lag) is not int or self.max_policy_lag < 0:
-            raise ValueError("core.max_policy_lag must be a nonnegative integer")
+            raise InputError("core.max_policy_lag must be a nonnegative integer")
         for name in ("router_aux_loss_weight", "router_z_loss_weight"):
             value = getattr(self, name)
-            if not math.isfinite(value) or value < 0:
-                raise ValueError(f"core.{name} must be finite and nonnegative")
+            validation.number(value, f"core.{name}")
 
     def checkpoint_save_options(self):
         """Writer policy, kept separate from model geometry and resume compatibility."""
@@ -100,30 +106,32 @@ class RunConfig:
 
     @classmethod
     def load(cls, path: str | Path, overrides: list[str] | None = None) -> "RunConfig":
-        with Path(path).open("rb") as stream:
-            data = tomllib.load(stream)
+        return cls.from_dict(validation.read_document(path), overrides)
+
+    @classmethod
+    def from_dict(cls, data, overrides=None):
+        validation.fields(data, "configuration", {"core", "miles"})
+        data = {key: dict(validation.mapping(value, f"[{key}]")) for key, value in data.items()}
         for override in overrides or []:
-            key, separator, raw = override.partition("=")
+            key, separator, raw = validation.text(override, "Override").partition("=")
             parts = key.split(".")
             if not separator or len(parts) != 2 or parts[0] not in ("core", "miles"):
-                raise ValueError("Overrides must be core.KEY=TOML_VALUE or miles.KEY=TOML_VALUE")
-            try:
-                value = tomllib.loads("value=" + raw)["value"]
-            except tomllib.TOMLDecodeError as error:
-                raise ValueError(f"Invalid TOML value in override {key}; quote strings") from error
+                raise InputError("Overrides must be core.KEY=TOML_VALUE or miles.KEY=TOML_VALUE")
+            value = validation.override_value(key, raw)
             data.setdefault(parts[0], {})[parts[1]] = value
-        unknown = set(data) - {"core", "miles"}
-        if unknown:
-            raise ValueError(f"Unknown configuration sections: {sorted(unknown)}")
+        validation.fields(data.get("core", {}), "[core]", {f.name for f in dataclasses.fields(CoreConfig)})
         config = cls(CoreConfig(**data.get("core", {})), dict(data.get("miles", {})))
         config.validate()
         return config
 
     def validate(self) -> None:
+        if not isinstance(self.core, CoreConfig):
+            raise InputError("RunConfig.core must be a CoreConfig instance; use CoreConfig(...) for Core settings.")
+        validation.mapping(self.miles, "[miles]")
         # Normalize aliases before checking the backend contract.
         for name in self.miles:
             if not re.fullmatch(r"[a-z][a-z0-9_]*", name):
-                raise ValueError(f"Invalid MILES option name: {name!r}; use underscores")
+                raise InputError(f"Invalid MILES option name: {name!r}; use underscores")
         for key in (
             "train_backend",
             "custom_config_path",
@@ -133,9 +141,10 @@ class RunConfig:
             "custom_async_data_buffer_path",
         ):
             if key in self.miles:
-                raise ValueError(f"miles.{key} is managed by the Core backend")
+                raise InputError(f"miles.{key} is managed by the Core backend")
         cli_options.encode_options(self.miles)
         options = cli_options.normalize_options(self.miles)
+        validation.runtime_values(options)
         for name, expected in {
             "optimizer": "adam",
             "fp16": False,
@@ -159,7 +168,7 @@ class RunConfig:
             "colocated_weight_update_pipeline_depth": 1,
         }.items():
             if name in options and options[name] != expected:
-                raise ValueError(f"Core RL requires miles.{name}={expected!r}; this alternative is not implemented")
+                raise InputError(f"Core RL requires miles.{name}={expected!r}; this alternative is not implemented")
         for name, replacement in {
             "gradient_checkpointing": "core.activation_checkpointing",
             "attn_implementation": "core.attention_backend",
@@ -167,66 +176,84 @@ class RunConfig:
             "max_tokens_per_gpu": "micro_batch_size=1 (Core dynamic batching is not implemented)",
         }.items():
             if name in options:
-                raise ValueError(f"Core RL does not consume miles.{name}; use {replacement}")
+                raise InputError(f"Core RL does not consume miles.{name}; use {replacement}")
         if options.get("lora_rank", 0) > 0:
-            raise ValueError("Core RL does not implement LoRA; miles.lora_rank must be nonpositive")
+            raise InputError("Core RL does not implement LoRA; miles.lora_rank must be nonpositive")
         if options.get("save_hf") is not None:
-            raise ValueError(
+            raise InputError(
                 "Core RL does not implement miles.save_hf; use miles.eval_hf_dir for snapshot evaluation "
                 "or export the native checkpoint separately"
             )
         if "max_weight_staleness" in options and options["max_weight_staleness"] != self.core.max_policy_lag:
-            raise ValueError("miles.max_weight_staleness must equal core.max_policy_lag (optimizer steps)")
+            raise InputError("miles.max_weight_staleness must equal core.max_policy_lag (optimizer steps)")
         if not options.get("hf_checkpoint"):
-            raise ValueError("miles.hf_checkpoint is required for the serving architecture/tokenizer")
+            raise InputError("miles.hf_checkpoint is required for the serving architecture/tokenizer")
         nodes = options.get("actor_num_nodes", 1)
         gpus = options.get("actor_num_gpus_per_node", 1)
         if any(type(n) is not int or n < 1 for n in (nodes, gpus)):
-            raise ValueError("Trainer nodes and GPUs per node must be positive integers")
+            raise InputError("Trainer nodes and GPUs per node must be positive integers")
         world = nodes * gpus
         if world % self.core.expert_parallel_size:
-            raise ValueError("Trainer world size must be divisible by core.expert_parallel_size")
+            raise InputError(
+                f"Trainer world size {world} ({nodes} nodes × {gpus} GPUs) must be divisible by "
+                f"core.expert_parallel_size={self.core.expert_parallel_size}; choose a divisor of {world}."
+            )
         samples = options.get("global_batch_size")
         if type(samples) is not int or samples < world or samples % world:
-            raise ValueError("miles.global_batch_size must be a positive multiple of trainer world size")
+            raise InputError(
+                f"miles.global_batch_size={samples!r} must be a positive multiple of trainer world size {world}; "
+                f"use {world}, {2 * world}, or another multiple."
+            )
         for name in ("offload", "fsdp_cpu_offload", "optimizer_cpu_offload", "stream_optimizer_state_to_disk"):
             if options.get(name, False):
-                raise ValueError(f"Core RL has no implementation for miles.{name}")
+                raise InputError(f"Core RL has no implementation for miles.{name}")
         for name in ("rollout_batch_size", "n_samples_per_prompt", "num_rollout"):
             if name in options and (type(options[name]) is not int or options[name] < 1):
-                raise ValueError(f"miles.{name} must be a positive integer")
+                raise InputError(f"miles.{name} must be a positive integer")
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
-        if collection and (collection % samples or self.core.max_policy_lag < collection // samples - 1):
-            raise ValueError("Rollout collection needs complete optimizer batches and a sufficient max_policy_lag")
+        if collection and collection % samples:
+            raise InputError(
+                f"Rollout collection has {collection} samples (rollout_batch_size × n_samples_per_prompt); "
+                f"miles.global_batch_size={samples} must divide that count to form complete optimizer batches."
+            )
+        if collection and self.core.max_policy_lag < collection // samples - 1:
+            raise InputError(
+                f"This collection takes {collection // samples} optimizer steps; "
+                f"set core.max_policy_lag >= {collection // samples - 1} or increase miles.global_batch_size."
+            )
         if options.get("check_weight_update_selector", "all") != "all":
-            raise ValueError("Core serving checks currently require check_weight_update_selector=all")
+            raise InputError("Core serving checks currently require check_weight_update_selector=all")
         if options.get("ref_update_interval") is not None:
-            raise ValueError("Core RL requires a fixed reference policy")
+            raise InputError("Core RL requires a fixed reference policy")
         if options.get("offload_train", False):
-            raise ValueError("Core trainer offload has not been qualified; set offload_train=false")
+            raise InputError("Core trainer offload has not been qualified; set offload_train=false")
         if options.get("qkv_format", "bshd") != "bshd":
-            raise ValueError("The Core backend currently uses bshd layout")
+            raise InputError("The Core backend currently uses bshd layout")
         if options.get("micro_batch_size", 1) != 1 or options.get("use_dynamic_batch_size", False):
-            raise ValueError("Use micro_batch_size=1; Core accumulates unpadded response samples")
+            raise InputError("Use micro_batch_size=1; Core accumulates unpadded response samples")
         for name in ("tensor_model_parallel_size", "pipeline_model_parallel_size", "context_parallel_size"):
             if options.get(name, 1) != 1:
-                raise ValueError(f"Core RL does not yet support {name}>1")
+                raise InputError(f"Core RL does not yet support {name}>1")
         for name in ("use_critic", "multi_lora", "indep_dp", "use_opd", "use_routing_replay"):
             if options.get(name, False):
-                raise ValueError(f"Core RL has no implementation for miles.{name}")
+                raise InputError(f"Core RL has no implementation for miles.{name}")
         if options.get("use_rollout_routing_replay", False) and not options.get("use_miles_router", False):
-            raise ValueError(
+            raise InputError(
                 "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
             )
         if self.core.replay_diagnostics and not options.get("use_rollout_routing_replay", False):
-            raise ValueError("core.replay_diagnostics requires rollout routing replay")
+            raise InputError(
+                "core.replay_diagnostics requires rollout routing replay; set miles.use_rollout_routing_replay=true and miles.use_miles_router=true, or disable replay_diagnostics."
+            )
         if options.get("fully_async", False):
             if options.get("colocate", False) or options.get("offload_rollout", False):
-                raise ValueError("Async Core training requires resident disaggregated rollout engines")
+                raise InputError(
+                    "Async Core training requires resident disaggregated rollout engines; set miles.colocate=false and miles.offload_rollout=false."
+                )
             if options.get("update_weights_interval", 1) != 1:
-                raise ValueError("Bounded async publishes every collected batch")
+                raise InputError("Bounded async publishes every collected batch")
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
-            raise ValueError("Async training requires an explicit positive core.max_policy_lag")
+            raise InputError("Async training requires an explicit positive core.max_policy_lag")
 
     def arguments(self) -> list[str]:
         """Compile without importing CUDA, MILES, Core, or downloading models."""

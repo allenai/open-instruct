@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles import run_data, workflow
+from open_instruct.miles.errors import InputError
 
 
 class Spec:
@@ -101,13 +102,13 @@ def test_prepared_model_reuse_rejects_metadata_changes(spec, location):
 
 def test_incomplete_model_is_not_adopted(spec):
     Path(spec.conversion["hf_output"]).mkdir(parents=True)
-    with pytest.raises(FileExistsError, match="incomplete"):
+    with pytest.raises(InputError, match="incomplete"):
         workflow.prepare_model(spec)
 
 
 def test_run_directory_exclusive_and_failure_recorded(spec):
     with pytest.raises(RuntimeError, match="deliberate"), workflow.run_directory(spec):
-        with pytest.raises(RuntimeError, match="Another process"), workflow.run_directory(spec):
+        with pytest.raises(InputError, match="Another process"), workflow.run_directory(spec):
             pytest.fail("must not acquire the same lock twice")
         raise RuntimeError("deliberate")
     root = Path(spec.output["root"])
@@ -160,7 +161,7 @@ def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, 
     assert "load" not in training_calls[0][0]
     assert training_calls[1][0]["load"] == str(root / "checkpoints")
     assert training_calls[1][1] == spec.output["hf_dir"]
-    with pytest.raises(FileExistsError, match="already completed"):
+    with pytest.raises(InputError, match="already completed"):
         workflow.execute(spec)
 
 
@@ -168,7 +169,7 @@ def test_auto_resume_false_blocks_retry(spec):
     spec.launch["auto_resume"] = False
     with workflow.run_directory(spec):
         pass
-    with pytest.raises(FileExistsError, match="auto_resume is false"), workflow.run_directory(spec):
+    with pytest.raises(InputError, match="auto_resume is false"), workflow.run_directory(spec):
         pytest.fail("retry accepted")
 
 
