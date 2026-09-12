@@ -98,16 +98,25 @@ def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfi
     )
 
 
+# The code service is an external API gateway that returns transient 5xx errors
+# under load. urllib3 retries only idempotent methods by default, so the scoring
+# POSTs must be allowed explicitly; the backoff grows 1, 2, 4, ... seconds and is
+# capped by urllib3, about four minutes in total before the verifier gives up.
+RETRY = requests.adapters.Retry(
+    total=8,
+    backoff_factor=1.0,
+    status_forcelist=[500, 502, 503, 504],
+    allowed_methods=frozenset({"GET", "POST"}),
+    raise_on_status=False,
+)
+
+
 def _get_session() -> Any:
     global _SESSION
     if _SESSION is not None:
         return _SESSION
     session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(
-        pool_connections=100,
-        pool_maxsize=100,
-        max_retries=requests.adapters.Retry(total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504]),
-    )
+    adapter = requests.adapters.HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=RETRY)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     _SESSION = session
