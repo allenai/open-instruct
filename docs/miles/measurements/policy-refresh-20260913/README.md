@@ -102,3 +102,39 @@ Qualify multiple refreshes, queued versus active siblings, cache-enabled
 operation, evaluation, failure/timeout and shutdown. Then run a small actual RL
 comparison with retained behavior data and measured importance ratios. A
 serving-only success cannot establish the RL estimator's behavior.
+
+### First local GPU result
+
+The tiny hero-shaped hybrid (KDA + full attention + latent MoE) completed the
+three cases on the local RTX 4090 using same-GPU IPC for the 95,892-byte fixture.
+All eight interrupted responses preserved their sampled prefix tokens and
+original output log-probabilities, and their two version spans matched the
+exact observed pause offsets. All 128 checked greedy continuation tokens
+matched fresh-prefill references; maximum compared log-probability error was
+0.010671. Prefix route agreement with fresh-prefill references was near, but
+not exactly, 100%; see `local-initial-transition-audit.json`. This is a BF16
+batch-versus-single-request comparison, not bit-exact routing qualification.
+
+The short case waited 0.474 s for draining versus 0.0121 s from interruption to
+weights ready with refresh. About 84.8% of its tokens were sampled after the
+switch. These tiny-model IPC timings are not a real-model NCCL speed claim.
+
+The first long case exposed measurement overhead: repeated streaming prompt
+scores delayed the requested interruption until token 452/512. Its client-side
+first-token timing also included JSON processing. The next revision skips
+prompt scores on streaming requests and records first-new-token time inside the
+scheduler. The old measurements are retained as an explicit initial result,
+not presented as clean long-prefix re-prefill performance.
+
+Debugging also found the pinned SGLang metadata expression
+`x if x < vocab_size - 1 else 0` in `_process_input_token_logprobs`: it relabels
+the last valid vocabulary token as zero. The numeric score is unaffected by
+that expression. The probe reports and permits exactly this known label case;
+any other label mismatch fails. No serving computation was patched to hide it.
+
+The diagnostic hook initially used obsolete direct `Req` log-probability
+fields; the pinned runtime stores these under `req.logprob`. This was fixed
+locally before any Beaker probe obtained GPUs. Queued attempts
+`01M2CN77CSHAAXXDT5JE3NWY6B`, `01M2CNKAN2NBSYAQ4M8CDZSY6B`, and
+`01M2CNG15KWH0ZKABKYZNR6SPA` were stopped before execution. They supply no GPU
+validation evidence.

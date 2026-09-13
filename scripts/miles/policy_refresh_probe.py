@@ -98,8 +98,12 @@ class Publisher:
         # A controlled, deliberately visible perturbation of attention and router
         # weights. This is not claimed to represent a particular RL optimizer step.
         for name, tensor in self.weights:
-            if name.startswith("model.layers.0.") and ("q_proj.weight" in name or name.endswith("gate.weight")):
-                tensor.mul_(1.015625)
+            if name.startswith("model.layers.0.") and (
+                any(key in name for key in ("q_proj.weight", "k_proj.weight", "v_proj.weight"))
+                or name.endswith("gate.weight")
+            ):
+                tensor[..., ::2].mul_(1.015625)
+                tensor[..., 1::2].mul_(0.984375)
                 self.changed.append(name)
         if not self.changed:
             raise ValueError("Fixture has no selected attention/router weights")
@@ -210,9 +214,9 @@ def request(prompt, rid, new_tokens, temperature=0):
     }
 
 
-def run_case(root, publisher, prompt, label, batch, length, cut, version, refresh):
+def run_case(root, publisher, prompt, label, batch, length, cut, version, refresh, temperature=0):
     rpc("flush_cache")
-    streams = [Stream(request(prompt, f"{label}-{i}", length)) for i in range(batch)]
+    streams = [Stream(request(prompt, f"{label}-{i}", length, temperature)) for i in range(batch)]
     futures = [POOL.submit(s.run) for s in streams]
     wait_tokens(streams, cut, futures)
     boundary = time.perf_counter()
@@ -237,6 +241,7 @@ def run_case(root, publisher, prompt, label, batch, length, cut, version, refres
     report = {
         "label": label,
         "refresh": refresh,
+        "temperature": temperature,
         "batch": batch,
         "prompt_tokens": len(prompt),
         "output_tokens_per_response": length,
@@ -285,6 +290,23 @@ def run_case(root, publisher, prompt, label, batch, length, cut, version, refres
             )
             entry["fresh_prefill_tokens_compared"] = count
             entry["fresh_prefill_max_logprob_error"] = float(np.max(np.abs(np.array(ref_lp) - got_lp)))
+            # Score the exact entire observed path. This comparison remains
+            # meaningful even if greedy continuation branches at a near tie,
+            # and also works for temperature-1 sampled continuations.
+            rpc("flush_cache")
+            teacher = rpc("generate", request(prompt + output, rid + "-teacher", 1))
+            (root / f"{rid}-teacher.json").write_text(json.dumps(teacher))
+            same_path = teacher["meta_info"]["input_token_logprobs"][len(prompt) : len(prompt) + length]
+            assert len(same_path) == length
+            suffix_delta = np.array([x[0] for x in same_path[kept:]]) - [
+                x[0] for x in meta["output_token_logprobs"][kept:]
+            ]
+            entry["same_path_suffix_mean_abs_logprob_error"] = float(np.abs(suffix_delta).mean())
+            entry["same_path_suffix_max_abs_logprob_error"] = float(np.abs(suffix_delta).max())
+            entry["fresh_prefill_first_token_logprob_error"] = float(abs(suffix_delta[0]))
+            if temperature != 0:
+                entry["fresh_prefill_token_matches"] = None
+                entry["fresh_prefill_max_logprob_error"] = None
             # The reference input now contains the OLD sampled tokens, scored
             # under current weights. Preserve both; never relabel the old draw.
             scores = reference["meta_info"]["input_token_logprobs"][len(prompt) : len(prompt) + kept]
@@ -375,6 +397,8 @@ def main():
         "0",
         "--stream-interval",
         "1",
+        "--random-seed",
+        "17",
     ]
     if not args.radix:
         command.append("--disable-radix-cache")
@@ -416,19 +440,23 @@ def main():
         rpc("generate", request(prompt, "warm", 32))
         publisher.publish(1)
         reports = []
-        for i, (label, p, batch, length, cut, refresh) in enumerate(
+        for i, (label, p, batch, length, cut, refresh, temperature, change) in enumerate(
             [
-                ("drain-short", prompt, 4, 256, 32, False),
-                ("refresh-short", prompt, 4, 256, 32, True),
-                ("refresh-long", (prompt * (1024 // len(prompt) + 1))[:1024], 4, 512, 128, True),
+                ("drain-short", prompt, 4, 256, 32, False, 0, False),
+                ("refresh-same", prompt, 4, 256, 32, True, 0, False),
+                ("refresh-short", prompt, 4, 256, 32, True, 0, True),
+                ("drain-long", (prompt * (1024 // len(prompt) + 1))[:1024], 4, 512, 128, False, 0, False),
+                ("refresh-long", (prompt * (1024 // len(prompt) + 1))[:1024], 4, 512, 128, True, 0, True),
+                ("refresh-sampled", prompt, 4, 512, 64, True, 1, True),
             ],
             start=2,
         ):
             # Change attention weights between versions; affects recurrent state.
             for name, tensor in publisher.weights:
-                if name in publisher.changed:
-                    tensor.mul_(1.015625 if refresh else 1.0)
-            reports.append(run_case(root, publisher, p, label, batch, length, cut, i, refresh))
+                if change and name in publisher.changed:
+                    tensor[..., ::2].mul_(1.015625)
+                    tensor[..., 1::2].mul_(0.984375)
+            reports.append(run_case(root, publisher, p, label, batch, length, cut, i, refresh, temperature))
         (root / "summary.json").write_text(
             json.dumps(
                 {

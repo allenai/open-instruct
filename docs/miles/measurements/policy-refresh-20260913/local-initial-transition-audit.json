@@ -1,0 +1,66 @@
+[
+  {
+    "rid": "refresh-long-0",
+    "old_tokens": 452,
+    "new_tokens": 60,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9952542372881356,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9964406779661017
+  },
+  {
+    "rid": "refresh-long-1",
+    "old_tokens": 452,
+    "new_tokens": 60,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9942372881355932,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9966101694915255
+  },
+  {
+    "rid": "refresh-long-2",
+    "old_tokens": 452,
+    "new_tokens": 60,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9952542372881356,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9964406779661017
+  },
+  {
+    "rid": "refresh-long-3",
+    "old_tokens": 452,
+    "new_tokens": 60,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9952542372881356,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9964406779661017
+  },
+  {
+    "rid": "refresh-short-0",
+    "old_tokens": 39,
+    "new_tokens": 217,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 1.0,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-1",
+    "old_tokens": 39,
+    "new_tokens": 217,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9953703703703703,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-2",
+    "old_tokens": 39,
+    "new_tokens": 217,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9953703703703703,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-3",
+    "old_tokens": 39,
+    "new_tokens": 217,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9953703703703703,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  }
+]

@@ -1,0 +1,364 @@
+{
+  "model": "/output/tiny",
+  "radix": false,
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "changed_parameters": [
+    "model.layers.0.mlp.router.gate.weight",
+    "model.layers.0.self_attn.q_proj.weight"
+  ],
+  "scope": "serving/publication prototype; no optimizer or RL quality claim",
+  "cases": [
+    {
+      "label": "drain-short",
+      "refresh": false,
+      "batch": 4,
+      "prompt_tokens": 16,
+      "output_tokens_per_response": 256,
+      "publication": {
+        "transfer_seconds": 0.007112396880984306,
+        "flush_seconds": 0.0009224098175764084,
+        "bytes": 95892,
+        "buckets": 1,
+        "transport": "local GPU IPC; not NCCL bandwidth"
+      },
+      "drain_wait_seconds": 0.47404617676511407,
+      "pause_including_instrumentation_seconds": 0,
+      "boundary_to_weights_ready_seconds": 0.48213754082098603,
+      "request_batch_seconds": 0.5868918602354825,
+      "responses": [
+        {
+          "rid": "drain-short-0",
+          "version_spans": [
+            {
+              "version": "1",
+              "start": 0,
+              "end": 256
+            }
+          ],
+          "retractions": null
+        },
+        {
+          "rid": "drain-short-1",
+          "version_spans": [
+            {
+              "version": "1",
+              "start": 0,
+              "end": 256
+            }
+          ],
+          "retractions": null
+        },
+        {
+          "rid": "drain-short-2",
+          "version_spans": [
+            {
+              "version": "1",
+              "start": 0,
+              "end": 256
+            }
+          ],
+          "retractions": null
+        },
+        {
+          "rid": "drain-short-3",
+          "version_spans": [
+            {
+              "version": "1",
+              "start": 0,
+              "end": 256
+            }
+          ],
+          "retractions": null
+        }
+      ]
+    },
+    {
+      "label": "refresh-short",
+      "refresh": true,
+      "batch": 4,
+      "prompt_tokens": 16,
+      "output_tokens_per_response": 256,
+      "publication": {
+        "transfer_seconds": 0.008584203664213419,
+        "flush_seconds": 0.0010247230529785156,
+        "bytes": 95892,
+        "buckets": 1,
+        "transport": "local GPU IPC; not NCCL bandwidth"
+      },
+      "drain_wait_seconds": 0,
+      "pause_including_instrumentation_seconds": 0.0025166478008031845,
+      "boundary_to_weights_ready_seconds": 0.01214910764247179,
+      "request_batch_seconds": 0.5778205869719386,
+      "responses": [
+        {
+          "rid": "refresh-short-0",
+          "version_spans": [
+            {
+              "version": "2",
+              "start": 0,
+              "end": 39
+            },
+            {
+              "version": "3",
+              "start": 39,
+              "end": 256
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 39,
+          "current_policy_fraction": 0.84765625,
+          "resume_to_first_new_token_seconds": 0.012343043927103281,
+          "instrumentation_seconds": 0.0015378408133983612,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.010670661926269531,
+          "known_last_vocab_metadata_remaps": 1,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.006030712372217423,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.0720822811126709,
+          "old_behavior_routes_saved": [
+            54,
+            2,
+            2
+          ]
+        },
+        {
+          "rid": "refresh-short-1",
+          "version_spans": [
+            {
+              "version": "2",
+              "start": 0,
+              "end": 39
+            },
+            {
+              "version": "3",
+              "start": 39,
+              "end": 256
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 39,
+          "current_policy_fraction": 0.84765625,
+          "resume_to_first_new_token_seconds": 0.01248793676495552,
+          "instrumentation_seconds": 0.00018509896472096443,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.008633852005004883,
+          "known_last_vocab_metadata_remaps": 1,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.00629418935531225,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.021749496459960938,
+          "old_behavior_routes_saved": [
+            54,
+            2,
+            2
+          ]
+        },
+        {
+          "rid": "refresh-short-2",
+          "version_spans": [
+            {
+              "version": "2",
+              "start": 0,
+              "end": 39
+            },
+            {
+              "version": "3",
+              "start": 39,
+              "end": 256
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 39,
+          "current_policy_fraction": 0.84765625,
+          "resume_to_first_new_token_seconds": 0.012406433001160622,
+          "instrumentation_seconds": 0.00016239704564213753,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.008633852005004883,
+          "known_last_vocab_metadata_remaps": 1,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.00629418935531225,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.021749496459960938,
+          "old_behavior_routes_saved": [
+            54,
+            2,
+            2
+          ]
+        },
+        {
+          "rid": "refresh-short-3",
+          "version_spans": [
+            {
+              "version": "2",
+              "start": 0,
+              "end": 39
+            },
+            {
+              "version": "3",
+              "start": 39,
+              "end": 256
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 39,
+          "current_policy_fraction": 0.84765625,
+          "resume_to_first_new_token_seconds": 0.012250429019331932,
+          "instrumentation_seconds": 0.0001424490474164486,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.008633852005004883,
+          "known_last_vocab_metadata_remaps": 1,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.00629418935531225,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.021749496459960938,
+          "old_behavior_routes_saved": [
+            54,
+            2,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "label": "refresh-long",
+      "refresh": true,
+      "batch": 4,
+      "prompt_tokens": 1024,
+      "output_tokens_per_response": 512,
+      "publication": {
+        "transfer_seconds": 0.08856214489787817,
+        "flush_seconds": 0.007944105193018913,
+        "bytes": 95892,
+        "buckets": 1,
+        "transport": "local GPU IPC; not NCCL bandwidth"
+      },
+      "drain_wait_seconds": 0,
+      "pause_including_instrumentation_seconds": 0.010375502984970808,
+      "boundary_to_weights_ready_seconds": 0.10690720099955797,
+      "request_batch_seconds": 2.238051660824567,
+      "responses": [
+        {
+          "rid": "refresh-long-0",
+          "version_spans": [
+            {
+              "version": "3",
+              "start": 0,
+              "end": 452
+            },
+            {
+              "version": "4",
+              "start": 452,
+              "end": 512
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 452,
+          "current_policy_fraction": 0.1171875,
+          "resume_to_first_new_token_seconds": 0.6061404081992805,
+          "instrumentation_seconds": 0.00015388010069727898,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.010315418243408203,
+          "known_last_vocab_metadata_remaps": 5,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.007318261977845589,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.14455890655517578,
+          "old_behavior_routes_saved": [
+            1475,
+            2,
+            2
+          ]
+        },
+        {
+          "rid": "refresh-long-1",
+          "version_spans": [
+            {
+              "version": "3",
+              "start": 0,
+              "end": 452
+            },
+            {
+              "version": "4",
+              "start": 452,
+              "end": 512
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 452,
+          "current_policy_fraction": 0.1171875,
+          "resume_to_first_new_token_seconds": 0.22543575428426266,
+          "instrumentation_seconds": 0.0004730331711471081,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.007498979568481445,
+          "known_last_vocab_metadata_remaps": 3,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.006631466667209051,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.14128541946411133,
+          "old_behavior_routes_saved": [
+            1475,
+            2,
+            2
+          ]
+        },
+        {
+          "rid": "refresh-long-2",
+          "version_spans": [
+            {
+              "version": "3",
+              "start": 0,
+              "end": 452
+            },
+            {
+              "version": "4",
+              "start": 452,
+              "end": 512
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 452,
+          "current_policy_fraction": 0.1171875,
+          "resume_to_first_new_token_seconds": 0.6547219133935869,
+          "instrumentation_seconds": 0.00023593474179506302,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.010315418243408203,
+          "known_last_vocab_metadata_remaps": 5,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.007318261977845589,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.14455890655517578,
+          "old_behavior_routes_saved": [
+            1475,
+            2,
+            2
+          ]
+        },
+        {
+          "rid": "refresh-long-3",
+          "version_spans": [
+            {
+              "version": "3",
+              "start": 0,
+              "end": 452
+            },
+            {
+              "version": "4",
+              "start": 452,
+              "end": 512
+            }
+          ],
+          "retractions": null,
+          "retained_old_tokens": 452,
+          "current_policy_fraction": 0.1171875,
+          "resume_to_first_new_token_seconds": 0.5676515232771635,
+          "instrumentation_seconds": 0.0001909700222313404,
+          "fresh_prefill_token_matches": 16,
+          "fresh_prefill_tokens_compared": 16,
+          "fresh_prefill_max_logprob_error": 0.010315418243408203,
+          "known_last_vocab_metadata_remaps": 5,
+          "old_prefix_rescore_mean_abs_logprob_delta": 0.007318261977845589,
+          "old_prefix_rescore_max_abs_logprob_delta": 0.14455890655517578,
+          "old_behavior_routes_saved": [
+            1475,
+            2,
+            2
+          ]
+        }
+      ]
+    }
+  ]
+}
