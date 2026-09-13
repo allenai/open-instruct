@@ -42,6 +42,11 @@ def report(options, core):
     decode_graph = graph_config.explicit_settings(options)["decode"]
     graph_limit = max(decode_graph["bs"]) if decode_graph.get("bs") else decode_graph.get("max_bs")
     graphs = decode_graph.get("backend") not in (None, "disabled")
+    if asynchronous and decode_graph.get("backend") == "disabled":
+        warn(
+            "decode_graphs_disabled",
+            "Decode CUDA graphs are disabled. Occupied request slots can still have low GPU activity; compare full decode graphs after qualifying the model and publication path before sizing a larger inference fleet.",
+        )
     if graphs and graph_limit and running and graph_limit < running:
         warn(
             "decode_graph_coverage",

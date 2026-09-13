@@ -61,8 +61,13 @@ CASES = {
 def specification(case, output):
     settings = CASES[case]
     output = Path(output)
-    run = RunSpec.load(ROOT / f"configs/miles/examples/{settings['profile']}.toml").to_dict()
     mechanics = settings["profile"] in ("dev", "tiny")
+    profile_path = (
+        f"examples/{settings['profile']}.toml"
+        if mechanics
+        else f"qualification/throughput-{settings['profile']}-base.toml"
+    )
+    run = RunSpec.load(ROOT / "configs/miles" / profile_path).to_dict()
     source = output.parent / "fixture" if mechanics else CAMPAIGN
     run["name"] = "throughput-" + case
     run["model"]["source"] = str(source / "hf")

@@ -13,8 +13,8 @@ can require different settings. Existing examples remain available.
 | [large](../../configs/miles/examples/large.toml) | 8 trainers + 56 inference GPUs | 64-GPU scale target | Full SFT checkpoint, EP8 trainer node and seven inference nodes; qualification follows smaller checks. |
 
 Small and large currently opt into experimental mixed-policy refresh. They use
-radix caching, the qualified extra-buffer KDA strategy, graphs disabled as required
-by refresh, direct bucketed publication, and preserved historical behavior scores.
+radix caching, the qualified extra-buffer KDA strategy, graphs disabled for the original
+refresh qualification, direct bucketed publication, and preserved historical behavior scores.
 They are not a statement that CUDA graphs, fused export, or packing are undesirable:
 those should be compared in subsequent focused measurements rather than silently
 combined with a new scheduling experiment.
@@ -46,7 +46,7 @@ combined with a new scheduling experiment.
 |---|---|---|
 | Trainer GPUs / EP | Model and optimizer distribution, training time | Expert divisibility, model memory, collective bandwidth; compare training time at the same optimization batch. |
 | Inference GPUs / engine TP | Independent engines and model fit | GPU memory and interconnect; increasing TP reduces engine count at a fixed GPU budget. |
-| Producer sample budget | Unfinished generation-and-reward work | Fleet service time, grading latency and group stragglers; enough headroom to refill engines, then watch age and discarded tokens. |
+| Producer sample budget | Owned groups, or unfinished samples with sample backfill | Fleet service time, grading latency and group stragglers; enough headroom to refill engines, then watch age and discarded tokens. |
 | HTTP concurrency per engine | Global generation semaphore, scaled by engine count | Too low leaves serving slots empty; too high moves waiting work into the serving system without creating GPU capacity. |
 | Running requests per engine | Requested decode batch admission | Effective token pool, recurrent-state pool and GPU memory can cap it further. Record the engine's resolved limit. |
 | Token/context and recurrent-state pools | Capacity for active contexts and cached prefixes | Model geometry, dtype, radix strategy, overlap scheduling and memory headroom. KDA state slots are not necessarily one per request. |
