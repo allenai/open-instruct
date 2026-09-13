@@ -148,7 +148,7 @@ def test_launcher_uses_requested_placement_bound_and_ttl():
     assert task["timeout"] == "45m"
     assert task["datasets"][0]["source"] == {"weka": "oe-training-default"}
     command = task["arguments"][0]
-    assert IMAGE in command and "/tmp-30d/" in command
+    assert IMAGE in command and "/open-instruct-compiler-cache/tmp-7d" in command
     assert "trap" in command and "/output/" in command
     with pytest.raises(ValueError, match="immutable"):
         launch.specification("user/mutable-image")

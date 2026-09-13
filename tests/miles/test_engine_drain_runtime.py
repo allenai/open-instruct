@@ -120,6 +120,7 @@ def test_producer_boundary_drains_without_cancelling_or_waiting_for_consumer(mon
         await producer._output.put(entry(0))
         child = asyncio.create_task(producer._output.put(entry(1)))
         producer._active_tasks = {child}
+        producer._producing_groups = {1: entry(1).prompt_group}
 
         async def worker():
             await child
@@ -133,6 +134,46 @@ def test_producer_boundary_drains_without_cancelling_or_waiting_for_consumer(mon
         await producer.finish_publication()
         assert producer._output._delegate._capacity == 1
         assert producer._producer_resumed.is_set()
+
+    asyncio.run(run())
+
+
+def test_boundary_reserves_completed_tasks_still_waiting_for_buffer_insertion():
+    async def run():
+        producer = DrainingRolloutFn.__new__(DrainingRolloutFn)
+        producer.args = SimpleNamespace(olmo_core=SimpleNamespace(engine_drain_timeout=1, engine_update_timeout=1))
+        producer._event = lambda record: None
+
+        async def deliver(engine, snapshot):
+            return snapshot.version
+
+        producer.controller = EngineDrain([Engine("a", "a", 0)], deliver, max_lag=2)
+        producer._producer_resumed = asyncio.Event()
+        producer._producer_resumed.set()
+        producer._producer_idle = asyncio.Event()
+        producer._boundary_capacity = None
+        producer._publication_paused = False
+        producer._output = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(buffer_args(), lambda group: None))
+        await producer._output.put(entry(0))
+        # The worker has collected four finished tasks and is inserting their
+        # results serially. None is in _active_tasks, but all remain owned.
+        producer._active_tasks = set()
+        producer._producing_groups = {i: entry(i).prompt_group for i in range(1, 5)}
+
+        async def worker():
+            for i in range(1, 5):
+                await producer._output.put(entry(i))
+                producer._producing_groups.pop(i)
+            producer._producer_idle.set()
+
+        producer._worker = asyncio.create_task(worker())
+        await asyncio.sleep(0)
+        await asyncio.wait_for(producer.prepare_publication(), 1)
+        assert not producer._producing_groups
+        assert len(producer._output._delegate._buffer) == 5
+        assert producer._output._delegate._capacity == 5
+        await producer.finish_publication()
+        assert producer._output._delegate._capacity == 1
 
     asyncio.run(run())
 

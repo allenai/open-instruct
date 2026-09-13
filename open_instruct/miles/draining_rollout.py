@@ -206,9 +206,10 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
         self.controller.check()
         self._producer_resumed.clear()
         # Stop admission at the producer first. Expand only enough to store all
-        # already-owned groups, so a full completed queue cannot block the join.
+        # already-owned groups, including completed tasks awaiting buffer insertion.
+        # _active_tasks excludes those completions; the ownership ledger does not.
         if self._output is not None and self._boundary_capacity is None:
-            self._boundary_capacity = await self._output.reserve_drain_capacity(len(self._active_tasks) + 1)
+            self._boundary_capacity = await self._output.reserve_drain_capacity(len(self._producing_groups))
         if self._worker is not None:
             await asyncio.wait_for(
                 self._wait_until_idle(),

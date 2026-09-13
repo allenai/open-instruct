@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "source": {
+    "node_id": "12b04e335cb010a6a63a72ea72b5fedd6e724d3be1481064fd291bd1",
+    "cuda_visible_devices": "GPU-a93e1a1a-4bc0-f992-f0cc-6bccc3e8069f",
+    "device_index": 0,
+    "version": 0
+  },
+  "delivery": {
+    "version": 0,
+    "bytes": 32768,
+    "delivery_seconds": 1.4563038400374353,
+    "peak_gpu_allocated_bytes": 32768
+  },
+  "scope": "real Ray object store, separate CUDA processes and NCCL; synthetic receiver, no model"
+}
