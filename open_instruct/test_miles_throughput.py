@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from scripts.miles import throughput_basket, throughput_occupancy
+from scripts.miles import sample_gpu_usage, throughput_basket, throughput_occupancy
 
 from open_instruct.miles import pipeline_observer, throughput, validation
 from open_instruct.miles.config import CoreConfig
@@ -270,3 +270,13 @@ def test_occupancy_summary_weights_time_and_preserves_missing_intervals():
     assert result["empty_fraction"] == pytest.approx(2 / 8)
     assert result["p95"] == result["maximum"] == 10
     assert throughput_occupancy.summarize([], 0, 10)["mean"] is None
+
+
+def test_gpu_usage_preserves_unavailable_values(monkeypatch):
+    monkeypatch.setattr(
+        sample_gpu_usage.subprocess, "check_output", lambda *a, **kw: "0, GPU-one, 75, N/A, 1000, 2000\n"
+    )
+    row = sample_gpu_usage.sample()[0]
+    assert row["uuid"] == "GPU-one" and row["utilization.gpu"] == 75
+    assert row["utilization.memory"] is None
+    assert row["memory.used"] == 1000

@@ -107,8 +107,12 @@ git -C /opt/core-rl/sources/miles apply /opt/core-rl/scripts/miles/diagnostics/p
                 )
             for index, task in enumerate(spec["tasks"]):
                 task["datasets"].append(dict(mountPath="/qualification-source", source=dict(beaker=source)))
+                node_overlay = overlay
+                if case not in ("dev", "tiny"):
+                    target = root / f"checkpoints/gpu_usage_node{index}.jsonl"
+                    node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))} &\n"
                 task["arguments"][0] = task["arguments"][0].replace(
-                    "cd /opt/core-rl\n", "cd /opt/core-rl\n" + overlay, 1
+                    "cd /opt/core-rl\n", "cd /opt/core-rl\n" + node_overlay, 1
                 )
                 if index == 0:
                     task["arguments"][0] += (

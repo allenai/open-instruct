@@ -321,3 +321,18 @@ seconds; longer gaps remain missing. Engine series keep their endpoint and rank
 labels. These summaries are conditional on the observed intervals and must be
 read alongside coverage, especially if an engine is unavailable. The processor
 timeline labels final generation draining separately from the normal loop.
+
+The follow-up jobs also retain direct NVML samples in `gpu_usage_node*.jsonl`:
+GPU activity percentage, memory activity percentage, and used/total VRAM in MiB.
+The generic SGLang utilization gauge is inactive in this configuration, so it must
+not be read as zero GPU activity. NVML sampling creates no CUDA context. It was
+attached partway through the first follow-up jobs; their coverage starts at the
+recorded attachment time. Later basket launches start it automatically. The
+[attachment record](results/gpu-observer-attachments-20260913.json) preserves the
+observer source and exact job/container identities.
+
+The remaining scale comparisons use 16 updates (ten after warmup) to bound their
+cost. The already-running 2+6 batch-32 and batch-128 comparisons retain 24 updates.
+If Holmes cannot place 64 GPUs, the prepared 8+24 case provides a 32-GPU
+measurement; it does not qualify 8+56. Placement and reserved-but-unused GPUs
+remain explicit in recommendations.

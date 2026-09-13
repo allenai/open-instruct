@@ -1,0 +1,50 @@
+{
+  "scope": "Read-only NVML observer attached after startup to the running v3 jobs; coverage starts at attached_unix, not run start.",
+  "source": "\"\"\"Read-only NVML sampling for topology qualification; no CUDA context is created.\"\"\"\n\nimport argparse\nimport csv\nimport json\nimport os\nimport subprocess\nimport time\nfrom pathlib import Path\n\nFIELDS = (\"index\", \"uuid\", \"utilization.gpu\", \"utilization.memory\", \"memory.used\", \"memory.total\")\n\n\ndef sample():\n    output = subprocess.check_output(\n        [\"nvidia-smi\", \"--query-gpu=\" + \",\".join(FIELDS), \"--format=csv,noheader,nounits\"], text=True, timeout=10\n    )\n    devices = []\n    for row in csv.reader(output.splitlines(), skipinitialspace=True):\n        if len(row) != len(FIELDS):\n            raise ValueError(\"Unexpected nvidia-smi response shape\")\n        record = dict(zip(FIELDS, row, strict=True))\n        for key in FIELDS:\n            if key != \"uuid\":\n                try:\n                    record[key] = float(record[key])\n                except ValueError:\n                    record[key] = None\n        devices.append(record)\n    return devices\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"output\", type=Path)\n    parser.add_argument(\"--seconds\", type=float, default=10800)\n    parser.add_argument(\"--interval\", type=float, default=5)\n    args = parser.parse_args()\n    if args.seconds <= 0 or args.interval < 1:\n        parser.error(\"duration must be positive and interval at least one second\")\n    args.output.parent.mkdir(parents=True, exist_ok=True)\n    end = time.monotonic() + args.seconds\n    with args.output.open(\"a\", buffering=1) as stream:\n        while time.monotonic() < end:\n            record = dict(time_unix=time.time(), host=os.uname().nodename)\n            try:\n                record[\"devices\"] = sample()\n            except (subprocess.SubprocessError, OSError, ValueError) as error:\n                record[\"error\"] = str(error)\n            stream.write(json.dumps(record) + \"\\n\")\n            time.sleep(args.interval)\n\n\nif __name__ == \"__main__\":\n    main()\n",
+  "attachments": [
+    {
+      "case": "bridge-8t8i",
+      "job": "01M2E50JNJTG272ZN2YMTBHJ6A",
+      "host": "holmes-cs-aus-536.reviz.ai2.in",
+      "container": "execution-01m2e50jnjtg272zn2ymtbhj6a",
+      "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/bridge-8t8i-303f284c9ec4/run/checkpoints/gpu_usage_node0.jsonl",
+      "source_sha256": "aa6f21d5fd50f145fdf3a9df5bfc465977b8cee271cbb43e7e372905485d2897",
+      "attached_unix": 1789331852.1373527,
+      "returncode": 0,
+      "error": null
+    },
+    {
+      "case": "bridge-8t8i",
+      "job": "01M2E50JSPMF7G15E89GBZSV0W",
+      "host": "holmes-cs-aus-549.reviz.ai2.in",
+      "container": "execution-01m2e50jspmf7g15e89gbzsv0w",
+      "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/bridge-8t8i-303f284c9ec4/run/checkpoints/gpu_usage_node1.jsonl",
+      "source_sha256": "aa6f21d5fd50f145fdf3a9df5bfc465977b8cee271cbb43e7e372905485d2897",
+      "attached_unix": 1789331852.1509988,
+      "returncode": 0,
+      "error": null
+    },
+    {
+      "case": "steady-2t6i-c8-b32",
+      "job": "01M2E50PJPKM5J6FY2QMGNQ884",
+      "host": "holmes-cs-aus-544.reviz.ai2.in",
+      "container": "execution-01m2e50pjpkm5j6fy2qmgnq884",
+      "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/steady-2t6i-c8-b32-fc943a630803/run/checkpoints/gpu_usage_node0.jsonl",
+      "source_sha256": "aa6f21d5fd50f145fdf3a9df5bfc465977b8cee271cbb43e7e372905485d2897",
+      "attached_unix": 1789331852.187611,
+      "returncode": 0,
+      "error": null
+    },
+    {
+      "case": "steady-2t6i-c8-b128",
+      "job": "01M2E50TB4TSVNP16456993XEB",
+      "host": "holmes-cs-aus-509.reviz.ai2.in",
+      "container": "execution-01m2e50tb4tsvnp16456993xeb",
+      "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/steady-2t6i-c8-b128-71cfef684725/run/checkpoints/gpu_usage_node0.jsonl",
+      "source_sha256": "aa6f21d5fd50f145fdf3a9df5bfc465977b8cee271cbb43e7e372905485d2897",
+      "attached_unix": 1789331852.2093651,
+      "returncode": 0,
+      "error": null
+    }
+  ]
+}
