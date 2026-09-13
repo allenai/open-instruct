@@ -82,7 +82,7 @@ Sixteen engines increase warm throughput about 29%, using 50% more GPUs (24 vs
 the production optimum: diagnostic_interval=1 intentionally snapshots, resets,
 republishes and compares full serving weights every update. That adds a large
 publication barrier in both arms. Next timing runs should retain startup checks
-and use periodic rather than every-update full diagnostics, matched across arms.
+and disable periodic full diagnostics, matched across arms.
 No 24-engine run is launched on the basis of these diagnostic-heavy numbers alone.
 
 Cold first optimizer steps were 642/749 s; steady optimizer work was about 60 s.
@@ -95,3 +95,17 @@ EP4 failed at rendezvous before training: one task was blocked by workspace/budg
 slot limits while its peer acquired a node, started and hit the 20-minute startup
 deadline. This does not establish an EP4 model/collective failure. Retry with a
 fresh output root after the larger allocations finish; keep the failure bounded.
+
+## Throughput follow-up configuration
+
+`pool-ep8-i8-throughput.toml` and `pool-ep8-i16-throughput.toml` retain
+`check_weight_update_equal=true` and set `core.diagnostic_interval=0`. Each has a
+fresh output identity. The completed qualification configs remain unchanged;
+the unsubmitted 24-engine config also uses startup-only audits. These changes
+are staged for subsequent launches, not changes to already submitted jobs.
+
+This removes periodic snapshot/reset/republish/compare and the extra gradient
+norm/update sampling governed by the same interval. Replay diagnostics, policy
+version/logprob gates, and scoring-pass checks retain their previous settings.
+A new timing measurement is required; the 44–51 s publication phase above remains
+the result for every-update audits. No startup-only performance result is claimed.

@@ -1,15 +1,15 @@
-# Full-SFT B300 training: one node of Core trainers (EP8) and one node of TP1 SGLang engines.
-# Replace YOUR_USERNAME/model source before launch; inspect `plan` first.
+# Throughput follow-up; original qualification config remains unchanged.
+# Matched engine-pool exercise: 8 trainers, EP8, 8 TP1 engines.
 schema_version = 1
-name = "grpo-async-disaggregated"
+name = "pool-ep8-i8-throughput-20260913"
 
 [model]
-source = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/policy-hf"
+source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/grpo-async-disaggregated"
-export_hf = true
+root = "/weka/oe-training-default/robertb/open-instruct/runs/pool-ep8-i8-throughput-20260913"
+export_hf = false
 
 [launch]
 workspace = "ai2/open-instruct-dev"
@@ -17,7 +17,7 @@ budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "urgent"
 min_runtime = "1h"
-timeout = "8h"
+timeout = "2h"
 # Multi-node runs currently require auto_resume = false; resume by relaunching
 # with the same output root once a checkpoint exists.
 auto_resume = false
@@ -27,22 +27,26 @@ gpus_per_replica = 8
 weka = "oe-training-default"
 mount_path = "/weka/oe-training-default"
 
-[data]
-seed = 17
-shuffle = true
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
 
-[[data.tasks]]
-task = "gsm8k"
-train_count = 6400
-eval_count = 128
+[launch.env]
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+
+[data]
+# Immutable math/IF/code Dolci mixture from scripts/miles/prepare_mixed_cache_exercise.py.
+prompt_data = "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/train.jsonl"
+eval_prompt_data = ["mixed", "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/eval.jsonl"]
+reward_config = "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/verifiers.json"
+shuffle = false
 
 [training]
-num_rollouts = 100
+num_rollouts = 12
 skip_eval_before_train = false
-eval_interval = 20
-save_checkpoints = true
-# Core saves synchronously. Choose a more frequent cadence for recovery.
-save_interval = 100
+eval_interval = 12
+save_checkpoints = false
 
 [trainer]
 # One full node of trainers with expert parallelism across all eight GPUs.
@@ -50,7 +54,6 @@ gpus = 8
 trainer_num_nodes = 1
 expert_parallel_size = 8
 micro_batch_size = 1
-# Validated basic packing; see docs/miles-sequence-packing.md.
 sequence_packing = true
 packing_max_tokens = 6144
 activation_recompute = true
@@ -58,7 +61,7 @@ trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-# One full node of TP1 engines: 512 responses per collection give each its 64 slots.
+# Requested total TP1 engine GPUs, independently of trainer EP.
 gpus = 8
 rollout_tensor_parallel_size = 1
 # 64 prompts x 8 responses per collection, one optimizer update per collection;
@@ -99,7 +102,8 @@ eps_clip_high = 0.28
 [tracking]
 wandb_mode = "offline"
 wandb_project = "olmo-rl-comparison"
-wandb_group = "core-workflow-async"
+wandb_group = "ep8-engine-pool-20260912"
+wandb_team = "ai2-llm"
 
 [runtime]
 row_specialization = "dynamic"
@@ -108,6 +112,7 @@ row_specialization = "dynamic"
 # Keep the full serving-weight audit at startup/resume only. Periodic
 # audits also reset and republish weights; reserve them for qualification.
 diagnostic_interval = 0
+replay_diagnostics = true
 max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
@@ -121,6 +126,8 @@ expert_publication = "fused"
 scoring_check_interval = 20
 
 [miles]
+use_rollout_routing_replay = true
+use_miles_router = true
 rollout_temperature = 1.0
 rollout_seed = 17
 rollout_max_prompt_len = 2048

@@ -426,7 +426,15 @@ Logprob checks and the initial HF comparison supply separate evidence. The
 round trip adds a second full transfer, with `repeated_version=true` in the
 publication log; include both transfers when measuring diagnostic overhead.
 The async producer remains paused until the check completes.
-The interval defaults to zero, leaving these expensive probes disabled.
+The interval defaults to zero, leaving these periodic probes disabled. Our training
+examples explicitly keep `core.diagnostic_interval=0` and
+`check_weight_update_equal=true`: the full weight audit runs at startup, including
+resume, and does not run after ordinary training updates. Reserve a positive
+interval for qualification or investigating publication correctness. This interval
+also controls the extra gradient-norm and sampled-parameter-update diagnostics;
+setting it to zero does not disable the separate policy-version, logprob, replay,
+or scoring-pass checks. Upstream MILES supplies the optional startup check; the
+periodic same-version round trip is an addition in our Core driver.
 
 Runtime failures include non-finite active inputs/rewards, empty effective
 batches, inconsistent rank schedules, stale policy versions, non-finite losses,

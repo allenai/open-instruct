@@ -108,7 +108,9 @@ wandb_team = "ai2-llm"
 row_specialization = "dynamic"
 
 [core]
-diagnostic_interval = 1
+# Keep the full serving-weight audit at startup/resume only. Periodic
+# audits also reset and republish weights; reserve them for qualification.
+diagnostic_interval = 0
 replay_diagnostics = true
 max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.01
