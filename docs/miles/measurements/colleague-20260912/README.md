@@ -120,3 +120,18 @@ producer scheduling; comparison with the old runs is an overall configuration
 comparison, not an isolated measurement of any one change. Publication still
 cancels unfinished groups in this runtime; a larger producer budget can also
 increase discarded work. Retain cancellation counts alongside useful throughput.
+
+Sixteen-engine throughput follow-up submitted as
+[01M2C867KWDKSN1XRH228A6VGM](https://beaker.org/ex/01M2C867KWDKSN1XRH228A6VGM),
+source `04b427592`, unchanged runtime image `01M2BX9JPT44DGQ9QWY5C0HF52`.
+It uses 8 EP8 trainers + 16 TP1 engines, 1024 outstanding responses, sample
+replenishment, and startup-only full weight audits. Twelve collections, batch 512,
+lag budget 2, TIS, packing and replay remain enabled. Submitted is not passed.
+The matching eight-engine follow-up and 24-engine candidate remain staged.
+77 focused host tests, lint, and all three config translations passed.
+
+Warm-cache case 3 completed with exit 0
+([01M2C5Q1C437KT0S3GGM6H1PCM](https://beaker.org/ex/01M2C5Q1C437KT0S3GGM6H1PCM));
+its detailed cache/reward audit remains pending. EP4 retry
+[01M2C5Q6FF95BFBZJBT7WRP5W1](https://beaker.org/ex/01M2C5Q6FF95BFBZJBT7WRP5W1)
+was still running at this submission check.
