@@ -138,6 +138,16 @@ def comparisons(data, output):
     save(fig, output, "discard-by-length")
 
 
+def observed_steps(points, *, max_hold_minutes=10 / 60):
+    """Break sampled lines at missing observations instead of implying long holds."""
+    result = []
+    for i, (timestamp, value) in enumerate(points):
+        result.append((timestamp, float("nan") if value is None else value))
+        if i + 1 < len(points) and points[i + 1][0] > timestamp + max_hold_minutes:
+            result.append((timestamp + max_hold_minutes, float("nan")))
+    return [p[0] for p in result], [p[1] for p in result]
+
+
 def occupancy(root, output, name):
     stages = read_rows(root / "checkpoints/driver_timing.jsonl")
     producer = read_rows(root / "checkpoints/pipeline_occupancy.jsonl")
@@ -161,10 +171,8 @@ def occupancy(root, output, name):
         ("http_waiting_requests", 2, "Waiting for HTTP admission"),
         ("http_capacity_requests", 2, "HTTP capacity"),
     ):
-        points = [r for r in producer if r.get(key) is not None]
-        axes[axis].step(
-            [(r["time_unix"] - start) / 60 for r in points], [r[key] for r in points], where="post", label=label
-        )
+        points = [((r["time_unix"] - start) / 60, r.get(key)) for r in producer]
+        axes[axis].step(*observed_steps(points), where="post", label=label)
     for identity in sorted({r["engine"] for r in engines if "engine" in r}):
         for key, axis in (("num_running_reqs", 3), ("num_queue_reqs", 4)):
             points = []
@@ -174,23 +182,28 @@ def occupancy(root, output, name):
                 series = [s for s in r.get("series", []) if s["name"] == key]
                 # These exercises use one TP1/DP1 engine per URL. Multi-series
                 # endpoints need an explicit rank aggregation rather than a guess.
-                if len(series) == 1 and series[0]["value"] is not None:
-                    points.append(((r["time_unix"] - start) / 60, series[0]["value"]))
-            if points:
-                axes[axis].step(
-                    [p[0] for p in points],
-                    [p[1] for p in points],
-                    where="post",
-                    label=identity.removeprefix("http://"),
-                )
+                value = series[0]["value"] if len(series) == 1 else None
+                points.append(((r["time_unix"] - start) / 60, value))
+            if any(value is not None for _, value in points):
+                axes[axis].step(*observed_steps(points), where="post", label=identity.removeprefix("http://"))
     for index, ax in enumerate(axes[1:], 1):
         ax.set_ylabel(("", "Prompt groups", "Requests", "Engine running", "Engine waiting")[index])
         ax.set_ylim(bottom=0)
         ax.grid(alpha=0.2)
-        if ax.lines:
+        if 0 < len(ax.lines) <= 8:
             ax.legend(ncols=4, fontsize=7)
+        elif ax.lines:
+            ax.text(0.01, 0.95, f"{len(ax.lines)} individual engines", transform=ax.transAxes, va="top", fontsize=8)
         else:
             ax.text(0.5, 0.5, "No usable observations", transform=ax.transAxes, ha="center")
+    measured_path = root / "measured-cycles.json"
+    warmup = json.loads(measured_path.read_text())["warmup_updates"] if measured_path.exists() else 6
+    measured_stages = [r for r in stages if r["stage"] == "generation_wait" and r["rollout_id"] == warmup]
+    warm_start = (measured_stages[0]["started_unix"] - start) / 60 if measured_stages else None
+    if warm_start is not None:
+        for ax in axes:
+            ax.axvline(warm_start, linestyle="--", color="#333333", linewidth=1)
+        axes[0].text(warm_start, 1.02, "Measured window begins", fontsize=8, ha="right")
     axes[-1].set_xlabel("Minutes since producer observation began (includes startup and shutdown)")
     fig.suptitle(name + " • sampled occupancy, not hardware GPU utilization")
     save(fig, output, name + "-pipeline")
@@ -236,6 +249,107 @@ def occupancy(root, output, name):
     save(fig, output, name + "-gpu-activity")
 
 
+def pipeline_map(report, output, name):
+    """Annotate the data path with measured queue occupancy and driver service times."""
+    if "occupancy" not in report:
+        return
+    occupancy_data = report["occupancy"]
+    queues = occupancy_data["pipeline"]
+
+    def value(key, field="mean", suffix=""):
+        row = queues.get(key, {})
+        number = row.get(field)
+        if number is None:
+            return "unobserved"
+        return f"{number:.1f}{suffix}"
+
+    def engine_value(key):
+        rows = [s for e in occupancy_data["engines"].values() for s in e["series"] if s["name"] == key]
+        numbers = [s["mean"] for s in rows if s["mean"] is not None]
+        return f"{min(numbers):.1f}–{max(numbers):.1f} / engine" if numbers else "unobserved"
+
+    means = {stage: statistics.mean(r[stage + "_seconds"] for r in report["per_update"]) for stage in COLORS}
+    boxes = [
+        (
+            0,
+            1,
+            "Producer",
+            f"Owned groups: {value('producer_owned_groups')} mean\nActive tasks: {value('producer_active_group_tasks')} mean",
+        ),
+        (
+            1,
+            1,
+            "HTTP admission",
+            f"Active: {value('http_active_requests')} mean\nWaiting: {value('http_waiting_requests')} mean\nCapacity: {value('http_capacity_requests')} requests",
+        ),
+        (2, 1, "Engine queue", f"Waiting: {engine_value('num_queue_reqs')}\nRouter residence: not timed"),
+        (3, 1, "Prefill / decode", f"Running: {engine_value('num_running_reqs')}\nSee NVML activity timeline"),
+        (
+            3,
+            0,
+            "Verification / siblings",
+            "Local GSM8K verification\nWait for all group members\nNot separately timed",
+        ),
+        (
+            2,
+            0,
+            "Completed FIFO",
+            f"Groups: {value('completed_queue_groups')} mean\nP95: {value('completed_queue_groups', 'p95')} / capacity {value('completed_queue_capacity_groups')}\nDropped tokens: {100 * report['discarded_token_fraction']:.1f}%",
+        ),
+        (
+            1,
+            0,
+            "Trainer",
+            f"Batch wait: {means['generation_wait']:.1f} s / cycle\nScore + train: {means['training']:.1f} s / cycle\nTraining + publication: {100 * (1 - report['trainer_wait_fraction']):.1f}% of cycle",
+        ),
+        (
+            0,
+            0,
+            "Weight publication",
+            f"{means['publication']:.1f} s / cycle\nRefresh paused engines\nRetained prefix is re-prefilled",
+        ),
+    ]
+    fig, ax = plt.subplots(figsize=(16, 6), layout="constrained")
+    ax.set(xlim=(-0.65, 3.65), ylim=(-0.55, 1.6))
+    ax.axis("off")
+    for x, y, title, body in boxes:
+        ax.text(
+            x,
+            y,
+            title + "\n\n" + body,
+            ha="center",
+            va="center",
+            fontsize=9,
+            bbox=dict(boxstyle="round,pad=0.8", facecolor="#eef3f5", edgecolor="#397f9d"),
+        )
+    for left, right in zip(boxes, boxes[1:]):
+        x1, y1 = left[:2]
+        x2, y2 = right[:2]
+        dx, dy = x2 - x1, y2 - y1
+        ax.annotate(
+            "",
+            xy=(x2 - 0.43 * dx, y2 - 0.28 * dy),
+            xytext=(x1 + 0.43 * dx, y1 + 0.28 * dy),
+            arrowprops=dict(arrowstyle="->", color="#555555", linewidth=1.5),
+        )
+    ax.text(
+        1.5,
+        -0.42,
+        "Publication updates the serving fleet; the generation path runs concurrently with training.",
+        ha="center",
+        fontsize=9,
+        color="#555555",
+    )
+    coverage = [r["coverage_fraction"] for r in queues.values() if r["mean"] is not None]
+    minimum = min(coverage) if coverage else 0
+    fig.suptitle(
+        f"{name} • {report['measured_updates']} measured updates • queue coverage ≥ {100 * minimum:.1f}%\n"
+        "Queue means are time-weighted; driver fractions are not hardware utilization",
+        fontsize=13,
+    )
+    save(fig, output, name + "-map")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path)
@@ -247,6 +361,9 @@ def main():
     for item in args.run_root:
         name, root = item.split("=", 1)
         occupancy(Path(root), args.output, name)
+        measured = Path(root) / "measured-cycles.json"
+        if measured.exists():
+            pipeline_map(json.loads(measured.read_text()), args.output, name)
 
 
 if __name__ == "__main__":
