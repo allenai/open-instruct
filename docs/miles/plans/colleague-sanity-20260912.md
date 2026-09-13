@@ -1,5 +1,7 @@
 # Colleague-readiness exercise plan
 
+Historical plan. Current outcomes are in the [readiness measurements](../measurements/colleague-20260913/README.md); use the [MILES guide](../index.md) for supported workflows.
+
 Proposed September 12, 2026, against `robertb/miles-olmo-core` at `875d972f1`.
 This is a plan, not new qualification evidence. No experiments are launched by
 this document. Freeze one candidate image and the resolved run files before
