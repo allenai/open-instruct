@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from open_instruct.miles import async_capacity, validation
 from open_instruct.miles import compiler_cache as cache
 from open_instruct.miles import options as cli_options
-from open_instruct.miles import validation
 from open_instruct.miles.errors import InputError
 
 
@@ -436,6 +436,7 @@ class RunConfig:
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         return {
             "argv": argv,
+            "async_capacity": async_capacity.report(options, self.core.max_policy_lag),
             "runtime_validated": False,
             "core": dataclasses.asdict(self.core),
             "miles": options,

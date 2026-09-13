@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles import judging, options, run_data, topology, validation
+from open_instruct.miles import async_capacity, judging, options, run_data, topology, validation
 from open_instruct.miles.config import CoreConfig, RunConfig
 from open_instruct.miles.errors import InputError
 
@@ -663,6 +663,7 @@ class RunSpec:
         if asynchronous:
             if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
+            miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 2.0)
             miles.setdefault("async_unused_samples_handler", "retry")
             miles.setdefault("rollout_submission_granularity", "group")

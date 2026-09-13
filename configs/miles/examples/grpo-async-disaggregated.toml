@@ -58,7 +58,8 @@ trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-# One full node of TP1 engines: 512 responses per collection give each its 64 slots.
+# One full node of TP1 engines. Async producer capacity is derived separately
+# from engine count and request slots; the collection size is the trainer batch.
 gpus = 8
 rollout_tensor_parallel_size = 1
 # 64 prompts x 8 responses per collection, one optimizer update per collection;
@@ -126,6 +127,8 @@ disable_grpo_std_normalization = true
 
 [async]
 fully_async = true
+# Omit async_max_concurrent_samples to size the producer for the engine fleet.
+# The completed FIFO below stays tied to collection size, not inference nodes.
 max_weight_staleness = 2
 async_data_buffer_capacity_factor = 2.0
 async_unused_samples_handler = "retry"

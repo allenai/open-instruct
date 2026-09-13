@@ -3,6 +3,7 @@
 import argparse
 import importlib
 import json
+import sys
 from pathlib import Path
 
 from open_instruct.miles import validation
@@ -56,7 +57,10 @@ def execute(parser, options):
     workflow = importlib.import_module("open_instruct.miles.workflow")
     if options.command == "validate":
         if structured:
-            config.compile().arguments()
+            compiled = config.compile()
+            compiled.arguments()
+            for warning in compiled.plan()["async_capacity"]["warnings"]:
+                print(f"Warning: {warning}", file=sys.stderr)
             print("Run schema, topology and MILES/Core options validated; inputs and runtime checked during train")
         else:
             workflow.parse_runtime(config)

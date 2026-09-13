@@ -70,7 +70,9 @@ admission × context. This is a requested pool capacity, not measured GPU alloca
 Synchronous colocation is the implicit default; async requires explicit resident
 disaggregation. Structured async enables TIS unless rollout log probabilities are
 explicitly the anchor. TIS and use_rollout_logprobs cannot both be enabled. Async
-uses buffer factor 2, retry, group submissions, and requires an explicit valid Core
+derives the omitted producer budget from engine count and request capacity; see
+[async queues and discard metrics](async-pipeline.md). It uses buffer factor 2,
+retry, group submissions, and requires an explicit valid Core
 lag allowance. The maintained async example selects lag one. KL > 0 enables the
 reference pass with the prepared starting model unless ref_load is supplied.
 

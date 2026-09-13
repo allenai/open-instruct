@@ -60,7 +60,7 @@ def test_behavior_scores_and_routes_are_unchanged_and_provenance_serializes():
     assert value.rollout_log_probs == [-0.8, -1.2, -0.6]
     assert value.weight_versions == ["0", "1"]
     assert value.oldest_weight_version == 0
-    assert value.train_metadata == value.metadata
+    assert value.train_metadata["policy_refresh"] == value.metadata["policy_refresh"]
     restored = Sample.from_dict(value.to_dict())
     assert restored.train_metadata == value.train_metadata
     assert restored.weight_versions == value.weight_versions
@@ -247,3 +247,33 @@ def test_metadata_survives_dp_reordering_with_numpy_lengths():
     shards = train_data_conversion._package_shards(None, data, [[1], [0]])
     assert policy_refresh.validate_batch(shards[0])[0][-1]["version"] == 2
     assert policy_refresh.validate_batch(shards[1])[0][-1]["version"] == 1
+
+
+def test_queue_discard_metrics_capture_generated_lengths_before_retry_reset():
+    async def scenario():
+        retried = []
+
+        def retry(group):
+            retried.append(group)
+            for value in group:
+                value.response_length = 0
+                value.weight_versions = []
+
+        buffer = RefreshPolicyDataBuffer(DataBufferConstructorInput(args(), retry))
+        stale = entry(0, (0, 1))
+        current = entry(1, (2, 2))
+        await buffer.put(stale)
+        pending = asyncio.create_task(buffer.get(current_version=2))
+        await buffer.put(current)
+        assert (await pending) is current
+        assert retried == [stale.prompt_group]
+        metrics = buffer.get_metrics()
+        prefix = "rollout/fully_async/completed_queue/"
+        assert metrics[prefix + "dropped_samples"] == 2
+        assert metrics[prefix + "dropped_response_tokens"] == 6
+        assert metrics[prefix + "dropped_samples_by_age/2"] == 2
+        assert metrics[prefix + "delivered_samples"] == 2
+        assert metrics[prefix + "dropped_samples_fraction"] == 0.5
+        assert buffer.get_metrics()[prefix + "dropped_samples"] == 0
+
+    asyncio.run(scenario())

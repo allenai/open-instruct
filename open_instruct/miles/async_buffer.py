@@ -1,5 +1,6 @@
 """MILES async buffer with homogeneous groups and an optimizer-step lag budget."""
 
+import time
 from copy import copy
 from dataclasses import is_dataclass, replace
 
@@ -7,6 +8,36 @@ from miles.rollout.fully_async_data_buffer import DefaultDataBuffer, iter_sample
 
 from open_instruct.miles import policy_refresh
 from open_instruct.miles.data import policy_versions
+from open_instruct.miles.queue_metrics import QueueMetrics
+
+
+class MeasuredDataBuffer(DefaultDataBuffer):
+    def __init__(self, input):
+        if not hasattr(DefaultDataBuffer, "on_dequeue"):
+            raise RuntimeError("Completed-queue metrics require the pinned MILES runtime with on_dequeue support")
+        super().__init__(input)
+        self._queue_metrics = QueueMetrics()
+        self._consumer_wait_seconds = 0.0
+
+    def on_dequeue(self, entry, *, staleness, accepted):
+        self._queue_metrics.record(
+            [sample.response_length for sample in iter_samples(entry.group)], age=staleness, accepted=accepted
+        )
+
+    async def get(self, **context):
+        started = time.monotonic()
+        try:
+            return await super().get(**context)
+        finally:
+            self._consumer_wait_seconds += time.monotonic() - started
+
+    def get_metrics(self):
+        waited, self._consumer_wait_seconds = self._consumer_wait_seconds, 0.0
+        return {
+            **super().get_metrics(),
+            **self._queue_metrics.collect(),
+            "rollout/fully_async/completed_queue/consumer_wait_seconds": waited,
+        }
 
 
 class HomogeneousPolicyDataBuffer:
@@ -23,7 +54,7 @@ class HomogeneousPolicyDataBuffer:
         else:
             delegate_input = copy(input)
             delegate_input.args = args
-        self._delegate = DefaultDataBuffer(delegate_input)
+        self._delegate = MeasuredDataBuffer(delegate_input)
         self._unused = input.unused_handler_fn
         self._samples = args.n_samples_per_prompt
         self._rejected = 0

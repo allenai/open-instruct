@@ -690,6 +690,29 @@ index 4e50149e1c6ed3f91eb7199f45986e739c3a5254..94ae2dcecf319c92b92eb0bcc37874aa
      @abc.abstractmethod
      def sleep(self, tags):
          raise NotImplementedError
+diff --git a/miles/rollout/fully_async_data_buffer.py b/miles/rollout/fully_async_data_buffer.py
+index 1e432488f022c7a2b728d09f4c64e59c838d14b3..7afd191c67b8ef5c79a9f9f0d901f07092d8e059 100644
+--- a/miles/rollout/fully_async_data_buffer.py
++++ b/miles/rollout/fully_async_data_buffer.py
+@@ -152,6 +152,8 @@ class DefaultDataBuffer(DataBuffer):
+ 
+                 # filters at retrieving sample: staleness filter
+                 staleness = self._staleness(entry.group, current_version)
++                accepted = staleness is None or self._args.max_weight_staleness is None or staleness <= self._args.max_weight_staleness
++                self.on_dequeue(entry, staleness=staleness, accepted=accepted)
+                 if staleness is None:
+                     return entry
+                 self._metric_consumed_staleness.append(staleness)
+@@ -161,6 +163,9 @@ class DefaultDataBuffer(DataBuffer):
+                 self._metric_stale_groups += 1
+                 self._unused_handler_fn(entry.prompt_group)
+ 
++    def on_dequeue(self, entry: DataBufferInput, *, staleness: int | None, accepted: bool) -> None:
++        """Observe a completed-queue decision before retry handling mutates samples."""
++
+     def get_metrics(self) -> dict[str, float]:
+         prefix = "rollout/fully_async/"
+         metrics = {
 diff --git a/miles/router/router.py b/miles/router/router.py
 index 8782e63383e781af09cb46fe365407a3babd45fb..7f3240af0a8eaa2e8b8410cc820236158dae1c49 100644
 --- a/miles/router/router.py

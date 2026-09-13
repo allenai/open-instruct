@@ -66,9 +66,12 @@ def record_response(sample, meta):
     if [x[1] for x in records] != sample.tokens[-sample.response_length :]:
         raise ValueError("Policy refresh behavior logprobs are not aligned with response tokens")
     provenance = {"spans": spans, "replay_version": replay_version}
+    # Keep server observations distinct from inferred publication boundaries:
+    # memory-pressure retractions can occur without a policy change.
+    serving = {key: meta[key] for key in ("num_retractions", "e2e_latency", "cached_tokens") if key in meta}
     sample.weight_versions = [str(span["version"]) for span in spans]
     sample.train_metadata = {**(sample.train_metadata or {}), "policy_refresh": provenance}
-    sample.metadata = {**(sample.metadata or {}), "policy_refresh": provenance}
+    sample.metadata = {**(sample.metadata or {}), "policy_refresh": provenance, "refresh_serving": serving}
     return provenance
 
 

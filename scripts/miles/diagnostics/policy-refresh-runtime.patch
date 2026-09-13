@@ -1,5 +1,5 @@
 diff --git a/miles/ray/rollout/rollout_manager.py b/miles/ray/rollout/rollout_manager.py
-index 224db2b77cc1c573a29ce35a94921e98b9739059..559bd4231d42a3ec476eef2379724d7269620260 100644
+index 224db2b77..559bd4231 100644
 --- a/miles/ray/rollout/rollout_manager.py
 +++ b/miles/ray/rollout/rollout_manager.py
 @@ -129,9 +129,14 @@ class RolloutManager:
@@ -20,7 +20,7 @@ index 224db2b77cc1c573a29ce35a94921e98b9739059..559bd4231d42a3ec476eef2379724d72
              return run(getattr(producer, method)())
  
 diff --git a/miles/ray/rollout/train_data_conversion.py b/miles/ray/rollout/train_data_conversion.py
-index e3c95a92999345e3654d607767176336c93302a4..0a550aed1b834a7df886c5a7f218151c74d9d631 100644
+index e3c95a929..0a550aed1 100644
 --- a/miles/ray/rollout/train_data_conversion.py
 +++ b/miles/ray/rollout/train_data_conversion.py
 @@ -369,6 +369,7 @@ def _package_shards(args, data: dict[str, Any], partitions) -> list[dict[str, An
@@ -31,8 +31,31 @@ index e3c95a92999345e3654d607767176336c93302a4..0a550aed1b834a7df886c5a7f218151c
              "teacher_log_probs",
              "opd_reverse_kl",
              "seq_witness_ids",
+diff --git a/miles/rollout/fully_async_data_buffer.py b/miles/rollout/fully_async_data_buffer.py
+index 1e432488f..7afd191c6 100644
+--- a/miles/rollout/fully_async_data_buffer.py
++++ b/miles/rollout/fully_async_data_buffer.py
+@@ -152,6 +152,8 @@ class DefaultDataBuffer(DataBuffer):
+ 
+                 # filters at retrieving sample: staleness filter
+                 staleness = self._staleness(entry.group, current_version)
++                accepted = staleness is None or self._args.max_weight_staleness is None or staleness <= self._args.max_weight_staleness
++                self.on_dequeue(entry, staleness=staleness, accepted=accepted)
+                 if staleness is None:
+                     return entry
+                 self._metric_consumed_staleness.append(staleness)
+@@ -161,6 +163,9 @@ class DefaultDataBuffer(DataBuffer):
+                 self._metric_stale_groups += 1
+                 self._unused_handler_fn(entry.prompt_group)
+ 
++    def on_dequeue(self, entry: DataBufferInput, *, staleness: int | None, accepted: bool) -> None:
++        """Observe a completed-queue decision before retry handling mutates samples."""
++
+     def get_metrics(self) -> dict[str, float]:
+         prefix = "rollout/fully_async/"
+         metrics = {
 diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
-index bc6a36ef9ab4261834adcda141639737bdd9c88c..17d12435b24eb18ce6c9eb11d4aa366eb7396dd1 100644
+index bc6a36ef9..17d12435b 100644
 --- a/miles/utils/arguments.py
 +++ b/miles/utils/arguments.py
 @@ -73,12 +73,15 @@ def _resolve_rollout_functions(args) -> None:

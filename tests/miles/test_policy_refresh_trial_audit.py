@@ -101,3 +101,19 @@ def test_false_success_is_rejected(tmp_path, fault):
     torch.save(payload, path)
     with pytest.raises(ValueError):
         audit.audit(tmp_path)
+
+
+def test_barrier_control_keeps_single_version_contract(tmp_path):
+    fixture(tmp_path)
+    for update in range(5):
+        path = tmp_path / f"rollouts/{update}.pt"
+        payload = torch.load(path, weights_only=False)
+        for sample in payload["samples"]:
+            sample["weight_versions"] = [str(update)]
+            sample.pop("train_metadata")
+            sample["metadata"] = {}
+        torch.save(payload, path)
+    result = audit.audit(tmp_path, mode="barrier")
+    assert result["mode"] == "barrier"
+    assert result["consumed_mixed_responses"] == 0
+    assert result["replay"]["passed"]

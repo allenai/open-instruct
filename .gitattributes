@@ -5,3 +5,4 @@ open_instruct/test_data/rlvr_sample.jsonl filter=lfs diff=lfs merge=lfs -text
 
 # Unified diffs require a leading space on empty context lines.
 runtime/miles/patches/*.patch -whitespace
+scripts/miles/diagnostics/*.patch -whitespace

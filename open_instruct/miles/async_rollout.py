@@ -26,6 +26,7 @@ from miles.rollout.submission_scheduler import make_submission_scheduler
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
+from open_instruct.miles import async_capacity
 from open_instruct.miles.errors import GenerationInterrupted
 
 logger = logger_utils.setup_logger(__name__)
@@ -49,6 +50,12 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
     def __init__(self, input: Any) -> None:
         """Construct the MILES producer and its lifecycle signals."""
         super().__init__(input)
+        capacity = async_capacity.report(
+            vars(self.args), getattr(getattr(self.args, "olmo_core", None), "max_policy_lag", None)
+        )
+        logger.info("Async pipeline capacity: %s", capacity)
+        for warning in capacity["warnings"]:
+            logger.warning("Async capacity: %s", warning)
         self._active_tasks: set[asyncio.Task[Any]] = set()
         self._producer_idle = asyncio.Event()
         self._producer_idle.set()

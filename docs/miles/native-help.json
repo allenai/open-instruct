@@ -11926,5 +11926,11 @@
       "help": null
     }
   ],
-  "schema_sha256": "18406ac53829c0b9d97cf0f6b5de52e2d8b9663985b3f7320362b5dabd6d0547"
+  "schema_provenance_verification": {
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "miles_development_commit": "edca455105ef0fa7e703002f5fb5c9aa426f761b",
+    "note": "Runtime source overlay verified against prior parser actions; original help capture image retained.",
+    "parser_actions_unchanged": true
+  },
+  "schema_sha256": "be6c3c8e3b63738f74956a86e5da3b6a63b00af349aa5e6ce1e4d792f4e005f3"
 }

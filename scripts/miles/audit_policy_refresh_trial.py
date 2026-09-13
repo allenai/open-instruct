@@ -16,7 +16,7 @@ def records(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def audit(root, *, updates=5, require_mixed=True):
+def audit(root, *, updates=5, mode="refresh", require_mixed=True):
     root = Path(root)
     reports, seen, total_mixed, mixed_reward_groups = [], set(), 0, 0
     for update in range(updates):
@@ -32,12 +32,23 @@ def audit(root, *, updates=5, require_mixed=True):
             if length <= 0 or len(probs) != length or not all(math.isfinite(p) for p in probs):
                 raise ValueError("Missing, misaligned or nonfinite original rollout probabilities")
             metadata = sample.get("train_metadata")
+            if mode == "barrier":
+                versions = sample["weight_versions"]
+                if len(versions) != 1:
+                    raise ValueError("Barrier baseline unexpectedly contains mixed-version responses")
+                version = policy_refresh.version_number(versions[0])
+                metadata = {
+                    "policy_refresh": {
+                        "replay_version": version,
+                        "spans": [dict(version=version, start=0, end=length)],
+                    }
+                }
             spans = policy_refresh.validate_batch(
                 dict(metadata=[metadata], response_lengths=[length], weight_versions=[sample["weight_versions"]])
             )[0]
             if any(not 0 <= update - span["version"] <= 2 for span in spans):
                 raise ValueError("Training consumed a token outside its optimizer-step lag budget")
-            if metadata["policy_refresh"] != sample["metadata"]["policy_refresh"]:
+            if mode == "refresh" and metadata["policy_refresh"] != sample["metadata"]["policy_refresh"]:
                 raise ValueError("Training and retained provenance differ")
             mask = sample.get("loss_mask")
             if mask is not None and (len(mask) != length or any(x != 1 for x in mask)):
@@ -73,7 +84,7 @@ def audit(root, *, updates=5, require_mixed=True):
                 median_response_tokens=float(np.median(lengths)),
             )
         )
-    if require_mixed and not total_mixed:
+    if mode == "refresh" and require_mixed and not total_mixed:
         raise ValueError("No refreshed response reached an optimizer step; continuation is not yet exercised")
     if not mixed_reward_groups:
         raise ValueError("No nonzero group-relative policy advantage was exercised")
@@ -99,6 +110,7 @@ def audit(root, *, updates=5, require_mixed=True):
         raise ValueError("A driver lifecycle stage failed")
     return dict(
         passed=True,
+        mode=mode,
         updates=updates,
         consumed_mixed_responses=total_mixed,
         groups_with_policy_advantage=mixed_reward_groups,
@@ -116,8 +128,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--mode", choices=("refresh", "barrier"), default="refresh")
     opt = parser.parse_args()
-    result = audit(opt.root)
+    result = audit(opt.root, mode=opt.mode)
     opt.output.write_text(json.dumps(result, indent=2) + "\n")
     print(
         json.dumps({key: value for key, value in result.items() if key not in ("timings", "publications")}, indent=2)

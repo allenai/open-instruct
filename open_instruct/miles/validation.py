@@ -123,6 +123,8 @@ def runtime_values(values):
     ):
         if key in values:
             integer(values[key], f"miles.{key}")
+    if values.get("async_max_concurrent_samples") is not None:
+        integer(values["async_max_concurrent_samples"], "miles.async_max_concurrent_samples")
     for key in ("lr_warmup_iters", "seed", "rollout_seed"):
         if key in values:
             integer(values[key], f"miles.{key}", minimum=0)
@@ -143,6 +145,16 @@ def runtime_values(values):
     for key in ("adam_eps", "async_data_buffer_capacity_factor"):
         if key in values:
             number(values[key], f"miles.{key}", exclusive_min=True)
+    if (
+        values.get("fully_async")
+        and "async_data_buffer_capacity_factor" in values
+        and "rollout_batch_size" in values
+        and values["async_data_buffer_capacity_factor"] * values["rollout_batch_size"] < 1
+    ):
+        raise InputError(
+            "async_data_buffer_capacity_factor * rollout_batch_size must be at least 1; "
+            "the completed buffer must hold a whole prompt group."
+        )
     for key in ("adam_beta1", "adam_beta2", "lr_warmup_fraction"):
         if key in values:
             number(values[key], f"miles.{key}", maximum=1, exclusive_max=True)
