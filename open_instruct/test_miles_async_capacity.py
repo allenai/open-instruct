@@ -106,3 +106,21 @@ def test_producer_headroom_and_partial_groups_are_explained(tmp_path):
     warnings = config.plan()["async_capacity"]["warnings"]
     assert any("not a predicted age" in w for w in warnings)
     assert any("retained siblings" in w for w in warnings)
+
+
+def test_combined_group_backlog_warns_even_when_each_limit_looks_small():
+    options = dict(
+        fully_async=True,
+        n_samples_per_prompt=4,
+        rollout_batch_size=8,
+        global_batch_size=32,
+        async_max_concurrent_samples=64,
+        async_data_buffer_capacity_factor=1,
+        rollout_submission_granularity="group",
+    )
+    report = async_capacity.report(options, 2)
+    assert report["owned_plus_buffer_samples"] == 96
+    assert any("retain 3 future" in warning for warning in report["warnings"])
+    report = async_capacity.report(options | {"async_max_concurrent_samples": 32}, 2)
+    assert report["owned_plus_buffer_samples"] == 64
+    assert not any("future optimizer batches" in warning for warning in report["warnings"])

@@ -80,6 +80,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
         ("steady-2t16i-c8-b128", 18, 3),
         ("steady-2t6i-c8-b128-graphs", 8, 1),
         ("steady-2t4i-c8-b32-graphs", 6, 1),
+        ("steady-2t4i-c8-b32-graphs-p32", 6, 1),
         ("steady-8t8i-c16-b256-graphs", 16, 2),
     ],
 )
@@ -312,3 +313,13 @@ def test_graph_warning_uses_json_over_convenience_and_legacy_flags():
         CoreConfig(),
     )
     assert any(issue["code"] == "decode_graph_coverage" for issue in report["warnings"])
+
+
+def test_graph_followup_changes_only_producer_budget_and_identity():
+    root = "/weka/oe-training-default/test/run"
+    baseline = throughput_basket.specification("steady-2t4i-c8-b32-graphs", root).to_dict()
+    bounded = throughput_basket.specification("steady-2t4i-c8-b32-graphs-p32", root).to_dict()
+    assert bounded["async"].pop("async_max_concurrent_samples") == 32
+    baseline.pop("name")
+    bounded.pop("name")
+    assert bounded == baseline

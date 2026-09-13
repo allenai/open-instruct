@@ -31,6 +31,13 @@ CASES = {
         "updates": 24,
     },
     "steady-2t4i-c8-b32-graphs": {"profile": "small", "concurrency": 8, "decode_graphs": True, "updates": 16},
+    "steady-2t4i-c8-b32-graphs-p32": {
+        "profile": "small",
+        "concurrency": 8,
+        "decode_graphs": True,
+        "producer_samples": 32,
+        "updates": 16,
+    },
     "steady-8t8i-c16-b256-graphs": {
         "profile": "large",
         "inference": 8,
@@ -112,6 +119,8 @@ def specification(case, output):
     run["miles"]["sglang_enable_metrics"] = True
     if "submission" in settings:
         run["async"]["rollout_submission_granularity"] = settings["submission"]
+    if "producer_samples" in settings:
+        run["async"]["async_max_concurrent_samples"] = settings["producer_samples"]
     if "concurrency" in settings:
         run["inference"]["sglang_server_concurrency"] = settings["concurrency"]
         run["inference"]["sglang_max_running_requests"] = settings["concurrency"]

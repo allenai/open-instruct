@@ -74,6 +74,20 @@ def report(options, max_policy_lag):
             "This is headroom, not a predicted age: compare completed-queue drops and trainer wait before raising it further. "
             "If drops grow while training stays busy, reduce async_max_concurrent_samples."
         )
+    combined = (
+        effective + buffer_samples
+        if options.get("rollout_submission_granularity") == "group"
+        and effective is not None
+        and buffer_samples is not None
+        else None
+    )
+    if combined is not None and batch and max_policy_lag is not None and combined > max_policy_lag * batch:
+        warnings.append(
+            f"Producer plus completed buffer can retain {combined / batch:g} future optimizer batches "
+            f"with max_policy_lag={max_policy_lag}. A fast generator can fill both under one policy while training runs; "
+            "older groups may then expire. This is a capacity warning, not a predicted discard rate. "
+            "Compare drops and trainer wait when reducing async_max_concurrent_samples or the completed-buffer factor."
+        )
     if options.get("rollout_submission_granularity") == "sample":
         warnings.append(
             "Sample backfill limits unfinished samples, not all retained siblings. Partly completed groups can hold "
@@ -90,6 +104,7 @@ def report(options, max_policy_lag):
         "submission_granularity": options.get("rollout_submission_granularity") or "sample",
         "completed_buffer_groups": buffer_groups,
         "completed_buffer_samples": buffer_samples,
+        "owned_plus_buffer_samples": combined,
         "samples_per_collection": collection,
         "samples_per_optimizer_step": batch,
         "warnings": warnings,

@@ -39,6 +39,14 @@ results can therefore also reside in producer tasks waiting to be inserted: the
 FIFO's reported capacity is not a bound on all resident response data. Lifecycle
 drains temporarily reserve additional space for already-owned completions.
 
+In group mode, ownership ends after successful FIFO insertion. Thus producer
+ownership and completed-buffer occupancy are separate: a 64-sample producer plus
+32-sample FIFO can retain 96 future samples while the trainer processes its current
+batch. At batch 32 and lag two, a fast generator can make more same-policy work
+than the next two updates can consume. Planning warns about this combined
+headroom. It is an upper bound, not a predicted discard rate: generation times,
+refresh boundaries and ongoing consumption determine actual age.
+
 The refresh trial's explicit limit of 32 meant **eight producer groups × four
 responses**. It was a small qualification setting, not a universal capacity or a
 training-queue limit. Two engines with server concurrency 8 gave 16 HTTP slots;
