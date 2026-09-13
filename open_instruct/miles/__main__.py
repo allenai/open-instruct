@@ -59,8 +59,11 @@ def execute(parser, options):
         if structured:
             compiled = config.compile()
             compiled.arguments()
-            for warning in compiled.plan()["async_capacity"]["warnings"]:
+            planned = compiled.plan()
+            for warning in planned["async_capacity"]["warnings"]:
                 print(f"Warning: {warning}", file=sys.stderr)
+            for warning in planned["throughput"]["warnings"]:
+                print(f"Warning [{warning['code']}]: {warning['message']}", file=sys.stderr)
             print("Run schema, topology and MILES/Core options validated; inputs and runtime checked during train")
         else:
             workflow.parse_runtime(config)

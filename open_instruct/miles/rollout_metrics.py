@@ -7,6 +7,8 @@ the run analyzer instead of only as warnings.
 """
 
 import collections
+import json
+from pathlib import Path
 
 from miles.ray.rollout.metrics import compute_rollout_step
 from miles.utils.tracking_utils import tracking
@@ -54,4 +56,19 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
             tracking.log(
                 args, {**metrics, "rollout/step": compute_rollout_step(args, rollout_id)}, step_key="rollout/step"
             )
+    if getattr(args, "save", None):
+        root = Path(args.save)
+        root.mkdir(parents=True, exist_ok=True)
+        lengths = [sample.response_length for sample in samples]
+        record = {
+            "rollout_id": rollout_id,
+            "samples": len(samples),
+            "response_tokens": sum(lengths),
+            "response_lengths": lengths,
+            "collection_wait_seconds": rollout_time,
+            "mixed_responses": sum(len(set(sample.weight_versions or [])) > 1 for sample in samples),
+            "queue_metrics": rollout_extra_metrics or {},
+        }
+        with (root / "rollout_flow.jsonl").open("a") as stream:
+            stream.write(json.dumps(record) + "\n")
     return False

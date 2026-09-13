@@ -5,16 +5,15 @@ import asyncio
 import dataclasses
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
 import ray
-from miles.utils import arguments
 from scripts.miles import gsm8k_parity
 
 from open_instruct.miles.config import RunConfig
 from open_instruct.miles.driver import train
+from open_instruct.miles.workflow import parse_runtime
 
 
 def configuration(campaign, output, *, mode="refresh", updates=4, resume=False):
@@ -81,8 +80,7 @@ def main():
     config = configuration(opt.campaign, opt.output, mode=opt.mode, updates=opt.updates, resume=opt.resume)
     invocation = "resume" if opt.resume else "initial"
     (opt.output / f"{invocation}-arguments.json").write_text(json.dumps(config.arguments(), indent=2) + "\n")
-    sys.argv = ["policy-refresh-trial", *config.arguments()]
-    args = arguments.parse_args()
+    args = parse_runtime(config)
     expected = "RefreshingRolloutFn" if opt.mode == "refresh" else "ManagedFullyAsyncRolloutFn"
     if not args.rollout_function_path.endswith(expected):
         raise RuntimeError("Runtime did not select the requested rollout producer")

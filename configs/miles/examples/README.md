@@ -19,3 +19,9 @@ Use [generated example summaries](../../../docs/miles/configuration.md#example-r
 for exact current values. `profiles/` contains low-level prepared-input configs;
 `qualification/` contains bounded exercise inputs. Neither is interchangeable with
 a full workflow example. Preserve frozen experiment inputs when changing starters.
+
+## Size-based candidates
+
+`dev.toml`, `tiny.toml`, `small.toml`, and `large.toml` are new qualification candidates.
+See [selection rationale and basket](../../../docs/miles/throughput-profiles.md).
+The small/large mixed-policy refresh path is experimental; the ratios are not yet measured recommendations.

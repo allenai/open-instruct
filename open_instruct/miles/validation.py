@@ -120,9 +120,22 @@ def runtime_values(values):
         "eval_interval",
         "lr_decay_iters",
         "update_weight_buffer_size",
+        "update_weights_interval",
     ):
         if key in values:
             integer(values[key], f"miles.{key}")
+    if (
+        values.get("rollout_num_gpus")
+        and values.get("rollout_num_gpus_per_engine")
+        and values["rollout_num_gpus"] % values["rollout_num_gpus_per_engine"]
+    ):
+        raise InputError(
+            "rollout_num_gpus must be divisible by rollout_num_gpus_per_engine; allocate whole inference engines."
+        )
+    if values.get("sglang_chunked_prefill_size") is not None:
+        chunk = values["sglang_chunked_prefill_size"]
+        if type(chunk) is not int or (chunk != -1 and chunk <= 0):
+            raise InputError("sglang_chunked_prefill_size must be a positive integer or -1 to disable chunking.")
     if values.get("async_max_concurrent_samples") is not None:
         integer(values["async_max_concurrent_samples"], "miles.async_max_concurrent_samples")
     for key in ("lr_warmup_iters", "seed", "rollout_seed"):

@@ -11,7 +11,7 @@ from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 from open_instruct import logger_utils
-from open_instruct.miles import startup_cache
+from open_instruct.miles import startup_cache, throughput
 from open_instruct.miles.rolling_publication import RollingPublication
 from open_instruct.miles.timing import evaluation_stage, stage
 
@@ -19,6 +19,8 @@ logger = logger_utils.setup_logger(__name__)
 
 
 async def train(args, *, export_hf=None):
+    for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
+        logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
         startup_cache.prepare(args)
     with stage(args, "placement"):
@@ -118,7 +120,8 @@ async def train(args, *, export_hf=None):
                 if rolling is not None:
                     await rolling.quiesce()
                 elif refresh:
-                    await manager.core_publication_boundary.remote(True)
+                    with stage(args, "checkpoint_drain", rollout_id):
+                        await manager.core_publication_boundary.remote(True)
                 try:
                     with stage(args, "checkpoint", rollout_id):
                         await manager.save.remote(rollout_id)

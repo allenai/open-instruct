@@ -299,7 +299,11 @@ Generated from the actual structured TOMLs. These are recipe choices, not univer
 
 | Example | Trainer GPUs | Rollout GPUs | Colocated | Prompts × responses | Global batch | Async | TIS | Packing | Collections |
 |---|---|---|---|---|---|---|---|---|---|
+| dev.toml | 1 × 1 | 1 | True | 4 × 2 | 8 | False | False | False | 4 |
 | grpo-async-disaggregated.toml | 1 × 8 | 8 | False | 64 × 8 | 512 | True | True | True | 100 |
 | grpo-basic.toml | 1 × 1 | 1 | True | 8 × 8 | 64 | False | False | False | 2 |
 | grpo-disaggregated.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 100 |
 | grpo-multitask.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 4 |
+| large.toml | 1 × 8 | 56 | False | 64 × 4 | 256 | True | True | False | 100 |
+| small.toml | 1 × 2 | 4 | False | 8 × 4 | 32 | True | True | False | 100 |
+| tiny.toml | 1 × 1 | 1 | False | 4 × 2 | 8 | False | False | False | 4 |
