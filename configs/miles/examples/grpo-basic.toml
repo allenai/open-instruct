@@ -97,6 +97,9 @@ wandb_group = "core-workflow-basic"
 row_specialization = "dynamic"
 
 [core]
+# Keep the full serving-weight audit at startup/resume only. Periodic
+# audits also reset and republish weights; reserve them for qualification.
+diagnostic_interval = 0
 attention_backend = "torch"
 max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.01
