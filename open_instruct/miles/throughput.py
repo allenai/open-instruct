@@ -1,5 +1,7 @@
 """Explain requested throughput budgets without promising GPU fit or optimality."""
 
+from open_instruct.miles import graph_config
+
 
 def report(options, core):
     issues = []
@@ -37,8 +39,9 @@ def report(options, core):
             "sync_collection_underfeeds_fleet",
             f"Synchronous collection has {collection} responses for {engines * min(http, running)} requested serving slots. More inference GPUs may sit idle; adjust fleet size or deliberately change the collection size.",
         )
-    graph_limit = options.get("sglang_cuda_graph_max_bs_decode")
-    graphs = options.get("sglang_cuda_graph_backend_decode") not in (None, "disabled")
+    decode_graph = graph_config.explicit_settings(options)["decode"]
+    graph_limit = max(decode_graph["bs"]) if decode_graph.get("bs") else decode_graph.get("max_bs")
+    graphs = decode_graph.get("backend") not in (None, "disabled")
     if graphs and graph_limit and running and graph_limit < running:
         warn(
             "decode_graph_coverage",

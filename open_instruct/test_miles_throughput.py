@@ -161,6 +161,21 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
     (tmp_path / "plan.json").write_text(json.dumps({"runtime": {"miles": {"num_rollout": 4, "fully_async": True}}}))
     with pytest.raises(ValueError, match="queue counters"):
         throughput_basket.analyze(tmp_path, warmup=1)
+    prefix = "rollout/fully_async/completed_queue/"
+    write(
+        "rollout_flow.jsonl",
+        [
+            dict(
+                rollout_id=i,
+                response_tokens=100,
+                mixed_responses=1,
+                queue_metrics={prefix + "dropped_response_tokens": 0, prefix + "delivered_response_tokens": 101},
+            )
+            for i in range(4)
+        ],
+    )
+    with pytest.raises(ValueError, match="delivery accounting"):
+        throughput_basket.analyze(tmp_path, warmup=1)
     write("training_contract_rank0.jsonl", [])
     with pytest.raises(ValueError, match="optimizer"):
         throughput_basket.analyze(tmp_path, warmup=1)
@@ -281,3 +296,17 @@ def test_gpu_usage_preserves_unavailable_values(monkeypatch):
     assert row["uuid"] == "GPU-one" and row["utilization.gpu"] == 75
     assert row["utilization.memory"] is None
     assert row["memory.used"] == 1000
+
+
+def test_graph_warning_uses_json_over_convenience_and_legacy_flags():
+    report = throughput.report(
+        {
+            "sglang_max_running_requests": 8,
+            "sglang_disable_cuda_graph": True,
+            "sglang_cuda_graph_backend_decode": "disabled",
+            "sglang_cuda_graph_max_bs_decode": 32,
+            "sglang_cuda_graph_config": {"decode": {"backend": "full", "max_bs": 4}},
+        },
+        CoreConfig(),
+    )
+    assert any(issue["code"] == "decode_graph_coverage" for issue in report["warnings"])

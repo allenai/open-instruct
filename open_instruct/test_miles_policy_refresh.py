@@ -1,6 +1,7 @@
 """Validate the explicit scope of the first policy-refresh qualification."""
 
 import dataclasses
+import json
 
 import pytest
 
@@ -60,3 +61,20 @@ def test_refresh_full_decode_graphs_preserve_prefill_restriction():
     config.validate()
     with pytest.raises(ValueError, match="backend_prefill"):
         dataclasses.replace(config, miles=config.miles | {"sglang_cuda_graph_backend_prefill": "breakable"}).validate()
+
+
+@pytest.mark.parametrize("encode", [lambda value: value, json.dumps])
+def test_refresh_checks_effective_json_graph_overrides(encode):
+    config = configured()
+    with pytest.raises(ValueError, match="backend_prefill"):
+        dataclasses.replace(
+            config, miles=config.miles | {"sglang_cuda_graph_config": encode({"prefill": {"backend": "breakable"}})}
+        ).validate()
+    dataclasses.replace(
+        config,
+        miles=config.miles
+        | {
+            "sglang_cuda_graph_backend_decode": "tc_piecewise",
+            "sglang_cuda_graph_config": encode({"decode": {"backend": "full"}}),
+        },
+    ).validate()

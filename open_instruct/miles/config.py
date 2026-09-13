@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles import async_capacity, throughput, validation
+from open_instruct.miles import async_capacity, graph_config, throughput, validation
 from open_instruct.miles import compiler_cache as cache
 from open_instruct.miles import options as cli_options
 from open_instruct.miles.errors import InputError
@@ -411,10 +411,13 @@ class RunConfig:
             raise InputError("refresh does not yet support speculative decoding or indexer replay")
         # Full decode graphs retain model/state buffer addresses across in-place
         # publication. Prefill and compiler-driven graph modes remain excluded.
-        if options.get("sglang_cuda_graph_backend_decode") not in ("disabled", "full"):
+        graphs = graph_config.explicit_settings(options)
+        if graphs["decode"].get("backend") not in ("disabled", "full"):
             raise InputError("refresh requires miles.sglang_cuda_graph_backend_decode=disabled or full")
-        if options.get("sglang_cuda_graph_backend_prefill") != "disabled":
-            raise InputError("refresh requires miles.sglang_cuda_graph_backend_prefill=disabled")
+        if graphs["prefill"].get("backend") != "disabled":
+            raise InputError(
+                "refresh requires miles.sglang_cuda_graph_backend_prefill=disabled, including JSON overrides"
+            )
         if options.get("rollout_temperature", 1.0) != 1.0 or options.get("rollout_top_p", 1.0) != 1.0:
             raise InputError("refresh qualification requires rollout_temperature=1 and rollout_top_p=1")
         if options.get("rollout_top_k", -1) != -1:

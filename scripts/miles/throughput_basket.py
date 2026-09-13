@@ -162,6 +162,10 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
                 for key in ("dropped_response_tokens", "delivered_response_tokens")
             ):
                 raise ValueError("Missing async queue counters; absence is not a zero discard rate")
+            if row["queue_metrics"][prefix + "delivered_response_tokens"] != row["response_tokens"]:
+                raise ValueError(
+                    f"Queue delivery accounting differs from consumed tokens at rollout {row['rollout_id']}"
+                )
     if seconds <= 0 or any(not math.isfinite(v) or v < 0 for values in durations.values() for v in values):
         raise ValueError("Invalid measured duration")
     dropped = sum(r["queue_metrics"].get(prefix + "dropped_response_tokens", 0) for r in chosen)
