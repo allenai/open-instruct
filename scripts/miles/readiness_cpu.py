@@ -251,8 +251,10 @@ def lifecycle(root):
         require({0, 2} <= {event["rollout_id"] for event in checks}, "Missing first-forward check after restart")
         require(all(event["max_abs"] <= event["tolerance"] for event in checks), "Scoring check failed")
         rank_events[str(rank)] = {"steps": [event["step"] for event in optimizers], "scoring_checks": checks}
+    # Resume publishes restored weights, then resets/republishes for its startup
+    # equality audit. Those are two version-2 publications after the saved one.
     publications = audit_workflow.read_jsonl(directory / "publication.jsonl")
-    require([event["version"] for event in publications] == [0, 1, 2, 2, 3, 4], "Publication/republish discontinuity")
+    require([event["version"] for event in publications] == [0, 1, 2, 2, 2, 3, 4], "Publication/republish discontinuity")
     return {
         "passed": True,
         "root": str(root),
