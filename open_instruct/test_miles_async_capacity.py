@@ -99,3 +99,10 @@ def test_discard_fraction_reports_token_waste_and_length_bias_separately():
     second = metrics.collect()
     assert second.keys() == first.keys()
     assert all(value == 0 for value in second.values())
+
+
+def test_producer_headroom_and_partial_groups_are_explained(tmp_path):
+    config = configured(tmp_path, inference={"gpus": 32}, miles={"rollout_submission_granularity": "sample"}).compile()
+    warnings = config.plan()["async_capacity"]["warnings"]
+    assert any("not a predicted age" in w for w in warnings)
+    assert any("retained siblings" in w for w in warnings)

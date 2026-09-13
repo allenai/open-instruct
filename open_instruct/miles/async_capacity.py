@@ -68,6 +68,17 @@ def report(options, max_policy_lag):
             f"Completed buffer spans {buffer_samples / batch:g} optimizer batches with max_policy_lag={max_policy_lag}; "
             "queued groups may expire before consumption. Reduce async_data_buffer_capacity_factor and measure stale-group discards."
         )
+    if effective is not None and batch and max_policy_lag is not None and effective > (max_policy_lag + 1) * batch:
+        warnings.append(
+            f"Producer budget alone covers {effective / batch:g} optimizer batches with max_policy_lag={max_policy_lag}. "
+            "This is headroom, not a predicted age: compare completed-queue drops and trainer wait before raising it further. "
+            "If drops grow while training stays busy, reduce async_max_concurrent_samples."
+        )
+    if options.get("rollout_submission_granularity") == "sample":
+        warnings.append(
+            "Sample backfill limits unfinished samples, not all retained siblings. Partly completed groups can hold "
+            "more responses than producer_sample_budget; monitor retained work, long-response age and memory."
+        )
     return {
         "enabled": True,
         "scope": "requested capacities; engine memory/state pools and routing can reduce utilization",
