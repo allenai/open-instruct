@@ -7,6 +7,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from scripts.miles import launch_policy_refresh_probe as launch
+from scripts.miles.analyze_policy_refresh import check_transition
 
 
 def test_capture_precedes_state_release_and_scope_restores(tmp_path, monkeypatch):
@@ -35,8 +36,7 @@ def test_capture_precedes_state_release_and_scope_restores(tmp_path, monkeypatch
         origin_input_ids=[1, 2, 3],
         retraction_count=0,
         routed_experts=None,
-        output_token_logprobs_val=[-0.2, -0.3],
-        output_token_logprobs_idx=[4, 5],
+        logprob=SimpleNamespace(output_token_logprobs_val=[-0.2, -0.3], output_token_logprobs_idx=[4, 5]),
     )
 
     def capture(req):
@@ -44,6 +44,12 @@ def test_capture_precedes_state_release_and_scope_restores(tmp_path, monkeypatch
         events.append("capture")
 
     class Scheduler:
+        def process_batch_result(self, batch, output):
+            pass
+
+        def continue_generation(self, request):
+            pass
+
         batch_result_processor = SimpleNamespace(_maybe_collect_routed_experts=capture)
 
         def pause_generation(self, request):
@@ -82,3 +88,22 @@ def test_launch_is_pinned_isolated_gpu_holmes(mode, monkeypatch):
 def test_unknown_probe_mode_rejected():
     with pytest.raises(ValueError, match="tiny or sft"):
         launch.make_spec("image", "unknown")
+
+
+def test_transition_preserves_behavior_and_exact_version_boundary():
+    before = {"output_ids": [4, 5], "behavior_logprobs": [-0.2, -0.3]}
+    response = {
+        "output_ids": [4, 5, 6],
+        "meta_info": {
+            "output_token_logprobs": [[-0.2, 4], [-0.3, 5], [-0.4, 6]],
+            "weight_versions": [{"version": "0", "start": 0, "end": 2}, {"version": "1", "start": 2, "end": 3}],
+        },
+    }
+    assert check_transition(before, response) == 2
+    response["meta_info"]["output_token_logprobs"][0][0] = -0.21
+    with pytest.raises(ValueError, match="overwritten"):
+        check_transition(before, response)
+    response["meta_info"]["output_token_logprobs"][0][0] = -0.2
+    response["meta_info"]["weight_versions"][1]["start"] = 1
+    with pytest.raises(ValueError, match="spans"):
+        check_transition(before, response)

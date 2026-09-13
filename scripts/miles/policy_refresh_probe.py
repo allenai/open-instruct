@@ -5,6 +5,7 @@ Original sampling logprobs/routes are retained independently of rescoring.
 """
 
 import argparse
+import base64
 import concurrent.futures
 import importlib.util
 import json
@@ -24,6 +25,7 @@ import torch
 from miles.backends.fsdp_utils import update_weight_utils
 from miles.utils import distributed_utils
 from safetensors import safe_open
+from sglang.srt.utils import MultiprocessingSerializer
 from torch import distributed as dist
 from transformers import AutoTokenizer
 
@@ -45,7 +47,7 @@ def rpc(endpoint, payload=None):
 
 class Stream:
     def __init__(self, payload):
-        self.payload = dict(payload, stream=True)
+        self.payload = dict(payload, stream=True, logprob_start_len=-1)
         self.latest = None
         self.first = None
         self.received = []
@@ -81,7 +83,9 @@ def wait_tokens(streams, count, futures):
 
 
 class Publisher:
-    def __init__(self, root):
+    def __init__(self, root, local_ipc=False):
+        self.root = root
+        self.local_ipc = local_ipc
         torch.cuda.set_device(0)
         self.weights = []
         for shard in sorted(root.glob("*.safetensors")):
@@ -100,6 +104,9 @@ class Publisher:
         if not self.changed:
             raise ValueError("Fixture has no selected attention/router weights")
         self.bytes = sum(t.numel() * t.element_size() for _, t in self.weights)
+        if local_ipc:
+            self.group = None
+            return
         self.group_name = "policy-refresh"
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
@@ -130,6 +137,26 @@ class Publisher:
         torch.cuda.set_device(0)
         started = time.perf_counter()
         rpc("begin_weight_update")
+        if self.local_ipc:
+            payload = MultiprocessingSerializer.serialize(self.weights)
+            rpc(
+                "update_weights_from_tensor",
+                {
+                    "serialized_named_tensors": [base64.b64encode(payload).decode()],
+                    "weight_version": str(version),
+                    "flush_cache": False,
+                },
+            )
+            rpc("end_weight_update")
+            delivered = time.perf_counter()
+            rpc("flush_cache")
+            return {
+                "transfer_seconds": delivered - started,
+                "flush_seconds": time.perf_counter() - delivered,
+                "bytes": self.bytes,
+                "buckets": 1,
+                "transport": "local GPU IPC; not NCCL bandwidth",
+            }
         buckets, size, batch = 0, 0, []
 
         def send():
@@ -205,6 +232,8 @@ def run_case(root, publisher, prompt, label, batch, length, cut, version, refres
         publication = publisher.publish(version)
         ready = resumed = time.perf_counter()
     results = [future.result(timeout=900) for future in futures]
+    for stream, result in zip(streams, results):
+        (root / (stream.payload["rid"] + ".json")).write_text(json.dumps(result))
     report = {
         "label": label,
         "refresh": refresh,
@@ -242,10 +271,12 @@ def run_case(root, publisher, prompt, label, batch, length, cut, version, refres
                 resume_to_first_new_token_seconds=after[0][0] - resumed,
                 instrumentation_seconds=before["instrumentation_seconds"],
             )
+            entry.update(json.loads((root / "trace" / f"{rid}.first-token.json").read_text()))
             # Independent empty-cache prefill of EXACT retained prefix. Compare
             # greedy continuation and teacher-forced old-prefix scores separately.
             rpc("flush_cache")
             reference = rpc("generate", request(prompt + output[:kept], rid + "-reference", min(16, length - kept)))
+            (root / f"{rid}-reference.json").write_text(json.dumps(reference))
             count = len(reference["output_ids"])
             ref_lp = [x[0] for x in reference["meta_info"]["output_token_logprobs"]]
             got_lp = [x[0] for x in meta["output_token_logprobs"][kept : kept + count]]
@@ -258,7 +289,16 @@ def run_case(root, publisher, prompt, label, batch, length, cut, version, refres
             # under current weights. Preserve both; never relabel the old draw.
             scores = reference["meta_info"]["input_token_logprobs"][len(prompt) : len(prompt) + kept]
             assert len(scores) == kept
-            assert [x[1] for x in scores] == output[:kept]
+            # Pinned SGLang metadata maps the final valid vocabulary ID to 0
+            # (strict < vocab_size - 1 in _process_input_token_logprobs). The
+            # score itself is untouched. Account for ONLY that known label bug.
+            vocab_size = json.loads((publisher.root / "config.json").read_text())["vocab_size"]
+            remapped = 0
+            for score, token in zip(scores, output[:kept]):
+                if score[1] != token:
+                    assert token == vocab_size - 1 and score[1] == 0, (score, token)
+                    remapped += 1
+            entry["known_last_vocab_metadata_remaps"] = remapped
             drift = np.array([x[0] for x in scores]) - before["behavior_logprobs"]
             entry["old_prefix_rescore_mean_abs_logprob_delta"] = float(np.abs(drift).mean())
             entry["old_prefix_rescore_max_abs_logprob_delta"] = float(np.abs(drift).max())
@@ -276,7 +316,12 @@ def main():
     parser.add_argument("--model", type=Path)
     parser.add_argument("--output", type=Path, default=Path("/output"))
     parser.add_argument("--radix", action="store_true")
+    parser.add_argument(
+        "--local-ipc", action="store_true", help="Tiny lifecycle test on one GPU; no cross-GPU timing claim"
+    )
     args = parser.parse_args()
+    if args.local_ipc and args.model is not None:
+        parser.error("--local-ipc is limited to the tiny fixture")
     root = args.output
     root.mkdir(parents=True, exist_ok=True)
     model = args.model or root / "tiny"
@@ -300,7 +345,7 @@ def main():
         "--port",
         "31000",
         "--base-gpu-id",
-        "1",
+        "0" if args.local_ipc else "1",
         "--tp-size",
         "1",
         "--trust-remote-code",
@@ -348,7 +393,7 @@ def main():
             time.sleep(2)
         else:
             raise TimeoutError("Server startup exceeded 20 minutes")
-        publisher = Publisher(model)
+        publisher = Publisher(model, local_ipc=args.local_ipc)
         # Warm kernels and transport outside measured cases. Subsequent version
         # changes use this SAME changed checkpoint to isolate state-refresh cost.
         prompt = (
