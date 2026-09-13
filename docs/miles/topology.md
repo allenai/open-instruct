@@ -57,6 +57,9 @@ graph capture, retractions, response tails, tokens/second and tokens/GPU-second.
 For prefix-cache policy see [run controls](run-controls.md); do not assume ordinary
 radix caching is interchangeable with KDA recurrent-state caching.
 
+For length-specific budgets, controls and qualification evidence, see
+[long sequences](long-sequences.md).
+
 ## When radix caching is useful
 
 Radix caching is most promising for **long, repeatedly reused prompt prefixes**:

@@ -33,6 +33,7 @@ switching to a deprecated backend.
 | [Managed judges](managed-judges.md) | Binding named rubrics and placing fixed-weight judge services |
 | [Operations](operations.md) | Reading metrics, diagnosing failures and establishing run completion |
 | [Architecture and development](architecture.md) | Understanding adapter ownership, runtime images and local checks |
+| [Long sequences](long-sequences.md) | Choosing prompt/response budgets, admission, memory controls and interpreting length qualification |
 | [Packing](sequence-packing.md) | Understanding document isolation, loss semantics and qualification |
 | [Compiler caches](compiler-cache.md) | Understanding cache restore/publication and bounded shutdown |
 | [Run-control semantics](run-controls.md) | Comparing Core controls with olmo-miles/Megatron terminology |
