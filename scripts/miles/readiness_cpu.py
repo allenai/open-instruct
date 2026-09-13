@@ -195,7 +195,10 @@ def check_optimizer_sequence(events, updates):
     require([event["step"] for event in optimizers] == list(range(1, updates + 1)), "Optimizer step discontinuity")
     require([event["rollout_id"] for event in optimizers] == list(range(updates)), "Rollout discontinuity")
     require(all(not event["optimizer_skipped"] for event in optimizers), "Skipped optimizer step")
-    require(all(event["lr_used"] > 0 for event in optimizers), "Zero learning rate in resume exercise")
+    require(
+        all(event["lr_used"] and all(lr > 0 for lr in event["lr_used"]) for event in optimizers),
+        "Zero learning rate in resume exercise",
+    )
     return optimizers
 
 
@@ -226,7 +229,9 @@ def lifecycle(root):
         checkpoint = importlib.import_module("olmo_core.distributed.checkpoint")
         metadata = checkpoint.get_checkpoint_metadata(path / "model")
         names = list(metadata.state_dict_metadata)
-        require(any("optim" in name for name in names), "Native save lacks optimizer state")
+        require(
+            any("optim" in name or name.endswith(".exp_avg") for name in names), "Native save lacks optimizer state"
+        )
         require(
             all((path / f"rank_{rank}.pt").is_file() for rank in range(manifest["world_size"])), "Missing rank state"
         )

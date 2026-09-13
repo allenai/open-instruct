@@ -96,7 +96,13 @@ def test_long_context_keeps_stdio_test_cases_in_one_verifier_target(monkeypatch,
 
 def test_resume_audit_rejects_repeated_or_skipped_steps():
     events = [
-        {"event": "optimizer", "step": step, "rollout_id": step - 1, "optimizer_skipped": False, "lr_used": 1e-6}
+        {
+            "event": "optimizer",
+            "step": step,
+            "rollout_id": step - 1,
+            "optimizer_skipped": False,
+            "lr_used": [1e-6, 1e-6],
+        }
         for step in range(1, 5)
     ]
     assert len(readiness_cpu.check_optimizer_sequence(events, 4)) == 4
