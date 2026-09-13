@@ -1,0 +1,156 @@
+{
+  "dense": {
+    "workflow": {
+      "finished_unix": 1789255978.220708,
+      "result": {
+        "completed_rollout_ids": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "export_hf": null,
+        "start_rollout_id": 0
+      },
+      "spec_sha256": "f64594a8e8ad7e7e35d70da5ccdcb979980fb78d3c66e0a41e4ac29daf27282e",
+      "started_unix": 1789254263.4105098,
+      "status": "complete",
+      "training_started_unix": 1789254269.7144663
+    },
+    "optimizer_records": 8,
+    "optimizer_steps": 8,
+    "replay_records": 0,
+    "replay_mismatches": 0,
+    "nonzero_parameter_update_records": 7,
+    "all_driver_stages_passed": true,
+    "post_first_two_mean_seconds": {
+      "training": 27.2861786930589,
+      "generation_wait": 186.3024957140442,
+      "publication": 29.229192605474964
+    },
+    "cache_success": null,
+    "cache_publication_seconds": null,
+    "cache_worker_outcomes": {}
+  },
+  "judge": {
+    "workflow": {
+      "finished_unix": 1789257970.6762297,
+      "result": {
+        "completed_rollout_ids": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "export_hf": null,
+        "start_rollout_id": 0
+      },
+      "spec_sha256": "1cc5685facbf3d4f3de2b0fca546ca71ba6e3a81afd51d2138c2277f2b4d1c5f",
+      "started_unix": 1789256191.9373696,
+      "status": "complete",
+      "training_started_unix": 1789256198.4256496
+    },
+    "optimizer_records": 8,
+    "optimizer_steps": 4,
+    "replay_records": 230,
+    "replay_mismatches": 0,
+    "nonzero_parameter_update_records": 8,
+    "all_driver_stages_passed": true,
+    "post_first_two_mean_seconds": {
+      "training": 110.4760903675342,
+      "generation_wait": 55.026164352486376,
+      "publication": 44.87015010655159
+    },
+    "cache_success": true,
+    "cache_publication_seconds": 15.217483027954586,
+    "cache_worker_outcomes": {
+      "published": 4
+    }
+  },
+  "ep8-i8": {
+    "workflow": {
+      "finished_unix": 1789260217.8818326,
+      "result": {
+        "completed_rollout_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "export_hf": null,
+        "start_rollout_id": 0
+      },
+      "spec_sha256": "5409c447329ec420e8bbe3e5f8b1d13df57dade2e87de55cf24c14b42d2f7001",
+      "started_unix": 1789255907.3115478,
+      "status": "complete",
+      "training_started_unix": 1789255917.6508424
+    },
+    "optimizer_records": 96,
+    "optimizer_steps": 12,
+    "replay_records": 6224,
+    "replay_mismatches": 0,
+    "nonzero_parameter_update_records": 96,
+    "all_driver_stages_passed": true,
+    "post_first_two_mean_seconds": {
+      "training": 62.05935550185386,
+      "generation_wait": 85.18653508007992,
+      "publication": 43.818136621592565
+    },
+    "cache_success": true,
+    "cache_publication_seconds": 43.537814480951056,
+    "cache_worker_outcomes": {
+      "published": 16
+    }
+  },
+  "ep8-i16": {
+    "workflow": {
+      "finished_unix": 1789260084.1297555,
+      "result": {
+        "completed_rollout_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "export_hf": null,
+        "start_rollout_id": 0
+      },
+      "spec_sha256": "3c1b2938e661db8707a99eac903f1f9f668d017b0d764c0a992a3d0201214ddc",
+      "started_unix": 1789256114.6261194,
+      "status": "complete",
+      "training_started_unix": 1789256124.9908009
+    },
+    "optimizer_records": 96,
+    "optimizer_steps": 12,
+    "replay_records": 6216,
+    "replay_mismatches": 0,
+    "nonzero_parameter_update_records": 96,
+    "all_driver_stages_passed": true,
+    "post_first_two_mean_seconds": {
+      "training": 59.952072491904254,
+      "generation_wait": 37.222103644313755,
+      "publication": 51.0535723424051
+    },
+    "cache_success": true,
+    "cache_publication_seconds": 44.43654331902508,
+    "cache_worker_outcomes": {
+      "published": 24
+    }
+  }
+}

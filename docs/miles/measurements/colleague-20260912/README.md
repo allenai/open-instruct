@@ -57,3 +57,41 @@ managed-judge mixtures need their own end-to-end confirmation.
 Six GPU experiments have now been submitted in the campaign, counting the failed
 original and its retry. Three of these are the added sizing family. Keep launch
 receipts here and update outcomes from the latest job of every replica.
+
+
+## Completed first wave (2026-09-13 UTC)
+
+Four cases completed every driver stage and final evaluation with exit 0 on every
+replica: dense (eight optimizer steps), mixed EP2/judge retry (four), and EP8 with
+eight/sixteen engines (twelve each). Native contract files contain 230, 6224 and
+6216 replay observations respectively, with zero mismatches. All MoE optimizer
+steps record nonzero sampled parameter changes on every rank. Dense changes seven
+of eight times; its first warmup step deliberately uses LR zero. These are runtime
+contract/lifecycle results, not a completed independent retained-sample reward audit.
+
+| Mean after first two collections | EP8 + 8 engines | EP8 + 16 engines |
+| --- | ---: | ---: |
+| Sum of training/wait/publication phases | 191.1 s | 148.2 s |
+| Training phase | 62.1 s | 60.0 s |
+| Waiting for generated data | 85.2 s | 37.2 s |
+| Publication phase including full diagnostics | 43.8 s | 51.1 s |
+| Actual publication transfer (actor timeline) | 1.42 s | 1.57 s |
+
+Sixteen engines increase warm throughput about 29%, using 50% more GPUs (24 vs
+16 total), about 16% more warm allocated GPU-time per update. This does not settle
+the production optimum: diagnostic_interval=1 intentionally snapshots, resets,
+republishes and compares full serving weights every update. That adds a large
+publication barrier in both arms. Next timing runs should retain startup checks
+and use periodic rather than every-update full diagnostics, matched across arms.
+No 24-engine run is launched on the basis of these diagnostic-heavy numbers alone.
+
+Cold first optimizer steps were 642/749 s; steady optimizer work was about 60 s.
+Compiler publication succeeded for all 16/24 workers, taking about 44 s total at
+shutdown; the mixed judge run published four workers in 15 s. Warm reuse still
+requires case 3. Full raw results were downloaded to /tmp/colleague-final-*;
+compact runtime-contract summaries are in completed-first-wave.json.
+
+EP4 failed at rendezvous before training: one task was blocked by workspace/budget
+slot limits while its peer acquired a node, started and hit the 20-minute startup
+deadline. This does not establish an EP4 model/collective failure. Retry with a
+fresh output root after the larger allocations finish; keep the failure bounded.
