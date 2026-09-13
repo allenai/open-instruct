@@ -33,6 +33,11 @@ steady state, and compare tokens/second and GPU-seconds as well as update time.
 Record generated length, cap fraction, mixed-reward groups, reward, lag and TIS
 clipping to distinguish a workload change from a kernel speedup.
 
+Centered advantages can make the scalar PPO loss zero at unchanged weights even
+when its gradient is nonzero. Check mixed-reward groups, gradients and parameter
+changes together. Total gradient norms can include router auxiliary losses; they
+do not prove that a batch with identical rewards supplied a policy gradient.
+
 The policy-agreement guard named max_train_rollout_logprob_abs_diff measures the
 **mean absolute active-token gap**, despite its legacy name. Replay diagnostics
 check supplied expert IDs; native route agreement is a different experiment.
