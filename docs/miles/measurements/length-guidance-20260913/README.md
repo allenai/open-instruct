@@ -67,7 +67,7 @@ headroom, so these admission limits are conservative test points, not maxima.
 
 The [expanded sweep](https://beaker.org/ex/01M2E1EC64MT0BKP4JYJD4JHEB) requests
 524,288 KV tokens, admission/graph cap 32 and 64 recurrent slots. Its largest
-groups will be 32 at 16K, 16 at 32K and eight at 64K. It uses the same pinned
+groups were 32 at 16K, 16 at 32K and eight at 64K. It uses the same pinned
 runtime and prefill chunk size. Results are below.
 
 Raw short generations and per-token scores are retained in
@@ -108,10 +108,13 @@ seven reached 14,336. All eight rewards were zero, so this batch cannot establis
 a nonzero policy-gradient update. It still exercises long forward/backward
 computation, including the router auxiliary objective. Rank one's first packing
 record had four samples in four packs: packing did not reduce the forward count.
-The run is not marked passed until optimizer, publication and final evaluation
-complete and retained-sample/replay checks pass.
+The first optimizer update completed. Its standalone-versus-training scoring
+check matched exactly across 108,897 active tokens (mean and maximum absolute
+difference zero). This is a Core scoring-path comparison, not a serving-versus-
+trainer equivalence claim. The run is not marked passed until final evaluation
+and retained-sample/replay checks also pass.
 
-The 32K run is still generating long responses. A local follow-up monitor will
+As of 19:08 UTC, both RL runs remain in progress. A local follow-up monitor will
 submit an exact-source `lengths` audit on Saturn after the GPU jobs terminate,
 for workflows whose Beaker exit code is zero. Its launch receipt is retained at
 `/tmp/readiness-length-final-audit-receipt.json` on the submitting host. Audit
