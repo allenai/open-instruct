@@ -225,15 +225,21 @@ Training includes standalone scoring; generation overlaps training. The wait
 fraction is the fraction of the driver's normal cycle awaiting a batch, not a
 measurement of hardware GPU idleness.
 
-| Case | Useful response tokens/s | Trainer wait | Discarded response tokens | GPU allocation |
-|---|---:|---:|---:|---:|
-| 2T + 4I, group, concurrency 16 | 552 | 82.6% | 52.1% | 6 |
-| 4T + 2I, group, concurrency 16 | 519 | 90.8% | 2.0% | 6 |
-| 2T + 4I, sample backfill, concurrency 16 | 487 | 83.1% | 50.0% | 6 |
-| 2T + 4I, group, concurrency 8 | 533 | 84.2% | 5.4% | 6 |
-| 2T + 6I, group, concurrency 16 | 518 | 83.1% | 65.5% | 8 |
+| Case | Useful response tokens/s | Trainer wait | Discarded response tokens | Producer sample budget | GPU allocation |
+|---|---:|---:|---:|---:|---:|
+| 2T + 4I, group, concurrency 16 | 552 | 82.6% | 52.1% | 128 | 6 |
+| 4T + 2I, group, concurrency 16 | 519 | 90.8% | 2.0% | 64 | 6 |
+| 2T + 4I, sample backfill, concurrency 16 | 487 | 83.1% | 50.0% | 128 | 6 |
+| 2T + 4I, group, concurrency 8 | 533 | 84.2% | 5.4% | 64 | 6 |
+| 2T + 6I, group, concurrency 16 | 518 | 83.1% | 65.5% | 192 | 8 |
 
 ![Awaited cycle, useful throughput and discarded tokens](images/throughput/cycle-comparison.png)
+
+The automatic producer budget changes with fleet size and admission. Thus the
+concurrency and topology comparisons also change ahead-of-training work; they
+are comparisons of complete configurations, not isolated causal measurements of
+one setting. Sample backfill counts unfinished samples, whereas group submission
+retains its slot until all siblings finish.
 
 The discarded-token denominator is dropped plus delivered tokens at dequeue in
 the selected window. It excludes final shutdown leftovers and unfinished work.
