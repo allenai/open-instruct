@@ -96,10 +96,11 @@ CPU-only WEKA analysis runs on Saturn. Source inputs and earlier experiments are
 not modified. The small/large benchmark disables saves and eval to isolate normal
 cycles; the examples retain practical save/evaluation cadence.
 
-Each performance case initially runs 12 updates and reports the window after
+Each single-node performance case and the 64-GPU candidate initially runs 12 updates and reports the window after
 three warmup updates. Report per-step timings too: three warmups do not establish
 that all compilation has stopped. Dev/tiny run four updates and are mechanics
-checks. A successful workflow and complete, non-skipped optimizer sequence are
+checks. The 8+8 multi-node bridge runs four updates to qualify inter-node behavior;
+its one post-warmup cycle is not a stable throughput estimate. A successful workflow and complete, non-skipped optimizer sequence are
 required before producing a success report. This is performance qualification,
 not evidence of comparable learning quality or full resume equivalence.
 

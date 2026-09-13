@@ -18,7 +18,7 @@ CASES = {
     "small-2t4i-sample": {"profile": "small", "submission": "sample"},
     "small-2t4i-c8": {"profile": "small", "concurrency": 8},
     "bridge-2t6i": {"profile": "small", "inference": 6, "capacity": 8},
-    "bridge-8t8i": {"profile": "large", "inference": 8},
+    "bridge-8t8i": {"profile": "large", "inference": 8, "updates": 4},
     "large-8t56i": {"profile": "large"},
 }
 
