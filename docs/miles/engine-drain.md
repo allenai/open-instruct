@@ -136,6 +136,32 @@ for exact images, attempts, timings and limitations. Per-update full audits rema
 disabled; initial weight equality and fixed-byte snapshot tests are separate
 numerical checks.
 
+## Freshness and the next scheduling decision
+
+Independent drain removes the fleet barrier but does not minimize policy age.
+The current mode starts drains after snapshot capture, drains every engine for
+that publication, delivers every captured version in order, and consumes eligible
+completed groups FIFO. Those choices can delay current-policy batches even while
+avoiding request cancellation. The six-update qualification is evidence for the
+ownership/transport contract, not evidence that this is the preferred RL schedule.
+
+A freshness-oriented follow-up should consider closing admission on a subset of
+engines while the next optimizer step is running, so some serving capacity is
+ready as soon as the new snapshot exists. Other engines can finish older requests
+and then catch up. Select newest-policy groups before older groups, with FIFO
+within a version and an explicit fallback/wait rule. Admission and completion
+backpressure must also prefer fresh work; changing dequeue order alone can leave
+old groups occupying all completion slots. A slow engine should be able to skip
+undelivered intermediate snapshots once a newer complete one exists, without
+reopening or invalidating another reader's immutable snapshot.
+
+These are not implemented here. Strictly on-policy consumption requires waiting
+for a complete batch at the trainer's current version. Bounded async accepts some
+older data by design; neither a lag bound nor zero cancellations establishes
+on-policy training. Compare time to the first useful current-version batch,
+consumed-version distribution, useful trained tokens and rejected completed work,
+rather than optimizing generation occupancy in isolation.
+
 ## Future mixed-policy work
 
 The reusable pieces are immutable snapshot ownership, per-engine communicators,

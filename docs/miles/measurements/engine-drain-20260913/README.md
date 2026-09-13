@@ -192,3 +192,18 @@ latencies include queue/prefill/decode, not isolated model-kernel time. Grading 
 the final response averaged 30 / 25 ms. The buffer's reported staleness metrics
 include examined rejected entries; the bounded-consumption claim uses actual
 trainer contracts and retained samples instead.
+
+
+## One-step lag checkpoint correction
+
+A further CPU regression reproduced a checkpoint deadlock with lag one: after the
+optimizer clock advances, already-submitted producer tasks can await admission at
+the new version. Quiescing before publishing that version waits on those tasks.
+The driver now submits rolling publication before checkpoint quiescence; the
+barrier path retains its ordering. The test fails with the previous order and
+passes after the fix; all 45 lifecycle/rolling-runtime tests passed together.
+
+[Two resumed updates with lag one and saves every update](https://beaker.org/ex/01M2CHHVJ1D0A6SFF2EQCHVKAC)
+exercise this on image `01M2CHD46881NR0DKT7KN96YWZ`, source `0bbc4e833cad`.
+The previous lag-two resume and deliberate-loss runs remain on image F; their
+results must not be mislabeled as qualification of this ordering correction.
