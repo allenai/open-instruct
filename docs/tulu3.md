@@ -151,7 +151,7 @@ accelerate launch \
     --report_to wandb \
     --logging_steps 1 \
     --model_revision main \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
     --use_slow_tokenizer \
     --use_lora False \
@@ -205,7 +205,7 @@ accelerate launch \
     --report_to wandb \
     --logging_steps 1 \
     --model_revision main \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --dataset_mixer_list allenai/llama-3.1-tulu-3-70b-preference-mixture \
     --use_slow_tokenizer \
     --use_lora False \
@@ -256,7 +256,7 @@ accelerate launch --mixed_precision bf16 \
     --report_to wandb \
     --logging_steps 1 \
     --model_revision main \
-    --gradient_checkpointing \
+    --activation_memory_budget 0.5 \
     --dataset_mixer_list ai2-adapt-dev/405b_preference_mix 1.0 \
     --use_slow_tokenizer \
     --use_lora False \
