@@ -26,8 +26,12 @@ def aligned(value):
 
 
 def canonical(source, index, tokenizer, dataset=DATASET, revision=REVISION):
-    names = aligned(source.get("verifier_source") or source.get("dataset"))
-    targets = aligned(source["ground_truth"])
+    raw_names = source.get("verifier_source") or source.get("dataset")
+    names = aligned(raw_names)
+    # Dolci wraps aligned verifier targets. The code mixture instead stores one
+    # verifier with a JSON list of test cases as its *single* target.
+    wrapped = isinstance(raw_names, list) or (isinstance(raw_names, str) and raw_names.strip().startswith("["))
+    targets = aligned(source["ground_truth"]) if wrapped else [source["ground_truth"]]
     if len(names) != 1 or len(targets) != 1 or names[0] not in ("math", "ifeval", "code", "code_stdio"):
         return None
     if source.get("messages"):

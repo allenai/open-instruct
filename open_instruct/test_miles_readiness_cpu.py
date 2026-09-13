@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.miles import launch_readiness_cpu, readiness_cpu
+from scripts.miles import launch_readiness_cpu, prepare_long_context, readiness_cpu
 
 
 def fixture():
@@ -71,3 +71,24 @@ def test_cpu_jobs_always_use_saturn_and_embed_exact_source():
 def test_long_preparation_launcher_does_not_pass_internal_mode_to_script():
     spec = launch_readiness_cpu.specification("image", "prepare-long", [Path("/model"), Path("/fixture")], b"pass")
     assert spec["tasks"][0]["arguments"][0].endswith("python /output/readiness_cpu.py /model /fixture")
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_long_context_keeps_stdio_test_cases_in_one_verifier_target(monkeypatch, wrapped):
+    cases = json.dumps([{"input": "1", "output": "2"}, {"input": "3", "output": "4"}])
+    source = {
+        "dataset": json.dumps(["code_stdio"]) if wrapped else "code_stdio",
+        "ground_truth": json.dumps([cases]) if wrapped else cases,
+        "messages": [{"role": "user", "content": "Solve this problem"}],
+    }
+
+    class Tokenizer:
+        chat_template = "template"
+
+        def encode(self, rendered, add_special_tokens):
+            return [1, 2, 3]
+
+    monkeypatch.setattr(prepare_long_context.run_data, "_render", lambda *args: "rendered")
+    row, length = prepare_long_context.canonical(source, 0, Tokenizer())
+    assert length == 3
+    assert row["metadata"]["verifiers"] == [{"name": "code_stdio", "target": cases, "weight": 1.0}]
