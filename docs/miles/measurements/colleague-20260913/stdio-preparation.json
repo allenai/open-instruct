@@ -1,0 +1,114 @@
+{
+  "counts": {
+    "eval": {
+      "code_stdio": 2
+    },
+    "train": {
+      "code_stdio": 8
+    }
+  },
+  "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef",
+  "dropped": {},
+  "normalized_content_and_identity_disjoint": true,
+  "outputs": {
+    "train.jsonl": "6ff332222c3ec2ac9d7949a7de922cba249d8c4871c5deb1ad03cff3e88af95d",
+    "verifiers.json": "c2cc4052c0fc6435061cd5cf01df117433b6f65a0779912a76b4a3d76555a8f0",
+    "eval.jsonl": "83c9dd9729e55c8584e5812f5afd3b199173ecff250f914077fa9d99e043e039"
+  },
+  "sources": {
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/rl-manifest.json": "7a588b35cf31c056488943f6500a6021ecdf08309cb7fe35115262a13c7233e0",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/eval.jsonl": "4749d16830bb23100f80e2f7896e03936b0db1c6e6b7414885123497e1a045d4",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/train.jsonl": "2815fb41cf1033ba9b21ba8b5c2c3b8f07a07a72f2ad09a66d3872e015c5b3e3"
+  },
+  "canaries": [
+    {
+      "name": "function-correct",
+      "score": 1.0,
+      "expected": 1,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 24,
+        "tests": 1,
+        "stdio": false
+      }
+    },
+    {
+      "name": "function-wrong",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 22,
+        "tests": 1,
+        "stdio": false
+      }
+    },
+    {
+      "name": "stdio-correct",
+      "score": 1.0,
+      "expected": 1,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      }
+    },
+    {
+      "name": "stdio-wrong",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      }
+    },
+    {
+      "name": "syntax-error",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 11,
+        "tests": 1,
+        "stdio": false
+      }
+    },
+    {
+      "name": "execution-timeout",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 16,
+        "tests": 1,
+        "stdio": true
+      }
+    }
+  ],
+  "selection": "Shortest original rendered-message JSON by character count within each split; not a difficulty estimate or reward-based selection.",
+  "queries": {
+    "train": [
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nExample\n\nInput\n\n5\n\n\nOutput\n\n5\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nExample\n\nInput\n\n2\n1 2\n\n\nOutput\n\n2\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nExample\n\nInput\n\ncrc\n1\n\n\nOutput\n\ncrc\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nExample\n\nInput\n\n4\n1 1 2\n\n\nOutput\n\n6\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nExample\n\nInput\n\n2 1\nWE\n\n\nOutput\n\n1 2\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nReturn the Nth Even Number\n\nThe input will not be 0.\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nExample\n\nInput\n\n2 1\n1 2\n1 2 1 1\n\n\nOutput\n\n1/2\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nExample\n\nInput\n\nanagram\ngrandmother\n\n\nOutput\n\n4\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
+    ],
+    "eval": [
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nAlice plays the following game, loosely based on the card game \"21\".\nAlice starts with 0 points, and draws numbers while she has less than K points.\u00a0 During each draw, she gains an integer number of points randomly from the range [1, W], where W is an integer.\u00a0 Each draw is independent and the outcomes have equal probabilities.\nAlice stops drawing numbers when she gets K or more points.\u00a0 What is the probability\u00a0that she has N or less points?\nExample 1:\nInput: N = 10, K = 1, W = 10\nOutput: 1.00000\nExplanation:  Alice gets a single card, then stops.\n\nExample 2:\nInput: N = 6, K = 1, W = 10\nOutput: 0.60000\nExplanation:  Alice gets a single card, then stops.\nIn 6 out of W = 10 possibilities, she is at or below N = 6 points.\n\nExample 3:\nInput: N = 21, K = 17, W = 10\nOutput: 0.73278\nNote:\n\n0 <= K <= N <= 10000\n1 <= W <= 10000\nAnswers will be accepted as correct if they are within 10^-5 of the correct answer.\nThe judging time limit has been reduced for this question.\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nDuring the research on properties of the greatest common divisor (GCD) of a set of numbers, Ildar, a famous mathematician, introduced a brand new concept of the weakened common divisor (WCD) of a list of pairs of integers.\n\nFor a given list of pairs of integers $(a_1, b_1)$, $(a_2, b_2)$, ..., $(a_n, b_n)$ their WCD is arbitrary integer greater than $1$, such that it divides at least one element in each pair. WCD may not exist for some lists.\n\nFor example, if the list looks like $[(12, 15), (25, 18), (10, 24)]$, then their WCD can be equal to $2$, $3$, $5$ or $6$ (each of these numbers is strictly greater than $1$ and divides at least one number in each pair).\n\nYou're currently pursuing your PhD degree under Ildar's mentorship, and that's why this problem was delegated to you. Your task is to calculate WCD efficiently.\n\n\n-----Input-----\n\nThe first line contains a single integer $n$ ($1 \\le n \\le 150\\,000$)\u00a0\u2014 the number of pairs.\n\nEach of the next $n$ lines contains two integer values $a_i$, $b_i$ ($2 \\le a_i, b_i \\le 2 \\cdot 10^9$).\n\n\n-----Output-----\n\nPrint a single integer\u00a0\u2014 the WCD of the set of pairs. \n\nIf there are multiple possible answers, output any; if there is no answer, print $-1$.\n\n\n-----Examples-----\nInput\n3\n17 18\n15 24\n12 15\n\nOutput\n6\nInput\n2\n10 16\n7 17\n\nOutput\n-1\n\nInput\n5\n90 108\n45 105\n75 40\n165 175\n33 30\n\nOutput\n5\n\n\n\n-----Note-----\n\nIn the first example the answer is $6$ since it divides $18$ from the first pair, $24$ from the second and $12$ from the third ones. Note that other valid answers will also be accepted.\n\nIn the second example there are no integers greater than $1$ satisfying the conditions.\n\nIn the third example one of the possible answers is $5$. Note that, for example, $15$ is also allowed, but it's not necessary to maximize the output.\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
+    ]
+  }
+}
