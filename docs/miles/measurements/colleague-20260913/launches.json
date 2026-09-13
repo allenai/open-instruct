@@ -1243,5 +1243,184 @@
       ],
       "unused_gpus": 0
     }
+  },
+  "stdio": {
+    "experiment_id": "01M2CNVBQERPXAMW332DNYCB8E",
+    "image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+    "requested_image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+    "revision": "1abd3ac2ff8ae3f382afd9a88faf84f7d4c0c6c5",
+    "spec_sha256": "986242577ec75611e83fa725f47a4ee4db8e548fd0015bf9271b9575b265e39a",
+    "spec": {
+      "schema_version": 1,
+      "name": "colleague-10-stdio-20260913",
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+      },
+      "data": {
+        "eval_prompt_data": [
+          "mixed",
+          "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913/eval.jsonl"
+        ],
+        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913/train.jsonl",
+        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913/verifiers.json",
+        "seed": 17,
+        "shuffle": false
+      },
+      "output": {
+        "export_hf": false,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913"
+      },
+      "launch": {
+        "workspace": "ai2/open-instruct-dev",
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "priority": "urgent",
+        "min_runtime": "1h",
+        "auto_resume": false,
+        "shared_memory": "200 GiB",
+        "timeout": "2h",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 3,
+        "secrets": {},
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          },
+          {
+            "mount_path": "/weka/oe-adapt-default",
+            "weka": "oe-adapt-default"
+          }
+        ]
+      },
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913/prepared/hf"
+      },
+      "compiler_cache": {
+        "enabled": true,
+        "restore": true,
+        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+      },
+      "training": {
+        "num_rollouts": 2,
+        "save_checkpoints": false,
+        "skip_eval_before_train": true
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "expert_parallel_size": 2,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "packing_max_tokens": 8192,
+        "sequence_packing": true,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 16,
+        "gpus": 1,
+        "max_context_length": 8192,
+        "max_response_length": 6144,
+        "placement_mode": "disaggregated",
+        "radix_cache": true,
+        "rollout_batch_size": 4,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 4,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "full",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 64,
+        "sglang_mamba_radix_cache_strategy": "extra_buffer",
+        "sglang_max_mamba_cache_size": 192,
+        "sglang_max_running_requests": 16,
+        "sglang_max_total_tokens": 524288,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_router_policy": "cache_aware",
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 16,
+        "update_weight_buffer_size": 2147483648
+      },
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.95,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "async": {},
+      "tracking": {
+        "wandb_group": "colleague-stdio-20260913",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison",
+        "wandb_team": "ai2-llm"
+      },
+      "runtime": {
+        "row_specialization": "dynamic"
+      },
+      "core": {
+        "diagnostic_interval": 0,
+        "expert_publication": "fused",
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "replay_diagnostics": true,
+        "router_aux_loss_weight": 0.01,
+        "router_z_loss_weight": 1e-05,
+        "scoring_check_interval": 20,
+        "stream_moe_export": true,
+        "weight_sync_mode": "flattened"
+      },
+      "miles": {
+        "disable_grpo_std_normalization": true,
+        "rollout_max_prompt_len": 2048,
+        "rollout_seed": 17,
+        "rollout_temperature": 1.0,
+        "seed": 17,
+        "use_miles_router": true,
+        "use_rollout_routing_replay": true
+      },
+      "judges": {},
+      "rubrics": {},
+      "judging": {
+        "bindings": {}
+      }
+    },
+    "allocation": {
+      "replicas": 1,
+      "gpus_per_replica": 3,
+      "allocated_gpus": 3,
+      "policy_gpus": 3,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "trainer_gpus": 2,
+          "rollout_gpus": 1,
+          "ray_gpus": 3,
+          "judges": {}
+        }
+      ],
+      "unused_gpus": 0
+    },
+    "placements": [
+      {
+        "task": "colleague-10-stdio-20260913",
+        "hostnames": [],
+        "gpus": 3
+      }
+    ],
+    "receipt": "/home/robert/.cache/open-instruct/miles/launches/colleague-10-stdio-20260913-23b7782ea4a5cd86.json",
+    "url": "https://beaker.org/ex/01M2CNVBQERPXAMW332DNYCB8E"
   }
 }

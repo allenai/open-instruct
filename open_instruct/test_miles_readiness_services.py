@@ -2,7 +2,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from scripts.miles import launch_readiness_cpu, readiness_services
+from scripts.miles import launch_readiness_cpu, prepare_stdio_exercise, readiness_services
 
 from open_instruct.miles import code_rewards
 
@@ -46,3 +46,12 @@ def test_service_launcher_preserves_url_and_has_no_mode_argument():
     spec = launch_readiness_cpu.specification("image", "services", [url], b"pass")
     assert spec["tasks"][0]["arguments"][0].endswith("python /output/readiness_cpu.py " + url)
     assert spec["tasks"][0]["resources"]["gpuCount"] == 0
+
+
+def test_stdio_selection_rejects_example_only_prompts():
+    wrapper = "where CODE is the solution for the problem.\n\n"
+    suffix = "\nWrite Python code to solve the problem."
+    assert not prepare_stdio_exercise.has_statement(wrapper + "Example\nInput\n5\nOutput\n5" + suffix)
+    assert prepare_stdio_exercise.has_statement(
+        wrapper + "Return the Nth Even Number\nThe input will not be 0." + suffix
+    )

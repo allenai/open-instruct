@@ -157,3 +157,34 @@ and NCCL interface settings.
 Establish positive stdio learning coverage; exercise controlled service-failure recovery and the
 full judged topology; finish corrected engine-pool sizing and the hero numerical
 gate. No H100 or new hero-training claim follows from these B300 exercises.
+
+
+## Follow-ups submitted at 06:04 UTC
+
+[Stdio-only exercise](https://beaker.org/ex/01M2CNVBQERPXAMW332DNYCB8E):
+three GPUs (EP2 trainers plus one engine), two collections of four prompts times
+four responses, packing/replay and radix enabled. This selects the shortest
+natural stdio prompts from the original immutable manifest, preserving targets,
+chat template and train/eval identities. Eight training and two held-out problems;
+6,144 response tokens and 8,192 total context. Shortness is not a difficulty claim.
+[Preparation](stdio-preparation.json) and all six verifier canaries passed.
+Acceptance requires positive natural rewards and a mixed-reward group, alongside
+optimizer/replay evidence; a clean process exit alone does not establish it.
+
+[Service recovery probe](https://beaker.org/ex/01M2CNHG2KMGY0M93G1RRC3ACD)
+runs on Saturn. A private loopback proxy injects transient 503/502/504 errors,
+exhausts the production HTTP retry budget, then permits healthy requests again.
+Only successful proxy requests reach the real code service. Also checks 429 with
+Retry-After and the established HTTP-500 sample-rejection semantics. This covers
+HTTP verifier recovery/exhaustion, not distributed engine replacement or recovery
+inside a live training loop. All six cases passed with the production retry settings: transient recovery
+took about 6.3 seconds; nine failed attempts raised after 246 seconds. The same
+session then completed a healthy request. [Report](service-recovery.json).
+
+
+The first stdio GPU submission was stopped while queued, before startup. Manual
+inspection of the prepared prompts found that several source entries retained only
+input/output examples, without a problem statement. Retry `10-stdio-r2.toml` uses a
+fresh immutable fixture and excludes those entries before sorting. The preparer
+has a regression test for example-only prompts. Existing source snapshots remain
+unchanged; neither this filtering nor shortness guarantees an easy problem.

@@ -4,21 +4,36 @@ import argparse
 import asyncio
 import copy
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.miles import prepare_colleague_exercises as preparation
 
 
+def has_statement(prompt):
+    # This manifest includes entries where scraping retained only examples.
+    body = prompt.split("where CODE is the solution for the problem.", 1)[-1]
+    body = body.split("Write Python code to solve the problem.", 1)[0]
+    statement = re.split(r"(?im)^\s*(?:examples?|sample(?: input| output)?|input|output)\b", body, maxsplit=1)[0]
+    return sum(character.isalpha() for character in statement) >= 20
+
+
 def prepare(model, output):
     manifest, partitions, inputs = preparation.source_rows()
     options = manifest["miles"]
     selected = {}
+    rejected = {}
     for split, sources in partitions.items():
         rows = []
+        rejected[split] = 0
         for index, source in enumerate(sources):
             metadata = source[options["metadata_key"]]
             if metadata["verifiers"][0]["name"] != "code_stdio":
+                continue
+            messages = preparation.run_data._messages({"messages": source[options["input_key"]]}, strip_answer=False)
+            if not has_statement(messages[-1]["content"]):
+                rejected[split] += 1
                 continue
             source = copy.deepcopy(source)
             source[options["metadata_key"]].setdefault("prepared_sample_id", f"manifest:{split}:{index}")
@@ -31,6 +46,7 @@ def prepare(model, output):
         **report,
         "sources": inputs,
         "canaries": canaries,
+        "missing_statement_rejections": rejected,
         "selection": "Shortest original rendered-message JSON by character count within each split; not a difficulty estimate or reward-based selection.",
     }
     report["queries"] = {
