@@ -216,3 +216,53 @@ observation errors are logged without changing generation or training ownership.
 The follow-up basket enables SGLang metrics. Compare observed resource activity,
 trainer wait and discarded tokens together. Keep FIFO, lag limits and historical
 behavior probabilities unchanged.
+
+### First-round measurements (updates 7–12)
+
+Every row below completed its 12 optimizer steps and failed final shutdown as
+explained above. These are useful cycle measurements, not end-to-end passes.
+Training includes standalone scoring; generation overlaps training. The wait
+fraction is the fraction of the driver's normal cycle awaiting a batch, not a
+measurement of hardware GPU idleness.
+
+| Case | Useful response tokens/s | Trainer wait | Discarded response tokens | GPU allocation |
+|---|---:|---:|---:|---:|
+| 2T + 4I, group, concurrency 16 | 552 | 82.6% | 52.1% | 6 |
+| 4T + 2I, group, concurrency 16 | 519 | 90.8% | 2.0% | 6 |
+| 2T + 4I, sample backfill, concurrency 16 | 487 | 83.1% | 50.0% | 6 |
+| 2T + 4I, group, concurrency 8 | 533 | 84.2% | 5.4% | 6 |
+| 2T + 6I, group, concurrency 16 | 518 | 83.1% | 65.5% | 8 |
+
+![Awaited cycle, useful throughput and discarded tokens](images/throughput/cycle-comparison.png)
+
+The discarded-token denominator is dropped plus delivered tokens at dequeue in
+the selected window. It excludes final shutdown leftovers and unfinished work.
+A consumed batch is not proof of equal learning, and completion order changes
+which prompts reach training even with the same data and seed.
+
+![Warmup, completed queue snapshots and discard traces](images/throughput/warmup-and-queue-traces.png)
+
+The queue snapshots above are taken **after collecting a training batch**. Zero
+there does not establish an empty queue throughout the preceding interval. The
+follow-up continuous sampler addresses that missing information. The shading
+marks the first six updates, excluded from these aggregate comparisons.
+
+![Dropped fractions by response length](images/throughput/discard-by-length.png)
+
+The length breakdown confirms why discarded tokens matter. For example, among
+4096-token capped responses dequeued during the measured window, the 2+4 group
+arm discarded 58 of 79; concurrency 8 discarded 4 of 43. Dropping a whole group
+also drops its shorter siblings. This is a short-run operational finding, not a
+controlled evaluation of downstream learning quality.
+
+With the current oldest-behavior-version age rule, more serving capacity cannot
+by itself guarantee that a long response survives several rapid policy updates.
+Both the service rate and time-to-complete a group matter. A larger optimization
+batch can slow version advancement while providing more training work, but changes
+learning. Increasing allowed lag changes the off-policy contract. These remain
+explicit experimental choices; the basket does not silently alter either rule.
+
+Reproduce the figures using `python -m scripts.miles.plot_throughput_basket
+ docs/miles/results/throughput-profiles-20260913.json /tmp/throughput-figures`.
+The report generator also accepts `--run-root case=/path/to/downloaded/run` for
+continuous queue/processor timelines when those observations exist.
