@@ -15,3 +15,6 @@ current operating defaults; start with the [MILES guide](../index.md).
 | [Publication transport: plan](publication-transport-plan-20260912.md) | publication-transport-plan-20260912 |
 | [Next MILES/Core qualification gates](qualification-plan.md) | qualification-plan |
 | [Backporting the olmo-miles KDA radix cache policy](radix-cache-backport-plan-20260912.md) | radix-cache-backport-plan-20260912 |
+
+The [original colleague sanity proposal](colleague-sanity-20260912.md) is retained
+for context; current acceptance evidence is in the measurements index.

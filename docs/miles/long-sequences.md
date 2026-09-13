@@ -98,8 +98,13 @@ accuracy. Even long-input, short-answer training must run the model over the pro
 serving-only memory trace is not a backward-memory estimate. Router trace return
 and replay also add work that the standalone serving sweep does not measure.
 
-A configured 32K limit also does not establish that any rollout reached
-32K: retain actual prompt/response lengths, truncation rate and gradients.
+The subsequent two-update 16K and 32K-context RL jobs and independent audits
+passed. Maximum actual total lengths were **14,466** and **30,850** tokens;
+response medians were 14,336 and 30,720, with 11/16 and 9/16 cap hits. Each
+retained 24 replay observations with zero mismatches. See the
+[final length audit](measurements/length-guidance-20260913/README.md#final-long-response-rl-audit).
+This qualifies bounded long-response execution with EP2, packing and recomputation;
+it does not establish 64K backward or high-concurrency training capacity.
 
 Earlier olmo-miles/Megatron exercises are useful starting evidence: a 32K run
 reached its response cap, while the nominal 64K run actually reached about 41K

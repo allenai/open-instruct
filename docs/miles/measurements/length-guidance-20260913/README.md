@@ -1,6 +1,8 @@
 # Length guidance exercise — September 13, 2026
 
-Status: both serving sweeps passed (exit 0); the 16K and 32K RL probes are running.
+> Point-in-time measurement. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../../feature-parity.md) and current examples before launching.
+
+Status: both serving sweeps and both 16K/32K RL probes passed (exit 0); independent retained-data audits passed. See the final audit below.
 
 Runtime image: `01M2CD5CH7MBVHZK50AXAPYGFB` (image C from the colleague
 readiness campaign). The standalone probe embeds its committed source; ordinary
@@ -118,5 +120,31 @@ As of 19:08 UTC, both RL runs remain in progress. A local follow-up monitor will
 submit an exact-source `lengths` audit on Saturn after the GPU jobs terminate,
 for workflows whose Beaker exit code is zero. Its launch receipt is retained at
 `/tmp/readiness-length-final-audit-receipt.json` on the submitting host. Audit
-results and a final training recommendation are pending; 64K training remains
+results are recorded in the final audit below; 64K training remains
 unqualified by this exercise.
+
+## Final long-response RL audit
+
+Both [16K](https://beaker.org/ex/01M2E15KM2J249V5BQ719PNX95) and
+[32K](https://beaker.org/ex/01M2E15MNA9HZV0V54JSD5JC32) jobs exited zero, as did
+[the independent Saturn audit](https://beaker.org/ex/01M2E40X1JXEBJD9PGSVPZZE5E).
+Each used EP2 trainers, one TP1 engine, two updates, packing/replay and recomputation.
+These are context settings, not exact achieved sequence lengths:
+
+| Configured context | Max actual total tokens | Median response | Cap hits / 16 | Replay observations / mismatches |
+|---|---:|---:|---:|---:|
+| 16,384 | 14,466 | 14,336 | 11 | 24 / 0 |
+| 32,768 | 30,850 | 30,720 | 9 | 24 / 0 |
+
+[16K audit](training-16k-audit.json) and [32K audit](training-32k-audit.json)
+retain all response lengths, sample hashes, reward accounting, policy versions,
+optimizer sequence and document/replay coverage. These do not establish 64K
+backward, dense-model memory fit, or a long-run learning improvement. Actual
+prompt lengths were short; the serving sweep separately exercised long inputs.
+
+[Training metrics](training-metrics.json) retain the recorded rank-zero allocator
+peaks and total gradient norms from both updates. Peak allocated memory was about
+166.9 GiB at 16K and 177.3 GiB at 32K; this is rank-zero PyTorch allocated memory,
+not process-wide GPU usage or all-rank maximum. Total gradients were finite and
+nonzero with auxiliary losses enabled; this is not an isolated policy-gradient
+measurement. These cold two-update timings are not steady throughput estimates.

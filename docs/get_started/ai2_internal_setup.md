@@ -1,5 +1,9 @@
 # Ai2 Internal Setup
 
+For new GRPO work, follow the [MILES laptop/session launch guide](../miles/launching.md).
+It uses a pinned MILES/Core image; the general CUDA/vLLM installation below is not
+required on a submission-only host. See the [sharing candidate](../miles/sharing-candidate.md).
+
 This document details some best practices when working with our cluster.
 
 ## (One-time setup) VScode + Weka setup

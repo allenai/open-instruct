@@ -81,8 +81,9 @@ tokens per sample versus roughly 3,600 generated tokens**. Warm updates 3–20 t
 no measurable end-to-end gain in that comparison, despite cache hits and increased
 reported engine throughput. This is a training-phase observation; both arms lost
 final evaluation to a code-service error. Matching mean trainer/behavior log-prob
-gaps (0.0241) do not establish tokenwise numerical identity. The full experiment
-report and mixed-chunk result were still pending when this guidance was added.
+gaps (0.0241) do not establish tokenwise numerical identity. The [completed three-arm report](measurements/radix-cache-ab-20260912.md)
+retains the mixed-chunk result and node/timing confounds. Its historical default
+suggestion does not override the current example TOMLs.
 
 Treat radix caching as workload-dependent tuning, particularly worth measuring
 when substantial prefixes repeat. Keep the example defaults until a representative
@@ -91,6 +92,6 @@ radix switch and retain the model-specific KDA recurrent-cache requirements.
 
 The current evidence includes B300 EP1/EP2 numerical and lifecycle checks,
 full-SFT async/admission runs and small multi-node exercises. EP8 packing throughput,
-full-model colocation, new architectures and other GPU types require their own
+full-SFT MoE colocation, new architectures and other GPU types require their own
 qualification. See [measurements](measurements/index.md); old EP2 timing is not an
 EP8 capacity claim. FlashAttention backend names alone do not establish H100 support.

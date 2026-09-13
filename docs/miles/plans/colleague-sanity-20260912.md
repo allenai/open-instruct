@@ -1,5 +1,7 @@
 # Colleague-readiness exercise plan
 
+> Point-in-time proposal. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../feature-parity.md) and current examples before launching.
+
 Historical plan. Current outcomes are in the [readiness measurements](../measurements/colleague-20260913/README.md); use the [MILES guide](../index.md) for supported workflows.
 
 Proposed September 12, 2026, against `robertb/miles-olmo-core` at `875d972f1`.

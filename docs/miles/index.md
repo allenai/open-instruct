@@ -23,6 +23,8 @@ switching to a deprecated backend.
 
 | Document | Use it when |
 |---|---|
+| [Sharing candidate](sharing-candidate.md) | Finding consolidated work, image qualification and tester setup |
+| [Support matrix](feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
 | [Workflow](workflow.md) | Editing one TOML from preparation through training and export |
 | [Launching](launching.md) | Submitting from a laptop or Beaker session, or executing in an allocation |
 | [Configuration reference](configuration.md) | Looking up fields, defaults, aliases, restrictions and overrides |

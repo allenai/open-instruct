@@ -1,5 +1,7 @@
 # Internal colleague exercise campaign, 2026-09-12
 
+> Point-in-time proposal. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../feature-parity.md) and current examples before launching.
+
 Candidate starts at primary Open Instruct `9403772d1`; runtime dependency revisions
 are pinned by `runtime/miles/runtime.lock.json`. Execution branch:
 `robertb/miles-colleague-exercises`. This note distinguishes planned coverage from results.

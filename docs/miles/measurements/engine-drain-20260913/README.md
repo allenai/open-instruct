@@ -1,5 +1,7 @@
 # Engine-drain qualification — isolated branch
 
+> Point-in-time measurement. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../../feature-parity.md) and current examples before launching.
+
 Implementation branch: `robertb/miles-engine-drain`; MILES runtime branch:
 `robertb/engine-drain` (`bc582bc5c`). Core and serving arithmetic are unchanged.
 These attempts use fresh identities and do not modify the colleague campaign.

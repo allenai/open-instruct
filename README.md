@@ -133,6 +133,8 @@ Current instructions are separate from historical evidence.
 
 | Document | Use it when |
 |---|---|
+| [Sharing candidate](docs/miles/sharing-candidate.md) | Finding consolidated work, image qualification and tester setup |
+| [Support matrix](docs/miles/feature-parity.md) | Distinguishing exercised paths, experiments and remaining gaps |
 | [Workflow and examples](docs/miles/workflow.md) | Choosing and editing a run recipe |
 | [Launching jobs](docs/miles/launching.md) | Submitting from a laptop or Beaker session |
 | [Configuration reference](docs/miles/configuration.md) | Looking up every structured/Core field and native passthrough |

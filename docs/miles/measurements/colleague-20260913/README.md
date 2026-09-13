@@ -1,5 +1,7 @@
 # Readiness continuation, September 13 UTC
 
+> Point-in-time measurement. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../../feature-parity.md) and current examples before launching.
+
 This is qualification evidence, not recommended defaults. Work is on
 `robertb/miles-colleague-exercises`; primary remains `robertb/miles-olmo-core`.
 Exact submitted specifications and source/image identities are in

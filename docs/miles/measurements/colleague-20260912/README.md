@@ -1,5 +1,7 @@
 # Colleague exercise results, 2026-09-12
 
+> Point-in-time measurement. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../../feature-parity.md) and current examples before launching.
+
 Status is evidence as of submission/startup, not a completed qualification.
 [Campaign and gates](../../plans/colleague-exercises-20260912.md).
 

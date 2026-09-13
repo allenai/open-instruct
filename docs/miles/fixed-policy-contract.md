@@ -1,5 +1,7 @@
 # Fixed-input Core/Megatron policy contract
 
+> Historical diagnostic procedure for the September 10–11 comparisons. It may require the recorded external olmo-miles checkout and immutable artifacts. For new runs use the [operating guide](index.md); for current support use the [support matrix](feature-parity.md). Historical pending-job statements below are not live status.
+
 `tests/miles/core_policy_contract.py` captures one real Core actor update on the immutable tiny KDA/latent-MoE fixture produced by `olmo_miles.evaluation.policy_contract`. The comparison checkout's `src` directory must be on `PYTHONPATH`: both arms import the same fixture schema and clipping/Adam validator. Fixture and checkpoint hashes are checked before model construction.
 
 Inside the qualified Core runtime, with one available GPU:

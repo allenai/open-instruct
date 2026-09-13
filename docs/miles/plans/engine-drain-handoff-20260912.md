@@ -1,5 +1,7 @@
 # Handoff: independent engine drain and rolling weight publication
 
+> Point-in-time proposal. Recorded defaults, branch names and then-pending work are historical; consult the [current support matrix](../feature-parity.md) and current examples before launching.
+
 ## Objective and scope
 
 Implement an opt-in disaggregated async publication mode that lets each SGLang
