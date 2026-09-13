@@ -11,7 +11,8 @@ from miles.utils.types import Sample
 from open_instruct.miles import draining_rollout, engine_delivery
 from open_instruct.miles.async_buffer import HomogeneousPolicyDataBuffer
 from open_instruct.miles.draining_rollout import DrainingRolloutFn
-from open_instruct.miles.engine_drain import Engine, EngineDrain
+from open_instruct.miles.engine_drain import Engine, EngineDrain, WeightSnapshot
+from open_instruct.miles.rolling_publication import RollingPublication
 from open_instruct.miles.state import PolicyClock
 
 
@@ -184,5 +185,34 @@ def test_direct_request_checks_execution_version_and_releases_before_reward(monk
         assert producer.controller.status()["groups_in_flight"] == 1
         assert sample.reward is None
         producer.controller.graded(assignment)
+
+    asyncio.run(run())
+
+
+def test_consuming_clock_advances_before_snapshot_capacity_wait():
+    async def run():
+        calls = []
+        capacity = asyncio.Event()
+
+        async def control(operation, **kwargs):
+            calls.append((operation, kwargs))
+            if operation == "capacity":
+                await capacity.wait()
+            return {}
+
+        async def broadcast(method):
+            calls.append((method, {}))
+            return [WeightSnapshot(1, (), 0, 0)]
+
+        manager = SimpleNamespace(core_engine_drain=SimpleNamespace(remote=control))
+        publisher = RollingPublication(None, SimpleNamespace(_broadcast=broadcast), manager)
+        publisher.version = 0
+        await publisher.optimizer_step_completed()
+        pending = asyncio.create_task(publisher.publish())
+        await asyncio.sleep(0)
+        assert calls == [("step", {"version": 1}), ("capacity", {})]
+        capacity.set()
+        await pending
+        assert [name for name, _ in calls] == ["step", "capacity", "capture_weight_snapshot", "publish"]
 
     asyncio.run(run())

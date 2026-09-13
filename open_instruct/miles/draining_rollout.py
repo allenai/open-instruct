@@ -144,10 +144,21 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
         )
         # Bypass the load-balancing router: it has no policy-version reservations.
         # Never retry an ambiguous HTTP outcome under a different policy/engine.
-        output = await asyncio.wait_for(
-            post(f"{self._urls[assignment.engine]}/generate", payload, max_retries=1),
-            self.args.olmo_core.engine_drain_timeout,
-        )
+        try:
+            output = await asyncio.wait_for(
+                post(f"{self._urls[assignment.engine]}/generate", payload, max_retries=1),
+                self.args.olmo_core.engine_drain_timeout,
+            )
+        except BaseException as error:
+            self.controller.emit(
+                "request_outcome_unknown",
+                engine=assignment.engine,
+                request=request,
+                error=type(error).__name__,
+                client_cancelled=isinstance(error, asyncio.CancelledError),
+                generated_tokens=None,
+            )
+            raise
         if output.get("meta_info", {}).get("finish_reason", {}).get("type") not in ("stop", "length"):
             self.controller.emit(
                 "request_failed",

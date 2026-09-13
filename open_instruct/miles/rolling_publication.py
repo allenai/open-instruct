@@ -14,7 +14,7 @@ class RollingPublication:
     def __init__(self, args, learner, manager):
         self.args, self.learner, self.manager = args, learner, manager
         self.deliveries = {}
-        self.version = None
+        self.version: int | None = None
 
     async def initialize(self):
         info = await self.manager.get_updatable_engines_and_lock.remote()
@@ -71,10 +71,19 @@ class RollingPublication:
             "initialize", urls=urls, incarnations=incarnations, deliveries=self.deliveries, version=self.version
         )
 
+    async def optimizer_step_completed(self):
+        # The consuming clock advances before snapshot backpressure/capture, so
+        # admission never mistakes a delayed snapshot for a delayed optimizer.
+        if self.version is None:
+            raise RuntimeError("rolling publication has not been initialized")
+        self.version += 1
+        return await self.manager.core_engine_drain.remote("step", version=self.version)
+
     async def publish(self):
         await self.manager.core_engine_drain.remote("capacity")
         snapshot = (await self.learner._broadcast("capture_weight_snapshot"))[0]
-        self.version = snapshot.version
+        if snapshot.version != self.version:
+            raise RuntimeError("captured snapshot disagrees with the completed optimizer step")
         return await self.manager.core_engine_drain.remote("publish", snapshot=snapshot)
 
     async def quiesce(self):

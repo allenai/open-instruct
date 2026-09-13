@@ -1,13 +1,13 @@
 # Experimental qualification; not a shared operating default.
 schema_version = 1
-name = "engine-drain-ep2-gsm8k-20260913-a"
+name = "engine-drain-ep2-gsm8k-20260913-b"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-gsm8k-20260913-a"
+root = "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-gsm8k-20260913-b"
 export_hf = false
 
 [launch]

@@ -35,7 +35,11 @@ class PolicyClock:
         self.published_step = self.completed_steps
 
     def as_dict(self) -> dict[str, int]:
-        return dataclasses.asdict(self)
+        state = dataclasses.asdict(self)
+        if self.snapshot_ready_step == -1:
+            # Preserve the legacy barrier-mode checkpoint clock representation.
+            del state["snapshot_ready_step"]
+        return state
 
     @classmethod
     def from_dict(cls, state: dict[str, Any]) -> "PolicyClock":

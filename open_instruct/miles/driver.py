@@ -92,6 +92,8 @@ async def train(args, *, export_hf=None):
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
                 completed.append(rollout_id)
+                if rolling is not None:
+                    await rolling.optimizer_step_completed()
             finally:
                 remove_rollout_data_refs(args, batch)
             sentinel = args.save_trigger_sentinel and os.path.exists(args.save_trigger_sentinel)
