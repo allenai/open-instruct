@@ -5,6 +5,7 @@ import ast
 import collections
 import hashlib
 import json
+from itertools import zip_longest
 from pathlib import Path
 
 from datasets import load_dataset
@@ -121,7 +122,7 @@ def prepare(model, output):
                 counts["code_mixture_long"] += 1
             if len(selected["long"]) == 10:
                 break
-    if any(len(v) != 10 for v in selected.values()):
+    if len(selected["long"]) < 2 or len(selected["short"]) != 10:
         raise ValueError(f"Insufficient natural long/short fixtures: {dict(counts)}")
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
     for name in ("code", "code_stdio"):
@@ -129,13 +130,20 @@ def prepare(model, output):
             "factory": "open_instruct.miles.code_rewards.CodeVerifier",
             "config": {"api_url": CODE_URL, "stdio": name == "code_stdio"},
         }
-    partitions = {"eval": [], "train": []}
-    for index in range(10):
-        split = "eval" if index < 2 else "train"
-        for kind in ("long", "short"):
-            row = selected[kind][index]
-            run_data._verify_row(row, tokenizer, 8192, registry)
-            partitions[split].append(row)
+    # Two distinct natural long prompts suffice for a boundary exercise: one
+    # held out, one trained. This is deliberately not a long-context benchmark.
+    long_eval = 2 if len(selected["long"]) >= 4 else 1
+    partitions = {}
+    for split, long_rows, short_rows in (
+        ("eval", selected["long"][:long_eval], selected["short"][:2]),
+        ("train", selected["long"][long_eval:], selected["short"][2:]),
+    ):
+        partitions[split] = []
+        for pair in zip_longest(long_rows, short_rows):
+            for row in pair:
+                if row is not None:
+                    run_data._verify_row(row, tokenizer, 8192, registry)
+                    partitions[split].append(row)
     output.mkdir(parents=True)
     for split, partition in partitions.items():
         (output / f"{split}.jsonl").write_text("".join(json.dumps(row) + "\n" for row in partition))
