@@ -1,0 +1,164 @@
+{
+  "dev": {
+    "case": "dev",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/dev-e825c176430f/run",
+    "experiment": "01M2DZWJCXVY30Q53BWAPVWJ9V",
+    "source": "01M2DZWF4VDEKEFCQJAK89PDBF",
+    "commit": "61e7f6c0d85856538fa4c6688a69acdf5df4e12b",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "27486c0384e0768ab57cd9cdb2eb508e00020137fa6fc634d1586ea0f7db83a9",
+    "analysis": {
+      "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
+      "completed_updates": 4,
+      "warmup_updates": 1,
+      "measured_updates": 3,
+      "warm_cycle_seconds": 10.608567588962615,
+      "useful_response_tokens": 6144,
+      "useful_response_tokens_per_second": 579.1545322661989,
+      "trainer_wait_fraction": 0.7996988203627382,
+      "discarded_response_tokens": 0,
+      "discarded_token_fraction": 0.0,
+      "mixed_responses": 0,
+      "per_update": [
+        {
+          "rollout_id": 1,
+          "response_tokens": 2048,
+          "mixed_responses": 0,
+          "generation_wait_seconds": 4.4277264340780675,
+          "training_seconds": 1.1322243344038725,
+          "publication_seconds": 0.10222552716732025
+        },
+        {
+          "rollout_id": 2,
+          "response_tokens": 2048,
+          "mixed_responses": 0,
+          "generation_wait_seconds": 2.0497373999096453,
+          "training_seconds": 0.335307686123997,
+          "publication_seconds": 0.08884807303547859
+        },
+        {
+          "rollout_id": 3,
+          "response_tokens": 2048,
+          "mixed_responses": 0,
+          "generation_wait_seconds": 2.006195152644068,
+          "training_seconds": 0.382533076684922,
+          "publication_seconds": 0.08376990491524339
+        }
+      ],
+      "median_seconds": {
+        "generation_wait": 2.0497373999096453,
+        "training": 0.382533076684922,
+        "publication": 0.08884807303547859
+      },
+      "all_driver_stage_seconds": {
+        "checkpoint": 1.361335248220712,
+        "generation_wait": 38.22169309761375,
+        "initial_publication": 0.36055111233145,
+        "placement": 9.661876955069602,
+        "publication": 0.38064394192770123,
+        "serving_startup": 236.90413327235729,
+        "startup_cache_prepare": 0.199613852892071,
+        "trainer_startup": 41.43881650315598,
+        "training": 37.39404784049839
+      },
+      "workflow": {
+        "finished_unix": 1789324432.4349234,
+        "result": {
+          "completed_rollout_ids": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "export_hf": null,
+          "start_rollout_id": 0
+        },
+        "spec_sha256": "b262f38e2000d2d82820691302697310dcfed73d2559b4ac08187ea26bf14ff9",
+        "started_unix": 1789324035.1122644,
+        "status": "complete",
+        "training_started_unix": 1789324040.9732003
+      }
+    }
+  },
+  "tiny": {
+    "case": "tiny",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/tiny-f565703b204b/run",
+    "experiment": "01M2DZWK3SAWW7AD47A3PP61PQ",
+    "source": "01M2DZWF4VDEKEFCQJAK89PDBF",
+    "commit": "61e7f6c0d85856538fa4c6688a69acdf5df4e12b",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "27486c0384e0768ab57cd9cdb2eb508e00020137fa6fc634d1586ea0f7db83a9",
+    "analysis": {
+      "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
+      "completed_updates": 4,
+      "warmup_updates": 1,
+      "measured_updates": 3,
+      "warm_cycle_seconds": 11.99018313549459,
+      "useful_response_tokens": 6144,
+      "useful_response_tokens_per_second": 512.419195817943,
+      "trainer_wait_fraction": 0.8061051607398948,
+      "discarded_response_tokens": 0,
+      "discarded_token_fraction": 0.0,
+      "mixed_responses": 0,
+      "per_update": [
+        {
+          "rollout_id": 1,
+          "response_tokens": 2048,
+          "mixed_responses": 0,
+          "generation_wait_seconds": 4.144294160418212,
+          "training_seconds": 1.1788461548276246,
+          "publication_seconds": 0.0930184731259942
+        },
+        {
+          "rollout_id": 2,
+          "response_tokens": 2048,
+          "mixed_responses": 0,
+          "generation_wait_seconds": 2.7829789565876126,
+          "training_seconds": 0.4221424893476069,
+          "publication_seconds": 0.10295109683647752
+        },
+        {
+          "rollout_id": 3,
+          "response_tokens": 2048,
+          "mixed_responses": 0,
+          "generation_wait_seconds": 2.7380753867328167,
+          "training_seconds": 0.42064699763432145,
+          "publication_seconds": 0.10722941998392344
+        }
+      ],
+      "median_seconds": {
+        "generation_wait": 2.7829789565876126,
+        "training": 0.4221424893476069,
+        "publication": 0.10295109683647752
+      },
+      "all_driver_stage_seconds": {
+        "checkpoint": 0.6410617944784462,
+        "generation_wait": 38.81017159949988,
+        "initial_publication": 2.098227775655687,
+        "placement": 9.699362732935697,
+        "publication": 0.4082879261113703,
+        "serving_startup": 238.44612836604938,
+        "startup_cache_prepare": 0.7110278918407857,
+        "trainer_startup": 43.932466516271234,
+        "training": 36.31975900474936
+      },
+      "workflow": {
+        "finished_unix": 1789324446.617169,
+        "result": {
+          "completed_rollout_ids": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "export_hf": null,
+          "start_rollout_id": 0
+        },
+        "spec_sha256": "90699953dd7bfac4e0cd7b594aadf42becfadcfe60217472446dc85b488d3d56",
+        "started_unix": 1789324039.54154,
+        "status": "complete",
+        "training_started_unix": 1789324045.5857341
+      }
+    }
+  }
+}

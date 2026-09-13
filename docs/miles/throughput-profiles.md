@@ -120,4 +120,24 @@ The analyzer reports warm consumer-wait fraction, useful response tokens/second,
 discarded-token fraction, and stage medians, with all lifecycle timings separate.
 Its normal-cycle sum is not an engine GPU utilization measurement: generation
 runs concurrently with training. Saved evidence and Beaker links will be added
-here as cases finish; no new topology is yet certified by this document.
+here as cases finish. Qualification is limited to the model and workload exercised.
+
+## Results recorded September 13
+
+[Machine-readable measurements](results/throughput-profiles-20260913.json) retain
+source/image provenance and per-update records. Initial mechanics results:
+
+| Case | Result | Warm median generation wait / training / publication | Evidence |
+|---|---|---|---|
+| Dev: 1 GPU colocated | Four updates and checkpoint saves passed | 2.05 / 0.38 / 0.09 s | [Beaker](https://beaker.org/ex/01M2DZWJCXVY30Q53BWAPVWJ9V) |
+| Tiny: 1+1 disaggregated | Four updates and checkpoint saves passed | 2.78 / 0.42 / 0.10 s | [Beaker](https://beaker.org/ex/01M2DZWK3SAWW7AD47A3PP61PQ) |
+
+Both used the same random small conventional MoE geometry and eight prepared
+GSM8K questions, with four prompts × two responses per collection and a 256-token
+response cap. These prove data/trainer/publication/save mechanics; they do not
+measure GSM8K learning or qualify full SFT model fit. All four optimizer steps
+were present and not skipped. Resume and export are not part of these two runs.
+The modest timing difference is not an optimization finding from three warm
+collections. Use dev as the minimal exercise, and tiny when the disaggregated
+boundary itself matters. Full-model ratio and scale qualification remains in
+progress.
