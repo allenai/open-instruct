@@ -30,6 +30,13 @@ CASES = {
         "batch": 128,
         "updates": 24,
     },
+    "steady-2t4i-c8-b128-graphs": {
+        "profile": "small",
+        "concurrency": 8,
+        "batch": 128,
+        "decode_graphs": True,
+        "updates": 16,
+    },
     "steady-2t4i-c8-b32-graphs": {"profile": "small", "concurrency": 8, "decode_graphs": True, "updates": 16},
     "steady-2t4i-c8-b32-graphs-p32": {
         "profile": "small",
@@ -190,6 +197,22 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
                 )
     if seconds <= 0 or any(not math.isfinite(v) or v < 0 for values in durations.values() for v in values):
         raise ValueError("Invalid measured duration")
+    queue_waits = [r["queue_metrics"].get(prefix + "consumer_wait_seconds") for r in chosen]
+    wait_breakdown = None
+    if all(value is not None for value in queue_waits):
+        if any(
+            not math.isfinite(value) or value < 0 or value > outer + 0.001
+            for value, outer in zip(queue_waits, durations["generation_wait"], strict=True)
+        ):
+            raise ValueError("Completed-queue wait is invalid or exceeds its enclosing collection stage")
+        queue_seconds = sum(queue_waits)
+        wait_breakdown = {
+            "scope": "Completed-buffer get time includes expiry filtering; the remainder includes collection and handoff, not solely transfer.",
+            "completed_queue_get_seconds": queue_seconds,
+            "completed_queue_get_cycle_fraction": queue_seconds / seconds,
+            "other_collection_seconds": max(0, sum(durations["generation_wait"]) - queue_seconds),
+            "other_collection_cycle_fraction": max(0, sum(durations["generation_wait"]) - queue_seconds) / seconds,
+        }
     dropped = sum(r["queue_metrics"].get(prefix + "dropped_response_tokens", 0) for r in chosen)
     delivered = sum(r["response_tokens"] for r in chosen)
     components = {
@@ -230,6 +253,7 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
         "useful_response_tokens": delivered,
         "useful_response_tokens_per_second": delivered / seconds,
         "trainer_wait_fraction": sum(durations["generation_wait"]) / seconds,
+        "batch_collection_breakdown": wait_breakdown,
         "discarded_response_tokens": dropped,
         "discarded_token_fraction": dropped / max(1, dropped + delivered),
         "mixed_responses": sum(r["mixed_responses"] for r in chosen),
@@ -238,6 +262,12 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
                 "rollout_id": row["rollout_id"],
                 "response_tokens": row["response_tokens"],
                 "mixed_responses": row["mixed_responses"],
+                "completed_queue_get_seconds": queue_waits[index],
+                "other_collection_seconds": (
+                    max(0, durations["generation_wait"][index] - queue_waits[index])
+                    if wait_breakdown is not None
+                    else None
+                ),
                 **{name + "_seconds": values[index] for name, values in durations.items()},
             }
             for index, row in enumerate(chosen)

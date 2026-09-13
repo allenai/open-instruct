@@ -80,6 +80,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
         ("steady-2t16i-c8-b128", 18, 3),
         ("steady-2t6i-c8-b128-graphs", 8, 1),
         ("steady-2t4i-c8-b32-graphs", 6, 1),
+        ("steady-2t4i-c8-b128-graphs", 6, 1),
         ("steady-2t4i-c8-b32-graphs-p32", 6, 1),
         ("steady-8t8i-c16-b256-graphs", 16, 2),
     ],
@@ -137,13 +138,23 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
     )
     write(
         "rollout_flow.jsonl",
-        [dict(rollout_id=i, response_tokens=100, mixed_responses=1, queue_metrics={}) for i in range(4)],
+        [
+            dict(
+                rollout_id=i,
+                response_tokens=100,
+                mixed_responses=1,
+                queue_metrics={"rollout/fully_async/completed_queue/consumer_wait_seconds": 0.25},
+            )
+            for i in range(4)
+        ],
     )
     write(
         "training_contract_rank0.jsonl",
         [dict(event="optimizer", step=i + 1, optimizer_skipped=False) for i in range(4)],
     )
     result = throughput_basket.analyze(tmp_path, warmup=1)
+    assert result["batch_collection_breakdown"]["completed_queue_get_seconds"] == 0.75
+    assert result["batch_collection_breakdown"]["other_collection_seconds"] == 2.25
     assert result["warm_cycle_seconds"] == 9
     assert result["useful_response_tokens_per_second"] == pytest.approx(300 / 9)
     assert result["all_driver_stage_seconds"]["checkpoint"] == 100

@@ -1,6 +1,6 @@
-# Candidate full-SFT B300 profile: 2 trainers (EP2), 4 TP1 engines.
-# Experimental refresh path; see docs/miles/throughput-profiles.md for qualification.
-# Ratios are provisional until the configuration basket completes.
+# Measured full-SFT B300 throughput starting point: EP2 + six TP1 engines.
+# Batch 128 is an optimization choice; see docs/miles/throughput-profiles.md.
+# Mixed-policy refresh remains experimental outside the exercised workload.
 schema_version = 1
 name = "small"
 
@@ -20,7 +20,7 @@ priority = "urgent"
 min_runtime = "1h"
 timeout = "8h"
 auto_resume = false
-gpus_per_replica = 6
+gpus_per_replica = 8
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
@@ -53,22 +53,22 @@ trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 4
+gpus = 6
 rollout_tensor_parallel_size = 1
-rollout_batch_size = 8
+rollout_batch_size = 32
 samples_per_prompt = 4
-global_batch_size = 32
+global_batch_size = 128
 max_response_length = 4096
 max_context_length = 6144
-sglang_server_concurrency = 16
-sglang_max_running_requests = 16
+sglang_server_concurrency = 8
+sglang_max_running_requests = 8
 sglang_max_total_tokens = 131072
 sglang_max_mamba_cache_size = 128
 sglang_mem_fraction_static = 0.6
 radix_cache = true
 mamba_radix_cache_strategy = "extra_buffer"
-sglang_cuda_graph_backend_decode = "disabled"
-sglang_cuda_graph_max_bs_decode = 16
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 8
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
 sglang_attention_backend = "triton"
@@ -98,11 +98,13 @@ wandb_group = "core-workflow-async"
 row_specialization = "dynamic"
 
 [core]
-max_train_rollout_logprob_abs_diff = 0.05
+# Async score differences include policy age; establish a workload-specific gate if needed.
 publication_mode = "refresh"
 refresh_request_timeout = 1800.0
 engine_drain_timeout = 900.0
 scoring_pass_required = true
+pipeline_observation_interval = 2.0
+replay_diagnostics = false # Qualification enabled this extra audit.
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
@@ -111,6 +113,7 @@ expert_publication = "per_expert"
 scoring_check_interval = 50
 
 [miles]
+sglang_enable_metrics = true
 use_rollout_routing_replay = true
 use_miles_router = true
 sglang_chunked_prefill_size = 8192

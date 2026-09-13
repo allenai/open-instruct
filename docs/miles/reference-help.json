@@ -13,7 +13,7 @@
     "compiler_cache_restore": "Restore a compatible cache before worker startup.",
     "compiler_cache_root": "Shared cache root; null selects maintained default. WEKA custom paths require a TTL component.",
     "diagnostic_interval": "Interval for trainer contract diagnostics; zero disables periodic diagnostics.",
-    "refresh_request_timeout": "Wall-clock deadline for one mixed-policy generation HTTP request, including serving queue time and refresh pauses; independent of engine draining.",
+    "refresh_request_timeout": "Positive seconds allowed for an entire refresh generation request, including admission, decode and publication pauses; separate from the lifecycle drain timeout.",
     "engine_drain_timeout": "Seconds to wait for already-reserved engine requests to finish; expiry fails the run without reopening the engine.",
     "engine_update_timeout": "Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run.",
     "expert_parallel_size": "Expert-parallel group size; must divide trainer world size.",
@@ -35,7 +35,8 @@
     "sequence_packing": "Pack complete samples within each optimizer partition using document-isolated attention/KDA and replay alignment.",
     "snapshot_capacity": "Maximum retained immutable host snapshots during rolling publication; each snapshot holds a full BF16 export in the Ray object store.",
     "stream_moe_export": "Stream MoE tensors during HF-layout publication to reduce export memory.",
-    "weight_sync_mode": "flattened batches tensor transfers; per_tensor is the rollback/reference transport."
+    "weight_sync_mode": "flattened batches tensor transfers; per_tensor is the rollback/reference transport.",
+    "pipeline_observation_interval": "Seconds between read-only async producer/completed-buffer observations; zero disables. Engine metrics are sampled no more frequently than every five seconds when observation is enabled. Missing samples remain explicit."
   },
   "native": {
     "adam_beta1": "Adam first-moment decay coefficient.",

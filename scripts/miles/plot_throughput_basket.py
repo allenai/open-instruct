@@ -37,12 +37,23 @@ def comparisons(data, output):
     names = [name.replace("small-", "").replace("steady-", "") for name, _ in entries]
     fig, axes = plt.subplots(1, 3, figsize=(15, max(3.5, len(entries) * 0.55)), layout="constrained")
     offsets = [0.0] * len(entries)
-    for stage, color in COLORS.items():
+    split = all(row["analysis"].get("batch_collection_breakdown") is not None for _, row in entries)
+    stages = (
+        {
+            "completed_queue_get": "#e5a545",
+            "other_collection": "#b8a481",
+            "training": COLORS["training"],
+            "publication": COLORS["publication"],
+        }
+        if split
+        else COLORS
+    )
+    for stage, color in stages.items():
         values = [statistics.mean(r[stage + "_seconds"] for r in row["analysis"]["per_update"]) for _, row in entries]
         axes[0].barh(names, values, left=offsets, color=color, label=stage.replace("_", " "))
         offsets = [a + b for a, b in zip(offsets, values)]
     axes[0].set_xlabel("Mean seconds / awaited driver cycle")
-    axes[0].legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncols=3, fontsize=8)
+    axes[0].legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncols=2, fontsize=8)
     axes[0].set_title("Trainer's awaited cycle")
     axes[1].barh(names, [row["analysis"]["useful_response_tokens_per_second"] for _, row in entries], color="#397f9d")
     axes[1].set_xlabel("Consumed response tokens / cycle second")
@@ -303,6 +314,14 @@ def pipeline_map(report, output, name):
         return f"{min(numbers):.1f}–{max(numbers):.1f} / engine" if numbers else "unobserved"
 
     means = {stage: statistics.mean(r[stage + "_seconds"] for r in report["per_update"]) for stage in COLORS}
+    breakdown = report.get("batch_collection_breakdown")
+    wait_label = f"Batch collection: {means['generation_wait']:.1f} s / cycle"
+    if breakdown is not None:
+        count = report["measured_updates"]
+        wait_label = (
+            f"Await/filter groups: {breakdown['completed_queue_get_seconds'] / count:.1f} s / cycle\n"
+            f"Other collect/handoff: {breakdown['other_collection_seconds'] / count:.1f} s / cycle"
+        )
     boxes = [
         (
             0,
@@ -334,13 +353,13 @@ def pipeline_map(report, output, name):
             1,
             0,
             "Trainer",
-            f"Batch wait: {means['generation_wait']:.1f} s / cycle\nScore + train: {means['training']:.1f} s / cycle\nTraining + publication: {100 * (1 - report['trainer_wait_fraction']):.1f}% of cycle",
+            f"{wait_label}\nScore + train: {means['training']:.1f} s / cycle\nTraining + publication: {100 * (1 - report['trainer_wait_fraction']):.1f}% of cycle",
         ),
         (
             0,
             0,
             "Weight publication",
-            f"{means['publication']:.1f} s / cycle\nRefresh paused engines\nRetained prefix is re-prefilled",
+            f"{means['publication']:.1f} s / cycle\nRefresh paused engines\nRe-prefill in-flight prefixes",
         ),
     ]
     fig, ax = plt.subplots(figsize=(16, 6), layout="constrained")
@@ -375,6 +394,12 @@ def pipeline_map(report, output, name):
         color="#555555",
     )
     coverage = [r["coverage_fraction"] for r in queues.values() if r["mean"] is not None]
+    coverage.extend(
+        row["coverage_fraction"]
+        for engine in occupancy_data["engines"].values()
+        for row in engine["series"]
+        if row["name"] in ("num_running_reqs", "num_queue_reqs") and row["mean"] is not None
+    )
     minimum = min(coverage) if coverage else 0
     fig.suptitle(
         f"{name} • {report['measured_updates']} measured updates • queue coverage ≥ {100 * minimum:.1f}%\n"
