@@ -1,13 +1,14 @@
-# Case 05: natural 4K–8K prompts plus long decoding, mixed chunks, packing/replay.
+# Case 06: two nodes, EP8 trainers + seven policy engines + one managed judge.
+# Four collections; audit each reward domain and nonzero learning signal.
 schema_version = 1
-name = "colleague-05-long-context-20260913"
+name = "colleague-06-ep8-judged-20260913"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/colleague-05-long-context-20260913"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/colleague-06-ep8-judged-20260913"
 export_hf = false
 
 [launch]
@@ -17,10 +18,8 @@ cluster = "ai2/holmes"
 priority = "urgent"
 min_runtime = "1h"
 timeout = "2h"
-# Multi-node runs currently require auto_resume = false; resume by relaunching
-# with the same output root once a checkpoint exists.
 auto_resume = false
-gpus_per_replica = 4
+gpus_per_replica = 8
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
@@ -35,10 +34,9 @@ NCCL_SOCKET_IFNAME = "ib"
 NCCL_IB_HCA = "^=mlx5_bond_0"
 
 [data]
-# Natural long prompts selected by scripts/miles/prepare_long_context.py.
-prompt_data = "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/train.jsonl"
-eval_prompt_data = ["mixed", "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/eval.jsonl"]
-reward_config = "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/verifiers.json"
+prompt_data = "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/moe/train.jsonl"
+eval_prompt_data = ["mixed", "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/moe/eval.jsonl"]
+reward_config = "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/moe/verifiers.json"
 shuffle = false
 
 [training]
@@ -46,32 +44,31 @@ num_rollouts = 4
 skip_eval_before_train = false
 eval_interval = 4
 save_checkpoints = false
+# Core saves synchronously. Choose a more frequent cadence for recovery.
 
 [trainer]
-# Small EP2 trainer, with a separate TP1 engine.
-gpus = 2
+gpus = 8
 trainer_num_nodes = 1
-expert_parallel_size = 2
+expert_parallel_size = 8
 micro_batch_size = 1
 sequence_packing = true
-packing_max_tokens = 16384
+packing_max_tokens = 8192
 activation_recompute = true
 trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-# Requested total TP1 engine GPUs, independently of trainer EP.
-gpus = 1
+gpus = 7
 rollout_tensor_parallel_size = 1
-# Four prompts x four responses, including natural long inputs.
-rollout_batch_size = 4
-samples_per_prompt = 4
-global_batch_size = 16
-max_response_length = 8192
-max_context_length = 16384
-sglang_server_concurrency = 16
-sglang_max_running_requests = 16
-sglang_max_total_tokens = 262144
+# Bounded plumbing exercise; standard training examples retain 8 x 8.
+rollout_batch_size = 16
+samples_per_prompt = 8
+global_batch_size = 128
+max_response_length = 4096
+max_context_length = 6144
+sglang_server_concurrency = 64
+sglang_max_running_requests = 64
+sglang_max_total_tokens = 524288
 sglang_max_mamba_cache_size = 128
 sglang_mem_fraction_static = 0.6
 radix_cache = false
@@ -100,41 +97,31 @@ eps_clip_high = 0.28
 [tracking]
 wandb_mode = "offline"
 wandb_project = "olmo-rl-comparison"
-wandb_group = "ep8-engine-pool-20260912"
-wandb_team = "ai2-llm"
+wandb_group = "colleague-readiness-20260912"
 
 [runtime]
 row_specialization = "dynamic"
 
 [core]
-# Keep the full serving-weight audit at startup/resume only. Periodic
-# audits also reset and republish weights; reserve them for qualification.
 diagnostic_interval = 0
 replay_diagnostics = true
+compiler_cache_diagnostics = true
 max_train_rollout_logprob_abs_diff = 0.05
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
-weight_sync_mode = "flattened"
-# Publish routed experts as one stacked tensor per layer and projection
-# (measured 2.6 s -> 0.35 s per publication with 2 GiB buckets).
+# Use the fused publication path qualified on the primary project branches.
 expert_publication = "fused"
-# The standalone scoring pass is skipped for this recipe; spot-check it
-# against the training forward every 20 updates instead of the default 50.
-scoring_check_interval = 20
+weight_sync_mode = "flattened"
 
 [miles]
-sglang_enable_mixed_chunk = true
-sglang_chunked_prefill_size = 4096
-lr_decay_iters = 4
-# Match the TP1 pool's aggregate 64-request admission limit; independent of
-# the 64-response optimizer batch and the completed-output buffer capacity.
-async_max_concurrent_samples = 32
+async_max_concurrent_samples = 448
 use_rollout_routing_replay = true
 use_miles_router = true
+calculate_per_token_loss = true
 rollout_temperature = 1.0
 rollout_seed = 17
-rollout_max_prompt_len = 8192
+rollout_max_prompt_len = 2048
 seed = 17
 disable_grpo_std_normalization = true
 
@@ -143,9 +130,7 @@ fully_async = true
 max_weight_staleness = 2
 async_data_buffer_capacity_factor = 2.0
 async_unused_samples_handler = "retry"
-# Replenish when individual responses finish, without waiting for a whole group.
 rollout_submission_granularity = "sample"
-# Core scores the old policy; TIS corrects the behavior-policy mismatch.
 off_policy_correction = "tis"
 
 # Persistent Triton caches shared by every user of this runtime image; the
@@ -153,5 +138,35 @@ off_policy_correction = "tis"
 # cold miss rather than a wrong hit. Omit shared_root to use this default.
 [compiler_cache]
 enabled = true
-shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+shared_root = "/weka/oe-training-default/robertb/open-instruct/colleague-compiler-cache-20260912/tmp-7d"
 restore = true
+
+[judges.general]
+mode = "managed"
+backend = "sglang"
+model = "Qwen/Qwen3-32B"
+revision = "9216db5781bf21249d130ec9da846c4624c16137"
+gpus = 1
+tensor_parallel_size = 1
+max_context_length = 40960
+max_concurrent_calls = 16
+chat_template = "qwen3-no-thinking"
+prepared_dir = "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+
+[rubrics.quality]
+profile = "open-instruct/general-quality"
+max_response_tokens = 2048
+temperature = 1.0
+
+[rubrics.reference_quality]
+profile = "open-instruct/general-quality_ref"
+max_response_tokens = 2048
+temperature = 1.0
+
+[judging.bindings."general-quality"]
+judge = "general"
+rubric = "quality"
+
+[judging.bindings."general-quality_ref"]
+judge = "general"
+rubric = "reference_quality"

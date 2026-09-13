@@ -105,7 +105,7 @@ wandb_group = "colleague-readiness-20260912"
 row_specialization = "dynamic"
 
 [core]
-diagnostic_interval = 1
+diagnostic_interval = 0
 replay_diagnostics = true
 compiler_cache_diagnostics = true
 max_train_rollout_logprob_abs_diff = 0.05
