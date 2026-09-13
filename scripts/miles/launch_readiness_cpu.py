@@ -23,7 +23,8 @@ def specification(image, mode, paths, source):
             "export CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=2 PYTHONPATH=/opt/core-rl",
             "export LD_LIBRARY_PATH=/usr/local/cuda/compat:${LD_LIBRARY_PATH:-}",
             "python -c " + shlex.quote(setup),
-            "python /output/readiness_cpu.py " + shlex.join([mode, *map(str, paths)]),
+            "python /output/readiness_cpu.py "
+            + shlex.join(([] if mode == "prepare-long" else [mode]) + list(map(str, paths))),
         )
     )
     return {
@@ -53,11 +54,15 @@ def specification(image, mode, paths, source):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
-    parser.add_argument("mode", choices=("inspect", "audit"))
+    parser.add_argument("mode", choices=("inspect", "audit", "prepare-long"))
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
-    source = Path(__file__).with_name("readiness_cpu.py").read_bytes()
+    source = (
+        Path(__file__)
+        .with_name("prepare_long_context.py" if args.mode == "prepare-long" else "readiness_cpu.py")
+        .read_bytes()
+    )
     document = specification(args.image, args.mode, args.paths, source)
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "experiment.json"

@@ -66,3 +66,8 @@ def test_cpu_jobs_always_use_saturn_and_embed_exact_source():
     assert "set -euo pipefail" in task["arguments"][0]
     assert "'/weka/oe-training-default/a b'" in task["arguments"][0]
     assert hashlib.sha256(b"print('hello')").hexdigest() in spec["description"]
+
+
+def test_long_preparation_launcher_does_not_pass_internal_mode_to_script():
+    spec = launch_readiness_cpu.specification("image", "prepare-long", [Path("/model"), Path("/fixture")], b"pass")
+    assert spec["tasks"][0]["arguments"][0].endswith("python /output/readiness_cpu.py /model /fixture")
