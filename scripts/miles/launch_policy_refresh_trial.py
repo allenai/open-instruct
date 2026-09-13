@@ -70,7 +70,12 @@ def main():
                 check=True,
                 stdout=sys.stderr,
             )
-            uploaded = subprocess.check_output(["beaker", "dataset", "get", name, "--format", "json"], text=True)
+            author = json.loads(
+                subprocess.check_output(["beaker", "account", "whoami", "--format", "json"], text=True)
+            )[0]["name"]
+            uploaded = subprocess.check_output(
+                ["beaker", "dataset", "get", f"{author}/{name}", "--format", "json"], text=True
+            )
             dataset = json.loads(uploaded)[0]["id"]
         mode = opt.mode
         command = f"""set -euo pipefail
