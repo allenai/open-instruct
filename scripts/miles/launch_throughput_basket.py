@@ -20,6 +20,7 @@ def main():
     parser.add_argument("image")
     parser.add_argument("cases", nargs="+", choices=list(basket.CASES))
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--exclude-hostname", action="append", default=[], help="Exclude an unhealthy host from this basket only")
     args = parser.parse_args()
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=basket.ROOT):
         raise RuntimeError("Commit changes before launch")
@@ -44,7 +45,7 @@ def main():
         )
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         source = "SOURCE_DATASET"
-        provenance = dict(commit=commit, base_image=args.image, archive_sha256=digest)
+        provenance = dict(commit=commit, base_image=args.image, archive_sha256=digest, excluded_hostnames=args.exclude_hostname)
         (directory / "provenance.json").write_text(json.dumps(provenance, indent=2))
         if not args.render_only:
             name = "throughput-source-" + uuid.uuid4().hex[:12]
@@ -80,9 +81,15 @@ def main():
                 / "run"
             )
             run = basket.specification(case, root)
-            spec = launch.specification(
-                args.image, run, hostnames=[f"host-{i}" for i in range(32)] if args.render_only else None
-            )
+            hostnames = [f"host-{i}" for i in range(32)] if args.render_only else None
+            if args.exclude_hostname:
+                hostnames = hostnames if hostnames is not None else launch.cluster_hostnames(run)
+                hostnames = [name for name in hostnames if name not in args.exclude_hostname]
+                if not hostnames:
+                    raise ValueError("No eligible hosts remain after exclusions")
+            spec = launch.specification(args.image, run, hostnames=hostnames)
+            if args.exclude_hostname and len(spec["tasks"]) == 1:
+                spec["tasks"][0]["constraints"] = {"hostname": hostnames}
             overlay = f"""mkdir -p /output
 cp /qualification-source/provenance.json /output/
 echo '{digest}  /qualification-source/source.tar' | sha256sum -c -
