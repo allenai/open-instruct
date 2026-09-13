@@ -6,7 +6,7 @@ Exact submitted specifications and source/image identities are in
 [launches.json](launches.json). GPU jobs use urgent Holmes, open-instruct-dev,
 one-hour minimum runtime. CPU preparation/audits use Saturn.
 
-## Current work (05:41 UTC)
+## Current work (06:19 UTC)
 
 | Exercise | Evidence/status | Remaining acceptance |
 | --- | --- | --- |
@@ -15,6 +15,8 @@ one-hour minimum runtime. CPU preparation/audits use Saturn.
 | Radix + packing/replay + code + named judge | [Four updates passed](https://beaker.org/ex/01M2CDQGG7REP67CCCMPS6BN8B); retained reward audit passed | Policy responses had zero cache hits; combined cache-use qualification remains open |
 | Forced cached-prefix replay | [Three-GPU follow-up passed](https://beaker.org/ex/01M2CH5AWXM02NF31RBA55RTXH), two updates; [retained feature audit passed](https://beaker.org/ex/01M2CMEKT2EFY46WV2BRRAJBJ8) | Qualified cached-prefix replay in this sequential-request configuration |
 | Natural long contexts + mixed chunks | [Four updates passed](https://beaker.org/ex/01M2CEX1M5BB4Q98GH8P9FHQ4Y); [feature audit passed](https://beaker.org/ex/01M2CGNGJTWPSDENXW9C55KDE1) | Qualified bounded long-token exercise, not a learning benchmark |
+| HTTP verifier recovery | [Six cases passed](https://beaker.org/ex/01M2CNHG2KMGY0M93G1RRC3ACD): transient recovery, retry exhaustion, subsequent healthy request, rate limit, sample rejection | Distributed engine/trainer failure recovery remains open |
+| Stdio learning signal | [Reviewed fixture submitted](https://beaker.org/ex/01M2CPQ4331ZP52PWN8CCBCESC), three GPUs, two updates | Positive natural rewards and mixed groups; optimizer/replay checks |
 | EP8 + seven engines + judge | Config 06 staged | Two full nodes available; distributed startup/rewards/ownership |
 | Corrected 8 versus 16 engine sizing | Configs staged; previous 16-engine attempt failed rendezvous before training | Matching runs with producer budget raised and periodic weight audits off |
 
@@ -197,3 +199,13 @@ uses a conservative statement/action-word and input/output screen, followed by
 manual review. This screen is confined to the qualification fixture; it is not a
 production dataset filter or a proof of data quality. Only the final exercise TOML
 is kept; submitted run specifications and source history preserve earlier attempts.
+
+
+Final stdio revision r4 passed [CPU preparation](https://beaker.org/ex/01M2CPHWQW9CJ9ZHXBXS55WKP9)
+and manual prompt review. [Retained preparation report](stdio-r4-preparation.json).
+The [GPU run](https://beaker.org/ex/01M2CPQ4331ZP52PWN8CCBCESC) is submitted using
+image C, with exact launch receipt in `launches.json`. Training examples include
+addition of integer pairs, a digital root and sequence modes, alongside harder
+string problems. It is still a short learning-path check, not an easy-task score
+benchmark. All 68 focused host readiness/config/retry tests passed; changed scripts
+passed Ruff/type checks and generated documentation remained current.

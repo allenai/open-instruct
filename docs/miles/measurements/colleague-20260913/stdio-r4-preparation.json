@@ -1,0 +1,118 @@
+{
+  "counts": {
+    "eval": {
+      "code_stdio": 2
+    },
+    "train": {
+      "code_stdio": 8
+    }
+  },
+  "template_sha256": "a3d6a7ad3fde8e26fa9953d80ac30682f7d56ac1d03f3428910a4239a4e23bef",
+  "dropped": {},
+  "normalized_content_and_identity_disjoint": true,
+  "outputs": {
+    "eval.jsonl": "16cdcd2c43a174239223b8c8722d6236b8d198b943ef8a4e265f99d71072e5f8",
+    "train.jsonl": "e575ecb824ef485b3c04660ad4d7cf72660c0b76f76000b7aee32c180f696749",
+    "verifiers.json": "c2cc4052c0fc6435061cd5cf01df117433b6f65a0779912a76b4a3d76555a8f0"
+  },
+  "sources": {
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/rl-manifest.json": "7a588b35cf31c056488943f6500a6021ecdf08309cb7fe35115262a13c7233e0",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/eval.jsonl": "4749d16830bb23100f80e2f7896e03936b0db1c6e6b7414885123497e1a045d4",
+    "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/tokenized-v2/train.jsonl": "2815fb41cf1033ba9b21ba8b5c2c3b8f07a07a72f2ad09a66d3872e015c5b3e3"
+  },
+  "canaries": [
+    {
+      "name": "function-correct",
+      "score": 1.0,
+      "expected": 1,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 24,
+        "tests": 1,
+        "stdio": false
+      }
+    },
+    {
+      "name": "function-wrong",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 22,
+        "tests": 1,
+        "stdio": false
+      }
+    },
+    {
+      "name": "stdio-correct",
+      "score": 1.0,
+      "expected": 1,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      }
+    },
+    {
+      "name": "stdio-wrong",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 10,
+        "tests": 1,
+        "stdio": true
+      }
+    },
+    {
+      "name": "syntax-error",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 11,
+        "tests": 1,
+        "stdio": false
+      }
+    },
+    {
+      "name": "execution-timeout",
+      "score": 0.0,
+      "expected": 0,
+      "diagnostics": {
+        "status": "ok",
+        "http_status": 200,
+        "program_chars": 16,
+        "tests": 1,
+        "stdio": true
+      }
+    }
+  ],
+  "missing_statement_rejections": {
+    "eval": 2,
+    "train": 1897
+  },
+  "selection": "Shortest original rendered-message JSON with a statement and explicit input/output headings within each split; not a difficulty estimate or reward-based selection.",
+  "queries": {
+    "train": [
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nGiven an integer n, count the total number of digit 1 appearing in all non-negative integers less than or equal to n.\n\nExample:\n\n\nInput: 13\nOutput: 6 \nExplanation: Digit 1 occurred in the following numbers: 1, 10, 11, 12, 13.\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nGiven a string s, partition s such that every substring of the partition is a palindrome.\n\nReturn the minimum cuts needed for a palindrome partitioning of s.\n\nExample:\n\n\nInput:\u00a0\"aab\"\nOutput: 1\nExplanation: The palindrome partitioning [\"aa\",\"b\"] could be produced using 1 cut.\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nCompute A + B.\n\nConstraints\n\n* -1000 \u2264 A, B \u2264 1000\n\nInput\n\nThe input will consist of a series of pairs of integers A and B separated by a space, one pair of integers per line. The input will be terminated by EOF.\n\nOutput\n\nFor each pair of input integers A and B, you must output the sum of A and B in one line.\n\nExample\n\nInput\n\n1 2\n10 5\n100 20\n\n\nOutput\n\n3\n15\n120\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nYou are given a string S. Find the number of different substrings in S.\n\nInput\nOne line containing a string S consisting of lowercase Latin letters.\n\nOutput\nOutput one integer - answer to the question.\n\nConstraints\n1 \u2264 length of S \u2264 1200\n\nSAMPLE INPUT\nabc\r\n\nSAMPLE OUTPUT\n6\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nGiven two strings s and t which consist of only lowercase letters.\n\nString t is generated by random shuffling string s and then add one more letter at a random position.\n\nFind the letter that was added in t.\n\nExample:\n\nInput:\ns = \"abcd\"\nt = \"abcde\"\n\nOutput:\ne\n\nExplanation:\n'e' is the letter that was added.\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nGiven a non-negative integer num, repeatedly add all its digits until the result has only one digit.\n\nExample:\n\n\nInput: 38\nOutput: 2 \nExplanation: The process is like: 3 + 8 = 11, 1 + 1 = 2. \n\u00a0            Since 2 has only one digit, return it.\n\n\nFollow up:\nCould you do it without any loop/recursion in O(1) runtime?\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nYou are given a string of length N. Calculate the number of distinct substrings of S.\n\nConstraints\n\n* 1 \\leq N \\leq 500,000\n* S consists of lowercase English letters.\n\nInput\n\nInput is given from Standard Input in the following format:\n\n\nS\n\n\nOutput\n\nPrint the answer.\n\nExamples\n\nInput\n\nabcbcba\n\n\nOutput\n\n21\n\n\nInput\n\nmississippi\n\n\nOutput\n\n53\n\n\nInput\n\nababacaca\n\n\nOutput\n\n33\n\n\nInput\n\naaaaa\n\n\nOutput\n\n5\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nYour task is to write a program which reads a sequence of integers and prints mode values of the sequence. The mode value is the element which occurs most frequently.\n\n\n\nInput\n\nA sequence of integers ai (1 \u2264 ai \u2264 100). The number of integers is less than or equals to 100.\n\nOutput\n\nPrint the mode values. If there are several mode values, print them in ascending order.\n\nExample\n\nInput\n\n5\n6\n3\n5\n8\n7\n5\n3\n9\n7\n3\n4\n\n\nOutput\n\n3\n5\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
+    ],
+    "eval": [
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\nDuring the research on properties of the greatest common divisor (GCD) of a set of numbers, Ildar, a famous mathematician, introduced a brand new concept of the weakened common divisor (WCD) of a list of pairs of integers.\n\nFor a given list of pairs of integers $(a_1, b_1)$, $(a_2, b_2)$, ..., $(a_n, b_n)$ their WCD is arbitrary integer greater than $1$, such that it divides at least one element in each pair. WCD may not exist for some lists.\n\nFor example, if the list looks like $[(12, 15), (25, 18), (10, 24)]$, then their WCD can be equal to $2$, $3$, $5$ or $6$ (each of these numbers is strictly greater than $1$ and divides at least one number in each pair).\n\nYou're currently pursuing your PhD degree under Ildar's mentorship, and that's why this problem was delegated to you. Your task is to calculate WCD efficiently.\n\n\n-----Input-----\n\nThe first line contains a single integer $n$ ($1 \\le n \\le 150\\,000$)\u00a0\u2014 the number of pairs.\n\nEach of the next $n$ lines contains two integer values $a_i$, $b_i$ ($2 \\le a_i, b_i \\le 2 \\cdot 10^9$).\n\n\n-----Output-----\n\nPrint a single integer\u00a0\u2014 the WCD of the set of pairs. \n\nIf there are multiple possible answers, output any; if there is no answer, print $-1$.\n\n\n-----Examples-----\nInput\n3\n17 18\n15 24\n12 15\n\nOutput\n6\nInput\n2\n10 16\n7 17\n\nOutput\n-1\n\nInput\n5\n90 108\n45 105\n75 40\n165 175\n33 30\n\nOutput\n5\n\n\n\n-----Note-----\n\nIn the first example the answer is $6$ since it divides $18$ from the first pair, $24$ from the second and $12$ from the third ones. Note that other valid answers will also be accepted.\n\nIn the second example there are no integers greater than $1$ satisfying the conditions.\n\nIn the third example one of the possible answers is $5$. Note that, for example, $15$ is also allowed, but it's not necessary to maximize the output.\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags",
+      "Solve the following code problem step by step. The last part of your response should be the solution to the problem in form ```\npython\nCODE\n``` where CODE is the solution for the problem.\n\n[Image] \n\nWalking through the streets of Marshmallow City, Slastyona have spotted some merchants selling a kind of useless toy which is very popular nowadays\u00a0\u2013 caramel spinner! Wanting to join the craze, she has immediately bought the strange contraption.\n\nSpinners in Sweetland have the form of V-shaped pieces of caramel. Each spinner can, well, spin around an invisible magic axis. At a specific point in time, a spinner can take 4 positions shown below (each one rotated 90 degrees relative to the previous, with the fourth one followed by the first one):\n\n [Image] \n\nAfter the spinner was spun, it starts its rotation, which is described by a following algorithm: the spinner maintains its position for a second then majestically switches to the next position in clockwise or counter-clockwise order, depending on the direction the spinner was spun in.\n\nSlastyona managed to have spinner rotating for exactly n seconds. Being fascinated by elegance of the process, she completely forgot the direction the spinner was spun in! Lucky for her, she managed to recall the starting position, and wants to deduct the direction given the information she knows. Help her do this.\n\n\n-----Input-----\n\nThere are two characters in the first string\u00a0\u2013 the starting and the ending position of a spinner. The position is encoded with one of the following characters: v (ASCII code 118, lowercase v), < (ASCII code 60), ^ (ASCII code 94) or > (ASCII code 62) (see the picture above for reference). Characters are separated by a single space.\n\nIn the second strings, a single number n is given (0 \u2264 n \u2264 10^9)\u00a0\u2013 the duration of the rotation.\n\nIt is guaranteed that the ending position of a spinner is a result of a n second spin in any of the directions, assuming the given starting position.\n\n\n-----Output-----\n\nOutput cw, if the direction is clockwise, ccw\u00a0\u2013 if counter-clockwise, and undefined otherwise.\n\n\n-----Examples-----\nInput\n^ >\n1\n\nOutput\ncw\n\nInput\n< ^\n3\n\nOutput\nccw\n\nInput\n^ v\n6\n\nOutput\nundefined\n\nWrite Python code to solve the problem. Present the code in \n```python\nYour code\n```\nat the end.\n\nRemember to put your solution inside the ```\npython\nCODE\n``` tags"
+    ]
+  }
+}
