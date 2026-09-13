@@ -162,25 +162,31 @@ async def train(args, *, export_hf=None):
             except BaseException as error:
                 cleanup_error = error
                 logger.exception("Engine drain cleanup failed")
-        for component, operation, timeout in (
+        for component, operation, timeout, cleanup_stage in (
             # Async generation must stop, but the servers must remain alive while
             # both sides collectively destroy the weight-update NCCL group.
             (
                 manager if args.fully_async else None,
                 lambda: manager.core_publication_boundary.remote(True),
-                args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout if rolling else 60,
+                (
+                    args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout
+                    if rolling or refresh
+                    else 60
+                ),
+                "final_generation_drain",
             ),
-            (learner, lambda: learner._broadcast("close_weight_transport"), 60),
-            (manager, lambda: manager.dispose.remote(), 120),
-            (learner, lambda: learner.dispose(), 60),
+            (learner, lambda: learner._broadcast("close_weight_transport"), 60, "close_weight_transport"),
+            (manager, lambda: manager.dispose.remote(), 120, "rollout_dispose"),
+            (learner, lambda: learner.dispose(), 60, "trainer_dispose"),
         ):
             if component is None:
                 continue
             try:
-                await asyncio.wait_for(operation(), timeout=timeout)
+                with stage(args, cleanup_stage):
+                    await asyncio.wait_for(operation(), timeout=timeout)
             except BaseException as error:
                 cleanup_error = cleanup_error or error
-                logger.exception("Core RL component cleanup failed")
+                logger.exception("Core RL cleanup %s failed (deadline=%ss)", cleanup_stage, timeout)
         try:
             await startup_cache.finish(args, success=failure is None and cleanup_error is None)
         except Exception:

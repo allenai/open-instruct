@@ -16,6 +16,7 @@ from open_instruct.miles.errors import InputError
 class CoreConfig:
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
+    pipeline_observation_interval: float = 0.0
     replay_diagnostics: bool = False
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
@@ -79,6 +80,9 @@ class CoreConfig:
             raise InputError("core.expert_publication must be per_expert or fused")
         for name in ("diagnostic_interval", "scoring_check_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)
+        validation.number(self.pipeline_observation_interval, "core.pipeline_observation_interval")
+        if self.pipeline_observation_interval < 0:
+            raise InputError("core.pipeline_observation_interval must be nonnegative (0 disables observation)")
         limit = self.max_train_rollout_logprob_abs_diff
         if limit is not None:
             validation.number(limit, "core.max_train_rollout_logprob_abs_diff")

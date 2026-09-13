@@ -162,3 +162,57 @@ A separate c8 attempt was canceled because its host reported zero temporary-disk
 space. Subsequent basket submissions exclude that host. Attempts stopped for
 these known issues are excluded from performance comparisons; retries have new
 identities and keep the same model/data/optimization settings.
+
+## Steady-state follow-up
+
+The target is now a small family with **1-, 2-, and 8-GPU trainers**, sizing
+inference around the trainer rather than keeping a fixed total GPU count. The
+one-GPU fixture remains a mechanics profile. Throughput recommendations must
+identify the model, GPU type, response cap, optimization batch and policy-age
+limit; changing those can change the balance substantially.
+
+All five first-round full-model arms completed 12 updates on every trainer rank,
+but failed final shutdown: the driver imposed a 60-second outer drain deadline
+on refresh despite its configured 900-second drain budget. These are completed
+training measurements with failed lifecycle qualification. The follow-up driver
+honors the configured budget and records final drain and disposal separately.
+The analyzer still rejects incomplete workflows by default. Offline investigation
+can explicitly inspect complete optimizer sequences from an incomplete workflow;
+the report retains `end_to_end_passed=false` and the original workflow error.
+
+Use updates **7–12** for the initial comparison. Training time settled by updates
+4–5 in most arms, but the 2+6 arm spiked at update 6. This is a timing-based warmup
+estimate, not a count of all compilation events. The next performance cases run
+24 updates, exclude the first six, and retain the full trace to check for late
+spikes or changing queue behavior.
+
+The first window still spends over 80% of the awaited cycle waiting for a usable
+batch. More producer concurrency or more inference did not automatically improve
+useful throughput: stale discarded work increased substantially in several arms.
+The follow-up compares 2+6 with eight requests per engine at batches 32 and 128,
+then compares the larger batch with 2+14 if multi-node qualification and capacity
+permit. Batch 128 changes the RL optimization batch; it is not a pure scheduling
+optimization or evidence of equal learning. The 2+14 launcher currently allocates
+three eight-GPU replicas (24 allocated, 16 used), because trainer and inference
+nodes are separate in its multi-node layout. Report both counts.
+
+Follow-up instrumentation (`core.pipeline_observation_interval=2`) records:
+
+* `pipeline_occupancy.jsonl`: producer ownership, active group tasks, completed
+  queue occupancy/capacity, generation semaphore occupancy and waiting requests.
+  The sampler does not dequeue work or reset window counters. Unavailable fields
+  are null. Semaphore occupancy includes router/server wait and response handling;
+  it is not GPU utilization. Sample-level unfinished counts are only available
+  from the sample-backfill scheduler.
+* `engine_occupancy.jsonl`: each engine's Prometheus queue/admission, pool usage,
+  throughput and occupancy series, sampled no more frequently than every five
+  seconds with bounded HTTP requests. Series labels and missing/nonfinite values
+  remain explicit. Engine-reported occupancy is distinct from hardware SM usage.
+* Existing trainer stage timing and completed-work length/age counters. Sampled
+  queue sizes describe instants; they do not give exact per-request queue waits.
+
+Observation is optional and disabled by default. It terminates with the producer;
+observation errors are logged without changing generation or training ownership.
+The follow-up basket enables SGLang metrics. Compare observed resource activity,
+trainer wait and discarded tokens together. Keep FIFO, lag limits and historical
+behavior probabilities unchanged.

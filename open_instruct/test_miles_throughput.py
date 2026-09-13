@@ -1,11 +1,13 @@
 """Hard constraints, advisory limits, and reproducible topology comparisons."""
 
+import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from scripts.miles import throughput_basket
 
-from open_instruct.miles import throughput, validation
+from open_instruct.miles import pipeline_observer, throughput, validation
 from open_instruct.miles.config import CoreConfig
 from open_instruct.miles.run_spec import RunSpec
 
@@ -71,6 +73,9 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
         ("bridge-2t6i", 8, 1),
         ("bridge-8t8i", 16, 2),
         ("large-8t56i", 64, 8),
+        ("steady-2t6i-c8-b32", 8, 1),
+        ("steady-2t6i-c8-b128", 8, 1),
+        ("steady-2t14i-c8-b128", 16, 3),
     ],
 )
 def test_basket_allocates_requested_policy_gpus(case, gpus, replicas):
@@ -138,6 +143,13 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
     assert result["all_driver_stage_seconds"]["checkpoint"] == 100
     assert len(result["per_update"]) == 3
     assert result["validated_trainer_ranks"] == 1
+    (tmp_path / "workflow.json").write_text(json.dumps({"status": "failed", "error": "cleanup timed out"}))
+    with pytest.raises(ValueError, match="Workflow"):
+        throughput_basket.analyze(tmp_path, warmup=1)
+    measured = throughput_basket.analyze(tmp_path, warmup=1, allow_incomplete_workflow=True)
+    assert not measured["end_to_end_passed"]
+    assert measured["workflow"]["error"] == "cleanup timed out"
+    (tmp_path / "workflow.json").write_text(json.dumps({"status": "complete"}))
     (tmp_path / "plan.json").write_text(
         json.dumps({"runtime": {"miles": {"num_rollout": 4, "actor_num_gpus_per_node": 2}}})
     )
@@ -155,3 +167,59 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
 def test_refresh_request_deadline_is_finite_and_positive(value):
     with pytest.raises(ValueError):
         CoreConfig(refresh_request_timeout=value)
+
+
+@pytest.mark.parametrize("value", [-1, True, float("inf"), float("nan")])
+def test_pipeline_observation_interval_is_nonnegative_and_finite(value):
+    with pytest.raises(ValueError):
+        CoreConfig(pipeline_observation_interval=value)
+
+
+def test_pipeline_observer_does_not_consume_or_reset_queue(tmp_path):
+    async def exercise():
+        semaphore = asyncio.Semaphore(1)
+        await semaphore.acquire()
+        waiting = asyncio.create_task(semaphore.acquire())
+        await asyncio.sleep(0)
+        buffer = [object(), object()]
+        producer = SimpleNamespace(
+            args=SimpleNamespace(
+                sglang_server_concurrency=1,
+                rollout_num_gpus=1,
+                rollout_num_gpus_per_engine=1,
+                save=str(tmp_path),
+                olmo_core=CoreConfig(pipeline_observation_interval=0.001),
+            ),
+            state=SimpleNamespace(generate_fn_semaphore=semaphore),
+            _output=SimpleNamespace(_delegate=SimpleNamespace(_buffer=buffer, _capacity=4)),
+            _producing_groups={1: []},
+            _active_tasks={waiting},
+            _scheduler=SimpleNamespace(),
+            _producer_resumed=asyncio.Event(),
+        )
+        observation = pipeline_observer.snapshot(producer)
+        assert observation["completed_queue_groups"] == 2
+        assert observation["http_active_requests"] == observation["http_waiting_requests"] == 1
+        assert observation["producer_unfinished_samples"] is None
+        assert len(buffer) == 2 and semaphore.locked() and not waiting.done()
+        task = asyncio.create_task(pipeline_observer.observe(producer))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+        records = [json.loads(line) for line in (tmp_path / "pipeline_occupancy.jsonl").read_text().splitlines()]
+        assert records and all(r["completed_queue_groups"] == 2 for r in records)
+
+    asyncio.run(exercise())
+
+
+def test_engine_metrics_preserve_labels_and_missing_values():
+    result = pipeline_observer.engine_metrics(
+        '# HELP ignored\nsglang:num_running_reqs{engine="a"} 7\n'
+        'sglang:num_running_reqs{engine="b"} 2\nsglang:fwd_occupancy NaN\n'
+        "sglang:unrelated_metric 900\n"
+    )
+    assert [r["value"] for r in result] == [7, 2, None]
+    assert result[0]["labels"] != result[1]["labels"]
+    assert not any(r["name"] == "num_queue_reqs" for r in result)

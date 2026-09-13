@@ -26,7 +26,7 @@ from miles.rollout.submission_scheduler import make_submission_scheduler
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
-from open_instruct.miles import async_capacity
+from open_instruct.miles import async_capacity, pipeline_observer
 from open_instruct.miles.errors import GenerationInterrupted
 
 logger = logger_utils.setup_logger(__name__)
@@ -228,6 +228,10 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
 
     async def _worker_loop(self) -> None:
         """Generate continuously while retaining ownership of every child task."""
+        observers = [
+            asyncio.create_task(pipeline_observer.observe(self)),
+            asyncio.create_task(pipeline_observer.observe_engines(self, get_worker_urls)),
+        ]
         active: set[asyncio.Task[Any]] = set()
         self._active_tasks = active
         self._producer_idle.clear()
@@ -260,6 +264,9 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                     if not self._stopping:
                         await self._put_or_stop(completion)
         finally:
+            for observer in observers:
+                observer.cancel()
+            await asyncio.gather(*observers, return_exceptions=True)
             unfinished = [task for task in active if not task.done()]
             if unfinished:
                 (logger.info if self._publication_paused or self._stopping else logger.warning)(

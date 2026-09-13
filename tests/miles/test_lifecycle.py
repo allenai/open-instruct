@@ -296,3 +296,52 @@ def test_rolling_checkpoint_unblocks_groups_waiting_for_one_step_lag(monkeypatch
     assert events.index("captured") < events.index("completed-owned-group") < events.index("cursor-saved")
     assert events.count("captured") == 1
     assert events.index("cursor-saved") < events.index("model-saved") < events.index("committed")
+
+
+def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
+    deadlines = []
+    original_wait_for = asyncio.wait_for
+
+    async def wait_for(awaitable, timeout):
+        deadlines.append(timeout)
+        return await original_wait_for(awaitable, timeout)
+
+    async def done(*args, **kwargs):
+        return None
+
+    manager = SimpleNamespace(
+        core_publication_boundary=SimpleNamespace(remote=done), dispose=SimpleNamespace(remote=done)
+    )
+    learner = SimpleNamespace(update_weights=done, _broadcast=done, dispose=done)
+
+    async def create(*args):
+        return learner, None
+
+    monkeypatch.setattr(driver.asyncio, "wait_for", wait_for)
+    monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
+    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    monkeypatch.setattr(driver.placement_group, "create_training_models", create)
+    monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
+    monkeypatch.setattr(driver, "init_tracking", lambda args: None)
+    monkeypatch.setattr(driver, "finish_tracking", lambda: None)
+    monkeypatch.setattr(driver, "EvalDispatcher", lambda *args: SimpleNamespace(drain=done))
+    args = SimpleNamespace(
+        fully_async=True,
+        offload_rollout=False,
+        check_weight_update_equal=False,
+        olmo_core=CoreConfig(publication_mode="refresh", engine_drain_timeout=900, engine_update_timeout=180),
+        eval_interval=None,
+        start_rollout_id=0,
+        num_rollout=0,
+        save=str(tmp_path),
+    )
+    asyncio.run(driver.train(args))
+    assert deadlines == [180, 1080, 60, 120, 60]
+    timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
+    assert [r["stage"] for r in timings[-4:]] == [
+        "final_generation_drain",
+        "close_weight_transport",
+        "rollout_dispose",
+        "trainer_dispose",
+    ]
+    assert all(r["passed"] for r in timings)

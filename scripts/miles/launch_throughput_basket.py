@@ -20,7 +20,9 @@ def main():
     parser.add_argument("image")
     parser.add_argument("cases", nargs="+", choices=list(basket.CASES))
     parser.add_argument("--render-only", action="store_true")
-    parser.add_argument("--exclude-hostname", action="append", default=[], help="Exclude an unhealthy host from this basket only")
+    parser.add_argument(
+        "--exclude-hostname", action="append", default=[], help="Exclude an unhealthy host from this basket only"
+    )
     args = parser.parse_args()
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=basket.ROOT):
         raise RuntimeError("Commit changes before launch")
@@ -45,7 +47,9 @@ def main():
         )
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         source = "SOURCE_DATASET"
-        provenance = dict(commit=commit, base_image=args.image, archive_sha256=digest, excluded_hostnames=args.exclude_hostname)
+        provenance = dict(
+            commit=commit, base_image=args.image, archive_sha256=digest, excluded_hostnames=args.exclude_hostname
+        )
         (directory / "provenance.json").write_text(json.dumps(provenance, indent=2))
         if not args.render_only:
             name = "throughput-source-" + uuid.uuid4().hex[:12]
@@ -110,7 +114,13 @@ git -C /opt/core-rl/sources/miles apply /opt/core-rl/scripts/miles/diagnostics/p
                     task["arguments"][0] += (
                         "\npython -m scripts.miles.throughput_basket "
                         + shlex.quote(str(root))
-                        + (" --warmup 1" if case in ("dev", "tiny") else "")
+                        + (
+                            " --warmup 1"
+                            if case in ("dev", "tiny")
+                            else " --warmup 3"
+                            if case == "bridge-8t8i"
+                            else " --warmup 6"
+                        )
                         + "\n"
                     )
                 trainer_ranks = run.plan()["allocation"]["nodes"][index]["trainer_gpus"]

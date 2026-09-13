@@ -19,7 +19,24 @@ CASES = {
     "small-2t4i-c8": {"profile": "small", "concurrency": 8},
     "bridge-2t6i": {"profile": "small", "inference": 6, "capacity": 8},
     "bridge-8t8i": {"profile": "large", "inference": 8, "updates": 4},
-    "large-8t56i": {"profile": "large"},
+    "large-8t56i": {"profile": "large", "updates": 24},
+    "steady-2t6i-c8-b32": {"profile": "small", "inference": 6, "capacity": 8, "concurrency": 8, "updates": 24},
+    "steady-2t6i-c8-b128": {
+        "profile": "small",
+        "inference": 6,
+        "capacity": 8,
+        "concurrency": 8,
+        "batch": 128,
+        "updates": 24,
+    },
+    "steady-2t14i-c8-b128": {
+        "profile": "small",
+        "inference": 14,
+        "capacity": 8,
+        "concurrency": 8,
+        "batch": 128,
+        "updates": 24,
+    },
 }
 
 
@@ -48,7 +65,7 @@ def specification(case, output):
     if mechanics:
         run["training"]["save_interval"] = 2
     run["launch"]["auto_resume"] = False
-    run["launch"]["timeout"] = "2h"
+    run["launch"]["timeout"] = "2h" if mechanics else "3h"
     run["launch"]["min_runtime"] = "15m" if mechanics else "1h"
     run["launch"]["secrets"]["WANDB_API_KEY"] = "robertb_WANDB_API_KEY"
     run["tracking"].update(
@@ -65,6 +82,11 @@ def specification(case, output):
         run["inference"]["gpus"] = settings["inference"]
     if "capacity" in settings:
         run["launch"]["gpus_per_replica"] = settings["capacity"]
+    if "batch" in settings:
+        run["inference"]["global_batch_size"] = settings["batch"]
+        run["inference"]["rollout_batch_size"] = settings["batch"] // run["inference"]["samples_per_prompt"]
+    run["core"]["pipeline_observation_interval"] = 2.0
+    run["miles"]["sglang_enable_metrics"] = True
     if "submission" in settings:
         run["async"]["rollout_submission_granularity"] = settings["submission"]
     if "concurrency" in settings:
@@ -79,7 +101,7 @@ def rows(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def analyze(root, *, warmup=3):
+def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
     if warmup < 0:
         raise ValueError("warmup must be nonnegative")
     root = Path(root)
@@ -100,7 +122,9 @@ def analyze(root, *, warmup=3):
             raise ValueError(f"Missing trainer contract for rank {rank}")
         records = rows(path)
         updates = [r for r in records if r["event"] == "optimizer"]
-        if [r["step"] for r in updates] != list(range(1, expected + 1)) or any(r["optimizer_skipped"] for r in updates):
+        if [r["step"] for r in updates] != list(range(1, expected + 1)) or any(
+            r["optimizer_skipped"] for r in updates
+        ):
             raise ValueError(f"Missing or skipped optimizer updates on rank {rank}")
         contracts.append(records)
     contract = contracts[0]
@@ -119,16 +143,22 @@ def analyze(root, *, warmup=3):
     prefix = "rollout/fully_async/completed_queue/"
     if options.get("fully_async", False):
         for row in flow:
-            if not all(prefix + key in row["queue_metrics"] for key in ("dropped_response_tokens", "delivered_response_tokens")):
+            if not all(
+                prefix + key in row["queue_metrics"]
+                for key in ("dropped_response_tokens", "delivered_response_tokens")
+            ):
                 raise ValueError("Missing async queue counters; absence is not a zero discard rate")
     if seconds <= 0 or any(not math.isfinite(v) or v < 0 for values in durations.values() for v in values):
         raise ValueError("Invalid measured duration")
     dropped = sum(r["queue_metrics"].get(prefix + "dropped_response_tokens", 0) for r in chosen)
     delivered = sum(r["response_tokens"] for r in chosen)
     components = {
-        "standalone_scoring": [r["seconds"] for r in contract if r["event"] == "score_timing" and r["rollout_id"] >= warmup],
+        "standalone_scoring": [
+            r["seconds"] for r in contract if r["event"] == "score_timing" and r["rollout_id"] >= warmup
+        ],
         "forward_backward_optimizer": [
-            r["elapsed_seconds"] for r in contract
+            r["elapsed_seconds"]
+            for r in contract
             if r["event"] == "optimizer" and r.get("rollout_id", r["step"] - 1) >= warmup and "elapsed_seconds" in r
         ],
     }
@@ -137,7 +167,11 @@ def analyze(root, *, warmup=3):
         "completed_updates": expected,
         "validated_trainer_ranks": ranks,
         "training_components_rank0": {
-            name: {"count": len(values), "total_seconds": sum(values), "median_seconds": statistics.median(values) if values else None}
+            name: {
+                "count": len(values),
+                "total_seconds": sum(values),
+                "median_seconds": statistics.median(values) if values else None,
+            }
             for name, values in components.items()
         },
         "warmup_updates": warmup,
@@ -165,7 +199,8 @@ def analyze(root, *, warmup=3):
         },
         "workflow": json.loads((root / "workflow.json").read_text()),
     }
-    if result["workflow"]["status"] != "complete":
+    result["end_to_end_passed"] = result["workflow"]["status"] == "complete"
+    if not result["end_to_end_passed"] and not allow_incomplete_workflow:
         raise ValueError("Workflow did not complete")
     return result
 
