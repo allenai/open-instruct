@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import statistics
 from pathlib import Path
 
@@ -79,13 +80,16 @@ def rows(path):
 
 
 def analyze(root, *, warmup=3):
+    if warmup < 0:
+        raise ValueError("warmup must be nonnegative")
     root = Path(root)
     metrics = root / "checkpoints"
     stages = rows(metrics / "driver_timing.jsonl")
     flow = rows(metrics / "rollout_flow.jsonl")
     if any(not r["passed"] for r in stages):
         raise ValueError("Failed driver stage; do not report a successful throughput run")
-    expected = json.loads((root / "plan.json").read_text())["runtime"]["miles"]["num_rollout"]
+    options = json.loads((root / "plan.json").read_text())["runtime"]["miles"]
+    expected = options["num_rollout"]
     if [r["rollout_id"] for r in flow] != list(range(expected)):
         raise ValueError("Missing or repeated consumed collections")
     contract = rows(metrics / "training_contract_rank0.jsonl")
@@ -105,6 +109,12 @@ def analyze(root, *, warmup=3):
         raise ValueError("Incomplete warm window")
     seconds = sum(sum(v) for v in durations.values())
     prefix = "rollout/fully_async/completed_queue/"
+    if options.get("fully_async", False):
+        for row in flow:
+            if not all(prefix + key in row["queue_metrics"] for key in ("dropped_response_tokens", "delivered_response_tokens")):
+                raise ValueError("Missing async queue counters; absence is not a zero discard rate")
+    if seconds <= 0 or any(not math.isfinite(v) or v < 0 for values in durations.values() for v in values):
+        raise ValueError("Invalid measured duration")
     dropped = sum(r["queue_metrics"].get(prefix + "dropped_response_tokens", 0) for r in chosen)
     delivered = sum(r["response_tokens"] for r in chosen)
     result = {
@@ -119,6 +129,15 @@ def analyze(root, *, warmup=3):
         "discarded_response_tokens": dropped,
         "discarded_token_fraction": dropped / max(1, dropped + delivered),
         "mixed_responses": sum(r["mixed_responses"] for r in chosen),
+        "per_update": [
+            {
+                "rollout_id": row["rollout_id"],
+                "response_tokens": row["response_tokens"],
+                "mixed_responses": row["mixed_responses"],
+                **{name + "_seconds": values[index] for name, values in durations.items()},
+            }
+            for index, row in enumerate(chosen)
+        ],
         "median_seconds": {name: statistics.median(values) for name, values in durations.items()},
         "all_driver_stage_seconds": {
             name: sum(r["seconds"] for r in stages if r["stage"] == name)

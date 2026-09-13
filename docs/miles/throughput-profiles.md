@@ -40,6 +40,36 @@ combined with a new scheduling experiment.
 * The 64-GPU profile requires multi-node coordinated launch with auto-resume
   disabled until that restart topology is qualified. Checkpoints remain available.
 
+## How the limits interact
+
+| Control | What it limits | External constraint and tuning signal |
+|---|---|---|
+| Trainer GPUs / EP | Model and optimizer distribution, training time | Expert divisibility, model memory, collective bandwidth; compare training time at the same optimization batch. |
+| Inference GPUs / engine TP | Independent engines and model fit | GPU memory and interconnect; increasing TP reduces engine count at a fixed GPU budget. |
+| Producer sample budget | Unfinished generation-and-reward work | Fleet service time, grading latency and group stragglers; enough headroom to refill engines, then watch age and discarded tokens. |
+| HTTP concurrency per engine | Global generation semaphore, scaled by engine count | Too low leaves serving slots empty; too high moves waiting work into the serving system without creating GPU capacity. |
+| Running requests per engine | Requested decode batch admission | Effective token pool, recurrent-state pool and GPU memory can cap it further. Record the engine's resolved limit. |
+| Token/context and recurrent-state pools | Capacity for active contexts and cached prefixes | Model geometry, dtype, radix strategy, overlap scheduling and memory headroom. KDA state slots are not necessarily one per request. |
+| Completed-buffer factor | Whole ready groups waiting for consumption | Trainer service rate and allowed policy lag; a larger queue absorbs bursts but cannot repair a sustained rate mismatch. |
+| Collection / optimization batch | Responses collected and samples per optimizer step | Trainer divisibility, memory, desired RL statistics; changing these is an optimization change, not just a throughput tweak. |
+| Allowed policy lag | Which completed groups remain eligible | Current trainer version versus oldest sampled token version; raising it accepts more off-policy data rather than making generation faster. |
+| Publication interval | How often serving receives current weights | Collective transfer and re-prefill latency versus policy freshness; keep this cost visible. |
+| Save / eval cadence | Interruptions outside normal training cycles | Checkpoint I/O, evaluation size and draining outstanding work; compare total run time separately. |
+
+Start with model fit and the desired optimization batch, then size engine
+admission from memory. Use the topology-derived producer budget as a starting
+point. If training waits and engines have spare capacity, increase admission or
+backfill; if engines are already busy, compare more inference GPUs. If completed
+work ages out while training stays busy, reduce ahead-of-training work before
+loosening the lag limit. Report dropped tokens as well as samples: a small sample
+fraction can hide substantial wasted long-response work. Keep the length/age
+breakdowns alongside the aggregate so this tradeoff stays visible.
+
+Persistent compilation caching reduces repeat startup cost; it does not increase
+engine admission or buffer capacity. Keep it enabled for normal examples, while
+recording cold and warm timings separately. Cache-off comparisons should use
+separate run identities and private cache locations, not delete shared caches.
+
 ## Nine-case basket
 
 | Order | Case | Question |
