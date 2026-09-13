@@ -12,11 +12,14 @@ class PolicyClock:
     completed_steps: int = 0
     published_step: int = -1
     next_rollout_id: int = 0
+    snapshot_ready_step: int = -1
 
     def validate_versions(self, versions: list[int], max_lag: int) -> int:
         if not versions:
             raise ValueError("Rollouts must carry behavior policy versions")
-        if any(type(v) is not int or v < 0 or v > self.published_step for v in versions):
+        if any(
+            type(v) is not int or v < 0 or v > max(self.published_step, self.snapshot_ready_step) for v in versions
+        ):
             raise ValueError("Missing, invalid, or future behavior policy version")
         lag = self.completed_steps - min(versions)
         if lag > max_lag:
@@ -32,7 +35,11 @@ class PolicyClock:
         self.published_step = self.completed_steps
 
     def as_dict(self) -> dict[str, int]:
-        return dataclasses.asdict(self)
+        state = dataclasses.asdict(self)
+        if self.snapshot_ready_step == -1:
+            # Preserve the legacy barrier-mode checkpoint clock representation.
+            del state["snapshot_ready_step"]
+        return state
 
     @classmethod
     def from_dict(cls, state: dict[str, Any]) -> "PolicyClock":
@@ -43,6 +50,7 @@ class PolicyClock:
             clock.completed_steps < 0
             or clock.next_rollout_id < 0
             or not -1 <= clock.published_step <= clock.completed_steps
+            or not -1 <= clock.snapshot_ready_step <= clock.completed_steps
         ):
             raise ValueError("Invalid policy clock checkpoint")
         return clock

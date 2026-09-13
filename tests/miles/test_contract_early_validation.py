@@ -13,6 +13,7 @@ from torch import multiprocessing as mp
 from torch import nn
 
 from open_instruct.miles import actor
+from open_instruct.miles.config import CoreConfig
 from open_instruct.miles.state import PolicyClock
 
 
@@ -36,7 +37,7 @@ def _worker(rank, rendezvous, fault):
         worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
         worker.args = SimpleNamespace(
             global_batch_size=4,
-            olmo_core=SimpleNamespace(max_sequence_length=16, max_policy_lag=0),
+            olmo_core=CoreConfig(max_sequence_length=16, max_policy_lag=0),
             use_rollout_routing_replay=fault != "schedule",
         )
         worker.clock = PolicyClock()

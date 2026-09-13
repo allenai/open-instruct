@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "injection": {
+    "engine": "1",
+    "version": 7,
+    "time": 1789275122.6965978
+  },
+  "terminal_seconds": 116.33974647521973,
+  "run_root": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-failure-20260913-a"
+}

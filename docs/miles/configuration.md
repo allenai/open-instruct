@@ -213,6 +213,10 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.replay_diagnostics | &lt;class &#x27;bool&#x27;&gt; | false | Retain expert-ID replay diagnostics; does not enable replay itself. |
 | core.stream_moe_export | &lt;class &#x27;bool&#x27;&gt; | true | Stream MoE tensors during HF-layout publication to reduce export memory. |
 | core.weight_sync_mode | &lt;class &#x27;str&#x27;&gt; | &quot;flattened&quot; | flattened batches tensor transfers; per_tensor is the rollback/reference transport. |
+| core.publication_mode | &lt;class &#x27;str&#x27;&gt; | &quot;barrier&quot; | barrier (default) synchronously publishes the fleet; engine_drain is experimental independent TP1 publication for disaggregated async MoE. |
+| core.engine_drain_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds to wait for already-reserved engine requests to finish; expiry fails the run without reopening the engine. |
+| core.engine_update_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run. |
+| core.snapshot_capacity | &lt;class &#x27;int&#x27;&gt; | 2 | Maximum retained immutable host snapshots during rolling publication; each snapshot holds a full BF16 export in the Ray object store. |
 | core.row_specialization | &lt;class &#x27;str&#x27;&gt; | &quot;static&quot; | static specializes no-gradient SwiGLU on capacity; dynamic avoids capacity-specific compilation. Independent of arithmetic flags. |
 | core.compiler_cache | &lt;class &#x27;bool&#x27;&gt; | true | Enable persistent compiler-cache lifecycle. |
 | core.compiler_cache_root | str &#124; None | null | Shared cache root; null selects maintained default. WEKA custom paths require a TTL component. |

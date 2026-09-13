@@ -46,9 +46,11 @@ def load_rollout(path):
     torch = importlib.import_module("torch")
     numpy = importlib.import_module("numpy")
     multiarray = importlib.import_module("numpy._core.multiarray")
-    with torch.serialization.safe_globals(
-        [multiarray._reconstruct, numpy.ndarray, numpy.dtype, type(numpy.dtype("int32"))]
-    ):
+    allowed = [multiarray._reconstruct, numpy.ndarray, numpy.dtype, type(numpy.dtype("int32"))]
+    # safe_globals removes its additions on exit even if another caller had
+    # already allowed them. Preserve the process's existing allowlist.
+    existing = set(torch.serialization.get_safe_globals())
+    with torch.serialization.safe_globals([item for item in allowed if item not in existing]):
         return torch.load(path, map_location="cpu", weights_only=True)
 
 

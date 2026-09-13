@@ -1,0 +1,302 @@
+[
+  {
+    "run_root": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-slow-resume-20260913-a",
+    "completed_steps": [
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "trainer_ranks": 2,
+    "consumed_lag_rank_version_counts": {
+      "0": 2,
+      "1": 4,
+      "2": 6
+    },
+    "trained_responses": 384,
+    "response_tokens": 861584,
+    "active_response_tokens": 861584,
+    "mixed_reward_groups": 27,
+    "mean_training_reward": 0.7395833333333334,
+    "resumed_from": {
+      "checkpoint": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-slow-20260913-a/checkpoints/core/rollout_0000005",
+      "completed_steps": 6,
+      "router_master_changes": {
+        "blocks.1.routed_experts_router.weight": {
+          "changed_elements": 655250,
+          "max_abs_change": 6.00423663854599e-06
+        },
+        "blocks.2.routed_experts_router.weight": {
+          "changed_elements": 655230,
+          "max_abs_change": 6.016343832015991e-06
+        },
+        "blocks.3.routed_experts_router.weight": {
+          "changed_elements": 655230,
+          "max_abs_change": 6.00423663854599e-06
+        },
+        "blocks.4.routed_experts_router.weight": {
+          "changed_elements": 655245,
+          "max_abs_change": 6.012618541717529e-06
+        },
+        "blocks.5.routed_experts_router.weight": {
+          "changed_elements": 655204,
+          "max_abs_change": 6.010755896568298e-06
+        },
+        "blocks.6.routed_experts_router.weight": {
+          "changed_elements": 655227,
+          "max_abs_change": 6.020069122314453e-06
+        },
+        "blocks.7.routed_experts_router.weight": {
+          "changed_elements": 655206,
+          "max_abs_change": 6.000511348247528e-06
+        },
+        "blocks.8.routed_experts_router.weight": {
+          "changed_elements": 655229,
+          "max_abs_change": 6.016343832015991e-06
+        },
+        "blocks.9.routed_experts_router.weight": {
+          "changed_elements": 655243,
+          "max_abs_change": 6.029382348060608e-06
+        },
+        "blocks.10.routed_experts_router.weight": {
+          "changed_elements": 655251,
+          "max_abs_change": 6.027519702911377e-06
+        },
+        "blocks.11.routed_experts_router.weight": {
+          "changed_elements": 655236,
+          "max_abs_change": 6.027519702911377e-06
+        },
+        "blocks.12.routed_experts_router.weight": {
+          "changed_elements": 655243,
+          "max_abs_change": 6.031244993209839e-06
+        },
+        "blocks.13.routed_experts_router.weight": {
+          "changed_elements": 655207,
+          "max_abs_change": 6.016343832015991e-06
+        },
+        "blocks.14.routed_experts_router.weight": {
+          "changed_elements": 655223,
+          "max_abs_change": 6.032176315784454e-06
+        },
+        "blocks.15.routed_experts_router.weight": {
+          "changed_elements": 655245,
+          "max_abs_change": 6.027519702911377e-06
+        },
+        "blocks.16.routed_experts_router.weight": {
+          "changed_elements": 655224,
+          "max_abs_change": 6.0442835092544556e-06
+        },
+        "blocks.17.routed_experts_router.weight": {
+          "changed_elements": 655230,
+          "max_abs_change": 6.034970283508301e-06
+        },
+        "blocks.18.routed_experts_router.weight": {
+          "changed_elements": 655254,
+          "max_abs_change": 6.027519702911377e-06
+        },
+        "blocks.19.routed_experts_router.weight": {
+          "changed_elements": 655250,
+          "max_abs_change": 6.042420864105225e-06
+        }
+      }
+    }
+  },
+  {
+    "run_root": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-lag1-resume-20260913-a",
+    "completed_steps": [
+      7,
+      8
+    ],
+    "trainer_ranks": 2,
+    "consumed_lag_rank_version_counts": {
+      "0": 2,
+      "1": 2
+    },
+    "trained_responses": 128,
+    "response_tokens": 253312,
+    "active_response_tokens": 253312,
+    "mixed_reward_groups": 8,
+    "mean_training_reward": 0.8046875,
+    "resumed_from": {
+      "checkpoint": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-slow-20260913-a/checkpoints/core/rollout_0000005",
+      "completed_steps": 6,
+      "router_master_changes": {
+        "blocks.1.routed_experts_router.weight": {
+          "changed_elements": 655089,
+          "max_abs_change": 2.0079314708709717e-06
+        },
+        "blocks.2.routed_experts_router.weight": {
+          "changed_elements": 655076,
+          "max_abs_change": 2.000480890274048e-06
+        },
+        "blocks.3.routed_experts_router.weight": {
+          "changed_elements": 655114,
+          "max_abs_change": 2.000480890274048e-06
+        },
+        "blocks.4.routed_experts_router.weight": {
+          "changed_elements": 655031,
+          "max_abs_change": 2.0079314708709717e-06
+        },
+        "blocks.5.routed_experts_router.weight": {
+          "changed_elements": 654994,
+          "max_abs_change": 2.0042061805725098e-06
+        },
+        "blocks.6.routed_experts_router.weight": {
+          "changed_elements": 654982,
+          "max_abs_change": 2.0079314708709717e-06
+        },
+        "blocks.7.routed_experts_router.weight": {
+          "changed_elements": 654993,
+          "max_abs_change": 2.002343535423279e-06
+        },
+        "blocks.8.routed_experts_router.weight": {
+          "changed_elements": 655017,
+          "max_abs_change": 2.000480890274048e-06
+        },
+        "blocks.9.routed_experts_router.weight": {
+          "changed_elements": 655064,
+          "max_abs_change": 2.0097941160202026e-06
+        },
+        "blocks.10.routed_experts_router.weight": {
+          "changed_elements": 655066,
+          "max_abs_change": 2.0116567611694336e-06
+        },
+        "blocks.11.routed_experts_router.weight": {
+          "changed_elements": 655056,
+          "max_abs_change": 2.0079314708709717e-06
+        },
+        "blocks.12.routed_experts_router.weight": {
+          "changed_elements": 655074,
+          "max_abs_change": 2.0042061805725098e-06
+        },
+        "blocks.13.routed_experts_router.weight": {
+          "changed_elements": 654999,
+          "max_abs_change": 2.0116567611694336e-06
+        },
+        "blocks.14.routed_experts_router.weight": {
+          "changed_elements": 655011,
+          "max_abs_change": 2.0060688257217407e-06
+        },
+        "blocks.15.routed_experts_router.weight": {
+          "changed_elements": 655088,
+          "max_abs_change": 2.0079314708709717e-06
+        },
+        "blocks.16.routed_experts_router.weight": {
+          "changed_elements": 655045,
+          "max_abs_change": 2.0079314708709717e-06
+        },
+        "blocks.17.routed_experts_router.weight": {
+          "changed_elements": 655059,
+          "max_abs_change": 2.0097941160202026e-06
+        },
+        "blocks.18.routed_experts_router.weight": {
+          "changed_elements": 655046,
+          "max_abs_change": 2.0079314708709717e-06
+        },
+        "blocks.19.routed_experts_router.weight": {
+          "changed_elements": 655055,
+          "max_abs_change": 2.0079314708709717e-06
+        }
+      }
+    }
+  },
+  {
+    "run_root": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-pinned-resume-20260913-a",
+    "completed_steps": [
+      7
+    ],
+    "trainer_ranks": 2,
+    "consumed_lag_rank_version_counts": {
+      "0": 2
+    },
+    "trained_responses": 64,
+    "response_tokens": 101742,
+    "active_response_tokens": 101742,
+    "mixed_reward_groups": 2,
+    "mean_training_reward": 0.859375,
+    "resumed_from": {
+      "checkpoint": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-slow-20260913-a/checkpoints/core/rollout_0000005",
+      "completed_steps": 6,
+      "router_master_changes": {
+        "blocks.1.routed_experts_router.weight": {
+          "changed_elements": 654794,
+          "max_abs_change": 1.0030344128608704e-06
+        },
+        "blocks.2.routed_experts_router.weight": {
+          "changed_elements": 654790,
+          "max_abs_change": 1.000240445137024e-06
+        },
+        "blocks.3.routed_experts_router.weight": {
+          "changed_elements": 654835,
+          "max_abs_change": 1.002743374556303e-06
+        },
+        "blocks.4.routed_experts_router.weight": {
+          "changed_elements": 654761,
+          "max_abs_change": 1.0030344128608704e-06
+        },
+        "blocks.5.routed_experts_router.weight": {
+          "changed_elements": 654619,
+          "max_abs_change": 1.0021030902862549e-06
+        },
+        "blocks.6.routed_experts_router.weight": {
+          "changed_elements": 654658,
+          "max_abs_change": 1.0058283805847168e-06
+        },
+        "blocks.7.routed_experts_router.weight": {
+          "changed_elements": 654658,
+          "max_abs_change": 1.0021030902862549e-06
+        },
+        "blocks.8.routed_experts_router.weight": {
+          "changed_elements": 654740,
+          "max_abs_change": 1.0021030902862549e-06
+        },
+        "blocks.9.routed_experts_router.weight": {
+          "changed_elements": 654767,
+          "max_abs_change": 1.0058283805847168e-06
+        },
+        "blocks.10.routed_experts_router.weight": {
+          "changed_elements": 654807,
+          "max_abs_change": 1.0058283805847168e-06
+        },
+        "blocks.11.routed_experts_router.weight": {
+          "changed_elements": 654766,
+          "max_abs_change": 1.0030344128608704e-06
+        },
+        "blocks.12.routed_experts_router.weight": {
+          "changed_elements": 654775,
+          "max_abs_change": 1.003500074148178e-06
+        },
+        "blocks.13.routed_experts_router.weight": {
+          "changed_elements": 654649,
+          "max_abs_change": 1.0058283805847168e-06
+        },
+        "blocks.14.routed_experts_router.weight": {
+          "changed_elements": 654681,
+          "max_abs_change": 1.002626959234476e-06
+        },
+        "blocks.15.routed_experts_router.weight": {
+          "changed_elements": 654819,
+          "max_abs_change": 1.0039657354354858e-06
+        },
+        "blocks.16.routed_experts_router.weight": {
+          "changed_elements": 654713,
+          "max_abs_change": 1.0058283805847168e-06
+        },
+        "blocks.17.routed_experts_router.weight": {
+          "changed_elements": 654734,
+          "max_abs_change": 1.0039657354354858e-06
+        },
+        "blocks.18.routed_experts_router.weight": {
+          "changed_elements": 654824,
+          "max_abs_change": 1.0039657354354858e-06
+        },
+        "blocks.19.routed_experts_router.weight": {
+          "changed_elements": 654770,
+          "max_abs_change": 1.0058283805847168e-06
+        }
+      }
+    }
+  }
+]

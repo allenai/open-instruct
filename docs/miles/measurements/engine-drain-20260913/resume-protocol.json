@@ -1,0 +1,75 @@
+{
+  "completed_responses": 912,
+  "delivered_bytes": 444340635648,
+  "event_counts": {
+    "decode_finished": 912,
+    "delivery_measured": 12,
+    "drain_finished": 12,
+    "drain_started": 12,
+    "engine_reopened": 12,
+    "group_graded": 114,
+    "group_reserved": 114,
+    "lifecycle_quiesced": 6,
+    "qualification_delay_finished": 1,
+    "qualification_delay_started": 1,
+    "qualification_hold_reserved": 1,
+    "request_sent": 912,
+    "snapshot_ready": 6,
+    "snapshot_released": 6,
+    "update_started": 12
+  },
+  "fast_reopened_while_older_peer_drained": [
+    {
+      "engine": "0",
+      "older_draining_peers": [
+        "1"
+      ],
+      "time": 1789275185.857248,
+      "version": 8
+    }
+  ],
+  "generated_tokens_observed": 2014686,
+  "mixed_groups": [],
+  "new_version_responses_completed_while_peer_draining": 0,
+  "optimizer_completions_during_publication": [
+    {
+      "active": [
+        [
+          "1",
+          "draining"
+        ]
+      ],
+      "completed_unix": 1789275290.203567,
+      "rollout_id": 8
+    }
+  ],
+  "ownership_errors": [],
+  "peak_retained_snapshot_bytes": 37028386304,
+  "phase_seconds": {
+    "delivery": {
+      "count": 12,
+      "max": 6.298081057611853,
+      "mean": 5.698552563941727
+    },
+    "draining": {
+      "count": 12,
+      "max": 125.12849855422974,
+      "mean": 10.429407477378845
+    },
+    "snapshot_capture": {
+      "count": 6,
+      "max": 90.91719043534249,
+      "mean": 74.07596998134007
+    },
+    "updating": {
+      "count": 12,
+      "max": 6.312902212142944,
+      "mean": 5.733774205048879
+    }
+  },
+  "requests_without_terminal_decode": [],
+  "reserved_requests": 912,
+  "scope": "protocol timeline only; numerical weights, learning, lag, and resume need separate audits",
+  "unreleased_snapshots": [],
+  "warning": "Phase durations overlap; do not sum them as elapsed wall time. Unknown HTTP outcomes have unknown discarded tokens."
+}

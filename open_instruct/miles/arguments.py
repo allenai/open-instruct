@@ -75,6 +75,22 @@ def load_core_args(extra_args_provider):
         "debug_rollout_only",
         "update_weight_transfer_mode",
         "colocated_weight_update_pipeline_depth",
+        "rollout_num_gpus_per_engine",
+        "partial_rollout",
+        "use_fault_tolerance",
+        "rollout_external",
+        "eval_num_gpus",
+        "sglang_dp_size",
+        "sglang_ep_size",
+        "sglang_pp_size",
+        "router_pd_disaggregation",
+        "prefill_num_servers",
+        "sglang_disaggregation_mode",
+        "sglang_config",
+        "load_debug_rollout_data",
+        "custom_generate_function_path",
+        "rollout_sample_filter_path",
+        "dynamic_sampling_filter_path",
     ):
         value = getattr(args, key, None)
         if value is not None:
