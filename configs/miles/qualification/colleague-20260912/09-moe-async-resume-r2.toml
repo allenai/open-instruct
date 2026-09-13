@@ -1,13 +1,13 @@
-# Case 05: natural 4K–8K prompts plus long decoding, mixed chunks, packing/replay.
+# Case 09: packed/replayed async checkpoint and fresh-process restore.
 schema_version = 1
-name = "colleague-05-long-context-20260913"
+name = "colleague-09-async-resume-20260913-r2"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/colleague-05-long-context-20260913"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/colleague-09-async-resume-20260913-r2"
 export_hf = false
 
 [launch]
@@ -17,10 +17,10 @@ cluster = "ai2/holmes"
 priority = "urgent"
 min_runtime = "1h"
 timeout = "2h"
-# Multi-node runs currently require auto_resume = false; resume by relaunching
+# Multi-node runs currently require auto_resume = true; resume by relaunching
 # with the same output root once a checkpoint exists.
-auto_resume = false
-gpus_per_replica = 4
+auto_resume = true
+gpus_per_replica = 3
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
@@ -30,20 +30,22 @@ mount_path = "/weka/oe-training-default"
 weka = "oe-adapt-default"
 mount_path = "/weka/oe-adapt-default"
 
-# Single-node bridge networking: use NCCL interface autodetection.
+# Single-node bridge networking: let NCCL select a visible interface.
+# The physical ib selector belongs to host-networked multi-node/judge jobs.
 
 [data]
-# Natural long prompts selected by scripts/miles/prepare_long_context.py.
-prompt_data = "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/train.jsonl"
-eval_prompt_data = ["mixed", "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/eval.jsonl"]
-reward_config = "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/verifiers.json"
+# Immutable math/IF/code Dolci mixture from scripts/miles/prepare_mixed_cache_exercise.py.
+prompt_data = "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/train.jsonl"
+eval_prompt_data = ["mixed", "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/eval.jsonl"]
+reward_config = "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/verifiers.json"
 shuffle = false
 
 [training]
 num_rollouts = 4
 skip_eval_before_train = false
-eval_interval = 4
-save_checkpoints = false
+eval_interval = 2
+save_checkpoints = true
+save_interval = 1
 
 [trainer]
 # Small EP2 trainer, with a separate TP1 engine.
@@ -52,7 +54,7 @@ trainer_num_nodes = 1
 expert_parallel_size = 2
 micro_batch_size = 1
 sequence_packing = true
-packing_max_tokens = 16384
+packing_max_tokens = 6144
 activation_recompute = true
 trainer_flash_attention_version = 4
 
@@ -61,15 +63,15 @@ placement_mode = "disaggregated"
 # Requested total TP1 engine GPUs, independently of trainer EP.
 gpus = 1
 rollout_tensor_parallel_size = 1
-# Four prompts x four responses, including natural long inputs.
-rollout_batch_size = 4
-samples_per_prompt = 4
-global_batch_size = 16
-max_response_length = 8192
-max_context_length = 16384
-sglang_server_concurrency = 16
-sglang_max_running_requests = 16
-sglang_max_total_tokens = 262144
+# Eight prompts x eight responses, one optimizer update per collection.
+rollout_batch_size = 8
+samples_per_prompt = 8
+global_batch_size = 64
+max_response_length = 4096
+max_context_length = 6144
+sglang_server_concurrency = 64
+sglang_max_running_requests = 64
+sglang_max_total_tokens = 524288
 sglang_max_mamba_cache_size = 128
 sglang_mem_fraction_static = 0.6
 radix_cache = false
@@ -122,17 +124,18 @@ expert_publication = "fused"
 scoring_check_interval = 20
 
 [miles]
-sglang_enable_mixed_chunk = true
-sglang_chunked_prefill_size = 4096
+# Two fresh processes: first stops after updates 1–2; identical relaunch restores
+# the saved trainer/optimizer/cursor and completes updates 3–4.
+debug_exit_after_rollout = 2
 lr_decay_iters = 4
 # Match the TP1 pool's aggregate 64-request admission limit; independent of
 # the 64-response optimizer batch and the completed-output buffer capacity.
-async_max_concurrent_samples = 32
+async_max_concurrent_samples = 64
 use_rollout_routing_replay = true
 use_miles_router = true
 rollout_temperature = 1.0
 rollout_seed = 17
-rollout_max_prompt_len = 8192
+rollout_max_prompt_len = 2048
 seed = 17
 disable_grpo_std_normalization = true
 

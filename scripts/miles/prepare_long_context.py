@@ -25,23 +25,28 @@ def aligned(value):
     return value if isinstance(value, list) else [value]
 
 
-def canonical(source, index, tokenizer):
+def canonical(source, index, tokenizer, dataset=DATASET, revision=REVISION):
     names = aligned(source.get("verifier_source") or source.get("dataset"))
     targets = aligned(source["ground_truth"])
     if len(names) != 1 or len(targets) != 1 or names[0] not in ("math", "ifeval", "code", "code_stdio"):
         return None
-    prompt = source["prompt"].strip()
-    if not prompt.lower().startswith("user:"):
-        raise ValueError("Expected Dolci user:-prefixed prompt")
-    content = prompt.split(":", 1)[1].strip()
-    rendered = run_data._render([{"role": "user", "content": content}], tokenizer, tokenizer.chat_template)
+    if source.get("messages"):
+        messages = run_data._messages(source, strip_answer=True)
+        content = "\n".join(m["content"] for m in messages)
+    else:
+        prompt = source["prompt"].strip()
+        if not prompt.lower().startswith("user:"):
+            raise ValueError("Expected Dolci user:-prefixed prompt")
+        content = prompt.split(":", 1)[1].strip()
+        messages = [{"role": "user", "content": content}]
+    rendered = run_data._render(messages, tokenizer, tokenizer.chat_template)
     identity = hashlib.sha256(" ".join(content.split()).encode()).hexdigest()
     row = {
         "input": rendered,
         "label": source["ground_truth"],
         "metadata": {
             "prepared_sample_id": identity,
-            "source": {"dataset": DATASET, "revision": REVISION, "index": index, "custom_id": source.get("custom_id")},
+            "source": {"dataset": dataset, "revision": revision, "index": index, "custom_id": source.get("custom_id")},
             "query": content,
             "verifiers": [{"name": names[0], "target": targets[0], "weight": 1.0}],
         },
@@ -84,6 +89,34 @@ def prepare(model, output):
                 selected[kind].append(row)
         if all(len(v) == 10 for v in selected.values()):
             break
+    extra_source = {
+        "dataset": "hamishivi/code_rlvr_mixture_dpo",
+        "revision": "0c37776831a2e956935bcabafa3915bcdf353a30",
+    }
+    if len(selected["long"]) < 10:
+        print("Dolci has no sufficient long-input coverage; scanning pinned Olmo 3 code mixture", flush=True)
+        extra = load_dataset(
+            extra_source["dataset"],
+            revision=extra_source["revision"],
+            split="train",
+            cache_dir="/weka/oe-training-default/robertb/olmo-miles/dataset-cache/huggingface/datasets",
+        )
+        for index, source in enumerate(extra):
+            result = canonical(source, index, tokenizer, **extra_source)
+            if result is None:
+                continue
+            row, length = result
+            key = row["metadata"]["prepared_sample_id"]
+            if key in seen:
+                continue
+            seen.add(key)
+            counts["code_mixture_scanned"] += 1
+            if 4096 < length <= 8192:
+                row["metadata"]["readiness_length_class"] = "long"
+                selected["long"].append(row)
+                counts["code_mixture_long"] += 1
+            if len(selected["long"]) == 10:
+                break
     if any(len(v) != 10 for v in selected.values()):
         raise ValueError(f"Insufficient natural long/short fixtures: {dict(counts)}")
     registry = {name: {"factory": factory} for name, factory in run_data.FACTORIES.items()}
@@ -109,6 +142,7 @@ def prepare(model, output):
         "revision": REVISION,
         "model": str(model),
         "source_rows": len(rows),
+        "additional_source": extra_source,
         "scanned_counts": dict(counts),
         "lengths": {
             split: [
