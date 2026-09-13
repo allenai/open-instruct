@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import torch
-from sglang.srt.managers.schedule_batch import Req
+from sglang.srt.managers import schedule_batch
 
 ROOT = Path(os.environ.get("POLICY_REFRESH_TRACE", "/output/trace"))
 CURRENT = None
@@ -15,9 +15,10 @@ CURRENT = None
 def install(scheduler_class):
     """Record exact pre-retraction behavior before the stock code clears routes."""
     old_pause = scheduler_class.pause_generation
-    old_reset = Req.reset_for_retract
+    old_release = schedule_batch.release_req
 
-    def reset(req):
+    def release(**kwargs):
+        req = kwargs["req"]
         if CURRENT is not None and req.output_ids:
             started = time.perf_counter()
             CURRENT.batch_result_processor._maybe_collect_routed_experts(req)
@@ -36,7 +37,7 @@ def install(scheduler_class):
                 "instrumentation_seconds": time.perf_counter() - started,
             }
             (ROOT / f"{stem}.json").write_text(json.dumps(record))
-        return old_reset(req)
+        return old_release(**kwargs)
 
     def pause(self, request):
         global CURRENT
@@ -46,5 +47,5 @@ def install(scheduler_class):
         finally:
             CURRENT = None
 
-    Req.reset_for_retract = reset
+    schedule_batch.release_req = release
     scheduler_class.pause_generation = pause
