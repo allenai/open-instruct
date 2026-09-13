@@ -1,6 +1,6 @@
-# Candidate full-SFT B300 profile: 8 trainers (EP8), 56 TP1 engines.
-# Experimental refresh path; see docs/miles/throughput-profiles.md for qualification.
-# Ratios are provisional until the configuration basket completes.
+# Measured full-SFT B300 starting point: one EP8 trainer node + eight TP1 engines.
+# Sixteen GPUs kept completed-buffer waiting near zero in qualification.
+# See docs/miles/throughput-profiles.md for workload and lifecycle limits.
 schema_version = 1
 name = "large"
 
@@ -53,7 +53,7 @@ trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 56
+gpus = 8
 rollout_tensor_parallel_size = 1
 rollout_batch_size = 64
 samples_per_prompt = 4
@@ -67,7 +67,7 @@ sglang_max_mamba_cache_size = 128
 sglang_mem_fraction_static = 0.6
 radix_cache = true
 mamba_radix_cache_strategy = "extra_buffer"
-sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_backend_decode = "full"
 sglang_cuda_graph_max_bs_decode = 16
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_sampling_backend = "pytorch"
@@ -98,11 +98,13 @@ wandb_group = "core-workflow-async"
 row_specialization = "dynamic"
 
 [core]
-max_train_rollout_logprob_abs_diff = 0.05
+# Async score differences include policy age; establish a workload-specific gate if needed.
 publication_mode = "refresh"
 refresh_request_timeout = 1800.0
 engine_drain_timeout = 900.0
 scoring_pass_required = true
+pipeline_observation_interval = 2.0
+replay_diagnostics = false # Qualification enabled this extra audit.
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001
 stream_moe_export = true
@@ -111,6 +113,7 @@ expert_publication = "per_expert"
 scoring_check_interval = 50
 
 [miles]
+sglang_enable_metrics = true
 use_rollout_routing_replay = true
 use_miles_router = true
 sglang_chunked_prefill_size = 8192

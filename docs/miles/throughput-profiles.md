@@ -3,7 +3,7 @@
 Use the trainer size and **desired optimization batch** to choose a starting
 profile, then provision inference to keep completed-group waiting near zero.
 The September 13 exercise found that full decode CUDA graphs mattered more than
-adding serving GPUs. For the measured EP2/batch-128 configuration, six inference
+adding serving GPUs. For the measured EP2/batch-128 configuration, four inference
 GPUs kept the trainer supplied with no completed-queue drops.
 
 These recommendations apply to the existing **18.5B-total full-SFT KDA/latent MoE**,
@@ -19,8 +19,8 @@ and the [chronological campaign log](measurements/throughput-campaign-20260913.m
 |---|---:|---:|---|
 | [dev](../../configs/miles/examples/dev.toml) | 1 shared | 8 | Tiny-model GSM8K mechanics. Four updates and saves passed. |
 | [tiny](../../configs/miles/examples/tiny.toml) | 1 / 1 | 8 | Tiny-model disaggregated mechanics. Four updates and saves passed. |
-| [small](../../configs/miles/examples/small.toml) | 2 / 6 | 128 | Measured full-model throughput starting point. |
-| [large](../../configs/miles/examples/large.toml) | Qualification in progress | 256 | Eight-trainer recommendation awaits the completed qualification. |
+| [small](../../configs/miles/examples/small.toml) | 2 / 4 | 128 | Measured full-model throughput starting point. |
+| [large](../../configs/miles/examples/large.toml) | 8 / 8 | 256 | Measured two-node throughput starting point; no need to begin at 64 GPUs. |
 
 Dev/tiny use a random small MoE fixture in qualification. They do not establish
 that the full-SFT model and optimizer fit on one trainer GPU, or measure GSM8K
@@ -36,7 +36,7 @@ is an RL configuration change and should be evaluated as such.
 ## Settings behind the recommendation
 
 * Enable **full decode CUDA graphs** through the configured request admission;
-  keep prefill graphs disabled for this qualified refresh path. The six-engine
+  keep prefill graphs disabled for this qualified refresh path. The four-engine
   example uses eight HTTP/running slots per engine and capture through batch eight.
 * Keep radix caching with the `extra_buffer` KDA strategy, a 131072-token pool,
   128 recurrent-state slots, and static memory fraction 0.6. These are requested
@@ -102,7 +102,7 @@ request slots while showing much lower device activity and useful throughput.
 5. Confirm all trainer ranks completed the intended optimizer sequence and the
    workflow shut down successfully before recording a passing qualification.
 
-The observed two-trainer training times generally settled by updates four to six,
+The observed two-trainer and eight-trainer training times generally settled by updates four to six,
 with earlier outliers and cold first steps lasting several minutes. This is a
 **timing-based** warmup criterion, not proof that no further kernel compilation
 can occur. The separate compiler-cache tests cover cache reuse; this topology

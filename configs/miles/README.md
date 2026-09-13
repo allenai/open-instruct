@@ -5,6 +5,11 @@ Start with the [researcher workflow](../../docs/miles/workflow.md) and the
 for model, data, trainer, inference, objective, tracking and launch. The profiles
 below remain the low-level `[core]` / `[miles]` equivalents.
 
+For the measured 1-, 2- and 8-GPU trainer family, use the
+[throughput starting profiles](../../docs/miles/throughput-profiles.md). The older
+low-level recipes below have different batch, packing and publication choices;
+they are not interchangeable throughput baselines.
+
 
 Use these standalone TOMLs with `python -m open_instruct.miles plan`, `validate`,
 and `train`. They describe runtime settings; allocation, mounts and credentials

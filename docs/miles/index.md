@@ -24,7 +24,7 @@ OLMo-core and serves through SGLang. The existing `grpo.py` Core/vLLM and
 | [Configuration reference](configuration.md) | Looking up fields, defaults, aliases, restrictions and overrides |
 | [Native option appendix](native-options.md) | Looking up an advanced MILES/SGLang flag or its original help |
 | [Models and checkpoints](models-and-checkpoints.md) | Selecting a supported checkpoint, converting, saving, resuming or exporting |
-| [Throughput profile candidates](throughput-profiles.md) | Choosing dev/tiny/small/large topology candidates and following their qualification |
+| [Throughput starting profiles](throughput-profiles.md) | Choosing a measured trainer/inference allocation and understanding queues, waste and warmup |
 | [Async queues and discard metrics](async-pipeline.md) | Sizing producer and completed buffers, tracing waits, and measuring discarded work |
 | [Topology and capacity](topology.md) | Choosing GPU placement, async scheduling, batch geometry and serving capacity |
 | [Data and evaluation](data-and-evaluation.md) | Selecting tasks, importing mixtures and retaining held-out generations |

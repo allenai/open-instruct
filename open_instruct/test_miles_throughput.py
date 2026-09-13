@@ -334,3 +334,14 @@ def test_graph_followup_changes_only_producer_budget_and_identity():
     baseline.pop("name")
     bounded.pop("name")
     assert bounded == baseline
+
+
+def test_hardware_roles_follow_observed_ips_not_replica_order(tmp_path):
+    cluster = tmp_path / "cluster" / "attempt"
+    cluster.mkdir(parents=True)
+    nodes = [dict(trainer_gpus=8, rollout_gpus=0), dict(trainer_gpus=0, rollout_gpus=8)]
+    layout = dict(replicas=2, nodes=nodes)
+    for rank, address in enumerate(["10.0.0.20", "10.0.0.3"]):
+        (cluster / f"node-{rank}.json").write_text(json.dumps(dict(rank=rank, address=address)))
+        (cluster / f"placement-{rank}.json").write_text(json.dumps(dict(address=address, layout=layout)))
+    assert throughput_occupancy.node_roles(tmp_path) == {"0": nodes[1], "1": nodes[0]}

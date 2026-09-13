@@ -5,6 +5,10 @@ logging and allocation together. The section names follow `olmo-miles` examples;
 the resolved training backend here is OLMo-core. Existing `[core]` / `[miles]`
 TOMLs and the `RunConfig` Python interface remain available for low-level work.
 
+For measured 1-, 2- and 8-GPU trainer starting points, see the
+[throughput profiles](throughput-profiles.md). The examples below are additional
+recipes with different packing, batch and publication choices.
+
 Start from one of the [examples](../../configs/miles/examples):
 
 | File | Purpose |

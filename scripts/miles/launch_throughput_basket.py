@@ -127,7 +127,9 @@ git -C /opt/core-rl/sources/miles apply /opt/core-rl/scripts/miles/diagnostics/p
                         )
                         + "\n"
                     )
-                trainer_ranks = run.plan()["allocation"]["nodes"][index]["trainer_gpus"]
+                # Roles are assigned by runtime IP order, not Beaker replica index.
+                # Any replica may become the trainer and needs its host-memory reservation.
+                trainer_ranks = max(node["trainer_gpus"] for node in run.plan()["allocation"]["nodes"])
                 task["resources"]["memory"] = (
                     "64 GiB" if case in ("dev", "tiny") else f"{max(256, 64 + 80 * trainer_ranks)} GiB"
                 )

@@ -13,6 +13,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib import ticker
 
 matplotlib.use("Agg")
 COLORS = {"generation_wait": "#e5a545", "training": "#397f9d", "publication": "#7c6ba6"}
@@ -22,10 +23,14 @@ def read_rows(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def save(fig, output, name):
+def save(fig, output, name, *, close=True):
     for extension in ("png", "svg"):
-        fig.savefig(output / f"{name}.{extension}", dpi=160, bbox_inches="tight")
-    plt.close(fig)
+        path = output / f"{name}.{extension}"
+        fig.savefig(path, dpi=160, bbox_inches="tight")
+        if extension == "svg":
+            path.write_text("\n".join(line.rstrip() for line in path.read_text().splitlines()) + "\n")
+    if close:
+        plt.close(fig)
 
 
 def comparisons(data, output):
@@ -67,6 +72,8 @@ def comparisons(data, output):
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(axis="x", alpha=0.2)
         ax.set_axisbelow(True)
+    for ax in axes[1:]:
+        ax.tick_params(axis="y", labelleft=False)
     fig.suptitle("Measured warm windows • generation overlaps training • lifecycle qualification listed separately")
     save(fig, output, "cycle-comparison")
 
@@ -193,6 +200,14 @@ def observed_steps(points, *, max_hold_minutes=10 / 60):
     return [p[0] for p in result], [p[1] for p in result]
 
 
+def warm_axis(axis, start, end):
+    ticks = ticker.MaxNLocator(nbins=8).tick_values(0, end - start)
+    ticks = ticks[(ticks >= 0) & (ticks <= end - start)]
+    axis.set_xticks(start + ticks, [f"{value:g}" for value in ticks])
+    axis.set_xlim(start, end)
+    axis.set_xlabel("Minutes into the measured warm window")
+
+
 def occupancy(root, output, name):
     stages = read_rows(root / "checkpoints/driver_timing.jsonl")
     producer = read_rows(root / "checkpoints/pipeline_occupancy.jsonl")
@@ -204,7 +219,10 @@ def occupancy(root, output, name):
     fig, axes = plt.subplots(5, 1, figsize=(13, 12), sharex=True, layout="constrained")
     for stage, color in {**COLORS, "final_generation_drain": "#bcbcbc"}.items():
         intervals = [((r["started_unix"] - start) / 60, r["seconds"] / 60) for r in stages if r["stage"] == stage]
-        axes[0].broken_barh(intervals, (0, 1), facecolors=color, label=stage.replace("_", " "))
+        label = {"generation_wait": "batch collection", "training": "score + train"}.get(
+            stage, stage.replace("_", " ")
+        )
+        axes[0].broken_barh(intervals, (0, 1), facecolors=color, label=label)
     axes[0].set_yticks([])
     axes[0].set_ylabel("Trainer driver")
     axes[0].legend(ncols=3, fontsize=8)
@@ -217,7 +235,12 @@ def occupancy(root, output, name):
         ("http_capacity_requests", 2, "HTTP capacity"),
     ):
         points = [((r["time_unix"] - start) / 60, r.get(key)) for r in producer]
-        axes[axis].step(*observed_steps(points), where="post", label=label)
+        axes[axis].step(
+            *observed_steps(points),
+            where="post",
+            label=label,
+            linestyle=":" if key.endswith("capacity_groups") else "-",
+        )
     for identity in sorted({r["engine"] for r in engines if "engine" in r}):
         for key, axis in (("num_running_reqs", 3), ("num_queue_reqs", 4)):
             points = []
@@ -242,16 +265,34 @@ def occupancy(root, output, name):
         else:
             ax.text(0.5, 0.5, "No usable observations", transform=ax.transAxes, ha="center")
     measured_path = root / "measured-cycles.json"
-    warmup = json.loads(measured_path.read_text())["warmup_updates"] if measured_path.exists() else 6
+    measured = json.loads(measured_path.read_text()) if measured_path.exists() else {}
+    warmup = measured.get("warmup_updates", 6)
     measured_stages = [r for r in stages if r["stage"] == "generation_wait" and r["rollout_id"] == warmup]
     warm_start = (measured_stages[0]["started_unix"] - start) / 60 if measured_stages else None
+    normal = [r for r in stages if r["stage"] in COLORS and r["rollout_id"] is not None and r["rollout_id"] >= warmup]
+    warm_end = (max(r["started_unix"] + r["seconds"] for r in normal) - start) / 60 if normal else None
+    warm_label = None
     if warm_start is not None:
         for ax in axes:
             ax.axvline(warm_start, linestyle="--", color="#333333", linewidth=1)
-        axes[0].text(warm_start, 1.02, "Measured window begins", fontsize=8, ha="right")
+        warm_label = axes[0].text(warm_start, 1.02, "Measured window begins", fontsize=8, ha="right")
     axes[-1].set_xlabel("Minutes since producer observation began (includes first-step warmup and shutdown)")
     fig.suptitle(name + " • sampled occupancy, not hardware GPU utilization")
-    save(fig, output, name + "-pipeline")
+    zoom = warm_start is not None and warm_end is not None
+    save(fig, output, name + "-pipeline", close=not zoom)
+    if zoom:
+        warm_axis(axes[-1], warm_start, warm_end)
+        for axis in axes[1:]:
+            values = []
+            for line in axis.lines:
+                x, y = np.asarray(line.get_xdata()), np.asarray(line.get_ydata())
+                values.extend(y[(x >= warm_start) & (x <= warm_end) & np.isfinite(y)])
+            if values:
+                axis.set_ylim(0, max(1, max(values)) * 1.1)
+        if warm_label is not None:
+            warm_label.set_visible(False)
+        fig.suptitle(name + " • warm queues and processors • sampled occupancy")
+        save(fig, output, name + "-steady-pipeline")
 
     paths = sorted((root / "checkpoints").glob("gpu_usage_node*.jsonl"))
     if not paths:
@@ -272,7 +313,10 @@ def occupancy(root, output, name):
                 next_time = records[position + 1]["time_unix"] if position + 1 < len(records) else end
                 trace[(grid >= t) & (grid < min(t + 10, next_time))] = matches[0]["utilization.gpu"]
             traces.append(trace)
-            labels.append(f"node {path.stem.split('node')[-1]} · GPU {int(index)}")
+            node_index = path.stem.split("node")[-1]
+            role = measured.get("occupancy", {}).get("node_roles", {}).get(node_index)
+            role_label = f" ({role['trainer_gpus']}T/{role['rollout_gpus']}I)" if role else ""
+            labels.append(f"node {node_index}{role_label} · GPU {int(index)}")
     if not traces:
         return
     fig, ax = plt.subplots(figsize=(13, max(4, len(traces) * 0.2)), layout="constrained")
@@ -291,7 +335,11 @@ def occupancy(root, output, name):
     ax.set_xlabel("Minutes since producer observation began")
     ax.set_title(name + " • NVML GPU activity • gray means unobserved")
     fig.colorbar(heat, ax=ax, label="GPU activity (%)")
-    save(fig, output, name + "-gpu-activity")
+    save(fig, output, name + "-gpu-activity", close=not zoom)
+    if zoom:
+        warm_axis(ax, warm_start, warm_end)
+        ax.set_title(name + " • warm NVML GPU activity • gray means unobserved")
+        save(fig, output, name + "-steady-gpu-activity")
 
 
 def pipeline_map(report, output, name):

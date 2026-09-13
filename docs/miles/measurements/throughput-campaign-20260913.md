@@ -453,3 +453,10 @@ comparison. The [2T/16I graphs-off run](https://beaker.org/ex/01M2E8YXBZ2E3B7JZW
 completed successfully at 1,816 tokens/s, 59.6% total collection time and 18.9% token
 drops. It allocated 24 GPUs while using 18. Enabling efficient decode deserves
 attention before multiplying an inefficient serving fleet.
+
+## Completed campaign recommendation
+
+The follow-up basket is complete. Use the [final report](throughput-20260913.md)
+for the audited 2T/4I batch-128 and 8T/8I batch-256 graph configurations, the
+producer-budget follow-up, and all queue/GPU figures. The earlier measurements
+above retain their original qualification limits.

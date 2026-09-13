@@ -1,4 +1,4 @@
-# Measured full-SFT B300 throughput starting point: EP2 + six TP1 engines.
+# Measured full-SFT B300 throughput starting point: EP2 + four TP1 engines.
 # Batch 128 is an optimization choice; see docs/miles/throughput-profiles.md.
 # Mixed-policy refresh remains experimental outside the exercised workload.
 schema_version = 1
@@ -20,7 +20,7 @@ priority = "urgent"
 min_runtime = "1h"
 timeout = "8h"
 auto_resume = false
-gpus_per_replica = 8
+gpus_per_replica = 6
 
 [[launch.weka_mounts]]
 weka = "oe-training-default"
@@ -53,7 +53,7 @@ trainer_flash_attention_version = 4
 
 [inference]
 placement_mode = "disaggregated"
-gpus = 6
+gpus = 4
 rollout_tensor_parallel_size = 1
 rollout_batch_size = 32
 samples_per_prompt = 4

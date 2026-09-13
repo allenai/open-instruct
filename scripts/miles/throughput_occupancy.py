@@ -4,6 +4,8 @@ import json
 import math
 from pathlib import Path
 
+from open_instruct.miles import topology
+
 
 def records(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
@@ -39,6 +41,30 @@ def summarize(points, start, end, *, max_hold=10.0):
     }
 
 
+def node_roles(root):
+    """Resolve observed replica indices through runtime IP assignment, not plan order."""
+    root = Path(root)
+    placements = list((root / "cluster").glob("*/placement-*.json"))
+    if not placements:
+        plan = root / "plan.json"
+        if plan.exists():
+            allocation = json.loads(plan.read_text()).get("allocation", {})
+            if allocation.get("replicas") == 1:
+                return {"0": allocation["nodes"][0]}
+        return {}
+    result = {}
+    for path in placements:
+        placement = json.loads(path.read_text())
+        nodes = [json.loads(p.read_text()) for p in path.parent.glob("node-*.json")]
+        assignments = topology.assign(placement["layout"], [node["address"] for node in nodes])
+        index = path.stem.removeprefix("placement-")
+        value = assignments[placement["address"]]
+        if index in result and result[index] != value:
+            raise ValueError("Replica roles differ across retained attempts; analyze one attempt at a time")
+        result[index] = value
+    return result
+
+
 def analyze(root, *, warmup=6):
     root = Path(root)
     stages = records(root / "checkpoints/driver_timing.jsonl")
@@ -71,6 +97,7 @@ def analyze(root, *, warmup=6):
             )
         },
         "engines": {},
+        "node_roles": node_roles(root),
     }
     engine_rows = [r for path in (root / "checkpoints").glob("engine_occupancy*.jsonl") for r in records(path)]
     for identity in sorted({r["engine"] for r in engine_rows if "engine" in r}):

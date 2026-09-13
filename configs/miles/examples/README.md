@@ -20,8 +20,16 @@ for exact current values. `profiles/` contains low-level prepared-input configs;
 `qualification/` contains bounded exercise inputs. Neither is interchangeable with
 a full workflow example. Preserve frozen experiment inputs when changing starters.
 
-## Size-based candidates
+## Size-based throughput starters
 
-`dev.toml`, `tiny.toml`, `small.toml`, and `large.toml` are new qualification candidates.
-See [selection rationale and basket](../../../docs/miles/throughput-profiles.md).
-The small/large mixed-policy refresh path is experimental; the ratios are not yet measured recommendations.
+Use `dev.toml` and `tiny.toml` for one-GPU and disaggregated tiny-model mechanics.
+`small.toml` uses two full-model trainer GPUs; `large.toml` uses eight. Their
+inference fleets and batch sizes follow the [measured throughput guide](../../../docs/miles/throughput-profiles.md).
+These full-model examples use mixed-policy refresh and keep FIFO/lag-two semantics;
+that remains experimental outside the qualified full-SFT GSM8K/B300 workload.
+They are different recipes from the older packed async example above.
+
+The throughput basket disables eval/saves/export and enables detailed replay
+qualification. These researcher starters retain practical eval/save/export
+settings and disable the extra route audit. Read the measurement scope before
+using normal-cycle timings to estimate total job duration.
