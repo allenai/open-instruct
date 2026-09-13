@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "experimental hero support; conversion and serving qualification in progress",
+  "status": "MILES/Core internal sharing candidate; see docs/miles/feature-parity.md for qualified scope",
   "base_image": {
     "beaker": "01M24E7MSDGN2QFW1T8Z31BCKS",
     "docker_id": "sha256:fe34fb1fef4910eb6610d8458a97c778360f67d0b38fbc0952cec28a321be629"

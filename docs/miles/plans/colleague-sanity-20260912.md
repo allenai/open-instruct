@@ -79,9 +79,9 @@ regression scenarios, not a claim that all defects remain in either integration.
    live invalidation evidence unless the keying implementation changes; this
    does not need another full RL run.
 
-Known capability constraints come from [run controls](miles-run-controls.md),
-[managed judges/topology](miles-managed-judges.md), and
-[packing semantics](miles-sequence-packing.md). Parser acceptance alone is not a
+Known capability constraints come from [run controls](../run-controls.md),
+[managed judges/topology](../../miles-managed-judges.md), and
+[packing semantics](../../miles-sequence-packing.md). Parser acceptance alone is not a
 claim that a model fits or that a backend combination has been exercised.
 
 ## Shared fixtures

@@ -19,3 +19,8 @@ runtime/miles/sources/
 !tests/miles/**
 **/__pycache__/
 **/.pytest_cache/
+
+!docs/
+!docs/miles/
+!docs/miles/**
+!README.md
