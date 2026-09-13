@@ -28,7 +28,11 @@ def save(fig, output, name):
 
 
 def comparisons(data, output):
-    entries = [(name, row) for name, row in data.items() if "driver_timings" in row]
+    entries = [
+        (name, row)
+        for name, row in data.items()
+        if "driver_timings" in row and row["analysis"]["measured_updates"] >= 6
+    ]
     names = [name.replace("small-", "").replace("steady-", "") for name, _ in entries]
     fig, axes = plt.subplots(1, 3, figsize=(15, max(3.5, len(entries) * 0.55)), layout="constrained")
     offsets = [0.0] * len(entries)
@@ -136,7 +140,10 @@ def comparisons(data, output):
 def occupancy(root, output, name):
     stages = read_rows(root / "checkpoints/driver_timing.jsonl")
     producer = read_rows(root / "checkpoints/pipeline_occupancy.jsonl")
-    engines = read_rows(root / "checkpoints/engine_occupancy.jsonl")
+    engines = sorted(
+        (row for path in (root / "checkpoints").glob("engine_occupancy*.jsonl") for row in read_rows(path)),
+        key=lambda row: row["time_unix"],
+    )
     start = min(r["time_unix"] for r in producer)
     fig, axes = plt.subplots(5, 1, figsize=(13, 12), sharex=True, layout="constrained")
     for stage, color in COLORS.items():

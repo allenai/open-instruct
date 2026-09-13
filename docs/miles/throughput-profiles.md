@@ -204,7 +204,7 @@ Follow-up instrumentation (`core.pipeline_observation_interval=2`) records:
   are null. Semaphore occupancy includes router/server wait and response handling;
   it is not GPU utilization. Sample-level unfinished counts are only available
   from the sample-backfill scheduler.
-* `engine_occupancy.jsonl`: each engine's Prometheus queue/admission, pool usage,
+* `engine_occupancy*.jsonl` (sharded by endpoint for larger reports): each engine's Prometheus queue/admission, pool usage,
   throughput and occupancy series, sampled no more frequently than every five
   seconds with bounded HTTP requests. Series labels and missing/nonfinite values
   remain explicit. Engine-reported occupancy is distinct from hardware SM usage.
@@ -266,3 +266,39 @@ Reproduce the figures using `python -m scripts.miles.plot_throughput_basket
  docs/miles/results/throughput-profiles-20260913.json /tmp/throughput-figures`.
 The report generator also accepts `--run-root case=/path/to/downloaded/run` for
 continuous queue/processor timelines when those observations exist.
+
+### Queue and processor map
+
+```mermaid
+flowchart LR
+    D[Prompt data] --> P[Producer: bounded owned groups]
+    P --> H[HTTP admission queue]
+    H --> R[Router]
+    R --> E[Engine admission queue]
+    E --> G[Prefill / decode processors]
+    G --> V[Reward verification]
+    V --> S[Wait for complete prompt group]
+    S --> Q[Bounded completed FIFO]
+    Q --> A{Oldest behavior version within lag?}
+    A -->|yes| C[Collect a training batch]
+    A -->|no| X[Drop / retry accounting]
+    C --> L[Trainer scoring]
+    L --> T[Forward / backward / optimizer]
+    T --> W[Direct weight publication]
+    W --> G
+    W --> A
+```
+
+The producer can own partly completed groups while HTTP requests wait or engines
+work. A sibling that has already finished is retained until its group completes;
+this is especially relevant to sample backfill. The completed FIFO is a separate
+bound and can block the producer. Batch collection may consume and reject several
+expired groups before it has enough eligible ones. For the GSM8K fixture,
+verification is local and inexpensive; judge- or execution-heavy workloads add
+another service-rate constraint and require their own measurements.
+
+The driver timeline records the **consumer's wait for a usable batch**, then
+scoring/training/publication. It does not separately time every request's semaphore,
+router, engine or sibling wait. Occupancy timelines reveal where work accumulates;
+exact per-request queue waits would require lifecycle traces. Do not infer hardware
+utilization or exact queue residence times from these sampled counts.

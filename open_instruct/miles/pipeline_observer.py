@@ -6,6 +6,7 @@ Unsupported fields are null, not zero. The observer is owned by the producer tas
 """
 
 import asyncio
+import hashlib
 import json
 import math
 import re
@@ -41,7 +42,7 @@ def snapshot(producer):
         "http_waiting_requests": sum(not waiter.done() for waiter in waiters)
         if waiters is not None
         else 0
-        if semaphore is not None
+        if hasattr(semaphore, "_waiters")
         else None,
     }
 
@@ -117,7 +118,12 @@ async def observe_engines(producer, get_urls):
                         except Exception as error:
                             stream.write(json.dumps(dict(time_unix=time.time(), discovery_error=str(error))) + "\n")
                     for record in await asyncio.gather(*(collect(url) for url in urls)):
-                        stream.write(json.dumps(record) + "\n")
+                        # A large fleet can exceed the result collector's per-file
+                        # limit. Shard by endpoint without losing series labels.
+                        identity = hashlib.sha256(record["engine"].encode()).hexdigest()[:12]
+                        destination = path.with_name(f"engine_occupancy_{identity}.jsonl")
+                        with destination.open("a") as output:
+                            output.write(json.dumps(record) + "\n")
                     await asyncio.sleep(max(5.0, interval))
     except Exception:
         logger.exception("Engine occupancy observation stopped; remaining occupancy data is unavailable")
