@@ -1,0 +1,130 @@
+[
+  {
+    "rid": "refresh-long-0",
+    "old_tokens": 135,
+    "new_tokens": 377,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9628670120898101,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9976252158894646
+  },
+  {
+    "rid": "refresh-long-1",
+    "old_tokens": 135,
+    "new_tokens": 377,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9656735751295337,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9971934369602763
+  },
+  {
+    "rid": "refresh-long-2",
+    "old_tokens": 135,
+    "new_tokens": 377,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9656735751295337,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9971934369602763
+  },
+  {
+    "rid": "refresh-long-3",
+    "old_tokens": 135,
+    "new_tokens": 377,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9656735751295337,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9971934369602763
+  },
+  {
+    "rid": "refresh-same-0",
+    "old_tokens": 138,
+    "new_tokens": 118,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9901960784313726,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9934640522875817
+  },
+  {
+    "rid": "refresh-same-1",
+    "old_tokens": 138,
+    "new_tokens": 118,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9852941176470589,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9950980392156863
+  },
+  {
+    "rid": "refresh-same-2",
+    "old_tokens": 138,
+    "new_tokens": 118,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9901960784313726,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9934640522875817
+  },
+  {
+    "rid": "refresh-same-3",
+    "old_tokens": 138,
+    "new_tokens": 118,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9901960784313726,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9934640522875817
+  },
+  {
+    "rid": "refresh-sampled-0",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9573170731707317,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-1",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9634146341463414,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-2",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9664634146341463,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-3",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9634146341463414,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-0",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.95,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-1",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.925,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-2",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.925,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-3",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.925,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  }
+]

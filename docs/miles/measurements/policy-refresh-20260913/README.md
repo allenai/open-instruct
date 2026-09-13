@@ -138,3 +138,65 @@ locally before any Beaker probe obtained GPUs. Queued attempts
 `01M2CN77CSHAAXXDT5JE3NWY6B`, `01M2CNKAN2NBSYAQ4M8CDZSY6B`, and
 `01M2CNG15KWH0ZKABKYZNR6SPA` were stopped before execution. They supply no GPU
 validation evidence.
+
+### Key/value perturbation and radix qualification
+
+Revision `b5b9f6a58` additionally perturbs **KDA keys and values** (not just
+queries), scaling alternate input columns by 1 +/- 1/64. This deliberately
+changes the recurrence and tests rebuilding state. It is a controlled fixture,
+not an RL optimizer update. An unchanged-weight refresh supplies a numerical
+control. The six-case matrix now contains short/long drain controls,
+unchanged-weight refresh, short/long changed-weight refresh and temperature-1
+sampled refresh. Complete same-token-path teacher forcing avoids interpreting
+logprobs from different greedy continuations as numerical error.
+
+Both local radix-disabled and radix-enabled matrices completed. Each audited
+16 interrupted responses with exact token-prefix/original rollout-score
+preservation and version boundaries. Original routes and freshly recomputed
+routes are retained separately. CUDA decode graphs were disabled.
+
+| Local tiny case (radix disabled) | Boundary to weights ready | Scheduler resume to next token | Tokens generated after switch |
+| --- | ---: | ---: | ---: |
+| Short drain | 0.494 s | n/a | n/a |
+| Short refresh, changed K/V | 0.0094 s | 0.0070 s | 86.3% |
+| Long drain | 0.791 s | n/a | n/a |
+| Long refresh, changed K/V | 0.0107 s | 0.0085 s | 73.6% |
+| Sampled refresh | 0.0092 s | 0.0073 s | 86.9% |
+
+The first unchanged-weight refresh paid a cold-path pause/resume penalty
+(0.239 s until weights ready, 0.242 s resume-to-token); do not omit that cost
+when considering cold runs. Short control total batch time also includes cold
+batch compilation. Long total batch time was essentially unchanged (1.0747 s
+versus 1.0752 s); refresh changes **when the new policy becomes available**, not
+necessarily total generation throughput. Tiny 95,892-byte same-GPU IPC results
+cannot establish a 37 GB trainer-to-engine transfer time.
+
+Mean absolute same-path suffix logprob differences were 0.0057–0.0070 for
+changed-weight cases versus 0.0063 in the unchanged-weight control. Individual
+outliers reached 0.191 nats. This supports comparable numerical behavior, not
+bit-exactness or proof that every discrepancy is harmless. New-prefix route
+agreement with fresh prefill was 99.7–100% in the changed-weight cases; agreement
+with historical routes was lower (93.1–96.5%), confirming the audit distinguishes
+recomputed routes from original decisions.
+
+For the temperature-1 sampled case, 268 retained tokens had a mean absolute
+rescore-minus-original logprob difference of 0.0171 nats. Per-token probability
+ratios ranged from 0.846 to 1.133. These are fixture measurements, not estimates
+of actual RL-step drift. Greedy cases use original raw model logprobs for
+numerical checks; they are not stochastic-policy sampling-bias measurements.
+
+Retained compact results: `local-kv-summary.json`,
+`local-kv-transition-audit.json`, `local-kv-prefix-ratios.json`, and
+`local-radix-summary.json` / `local-radix-transition-audit.json`.
+Full token, route, reference and teacher-forced records remain in the local
+`/tmp/policy-refresh-local-kv` and `/tmp/policy-refresh-local-radix` directories.
+
+Revised two-GPU Beaker probes submitted with exactly the committed sources:
+
+1. Tiny hybrid: [Beaker](https://beaker.org/ex/01M2CPRSZDTNTX8N5B5GR2DH6H).
+2. Existing SFT checkpoint: [Beaker](https://beaker.org/ex/01M2CPRTVEQ9BDRCDVRMXSV2DF).
+
+At this writing both await Holmes placement. No cross-GPU result or full-model
+speedup is claimed. Five focused CPU tests, explicit script Ruff checks, and
+repository `make style` / `make quality` pass. These are prototype/training
+probes, not the repository GPU pytest certification.

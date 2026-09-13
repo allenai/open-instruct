@@ -1,0 +1,130 @@
+[
+  {
+    "rid": "refresh-long-0",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9627705627705627,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9976190476190476
+  },
+  {
+    "rid": "refresh-long-1",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9627705627705627,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9976190476190476
+  },
+  {
+    "rid": "refresh-long-2",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9627705627705627,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9976190476190476
+  },
+  {
+    "rid": "refresh-long-3",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9627705627705627,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9976190476190476
+  },
+  {
+    "rid": "refresh-same-0",
+    "old_tokens": 142,
+    "new_tokens": 114,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9936305732484076,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9920382165605095
+  },
+  {
+    "rid": "refresh-same-1",
+    "old_tokens": 142,
+    "new_tokens": 114,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9856687898089171,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9952229299363057
+  },
+  {
+    "rid": "refresh-same-2",
+    "old_tokens": 142,
+    "new_tokens": 114,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9936305732484076,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9920382165605095
+  },
+  {
+    "rid": "refresh-same-3",
+    "old_tokens": 142,
+    "new_tokens": 114,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9936305732484076,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 0.9920382165605095
+  },
+  {
+    "rid": "refresh-sampled-0",
+    "old_tokens": 68,
+    "new_tokens": 444,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9698795180722891,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-1",
+    "old_tokens": 68,
+    "new_tokens": 444,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9578313253012049,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-2",
+    "old_tokens": 68,
+    "new_tokens": 444,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9698795180722891,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-3",
+    "old_tokens": 68,
+    "new_tokens": 444,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.963855421686747,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-0",
+    "old_tokens": 38,
+    "new_tokens": 218,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9528301886792453,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-1",
+    "old_tokens": 38,
+    "new_tokens": 218,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9575471698113207,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-2",
+    "old_tokens": 38,
+    "new_tokens": 218,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9575471698113207,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-3",
+    "old_tokens": 38,
+    "new_tokens": 218,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9575471698113207,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  }
+]
