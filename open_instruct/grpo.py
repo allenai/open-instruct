@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-GRPO training with OLMo-core's Trainer.
+Deprecated GRPO entry point using OLMo-core and vLLM.
 
-This module provides GRPO (Group Relative Policy Optimization) training using
-OLMo-core's native training infrastructure, replacing DeepSpeed with FSDP.
-
-Uses Ray for distributed training with Beaker.
+For new GRPO work, use `python -m open_instruct.miles`; see docs/miles/index.md
+for model/workload support and launch instructions. This separate implementation
+is retained for existing runs and historical reproduction. Do not use it as the
+starting point for new GRPO recipes or features.
 """
 
 import dataclasses
@@ -344,6 +344,12 @@ def main(
 
 
 if __name__ == "__main__":
+    logger.warning(
+        "DEPRECATED: open_instruct/grpo.py is retained for existing runs and historical reproduction. "
+        "For new GRPO work, use `python -m open_instruct.miles`; "
+        "see docs/miles/index.md for model/workload support and launch instructions. "
+        "Continuing with the legacy implementation; arguments are not translated."
+    )
     parser = utils.ArgumentParserPlus(
         [  # ty: ignore[invalid-argument-type]
             grpo_utils.GRPOExperimentConfig,

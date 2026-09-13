@@ -1,4 +1,10 @@
-# Training Tool-Using Models and RL Environments
+# Deprecated vLLM tool and environment training
+
+> **Deprecated GRPO workflow:** This page describes the retained `grpo.py` /
+> `grpo_fast.py` vLLM stack. For new GRPO work, start with the
+> [MILES guide](../miles/index.md) and verify the required tool/environment support.
+> These multi-turn examples do not establish equivalent MILES support. Use them
+> only when maintaining or reproducing an explicitly selected legacy workflow.
 
 This page is for people who want to train models in Open-Instruct that do more than produce a single final answer. You can use it to:
 
@@ -6,13 +12,13 @@ This page is for people who want to train models in Open-Instruct that do more t
 - train against stateful RL environments such as guessing games or Wordle
 - combine intermediate environment rewards with a final verifier-based reward
 
-The recommended workflow is user-facing and script-first: start from an existing debug or training script, choose the tool or environment setup you want, then adjust the configuration for your dataset and infrastructure. You should not need to build a new training loop just to add tool use.
+For maintenance of an existing legacy run, the workflow is script-first: start from an existing debug or training script, choose the tool or environment setup you want, then adjust the configuration for your dataset and infrastructure. You should not need to build a new training loop just to add tool use.
 
 Right now, Open-Instruct supports a simple interaction model where environment outputs are appended back into the conversation during multi-turn GRPO rollouts.
 
 ## Example Scripts
 
-Start from one of these scripts. They are the fastest way to see the expected config shape and get a working run before customizing anything.
+These scripts document the deprecated configuration and support existing legacy runs.
 
 | Script | Description |
 | --- | --- |

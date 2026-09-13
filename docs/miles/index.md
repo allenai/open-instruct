@@ -1,11 +1,15 @@
 # MILES + OLMo-core GRPO
 
-MILES is the preferred GRPO path in this project for **supported models and workloads**.
+Use **`python -m open_instruct.miles`** for new GRPO work in this project.
 Open Instruct owns the researcher configuration and data/reward integration; MILES
 owns rollout orchestration and shared RL machinery; the adapter trains through
-OLMo-core and serves through SGLang. The existing `grpo.py` Core/vLLM and
-`grpo_fast.py` DeepSpeed/vLLM paths remain available. See the
-[GRPO implementation chooser](../algorithms/grpo.md#implemented-variants).
+OLMo-core and serves through SGLang. Check model and workload support below.
+
+The older `grpo.py` Core/vLLM and `grpo_fast.py` DeepSpeed/vLLM entry points are
+**deprecated** and retained for existing runs and historical reproduction only.
+Their [legacy reference](../algorithms/legacy_grpo.md) does not define MILES behavior.
+If a required capability is missing here, identify the gap rather than silently
+switching to a deprecated backend.
 
 ## Start here
 

@@ -36,7 +36,11 @@ uv run python -m accelerate.commands.launch \
     ...
 ```
 
-### GRPO/RL (Single GPU)
+### Deprecated GRPO/RL (Single GPU)
+
+This example uses the deprecated DeepSpeed/vLLM entry point. For new GRPO work,
+start with the [MILES guide](miles/index.md) and verify model and hardware support;
+this legacy example does not qualify MILES on DGX Spark.
 
 `VLLM_ALLOW_INSECURE_SERIALIZATION=1` is needed due to a vLLM v1 msgspec serialization bug on aarch64. See [huggingface/trl#3676](https://github.com/huggingface/trl/issues/3676).
 

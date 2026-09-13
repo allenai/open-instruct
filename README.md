@@ -98,20 +98,18 @@ bash scripts/train/tulu3/dpo_8b.sh
 
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
-For new runs on supported models, use **MILES + OLMo-core with SGLang**.
-Open Instruct supplies the run configuration and data/reward integration; MILES
-coordinates rollouts, and the Core adapter trains the model. Check
-[model support and qualification limits](docs/miles/models-and-checkpoints.md) first.
+Use **`python -m open_instruct.miles`** for new GRPO runs. Open Instruct supplies
+configuration and data/reward integration; MILES coordinates rollouts, the Core
+adapter trains the model, and SGLang serves it. Start with the
+[MILES guide](docs/miles/index.md) and check
+[model support and qualification limits](docs/miles/models-and-checkpoints.md).
+If a required capability is missing, identify the support gap before choosing a backend.
 
-| Path | Trainer / inference | Use it for |
-|---|---|---|
-| `python -m open_instruct.miles` | OLMo-core / SGLang | Preferred supported-model workflow; TOML, async, multi-node placement and named judges |
-| `open_instruct/grpo.py` | OLMo-core / vLLM | Existing native Core recipes and capabilities outside the MILES support matrix |
-| `open_instruct/grpo_fast.py` | DeepSpeed / vLLM | Existing DeepSpeed recipes and their reproduction workflows |
-
-See the [GRPO implementation guide](docs/algorithms/grpo.md) for the alternatives.
-The MILES runtime has separate pinned dependencies; the general Docker image
-and the older GRPO CLI flags are not interchangeable with it.
+**Deprecated:** `open_instruct/grpo.py` and `open_instruct/grpo_fast.py` remain
+runnable for existing experiments and historical reproduction. Do not use them as
+starting points for new recipes. Their [legacy reference](docs/algorithms/legacy_grpo.md)
+is separate from the current workflow. Their CLI flags and the general Docker image
+are not interchangeable with the pinned MILES runtime.
 
 ```bash
 # Python 3.12, from the checkout. Edit checkpoint and output paths after copying.

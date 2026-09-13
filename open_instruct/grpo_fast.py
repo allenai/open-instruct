@@ -27,6 +27,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Deprecated GRPO entry point using DeepSpeed and vLLM.
+
+For new GRPO work, use `python -m open_instruct.miles`; see docs/miles/index.md
+for model/workload support and launch instructions. This implementation is
+retained for existing runs and historical reproduction. Do not use it as the
+starting point for new GRPO recipes or features.
+"""
+
 # isort: off
 import contextlib
 import os
@@ -2387,6 +2395,12 @@ def main(
 
 
 if __name__ == "__main__":
+    logger.warning(
+        "DEPRECATED: open_instruct/grpo_fast.py is retained for existing runs and historical reproduction. "
+        "For new GRPO work, use `python -m open_instruct.miles`; "
+        "see docs/miles/index.md for model/workload support and launch instructions. "
+        "Continuing with the legacy implementation; arguments are not translated."
+    )
     utils.check_oe_eval_internal()
 
     parser = ArgumentParserPlus(
