@@ -382,3 +382,14 @@ whole-cycle comparison. No change is made to FIFO, policy age, or behavior score
 ![Continuous 2+6 batch-32 queues](images/throughput/steady-2t6i-c8-b32-pipeline.png)
 
 ![Sampled device activity, including missing coverage](images/throughput/steady-2t6i-c8-b32-gpu-activity.png)
+
+The age plot uses the **oldest behavior version anywhere in the prompt group**,
+matching the queue's age gate. A group labeled age two can still contain many
+newer suffix tokens after refresh. The analysis therefore also records the
+fraction of consumed, unmasked tokens sampled under the trainer's current policy,
+weighted across all trainer ranks. These are provenance measures, not a claim
+that trainer and serving arithmetic are identical.
+
+Pipeline timelines begin when the producer observer starts. They include first-step
+training warmup and final draining, but engine/model initialization can precede
+that window. Startup stages are retained separately in the driver timing report.

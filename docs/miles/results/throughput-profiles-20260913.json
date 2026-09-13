@@ -18498,6 +18498,8 @@
       "holmes-cs-aus-516.reviz.ai2.in"
     ],
     "analysis": {
+      "current_policy_token_fraction": 0.2275619193329318,
+      "provenance_active_tokens": 1217027,
       "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
       "completed_updates": 24,
       "validated_trainer_ranks": 2,
@@ -26143,6 +26145,22 @@
         "save_checkpoints": false,
         "skip_eval_before_train": true
       }
+    },
+    "allocation": {
+      "allocated_gpus": 8,
+      "gpus_per_replica": 8,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "judges": {},
+          "ray_gpus": 8,
+          "rollout_gpus": 6,
+          "trainer_gpus": 2
+        }
+      ],
+      "policy_gpus": 8,
+      "replicas": 1,
+      "unused_gpus": 0
     },
     "compiler_cache": {
       "report_dir": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d/runs/9a48edd06cf646dc94599d2557f776c6",

@@ -180,7 +180,17 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
             if r["event"] == "optimizer" and r.get("rollout_id", r["step"] - 1) >= warmup and "elapsed_seconds" in r
         ],
     }
+    provenance = [
+        r for records in contracts for r in records if r["event"] == "refresh_scores" and r["rollout_id"] >= warmup
+    ]
+    provenance_tokens = sum(r["active_tokens"] for r in provenance)
     result = {
+        "current_policy_token_fraction": (
+            sum(r["active_tokens"] * r["current_version_token_fraction"] for r in provenance) / provenance_tokens
+            if provenance_tokens
+            else None
+        ),
+        "provenance_active_tokens": provenance_tokens,
         "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
         "completed_updates": expected,
         "validated_trainer_ranks": ranks,

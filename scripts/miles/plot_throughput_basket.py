@@ -137,6 +137,40 @@ def comparisons(data, output):
     fig.colorbar(heat, ax=ax, label="Fraction discarded")
     save(fig, output, "discard-by-length")
 
+    age_bins = ["0", "1", "2", "3", "4", "5_8", "9_16", "17_plus", "unknown"]
+    distribution, counts = [], []
+    for _, row in entries:
+        chosen = [r for r in row["flow"] if r["rollout_id"] >= row["analysis"]["warmup_updates"]]
+        cells = [
+            tuple(
+                sum(r["queue_metrics"].get(prefix + outcome + "_samples_by_age/" + age, 0) for r in chosen)
+                for outcome in ("delivered", "dropped")
+            )
+            for age in age_bins
+        ]
+        total = sum(sum(cell) for cell in cells)
+        distribution.append([sum(cell) / total if total else float("nan") for cell in cells])
+        counts.append(cells)
+    fig, ax = plt.subplots(figsize=(13, max(3, len(entries) * 0.6)), layout="constrained")
+    heat = ax.imshow(distribution, vmin=0, vmax=1, cmap="Blues", aspect="auto")
+    ax.set_xticks(range(len(age_bins)), ["0", "1", "2", "3", "4", "5–8", "9–16", "17+", "unknown"])
+    ax.set_yticks(range(len(names)), names)
+    ax.set_xlabel("Age of oldest behavior policy in group (updates); cell = delivered / dropped samples")
+    ax.set_title("Freshness at completed-queue dequeue • rejected attempts included")
+    for i, cells in enumerate(counts):
+        for j, (delivered, dropped) in enumerate(cells):
+            ax.text(
+                j,
+                i,
+                f"{delivered}/{dropped}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="white" if distribution[i][j] > 0.6 else "black",
+            )
+    fig.colorbar(heat, ax=ax, label="Fraction of dequeued response attempts")
+    save(fig, output, "age-distribution")
+
 
 def observed_steps(points, *, max_hold_minutes=10 / 60):
     """Break sampled lines at missing observations instead of implying long holds."""
@@ -204,7 +238,7 @@ def occupancy(root, output, name):
         for ax in axes:
             ax.axvline(warm_start, linestyle="--", color="#333333", linewidth=1)
         axes[0].text(warm_start, 1.02, "Measured window begins", fontsize=8, ha="right")
-    axes[-1].set_xlabel("Minutes since producer observation began (includes startup and shutdown)")
+    axes[-1].set_xlabel("Minutes since producer observation began (includes first-step warmup and shutdown)")
     fig.suptitle(name + " • sampled occupancy, not hardware GPU utilization")
     save(fig, output, name + "-pipeline")
 
