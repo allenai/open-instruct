@@ -16,10 +16,15 @@ def has_statement(prompt):
     body = prompt.split("where CODE is the solution for the problem.", 1)[-1]
     body = body.split("Write Python code to solve the problem.", 1)[0]
     body = re.sub(r"(?im)^.*(?:time limit|memory limit).*$", "", body)
-    if not all(re.search(rf"(?im)^\s*(?:#+\s*)?{name}\b", body) for name in ("input", "output")):
+    if not all(re.search(rf"(?im)^\s*(?:[#-]+\s*)?{name}\b", body) for name in ("input", "output")):
         return False
-    statement = re.split(r"(?im)^\s*(?:examples?|sample(?: input| output)?|input|output)\b", body, maxsplit=1)[0]
-    return sum(character.isalpha() for character in statement) >= 20
+    statement = re.split(
+        r"(?im)^\s*(?:[#-]+\s*)?(?:examples?|sample(?: input| output)?|input|output)\b", body, maxsplit=1
+    )[0]
+    return (
+        bool(re.search(r"(?i)\b(?:compute|calculate|given|find|determine|your task|you have|there are)\b", statement))
+        and sum(character.isalpha() for character in statement) >= 8
+    )
 
 
 def prepare(model, output):

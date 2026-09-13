@@ -62,3 +62,12 @@ def test_stdio_selection_rejects_example_only_prompts():
     assert prepare_stdio_exercise.has_statement(
         wrapper + "Calculate the sum of two given integers.\nInput\nTwo integers a and b.\nOutput\nTheir sum." + suffix
     )
+
+    assert not prepare_stdio_exercise.has_statement(
+        wrapper
+        + "-----Input-----\nThe input contains a single integer a.\n-----Output-----\nOutput a single integer.\nExample\nInput\n3\nOutput\n27"
+        + suffix
+    )
+    assert not prepare_stdio_exercise.has_statement(
+        wrapper + "Solve the following coding problem using python.\nExample\nInput\n5\nOutput\n5" + suffix
+    )
