@@ -43,7 +43,8 @@ def test_refresh_is_explicit_and_compiles_into_core_config():
         ({"rollout_temperature": 0.7}, "temperature"),
         ({"rollout_top_p": 0.9}, "top_p"),
         ({"rollout_top_k": 10}, "top_k"),
-        ({"sglang_cuda_graph_backend_decode": "full"}, "backend_decode"),
+        ({"sglang_cuda_graph_backend_decode": "tc_piecewise"}, "backend_decode"),
+        ({"sglang_cuda_graph_backend_prefill": "tc_piecewise"}, "backend_prefill"),
         ({"advantage_estimator": "gspo"}, "grpo"),
     ],
 )
@@ -51,3 +52,11 @@ def test_refresh_rejects_unqualified_contracts(change, match):
     config = configured()
     with pytest.raises(ValueError, match=match):
         dataclasses.replace(config, miles=config.miles | change).validate()
+
+
+def test_refresh_full_decode_graphs_preserve_prefill_restriction():
+    config = configured()
+    config = dataclasses.replace(config, miles=config.miles | {"sglang_cuda_graph_backend_decode": "full"})
+    config.validate()
+    with pytest.raises(ValueError, match="backend_prefill"):
+        dataclasses.replace(config, miles=config.miles | {"sglang_cuda_graph_backend_prefill": "breakable"}).validate()

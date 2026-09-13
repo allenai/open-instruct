@@ -409,9 +409,12 @@ class RunConfig:
             raise InputError("refresh currently supports the token-level grpo objective only")
         if options.get("sglang_speculative_algorithm") or options.get("use_rollout_indexer_replay", False):
             raise InputError("refresh does not yet support speculative decoding or indexer replay")
-        for name in ("sglang_cuda_graph_backend_decode", "sglang_cuda_graph_backend_prefill"):
-            if options.get(name) != "disabled":
-                raise InputError(f"refresh qualification requires miles.{name}=disabled")
+        # Full decode graphs retain model/state buffer addresses across in-place
+        # publication. Prefill and compiler-driven graph modes remain excluded.
+        if options.get("sglang_cuda_graph_backend_decode") not in ("disabled", "full"):
+            raise InputError("refresh requires miles.sglang_cuda_graph_backend_decode=disabled or full")
+        if options.get("sglang_cuda_graph_backend_prefill") != "disabled":
+            raise InputError("refresh requires miles.sglang_cuda_graph_backend_prefill=disabled")
         if options.get("rollout_temperature", 1.0) != 1.0 or options.get("rollout_top_p", 1.0) != 1.0:
             raise InputError("refresh qualification requires rollout_temperature=1 and rollout_top_p=1")
         if options.get("rollout_top_k", -1) != -1:
