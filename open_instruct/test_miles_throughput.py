@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from scripts.miles import throughput_basket
+from scripts.miles import throughput_basket, throughput_occupancy
 
 from open_instruct.miles import pipeline_observer, throughput, validation
 from open_instruct.miles.config import CoreConfig
@@ -260,3 +260,12 @@ def test_engine_observer_shards_and_records_endpoint_failures(monkeypatch, tmp_p
         assert "503" in next(r for r in records if "broken" in r["engine"])["error"]
 
     asyncio.run(exercise())
+
+
+def test_occupancy_summary_weights_time_and_preserves_missing_intervals():
+    result = throughput_occupancy.summarize([(0, 2), (2, 0), (4, None), (20, 10)], 1, 25, max_hold=5)
+    assert result["coverage_fraction"] == pytest.approx(8 / 24)
+    assert result["mean"] == pytest.approx(52 / 8)
+    assert result["empty_fraction"] == pytest.approx(2 / 8)
+    assert result["p95"] == result["maximum"] == 10
+    assert throughput_occupancy.summarize([], 0, 10)["mean"] is None
