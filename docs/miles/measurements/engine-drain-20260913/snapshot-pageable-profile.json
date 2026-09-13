@@ -1,0 +1,53 @@
+{
+  "scope": "Synthetic BF16 source; exact capture implementation, excludes native export/EP collectives, serving and concurrent training. GPU synchronization added to isolate phases.",
+  "measurements": [
+    {
+      "total_seconds": 48.41609397996217,
+      "bytes": 37028386304,
+      "phase_seconds": {
+        "prior_cuda_wait": 0.010603152215480804,
+        "gpu_pack": 0.018785144202411175,
+        "d2h": 34.44280495774001,
+        "ray_put": 11.86273117782548
+      },
+      "calls": {
+        "gpu_pack": 39,
+        "d2h": 39,
+        "ray_put": 39
+      },
+      "unattributed_seconds": 2.0811695479787886
+    },
+    {
+      "total_seconds": 28.67440916504711,
+      "bytes": 37028386304,
+      "phase_seconds": {
+        "prior_cuda_wait": 0.010692514013499022,
+        "gpu_pack": 0.014621846843510866,
+        "d2h": 26.969655953347683,
+        "ray_put": 0.9812968238256872
+      },
+      "calls": {
+        "gpu_pack": 39,
+        "d2h": 39,
+        "ray_put": 39
+      },
+      "unattributed_seconds": 0.6981420270167291
+    },
+    {
+      "total_seconds": 28.907258711289614,
+      "bytes": 37028386304,
+      "phase_seconds": {
+        "prior_cuda_wait": 0.010577933862805367,
+        "gpu_pack": 0.014585447497665882,
+        "d2h": 26.815201269928366,
+        "ray_put": 1.3594623059034348
+      },
+      "calls": {
+        "gpu_pack": 39,
+        "d2h": 39,
+        "ray_put": 39
+      },
+      "unattributed_seconds": 0.7074317540973425
+    }
+  ]
+}

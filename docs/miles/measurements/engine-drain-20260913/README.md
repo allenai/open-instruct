@@ -229,3 +229,48 @@ The image-G focused suite passed **62 tests**, covering lifecycle, capture,
 producer admission, learning/resume audits and failure validation. Its code differs
 from F by the documented checkpoint-order correction; the profiler is a separate
 committed helper embedded with provenance, not a mutation of the runtime image.
+
+
+## Resume and copy-profile results
+
+The [six-update fresh-process resume](https://beaker.org/ex/01M2CG415X6NA0NJXDV3PCRAQR)
+completed steps 7–12, saves, final evaluation and shutdown, exit 0. All 912 admitted
+responses completed; no ownership/version errors, mixed groups, unknown outcomes,
+cancellations or unreleased snapshots were observed. An entire driver training
+interval (update 9, rollout ID 8) fit inside engine 1's 125.13 s drain. Engine 0
+reopened version 8 during that drain. Unlike D, this run produced **zero** new-version
+responses during the interval: completion backpressure held the producer. Independent
+transport and optimizer progress passed, but fresh-generation progress depends on
+queue/admission scheduling. See [resume-protocol.json](resume-protocol.json).
+
+The full-volume profile separates the new snapshot copy from the existing audit
+optimization. Periodic weight audits are disabled in these configs; the new CPU
+snapshot is explicitly the storage backing for background publication. The primary
+barrier publisher still sends directly from GPU and needs no frozen CPU model.
+
+| Synthetic 37 GB capture | First capture | Warm captures | Warm D2H | Warm Ray insertion |
+| --- | ---: | ---: | ---: | ---: |
+| Pageable host output | 48.42 s | 28.67 / 28.91 s | 26.97 / 26.82 s | 0.98 / 1.36 s |
+| Reused pinned staging | 16.39 s | 2.52 / 2.64 s | 0.67 / 0.67 s | 1.81 / 1.93 s |
+
+GPU packing was approximately 0.02 s in both. The source retains at most one pinned
+buffer sized to the largest flattened bucket (approximately 1.47 GB in this fixture).
+D2H completes before Ray freezes that buffer; it can then be reused without aliasing
+older snapshots. The [pinned profile](https://beaker.org/ex/01M2CJK156CXRNWN02ZQZM1P6J)
+passed with distinct values in every tensor and immutable object-store checks. The
+[real two-GPU transport probe](https://beaker.org/ex/01M2CJK7VG0F46AM0CCD3ZBF9Q)
+also passed exact full-tensor comparison after source mutation and staging reuse.
+These are image H, `01M2CJG5RQQ93GEYNYAS7ASCQJ`, source `e468b2e014b4`.
+
+Raw profiles: [pageable](snapshot-pageable-profile.json),
+[pinned](snapshot-pinned-profile.json). The pinned profile identifies B300 hardware;
+the earlier profile did not record device metadata in its report. Both were Holmes
+GPU allocations. These are isolated data-movement measurements with artificial
+synchronization, not native exporter or RL step timings. One actual resumed update
+with this image is [running separately](https://beaker.org/ex/01M2CJRKFDSDSQPYZD3Y5CTRWS)
+to validate full-model behavior with the new staging path.
+
+Latest full compatible runtime suite: **772 passed, 53 skipped** (the same explicit
+cross-backend image incompatibility excluded). Wrapper suite: **309 passed, one
+skipped**. `make style` and `make quality` pass using the existing local environment;
+no formatter changes were needed. The primary branches remain untouched.
