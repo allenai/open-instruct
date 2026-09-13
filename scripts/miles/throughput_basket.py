@@ -30,6 +30,14 @@ CASES = {
         "batch": 128,
         "updates": 24,
     },
+    "steady-2t4i-c8-b32-graphs": {"profile": "small", "concurrency": 8, "decode_graphs": True, "updates": 16},
+    "steady-8t8i-c16-b256-graphs": {
+        "profile": "large",
+        "inference": 8,
+        "concurrency": 16,
+        "decode_graphs": True,
+        "updates": 16,
+    },
     "steady-2t6i-c8-b128-graphs": {
         "profile": "small",
         "inference": 6,

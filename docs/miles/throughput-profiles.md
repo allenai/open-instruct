@@ -393,3 +393,15 @@ that trainer and serving arithmetic are identical.
 Pipeline timelines begin when the producer observer starts. They include first-step
 training warmup and final draining, but engine/model initialization can precede
 that window. Startup stages are retained separately in the driver timing report.
+
+The decode-graph case initially finishes generations before publication, with
+zero mixed responses in its first five collections. It therefore cannot alone
+qualify refresh of an in-flight graph-decoded response. The final focused checks
+use 2+4 / batch 32 and 8+8 / batch 256 with decode graphs and replay diagnostics.
+They must retain actual mixed responses and pass the replay audit; an idle-engine
+weight update is not sufficient evidence.
+
+A short `generation_wait` stage with a full completed queue includes batch
+retrieval, serialization and handoff. It should not be interpreted as a need for
+more inference engines. The queue timeline disambiguates that from an empty
+buffer waiting for generation.

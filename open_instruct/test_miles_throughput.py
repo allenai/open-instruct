@@ -79,6 +79,8 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
         ("steady-2t6i-c8-b128", 8, 1),
         ("steady-2t16i-c8-b128", 18, 3),
         ("steady-2t6i-c8-b128-graphs", 8, 1),
+        ("steady-2t4i-c8-b32-graphs", 6, 1),
+        ("steady-8t8i-c16-b256-graphs", 16, 2),
     ],
 )
 def test_basket_allocates_requested_policy_gpus(case, gpus, replicas):
