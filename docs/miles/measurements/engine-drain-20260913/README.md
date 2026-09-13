@@ -274,3 +274,24 @@ Latest full compatible runtime suite: **772 passed, 53 skipped** (the same expli
 cross-backend image incompatibility excluded). Wrapper suite: **309 passed, one
 skipped**. `make style` and `make quality` pass using the existing local environment;
 no formatter changes were needed. The primary branches remain untouched.
+
+
+### Final resume qualification (06:07 UTC)
+
+The remaining lag-one and pinned-staging GPU trials completed with exit zero.
+Read-only Saturn audit `01M2CND3HN14T5HDBSV9C845SP` also passed for both.
+Lag-one resumed steps 7–8, saved each update, evaluated and shut down. The
+pinned-staging run resumed step 7, saved, evaluated and shut down. All 19 router
+FP32 master parameter groups changed relative to the actual step-6 resume
+checkpoint. The separate six-update slow-resume audit
+`01M2CJT2C2GDD359XYH7EN3G6C` passed steps 7–12 and the same resume-relative
+parameter-change check. See `final-resume-audits.json` for retained counts.
+
+The pinned-staging run measured **2.3113 seconds** for the real 37,028,386,304-byte
+trained-policy snapshot (version 7). This supersedes the earlier statement that
+only the isolated copy profile was available. It is one optimizer-boundary
+capture, not a steady-state distribution or end-to-end throughput comparison.
+
+Independent delivery remains opt-in and unmerged. The requested alternative
+pause/retract, direct publication and re-prefill experiment is isolated on
+`robertb/miles-policy-refresh`; it does not replace or alter these results.
