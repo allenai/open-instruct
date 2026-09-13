@@ -126,15 +126,7 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
             and assignment.version > self._probe_after_version
         ):
             self._probe_used = True
-            self.controller.emit(
-                "qualification_delay_started",
-                engine=assignment.engine,
-                request=request,
-                seconds=self._probe_delay,
-                version=assignment.version,
-            )
-            await asyncio.sleep(self._probe_delay)
-            self.controller.emit("qualification_delay_finished", engine=assignment.engine, request=request)
+            await self._delay_until_draining(assignment, request)
         self.controller.emit(
             "request_sent",
             engine=assignment.engine,
@@ -184,6 +176,30 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
             },
         }
         return GenerateFnOutput(samples=sample)
+
+    async def _delay_until_draining(self, assignment, request):
+        self.controller.emit(
+            "qualification_hold_reserved", engine=assignment.engine, request=request, version=assignment.version
+        )
+        # Cold compilation can outlast a fixed delay started at admission. Gate
+        # the qualification hold on actual admission closure, so the test really
+        # leaves one owned request behind while the peer receives newer weights.
+        async with asyncio.timeout(
+            self.args.olmo_core.engine_drain_timeout + self.args.olmo_core.engine_update_timeout
+        ):
+            while self.controller.engines[assignment.engine].state == "serving":
+                self.controller.check()
+                await asyncio.sleep(0.1)
+        self.controller.check()
+        self.controller.emit(
+            "qualification_delay_started",
+            engine=assignment.engine,
+            request=request,
+            seconds=self._probe_delay,
+            version=assignment.version,
+        )
+        await asyncio.sleep(self._probe_delay)
+        self.controller.emit("qualification_delay_finished", engine=assignment.engine, request=request)
 
     async def _next_group(self, current_version):
         self.controller.check()

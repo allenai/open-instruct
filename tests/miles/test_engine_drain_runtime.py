@@ -277,3 +277,30 @@ def test_delivery_location_uses_selected_gpu_uuid_without_visible_devices(monkey
         "device_index": 0,
         "version": 4,
     }
+
+
+def test_qualification_delay_starts_after_admission_closes():
+    async def run():
+        events = []
+
+        async def deliver(engine, snapshot):
+            return snapshot.version
+
+        producer = DrainingRolloutFn.__new__(DrainingRolloutFn)
+        producer.args = SimpleNamespace(olmo_core=SimpleNamespace(engine_drain_timeout=1, engine_update_timeout=1))
+        producer.controller = EngineDrain([Engine("a", "a", 0)], deliver, max_lag=2, event=events.append)
+        producer._probe_delay = 0.01
+        assignment = await producer.controller.reserve(1, 1)
+        held = asyncio.create_task(producer._delay_until_draining(assignment, assignment.requests[0]))
+        await asyncio.sleep(0)
+        assert not any(event["event"] == "qualification_delay_started" for event in events)
+        producer.controller.set_step(1)
+        producer.controller.publish(WeightSnapshot(1, (), 0, 0))
+        await asyncio.wait_for(held, 1)
+        names = [event["event"] for event in events]
+        assert names.index("drain_started") < names.index("qualification_delay_started")
+        producer.controller.decoded(assignment, assignment.requests[0], version=0, tokens=1)
+        producer.controller.graded(assignment)
+        await producer.controller.barrier()
+
+    asyncio.run(run())

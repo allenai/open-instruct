@@ -18,8 +18,10 @@ reservation before reward computation. Group identity remains owned through grad
 and the existing data-source ledger retains it until consumption or deliberate drop.
 
 After each optimizer step, all trainer ranks export in the existing collective order.
-Rank zero copies BF16 tensors to host memory, packs the established flattened byte
-layout, and places immutable NumPy buckets in Ray's object store. The exporter
+Rank zero takes owned BF16 copies into one GPU bucket, packs the established
+flattened byte layout on the GPU, then copies that bucket to host memory and places
+it in Ray's immutable object store. Capture temporarily needs the owned bucket
+and its packed GPU buffer, rather than another complete GPU model. The exporter
 retains no live parameter views. There is one full snapshot per version, shared by
 all receivers. `snapshot_capacity` bounds versions retained; the driver waits for
 capacity before another capture. Ray's own object-store spill policy still applies.
@@ -81,7 +83,9 @@ MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
 
 The separate slow fixture sets `OI_MILES_ENGINE_DRAIN_TEST_DELAY_SECONDS=120`.
 This qualification-only switch delays exactly one reserved request on engine 1
-before its HTTP send, after that engine first receives trained weights. It tests
+before its HTTP send, after that engine first receives trained weights. The hold
+waits for actual admission closure before starting the 120-second delay, so cold
+trainer compilation cannot consume the intended slow-drain interval. It tests
 queued/unsent ownership after cold-start training; it does not simulate slow grading
 or establish transport bandwidth. Values outside 0–120 are rejected. Default is zero.
 

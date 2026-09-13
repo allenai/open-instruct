@@ -58,3 +58,29 @@ retained-rollout loader removed NumPy entries from a pre-existing Torch allowlis
 The fixture now checks the current shared `tmp-7d` root, and the loader scopes only
 new allowlist entries. Its regression also preloads entries to catch the latter
 failure independent of test order. The corrected broad rerun passed: **752 passed, 53 skipped, zero failures** in 264 seconds, with only the documented cross-backend module excluded. Wrapper tests also passed again: **309 passed, one skipped**.
+
+## First full-model rolling update
+
+Trial C reached generation through the new transport after its initial full
+weight equality check. Its first optimizer step completed on both EP2 ranks, with
+74,454 active tokens and exact standalone/training scoring agreement (max and mean
+absolute difference zero). Behavior/teacher scoring mean absolute difference was
+0.00557; that is a different comparison from the exact scoring-path check.
+
+At version 1, snapshot capture took **43.67 s** for **37,028,386,304 bytes**.
+Independent engine delivery took **4.58 s** and **5.36 s**, with a reported sender
+GPU allocation peak of **1,247,805,440 bytes** each. Both reopened version 1.
+The first drain had no outstanding requests; it is not independent slow-peer
+progress evidence. Cold training took 270 s and cannot be used as steady-state
+publication performance.
+
+The next revision packs owned BF16 tensor copies on the source GPU and copies one
+whole bucket to CPU. This targets the measured per-tensor CPU copy/concatenation
+cost without retaining a second full GPU model. CPU snapshot tests pass; the
+revised two-GPU probe now uses two buckets and a noncontiguous FP32 source to check
+BF16 capture and source mutation. GPU validation of this revision is pending.
+
+The slow fixture now waits for admission to close before starting its delay.
+The earlier fixed-at-admission delay in image D could expire during cold backward
+compilation, before a publication drain began. Image D's running attempt remains
+recorded as that earlier fixture, not evidence for the revised one.

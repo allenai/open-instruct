@@ -31,7 +31,10 @@ def capture(actor):
     def flush():
         if dist.get_rank() != 0:
             return
-        packed = update_weight_utils.FlattenedTensorBucket(named_tensors=bucket).get_flattened_tensor()
+        # Pack on the source device and perform one D2H copy per bucket. Doing
+        # CPU concatenation and a blocking copy for every individual parameter
+        # cost 44 seconds for the first measured 37 GB snapshot.
+        packed = update_weight_utils.FlattenedTensorBucket(named_tensors=bucket).get_flattened_tensor().cpu()
         # ray.put serializes before returning. The resulting NumPy object is
         # read-only on retrieval; subsequent optimizer writes cannot alias it.
         refs.append(
@@ -55,7 +58,10 @@ def capture(actor):
             actor._agree(flush)
             bucket, size = [], 0
         if dist.get_rank() == 0:
-            bucket.append((name, tensor.detach().to(device="cpu", dtype=torch.bfloat16, copy=True).contiguous()))
+            # Exporters may reuse scratch storage on the next iteration. Own
+            # each tensor immediately, but retain at most one GPU bucket rather
+            # than a complete extra model. The packed CPU array is frozen by Ray.
+            bucket.append((name, tensor.detach().to(dtype=torch.bfloat16, copy=True).contiguous()))
         size += nbytes
         total += nbytes
     if size:

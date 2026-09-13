@@ -16,6 +16,13 @@ from open_instruct.miles import actor, engine_delivery
 from open_instruct.miles.state import PolicyClock
 
 
+def fixture(device):
+    return {
+        "w": torch.arange(4_194_304, device=device, dtype=torch.float32).reshape(1024, 4096).T,
+        "bias": torch.arange(2048, device=device, dtype=torch.bfloat16),
+    }
+
+
 @ray.remote(num_gpus=1)
 class Source:
     def __init__(self):
@@ -24,8 +31,7 @@ class Source:
             "gloo", init_method=f"file:///tmp/drain-probe-{uuid.uuid4().hex}", rank=0, world_size=1
         )
         self.clock = PolicyClock()
-        self.weights = {"w": torch.arange(16384, device="cuda", dtype=torch.float32).reshape(128, 128).T}
-        self.weights["w"] = self.weights["w"].to(torch.bfloat16)
+        self.weights = fixture("cuda")
 
     def location(self):
         return actor.OLMoCoreTrainRayActor.delivery_location(self)
@@ -43,7 +49,8 @@ class Source:
             return engine_delivery.capture(self)
 
     def advance(self):
-        self.weights["w"].add_(10000)
+        for tensor in self.weights.values():
+            tensor.add_(10000)
         self.clock.completed_steps += 1
         return self.clock.completed_steps
 
@@ -102,8 +109,10 @@ class Receiver:
         return str(self.version)
 
     def compare(self):
-        expected = torch.arange(16384, dtype=torch.float32).reshape(128, 128).T.to(torch.bfloat16)
-        return bool(torch.equal(self.weights["w"].cpu(), expected))
+        expected = fixture("cpu")
+        return set(self.weights) == set(expected) and all(
+            torch.equal(self.weights[name].cpu(), value.bfloat16()) for name, value in expected.items()
+        )
 
     def destroy_weights_update_group(self, name):
         dist.destroy_process_group(self.group)
@@ -127,6 +136,7 @@ def main():
         ).remote(receiver, location["cuda_visible_devices"], 0, 30)
         ray.get(sender.connect.remote(), timeout=90)
         snapshot = ray.get(source.snapshot.remote(), timeout=30)
+        assert len(snapshot.buckets) == 2
         assert ray.get(source.advance.remote(), timeout=30) == 1
         result = ray.get(sender.deliver.remote(snapshot), timeout=60)
         assert result["version"] == 0
