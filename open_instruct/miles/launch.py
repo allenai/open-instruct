@@ -126,6 +126,11 @@ def specification(image, spec, *, hostnames=None):
         envVars=[{"name": key, "value": value} for key, value in env.items() if key not in spec.launch["secrets"]]
         + [{"name": key, "secret": value} for key, value in spec.launch["secrets"].items()],
     )
+    # Cluster bootstrap advertises the physical node IP for Ray and judges,
+    # including single-node runs with judge bindings. That address requires
+    # host networking; bridge networking can strand local GCS clients.
+    if layout["replicas"] > 1 or spec.judges["judging"]["bindings"]:
+        task["hostNetworking"] = True
     tasks = [task]
     if layout["replicas"] > 1:
         hostnames = cluster_hostnames(spec) if hostnames is None else hostnames

@@ -1,0 +1,36 @@
+{
+  "code_outcomes": {
+    "train:code_stdio:ok": 32
+  },
+  "counts": {
+    "train:code_stdio": 32
+  },
+  "dumps": [
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913-r4/rollouts/0.pt",
+      "samples": 16,
+      "sha256": "3515df85c5d5cac6821f250866fbfabcc8ba45e42280efaceef8e9735818633b"
+    },
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913-r4/rollouts/1.pt",
+      "samples": 16,
+      "sha256": "b002f431b2e36a8305c8b229a10b29a525da06eb8c3caf834a7fb999cd11938a"
+    }
+  ],
+  "limitations": [
+    "Retained rewards/accounting checked; deterministic math/IF/code rewards have not been independently re-executed.",
+    "Judge grades reparsed from retained replies, without new stochastic model requests.",
+    "No optimizer/checkpoint numerical-equivalence claim from this sample audit."
+  ],
+  "mixed_reward_groups": {
+    "code_stdio": 2
+  },
+  "passed": true,
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913-r4",
+  "score_counts": {
+    "train:code_stdio": {
+      "0.0": 28,
+      "1.0": 4
+    }
+  }
+}

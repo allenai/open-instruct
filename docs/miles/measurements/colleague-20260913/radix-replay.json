@@ -1,0 +1,10 @@
+{
+  "replay_observations": 240,
+  "packing_observations": 8,
+  "passed": true,
+  "source_sha256": {
+    "training_contract_rank1.jsonl": "5803b87b5c6d9cb8cc2a27bc509ef787ae5e7852bff96983c3d939cbe80cd7ed",
+    "training_contract_rank0.jsonl": "70c239b10fb26c4f7cb6cfcfaefbb9129fb2f301088d158a6bb9bf1c923e0d03"
+  },
+  "run": "radix"
+}

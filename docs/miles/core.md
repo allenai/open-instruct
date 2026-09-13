@@ -497,3 +497,7 @@ also completed two updates and a separate-process third update through the publi
 entrypoint, with schema-2 checkpoints and a 12-response audit. Its 256-token
 prompt budget plus 256-token response budget match the fixture's 512-token HF
 context. [Evidence](measurements/core-tiny-default-20260910.json).
+
+A deliberate `debug_exit_after_rollout` stop preserves checkpoints and leaves the
+workflow resumable. Final HF export is deferred until the configured rollout
+horizon completes; an early process must not occupy the final export directory.

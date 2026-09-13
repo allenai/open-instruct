@@ -1,0 +1,62 @@
+{
+  "code_outcomes": {
+    "train:code:ok": 8,
+    "train:code_stdio:ok": 8
+  },
+  "counts": {
+    "train:code": 8,
+    "train:code_stdio": 8,
+    "train:ifeval": 8,
+    "train:math": 8
+  },
+  "dumps": [
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-04b-cache-replay-20260913/rollouts/0.pt",
+      "samples": 16,
+      "sha256": "860dc694bf32812690314a25440b26c10185292642947cf949e56ea1126cfa02"
+    },
+    {
+      "path": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-04b-cache-replay-20260913/rollouts/1.pt",
+      "samples": 16,
+      "sha256": "df0e6ed33ae60489ee2251d0cb1b6af60115c5f2d30c9c77100dbc9036fefcbb"
+    }
+  ],
+  "feature_coverage": {
+    "cached_tokens": 5184,
+    "long_prompt_samples": 0,
+    "long_response_samples": 0,
+    "max_sequence_tokens": 1127,
+    "over_8k_samples": 0,
+    "packing_observations": 4,
+    "prompt_tokens": 9452,
+    "replay_observations": 12
+  },
+  "limitations": [
+    "Retained rewards/accounting checked; deterministic math/IF/code rewards have not been independently re-executed.",
+    "Judge grades reparsed from retained replies, without new stochastic model requests.",
+    "No optimizer/checkpoint numerical-equivalence claim from this sample audit."
+  ],
+  "mixed_reward_groups": {
+    "code": 0,
+    "code_stdio": 0,
+    "ifeval": 0,
+    "math": 0
+  },
+  "passed": true,
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-04b-cache-replay-20260913",
+  "score_counts": {
+    "train:code": {
+      "0.0": 8
+    },
+    "train:code_stdio": {
+      "0.0": 8
+    },
+    "train:ifeval": {
+      "0.0": 4,
+      "0.25": 4
+    },
+    "train:math": {
+      "0.0": 8
+    }
+  }
+}

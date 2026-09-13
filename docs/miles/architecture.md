@@ -64,3 +64,19 @@ Regenerate that snapshot with the documented capture command in the native appen
 when parser flags change. Update descriptions and rerun generation, reviewing the
 diff. Do not edit generated tables manually or copy a measurement's settings into
 current defaults without a deliberate recipe change.
+
+### Type checking with an external Core checkout
+
+The repository's type-check command does not require a hidden runtime source
+directory. The MILES adapter still needs the pinned Core APIs: an older installed
+Core can report missing members. To resolve its types against the exact Core
+branch during MILES development, pass that source path explicitly:
+
+```bash
+uv run ty check --extra-search-path /path/to/OLMo-core/src
+```
+
+Do not add an unconditionally required, ignored runtime directory to the global
+`tool.ty.environment.extra-paths`: a fresh clone has no such directory and the
+checker exits before examining any files. The runtime image and dependency lock
+continue to define the actual training implementation.

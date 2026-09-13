@@ -1,0 +1,286 @@
+{
+  "experiment_id": "01M2C867KWDKSN1XRH228A6VGM",
+  "image": "01M2BX9JPT44DGQ9QWY5C0HF52",
+  "requested_image": "01M2BX9JPT44DGQ9QWY5C0HF52",
+  "revision": "04b427592190b0171da3041fec8d704973bea94a",
+  "spec_sha256": "bb68a79b2cbffd078becf01bb3011ce0072774cb35a85923231c33863809581e",
+  "spec": {
+    "schema_version": 1,
+    "name": "pool-ep8-i16-throughput-20260913",
+    "model": {
+      "format": "hf",
+      "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+    },
+    "data": {
+      "eval_prompt_data": [
+        "mixed",
+        "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/eval.jsonl"
+      ],
+      "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/train.jsonl",
+      "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/verifiers.json",
+      "seed": 17,
+      "shuffle": false
+    },
+    "output": {
+      "export_hf": false,
+      "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/pool-ep8-i16-throughput-20260913/export-hf",
+      "root": "/weka/oe-training-default/robertb/open-instruct/runs/pool-ep8-i16-throughput-20260913"
+    },
+    "launch": {
+      "workspace": "ai2/open-instruct-dev",
+      "budget": "ai2/oe-other",
+      "cluster": "ai2/holmes",
+      "priority": "urgent",
+      "min_runtime": "1h",
+      "auto_resume": false,
+      "shared_memory": "200 GiB",
+      "timeout": "2h",
+      "coordination": {
+        "heartbeat_timeout": 120,
+        "startup_timeout": 1200
+      },
+      "env": {
+        "NCCL_IB_HCA": "^=mlx5_bond_0",
+        "NCCL_SOCKET_IFNAME": "ib"
+      },
+      "gpus_per_replica": 8,
+      "secrets": {},
+      "weka_mounts": [
+        {
+          "mount_path": "/weka/oe-training-default",
+          "weka": "oe-training-default"
+        },
+        {
+          "mount_path": "/weka/oe-adapt-default",
+          "weka": "oe-adapt-default"
+        }
+      ]
+    },
+    "conversion": {
+      "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/pool-ep8-i16-throughput-20260913/prepared/hf"
+    },
+    "compiler_cache": {
+      "enabled": true,
+      "restore": true,
+      "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+    },
+    "training": {
+      "eval_interval": 12,
+      "num_rollouts": 12,
+      "save_checkpoints": false,
+      "skip_eval_before_train": false
+    },
+    "trainer": {
+      "activation_recompute": true,
+      "expert_parallel_size": 8,
+      "gpus": 8,
+      "micro_batch_size": 1,
+      "packing_max_tokens": 6144,
+      "sequence_packing": true,
+      "trainer_flash_attention_version": 4,
+      "trainer_num_nodes": 1
+    },
+    "inference": {
+      "check_weight_update_equal": true,
+      "global_batch_size": 512,
+      "gpus": 16,
+      "max_context_length": 6144,
+      "max_response_length": 4096,
+      "placement_mode": "disaggregated",
+      "radix_cache": false,
+      "rollout_batch_size": 64,
+      "rollout_tensor_parallel_size": 1,
+      "samples_per_prompt": 8,
+      "sglang_attention_backend": "triton",
+      "sglang_cuda_graph_backend_decode": "full",
+      "sglang_cuda_graph_backend_prefill": "disabled",
+      "sglang_cuda_graph_max_bs_decode": 64,
+      "sglang_max_mamba_cache_size": 128,
+      "sglang_max_running_requests": 64,
+      "sglang_max_total_tokens": 524288,
+      "sglang_mem_fraction_static": 0.6,
+      "sglang_sampling_backend": "pytorch",
+      "sglang_server_concurrency": 64,
+      "update_weight_buffer_size": 2147483648
+    },
+    "optimizer": {
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.95,
+      "adam_eps": 1e-08,
+      "clip_grad": 1.0,
+      "entropy_coef": 0.0,
+      "eps_clip": 0.2,
+      "eps_clip_high": 0.28,
+      "kl_loss_coef": 0.0,
+      "learning_rate": 1e-06,
+      "lr_decay_style": "constant",
+      "lr_warmup_iters": 0,
+      "weight_decay": 0.0
+    },
+    "async": {
+      "async_data_buffer_capacity_factor": 2.0,
+      "async_unused_samples_handler": "retry",
+      "fully_async": true,
+      "max_weight_staleness": 2,
+      "off_policy_correction": "tis",
+      "rollout_submission_granularity": "sample"
+    },
+    "tracking": {
+      "wandb_group": "ep8-engine-pool-20260912",
+      "wandb_mode": "offline",
+      "wandb_project": "olmo-rl-comparison",
+      "wandb_team": "ai2-llm"
+    },
+    "runtime": {
+      "row_specialization": "dynamic"
+    },
+    "core": {
+      "diagnostic_interval": 0,
+      "expert_publication": "fused",
+      "max_train_rollout_logprob_abs_diff": 0.05,
+      "replay_diagnostics": true,
+      "router_aux_loss_weight": 0.01,
+      "router_z_loss_weight": 1e-05,
+      "scoring_check_interval": 20,
+      "stream_moe_export": true,
+      "weight_sync_mode": "flattened"
+    },
+    "miles": {
+      "async_max_concurrent_samples": 1024,
+      "disable_grpo_std_normalization": true,
+      "rollout_max_prompt_len": 2048,
+      "rollout_seed": 17,
+      "rollout_temperature": 1.0,
+      "seed": 17,
+      "use_miles_router": true,
+      "use_rollout_routing_replay": true
+    },
+    "judges": {},
+    "rubrics": {},
+    "judging": {
+      "bindings": {}
+    }
+  },
+  "allocation": {
+    "replicas": 3,
+    "gpus_per_replica": 8,
+    "allocated_gpus": 24,
+    "policy_gpus": 24,
+    "judge_gpus": 0,
+    "nodes": [
+      {
+        "trainer_gpus": 8,
+        "rollout_gpus": 0,
+        "ray_gpus": 8,
+        "judges": {}
+      },
+      {
+        "trainer_gpus": 0,
+        "rollout_gpus": 8,
+        "ray_gpus": 8,
+        "judges": {}
+      },
+      {
+        "trainer_gpus": 0,
+        "rollout_gpus": 8,
+        "ray_gpus": 8,
+        "judges": {}
+      }
+    ],
+    "unused_gpus": 0
+  },
+  "placements": [
+    {
+      "task": "pool-ep8-i16-throughput-20260913-replica-0",
+      "hostnames": [
+        "holmes-cs-aus-515.reviz.ai2.in",
+        "holmes-cs-aus-485.reviz.ai2.in",
+        "holmes-cs-aus-489.reviz.ai2.in",
+        "holmes-cs-aus-492.reviz.ai2.in",
+        "holmes-cs-aus-495.reviz.ai2.in",
+        "holmes-cs-aus-498.reviz.ai2.in",
+        "holmes-cs-aus-501.reviz.ai2.in",
+        "holmes-cs-aus-504.reviz.ai2.in",
+        "holmes-cs-aus-507.reviz.ai2.in",
+        "holmes-cs-aus-510.reviz.ai2.in",
+        "holmes-cs-aus-513.reviz.ai2.in",
+        "holmes-cs-aus-518.reviz.ai2.in",
+        "holmes-cs-aus-521.reviz.ai2.in",
+        "holmes-cs-aus-524.reviz.ai2.in",
+        "holmes-cs-aus-527.reviz.ai2.in",
+        "holmes-cs-aus-530.reviz.ai2.in",
+        "holmes-cs-aus-533.reviz.ai2.in",
+        "holmes-cs-aus-536.reviz.ai2.in",
+        "holmes-cs-aus-539.reviz.ai2.in",
+        "holmes-cs-aus-542.reviz.ai2.in",
+        "holmes-cs-aus-545.reviz.ai2.in",
+        "holmes-cs-aus-548.reviz.ai2.in",
+        "holmes-cs-aus-551.reviz.ai2.in",
+        "holmes-cs-aus-554.reviz.ai2.in"
+      ],
+      "gpus": 8
+    },
+    {
+      "task": "pool-ep8-i16-throughput-20260913-replica-1",
+      "hostnames": [
+        "holmes-cs-aus-516.reviz.ai2.in",
+        "holmes-cs-aus-486.reviz.ai2.in",
+        "holmes-cs-aus-490.reviz.ai2.in",
+        "holmes-cs-aus-493.reviz.ai2.in",
+        "holmes-cs-aus-496.reviz.ai2.in",
+        "holmes-cs-aus-499.reviz.ai2.in",
+        "holmes-cs-aus-502.reviz.ai2.in",
+        "holmes-cs-aus-505.reviz.ai2.in",
+        "holmes-cs-aus-508.reviz.ai2.in",
+        "holmes-cs-aus-511.reviz.ai2.in",
+        "holmes-cs-aus-514.reviz.ai2.in",
+        "holmes-cs-aus-519.reviz.ai2.in",
+        "holmes-cs-aus-522.reviz.ai2.in",
+        "holmes-cs-aus-525.reviz.ai2.in",
+        "holmes-cs-aus-528.reviz.ai2.in",
+        "holmes-cs-aus-531.reviz.ai2.in",
+        "holmes-cs-aus-534.reviz.ai2.in",
+        "holmes-cs-aus-537.reviz.ai2.in",
+        "holmes-cs-aus-540.reviz.ai2.in",
+        "holmes-cs-aus-543.reviz.ai2.in",
+        "holmes-cs-aus-546.reviz.ai2.in",
+        "holmes-cs-aus-549.reviz.ai2.in",
+        "holmes-cs-aus-552.reviz.ai2.in",
+        "holmes-cs-aus-555.reviz.ai2.in"
+      ],
+      "gpus": 8
+    },
+    {
+      "task": "pool-ep8-i16-throughput-20260913-replica-2",
+      "hostnames": [
+        "holmes-cs-aus-487.reviz.ai2.in",
+        "holmes-cs-aus-488.reviz.ai2.in",
+        "holmes-cs-aus-491.reviz.ai2.in",
+        "holmes-cs-aus-494.reviz.ai2.in",
+        "holmes-cs-aus-497.reviz.ai2.in",
+        "holmes-cs-aus-500.reviz.ai2.in",
+        "holmes-cs-aus-503.reviz.ai2.in",
+        "holmes-cs-aus-506.reviz.ai2.in",
+        "holmes-cs-aus-509.reviz.ai2.in",
+        "holmes-cs-aus-512.reviz.ai2.in",
+        "holmes-cs-aus-517.reviz.ai2.in",
+        "holmes-cs-aus-520.reviz.ai2.in",
+        "holmes-cs-aus-523.reviz.ai2.in",
+        "holmes-cs-aus-526.reviz.ai2.in",
+        "holmes-cs-aus-529.reviz.ai2.in",
+        "holmes-cs-aus-532.reviz.ai2.in",
+        "holmes-cs-aus-535.reviz.ai2.in",
+        "holmes-cs-aus-538.reviz.ai2.in",
+        "holmes-cs-aus-541.reviz.ai2.in",
+        "holmes-cs-aus-544.reviz.ai2.in",
+        "holmes-cs-aus-547.reviz.ai2.in",
+        "holmes-cs-aus-550.reviz.ai2.in",
+        "holmes-cs-aus-553.reviz.ai2.in",
+        "holmes-cs-aus-556.reviz.ai2.in"
+      ],
+      "gpus": 8
+    }
+  ],
+  "receipt": "/home/robert/.cache/open-instruct/miles/launches/pool-ep8-i16-throughput-20260913-ca20498586cf0816.json",
+  "url": "https://beaker.org/ex/01M2C867KWDKSN1XRH228A6VGM"
+}

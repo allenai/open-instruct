@@ -158,17 +158,14 @@ async def code_score(args: Any, prediction: str, target: Any, *, stdio: bool = F
 async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = False) -> tuple[float, dict]:
     """Score one completion and describe the service outcome for per-sample diagnostics."""
     config = code_verifier_config(args, stdio=stdio)
-    payload = {
-        "program": extract_python_code(prediction),
-        "tests": target,
-        "max_execution_time": config.max_execution_time,
-    }
+    program = extract_python_code(prediction)
+    payload = {"program": program, "tests": target, "max_execution_time": config.max_execution_time}
     timeout = max(30.0, min(300.0, config.max_execution_time * 10))
 
     diagnostics = {
         "status": "ok",
         "http_status": None,
-        "program_chars": len(payload["program"]),
+        "program_chars": len(program),
         "tests": len(target) if isinstance(target, list) else -1,
         "stdio": stdio,
     }
@@ -193,7 +190,7 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
                 logger.warning(
                     "code verifier rejected a sample with HTTP %s (program %d chars, %d tests); scoring it zero",
                     status,
-                    len(payload["program"]),
+                    len(program),
                     len(target) if isinstance(target, list) else -1,
                 )
                 diagnostics["status"] = "rejected"
