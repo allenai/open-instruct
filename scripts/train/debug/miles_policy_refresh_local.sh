@@ -3,6 +3,7 @@
 set -euo pipefail
 image="${1:-open-instruct-miles-core-e468b2e014b4}"
 probe_output="${2:?Provide a fresh /tmp output directory}"
+shift 2
 mkdir -p "$probe_output"
 cp scripts/miles/policy_refresh_probe.py scripts/miles/policy_refresh_hooks.py "$probe_output/"
 git rev-parse HEAD > "$probe_output/source-commit.txt"
@@ -18,5 +19,5 @@ docker run --rm --entrypoint bash --network host --shm-size=4g \
     ln -s libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so
     export PYTHONPATH="/output:$PYTHONPATH"
     printf "\nfrom policy_refresh_hooks import install as _install_refresh_probe\n_install_refresh_probe(Scheduler)\n" >> /sgl-workspace/sglang/python/sglang/srt/managers/scheduler.py
-    python /output/policy_refresh_probe.py --local-ipc
-  '
+    python /output/policy_refresh_probe.py --local-ipc "$@"
+  ' -- "$@"
