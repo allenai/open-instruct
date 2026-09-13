@@ -1,15 +1,20 @@
 """Read-only source inventory and retained-sample checks for readiness qualification."""
 
 import argparse
+import asyncio
 import collections
+import copy
 import hashlib
+import importlib
 import json
 import math
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.miles import audit_workflow, prepare_colleague_exercises
 
-from open_instruct.miles import general_judge, run_data, workflow
+from open_instruct.miles import general_judge, rewards, run_data, workflow
 
 require = audit_workflow.require
 
@@ -185,9 +190,128 @@ def inspect(model):
     }
 
 
+def check_optimizer_sequence(events, updates):
+    optimizers = [event for event in events if event.get("event") == "optimizer"]
+    require([event["step"] for event in optimizers] == list(range(1, updates + 1)), "Optimizer step discontinuity")
+    require([event["rollout_id"] for event in optimizers] == list(range(updates)), "Rollout discontinuity")
+    require(all(not event["optimizer_skipped"] for event in optimizers), "Skipped optimizer step")
+    require(all(event["lr_used"] > 0 for event in optimizers), "Zero learning rate in resume exercise")
+    return optimizers
+
+
+def lifecycle(root):
+    """Audit our four-update, save-every-update, two-process readiness cases."""
+    root = Path(root)
+    state = json.loads((root / "workflow.json").read_text())
+    require(state["status"] == "complete", "Resume workflow incomplete")
+    require(state["result"]["start_rollout_id"] == 2, "No fresh-process resume from update two")
+    require(state["result"]["completed_rollout_ids"] == [2, 3], "Wrong resumed horizon")
+    plan = json.loads((root / "resolved-plan.json").read_text())
+    require(plan["miles"].get("load"), "Resume plan did not load a checkpoint")
+    directory = root / "checkpoints"
+    latest = json.loads((directory / "core-latest.json").read_text())
+    require(latest["rollout_id"] == 3, "Final native checkpoint not committed")
+    boundaries = []
+    for rollout in range(4):
+        path = directory / "core" / f"rollout_{rollout:07d}"
+        manifest = json.loads((path / "complete.json").read_text())
+        clock = manifest["clock"]
+        require(
+            clock["completed_steps"] == rollout + 1 and clock["next_rollout_id"] == rollout + 1, "Wrong saved clock"
+        )
+        cursor = directory / "rollout" / f"global_dataset_state_dict_{rollout}.pt"
+        require(audit_workflow.digest(cursor) == manifest["cursor_sha256"], "Saved cursor integrity failure")
+        # Read descriptors, not many gigabytes of optimizer tensors. Native restore
+        # itself is exercised by the resumed GPU process and must also pass.
+        checkpoint = importlib.import_module("torch.distributed.checkpoint")
+        metadata = checkpoint.FileSystemReader(path / "model").read_metadata()
+        names = list(metadata.state_dict_metadata)
+        require(any("optim" in name for name in names), "Native save lacks optimizer state")
+        require(
+            all((path / f"rank_{rank}.pt").is_file() for rank in range(manifest["world_size"])), "Missing rank state"
+        )
+        boundaries.append(
+            {
+                "rollout_id": rollout,
+                "clock": clock,
+                "cursor_sha256": manifest["cursor_sha256"],
+                "native_entries": len(names),
+            }
+        )
+    rank_events = {}
+    for rank in range(manifest["world_size"]):
+        events = audit_workflow.read_jsonl(directory / f"training_contract_rank{rank}.jsonl")
+        optimizers = check_optimizer_sequence(events, 4)
+        checks = [event for event in events if event.get("event") == "scoring_check"]
+        require({0, 2} <= {event["rollout_id"] for event in checks}, "Missing first-forward check after restart")
+        require(all(event["max_abs"] <= event["tolerance"] for event in checks), "Scoring check failed")
+        rank_events[str(rank)] = {"steps": [event["step"] for event in optimizers], "scoring_checks": checks}
+    publications = audit_workflow.read_jsonl(directory / "publication.jsonl")
+    require([event["version"] for event in publications] == [0, 1, 2, 2, 3, 4], "Publication/republish discontinuity")
+    return {
+        "passed": True,
+        "root": str(root),
+        "boundaries": boundaries,
+        "ranks": rank_events,
+        "publication_versions": [event["version"] for event in publications],
+        "limitations": [
+            "Restore lifecycle and saved optimizer descriptors checked; not an uninterrupted-versus-resumed numerical-equivalence experiment."
+        ],
+    }
+
+
+def rescore(root):
+    """Re-execute low/high retained rewards for each deterministic domain."""
+    root = Path(root)
+    plan = json.loads((root / "resolved-plan.json").read_text())
+    domains = {"math", "ifeval", "code", "code_stdio"}
+    candidates = collections.defaultdict(list)
+    for rollout in range(plan["miles"]["num_rollout"]):
+        path = Path(plan["miles"]["save_debug_rollout_data"].format(rollout_id=rollout))
+        for sample in audit_workflow.load_rollout(path)["samples"]:
+            names = [entry["name"] for entry in sample["metadata"]["verifiers"]]
+            if len(names) == 1 and names[0] in domains:
+                candidates[names[0]].append((rollout, sample))
+    require(set(candidates) == domains, "Missing deterministic verifier domain")
+    registry = json.loads(Path(plan["core"]["reward_config"]).read_text())
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "verifiers.json"
+        path.write_text(json.dumps({name: registry[name] for name in sorted(domains)}))
+        args = SimpleNamespace(olmo_core=SimpleNamespace(reward_config=str(path)))
+
+        async def execute():
+            results = []
+            for domain, items in sorted(candidates.items()):
+                ordered = sorted(items, key=lambda item: item[1]["reward"])
+                for rollout, sample in (ordered[0], ordered[-1]):
+                    duplicate = SimpleNamespace(**copy.deepcopy(sample))
+                    score = await asyncio.wait_for(rewards._score(args, duplicate), timeout=180)
+                    results.append(
+                        {
+                            "domain": domain,
+                            "rollout": rollout,
+                            "id": sample["metadata"]["prepared_sample_id"],
+                            "response_sha256": hashlib.sha256(sample["response"].encode()).hexdigest(),
+                            "recorded": sample["reward"],
+                            "rescored": score,
+                            "matched": math.isclose(score, sample["reward"], rel_tol=0, abs_tol=1e-10),
+                            "diagnostics": duplicate.metadata.get("verifier_diagnostics", {}),
+                        }
+                    )
+            return results
+
+        results = asyncio.run(execute())
+    return {
+        "passed": all(row["matched"] for row in results),
+        "root": str(root),
+        "results": results,
+        "limits": "Two retained training responses per deterministic domain, selected at reward extremes. Fresh verifier/service execution; no new judge calls or optimizer-equivalence claim.",
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("inspect", "audit"))
+    parser.add_argument("mode", choices=("inspect", "audit", "lifecycle", "rescore"))
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--output", type=Path, default=Path("/output"))
     args = parser.parse_args()
@@ -195,10 +319,11 @@ def main():
     failed = False
     for index, path in enumerate(args.paths):
         try:
-            report = inspect(path) if args.mode == "inspect" else audit(path)
+            report = {"inspect": inspect, "audit": audit, "lifecycle": lifecycle, "rescore": rescore}[args.mode](path)
         except Exception as error:
             report = {"passed": False, "path": str(path), "error": f"{type(error).__name__}: {error}"}
             failed = True
+        failed = failed or not report["passed"]
         workflow.write_json(args.output / f"{args.mode}-{index}.json", report)
         print(json.dumps({"path": str(path), "passed": report["passed"], "error": report.get("error")}), flush=True)
     if failed:

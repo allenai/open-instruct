@@ -1,0 +1,97 @@
+{
+  "additional_source": {
+    "dataset": "hamishivi/code_rlvr_mixture_dpo",
+    "revision": "0c37776831a2e956935bcabafa3915bcdf353a30"
+  },
+  "dataset": "allenai/Dolci-Think-RL-7B",
+  "lengths": {
+    "eval": [
+      {
+        "domain": "code_stdio",
+        "id": "5a1cbb4cdad2e62c9e72ec1cfe1913ace1f4024f907f789f98f4f0d37013eb84",
+        "tokens": 4556
+      },
+      {
+        "domain": "math",
+        "id": "1766d8d965391f4867616e284fa4cd1c435e33ad9caf2de854e42bb2da99d31a",
+        "tokens": 187
+      },
+      {
+        "domain": "math",
+        "id": "b995aba91a52ed35b67430ffee934b3635e45bc77ea53ec3920f7e44ca560c5f",
+        "tokens": 119
+      }
+    ],
+    "train": [
+      {
+        "domain": "code_stdio",
+        "id": "7b81b8a900f27d7abe4e4a5875c267505927ec698d6a879b0951870af99591b0",
+        "tokens": 4550
+      },
+      {
+        "domain": "math",
+        "id": "5a2bbd45fb6e243f77b01d9c093f17ec25a85221c9f252c0438f2d23b24bf50c",
+        "tokens": 130
+      },
+      {
+        "domain": "math",
+        "id": "583a7b534d296ea90c6a21a7c88b586c36e18375f75fe8c6b3f141d48f0cf90e",
+        "tokens": 123
+      },
+      {
+        "domain": "math",
+        "id": "42a5d1bf81c2083b2c86e0dffa338e1763603a071550dab55abf652912db2332",
+        "tokens": 68
+      },
+      {
+        "domain": "math",
+        "id": "27270d0f78a6bf2e5a8ff1413e7eaaf04c9c5226724f30716eaacdfff160cab9",
+        "tokens": 90
+      },
+      {
+        "domain": "math",
+        "id": "6aadba3baf62aa8cc06ac2300302d802df605930a32597751a2c1ee1a4a3f179",
+        "tokens": 100
+      },
+      {
+        "domain": "math",
+        "id": "79080dff3b7de12ddb946b403335b6a647a33eea6028fb1b8ed38fbfa703fac6",
+        "tokens": 125
+      },
+      {
+        "domain": "math",
+        "id": "16c66296a8cf300cb5edb603126f808a73af6cf643fcee5f4527f72fedeb571d",
+        "tokens": 112
+      },
+      {
+        "domain": "math",
+        "id": "9a9d672e463e85aecf9cf587afe2aaed9ff12c08fd32014b2af3635ed5c18970",
+        "tokens": 140
+      }
+    ]
+  },
+  "limits": {
+    "context": 16384,
+    "prompt": 8192,
+    "response": 8192
+  },
+  "model": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+  "outputs": {
+    "eval.jsonl": "868b8169d1958464d0a5cd47592ac08b84521466c5b0b8340a5b4bd0bad4e141",
+    "train.jsonl": "d753169e32e2bc25d45be7a7805ac58515c5de7ea6e8568c43b8d7920c563101",
+    "verifiers.json": "688307577c48d84aa1345dadaeb77ea7bd80e29c4dd36b96e20cb8e9e06cb754"
+  },
+  "passed": true,
+  "revision": "0fb6466d31ef3a9dd16985ef635e6429e05a6491",
+  "scanned_counts": {
+    "code:total": 12121,
+    "code_mixture_long": 2,
+    "code_mixture_scanned": 2,
+    "code_stdio:total": 8712,
+    "ifeval:total": 29813,
+    "math:total": 24113,
+    "short": 24112
+  },
+  "source_rows": 102014,
+  "synthetic_padding": false
+}

@@ -12,8 +12,11 @@ replay, code services and a managed judge (retry); matching warm-cache fresh
 allocation; EP8 with eight engines; EP8 with sixteen engines; and EP4 with eight
 engines (retry). EP4 completed all twelve updates on both nodes, exit 0. The warm
 case restored compatible caches on both trainers and both serving workers.
-Independent retained-sample reward audits and final comparative timing analysis
-remain pending; lifecycle completion is not full feature or learning qualification.
+Retained-sample identity/reward-accounting audits passed for the cold and warm
+six-domain runs; independent deterministic rescoring remains pending. Stdio code
+executed but all training rewards were zero, so that domain has no demonstrated
+learning signal. Final comparative timing analysis remains pending. See the
+[continuation ledger](../measurements/colleague-20260913/README.md).
 
 The corrected sixteen-engine throughput attempt
 [01M2C867KWDKSN1XRH228A6VGM](https://beaker.org/ex/01M2C867KWDKSN1XRH228A6VGM)
@@ -24,13 +27,16 @@ staged eight-engine profile with the same new controls. No inference-pool optimu
 is established. Recheck after engine-drain work because cancellation currently
 confounds useful throughput. No 24-engine escalation before that evidence.
 
-Not yet exercised in this campaign: dedicated long-context/mixed-chunk case;
+New exercises are submitted (not yet qualified): long-context/mixed-chunk case;
 radix combined with the six-domain judge fixture; full EP8 + seven engines + judge;
 packed/replayed MoE async fresh-process resume and injected failure; dense full-model
 colocated checkpoint/resume/export/reload; hero EP2/TP2 numerical qualification.
 The hero numerical gate remains a prerequisite, not a passed training result.
 
-Long-context coverage is explicitly absent. Pool runs used a 2048 prompt cap,
+Long-context qualification is still pending. A new immutable fixture now has
+one 4,550-token natural training prompt and a distinct 4,556-token held-out
+prompt, with short math controls; its four-GPU run is submitted.
+Historical pool-run coverage: Pool runs used a 2048 prompt cap,
 4096 response cap and 6144 context/packing cap. Frequent 4096-token truncation
 exercises long decoding at that limit; it does not qualify 8K/16K prompts or
 contexts. Prepare a separate small manifest with verified real token lengths,

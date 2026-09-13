@@ -1,0 +1,899 @@
+{
+  "dense-first": {
+    "experiment_id": "01M2CD5M6R6WB7M8NYGZ243B8Y",
+    "image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+    "revision": "f958d4b6d452fa26bb535c9825fdddec116289ae",
+    "spec_sha256": "5907d7293a2f75cc1bc8e4cb747e185716fd8a8dd871af8bbb76c97d56a8c250",
+    "spec": {
+      "schema_version": 1,
+      "name": "colleague-08-dense-colocated-20260913",
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-7b-think-dpo-oi-template"
+      },
+      "data": {
+        "eval_prompt_data": [
+          "mixed",
+          "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/dense/eval.jsonl"
+        ],
+        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/dense/train.jsonl",
+        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/dense/verifiers.json",
+        "seed": 17,
+        "shuffle": false
+      },
+      "output": {
+        "export_hf": true,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913"
+      },
+      "launch": {
+        "workspace": "ai2/open-instruct-dev",
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "priority": "urgent",
+        "min_runtime": "1h",
+        "auto_resume": true,
+        "shared_memory": "200 GiB",
+        "timeout": "90m",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 2,
+        "secrets": {},
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          }
+        ]
+      },
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913/prepared/hf"
+      },
+      "compiler_cache": {
+        "enabled": false,
+        "restore": true,
+        "shared_root": "/weka/oe-training-default/robertb/open-instruct/compiler-cache/tmp-30d"
+      },
+      "training": {
+        "eval_interval": 2,
+        "num_rollouts": 4,
+        "save_checkpoints": true,
+        "save_interval": 1,
+        "skip_eval_before_train": false
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "expert_parallel_size": 1,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 32,
+        "gpus": 2,
+        "max_context_length": 4096,
+        "max_response_length": 2048,
+        "placement_mode": "colocated",
+        "rollout_batch_size": 8,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 4,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "disabled",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 64,
+        "sglang_disable_radix_cache": true,
+        "sglang_max_running_requests": 32,
+        "sglang_max_total_tokens": 32768,
+        "sglang_mem_fraction_static": 0.15,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 32,
+        "update_weight_buffer_size": 1073741824
+      },
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.999,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.272,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "async": {},
+      "tracking": {
+        "wandb_group": "colleague-readiness-20260912",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison"
+      },
+      "runtime": {},
+      "core": {
+        "diagnostic_interval": 0,
+        "max_policy_lag": 0,
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "router_aux_loss_weight": 0.0,
+        "router_z_loss_weight": 0.0,
+        "weight_sync_mode": "flattened"
+      },
+      "miles": {
+        "calculate_per_token_loss": true,
+        "debug_exit_after_rollout": 2,
+        "disable_grpo_std_normalization": true,
+        "eval_temperature": 0.0,
+        "lr_decay_iters": 4,
+        "n_samples_per_eval_prompt": 1,
+        "rollout_max_prompt_len": 2048,
+        "rollout_seed": 1,
+        "rollout_temperature": 1.0,
+        "rollout_top_k": -1,
+        "rollout_top_p": 1.0,
+        "seed": 1,
+        "use_rollout_routing_replay": false
+      },
+      "judges": {},
+      "rubrics": {},
+      "judging": {
+        "bindings": {}
+      }
+    },
+    "allocation": {
+      "replicas": 1,
+      "gpus_per_replica": 2,
+      "allocated_gpus": 2,
+      "policy_gpus": 2,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "trainer_gpus": 2,
+          "rollout_gpus": 0,
+          "ray_gpus": 2,
+          "judges": {}
+        }
+      ],
+      "unused_gpus": 0
+    }
+  },
+  "dense-resume": {
+    "experiment_id": "01M2CEKDXM84SBDCNFEK3FP509",
+    "image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+    "revision": "e563df9feaffead5cd014411739825ee164d5cc0",
+    "spec_sha256": "5907d7293a2f75cc1bc8e4cb747e185716fd8a8dd871af8bbb76c97d56a8c250",
+    "spec": {
+      "schema_version": 1,
+      "name": "colleague-08-dense-colocated-20260913",
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/open-instruct/checkpoints/olmo3-7b-think-dpo-oi-template"
+      },
+      "data": {
+        "eval_prompt_data": [
+          "mixed",
+          "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/dense/eval.jsonl"
+        ],
+        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/dense/train.jsonl",
+        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/dense/verifiers.json",
+        "seed": 17,
+        "shuffle": false
+      },
+      "output": {
+        "export_hf": true,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913"
+      },
+      "launch": {
+        "workspace": "ai2/open-instruct-dev",
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "priority": "urgent",
+        "min_runtime": "1h",
+        "auto_resume": true,
+        "shared_memory": "200 GiB",
+        "timeout": "90m",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 2,
+        "secrets": {},
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          }
+        ]
+      },
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913/prepared/hf"
+      },
+      "compiler_cache": {
+        "enabled": false,
+        "restore": true,
+        "shared_root": "/weka/oe-training-default/robertb/open-instruct/compiler-cache/tmp-30d"
+      },
+      "training": {
+        "eval_interval": 2,
+        "num_rollouts": 4,
+        "save_checkpoints": true,
+        "save_interval": 1,
+        "skip_eval_before_train": false
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "expert_parallel_size": 1,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 32,
+        "gpus": 2,
+        "max_context_length": 4096,
+        "max_response_length": 2048,
+        "placement_mode": "colocated",
+        "rollout_batch_size": 8,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 4,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "disabled",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 64,
+        "sglang_disable_radix_cache": true,
+        "sglang_max_running_requests": 32,
+        "sglang_max_total_tokens": 32768,
+        "sglang_mem_fraction_static": 0.15,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 32,
+        "update_weight_buffer_size": 1073741824
+      },
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.999,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.272,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "async": {},
+      "tracking": {
+        "wandb_group": "colleague-readiness-20260912",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison"
+      },
+      "runtime": {},
+      "core": {
+        "diagnostic_interval": 0,
+        "max_policy_lag": 0,
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "router_aux_loss_weight": 0.0,
+        "router_z_loss_weight": 0.0,
+        "weight_sync_mode": "flattened"
+      },
+      "miles": {
+        "calculate_per_token_loss": true,
+        "debug_exit_after_rollout": 2,
+        "disable_grpo_std_normalization": true,
+        "eval_temperature": 0.0,
+        "lr_decay_iters": 4,
+        "n_samples_per_eval_prompt": 1,
+        "rollout_max_prompt_len": 2048,
+        "rollout_seed": 1,
+        "rollout_temperature": 1.0,
+        "rollout_top_k": -1,
+        "rollout_top_p": 1.0,
+        "seed": 1,
+        "use_rollout_routing_replay": false
+      },
+      "judges": {},
+      "rubrics": {},
+      "judging": {
+        "bindings": {}
+      }
+    },
+    "allocation": {
+      "replicas": 1,
+      "gpus_per_replica": 2,
+      "allocated_gpus": 2,
+      "policy_gpus": 2,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "trainer_gpus": 2,
+          "rollout_gpus": 0,
+          "ray_gpus": 2,
+          "judges": {}
+        }
+      ],
+      "unused_gpus": 0
+    }
+  },
+  "moe-resume-r2-first": {
+    "experiment_id": "01M2CDZ17RQWTE2Q5W8P56BQNK",
+    "image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+    "revision": "6b822708a413cc14b35949b84e2635f7ec9ec99b",
+    "spec_sha256": "bd92553bda74a4982b8c04e2e7b5e004e5cbb6d0305dfdaec229b7dfdbe3a344",
+    "spec": {
+      "schema_version": 1,
+      "name": "colleague-09-async-resume-20260913-r2",
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+      },
+      "data": {
+        "eval_prompt_data": [
+          "mixed",
+          "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/eval.jsonl"
+        ],
+        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/train.jsonl",
+        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/mixed-cache-ab-20260912/verifiers.json",
+        "seed": 17,
+        "shuffle": false
+      },
+      "output": {
+        "export_hf": false,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-09-async-resume-20260913-r2/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-09-async-resume-20260913-r2"
+      },
+      "launch": {
+        "workspace": "ai2/open-instruct-dev",
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "priority": "urgent",
+        "min_runtime": "1h",
+        "auto_resume": true,
+        "shared_memory": "200 GiB",
+        "timeout": "2h",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 3,
+        "secrets": {},
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          },
+          {
+            "mount_path": "/weka/oe-adapt-default",
+            "weka": "oe-adapt-default"
+          }
+        ]
+      },
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-09-async-resume-20260913-r2/prepared/hf"
+      },
+      "compiler_cache": {
+        "enabled": true,
+        "restore": true,
+        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+      },
+      "training": {
+        "eval_interval": 2,
+        "num_rollouts": 4,
+        "save_checkpoints": true,
+        "save_interval": 1,
+        "skip_eval_before_train": false
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "expert_parallel_size": 2,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "packing_max_tokens": 6144,
+        "sequence_packing": true,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 64,
+        "gpus": 1,
+        "max_context_length": 6144,
+        "max_response_length": 4096,
+        "placement_mode": "disaggregated",
+        "radix_cache": false,
+        "rollout_batch_size": 8,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 8,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "full",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 64,
+        "sglang_max_mamba_cache_size": 128,
+        "sglang_max_running_requests": 64,
+        "sglang_max_total_tokens": 524288,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 64,
+        "update_weight_buffer_size": 2147483648
+      },
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.95,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "async": {
+        "async_data_buffer_capacity_factor": 2.0,
+        "async_unused_samples_handler": "retry",
+        "fully_async": true,
+        "max_weight_staleness": 2,
+        "off_policy_correction": "tis",
+        "rollout_submission_granularity": "sample"
+      },
+      "tracking": {
+        "wandb_group": "ep8-engine-pool-20260912",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison",
+        "wandb_team": "ai2-llm"
+      },
+      "runtime": {
+        "row_specialization": "dynamic"
+      },
+      "core": {
+        "diagnostic_interval": 0,
+        "expert_publication": "fused",
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "replay_diagnostics": true,
+        "router_aux_loss_weight": 0.01,
+        "router_z_loss_weight": 1e-05,
+        "scoring_check_interval": 20,
+        "stream_moe_export": true,
+        "weight_sync_mode": "flattened"
+      },
+      "miles": {
+        "async_max_concurrent_samples": 64,
+        "debug_exit_after_rollout": 2,
+        "disable_grpo_std_normalization": true,
+        "lr_decay_iters": 4,
+        "rollout_max_prompt_len": 2048,
+        "rollout_seed": 17,
+        "rollout_temperature": 1.0,
+        "seed": 17,
+        "use_miles_router": true,
+        "use_rollout_routing_replay": true
+      },
+      "judges": {},
+      "rubrics": {},
+      "judging": {
+        "bindings": {}
+      }
+    },
+    "allocation": {
+      "replicas": 1,
+      "gpus_per_replica": 3,
+      "allocated_gpus": 3,
+      "policy_gpus": 3,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "trainer_gpus": 2,
+          "rollout_gpus": 1,
+          "ray_gpus": 3,
+          "judges": {}
+        }
+      ],
+      "unused_gpus": 0
+    }
+  },
+  "radix": {
+    "experiment_id": "01M2CDQGG7REP67CCCMPS6BN8B",
+    "image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+    "revision": "6af33e15acda22ec43b0e46053ba4bfc874f3be0",
+    "spec_sha256": "9fbe73d4900a8646d61990d95487547dc743fab8d578ebe95a159f07b508daba",
+    "spec": {
+      "schema_version": 1,
+      "name": "colleague-04-radix-20260912",
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+      },
+      "data": {
+        "eval_prompt_data": [
+          "mixed",
+          "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/moe/eval.jsonl"
+        ],
+        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/moe/train.jsonl",
+        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/colleague-20260912/moe/verifiers.json",
+        "seed": 17,
+        "shuffle": false
+      },
+      "output": {
+        "export_hf": false,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-04-radix-20260912/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-04-radix-20260912"
+      },
+      "launch": {
+        "workspace": "ai2/open-instruct-dev",
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "priority": "urgent",
+        "min_runtime": "1h",
+        "auto_resume": false,
+        "shared_memory": "200 GiB",
+        "timeout": "2h",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {
+          "NCCL_IB_HCA": "^=mlx5_bond_0",
+          "NCCL_SOCKET_IFNAME": "ib"
+        },
+        "gpus_per_replica": 5,
+        "secrets": {},
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          },
+          {
+            "mount_path": "/weka/oe-adapt-default",
+            "weka": "oe-adapt-default"
+          }
+        ]
+      },
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-04-radix-20260912/prepared/hf"
+      },
+      "compiler_cache": {
+        "enabled": true,
+        "restore": true,
+        "shared_root": "/weka/oe-training-default/robertb/open-instruct/colleague-compiler-cache-20260912/tmp-7d"
+      },
+      "training": {
+        "eval_interval": 4,
+        "num_rollouts": 4,
+        "save_checkpoints": false,
+        "skip_eval_before_train": false
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "expert_parallel_size": 2,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "packing_max_tokens": 8192,
+        "sequence_packing": true,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 64,
+        "gpus": 2,
+        "max_context_length": 6144,
+        "max_response_length": 4096,
+        "placement_mode": "disaggregated",
+        "radix_cache": true,
+        "rollout_batch_size": 16,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 4,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "full",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 64,
+        "sglang_mamba_scheduler_strategy": "extra_buffer",
+        "sglang_max_mamba_cache_size": 192,
+        "sglang_max_running_requests": 32,
+        "sglang_max_total_tokens": 524288,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_router_policy": "cache_aware",
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 32,
+        "update_weight_buffer_size": 2147483648
+      },
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.95,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "async": {
+        "async_data_buffer_capacity_factor": 2.0,
+        "async_unused_samples_handler": "retry",
+        "fully_async": false,
+        "max_weight_staleness": 0,
+        "rollout_submission_granularity": "group"
+      },
+      "tracking": {
+        "wandb_group": "colleague-readiness-20260912",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison"
+      },
+      "runtime": {
+        "row_specialization": "dynamic"
+      },
+      "core": {
+        "compiler_cache_diagnostics": true,
+        "diagnostic_interval": 0,
+        "expert_publication": "fused",
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "replay_diagnostics": true,
+        "router_aux_loss_weight": 0.01,
+        "router_z_loss_weight": 1e-05,
+        "stream_moe_export": true,
+        "weight_sync_mode": "flattened"
+      },
+      "miles": {
+        "calculate_per_token_loss": true,
+        "disable_grpo_std_normalization": true,
+        "rollout_max_prompt_len": 2048,
+        "rollout_seed": 17,
+        "rollout_temperature": 1.0,
+        "seed": 17,
+        "use_miles_router": true,
+        "use_rollout_routing_replay": true
+      },
+      "judges": {
+        "general": {
+          "backend": "sglang",
+          "chat_template": "qwen3-no-thinking",
+          "gpus": 1,
+          "max_concurrent_calls": 16,
+          "max_context_length": 40960,
+          "mode": "managed",
+          "model": "Qwen/Qwen3-32B",
+          "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge",
+          "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+          "tensor_parallel_size": 1,
+          "timeout": 120
+        }
+      },
+      "rubrics": {
+        "quality": {
+          "max_response_tokens": 2048,
+          "profile": "open-instruct/general-quality",
+          "temperature": 1.0
+        },
+        "reference_quality": {
+          "max_response_tokens": 2048,
+          "profile": "open-instruct/general-quality_ref",
+          "temperature": 1.0
+        }
+      },
+      "judging": {
+        "bindings": {
+          "general-quality": {
+            "judge": "general",
+            "rubric": "quality"
+          },
+          "general-quality_ref": {
+            "judge": "general",
+            "rubric": "reference_quality"
+          }
+        }
+      }
+    },
+    "allocation": {
+      "replicas": 1,
+      "gpus_per_replica": 5,
+      "allocated_gpus": 5,
+      "policy_gpus": 4,
+      "judge_gpus": 1,
+      "nodes": [
+        {
+          "trainer_gpus": 2,
+          "rollout_gpus": 2,
+          "ray_gpus": 4,
+          "judges": {
+            "general": 1
+          }
+        }
+      ],
+      "unused_gpus": 0
+    }
+  },
+  "long-context": {
+    "experiment_id": "01M2CEX1M5BB4Q98GH8P9FHQ4Y",
+    "image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+    "revision": "2dc77b21776c0b1bf27f9bf3905daf4b55550656",
+    "spec_sha256": "be9aec18e7a99c88a414b0ecd364cf02f9a048ab5639f16b70f8019e9743a470",
+    "spec": {
+      "schema_version": 1,
+      "name": "colleague-05-long-context-20260913",
+      "model": {
+        "format": "hf",
+        "source": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
+      },
+      "data": {
+        "eval_prompt_data": [
+          "mixed",
+          "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/eval.jsonl"
+        ],
+        "prompt_data": "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/train.jsonl",
+        "reward_config": "/weka/oe-training-default/robertb/open-instruct/data/colleague-long-20260913/verifiers.json",
+        "seed": 17,
+        "shuffle": false
+      },
+      "output": {
+        "export_hf": false,
+        "hf_dir": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-05-long-context-20260913/export-hf",
+        "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-05-long-context-20260913"
+      },
+      "launch": {
+        "workspace": "ai2/open-instruct-dev",
+        "budget": "ai2/oe-other",
+        "cluster": "ai2/holmes",
+        "priority": "urgent",
+        "min_runtime": "1h",
+        "auto_resume": false,
+        "shared_memory": "200 GiB",
+        "timeout": "2h",
+        "coordination": {
+          "heartbeat_timeout": 120,
+          "startup_timeout": 1200
+        },
+        "env": {},
+        "gpus_per_replica": 4,
+        "secrets": {},
+        "weka_mounts": [
+          {
+            "mount_path": "/weka/oe-training-default",
+            "weka": "oe-training-default"
+          },
+          {
+            "mount_path": "/weka/oe-adapt-default",
+            "weka": "oe-adapt-default"
+          }
+        ]
+      },
+      "conversion": {
+        "hf_output": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-05-long-context-20260913/prepared/hf"
+      },
+      "compiler_cache": {
+        "enabled": true,
+        "restore": true,
+        "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+      },
+      "training": {
+        "eval_interval": 4,
+        "num_rollouts": 4,
+        "save_checkpoints": false,
+        "skip_eval_before_train": false
+      },
+      "trainer": {
+        "activation_recompute": true,
+        "expert_parallel_size": 2,
+        "gpus": 2,
+        "micro_batch_size": 1,
+        "packing_max_tokens": 16384,
+        "sequence_packing": true,
+        "trainer_flash_attention_version": 4,
+        "trainer_num_nodes": 1
+      },
+      "inference": {
+        "check_weight_update_equal": true,
+        "global_batch_size": 16,
+        "gpus": 1,
+        "max_context_length": 16384,
+        "max_response_length": 8192,
+        "placement_mode": "disaggregated",
+        "radix_cache": false,
+        "rollout_batch_size": 4,
+        "rollout_tensor_parallel_size": 1,
+        "samples_per_prompt": 4,
+        "sglang_attention_backend": "triton",
+        "sglang_cuda_graph_backend_decode": "full",
+        "sglang_cuda_graph_backend_prefill": "disabled",
+        "sglang_cuda_graph_max_bs_decode": 64,
+        "sglang_max_mamba_cache_size": 128,
+        "sglang_max_running_requests": 16,
+        "sglang_max_total_tokens": 262144,
+        "sglang_mem_fraction_static": 0.6,
+        "sglang_sampling_backend": "pytorch",
+        "sglang_server_concurrency": 16,
+        "update_weight_buffer_size": 2147483648
+      },
+      "optimizer": {
+        "adam_beta1": 0.9,
+        "adam_beta2": 0.95,
+        "adam_eps": 1e-08,
+        "clip_grad": 1.0,
+        "entropy_coef": 0.0,
+        "eps_clip": 0.2,
+        "eps_clip_high": 0.28,
+        "kl_loss_coef": 0.0,
+        "learning_rate": 1e-06,
+        "lr_decay_style": "constant",
+        "lr_warmup_iters": 0,
+        "weight_decay": 0.0
+      },
+      "async": {
+        "async_data_buffer_capacity_factor": 2.0,
+        "async_unused_samples_handler": "retry",
+        "fully_async": true,
+        "max_weight_staleness": 2,
+        "off_policy_correction": "tis",
+        "rollout_submission_granularity": "sample"
+      },
+      "tracking": {
+        "wandb_group": "ep8-engine-pool-20260912",
+        "wandb_mode": "offline",
+        "wandb_project": "olmo-rl-comparison",
+        "wandb_team": "ai2-llm"
+      },
+      "runtime": {
+        "row_specialization": "dynamic"
+      },
+      "core": {
+        "diagnostic_interval": 0,
+        "expert_publication": "fused",
+        "max_train_rollout_logprob_abs_diff": 0.05,
+        "replay_diagnostics": true,
+        "router_aux_loss_weight": 0.01,
+        "router_z_loss_weight": 1e-05,
+        "scoring_check_interval": 20,
+        "stream_moe_export": true,
+        "weight_sync_mode": "flattened"
+      },
+      "miles": {
+        "async_max_concurrent_samples": 32,
+        "disable_grpo_std_normalization": true,
+        "lr_decay_iters": 4,
+        "rollout_max_prompt_len": 8192,
+        "rollout_seed": 17,
+        "rollout_temperature": 1.0,
+        "seed": 17,
+        "sglang_chunked_prefill_size": 4096,
+        "sglang_enable_mixed_chunk": true,
+        "use_miles_router": true,
+        "use_rollout_routing_replay": true
+      },
+      "judges": {},
+      "rubrics": {},
+      "judging": {
+        "bindings": {}
+      }
+    },
+    "allocation": {
+      "replicas": 1,
+      "gpus_per_replica": 3,
+      "allocated_gpus": 3,
+      "policy_gpus": 3,
+      "judge_gpus": 0,
+      "nodes": [
+        {
+          "trainer_gpus": 2,
+          "rollout_gpus": 1,
+          "ray_gpus": 3,
+          "judges": {}
+        }
+      ],
+      "unused_gpus": 0
+    }
+  }
+}

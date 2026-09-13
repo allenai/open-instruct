@@ -92,3 +92,16 @@ def test_long_context_keeps_stdio_test_cases_in_one_verifier_target(monkeypatch,
     row, length = prepare_long_context.canonical(source, 0, Tokenizer())
     assert length == 3
     assert row["metadata"]["verifiers"] == [{"name": "code_stdio", "target": cases, "weight": 1.0}]
+
+
+def test_resume_audit_rejects_repeated_or_skipped_steps():
+    events = [
+        {"event": "optimizer", "step": step, "rollout_id": step - 1, "optimizer_skipped": False, "lr_used": 1e-6}
+        for step in range(1, 5)
+    ]
+    assert len(readiness_cpu.check_optimizer_sequence(events, 4)) == 4
+    with pytest.raises(ValueError, match="step discontinuity"):
+        readiness_cpu.check_optimizer_sequence(events + [events[-1]], 4)
+    events[2]["optimizer_skipped"] = True
+    with pytest.raises(ValueError, match="Skipped optimizer"):
+        readiness_cpu.check_optimizer_sequence(events, 4)
