@@ -67,7 +67,11 @@ reaching **12,742 total tokens**. It does not establish 32K/64K training support
 The new sweep separates synthetic long-input serving from real math RL with long
 response budgets. Synthetic inputs establish execution capacity; their repeated
 filler and short outputs do not represent long reasoning throughput or task
-accuracy. A configured 32K limit also does not establish that any rollout reached
+accuracy. Even long-input, short-answer training must run the model over the prompt; the
+serving-only memory trace is not a backward-memory estimate. Router trace return
+and replay also add work that the standalone serving sweep does not measure.
+
+A configured 32K limit also does not establish that any rollout reached
 32K: retain actual prompt/response lengths, truncation rate and gradients.
 
 Earlier olmo-miles/Megatron exercises are useful starting evidence: a 32K run
