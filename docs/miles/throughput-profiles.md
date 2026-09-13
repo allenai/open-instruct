@@ -336,3 +336,25 @@ cost. The already-running 2+6 batch-32 and batch-128 comparisons retain 24 updat
 If Holmes cannot place 64 GPUs, the prepared 8+24 case provides a 32-GPU
 measurement; it does not qualify 8+56. Placement and reserved-but-unused GPUs
 remain explicit in recommendations.
+
+### Cross-node EP8 qualification
+
+The [8-trainer / 8-inference run](https://beaker.org/ex/01M2E50JHXTPJTX1T6SV3WCF39)
+completed all four updates and exited successfully on both nodes. All eight
+trainer-rank contracts passed. The final generation drain took 309 seconds,
+qualifying the corrected shutdown deadline on GPU. This basket did not exercise
+checkpoint resume or HF export.
+
+![EP8 pipeline timeline](images/throughput/bridge-8t8i-pipeline.png)
+
+Cold training filled the completed buffer; inference then ran out of admitted
+work until training caught up. Later the buffer emptied and training waited for
+generation. Forward/backward/optimizer time was 642, 64, 34, and 34 seconds.
+The last cycle spent 208 seconds awaiting a batch, 43 seconds scoring/training,
+and 3.6 seconds publishing. One warm cycle cannot establish steady-state
+throughput, but does show that equal trainer/inference GPU counts are not enough
+to saturate this trainer for this workload.
+
+Hardware sampling was attached after the normal cycles in this qualification:
+its warm-window coverage is zero. The continuous engine request counts above
+are available throughout; they are not GPU utilization percentages.

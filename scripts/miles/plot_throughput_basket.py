@@ -11,6 +11,7 @@ import statistics
 from pathlib import Path
 
 import matplotlib
+import numpy as np
 from matplotlib import pyplot as plt
 
 matplotlib.use("Agg")
@@ -155,8 +156,10 @@ def occupancy(root, output, name):
     for key, axis, label in (
         ("producer_owned_groups", 1, "Owned prompt groups"),
         ("completed_queue_groups", 1, "Completed queue groups"),
+        ("completed_queue_capacity_groups", 1, "Completed queue capacity"),
         ("http_active_requests", 2, "HTTP active (includes server wait)"),
         ("http_waiting_requests", 2, "Waiting for HTTP admission"),
+        ("http_capacity_requests", 2, "HTTP capacity"),
     ):
         points = [r for r in producer if r.get(key) is not None]
         axes[axis].step(
@@ -191,6 +194,46 @@ def occupancy(root, output, name):
     axes[-1].set_xlabel("Minutes since producer observation began (includes startup and shutdown)")
     fig.suptitle(name + " • sampled occupancy, not hardware GPU utilization")
     save(fig, output, name + "-pipeline")
+
+    paths = sorted((root / "checkpoints").glob("gpu_usage_node*.jsonl"))
+    if not paths:
+        return
+    end = max(r["time_unix"] for r in producer)
+    grid = np.arange(start, end + 5, 5)
+    traces, labels = [], []
+    for path in paths:
+        records = read_rows(path)
+        devices = sorted({(d["index"], d["uuid"]) for r in records for d in r.get("devices", [])}, key=lambda d: d[0])
+        for index, identity in devices:
+            trace = np.full(len(grid), np.nan)
+            for position, record in enumerate(records):
+                matches = [d for d in record.get("devices", []) if d["uuid"] == identity]
+                if len(matches) != 1 or matches[0]["utilization.gpu"] is None:
+                    continue
+                t = record["time_unix"]
+                next_time = records[position + 1]["time_unix"] if position + 1 < len(records) else end
+                trace[(grid >= t) & (grid < min(t + 10, next_time))] = matches[0]["utilization.gpu"]
+            traces.append(trace)
+            labels.append(f"node {path.stem.split('node')[-1]} · GPU {int(index)}")
+    if not traces:
+        return
+    fig, ax = plt.subplots(figsize=(13, max(4, len(traces) * 0.2)), layout="constrained")
+    color_map = plt.get_cmap("Blues").copy()
+    color_map.set_bad("#dddddd")
+    heat = ax.imshow(
+        traces,
+        aspect="auto",
+        interpolation="nearest",
+        cmap=color_map,
+        vmin=0,
+        vmax=100,
+        extent=(0, (grid[-1] - start) / 60, len(traces) - 0.5, -0.5),
+    )
+    ax.set_yticks(range(len(labels)), labels, fontsize=7)
+    ax.set_xlabel("Minutes since producer observation began")
+    ax.set_title(name + " • NVML GPU activity • gray means unobserved")
+    fig.colorbar(heat, ax=ax, label="GPU activity (%)")
+    save(fig, output, name + "-gpu-activity")
 
 
 def main():

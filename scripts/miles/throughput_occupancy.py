@@ -87,4 +87,28 @@ def analyze(root, *, warmup=6):
             "series": summaries,
             "failed_observations": sum("error" in r for r in values if start <= r["time_unix"] <= end),
         }
+    result["hardware"] = {}
+    for path in sorted((root / "checkpoints").glob("gpu_usage_node*.jsonl")):
+        observations = records(path)
+        identities = sorted({d["uuid"] for r in observations for d in r.get("devices", [])})
+        devices = []
+        for identity in identities:
+            values = []
+            index = None
+            for row in observations:
+                matches = [d for d in row.get("devices", []) if d["uuid"] == identity]
+                device = matches[0] if len(matches) == 1 else {}
+                index = device.get("index", index)
+                values.append((row["time_unix"], device))
+            devices.append(
+                {
+                    "uuid": identity,
+                    "index": index,
+                    "metrics": {
+                        key: summarize([(t, d.get(key)) for t, d in values], start, end)
+                        for key in ("utilization.gpu", "utilization.memory", "memory.used", "memory.total")
+                    },
+                }
+            )
+        result["hardware"][path.stem] = devices
     return result
