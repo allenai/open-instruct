@@ -74,6 +74,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
         ("bridge-2t6i", 8, 1),
         ("bridge-8t8i", 16, 2),
         ("large-8t56i", 64, 8),
+        ("steady-8t24i-c8-b256", 32, 4),
         ("steady-2t6i-c8-b32", 8, 1),
         ("steady-2t6i-c8-b128", 8, 1),
         ("steady-2t14i-c8-b128", 16, 3),

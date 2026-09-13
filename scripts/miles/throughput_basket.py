@@ -20,6 +20,7 @@ CASES = {
     "bridge-2t6i": {"profile": "small", "inference": 6, "capacity": 8},
     "bridge-8t8i": {"profile": "large", "inference": 8, "updates": 4},
     "large-8t56i": {"profile": "large", "updates": 24},
+    "steady-8t24i-c8-b256": {"profile": "large", "inference": 24, "concurrency": 8, "updates": 24},
     "steady-2t6i-c8-b32": {"profile": "small", "inference": 6, "capacity": 8, "concurrency": 8, "updates": 24},
     "steady-2t6i-c8-b128": {
         "profile": "small",
