@@ -96,6 +96,12 @@ async def train(args, *, export_hf=None):
                     await rolling.optimizer_step_completed()
             finally:
                 remove_rollout_data_refs(args, batch)
+            if rolling is not None:
+                # Publish before quiescing: with a one-step lag budget, already
+                # submitted groups may be waiting for this version's admission.
+                # Waiting for those tasks before publishing would deadlock save.
+                with stage(args, "publication", rollout_id):
+                    await rolling.publish()
             sentinel = args.save_trigger_sentinel and os.path.exists(args.save_trigger_sentinel)
             if sentinel or should_run_periodic_action(
                 rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout
@@ -112,12 +118,9 @@ async def train(args, *, export_hf=None):
                         await rolling.resume()
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
-            if (rollout_id + 1) % args.update_weights_interval == 0:
+            if rolling is None and (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
-                    if rolling is not None:
-                        await rolling.publish()
-                    else:
-                        await publish(rollout_id)
+                    await publish(rollout_id)
             if should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout):
                 with evaluation_stage(args, rollout_id):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)

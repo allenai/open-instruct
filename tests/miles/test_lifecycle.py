@@ -8,6 +8,7 @@ import pytest
 
 from open_instruct.miles import actor, driver
 from open_instruct.miles.config import CoreConfig
+from open_instruct.miles.engine_drain import Engine, EngineDrain, WeightSnapshot
 
 
 @pytest.mark.parametrize("with_export", [False, True])
@@ -201,3 +202,97 @@ def test_failed_periodic_comparison_aborts_before_resume_or_next_generation(monk
         expected_cleanup.insert(0, "paused-True")
         assert events.count("paused-False") == 1  # Only the successful initial publication resumes the producer.
     assert events[failure_index + 1 :] == expected_cleanup
+
+
+def test_rolling_checkpoint_unblocks_groups_waiting_for_one_step_lag(monkeypatch):
+    events = []
+
+    async def event(name):
+        events.append(name)
+
+    class Publisher:
+        def __init__(self, *args):
+            async def deliver(identity, snapshot):
+                return snapshot.version
+
+            self.controller = EngineDrain([Engine("0", "a", 0)], deliver, max_lag=1)
+            self.pending = None
+
+        async def initialize(self):
+            pass
+
+        async def optimizer_step_completed(self):
+            self.controller.set_step(1)
+
+            async def produce():
+                assignment = await self.controller.reserve(1, 1)
+                self.controller.decoded(assignment, assignment.requests[0], version=1, tokens=2)
+                self.controller.graded(assignment)
+                events.append("completed-owned-group")
+
+            self.pending = asyncio.create_task(produce())
+            await asyncio.sleep(0)
+            assert not self.pending.done()  # Old engine has no admission headroom.
+
+        async def publish(self):
+            self.controller.publish(WeightSnapshot(1, (), 0, 0))
+            events.append("captured")
+
+        async def quiesce(self):
+            assert self.pending is not None
+            await asyncio.wait_for(self.pending, 0.5)
+            await self.controller.pause()
+
+        async def resume(self):
+            self.controller.resume()
+
+        async def close(self, *, failed):
+            if self.pending is not None and not self.pending.done():
+                self.pending.cancel()
+                await asyncio.gather(self.pending, return_exceptions=True)
+            await self.controller.close()
+
+    manager = SimpleNamespace(
+        generate=SimpleNamespace(remote=lambda rollout_id: event("generated")),
+        save=SimpleNamespace(remote=lambda rollout_id: event("cursor-saved")),
+        dispose=SimpleNamespace(remote=lambda: event("engines-disposed")),
+        core_publication_boundary=SimpleNamespace(remote=lambda paused: event(f"paused-{paused}")),
+    )
+    learner = SimpleNamespace(
+        _broadcast=lambda method: event(method),
+        dispose=lambda: event("trainer-disposed"),
+        update_weights=lambda rollout_id: event("initial-published"),
+        train=lambda rollout_id, batch: event("trained"),
+        save_model=lambda *a, **k: event("model-saved"),
+        finalize_checkpoint=lambda *a: event("committed"),
+    )
+
+    async def create(*args):
+        return learner, None
+
+    monkeypatch.setattr(driver, "RollingPublication", Publisher)
+    monkeypatch.setattr(driver.placement_group, "create_placement_groups", lambda args: {"rollout": None})
+    monkeypatch.setattr(driver.placement_group, "create_rollout_manager", lambda *args: (manager, 1))
+    monkeypatch.setattr(driver.placement_group, "create_training_models", create)
+    monkeypatch.setattr(driver.object_store, "init_instance", lambda *args, **kwargs: None)
+    monkeypatch.setattr(driver, "init_tracking", lambda args: None)
+    monkeypatch.setattr(driver, "finish_tracking", lambda: None)
+    monkeypatch.setattr(driver, "remove_rollout_data_refs", lambda *args: None)
+    monkeypatch.setattr(driver, "EvalDispatcher", lambda *args: SimpleNamespace(drain=lambda: event("drained")))
+    args = SimpleNamespace(
+        fully_async=True,
+        offload_rollout=False,
+        check_weight_update_equal=False,
+        olmo_core=CoreConfig(publication_mode="engine_drain", max_policy_lag=1),
+        save_trigger_sentinel=None,
+        save_interval=1,
+        update_weights_interval=1,
+        debug_exit_after_rollout=None,
+        eval_interval=None,
+        start_rollout_id=0,
+        num_rollout=1,
+    )
+    asyncio.run(driver.train(args))
+    assert events.index("captured") < events.index("completed-owned-group") < events.index("cursor-saved")
+    assert events.count("captured") == 1
+    assert events.index("cursor-saved") < events.index("model-saved") < events.index("committed")

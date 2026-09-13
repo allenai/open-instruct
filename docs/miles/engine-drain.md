@@ -64,6 +64,9 @@ fails and a fresh process must restore a committed checkpoint. Automatic fault
 tolerance, external engines, custom generators/filters, serving TP/DP/EP/PP greater
 than one, and snapshot-fleet evaluation are rejected.
 
+Rolling publication is submitted before checkpoint quiescence. A one-step lag
+budget can leave already-submitted groups waiting for the newly completed version;
+publishing first lets them obtain admission and finish instead of blocking the save.
 Evaluation, checkpoint and final export stop producer submission, drain already-owned
 work and join publication. To prevent a full completion queue from blocking that
 join, its capacity expands only by the number of already-owned groups; it returns
