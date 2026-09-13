@@ -13,7 +13,9 @@ def fixture(tmp_path, monkeypatch):
     checkpoints = tmp_path / "checkpoints"
     saved = checkpoints / "core/rollout_0000001"
     saved.mkdir(parents=True)
-    (saved / "complete.json").write_text(json.dumps({"clock": {"completed_steps": 2}, "hf_config": {}}))
+    (saved / "complete.json").write_text(
+        json.dumps({"clock": {"completed_steps": 2}, "hf_config": {"n_routed_experts": 1, "hidden_size": 1}})
+    )
     (tmp_path / "resolved-plan.json").write_text(
         json.dumps(
             {
@@ -60,7 +62,7 @@ def fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(
         audit,
         "SafeTensorState",
-        lambda path: Initial({"model.layers.1.mlp.router.gate.weight": torch.tensor([1.0], dtype=torch.bfloat16)}),
+        lambda path: Initial({"model.layers.1.mlp.router.gate.weight": torch.tensor([[1.0]], dtype=torch.bfloat16)}),
     )
     return SimpleNamespace(samples=samples, masters=masters)
 
@@ -109,7 +111,7 @@ def test_import_rounding_is_not_mistaken_for_optimizer_change(tmp_path, monkeypa
     monkeypatch.setattr(
         audit,
         "SafeTensorState",
-        lambda path: Initial({"model.layers.1.mlp.router.gate.weight": torch.tensor([1.001], dtype=torch.float32)}),
+        lambda path: Initial({"model.layers.1.mlp.router.gate.weight": torch.tensor([[1.001]], dtype=torch.float32)}),
     )
     with pytest.raises(ValueError, match="No measured router master change"):
         audit.audit(tmp_path)

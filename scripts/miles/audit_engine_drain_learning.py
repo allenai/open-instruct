@@ -95,7 +95,13 @@ def audit(root):
             layer = int(name.split(".")[1])
             hf_name = f"model.layers.{layer}.mlp.router.gate.weight"
             expected, actual = initial[hf_name], native[name]
-            if expected.shape != actual.shape:
+            shape = (manifest["hf_config"]["n_routed_experts"], manifest["hf_config"]["hidden_size"])
+            # Core's canonical converter flattens router matrices on import and
+            # restores exactly [n_experts, d_model] on export (no transpose).
+            if tuple(actual.shape) != (math.prod(shape),):
+                raise ValueError(f"Unexpected native flat router layout for {name}: {actual.shape}")
+            actual = actual.reshape(shape)
+            if tuple(expected.shape) != shape:
                 raise ValueError(
                     f"Router shape mismatch for {hf_name}: initial={expected.shape}, native={actual.shape}"
                 )

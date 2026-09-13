@@ -133,6 +133,9 @@ def test_producer_boundary_drains_without_cancelling_or_waiting_for_consumer(mon
         assert len(producer._output._delegate._buffer) == 2
         await producer.finish_publication()
         assert producer._output._delegate._capacity == 1
+        assert not producer._producer_resumed.is_set()
+        await producer._output.get(current_version=0)
+        producer._resume_if_buffer_allows()
         assert producer._producer_resumed.is_set()
 
     asyncio.run(run())
@@ -174,6 +177,17 @@ def test_boundary_reserves_completed_tasks_still_waiting_for_buffer_insertion():
         assert producer._output._delegate._capacity == 5
         await producer.finish_publication()
         assert producer._output._delegate._capacity == 1
+        assert not producer._producer_resumed.is_set()
+        for index in range(4):
+            await producer._output.get(current_version=0)
+            producer._resume_if_buffer_allows()
+            assert producer._producer_resumed.is_set() == (index == 3)
+            if index < 3:
+                # No new owned groups are admitted while draining the excess.
+                await producer.prepare_publication()
+                await producer.finish_publication()
+                assert producer._output._delegate._capacity == 1
+                assert not producer._producer_resumed.is_set()
 
     asyncio.run(run())
 
@@ -302,5 +316,43 @@ def test_qualification_delay_starts_after_admission_closes():
         producer.controller.decoded(assignment, assignment.requests[0], version=0, tokens=1)
         producer.controller.graded(assignment)
         await producer.controller.barrier()
+
+    asyncio.run(run())
+
+
+def test_stale_excess_queue_wakes_producer_without_a_successful_dequeue():
+    async def run():
+        discarded = []
+        producer = DrainingRolloutFn.__new__(DrainingRolloutFn)
+
+        async def deliver(engine, snapshot):
+            return snapshot.version
+
+        producer.controller = EngineDrain([Engine("a", "a", 3)], deliver, max_lag=2)
+        producer._publication_paused = False
+        producer._producer_resumed = asyncio.Event()
+        producer._draining_groups = []
+        producer._interrupted_groups = []
+        producer._output = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(buffer_args(), discarded.append))
+        original = await producer._output.reserve_drain_capacity(1)
+        await producer._output.put(entry(0, 0))
+        await producer._output.put(entry(1, 0))
+        await producer._output.restore_capacity(original)
+        stop = asyncio.Event()
+
+        async def worker():
+            await producer._producer_resumed.wait()
+            await producer._output.put(entry(2, 3))
+            await stop.wait()
+
+        producer._worker = asyncio.create_task(worker())
+        try:
+            result = await asyncio.wait_for(producer._next_group(3), 2)
+            assert result.group[0].group_index == 2
+            assert len(discarded) == 2
+            assert producer._producer_resumed.is_set()
+        finally:
+            stop.set()
+            await producer._worker
 
     asyncio.run(run())

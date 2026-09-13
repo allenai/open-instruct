@@ -61,7 +61,9 @@ than one, and snapshot-fleet evaluation are rejected.
 Evaluation, checkpoint and final export stop producer submission, drain already-owned
 work and join publication. To prevent a full completion queue from blocking that
 join, its capacity expands only by the number of already-owned groups; it returns
-to its configured capacity afterward. Completed data is retained. Checkpoints use
+to its configured capacity afterward. Completed data is retained, and new producer
+submission waits until the excess completion queue is consumed. Repeated boundaries
+therefore cannot accumulate another generation wave on every save. Checkpoints use
 the existing atomic cursor/pristine-pending-prompt ledger and native model commit.
 Resume regenerates outstanding prompts at restored weights; it does not restore
 partial decodes, KV/KDA state, publisher processes, or in-memory completion queues.

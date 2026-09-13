@@ -209,8 +209,13 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
         try:
             while not pending.done():
                 self.controller.check()
+                # The delegate can discard stale groups without returning an
+                # entry. That still frees capacity and must wake the producer.
+                self._resume_if_buffer_allows()
                 await asyncio.wait({pending}, timeout=0.25)
-            return pending.result()
+            result = pending.result()
+            self._resume_if_buffer_allows()
+            return result
         finally:
             if not pending.done():
                 pending.cancel()
@@ -244,7 +249,17 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
             self._boundary_capacity = None
         self.controller.resume()
         self._publication_paused = False
-        self._producer_resumed.set()
+        self._resume_if_buffer_allows()
+
+    def _resume_if_buffer_allows(self):
+        # A boundary may retain more completions than the normal queue capacity.
+        # Consume that excess before admitting another generation wave, otherwise
+        # frequent checkpoints could grow the retained queue on every boundary.
+        if self._publication_paused:
+            return
+        delegate = self._output._delegate if self._output is not None else None
+        if delegate is None or len(delegate._buffer) <= delegate._capacity:
+            self._producer_resumed.set()
 
     async def _call_eval(self, input):
         if self.controller is None:

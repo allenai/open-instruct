@@ -1,3 +1,4 @@
+# Six resumed updates ensure the initially prefetched policy ages out and the delayed engine receives new groups.
 # Requires a completed checkpoint from the separate six-update D trial.
 # Experimental qualification; not a shared operating default.
 schema_version = 1
@@ -36,9 +37,9 @@ train_count = 128
 eval_count = 16
 
 [training]
-num_rollouts = 9
+num_rollouts = 12
 skip_eval_before_train = true
-eval_interval = 9
+eval_interval = 12
 save_checkpoints = true
 save_interval = 3
 
