@@ -54,7 +54,9 @@ def specification(image, mode, paths, source):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
-    parser.add_argument("mode", choices=("inspect", "audit", "prepare-long", "lifecycle", "rescore", "drift"))
+    parser.add_argument(
+        "mode", choices=("inspect", "audit", "prepare-long", "lifecycle", "rescore", "drift", "features")
+    )
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()

@@ -353,9 +353,71 @@ def drift(root):
     }
 
 
+def features(root):
+    """Require actual cache/long-token/replay coverage, beyond configured flags."""
+    root = Path(root)
+    report = audit(root)
+    plan = json.loads((root / "resolved-plan.json").read_text())
+    miles = plan["miles"]
+    samples = []
+    for rollout in range(miles["num_rollout"]):
+        path = Path(miles["save_debug_rollout_data"].format(rollout_id=rollout))
+        samples.extend(audit_workflow.load_rollout(path)["samples"])
+    coverage = {
+        "long_prompt_samples": sum(len(s["tokens"]) - s["response_length"] > 4096 for s in samples),
+        "long_response_samples": sum(s["response_length"] > 4096 for s in samples),
+        "over_8k_samples": sum(len(s["tokens"]) > 8192 for s in samples),
+        "max_sequence_tokens": max(len(s["tokens"]) for s in samples),
+        "cached_tokens": sum(s.get("prefix_cache_info", {}).get("cached_tokens", 0) for s in samples),
+        "prompt_tokens": sum(len(s["tokens"]) - s["response_length"] for s in samples),
+    }
+    if miles.get("sglang_enable_mixed_chunk"):
+        require(
+            all(coverage[key] > 0 for key in ("long_prompt_samples", "long_response_samples", "over_8k_samples")),
+            "Long-context flags lacked actual consumed token coverage",
+        )
+    if not miles.get("sglang_disable_radix_cache", True):
+        require(coverage["cached_tokens"] > 0, "Radix enabled but no actual cache hits")
+    contracts = sorted((root / "checkpoints").glob("training_contract_rank*.jsonl"))
+    require(contracts, "Missing trainer contracts")
+    local_samples = miles["global_batch_size"] // len(contracts)
+    replay_count, packed_count = 0, 0
+    for path in contracts:
+        rows = audit_workflow.read_jsonl(path)
+        optimizers = check_optimizer_sequence(rows, miles["num_rollout"])
+        for optimizer in optimizers:
+            replay = [
+                r for r in rows if r.get("event") == "replay_routes" and r["rollout_id"] == optimizer["rollout_id"]
+            ]
+            phases = ["training"] + ([] if optimizer["scoring_pass"] == "skipped" else ["scoring"])
+            for phase in phases:
+                selected = [r for r in replay if r["phase"] == phase]
+                require(sum(r["samples"] for r in selected) == local_samples, "Incomplete replay sample coverage")
+            for row in replay:
+                require(
+                    row["mismatches"] == 0 and row["captured_tokens"] == row["tokens"] - row["synthetic_tail_tokens"],
+                    "Replay routes/boundaries differ",
+                )
+                require(row["layers"], "Missing replay layers")
+                for counts in row["layers"].values():
+                    minimum = 2 if row["phase"] == "training" else 1
+                    require(
+                        counts["entered"] >= minimum and counts["returned"] >= minimum, "Missing replay recomputation"
+                    )
+            replay_count += len(replay)
+        packed_count += sum(r.get("event") == "packing" for r in rows)
+    require(packed_count > 0, "Packing not observed")
+    report["feature_coverage"] = {
+        **coverage,
+        "replay_observations": replay_count,
+        "packing_observations": packed_count,
+    }
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("inspect", "audit", "lifecycle", "rescore", "drift"))
+    parser.add_argument("mode", choices=("inspect", "audit", "lifecycle", "rescore", "drift", "features"))
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--output", type=Path, default=Path("/output"))
     args = parser.parse_args()
@@ -363,9 +425,14 @@ def main():
     failed = False
     for index, path in enumerate(args.paths):
         try:
-            report = {"inspect": inspect, "audit": audit, "lifecycle": lifecycle, "rescore": rescore, "drift": drift}[
-                args.mode
-            ](path)
+            report = {
+                "inspect": inspect,
+                "audit": audit,
+                "lifecycle": lifecycle,
+                "rescore": rescore,
+                "drift": drift,
+                "features": features,
+            }[args.mode](path)
         except Exception as error:
             report = {"passed": False, "path": str(path), "error": f"{type(error).__name__}: {error}"}
             failed = True
