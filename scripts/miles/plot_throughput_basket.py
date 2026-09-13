@@ -146,7 +146,7 @@ def occupancy(root, output, name):
     )
     start = min(r["time_unix"] for r in producer)
     fig, axes = plt.subplots(5, 1, figsize=(13, 12), sharex=True, layout="constrained")
-    for stage, color in COLORS.items():
+    for stage, color in {**COLORS, "final_generation_drain": "#bcbcbc"}.items():
         intervals = [((r["started_unix"] - start) / 60, r["seconds"] / 60) for r in stages if r["stage"] == stage]
         axes[0].broken_barh(intervals, (0, 1), facecolors=color, label=stage.replace("_", " "))
     axes[0].set_yticks([])
@@ -175,7 +175,10 @@ def occupancy(root, output, name):
                     points.append(((r["time_unix"] - start) / 60, series[0]["value"]))
             if points:
                 axes[axis].step(
-                    [p[0] for p in points], [p[1] for p in points], where="post", label=identity.rsplit(":", 1)[-1]
+                    [p[0] for p in points],
+                    [p[1] for p in points],
+                    where="post",
+                    label=identity.removeprefix("http://"),
                 )
     for index, ax in enumerate(axes[1:], 1):
         ax.set_ylabel(("", "Prompt groups", "Requests", "Engine running", "Engine waiting")[index])

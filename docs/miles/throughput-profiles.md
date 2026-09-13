@@ -313,3 +313,11 @@ scoring/training/publication. It does not separately time every request's semaph
 router, engine or sibling wait. Occupancy timelines reveal where work accumulates;
 exact per-request queue waits would require lifecycle traces. Do not infer hardware
 utilization or exact queue residence times from these sampled counts.
+
+
+Occupancy summaries use observation-time weighting and report the fraction of the
+window covered. A sample is held until the next observation, for at most ten
+seconds; longer gaps remain missing. Engine series keep their endpoint and rank
+labels. These summaries are conditional on the observed intervals and must be
+read alongside coverage, especially if an engine is unavailable. The processor
+timeline labels final generation draining separately from the normal loop.
