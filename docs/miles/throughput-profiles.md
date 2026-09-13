@@ -358,3 +358,27 @@ to saturate this trainer for this workload.
 Hardware sampling was attached after the normal cycles in this qualification:
 its warm-window coverage is zero. The continuous engine request counts above
 are available throughout; they are not GPU utilization percentages.
+
+### Admission occupancy versus GPU activity
+
+The completed [2+6, batch-32 run](https://beaker.org/ex/01M2E50PF1P60341G91J31F1SK)
+passed 24 updates and clean shutdown. Across updates 7–24 it delivered 536 useful
+response tokens/s, spent 84.6% of the driver cycle awaiting a batch, and discarded
+27.0% of dequeued response tokens. The completed queue was empty 94.3% of the
+observed window despite all 48 HTTP slots being occupied. Engines averaged
+7.4–7.5 running requests out of eight.
+
+NVML observations cover only the final 66% of that warm window. During those
+observations the six serving devices averaged roughly 11–14% GPU activity. This
+is sampled kernel activity, not SM occupancy or a direct diagnosis of CPU
+overhead. It motivates a single decode-graph comparison at the same 2+6,
+batch-128 geometry. That case enables full decode graphs through batch eight,
+leaves prefill graphs disabled, and adds trainer replay diagnostics. Consequently
+its trainer overhead is also measured; it is not a strictly single-variable
+whole-cycle comparison. No change is made to FIFO, policy age, or behavior scores.
+
+![Measured 2+6 batch-32 pipeline](images/throughput/steady-2t6i-c8-b32-map.png)
+
+![Continuous 2+6 batch-32 queues](images/throughput/steady-2t6i-c8-b32-pipeline.png)
+
+![Sampled device activity, including missing coverage](images/throughput/steady-2t6i-c8-b32-gpu-activity.png)

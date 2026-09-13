@@ -30,6 +30,15 @@ CASES = {
         "batch": 128,
         "updates": 24,
     },
+    "steady-2t6i-c8-b128-graphs": {
+        "profile": "small",
+        "inference": 6,
+        "capacity": 8,
+        "concurrency": 8,
+        "batch": 128,
+        "decode_graphs": True,
+        "updates": 16,
+    },
     "steady-2t16i-c8-b128": {
         "profile": "small",
         "inference": 16,
@@ -93,6 +102,10 @@ def specification(case, output):
     if "concurrency" in settings:
         run["inference"]["sglang_server_concurrency"] = settings["concurrency"]
         run["inference"]["sglang_max_running_requests"] = settings["concurrency"]
+    if settings.get("decode_graphs"):
+        run["inference"]["sglang_cuda_graph_backend_decode"] = "full"
+        run["inference"]["sglang_cuda_graph_max_bs_decode"] = settings["concurrency"]
+        run["core"]["replay_diagnostics"] = True
     # The benchmark observes drift without a run-ending threshold established on a different batch distribution.
     run["core"].pop("max_train_rollout_logprob_abs_diff", None)
     return RunSpec.from_dict(run, config_path=output / "trial.json")
