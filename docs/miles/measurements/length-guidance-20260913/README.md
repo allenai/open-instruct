@@ -1,6 +1,6 @@
 # Length guidance exercise — September 13, 2026
 
-Status: in progress. No new capacity result is claimed yet.
+Status: initial serving sweep passed (exit 0); expanded serving sweep and both RL probes are running.
 
 Runtime image: `01M2CD5CH7MBVHZK50AXAPYGFB` (image C from the colleague
 readiness campaign). The standalone probe embeds its committed source; ordinary
@@ -12,10 +12,10 @@ Model:
 
 | Exercise | Purpose | Status |
 |---|---|---|
-| [Single-GPU serving sweep](https://beaker.org/ex/01M2E0SRNC49XZZY31VWPFE2SM) | Exact synthetic inputs of context minus 256 tokens at 16K/32K/64K; greedy output capped at 128; cold/warm and increasing concurrency | Running |
-| [Saturn math preparation](https://beaker.org/ex/01M2E0VGC7HJQMZRHEAMJHQQST) | Retain the existing eight train/two held-out natural math rows; token budget and disjointness checks | Preparing |
-| [16K RL config](../../../../configs/miles/qualification/colleague-20260912/length-math-16k-20260913.toml) | Two updates, EP2 + one engine, packing/replay, recomputation, 2 × 4 responses; response cap 14,336 | Awaiting preparation |
-| [32K RL config](../../../../configs/miles/qualification/colleague-20260912/length-math-32k-20260913.toml) | Same recipe with response cap 30,720 | Awaiting preparation |
+| [Single-GPU serving sweep](https://beaker.org/ex/01M2E0SRNC49XZZY31VWPFE2SM) | Exact synthetic inputs of context minus 256 tokens at 16K/32K/64K; greedy output capped at 128; cold/warm and increasing concurrency | Passed |
+| [Saturn math preparation](https://beaker.org/ex/01M2E0VGC7HJQMZRHEAMJHQQST) | Retain the existing eight train/two held-out natural math rows; token budget and disjointness checks | Passed |
+| [16K RL config](../../../../configs/miles/qualification/colleague-20260912/length-math-16k-20260913.toml) | Two updates, EP2 + one engine, packing/replay, recomputation, 2 × 4 responses; response cap 14,336 | [Running](https://beaker.org/ex/01M2E15KM2J249V5BQ719PNX95) |
+| [32K RL config](../../../../configs/miles/qualification/colleague-20260912/length-math-32k-20260913.toml) | Same recipe with response cap 30,720 | [Running](https://beaker.org/ex/01M2E15MNA9HZV0V54JSD5JC32) |
 
 The inference probe uses a fresh server for each context, an explicit 131,072 KV
 token ceiling, 16 recurrent state slots, radix off, chunked prefill 2,048 and decode
@@ -44,3 +44,35 @@ MILES_EXISTING_IMAGE=01M2CD5CH7MBVHZK50AXAPYGFB \
 
 The receipt pins the submitted source and immutable image. Use a fresh output
 root when copying an RL configuration. These dated probes are not starter defaults.
+
+## Initial serving results
+
+All 24 responses produced 128 finite-scored tokens; every response hit the short
+probe cap. This is execution evidence, **not a retrieval accuracy pass**.
+No OOM or retraction event was found in the server logs. The requested 131,072
+KV tokens were actually allocated (1 GiB K + 1 GiB V) at every context.
+
+| Configured context | Actual prompt | Warm single request | Largest tested concurrent group | Group time | Peak sampled device memory |
+|---|---|---|---|---|---|
+| 16,384 | 16,128 | 1.24 s | 8 | 7.65 s | 38.51 GiB |
+| 32,768 | 32,512 | 2.05 s | 4 | 6.48 s | 38.72 GiB |
+| 65,536 | 65,280 | 3.94 s | 2 | 7.22 s | 38.72 GiB |
+
+Times include prefill and 128 decode tokens through a local HTTP client. Larger
+groups have not each received a repeated warm measurement. Startup took 270 s
+for the first server and 62–63 s for the next two, which reused this allocation's
+compiler cache. Device memory is sampled every second and includes startup;
+it is not a precise allocator peak. This model/hardware leaves substantial
+headroom, so these admission limits are conservative test points, not maxima.
+
+The [expanded sweep](https://beaker.org/ex/01M2E1EC64MT0BKP4JYJD4JHEB) requests
+524,288 KV tokens, admission/graph cap 32 and 64 recurrent slots. Its largest
+groups will be 32 at 16K, 16 at 32K and eight at 64K. It uses the same pinned
+runtime and prefill chunk size. Results are pending.
+
+Raw short generations and per-token scores are retained in
+[serving-small-generations.json](serving-small-generations.json); compact timings,
+commands, memory and log hashes are in
+[serving-small-summary.json](serving-small-summary.json). Full logs and memory
+samples remain in the Beaker result dataset. The preparation report confirms
+8 train and 2 held-out natural math prompts with disjoint token hashes.

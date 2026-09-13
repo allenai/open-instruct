@@ -111,3 +111,14 @@ def test_resume_audit_rejects_repeated_or_skipped_steps():
     events[2]["optimizer_skipped"] = True
     with pytest.raises(ValueError, match="Skipped optimizer"):
         readiness_cpu.check_optimizer_sequence(events, 4)
+
+
+def test_length_coverage_distinguishes_actual_tokens_from_response_cap():
+    samples = [{"tokens": [0] * 9000, "response_length": 8000}, {"tokens": [0] * 17000, "response_length": 16000}]
+    report = readiness_cpu.length_coverage(samples, 30720)
+    assert report["max_total_tokens"] == 17000
+    assert report["response_cap_hits"] == 0
+    assert report["above_total_tokens"] == {"8192": 2, "16384": 1, "32768": 0, "49152": 0}
+    assert readiness_cpu.length_coverage(samples, 16000)["response_cap_hits"] == 1
+    with pytest.raises(ValueError, match="Invalid token lengths"):
+        readiness_cpu.length_coverage(samples, 8000)

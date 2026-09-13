@@ -8,6 +8,7 @@ import hashlib
 import importlib
 import json
 import math
+import statistics
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -426,9 +427,51 @@ def features(root):
     return report
 
 
+def length_coverage(samples, response_cap):
+    require(samples, "No retained training samples")
+    total = [len(s["tokens"]) for s in samples]
+    response = [s["response_length"] for s in samples]
+    require(
+        all(0 < r <= t and r <= response_cap for r, t in zip(response, total, strict=True)), "Invalid token lengths"
+    )
+    return {
+        "samples": len(samples),
+        "total_tokens": total,
+        "response_tokens": response,
+        "max_total_tokens": max(total),
+        "median_response_tokens": statistics.median(response),
+        "response_cap_hits": sum(r == response_cap for r in response),
+        "above_total_tokens": {str(n): sum(t > n for t in total) for n in (8192, 16384, 32768, 49152)},
+    }
+
+
+def lengths(root):
+    """Audit natural long-response RL without requiring artificially long prompts."""
+    root = Path(root)
+    report = audit(root)
+    plan = json.loads((root / "resolved-plan.json").read_text())
+    miles, core = plan["miles"], plan["core"]
+    samples = []
+    per_rollout = []
+    for rollout in range(miles["num_rollout"]):
+        path = Path(miles["save_debug_rollout_data"].format(rollout_id=rollout))
+        batch = audit_workflow.load_rollout(path)["samples"]
+        require(all(len(s["tokens"]) <= core["max_sequence_length"] for s in batch), "Training context overflow")
+        per_rollout.append({"rollout": rollout, **length_coverage(batch, miles["rollout_max_response_len"])})
+        samples.extend(batch)
+    report["length_coverage"] = length_coverage(samples, miles["rollout_max_response_len"])
+    report["per_rollout"] = per_rollout
+    report["replay_coverage"] = replay_coverage(root, miles)
+    report["configured_context"] = core["max_sequence_length"]
+    report["limits"] = (
+        "Retained sample, reward accounting, policy versions, optimizer sequence and replay checks. Actual lengths reported independently of configured cap; no full checkpoint parameter-drift audit."
+    )
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("inspect", "audit", "lifecycle", "rescore", "drift", "features"))
+    parser.add_argument("mode", choices=("inspect", "audit", "lifecycle", "rescore", "drift", "features", "lengths"))
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--output", type=Path, default=Path("/output"))
     args = parser.parse_args()
@@ -443,6 +486,7 @@ def main():
                 "rescore": rescore,
                 "drift": drift,
                 "features": features,
+                "lengths": lengths,
             }[args.mode](path)
         except Exception as error:
             report = {"passed": False, "path": str(path), "error": f"{type(error).__name__}: {error}"}

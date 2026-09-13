@@ -1,0 +1,271 @@
+{
+  "experiment": "01M2E0SRNC49XZZY31VWPFE2SM",
+  "exit_code": 0,
+  "passed": true,
+  "model": "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+  "hardware": "NVIDIA B300 SXM6 AC",
+  "image": "01M2CD5CH7MBVHZK50AXAPYGFB",
+  "limits": "Synthetic exact-length input; short greedy output. No backward, replay, weight publication, natural-task score or sustained long decoding coverage. Memory samples are device-wide at 1s intervals, not allocator peaks.",
+  "cases": [
+    {
+      "context": 16384,
+      "startup_seconds": 270.1997413211502,
+      "command": [
+        "/usr/bin/python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "31000",
+        "--tp-size",
+        "1",
+        "--context-length",
+        "16384",
+        "--max-total-tokens",
+        "131072",
+        "--mem-fraction-static",
+        "0.6",
+        "--max-running-requests",
+        "8",
+        "--max-mamba-cache-size",
+        "16",
+        "--chunked-prefill-size",
+        "2048",
+        "--attention-backend",
+        "triton",
+        "--sampling-backend",
+        "pytorch",
+        "--cuda-graph-backend-decode",
+        "full",
+        "--cuda-graph-max-bs-decode",
+        "8",
+        "--cuda-graph-backend-prefill",
+        "disabled",
+        "--disable-radix-cache",
+        "--trust-remote-code",
+        "--skip-server-warmup"
+      ],
+      "device_peak_sampled_gib": 38.5146484375,
+      "kv_allocation": [
+        "[2026-09-13 18:36:30] KV Cache is allocated. dtype: torch.bfloat16, #tokens: 131072, K size: 1.00 GB, V size: 1.00 GB"
+      ],
+      "retraction_or_oom_lines": [],
+      "groups": [
+        {
+          "concurrency": 1,
+          "seconds": 5.728495536837727,
+          "input_tokens": 16128,
+          "output_tokens": [
+            128
+          ]
+        },
+        {
+          "concurrency": 1,
+          "seconds": 1.2399466489441693,
+          "input_tokens": 16128,
+          "output_tokens": [
+            128
+          ]
+        },
+        {
+          "concurrency": 2,
+          "seconds": 4.967304443009198,
+          "input_tokens": 16128,
+          "output_tokens": [
+            128,
+            128
+          ]
+        },
+        {
+          "concurrency": 8,
+          "seconds": 7.652474105823785,
+          "input_tokens": 16128,
+          "output_tokens": [
+            128,
+            128,
+            128,
+            128,
+            128,
+            128,
+            128,
+            128
+          ]
+        }
+      ],
+      "artifact_sha256": {
+        "memory.jsonl": "e43982590ac7fb251227af1bbdbe99dce0da40ff6d0fcb248d014a4ae70f284b",
+        "server.log": "8bf2f0cfd7b7e349bfabdbb938d2446c938accfe5b7e0cbd2d54eef8e448b787"
+      }
+    },
+    {
+      "context": 32768,
+      "startup_seconds": 63.06040110299364,
+      "command": [
+        "/usr/bin/python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "31000",
+        "--tp-size",
+        "1",
+        "--context-length",
+        "32768",
+        "--max-total-tokens",
+        "131072",
+        "--mem-fraction-static",
+        "0.6",
+        "--max-running-requests",
+        "8",
+        "--max-mamba-cache-size",
+        "16",
+        "--chunked-prefill-size",
+        "2048",
+        "--attention-backend",
+        "triton",
+        "--sampling-backend",
+        "pytorch",
+        "--cuda-graph-backend-decode",
+        "full",
+        "--cuda-graph-max-bs-decode",
+        "8",
+        "--cuda-graph-backend-prefill",
+        "disabled",
+        "--disable-radix-cache",
+        "--trust-remote-code",
+        "--skip-server-warmup"
+      ],
+      "device_peak_sampled_gib": 38.7158203125,
+      "kv_allocation": [
+        "[2026-09-13 18:41:20] KV Cache is allocated. dtype: torch.bfloat16, #tokens: 131072, K size: 1.00 GB, V size: 1.00 GB"
+      ],
+      "retraction_or_oom_lines": [],
+      "groups": [
+        {
+          "concurrency": 1,
+          "seconds": 2.2434628647752106,
+          "input_tokens": 32512,
+          "output_tokens": [
+            128
+          ]
+        },
+        {
+          "concurrency": 1,
+          "seconds": 2.0516496668569744,
+          "input_tokens": 32512,
+          "output_tokens": [
+            128
+          ]
+        },
+        {
+          "concurrency": 2,
+          "seconds": 3.6642705500125885,
+          "input_tokens": 32512,
+          "output_tokens": [
+            128,
+            128
+          ]
+        },
+        {
+          "concurrency": 4,
+          "seconds": 6.482048052828759,
+          "input_tokens": 32512,
+          "output_tokens": [
+            128,
+            128,
+            128,
+            128
+          ]
+        }
+      ],
+      "artifact_sha256": {
+        "memory.jsonl": "5c6027b02a37cbd6f0fc7f81e98ea6a6dabae30b366e8910cf44d05bc79255e7",
+        "server.log": "56b8a09ed703cd4f185c19d8a17a03d06906fada39080812a8c973a5174b1586"
+      }
+    },
+    {
+      "context": 65536,
+      "startup_seconds": 62.06369632901624,
+      "command": [
+        "/usr/bin/python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "31000",
+        "--tp-size",
+        "1",
+        "--context-length",
+        "65536",
+        "--max-total-tokens",
+        "131072",
+        "--mem-fraction-static",
+        "0.6",
+        "--max-running-requests",
+        "8",
+        "--max-mamba-cache-size",
+        "16",
+        "--chunked-prefill-size",
+        "2048",
+        "--attention-backend",
+        "triton",
+        "--sampling-backend",
+        "pytorch",
+        "--cuda-graph-backend-decode",
+        "full",
+        "--cuda-graph-max-bs-decode",
+        "8",
+        "--cuda-graph-backend-prefill",
+        "disabled",
+        "--disable-radix-cache",
+        "--trust-remote-code",
+        "--skip-server-warmup"
+      ],
+      "device_peak_sampled_gib": 38.7216796875,
+      "kv_allocation": [
+        "[2026-09-13 18:42:43] KV Cache is allocated. dtype: torch.bfloat16, #tokens: 131072, K size: 1.00 GB, V size: 1.00 GB"
+      ],
+      "retraction_or_oom_lines": [],
+      "groups": [
+        {
+          "concurrency": 1,
+          "seconds": 4.113199402112514,
+          "input_tokens": 65280,
+          "output_tokens": [
+            128
+          ]
+        },
+        {
+          "concurrency": 1,
+          "seconds": 3.9355805618688464,
+          "input_tokens": 65280,
+          "output_tokens": [
+            128
+          ]
+        },
+        {
+          "concurrency": 2,
+          "seconds": 7.2241013762541115,
+          "input_tokens": 65280,
+          "output_tokens": [
+            128,
+            128
+          ]
+        }
+      ],
+      "artifact_sha256": {
+        "memory.jsonl": "3f75dbb6c5355a06fce9e7f1a8d09dc77ffb97653d0764fcd6682d158506e36b",
+        "server.log": "1155bc691d1f84d344fa3a2266406cefa829b39d2b0b247925b9693ba84ad01c"
+      }
+    }
+  ]
+}

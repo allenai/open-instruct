@@ -67,6 +67,7 @@ def main():
             "rescore",
             "drift",
             "features",
+            "lengths",
             "services",
             "prepare-stdio",
             "prepare-length-math",
