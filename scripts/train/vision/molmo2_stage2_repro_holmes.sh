@@ -56,9 +56,13 @@ fi
 
 echo "holmes run: ${MAX_STEPS} steps, ${NUM_NODES} node(s), ref ${GIT_REF}, ckpt ${STAGE1_CKPT}"
 
+# Workspace: ai2/molmofication, not ai2/open-instruct-dev. Beaker decides preemption
+# by workspace allocation balance, and open-instruct-dev ran 271-302% over target, so
+# every job past its 8h minimum runtime lost the fairness contest and was preempted
+# (repeatedly, mid-run). molmofication is this work's own allocation.
 uv run python mason.py \
     --cluster ai2/holmes \
-    --workspace ai2/open-instruct-dev \
+    --workspace ai2/molmofication \
     --priority urgent \
     --max_retries 3 \
     --image "$BOOTSTRAP_IMAGE" \
