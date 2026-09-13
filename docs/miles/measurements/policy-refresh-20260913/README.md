@@ -79,7 +79,8 @@ MILES_EXISTING_IMAGE=01M2CJG5RQQ93GEYNYAS7ASCQJ \
 
 Use `sft` instead of `tiny` for the existing SFT HF checkpoint. Add `--radix`
 after the mode for a separate radix-enabled qualification. GPU placement is
-Holmes, urgent, `ai2/open-instruct-dev`, minimum runtime one hour. Each run uses
+Holmes, urgent, `ai2/open-instruct-dev`, minimum runtime one hour for the full model. The disposable tiny fixture uses
+a 10-minute minimum / 20-minute timeout to allow short backfill. Each run uses
 its own Beaker result dataset. Injected probe sources and their SHA-256 hashes
 are recorded in `provenance.json`; runtime image and source overlays are fixed.
 

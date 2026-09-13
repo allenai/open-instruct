@@ -56,6 +56,10 @@ def make_spec(image, mode, radix=False):
         "timeout": "1h",
         "envVars": [{"name": "OMP_NUM_THREADS", "value": "2"}, {"name": "NCCL_CUMEM_ENABLE", "value": "1"}],
     }
+    if mode == "tiny":
+        task["resources"].update(cpuCount=8, memory="32 GiB", sharedMemory="4 GiB")
+        task["context"]["minRuntime"] = "10m"
+        task["timeout"] = "20m"
     if mode == "sft":
         task["datasets"] = [{"mountPath": "/weka/oe-training-default", "source": {"weka": "oe-training-default"}}]
     return {

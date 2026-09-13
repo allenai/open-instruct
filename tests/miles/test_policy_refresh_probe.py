@@ -69,7 +69,11 @@ def test_launch_is_pinned_isolated_gpu_holmes(mode, monkeypatch):
     task = launch.make_spec("immutable-image-id", mode)["tasks"][0]
     assert task["resources"]["gpuCount"] == 2
     assert task["constraints"]["cluster"] == ["ai2/holmes"]
-    assert task["context"] == {"priority": "urgent", "minRuntime": "1h", "autoResume": False}
+    assert task["context"] == {
+        "priority": "urgent",
+        "minRuntime": "10m" if mode == "tiny" else "1h",
+        "autoResume": False,
+    }
     assert task["image"] == {"beaker": "immutable-image-id"}
     assert ("datasets" in task) == (mode == "sft")
     assert "--model" in task["arguments"][0] if mode == "sft" else "--model" not in task["arguments"][0]
