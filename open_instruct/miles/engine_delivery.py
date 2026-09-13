@@ -22,6 +22,22 @@ from open_instruct.miles import models
 from open_instruct.miles.engine_drain import WeightSnapshot
 
 
+def copy_bucket_to_host(actor, flat):
+    """Reuse pinned staging; Ray must finish freezing it before the next copy."""
+    if not flat.is_cuda:
+        return flat.cpu()
+    staging = getattr(actor, "_engine_drain_host_staging", None)
+    if staging is None or staging.numel() < flat.numel():
+        staging = torch.empty(flat.numel(), dtype=flat.dtype, device="cpu", pin_memory=True)
+        actor._engine_drain_host_staging = staging
+    packed = staging[: flat.numel()]
+    packed.copy_(flat, non_blocking=True)
+    # Freeze only after the D2H completes. The exported GPU bucket can then be
+    # released, and ray.put copies the staging bytes into immutable object storage.
+    torch.cuda.current_stream(flat.device).synchronize()
+    return packed
+
+
 def capture(actor):
     """Collective optimizer-boundary export; only rank zero retains frozen bytes."""
     started = time.perf_counter()
@@ -34,7 +50,8 @@ def capture(actor):
         # Pack on the source device and perform one D2H copy per bucket. Doing
         # CPU concatenation and a blocking copy for every individual parameter
         # cost 44 seconds for the first measured 37 GB snapshot.
-        packed = update_weight_utils.FlattenedTensorBucket(named_tensors=bucket).get_flattened_tensor().cpu()
+        flat = update_weight_utils.FlattenedTensorBucket(named_tensors=bucket).get_flattened_tensor()
+        packed = copy_bucket_to_host(actor, flat)
         # ray.put serializes before returning. The resulting NumPy object is
         # read-only on retrieval; subsequent optimizer writes cannot alias it.
         refs.append(

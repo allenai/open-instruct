@@ -19,10 +19,12 @@ and the existing data-source ledger retains it until consumption or deliberate d
 
 After each optimizer step, all trainer ranks export in the existing collective order.
 Rank zero takes owned BF16 copies into one GPU bucket, packs the established
-flattened byte layout on the GPU, then copies that bucket to host memory and places
+flattened byte layout on the GPU, then copies that bucket into reusable pinned host staging and places
 it in Ray's immutable object store. Capture temporarily needs the owned bucket
 and its packed GPU buffer, rather than another complete GPU model. The exporter
-retains no live parameter views. There is one full snapshot per version, shared by
+retains no live parameter views. D2H completion is synchronized before `ray.put`;
+the staging buffer is reused only after Ray has frozen its bytes. The source retains
+one pinned buffer as large as its largest bucket. There is one full snapshot per version, shared by
 all receivers. `snapshot_capacity` bounds versions retained; the driver waits for
 capacity before another capture. Ray's own object-store spill policy still applies.
 Provision host/object-store space for capacity times full exported model bytes,
