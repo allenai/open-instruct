@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.miles import audit_workflow, prepare_colleague_exercises
+from torch.distributed.checkpoint import metadata as checkpoint_metadata
 
 from open_instruct.miles import general_judge, rewards, run_data, workflow
 
@@ -337,7 +338,7 @@ def drift(root):
     candidates = sorted(
         key
         for key, value in metadata.state_dict_metadata.items()
-        if hasattr(value, "size")
+        if isinstance(value, checkpoint_metadata.TensorStorageMetadata)
         and 0 < value.size.numel() <= 1048576
         and ((key.startswith("model.") and key.endswith(("weight", "bias"))) or key.endswith(".main"))
     )
