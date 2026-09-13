@@ -4,7 +4,9 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 from scripts.miles.launch_gsm8k_parity import ROOT as CAMPAIGN_ROOT
@@ -49,7 +51,8 @@ def main():
         (root / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
         dataset = "SOURCE_DATASET"
         if not opt.render_only:
-            uploaded = subprocess.check_output(
+            name = f"policy-refresh-src-{commit[:12]}-{uuid.uuid4().hex[:8]}"
+            subprocess.run(
                 [
                     "beaker",
                     "dataset",
@@ -59,13 +62,15 @@ def main():
                     "ai2/open-instruct-dev",
                     "--budget",
                     "ai2/oe-other",
+                    "--name",
+                    name,
                     "--desc",
                     f"Policy refresh qualification source {commit}",
-                    "--format",
-                    "json",
                 ],
-                text=True,
+                check=True,
+                stdout=sys.stderr,
             )
+            uploaded = subprocess.check_output(["beaker", "dataset", "get", name, "--format", "json"], text=True)
             dataset = json.loads(uploaded)[0]["id"]
         mode = opt.mode
         command = f"""set -euo pipefail

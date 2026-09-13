@@ -5,6 +5,7 @@ while replay_version identifies the forward that rebuilt the final route table.
 """
 
 import math
+from numbers import Integral
 
 import torch
 
@@ -22,7 +23,13 @@ def version_number(value):
 
 def validate_spans(spans, length, *, replay_version):
     """Validate exact half-open response-token coverage; omit empty spans."""
-    if type(length) is not int or length <= 0 or not isinstance(spans, list) or not spans:
+    if (
+        isinstance(length, bool)
+        or not isinstance(length, Integral)
+        or length <= 0
+        or not isinstance(spans, list)
+        or not spans
+    ):
         raise ValueError("Policy refresh requires version spans for every response token")
     replay_version = version_number(replay_version)
     result, cursor, previous = [], 0, -1

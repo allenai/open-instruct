@@ -591,6 +591,18 @@ index 87d269ea81673845001c8d12b170dad609672363..af77b75000188e339075d7bd85c7df0f
              ).remote(
                  self.args,
                  rank=global_rank,
+diff --git a/miles/ray/rollout/train_data_conversion.py b/miles/ray/rollout/train_data_conversion.py
+index e3c95a92999345e3654d607767176336c93302a4..0a550aed1b834a7df886c5a7f218151c74d9d631 100644
+--- a/miles/ray/rollout/train_data_conversion.py
++++ b/miles/ray/rollout/train_data_conversion.py
+@@ -369,6 +369,7 @@ def _package_shards(args, data: dict[str, Any], partitions) -> list[dict[str, An
+             "rollout_routed_experts",
+             "rollout_indexer_topk",
+             "prompt",
++            "metadata",
+             "teacher_log_probs",
+             "opd_reverse_kl",
+             "seq_witness_ids",
 diff --git a/miles/ray/train/actor_factory.py b/miles/ray/train/actor_factory.py
 index 9afc33fdeeaaeaab6766bb17949ddfbbd02daf66..282c4d08373f8c6c8710db6beaba9b996994dfb9 100644
 --- a/miles/ray/train/actor_factory.py

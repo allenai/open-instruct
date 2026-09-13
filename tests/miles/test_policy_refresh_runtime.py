@@ -3,9 +3,11 @@
 import asyncio
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_function
+from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample
 
@@ -232,3 +234,16 @@ def test_refresh_score_metrics_separate_prefix_from_fresh_suffix():
     assert result["current_version_token_fraction"] == pytest.approx(1 / 3)
     assert result["historical_prefix"]["tis_clip_fraction"] == 0.5
     assert result["latest_forward"]["mean_abs_logratio"] == 0
+
+
+def test_metadata_survives_dp_reordering_with_numpy_lengths():
+    values = [sample(0, (0, 1)), sample(1, (1, 2))]
+    data = dict(
+        metadata=[v.train_metadata for v in values],
+        weight_versions=[v.weight_versions for v in values],
+        response_lengths=np.array([3, 3]),
+        total_lengths=[4, 4],
+    )
+    shards = train_data_conversion._package_shards(None, data, [[1], [0]])
+    assert policy_refresh.validate_batch(shards[0])[0][-1]["version"] == 2
+    assert policy_refresh.validate_batch(shards[1])[0][-1]["version"] == 1

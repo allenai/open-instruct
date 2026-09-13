@@ -42,7 +42,9 @@ async def train(args, *, export_hf=None):
                 await manager.core_publication_boundary.remote(True, **({"refresh": True} if refresh else {}))
             if args.offload_rollout:
                 await manager.onload_weights.remote()
-            await learner.update_weights(rollout_id)
+            await asyncio.wait_for(
+                learner.update_weights(rollout_id), timeout=args.olmo_core.engine_update_timeout if refresh else None
+            )
             interval = args.olmo_core.diagnostic_interval
             fresh_initial = rollout_id is None and args.start_rollout_id == 0
             diagnostic = interval > 0 and (rollout_id is None or (rollout_id + 1) % interval == 0)
@@ -58,7 +60,10 @@ async def train(args, *, export_hf=None):
                         selector=args.check_weight_update_selector,
                         skip_list=args.check_weight_update_skip_list,
                     )
-                    await learner.update_weights(rollout_id)
+                    await asyncio.wait_for(
+                        learner.update_weights(rollout_id),
+                        timeout=args.olmo_core.engine_update_timeout if refresh else None,
+                    )
                 await manager.check_weights.remote(
                     action="compare",
                     allow_quant_error=args.check_weight_update_allow_quant_error,

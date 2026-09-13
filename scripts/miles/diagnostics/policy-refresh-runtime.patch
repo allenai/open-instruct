@@ -19,6 +19,18 @@ index 224db2b77cc1c573a29ce35a94921e98b9739059..559bd4231d42a3ec476eef2379724d72
          if hasattr(producer, method):
              return run(getattr(producer, method)())
  
+diff --git a/miles/ray/rollout/train_data_conversion.py b/miles/ray/rollout/train_data_conversion.py
+index e3c95a92999345e3654d607767176336c93302a4..0a550aed1b834a7df886c5a7f218151c74d9d631 100644
+--- a/miles/ray/rollout/train_data_conversion.py
++++ b/miles/ray/rollout/train_data_conversion.py
+@@ -369,6 +369,7 @@ def _package_shards(args, data: dict[str, Any], partitions) -> list[dict[str, An
+             "rollout_routed_experts",
+             "rollout_indexer_topk",
+             "prompt",
++            "metadata",
+             "teacher_log_probs",
+             "opd_reverse_kl",
+             "seq_witness_ids",
 diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
 index bc6a36ef9ab4261834adcda141639737bdd9c88c..17d12435b24eb18ce6c9eb11d4aa366eb7396dd1 100644
 --- a/miles/utils/arguments.py
