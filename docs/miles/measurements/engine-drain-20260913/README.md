@@ -207,3 +207,25 @@ passes after the fix; all 45 lifecycle/rolling-runtime tests passed together.
 exercise this on image `01M2CHD46881NR0DKT7KN96YWZ`, source `0bbc4e833cad`.
 The previous lag-two resume and deliberate-loss runs remain on image F; their
 results must not be mislabeled as qualification of this ordering correction.
+
+
+The deliberate-loss harness passed: the version-seven receiver was quarantined
+0.19 s after its owned server was retired, never reopened, and the driver returned
+its terminal failure in **116.34 s**, including completion of the already-in-flight
+optimizer step and cleanup. [failure-probe.json](failure-probe.json) records the
+injection and elapsed time; the full exception and event timeline are Beaker results.
+This validates fail-and-restart behavior, not automatic engine recovery.
+
+Full-model GPU-packing captures on image F are still expensive and variable:
+76.25 / 73.82 s on the slow-resume run, versus 30.07 s in the failure run.
+There is no demonstrated capture-speed improvement yet. An isolated
+[single-GPU, 37 GB copy profile](https://beaker.org/ex/01M2CJ2Q4329GCKJ9X1JBG3RMR)
+times packing, D2H and Ray object-store insertion using the exact capture function
+with a synthetic BF16 source. It excludes native export, EP collectives and concurrent
+training and adds GPU synchronization to isolate phases; its results must not be
+presented as end-to-end RL timings.
+
+The image-G focused suite passed **62 tests**, covering lifecycle, capture,
+producer admission, learning/resume audits and failure validation. Its code differs
+from F by the documented checkpoint-order correction; the profiler is a separate
+committed helper embedded with provenance, not a mutation of the runtime image.
