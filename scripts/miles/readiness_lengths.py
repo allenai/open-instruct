@@ -55,13 +55,15 @@ def gpu_snapshot():
     return {"time": time.time(), "csv": result.stdout.strip()}
 
 
-def exercise(output, contexts, prefill):
+def exercise(output, contexts, prefill, kv_tokens=131072, max_running=8):
     output.mkdir(parents=True, exist_ok=True)
     tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
     report = {
         "model": MODEL,
         "contexts": contexts,
         "chunked_prefill_size": prefill,
+        "kv_tokens": kv_tokens,
+        "max_running": max_running,
         "limits": "Synthetic exact-length input; short greedy output. No backward, replay, weight publication, natural-task score or sustained long decoding coverage. Memory samples are device-wide at 1s intervals, not allocator peaks.",
         "cases": [],
         "passed": False,
@@ -85,13 +87,13 @@ def exercise(output, contexts, prefill):
             "--context-length",
             str(context),
             "--max-total-tokens",
-            "131072",
+            str(kv_tokens),
             "--mem-fraction-static",
             "0.6",
             "--max-running-requests",
-            "8",
+            str(max_running),
             "--max-mamba-cache-size",
-            "16",
+            str(2 * max_running),
             "--chunked-prefill-size",
             str(prefill),
             "--attention-backend",
@@ -101,7 +103,7 @@ def exercise(output, contexts, prefill):
             "--cuda-graph-backend-decode",
             "full",
             "--cuda-graph-max-bs-decode",
-            "8",
+            str(max_running),
             "--cuda-graph-backend-prefill",
             "disabled",
             "--disable-radix-cache",
@@ -144,7 +146,7 @@ def exercise(output, contexts, prefill):
                     time.sleep(2)
                 case["startup_seconds"] = time.monotonic() - started
                 # Every simultaneous prompt + its reserved output fits the explicit KV pool.
-                maximum = min(8, 131072 // context)
+                maximum = min(max_running, kv_tokens // context)
                 concurrencies = list(dict.fromkeys([1, 1, min(2, maximum), maximum]))
                 # Separate first-shape compilation from a warmed identical-capacity request.
                 concurrencies.insert(1, 1)
@@ -221,7 +223,11 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, default=Path("/output"))
     parser.add_argument("--contexts", type=int, nargs="+", default=[16384, 32768, 65536])
     parser.add_argument("--chunked-prefill-size", type=int, default=2048)
+    parser.add_argument("--kv-tokens", type=int, default=131072)
+    parser.add_argument("--max-running", type=int, default=8)
     args = parser.parse_args()
     if any(c not in (16384, 32768, 65536) for c in args.contexts):
         parser.error("Only the bounded 16K/32K/64K sweep is supported")
-    exercise(args.output, args.contexts, args.chunked_prefill_size)
+    if args.kv_tokens < max(args.contexts) or args.max_running not in (8, 16, 32):
+        parser.error("KV pool must hold a full context; admission must be 8, 16 or 32")
+    exercise(args.output, args.contexts, args.chunked_prefill_size, args.kv_tokens, args.max_running)

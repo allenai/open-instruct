@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 
-def specification(image, source):
+def specification(image, source, kv_tokens=131072, max_running=8):
     setup = (
         "import base64,pathlib; pathlib.Path('/output/lengths.py').write_bytes(base64.b64decode("
         + repr(base64.b64encode(source).decode())
@@ -24,7 +24,7 @@ def specification(image, source):
             "export PYTHONPATH=/opt/core-rl OMP_NUM_THREADS=2 TOKENIZERS_PARALLELISM=false",
             "export SGLANG_EXTERNAL_MODEL_PACKAGE=olmo_sglang.models",
             "python -c " + shlex.quote(setup),
-            "python /output/lengths.py",
+            f"python /output/lengths.py --kv-tokens {int(kv_tokens)} --max-running {int(max_running)}",
         ]
     )
     return {
@@ -52,9 +52,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument("--kv-tokens", type=int, default=131072)
+    parser.add_argument("--max-running", type=int, choices=(8, 16, 32), default=8)
     args = parser.parse_args()
     source = Path(__file__).with_name("readiness_lengths.py").read_bytes()
-    document = specification(args.image, source)
+    document = specification(args.image, source, args.kv_tokens, args.max_running)
     with tempfile.TemporaryDirectory() as temporary:
         path = Path(temporary) / "experiment.json"
         path.write_text(json.dumps(document))
