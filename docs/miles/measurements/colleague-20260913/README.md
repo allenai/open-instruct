@@ -209,3 +209,24 @@ addition of integer pairs, a digital root and sequence modes, alongside harder
 string problems. It is still a short learning-path check, not an easy-task score
 benchmark. All 68 focused host readiness/config/retry tests passed; changed scripts
 passed Ruff/type checks and generated documentation remained current.
+
+
+## Combined asynchronous judged exercise
+
+[Submitted run](https://beaker.org/ex/01M2CRTVVAAAM85D0E8RFQ7NJ3), config
+`11-combined-async-judged.toml`: one node with two EP2 trainers, three TP1 policy
+engines and one managed Qwen3-32B judge. Four collections of 8 prompts x 8
+responses, global batch 64, asynchronous sample submission with TIS and maximum
+policy lag two, packing/replay, radix extra-buffer caching, cache-aware routing,
+and native saves after updates two and four. Startup-only full-weight audits.
+
+The existing six-domain fixture and pinned runtime image C are reused. The KDA
+cache holds 384 states per engine to satisfy the >5x admission guard for 64
+running requests when radix is enabled. CPU planning verified six physical GPUs,
+one-node host networking for the judge bootstrap, and all resolved controls;
+64 config/cache tests and lint passed before submission. This combines previously
+separate checks; it does not establish EP8, restart, failure recovery, or actual
+prefix-cache use merely by enabling the flags. Acceptance requires retained
+per-domain reward/service outcomes, lag/publication/packing/replay checks, native
+checkpoint integrity, and observed cache hits for the cache-use claim. The full
+EP8 + seven-engine + judge case remains separately pending whole-node capacity.
