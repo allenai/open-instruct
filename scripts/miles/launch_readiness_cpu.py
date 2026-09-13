@@ -25,7 +25,8 @@ def specification(image, mode, paths, source):
             "python -c " + shlex.quote(setup),
             "python /output/readiness_cpu.py "
             + shlex.join(
-                ([] if mode in ("prepare-long", "prepare-stdio", "services") else [mode]) + list(map(str, paths))
+                ([] if mode in ("prepare-long", "prepare-stdio", "prepare-length-math", "services") else [mode])
+                + list(map(str, paths))
             ),
         )
     )
@@ -68,6 +69,7 @@ def main():
             "features",
             "services",
             "prepare-stdio",
+            "prepare-length-math",
         ),
     )
     parser.add_argument("paths", nargs="+")
@@ -80,6 +82,7 @@ def main():
                 "prepare-long": "prepare_long_context.py",
                 "services": "readiness_services.py",
                 "prepare-stdio": "prepare_stdio_exercise.py",
+                "prepare-length-math": "prepare_length_math.py",
             }.get(args.mode, "readiness_cpu.py")
         )
         .read_bytes()
