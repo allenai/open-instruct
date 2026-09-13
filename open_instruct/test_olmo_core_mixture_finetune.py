@@ -1,5 +1,7 @@
 """CPU tests for the multimodal SFT entry point's argument surface."""
 
+import pytest
+
 from open_instruct import olmo_core_mixture_finetune, olmo_core_multimodal_utils, olmo_core_utils, sft_mixture, utils
 
 
@@ -68,3 +70,21 @@ def test_checkpointer_skips_pre_train_save():
     assert callback.pre_train_checkpoint is False
     assert callback.save_async is False
     assert callback.ephemeral_save_interval is None
+
+
+def test_assert_has_checkpoint_rejects_empty_dir(tmp_path):
+    """A resume path with no stepN dir must fail loudly, not train uninitialized weights."""
+    empty = tmp_path / "run"
+    (empty / "wandb").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="no 'stepN' checkpoint"):
+        olmo_core_mixture_finetune._assert_has_checkpoint(str(empty))
+
+    with pytest.raises(FileNotFoundError):
+        olmo_core_mixture_finetune._assert_has_checkpoint(str(tmp_path / "missing"))
+
+
+def test_assert_has_checkpoint_accepts_run_and_step_dirs(tmp_path):
+    run = tmp_path / "run"
+    (run / "step9000").mkdir(parents=True)
+    olmo_core_mixture_finetune._assert_has_checkpoint(str(run))
+    olmo_core_mixture_finetune._assert_has_checkpoint(str(run / "step9000"))

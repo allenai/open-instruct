@@ -77,6 +77,25 @@ class MultimodalSFTArguments:
     checkpoint: olmo_core_utils.CheckpointConfig
 
 
+def _assert_has_checkpoint(path: str) -> None:
+    """Fail fast when a checkpoint path holds no checkpoint.
+
+    ``load_path`` accepts either an OLMo-core run directory (whose latest ``stepN``
+    is used) or a single ``stepN`` directory. Neither olmo-core nor the trainer
+    errors when the path resolves to nothing, so an empty directory silently
+    becomes a from-scratch run on uninitialized weights.
+    """
+    if os.path.basename(os.path.normpath(path)).startswith("step"):
+        if os.path.isdir(path):
+            return
+    elif os.path.isdir(path) and any(entry.startswith("step") for entry in os.listdir(path)):
+        return
+    raise FileNotFoundError(
+        f"resume_from_checkpoint={path!r} contains no 'stepN' checkpoint directory. "
+        f"Training would silently start from scratch with uninitialized weights."
+    )
+
+
 def main(args: MultimodalSFTArguments) -> None:
     if not os.path.isdir(paths.MOLMO_DATA_DIR):
         raise FileNotFoundError(
@@ -177,6 +196,10 @@ def main(args: MultimodalSFTArguments) -> None:
     # - Stage-1 init: the trainer loads model weights (only) from load_path, unless a
     #   checkpoint already exists in save_folder (preemption resume).
     if args.checkpoint.resume_from_checkpoint:
+        # A resume path with no checkpoint in it is silent corruption: the trainer
+        # loads nothing, and a model built for `load_path` init was only `to_empty()`d,
+        # so training proceeds on uninitialized weights (CE = ln(vocab_size)).
+        _assert_has_checkpoint(args.checkpoint.resume_from_checkpoint)
         trainer_config.load_path = args.checkpoint.resume_from_checkpoint
     elif defer_load:
         trainer_config.load_path = args.model.model_name_or_path
