@@ -80,8 +80,16 @@ def audit(root):
     )
     examples, dump_files, seen_groups = [], [], set()
     labels = [(i, i * optimizer_steps, "train") for i in range(updates)]
-    # Initial eval and final eval filenames follow the driver rollout clock.
-    labels += [("eval_0", 0, "eval"), (f"eval_{updates - 1}", updates * optimizer_steps, "eval")]
+    interval = miles.get("eval_interval")
+    if interval is not None:
+        if not miles.get("skip_eval_before_train", False):
+            require(
+                interval > 1, "Eval-every-update overwrites the retained initial eval; use separate audit evidence"
+            )
+            labels.append(("eval_0", 0, "eval"))
+        labels.extend(
+            (f"eval_{i}", (i + 1) * optimizer_steps, "eval") for i in range(updates) if (i + 1) % interval == 0
+        )
     for label, version, split in labels:
         path = Path(miles["save_debug_rollout_data"].format(rollout_id=label))
         samples = audit_workflow.load_rollout(path)["samples"]
