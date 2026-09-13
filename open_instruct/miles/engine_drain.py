@@ -19,6 +19,7 @@ class Assignment:
     version: int
     group: int
     requests: tuple[str, ...]
+    attempt: int = 0
 
 
 @dataclass
@@ -73,6 +74,7 @@ class EngineDrain:
         self._groups: dict[int, Assignment] = {}
         self._paused = False
         self._closed = False
+        self._admission_sequence = 0
 
     def emit(self, kind: str, **fields):
         self._event({"event": kind, "time": time.time(), "monotonic": time.monotonic(), **fields})
@@ -107,8 +109,12 @@ class EngineDrain:
                 ]
                 if eligible and not self._paused:
                     engine = min(eligible, key=lambda e: (len(e.requests), -e.version, e.identity))
-                    requests = tuple(f"{engine.incarnation}:{group}:{i}" for i in range(count))
-                    assignment = Assignment(engine.identity, engine.incarnation, engine.version, group, requests)
+                    attempt = self._admission_sequence
+                    self._admission_sequence += 1
+                    requests = tuple(f"{engine.incarnation}:{group}:{attempt}:{i}" for i in range(count))
+                    assignment = Assignment(
+                        engine.identity, engine.incarnation, engine.version, group, requests, attempt
+                    )
                     engine.requests.update(requests)
                     self._groups[group] = assignment
                     self.emit("group_reserved", **vars(assignment), consuming_step=self.step)
@@ -135,6 +141,7 @@ class EngineDrain:
             engine=engine.identity,
             request=request,
             group=assignment.group,
+            attempt=assignment.attempt,
             assigned_version=assignment.version,
             executed_version=version,
             tokens=tokens,
@@ -147,7 +154,13 @@ class EngineDrain:
             raise RuntimeError("cannot retire group ownership before all responses are terminal")
         if self._groups.pop(assignment.group, None) != assignment:
             raise RuntimeError("group ownership was lost or retired twice")
-        self.emit("group_graded", engine=engine.identity, group=assignment.group, version=assignment.version)
+        self.emit(
+            "group_graded",
+            engine=engine.identity,
+            group=assignment.group,
+            attempt=assignment.attempt,
+            version=assignment.version,
+        )
 
     def fail(self, identity: str, error: BaseException):
         self.engines[identity].state = "unavailable"

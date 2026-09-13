@@ -180,6 +180,7 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
                 "incarnation": assignment.incarnation,
                 "request": request,
                 "version": assignment.version,
+                "attempt": assignment.attempt,
             },
         }
         return GenerateFnOutput(samples=sample)

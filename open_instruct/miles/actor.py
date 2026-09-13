@@ -2,7 +2,6 @@
 
 import contextlib
 import json
-import os
 import time
 from pathlib import Path
 
@@ -572,10 +571,17 @@ class OLMoCoreTrainRayActor(TrainRayActor):
         return engine_delivery.capture(self)
 
     def delivery_location(self):
+        # MILES deliberately leaves CUDA_VISIBLE_DEVICES unset in some layouts.
+        # Identify the actual selected physical GPU, then expose only that GPU
+        # (as local device zero) to the independent sender process.
+        properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+        if "MIG" in properties.name:
+            raise ValueError("engine-drain sender placement is not qualified on MIG devices")
+        identifier = str(properties.uuid)
         return {
             "node_id": ray.get_runtime_context().get_node_id(),
-            "cuda_visible_devices": os.environ["CUDA_VISIBLE_DEVICES"],
-            "device_index": torch.cuda.current_device(),
+            "cuda_visible_devices": identifier if identifier.startswith("GPU-") else f"GPU-{identifier}",
+            "device_index": 0,
             "version": self.clock.completed_steps,
         }
 

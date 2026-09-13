@@ -92,6 +92,25 @@ provide optimizer/queue/evaluation/checkpoint evidence. Overlapping stages must 
 be summed as elapsed wall time. The controller has no source of partial generated
 tokens when HTTP fails; do not infer their number from unfinished groups.
 
+Analyze a completed run's retained protocol and driver timelines with:
+
+```bash
+python -m scripts.miles.analyze_engine_drain /path/to/run --output /tmp/drain-audit.json
+```
+
+The audit checks request-attempt uniqueness and actual response/group versions,
+and reports independent engine progress and training intervals fully contained
+inside a peer's drain/update interval. It does not certify numerical equality,
+consumed lag, learning, or recovery.
+
+A separate two-GPU transport probe uses real Ray object-store snapshots and NCCL,
+but a synthetic receiver. Run through the same committed-image wrapper:
+
+```bash
+MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
+  ./scripts/train/build_image_and_launch.sh --miles scripts/train/debug/miles_engine_delivery_probe.sh
+```
+
 CPU tests have demonstrated independent progress, version checks, admission ordering,
 last-reader snapshot retention, deadlines and saturated-buffer lifecycle behavior.
 GPU transfer, useful learning, fresh-process resume, failure handling, and comparison

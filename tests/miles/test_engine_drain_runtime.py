@@ -8,7 +8,7 @@ import torch
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample
 
-from open_instruct.miles import draining_rollout, engine_delivery
+from open_instruct.miles import actor, draining_rollout, engine_delivery
 from open_instruct.miles.async_buffer import HomogeneousPolicyDataBuffer
 from open_instruct.miles.draining_rollout import DrainingRolloutFn
 from open_instruct.miles.engine_drain import Engine, EngineDrain, WeightSnapshot
@@ -216,3 +216,23 @@ def test_consuming_clock_advances_before_snapshot_capacity_wait():
         assert [name for name, _ in calls] == ["step", "capacity", "capture_weight_snapshot", "publish"]
 
     asyncio.run(run())
+
+
+def test_delivery_location_uses_selected_gpu_uuid_without_visible_devices(monkeypatch):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr(actor.torch.cuda, "current_device", lambda: 3)
+
+    def properties(device):
+        assert device == 3
+        return SimpleNamespace(name="NVIDIA B300", uuid="12345678-abcd-ef12-abcd-123456789abc")
+
+    monkeypatch.setattr(actor.torch.cuda, "get_device_properties", properties)
+    monkeypatch.setattr(actor.ray, "get_runtime_context", lambda: SimpleNamespace(get_node_id=lambda: "source-node"))
+    worker = SimpleNamespace(clock=PolicyClock(completed_steps=4))
+    location = actor.OLMoCoreTrainRayActor.delivery_location(worker)
+    assert location == {
+        "node_id": "source-node",
+        "cuda_visible_devices": "GPU-12345678-abcd-ef12-abcd-123456789abc",
+        "device_index": 0,
+        "version": 4,
+    }

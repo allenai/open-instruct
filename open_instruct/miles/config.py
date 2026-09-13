@@ -368,10 +368,16 @@ class RunConfig:
         for name in ("sglang_dp_size", "sglang_ep_size", "sglang_pp_size"):
             if options.get(name, 1) != 1:
                 raise InputError(f"engine_drain requires miles.{name}=1")
+        if options.get("router_pd_disaggregation", False) or options.get("prefill_num_servers") is not None:
+            raise InputError("engine_drain does not support serving prefill/decode disaggregation")
+        if options.get("sglang_disaggregation_mode", "null") not in (None, "null"):
+            raise InputError("engine_drain requires ordinary TP1 engines, not a prefill/decode serving role")
         if options.get("eval_num_gpus", 0) > 0:
             raise InputError("engine_drain currently supports blocking shared-engine evaluation only")
         for name in (
             "custom_generate_function_path",
+            "sglang_config",
+            "load_debug_rollout_data",
             "rollout_function_path",
             "eval_function_path",
             "rollout_sample_filter_path",
