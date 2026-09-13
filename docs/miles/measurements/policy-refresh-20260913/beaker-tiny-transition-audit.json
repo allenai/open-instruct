@@ -1,0 +1,130 @@
+[
+  {
+    "rid": "refresh-long-0",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9645021645021645,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-long-1",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9645021645021645,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-long-2",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9645021645021645,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-long-3",
+    "old_tokens": 132,
+    "new_tokens": 380,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9645021645021645,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-same-0",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.995,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-same-1",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.995,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-same-2",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.995,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-same-3",
+    "old_tokens": 35,
+    "new_tokens": 221,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.995,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-0",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9634146341463414,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-1",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9634146341463414,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-2",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9695121951219512,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-sampled-3",
+    "old_tokens": 67,
+    "new_tokens": 445,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.975609756097561,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-0",
+    "old_tokens": 34,
+    "new_tokens": 222,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9540816326530612,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-1",
+    "old_tokens": 34,
+    "new_tokens": 222,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9540816326530612,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-2",
+    "old_tokens": 34,
+    "new_tokens": 222,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9540816326530612,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  },
+  {
+    "rid": "refresh-short-3",
+    "old_tokens": 34,
+    "new_tokens": 222,
+    "original_behavior_preserved": true,
+    "refreshed_vs_old_prefix_route_agreement": 0.9540816326530612,
+    "refreshed_vs_fresh_prefill_prefix_route_agreement": 1.0
+  }
+]

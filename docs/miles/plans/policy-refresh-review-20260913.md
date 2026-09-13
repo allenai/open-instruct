@@ -180,3 +180,43 @@ The main remaining changes are transport and scheduling contracts:
 - Judge speed with full-model publication, re-prefill and completed-group
   throughput, then compare actual RL learning. The queued probes contain no
   optimizer and cannot settle the learning question.
+
+
+## Initial training implementation
+
+The isolated branch now implements `core.publication_mode = "refresh"`.
+Defaults remain `barrier`. `RefreshingRolloutFn` closes admission without joining
+in-flight requests during publication; Core's existing direct GPU updater
+retracts, flushes and resumes the engines. Save/eval/teardown instead drain owned
+requests with bounded temporary buffer capacity. Publication failure does not
+reopen admission. Request failures are not transparently retried under another
+policy.
+
+Exact response-token spans and final replay version are carried in
+`Sample.train_metadata["policy_refresh"]` through the existing metadata codec.
+`weight_versions` contains all nonempty behavior spans, so the existing oldest
+version lag rule remains conservative. The refresh buffer accepts mixed-version
+siblings while preserving whole groups. The trainer validates the metadata
+before scoring and logs prefix/suffix importance-ratio diagnostics separately.
+Original behavior logprobs and normal loss masks are retained.
+
+Initial scope: disaggregated resident TP1 engines, one optimizer step per
+collection, single-turn text, standard GRPO/TIS, untruncated temperature-1
+sampling, graphs disabled, no automatic engine replacement. Router replay and
+radix caching are included in the qualification. A checkpoint restarts from
+model/optimizer state and regenerates pending prompts using the existing cursor
+contract; GPU-resident partial requests are not serialized across allocations.
+
+The committed-source trial is launched via:
+
+```bash
+MILES_EXISTING_IMAGE=01M2CJG5RQQ93GEYNYAS7ASCQJ \
+  ./scripts/train/build_image_and_launch.sh --miles \
+  scripts/train/debug/miles_policy_refresh_trial.sh
+```
+
+It mounts a checksum-recorded source dataset over that immutable image and
+applies a checked, committed MILES delta. EP2 plus two inference engines run
+four updates with save/eval boundaries, then restart for update five. Full
+training qualification is pending; serving-only probe success does not imply
+this trial has passed.

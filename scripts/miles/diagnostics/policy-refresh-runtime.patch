@@ -1,0 +1,44 @@
+diff --git a/miles/ray/rollout/rollout_manager.py b/miles/ray/rollout/rollout_manager.py
+index 224db2b77cc1c573a29ce35a94921e98b9739059..559bd4231d42a3ec476eef2379724d7269620260 100644
+--- a/miles/ray/rollout/rollout_manager.py
++++ b/miles/ray/rollout/rollout_manager.py
+@@ -129,9 +129,14 @@ class RolloutManager:
+     def get_router_address(self) -> tuple[str, int]:
+         return self.args.sglang_router_ip, self.args.sglang_router_port
+ 
+-    def core_publication_boundary(self, begin: bool):
++    def core_publication_boundary(self, begin: bool, *, refresh: bool = False):
+         producer = self.generate_rollout
+-        method = "prepare_publication" if begin else "finish_publication"
++        if refresh:
++            method = "begin_refresh" if begin else "end_refresh"
++            if not hasattr(producer, method):
++                raise RuntimeError("Policy refresh requires the managed refreshing producer")
++        else:
++            method = "prepare_publication" if begin else "finish_publication"
+         if hasattr(producer, method):
+             return run(getattr(producer, method)())
+ 
+diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
+index bc6a36ef9ab4261834adcda141639737bdd9c88c..17d12435b24eb18ce6c9eb11d4aa366eb7396dd1 100644
+--- a/miles/utils/arguments.py
++++ b/miles/utils/arguments.py
+@@ -73,12 +73,15 @@ def _resolve_rollout_functions(args) -> None:
+     args.rollout_function_path, args.eval_function_path = resolve_rollout_function_paths(args)
+     if args.train_backend == "olmo_core" and args.fully_async:
+         original_path = args.rollout_function_path
+-        draining = getattr(getattr(args, "olmo_core", None), "publication_mode", "barrier") == "engine_drain"
+-        if draining and user_eval_path is not None:
+-            raise ValueError("engine_drain requires managed shared-engine evaluation; omit --eval-function-path")
++        mode = getattr(getattr(args, "olmo_core", None), "publication_mode", "barrier")
++        draining = mode == "engine_drain"
++        if mode in ("engine_drain", "refresh") and user_eval_path is not None:
++            raise ValueError(f"{mode} requires managed shared-engine evaluation; omit --eval-function-path")
+         args.rollout_function_path = (
+             "open_instruct.miles.draining_rollout.DrainingRolloutFn"
+             if draining
++            else "open_instruct.miles.refreshing_rollout.RefreshingRolloutFn"
++            if mode == "refresh"
+             else "open_instruct.miles.async_rollout.ManagedFullyAsyncRolloutFn"
+         )
+         if args.eval_function_path == original_path:

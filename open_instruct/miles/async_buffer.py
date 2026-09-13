@@ -5,6 +5,7 @@ from dataclasses import is_dataclass, replace
 
 from miles.rollout.fully_async_data_buffer import DefaultDataBuffer, iter_samples
 
+from open_instruct.miles import policy_refresh
 from open_instruct.miles.data import policy_versions
 
 
@@ -63,3 +64,26 @@ class HomogeneousPolicyDataBuffer:
         async with self._delegate._cond:
             self._delegate._capacity = capacity
             self._delegate._cond.notify_all()
+
+
+class RefreshPolicyDataBuffer(HomogeneousPolicyDataBuffer):
+    """Keep complete mixed-policy groups with validated token-level provenance.
+
+    The delegate still uses the oldest behavior version for the lag limit and
+    FIFO consumption. A refreshed suffix never conceals an old prefix.
+    """
+
+    async def put(self, item):
+        samples = list(iter_samples(item.group))
+        if len(item.group) != self._samples or len(samples) != self._samples:
+            raise ValueError("Policy refresh requires complete single-turn prompt groups")
+        if len({sample.group_index for sample in samples}) != 1:
+            raise ValueError("Policy refresh cannot combine unrelated prompt groups")
+        policy_refresh.validate_batch(
+            {
+                "metadata": [s.train_metadata for s in samples],
+                "response_lengths": [s.response_length for s in samples],
+                "weight_versions": [s.weight_versions for s in samples],
+            }
+        )
+        await self._delegate.put(item)

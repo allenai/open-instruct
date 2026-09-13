@@ -200,3 +200,42 @@ At this writing both await Holmes placement. No cross-GPU result or full-model
 speedup is claimed. Five focused CPU tests, explicit script Ruff checks, and
 repository `make style` / `make quality` pass. These are prototype/training
 probes, not the repository GPU pytest certification.
+
+
+## Two-GPU serving qualification completed
+
+Both isolated jobs completed with exit 0: tiny
+[01M2CPRSZDTNTX8N5B5GR2DH6H](https://beaker.org/ex/01M2CPRSZDTNTX8N5B5GR2DH6H)
+and full SFT
+[01M2CPRTVEQ9BDRCDVRMXSV2DF](https://beaker.org/ex/01M2CPRTVEQ9BDRCDVRMXSV2DF).
+Each six-case matrix retained and audited 16 interrupted responses. Original
+prefix tokens, behavior logprobs and exact policy boundaries all passed.
+Compact summaries, route audits and source provenance are retained alongside
+this document as `beaker-{tiny,sft}-*.json`.
+
+Full SFT results (37,028,386,304 bytes, 35 NCCL buckets):
+
+| Case | Boundary to weights ready | Resume to next token | Request batch wall time |
+| --- | ---: | ---: | ---: |
+| Drain short | 14.834 s | n/a | 22.652 s |
+| Refresh unchanged | 1.783 s | 0.196 s | 16.599 s |
+| Refresh changed, short | 1.881 s | 0.147 s | 16.685 s |
+| Drain long | 43.244 s | n/a | 52.606 s |
+| Refresh changed, long | 2.192 s | 9.472 s | 60.658 s |
+| Refresh sampled, T=1 | 1.873 s | 0.164 s | 41.849 s |
+
+These are individual cases, not warm steady-state throughput estimates. The
+long case demonstrates the real tradeoff: much earlier publication, but more
+prefill work and a slower completed batch. The 9.472-second restart is observed;
+its compute/compilation breakdown has not been profiled.
+
+Expert routes are not generally bit-exact across batching/prefill executions.
+The unchanged short control had 74.2% positional top-k agreement but 97.4%
+expert-set overlap with a fresh reference prefill. The changed short case had
+74.1% positional agreement and 97.1% expert-set overlap; the long case matched
+exactly. The unchanged control matters when interpreting these differences.
+The next qualification must check actual trainer replay, rather than inferring
+trainer equivalence from natural-route agreement alone.
+
+No optimizer ran in either serving probe. These results do not establish RL
+quality or complete the training integration acceptance gate.

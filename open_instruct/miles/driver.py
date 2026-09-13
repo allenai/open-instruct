@@ -30,6 +30,7 @@ async def train(args, *, export_hf=None):
     failure = None
     completed = []
     rolling = None
+    refresh = args.olmo_core.publication_mode == "refresh"
     try:
         with stage(args, "serving_startup"):
             manager, rollouts_per_epoch = placement_group.create_rollout_manager(args, groups["rollout"])
@@ -38,7 +39,7 @@ async def train(args, *, export_hf=None):
 
         async def publish(rollout_id=None):
             if args.fully_async:
-                await manager.core_publication_boundary.remote(True)
+                await manager.core_publication_boundary.remote(True, **({"refresh": True} if refresh else {}))
             if args.offload_rollout:
                 await manager.onload_weights.remote()
             await learner.update_weights(rollout_id)
@@ -67,7 +68,7 @@ async def train(args, *, export_hf=None):
             if args.offload_rollout:
                 await manager.onload_kv.remote()
             if args.fully_async:
-                await manager.core_publication_boundary.remote(False)
+                await manager.core_publication_boundary.remote(False, **({"refresh": True} if refresh else {}))
 
         with stage(args, "initial_publication"):
             await publish()
@@ -102,12 +103,17 @@ async def train(args, *, export_hf=None):
                 # Waiting for those tasks before publishing would deadlock save.
                 with stage(args, "publication", rollout_id):
                     await rolling.publish()
+            if refresh:
+                with stage(args, "publication", rollout_id):
+                    await publish(rollout_id)
             sentinel = args.save_trigger_sentinel and os.path.exists(args.save_trigger_sentinel)
             if sentinel or should_run_periodic_action(
                 rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout
             ):
                 if rolling is not None:
                     await rolling.quiesce()
+                elif refresh:
+                    await manager.core_publication_boundary.remote(True)
                 try:
                     with stage(args, "checkpoint", rollout_id):
                         await manager.save.remote(rollout_id)
@@ -116,9 +122,11 @@ async def train(args, *, export_hf=None):
                 finally:
                     if rolling is not None:
                         await rolling.resume()
+                    elif refresh:
+                        await manager.core_publication_boundary.remote(False)
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
-            if rolling is None and (rollout_id + 1) % args.update_weights_interval == 0:
+            if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
                     await publish(rollout_id)
             if should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout):

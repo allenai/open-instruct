@@ -56,7 +56,7 @@ class CoreConfig:
     expert_publication: str = "per_expert"
 
     def __post_init__(self):
-        validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain"))
+        validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
         for name in ("engine_drain_timeout", "engine_update_timeout"):
             validation.number(getattr(self, name), f"core.{name}")
@@ -346,6 +346,8 @@ class RunConfig:
                 raise InputError("Bounded async publishes every collected batch")
         if self.core.publication_mode == "engine_drain":
             self._validate_engine_drain(options, collection, samples)
+        if self.core.publication_mode == "refresh":
+            self._validate_refresh(options, collection, samples)
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise InputError("Async training requires an explicit positive core.max_policy_lag")
 
@@ -386,6 +388,29 @@ class RunConfig:
         ):
             if options.get(name):
                 raise InputError(f"engine_drain requires the managed single-turn producer; remove miles.{name}")
+
+    def _validate_refresh(self, options, collection, samples):
+        # The first qualification shares the independent publisher's resident
+        # TP1/single-turn restrictions, without its immutable snapshots.
+        try:
+            self._validate_engine_drain(options, collection, samples)
+        except InputError as error:
+            raise InputError(str(error).replace("engine_drain", "refresh")) from error
+        if not options.get("use_miles_router", False):
+            raise InputError("refresh requires miles.use_miles_router=true to retain policy-span metadata")
+        if not options.get("use_tis", False) or options.get("use_rollout_logprobs", False):
+            raise InputError("refresh requires miles.use_tis=true and miles.use_rollout_logprobs=false")
+        if options.get("advantage_estimator", "grpo") != "grpo":
+            raise InputError("refresh currently supports the token-level grpo objective only")
+        if options.get("sglang_speculative_algorithm") or options.get("use_rollout_indexer_replay", False):
+            raise InputError("refresh does not yet support speculative decoding or indexer replay")
+        for name in ("sglang_cuda_graph_backend_decode", "sglang_cuda_graph_backend_prefill"):
+            if options.get(name) != "disabled":
+                raise InputError(f"refresh qualification requires miles.{name}=disabled")
+        if options.get("rollout_temperature", 1.0) != 1.0 or options.get("rollout_top_p", 1.0) != 1.0:
+            raise InputError("refresh qualification requires rollout_temperature=1 and rollout_top_p=1")
+        if options.get("rollout_top_k", -1) != -1:
+            raise InputError("refresh qualification requires rollout_top_k=-1")
 
     def arguments(self) -> list[str]:
         """Compile without importing CUDA, MILES, Core, or downloading models."""

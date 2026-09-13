@@ -1,0 +1,8 @@
+{
+  "image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+  "commit": "b5b9f6a58542fd70c0e48619786007da7d30a41b",
+  "sha256": {
+    "policy_refresh_probe.py": "1a675fbdb8e18fe27230997888acc1bfe963ec2c9af9a305f2908e942d07295a",
+    "policy_refresh_hooks.py": "6194e12f121f9083ccd91e286a0f42a7e8ba4edee02392f066d4b9bfa6cdb5e0"
+  }
+}

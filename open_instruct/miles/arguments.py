@@ -91,6 +91,16 @@ def load_core_args(extra_args_provider):
         "custom_generate_function_path",
         "rollout_sample_filter_path",
         "dynamic_sampling_filter_path",
+        "use_tis",
+        "use_rollout_logprobs",
+        "advantage_estimator",
+        "sglang_speculative_algorithm",
+        "use_rollout_indexer_replay",
+        "sglang_cuda_graph_backend_decode",
+        "sglang_cuda_graph_backend_prefill",
+        "rollout_temperature",
+        "rollout_top_p",
+        "rollout_top_k",
     ):
         value = getattr(args, key, None)
         if value is not None:
@@ -112,6 +122,10 @@ def load_core_args(extra_args_provider):
     args.compress_ratios = None
     if args.fully_async:
         args.max_weight_staleness = core.max_policy_lag
-        args.custom_async_data_buffer_path = "open_instruct.miles.async_buffer.HomogeneousPolicyDataBuffer"
+        args.custom_async_data_buffer_path = (
+            "open_instruct.miles.async_buffer.RefreshPolicyDataBuffer"
+            if core.publication_mode == "refresh"
+            else "open_instruct.miles.async_buffer.HomogeneousPolicyDataBuffer"
+        )
     args.data_source_path = "open_instruct.miles.data_source.DashboardDrainingRolloutDataSource"
     return args

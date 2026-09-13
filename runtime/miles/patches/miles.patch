@@ -500,7 +500,7 @@ index fb40d1250983997927364e0995b181377786b103..e5e3dfc68503ec64a6e980b393d4788e
          self.rollout_manager = self._rollout_manager
          await self._broadcast("set_rollout_manager", self._rollout_manager)
 diff --git a/miles/ray/rollout/rollout_manager.py b/miles/ray/rollout/rollout_manager.py
-index 2f74e4096fac39c2be9aaf948bde880fb7a4beab..224db2b77cc1c573a29ce35a94921e98b9739059 100644
+index 2f74e4096fac39c2be9aaf948bde880fb7a4beab..559bd4231d42a3ec476eef2379724d7269620260 100644
 --- a/miles/ray/rollout/rollout_manager.py
 +++ b/miles/ray/rollout/rollout_manager.py
 @@ -30,6 +30,7 @@ from miles.rollout.base_types import (
@@ -520,13 +520,18 @@ index 2f74e4096fac39c2be9aaf948bde880fb7a4beab..224db2b77cc1c573a29ce35a94921e98
  
  logging.getLogger("httpx").setLevel(logging.WARNING)
  logging.getLogger("httpcore").setLevel(logging.WARNING)
-@@ -128,7 +129,25 @@ class RolloutManager:
+@@ -128,7 +129,30 @@ class RolloutManager:
      def get_router_address(self) -> tuple[str, int]:
          return self.args.sglang_router_ip, self.args.sglang_router_port
  
-+    def core_publication_boundary(self, begin: bool):
++    def core_publication_boundary(self, begin: bool, *, refresh: bool = False):
 +        producer = self.generate_rollout
-+        method = "prepare_publication" if begin else "finish_publication"
++        if refresh:
++            method = "begin_refresh" if begin else "end_refresh"
++            if not hasattr(producer, method):
++                raise RuntimeError("Policy refresh requires the managed refreshing producer")
++        else:
++            method = "prepare_publication" if begin else "finish_publication"
 +        if hasattr(producer, method):
 +            return run(getattr(producer, method)())
 +
@@ -546,7 +551,7 @@ index 2f74e4096fac39c2be9aaf948bde880fb7a4beab..224db2b77cc1c573a29ce35a94921e98
          if (close := getattr(self.data_source, "close", None)) is not None:
              close()
          event_analyzer.run_analysis_from_args(self.args)
-@@ -138,6 +157,7 @@ class RolloutManager:
+@@ -138,6 +162,7 @@ class RolloutManager:
              self.eval_generate_rollout.dispose()
          for monitor in self._health_monitors:
              monitor.stop()
@@ -878,21 +883,24 @@ index 8782e63383e781af09cb46fe365407a3babd45fb..7f3240af0a8eaa2e8b8410cc82023615
          """Mark the request to the given URL as finished"""
          assert url in self.worker_request_counts, f"URL {url} not recognized"
 diff --git a/miles/utils/arguments.py b/miles/utils/arguments.py
-index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737bdd9c88c 100644
+index f0be5b7a17534c2f2eee230188f6febdf872f90e..17d12435b24eb18ce6c9eb11d4aa366eb7396dd1 100644
 --- a/miles/utils/arguments.py
 +++ b/miles/utils/arguments.py
-@@ -71,6 +71,18 @@ def _resolve_rollout_functions(args) -> None:
+@@ -71,6 +71,21 @@ def _resolve_rollout_functions(args) -> None:
  
      user_eval_path = args.eval_function_path
      args.rollout_function_path, args.eval_function_path = resolve_rollout_function_paths(args)
 +    if args.train_backend == "olmo_core" and args.fully_async:
 +        original_path = args.rollout_function_path
-+        draining = getattr(getattr(args, "olmo_core", None), "publication_mode", "barrier") == "engine_drain"
-+        if draining and user_eval_path is not None:
-+            raise ValueError("engine_drain requires managed shared-engine evaluation; omit --eval-function-path")
++        mode = getattr(getattr(args, "olmo_core", None), "publication_mode", "barrier")
++        draining = mode == "engine_drain"
++        if mode in ("engine_drain", "refresh") and user_eval_path is not None:
++            raise ValueError(f"{mode} requires managed shared-engine evaluation; omit --eval-function-path")
 +        args.rollout_function_path = (
 +            "open_instruct.miles.draining_rollout.DrainingRolloutFn"
 +            if draining
++            else "open_instruct.miles.refreshing_rollout.RefreshingRolloutFn"
++            if mode == "refresh"
 +            else "open_instruct.miles.async_rollout.ManagedFullyAsyncRolloutFn"
 +        )
 +        if args.eval_function_path == original_path:
@@ -900,7 +908,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
      # An inherited eval path is the rollout fn serving eval itself, never a checkpoint
      # backend: skip the resolve so custom rollout modules are not imported on the driver.
      checkpoint_backend = user_eval_path is not None and is_checkpoint_eval_fn(args.eval_function_path)
-@@ -262,7 +274,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
+@@ -262,7 +277,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
              parser.add_argument(
                  "--train-backend",
                  type=str,
@@ -909,7 +917,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
                  default="megatron",
                  help="The backend for training.",
              )
-@@ -776,6 +788,16 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
+@@ -776,6 +791,16 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                      "This is used for updating weights by batch and should be useful for MoE models."
                  ),
              )
@@ -926,7 +934,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
              parser.add_argument(
                  "--update-weights-interval",
                  type=int,
-@@ -2693,6 +2715,13 @@ def parse_args(add_custom_arguments=None):
+@@ -2693,6 +2718,13 @@ def parse_args(add_custom_arguments=None):
          args.rank = 0
          args.world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
          args = set_default_megatron_args(args)
@@ -940,7 +948,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
      else:
          from miles.backends.fsdp_utils.arguments import load_fsdp_args
  
-@@ -2729,7 +2758,7 @@ def parse_args(add_custom_arguments=None):
+@@ -2729,7 +2761,7 @@ def parse_args(add_custom_arguments=None):
                  "decoder_first_pipeline_num_layers and decoder_last_pipeline_num_layers should be None when "
                  "pipeline_model_parallel_size is 1."
              )
@@ -949,7 +957,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
          from miles.backends.fsdp_utils.arguments import validate_hybrid_shard_args
  
          validate_hybrid_shard_args(args)
-@@ -2792,6 +2821,15 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
+@@ -2792,6 +2824,15 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
      return eval_datasets
  
  
@@ -965,7 +973,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
  _FT_DEFAULT_COMPONENTS: list[str] = ["rollout"]
  
  
-@@ -3037,7 +3075,11 @@ def miles_validate_args(args):
+@@ -3037,7 +3078,11 @@ def miles_validate_args(args):
              raise ValueError("--opd-teacher-urls is set but --use-opd is not enabled. Please add --use-opd flag.")
  
      # TODO: During loading, we need to set the start_rollout_id here.
@@ -978,7 +986,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
          # Fresh runs pass a not-yet-created `--load` dir; fall back to the reference
          # weights (loaded via the HF bridge) instead of asserting in load_checkpoint.
          # Mirrors the non-bridge branch below.
-@@ -3063,7 +3105,7 @@ def miles_validate_args(args):
+@@ -3063,7 +3108,7 @@ def miles_validate_args(args):
              args.start_rollout_id = 0
  
      if args.eval_interval is not None:
@@ -987,7 +995,7 @@ index f0be5b7a17534c2f2eee230188f6febdf872f90e..bc6a36ef9ab4261834adcda141639737
  
      if args.eval_num_gpus > 0:
          assert args.eval_num_gpus % args.eval_num_gpus_per_engine == 0, (
-@@ -3525,7 +3567,7 @@ def miles_validate_args(args):
+@@ -3525,7 +3570,7 @@ def miles_validate_args(args):
      ), "sglang_config and prefill_num_servers are mutually exclusive. Use server_groups in the YAML config instead."
  
      if args.qkv_format == "bshd":

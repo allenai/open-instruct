@@ -28,6 +28,7 @@ from open_instruct.miles import (
     engine_delivery,
     models,
     packing,
+    policy_refresh,
     publication,
     replay_diagnostics,
     scheduler,
@@ -163,6 +164,17 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             "Core score contract: %s",
             contract.record(self.args, {"event": "scores", "rollout_id": rollout_id, "source": source, **profile}),
         )
+        if self.args.olmo_core.publication_mode == "refresh":
+            refresh_profile = policy_refresh.score_metrics(
+                rollout,
+                current_version=self.clock.completed_steps,
+                clip_low=self.args.tis_clip_low,
+                clip_high=self.args.tis_clip,
+            )
+            logger.info(
+                "Core refresh scores: %s",
+                contract.record(self.args, {"event": "refresh_scores", "rollout_id": rollout_id, **refresh_profile}),
+            )
         return difference, agreement, profile
 
     def _check_training_scores(self, rollout, training_scores):
@@ -256,6 +268,8 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             local_batch = self.args.global_batch_size // dist.get_world_size()
             if self.args.use_rollout_routing_replay:
                 self._agree(lambda: self._validate_replay_batches(batches))
+            if self.args.olmo_core.publication_mode == "refresh":
+                self._agree(lambda: policy_refresh.validate_batch(rollout))
             versions = self._agree(lambda: data.policy_versions(rollout))
             self._agree(lambda: self.clock.validate_versions(versions, self.args.olmo_core.max_policy_lag))
             decision = self._scoring_pass()

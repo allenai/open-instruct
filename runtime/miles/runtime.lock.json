@@ -16,9 +16,9 @@
     "miles": {
       "repository": "https://github.com/radixark/miles.git",
       "revision": "dbbab1566ae438f7202fff653eae938e07b1d4b6",
-      "development_commit": "bc582bc5c680b2138d50cda141322155207a34fa",
+      "development_commit": "2e04e5fb9c0e7bb1b530d22bf0d59d98f768e672",
       "patch": "patches/miles.patch",
-      "patch_sha256": "f0678596edf5315ad57898229ff4c3c7d1cb5256fc59eac52f599235a4a93764"
+      "patch_sha256": "74698271b30d6163462588efb7385688ea3636c535433718b8f95b3189a3b72e"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
