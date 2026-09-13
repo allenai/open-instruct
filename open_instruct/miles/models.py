@@ -62,6 +62,8 @@ def build_train_module(args, source=None):
     config = model_config_from_hf(hf, args.olmo_core)
     config.init_seed = args.seed
     kind = "moe" if isinstance(config, transformer_config.OLMoDDPModelConfig) else "standard"
+    if getattr(args.olmo_core, "publication_mode", "barrier") == "engine_drain" and kind != "moe":
+        raise ValueError("engine_drain currently requires the Core MoE trainer")
     backend = _backend(kind)
     backend.validate_training_options(args)
     if kind == "moe":

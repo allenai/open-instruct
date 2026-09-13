@@ -47,3 +47,19 @@ class HomogeneousPolicyDataBuffer:
     def get_metrics(self):
         rejected, self._rejected = self._rejected, 0
         return {**self._delegate.get_metrics(), "rollout/fully_async/rejected_policy_groups": rejected}
+
+    async def reserve_drain_capacity(self, additional):
+        """Allow only already-owned completions through a quiescent lifecycle barrier."""
+        if type(additional) is not int or additional < 0:
+            raise ValueError("drain capacity must be nonnegative")
+        delegate = self._delegate
+        async with delegate._cond:
+            original = delegate._capacity
+            delegate._capacity = max(original, len(delegate._buffer)) + additional
+            delegate._cond.notify_all()
+        return original
+
+    async def restore_capacity(self, capacity):
+        async with self._delegate._cond:
+            self._delegate._capacity = capacity
+            self._delegate._cond.notify_all()

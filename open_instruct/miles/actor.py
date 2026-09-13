@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import os
 import time
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from open_instruct.miles import (
     config,
     contract,
     data,
+    engine_delivery,
     models,
     packing,
     publication,
@@ -563,6 +565,19 @@ class OLMoCoreTrainRayActor(TrainRayActor):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("a") as output:
                     output.write(json.dumps(timings) + "\n")
+
+    def capture_weight_snapshot(self):
+        if self.args.olmo_core.publication_mode != "engine_drain":
+            raise ValueError("snapshot capture requires core.publication_mode=engine_drain")
+        return engine_delivery.capture(self)
+
+    def delivery_location(self):
+        return {
+            "node_id": ray.get_runtime_context().get_node_id(),
+            "cuda_visible_devices": os.environ["CUDA_VISIBLE_DEVICES"],
+            "device_index": torch.cuda.current_device(),
+            "version": self.clock.completed_steps,
+        }
 
     def configure_publication(self, buffer_bytes):
         """Set the publication bucket size for subsequent updates; used by profiling drivers."""

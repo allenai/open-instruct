@@ -1,5 +1,5 @@
 {
-  "image": "sha256:57a553dea98f6ce00e5e9a200ec9a5b61fd59d036b007b583a608abcb94610da",
+  "image": "811f856cf336-with-engine-drain-source-overlay",
   "options": [
     {
       "default": null,
@@ -11926,5 +11926,5 @@
       "help": null
     }
   ],
-  "schema_sha256": "b1b7f66d11e15bf63e77ca4b8ea1d1ad9c8e0f94e8647cce53266c689376b11d"
+  "schema_sha256": "18406ac53829c0b9d97cf0f6b5de52e2d8b9663985b3f7320362b5dabd6d0547"
 }

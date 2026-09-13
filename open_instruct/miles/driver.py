@@ -12,6 +12,7 @@ from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 from open_instruct import logger_utils
 from open_instruct.miles import startup_cache
+from open_instruct.miles.rolling_publication import RollingPublication
 from open_instruct.miles.timing import evaluation_stage, stage
 
 logger = logger_utils.setup_logger(__name__)
@@ -28,6 +29,7 @@ async def train(args, *, export_hf=None):
     learner = None
     failure = None
     completed = []
+    rolling = None
     try:
         with stage(args, "serving_startup"):
             manager, rollouts_per_epoch = placement_group.create_rollout_manager(args, groups["rollout"])
@@ -69,6 +71,10 @@ async def train(args, *, export_hf=None):
 
         with stage(args, "initial_publication"):
             await publish()
+        if args.olmo_core.publication_mode == "engine_drain":
+            rolling = RollingPublication(args, learner, manager)
+            with stage(args, "engine_drain_startup"):
+                await rolling.initialize()
         evaluation = EvalDispatcher(args, learner, manager)
         if args.eval_interval is not None and not args.skip_eval_before_train:
             with evaluation_stage(args, args.start_rollout_id, initial=True):
@@ -92,15 +98,24 @@ async def train(args, *, export_hf=None):
             if sentinel or should_run_periodic_action(
                 rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout
             ):
-                with stage(args, "checkpoint", rollout_id):
-                    await manager.save.remote(rollout_id)
-                    await learner.save_model(rollout_id, force_sync=True)
-                    await learner.finalize_checkpoint(rollout_id)
+                if rolling is not None:
+                    await rolling.quiesce()
+                try:
+                    with stage(args, "checkpoint", rollout_id):
+                        await manager.save.remote(rollout_id)
+                        await learner.save_model(rollout_id, force_sync=True)
+                        await learner.finalize_checkpoint(rollout_id)
+                finally:
+                    if rolling is not None:
+                        await rolling.resume()
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
             if (rollout_id + 1) % args.update_weights_interval == 0:
                 with stage(args, "publication", rollout_id):
-                    await publish(rollout_id)
+                    if rolling is not None:
+                        await rolling.publish()
+                    else:
+                        await publish(rollout_id)
             if should_run_periodic_action(rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout):
                 with evaluation_stage(args, rollout_id):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
@@ -120,10 +135,20 @@ async def train(args, *, export_hf=None):
         raise
     finally:
         cleanup_error = None
+        if rolling is not None:
+            try:
+                await rolling.close(failed=failure is not None)
+            except BaseException as error:
+                cleanup_error = error
+                logger.exception("Engine drain cleanup failed")
         for component, operation, timeout in (
             # Async generation must stop, but the servers must remain alive while
             # both sides collectively destroy the weight-update NCCL group.
-            (manager if args.fully_async else None, lambda: manager.core_publication_boundary.remote(True), 60),
+            (
+                manager if args.fully_async else None,
+                lambda: manager.core_publication_boundary.remote(True),
+                args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout if rolling else 60,
+            ),
             (learner, lambda: learner._broadcast("close_weight_transport"), 60),
             (manager, lambda: manager.dispose.remote(), 120),
             (learner, lambda: learner.dispose(), 60),

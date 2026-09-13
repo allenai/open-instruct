@@ -19,6 +19,10 @@ class CoreConfig:
     replay_diagnostics: bool = False
     stream_moe_export: bool = True
     weight_sync_mode: str = "flattened"
+    publication_mode: str = "barrier"
+    engine_drain_timeout: float = 180.0
+    engine_update_timeout: float = 180.0
+    snapshot_capacity: int = 2
     row_specialization: str = "static"
     compiler_cache: bool = True
     compiler_cache_root: str | None = None
@@ -52,6 +56,12 @@ class CoreConfig:
     expert_publication: str = "per_expert"
 
     def __post_init__(self):
+        validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain"))
+        validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
+        for name in ("engine_drain_timeout", "engine_update_timeout"):
+            validation.number(getattr(self, name), f"core.{name}")
+            if getattr(self, name) <= 0:
+                raise InputError(f"core.{name} must be positive")
         if self.compiler_cache_root is not None:
             if not isinstance(self.compiler_cache_root, str) or not self.compiler_cache_root:
                 raise InputError("core.compiler_cache_root must be a nonempty absolute path or unset")
@@ -334,8 +344,42 @@ class RunConfig:
                 )
             if options.get("update_weights_interval", 1) != 1:
                 raise InputError("Bounded async publishes every collected batch")
+        if self.core.publication_mode == "engine_drain":
+            self._validate_engine_drain(options, collection, samples)
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise InputError("Async training requires an explicit positive core.max_policy_lag")
+
+    def _validate_engine_drain(self, options, collection, samples):
+        if not options.get("fully_async", False):
+            raise InputError("engine_drain requires miles.fully_async=true")
+        if options.get("rollout_num_gpus_per_engine", 1) != 1:
+            raise InputError("engine_drain currently supports TP1 serving only")
+        if collection != samples:
+            raise InputError("engine_drain currently requires one optimizer step per rollout collection")
+        if self.core.weight_sync_mode != "flattened":
+            raise InputError("engine_drain requires core.weight_sync_mode=flattened")
+        if self.core.diagnostic_interval != 0:
+            raise InputError("engine_drain requires diagnostic_interval=0; full publication audits run at startup")
+        for name in ("partial_rollout", "use_fault_tolerance", "rollout_external"):
+            if options.get(name, False):
+                raise InputError(
+                    f"engine_drain does not yet support miles.{name}; disable it or use publication_mode=barrier"
+                )
+        for name in ("sglang_dp_size", "sglang_ep_size", "sglang_pp_size"):
+            if options.get(name, 1) != 1:
+                raise InputError(f"engine_drain requires miles.{name}=1")
+        if options.get("eval_num_gpus", 0) > 0:
+            raise InputError("engine_drain currently supports blocking shared-engine evaluation only")
+        for name in (
+            "custom_generate_function_path",
+            "rollout_function_path",
+            "eval_function_path",
+            "rollout_sample_filter_path",
+            "dynamic_sampling_filter_path",
+            "rollout_router_url",
+        ):
+            if options.get(name):
+                raise InputError(f"engine_drain requires the managed single-turn producer; remove miles.{name}")
 
     def arguments(self) -> list[str]:
         """Compile without importing CUDA, MILES, Core, or downloading models."""
