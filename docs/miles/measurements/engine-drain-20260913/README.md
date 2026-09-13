@@ -19,8 +19,8 @@ local device zero to the independent sender. A regression test covers unset CVD.
 | Attempt | Image | Result |
 | --- | --- | --- |
 | [Transport probe](https://beaker.org/ex/01M2CCHBGWRXJ7CZJ31DHSBQTY) | `01M2CCH3KXG5M2N8FJ48JRZ46X`, source `e5bba0f2ea72` | Passed, exit 0. Real two-GPU Ray/NCCL transport, synthetic receiver. Source was mutated after capture; received BF16 bytes matched the original exactly. |
-| [C](https://beaker.org/ex/01M2CCPFJ1XYNC48G7W7KENZPC) | Same image/source as transport probe | Full EP2 plus two TP1 engines; launched, result pending. |
-| [Barrier control](https://beaker.org/ex/01M2CCQY4DJBX0B62QWYRV213N) | Same image/source as C | Matched old-mode control; launched, result pending. |
+| [C](https://beaker.org/ex/01M2CCPFJ1XYNC48G7W7KENZPC) | Same image/source as transport probe | Three optimizer steps completed. Stopped at the checkpoint join after reproducing the already-fixed completed-buffer deadlock. No committed checkpoint; not a successful lifecycle run. |
+| [Barrier control](https://beaker.org/ex/01M2CCQY4DJBX0B62QWYRV213N) | Same image/source as C | Passed, exit 0: six optimizer steps, initial/final evaluation, saves and shutdown. |
 
 The transport probe transferred only 32 KiB in 1.46 seconds including its first
 collective. This validates process placement, immutable object-store ownership,
@@ -35,8 +35,9 @@ SGLang model-loading test. See [its report](transport-probe.json).
 - Ruff and type checking pass.
 - Request IDs now distinguish repeated admissions of the same prompt group.
 
-Full SGLang transport, learning, slow-engine overlap, control performance,
-fresh-process resume, and bounded GPU engine failure remain unqualified.
+Complete rolling-run lifecycle, slow-engine overlap, fresh-process resume, and
+bounded GPU engine failure remain unqualified. Initial SGLang weight equality
+and optimizer execution have passed in C; the old-mode control completed.
 
 ## Additional review and test findings
 
@@ -44,7 +45,9 @@ A saturated completion queue can contain several finished tasks awaiting inserti
 none of which remain in `_active_tasks`. Quiescent capacity now uses the full
 `_producing_groups` ownership ledger. A regression exercises four such completions
 with no active decodes and verifies all survive the boundary without cancellation.
-This correction postdates image C and must be exercised in a later image.
+This correction postdates image C. C subsequently reproduced this exact failure
+(`active_groups=0`, worker blocked) at its first save boundary and was stopped.
+The running image D includes the fix; resume fixtures now read D, not C.
 
 The full CPU runtime suite initially could not collect
 `test_core_policy_contract.py`: the base image lacks its cross-backend
@@ -78,9 +81,19 @@ The next revision packs owned BF16 tensor copies on the source GPU and copies on
 whole bucket to CPU. This targets the measured per-tensor CPU copy/concatenation
 cost without retaining a second full GPU model. CPU snapshot tests pass; the
 revised two-GPU probe now uses two buckets and a noncontiguous FP32 source to check
-BF16 capture and source mutation. GPU validation of this revision is pending.
+BF16 capture and source mutation. The revised GPU transport probe passed; full-model capture timing remains pending.
 
 The slow fixture now waits for admission to close before starting its delay.
 The earlier fixed-at-admission delay in image D could expire during cold backward
 compilation, before a publication drain began. Image D's running attempt remains
 recorded as that earlier fixture, not evidence for the revised one.
+
+## Additional attempts
+
+| Attempt | Image / source | Status |
+| --- | --- | --- |
+| [D, original slow fixture](https://beaker.org/ex/01M2CDFK13AV7WV82EX4AMAJTR) | `01M2CDFB37KCSGKJZ36M12TK48`, `3c97e913b` | Running with corrected completion ledger and original fixed delay. |
+| [GPU bucket probe](https://beaker.org/ex/01M2CEMH82TJRT3DV4C1SV5319) | `01M2CEM9RZ5CGQ1NVMTM7PY4R0`, `019e66609` | Passed: 8,392,704 bytes in two buckets, noncontiguous FP32 source, BF16 capture, post-capture mutation, exact receipt and teardown. |
+
+The bucket probe's 2.02 s includes first-collective setup; it is not a throughput
+benchmark. The next full-model exercise reuses this immutable image.

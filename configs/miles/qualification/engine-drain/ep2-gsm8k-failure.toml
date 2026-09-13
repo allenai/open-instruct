@@ -1,5 +1,5 @@
-# Use only with the deliberate engine-loss harness, after trial C has saved.
-# Requires a completed checkpoint from the separate six-update C trial.
+# Use only with the deliberate engine-loss harness, after trial D has saved.
+# Requires a completed checkpoint from the separate six-update D trial.
 # Experimental qualification; not a shared operating default.
 schema_version = 1
 name = "engine-drain-ep2-failure-20260913-a"
@@ -113,7 +113,7 @@ stream_moe_export = true
 weight_sync_mode = "flattened"
 
 [miles]
-load = "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-gsm8k-20260913-c/checkpoints"
+load = "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-slow-20260913-a/checkpoints"
 use_miles_router = true
 use_rollout_routing_replay = true
 rollout_temperature = 1.0
