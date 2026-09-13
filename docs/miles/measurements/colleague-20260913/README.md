@@ -230,3 +230,36 @@ prefix-cache use merely by enabling the flags. Acceptance requires retained
 per-domain reward/service outcomes, lag/publication/packing/replay checks, native
 checkpoint integrity, and observed cache hits for the cache-use claim. The full
 EP8 + seven-engine + judge case remains separately pending whole-node capacity.
+
+
+## Overnight outcomes, checked at 16:31 UTC
+
+Both GPU runs exited zero. Stdio completed two updates in 24.8 minutes including
+startup and evaluation; the combined six-GPU run completed four updates in 34.9
+minutes. [Stdio completion/replay/timings](stdio-completion.json) and
+[combined completion/replay/timings](combined-completion.json) retain the workflow,
+rank-contract hashes, per-stage timings and rollout metrics.
+
+Stdio logged mean reward 0.125 in each 16-response collection, with one mixed-reward
+group of four in each collection. The execution service rejected no samples.
+Both optimizer steps ran with finite nonzero total gradient norms. Forty-two
+replay observations and four packing records passed with zero route/boundary
+mismatches. Twenty-three of 32 responses reached the 6,144-token cap. This
+establishes positive rewards and mixed groups on natural stdio tasks, not a
+learning-quality comparison or an isolated policy-gradient norm measurement.
+
+The combined run passed 196 replay observations and eight packing records across
+four optimizer steps. Actual cache hits occurred in the first three collections;
+maximum consumed policy lag was two, within the configured bound. Both scheduled
+saves completed and committed manifests report completed steps two and four.
+After update one, generation waits were 4.84, 4.10 and 1.82 seconds; publication
+was 0.70–1.29 seconds across all four updates. Training took 590.54 seconds on the
+first call and 25.29–70.64 seconds on later calls. Saves took 109.04 and 120.01
+seconds. These are short combined-feature measurements, not a calibrated engine
+pool comparison or a fresh-process restore of these checkpoints.
+
+Independent [retained-sample reward audits](https://beaker.org/ex/01M2DSEHTMJHBE7AZZEMA24H4A)
+and a [combined cached-prefix feature audit](https://beaker.org/ex/01M2DSGSSZ5GWJFZYDQ31DR3ZX)
+were submitted on Saturn after downloading the logs. At this timestamp they are
+pulling the runtime image; no audit pass is claimed yet. Full EP8/judged topology
+still awaits two whole Holmes nodes (current free GPUs are fragmented 7 + 1).

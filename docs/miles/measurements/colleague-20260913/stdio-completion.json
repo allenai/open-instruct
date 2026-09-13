@@ -1,0 +1,196 @@
+{
+  "workflow": {
+    "finished_unix": 1789283651.6158261,
+    "result": {
+      "completed_rollout_ids": [
+        0,
+        1
+      ],
+      "export_hf": null,
+      "start_rollout_id": 0
+    },
+    "spec_sha256": "a859b4364345a272a3d124318f5df234526fe83ae301100437b14692d7f0f8f3",
+    "started_unix": 1789282210.64451,
+    "status": "complete",
+    "training_started_unix": 1789282216.9430177
+  },
+  "replay": {
+    "replay_observations": 42,
+    "packing_observations": 4
+  },
+  "timings": [
+    {
+      "stage": "startup_cache_prepare",
+      "rollout_id": null,
+      "started_unix": 1789282241.3593256,
+      "seconds": 0.20344555983319879,
+      "passed": true
+    },
+    {
+      "stage": "placement",
+      "rollout_id": null,
+      "started_unix": 1789282241.562902,
+      "seconds": 9.642896651756018,
+      "passed": true
+    },
+    {
+      "stage": "serving_startup",
+      "rollout_id": null,
+      "started_unix": 1789282251.8491757,
+      "seconds": 377.6013069720939,
+      "passed": true
+    },
+    {
+      "stage": "trainer_startup",
+      "rollout_id": null,
+      "started_unix": 1789282629.451778,
+      "seconds": 145.20983896683902,
+      "passed": true
+    },
+    {
+      "stage": "initial_publication",
+      "rollout_id": null,
+      "started_unix": 1789282774.6625488,
+      "seconds": 31.06023876508698,
+      "passed": true
+    },
+    {
+      "stage": "generation_wait",
+      "rollout_id": 0,
+      "started_unix": 1789282805.724051,
+      "seconds": 66.16795158898458,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 0,
+      "started_unix": 1789282871.8937232,
+      "seconds": 523.4755002488382,
+      "passed": true
+    },
+    {
+      "stage": "publication",
+      "rollout_id": 0,
+      "started_unix": 1789283395.3703568,
+      "seconds": 0.4830320063047111,
+      "passed": true
+    },
+    {
+      "stage": "generation_wait",
+      "rollout_id": 1,
+      "started_unix": 1789283395.8548546,
+      "seconds": 50.83461597794667,
+      "passed": true
+    },
+    {
+      "stage": "training",
+      "rollout_id": 1,
+      "started_unix": 1789283446.690451,
+      "seconds": 158.67319792928174,
+      "passed": true
+    },
+    {
+      "stage": "publication",
+      "rollout_id": 1,
+      "started_unix": 1789283605.3645976,
+      "seconds": 1.9519838858395815,
+      "passed": true
+    },
+    {
+      "stage": "evaluation",
+      "rollout_id": 1,
+      "started_unix": 1789283607.317528,
+      "seconds": 29.86030150903389,
+      "passed": true,
+      "details": {
+        "phase": "periodic",
+        "scope": "blocking_shared_engine_evaluation",
+        "configured_serving": {
+          "rollout_num_gpus": 1,
+          "rollout_num_gpus_per_engine": 1,
+          "sglang_server_concurrency": 16,
+          "sglang_max_running_requests": 16,
+          "sglang_max_total_tokens": 524288,
+          "sglang_max_mamba_cache_size": 192,
+          "sglang_cuda_graph_max_bs_decode": 64,
+          "sglang_mem_fraction_static": 0.6,
+          "sglang_context_length": 8192,
+          "sglang_disable_radix_cache": false
+        }
+      }
+    }
+  ],
+  "contracts": {
+    "training_contract_rank1.jsonl": "3ad6caa8c6884d0f815fef0cbafcd391d25d2848f711698c86fa3fd349938fb5",
+    "training_contract_rank0.jsonl": "ef345aa5fa00654cdd8083b1e159351795536484caccc881ba0d1225fe94d9f5"
+  },
+  "checkpoint_manifests": {},
+  "rollout_metrics": [
+    {
+      "rollout/code_verifier/samples": 16,
+      "rollout/code_verifier/rejected": 0,
+      "rollout/code_verifier/rejected_fraction": 0.0,
+      "rollout/num_training_samples": 16,
+      "rollout/episode_raw_reward": 0.125,
+      "rollout/episode_response_length/mean": 5164.125,
+      "rollout/episode_response_length/median": 6144.0,
+      "rollout/episode_response_length/max": 6144,
+      "rollout/episode_response_length/min": 459,
+      "rollout/episode_total_response_length/mean": 5164.125,
+      "rollout/response_len/mean": 5164.125,
+      "rollout/response_len/median": 6144.0,
+      "rollout/response_len/max": 6144,
+      "rollout/response_len/min": 459,
+      "rollout/zero_std/count_0.0": 3,
+      "rollout/zero_std/all_zero_percentage": 0.75,
+      "rollout/zero_std/all_one_percentage": 0.0,
+      "rollout/prefix_cache_hit_rate": 0.0,
+      "rollout/avg_cached_tokens_per_sample": 0.0,
+      "rollout/repetition_frac": 0.0,
+      "rollout/truncated_ratio": 0.75,
+      "rollout/weight_version/mean": 0.0,
+      "rollout/weight_version/median": 0.0,
+      "rollout/weight_version/max": 0,
+      "rollout/weight_version/min": 0,
+      "rollout/weight_version/mixed_version_ratio": 0.0,
+      "perf/rollout_time": 66.05816555023193,
+      "perf/tokens_per_gpu_per_sec": 1250.8067596453243,
+      "perf/longest_sample_tokens_per_sec": 93.00894066348211,
+      "perf/effective_tokens_per_gpu_per_sec": 1250.8067596453243,
+      "perf/longest_effective_sample_tokens_per_sec": 93.00894066348211
+    },
+    {
+      "rollout/code_verifier/samples": 16,
+      "rollout/code_verifier/rejected": 0,
+      "rollout/code_verifier/rejected_fraction": 0.0,
+      "rollout/num_training_samples": 16,
+      "rollout/episode_raw_reward": 0.125,
+      "rollout/episode_response_length/mean": 5315.25,
+      "rollout/episode_response_length/median": 6144.0,
+      "rollout/episode_response_length/max": 6144,
+      "rollout/episode_response_length/min": 1035,
+      "rollout/episode_total_response_length/mean": 5315.25,
+      "rollout/response_len/mean": 5315.25,
+      "rollout/response_len/median": 6144.0,
+      "rollout/response_len/max": 6144,
+      "rollout/response_len/min": 1035,
+      "rollout/zero_std/count_0.0": 3,
+      "rollout/zero_std/all_zero_percentage": 0.75,
+      "rollout/zero_std/all_one_percentage": 0.0,
+      "rollout/prefix_cache_hit_rate": 0.0,
+      "rollout/avg_cached_tokens_per_sample": 0.0,
+      "rollout/repetition_frac": 0.0625,
+      "rollout/truncated_ratio": 0.6875,
+      "rollout/weight_version/mean": 1.0,
+      "rollout/weight_version/median": 1.0,
+      "rollout/weight_version/max": 1,
+      "rollout/weight_version/min": 1,
+      "rollout/weight_version/mixed_version_ratio": 0.0,
+      "perf/rollout_time": 50.726383686065674,
+      "perf/tokens_per_gpu_per_sec": 1676.5240062512328,
+      "perf/longest_sample_tokens_per_sec": 121.1204023141853,
+      "perf/effective_tokens_per_gpu_per_sec": 1676.5240062512328,
+      "perf/longest_effective_sample_tokens_per_sec": 121.1204023141853
+    }
+  ]
+}
