@@ -184,7 +184,16 @@ session then completed a healthy request. [Report](service-recovery.json).
 
 The first stdio GPU submission was stopped while queued, before startup. Manual
 inspection of the prepared prompts found that several source entries retained only
-input/output examples, without a problem statement. Retry `10-stdio-r2.toml` uses a
+input/output examples, without a problem statement. The corrected `10-stdio.toml` uses a
 fresh immutable fixture and excludes those entries before sorting. The preparer
 has a regression test for example-only prompts. Existing source snapshots remain
 unchanged; neither this filtering nor shortness guarantees an easy problem.
+
+
+Preparation revisions r2 and r3 also failed manual prompt review (they were never
+submitted to GPUs): remaining examples included resource-limit headers without a
+statement, generic coding instructions, and image-only statements. Revision r4
+uses a conservative statement/action-word and input/output screen, followed by
+manual review. This screen is confined to the qualification fixture; it is not a
+production dataset filter or a proof of data quality. Only the final exercise TOML
+is kept; submitted run specifications and source history preserve earlier attempts.

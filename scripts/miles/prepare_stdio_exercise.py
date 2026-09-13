@@ -12,6 +12,7 @@ from scripts.miles import prepare_colleague_exercises as preparation
 
 
 def has_statement(prompt):
+    """Conservative qualification-only screen; selected prompts still need manual review."""
     # This manifest includes entries where scraping retained only examples.
     body = prompt.split("where CODE is the solution for the problem.", 1)[-1]
     body = body.split("Write Python code to solve the problem.", 1)[0]

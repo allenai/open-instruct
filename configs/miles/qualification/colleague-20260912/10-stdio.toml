@@ -1,14 +1,14 @@
 # Stdio learning-path qualification on short natural problems; not a production recipe.
 # Original targets/template; longer response budget allows answers to finish.
 schema_version = 1
-name = "colleague-10-stdio-20260913"
+name = "colleague-10-stdio-20260913-r4"
 
 [model]
 source = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 format = "hf"
 
 [output]
-root = "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913"
+root = "/weka/oe-training-default/robertb/open-instruct/runs/colleague-10-stdio-20260913-r4"
 export_hf = false
 
 [launch]
@@ -31,9 +31,9 @@ mount_path = "/weka/oe-adapt-default"
 
 
 [data]
-prompt_data = "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913/train.jsonl"
-eval_prompt_data = ["mixed", "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913/eval.jsonl"]
-reward_config = "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913/verifiers.json"
+prompt_data = "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913-r4/train.jsonl"
+eval_prompt_data = ["mixed", "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913-r4/eval.jsonl"]
+reward_config = "/weka/oe-training-default/robertb/open-instruct/data/colleague-stdio-20260913-r4/verifiers.json"
 shuffle = false
 
 [training]
