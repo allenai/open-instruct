@@ -52,6 +52,13 @@ def test_stdio_selection_rejects_example_only_prompts():
     wrapper = "where CODE is the solution for the problem.\n\n"
     suffix = "\nWrite Python code to solve the problem."
     assert not prepare_stdio_exercise.has_statement(wrapper + "Example\nInput\n5\nOutput\n5" + suffix)
-    assert prepare_stdio_exercise.has_statement(
+    assert not prepare_stdio_exercise.has_statement(
         wrapper + "Return the Nth Even Number\nThe input will not be 0." + suffix
+    )
+
+    assert not prepare_stdio_exercise.has_statement(
+        wrapper + "Time Limit: 8 sec / Memory Limit: 64 MB\nExample\nInput\n5\nOutput\n5" + suffix
+    )
+    assert prepare_stdio_exercise.has_statement(
+        wrapper + "Calculate the sum of two given integers.\nInput\nTwo integers a and b.\nOutput\nTheir sum." + suffix
     )
