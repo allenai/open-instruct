@@ -92,10 +92,18 @@ def analyze(root, *, warmup=3):
     expected = options["num_rollout"]
     if [r["rollout_id"] for r in flow] != list(range(expected)):
         raise ValueError("Missing or repeated consumed collections")
-    contract = rows(metrics / "training_contract_rank0.jsonl")
-    updates = [r for r in contract if r["event"] == "optimizer"]
-    if [r["step"] for r in updates] != list(range(1, expected + 1)) or any(r["optimizer_skipped"] for r in updates):
-        raise ValueError("Missing or skipped optimizer updates")
+    ranks = options.get("actor_num_nodes", 1) * options.get("actor_num_gpus_per_node", 1)
+    contracts = []
+    for rank in range(ranks):
+        path = metrics / f"training_contract_rank{rank}.jsonl"
+        if not path.exists():
+            raise ValueError(f"Missing trainer contract for rank {rank}")
+        records = rows(path)
+        updates = [r for r in records if r["event"] == "optimizer"]
+        if [r["step"] for r in updates] != list(range(1, expected + 1)) or any(r["optimizer_skipped"] for r in updates):
+            raise ValueError(f"Missing or skipped optimizer updates on rank {rank}")
+        contracts.append(records)
+    contract = contracts[0]
     chosen = [r for r in flow if r["rollout_id"] >= warmup]
     durations = {
         name: [
@@ -117,9 +125,21 @@ def analyze(root, *, warmup=3):
         raise ValueError("Invalid measured duration")
     dropped = sum(r["queue_metrics"].get(prefix + "dropped_response_tokens", 0) for r in chosen)
     delivered = sum(r["response_tokens"] for r in chosen)
+    components = {
+        "standalone_scoring": [r["seconds"] for r in contract if r["event"] == "score_timing" and r["rollout_id"] >= warmup],
+        "forward_backward_optimizer": [
+            r["elapsed_seconds"] for r in contract
+            if r["event"] == "optimizer" and r.get("rollout_id", r["step"] - 1) >= warmup and "elapsed_seconds" in r
+        ],
+    }
     result = {
         "scope": "Warm awaited driver-cycle throughput, excluding startup, checkpoints, evaluation and final drain; generation overlaps training.",
         "completed_updates": expected,
+        "validated_trainer_ranks": ranks,
+        "training_components_rank0": {
+            name: {"count": len(values), "total_seconds": sum(values), "median_seconds": statistics.median(values) if values else None}
+            for name, values in components.items()
+        },
         "warmup_updates": warmup,
         "measured_updates": len(chosen),
         "warm_cycle_seconds": seconds,

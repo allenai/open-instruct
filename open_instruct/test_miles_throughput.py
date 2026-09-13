@@ -137,6 +137,12 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
     assert result["useful_response_tokens_per_second"] == pytest.approx(300 / 9)
     assert result["all_driver_stage_seconds"]["checkpoint"] == 100
     assert len(result["per_update"]) == 3
+    assert result["validated_trainer_ranks"] == 1
+    (tmp_path / "plan.json").write_text(
+        json.dumps({"runtime": {"miles": {"num_rollout": 4, "actor_num_gpus_per_node": 2}}})
+    )
+    with pytest.raises(ValueError, match="rank 1"):
+        throughput_basket.analyze(tmp_path, warmup=1)
     (tmp_path / "plan.json").write_text(json.dumps({"runtime": {"miles": {"num_rollout": 4, "fully_async": True}}}))
     with pytest.raises(ValueError, match="queue counters"):
         throughput_basket.analyze(tmp_path, warmup=1)
