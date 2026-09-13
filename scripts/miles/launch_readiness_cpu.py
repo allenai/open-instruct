@@ -24,7 +24,7 @@ def specification(image, mode, paths, source):
             "export LD_LIBRARY_PATH=/usr/local/cuda/compat:${LD_LIBRARY_PATH:-}",
             "python -c " + shlex.quote(setup),
             "python /output/readiness_cpu.py "
-            + shlex.join(([] if mode == "prepare-long" else [mode]) + list(map(str, paths))),
+            + shlex.join(([] if mode in ("prepare-long", "services") else [mode]) + list(map(str, paths))),
         )
     )
     return {
@@ -55,14 +55,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image")
     parser.add_argument(
-        "mode", choices=("inspect", "audit", "prepare-long", "lifecycle", "rescore", "drift", "features")
+        "mode", choices=("inspect", "audit", "prepare-long", "lifecycle", "rescore", "drift", "features", "services")
     )
-    parser.add_argument("paths", nargs="+", type=Path)
+    parser.add_argument("paths", nargs="+")
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
     source = (
         Path(__file__)
-        .with_name("prepare_long_context.py" if args.mode == "prepare-long" else "readiness_cpu.py")
+        .with_name(
+            {"prepare-long": "prepare_long_context.py", "services": "readiness_services.py"}.get(
+                args.mode, "readiness_cpu.py"
+            )
+        )
         .read_bytes()
     )
     document = specification(args.image, args.mode, args.paths, source)
