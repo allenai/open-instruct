@@ -11,6 +11,7 @@ import string
 import subprocess
 import sys
 import time
+from datetime import timedelta
 
 import backoff
 import beaker
@@ -119,6 +120,14 @@ def get_args():
         default=None,
         help="Beaker duration string (e.g. '90m', '2h'): the scheduler will not preempt the job "
         "before it has run this long. Only meaningful with --preemptible.",
+    )
+    parser.add_argument(
+        "--synchronized_start_timeout_minutes",
+        type=int,
+        default=None,
+        help="Multi-node only: how long (minutes) replicas wait for each other to become ready "
+        "before the gang-scheduled job is killed. Beaker's default is 10m, which a large image "
+        "pulling cold onto fresh nodes can exceed. Raise it (e.g. 30) for big-image multi-node runs.",
     )
     parser.add_argument("--budget", type=str, help="Budget to use. If unset, Beaker uses the default budget.", default=None)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
@@ -596,6 +605,8 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         spec.leader_selection = True
         spec.propagate_failure = True
         spec.propagate_preemption = True
+        if args.synchronized_start_timeout_minutes is not None:
+            spec.synchronized_start_timeout = timedelta(minutes=args.synchronized_start_timeout_minutes)
     if args.no_host_networking:
         spec.host_networking = False
     else:

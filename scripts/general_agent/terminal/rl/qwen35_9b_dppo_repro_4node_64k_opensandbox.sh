@@ -58,6 +58,7 @@ uv run python mason.py \
        --priority "${BEAKER_PRIORITY:-high}" \
        --preemptible \
        --min_runtime "${BEAKER_MIN_RUNTIME:-8h}" \
+       --synchronized_start_timeout_minutes "${BEAKER_SYNC_START_MINUTES:-30}" \
        --num_nodes 4 \
        --max_retries 5 \
        --env REPO_PATH=/stage \
