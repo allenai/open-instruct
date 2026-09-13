@@ -30,6 +30,17 @@ CASES = {
         "batch": 128,
         "updates": 24,
     },
+    "steady-2t2i-c32-b128-graphs": {
+        "profile": "small",
+        "inference": 2,
+        "capacity": 4,
+        "concurrency": 32,
+        "batch": 128,
+        "token_pool": 262144,
+        "state_pool": 256,
+        "decode_graphs": True,
+        "updates": 16,
+    },
     "steady-2t4i-c8-b128-graphs": {
         "profile": "small",
         "concurrency": 8,
@@ -131,6 +142,10 @@ def specification(case, output):
     if "concurrency" in settings:
         run["inference"]["sglang_server_concurrency"] = settings["concurrency"]
         run["inference"]["sglang_max_running_requests"] = settings["concurrency"]
+    if "token_pool" in settings:
+        run["inference"]["sglang_max_total_tokens"] = settings["token_pool"]
+    if "state_pool" in settings:
+        run["inference"]["sglang_max_mamba_cache_size"] = settings["state_pool"]
     if settings.get("decode_graphs"):
         run["inference"]["sglang_cuda_graph_backend_decode"] = "full"
         run["inference"]["sglang_cuda_graph_max_bs_decode"] = settings["concurrency"]

@@ -81,6 +81,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
         ("steady-2t6i-c8-b128-graphs", 8, 1),
         ("steady-2t4i-c8-b32-graphs", 6, 1),
         ("steady-2t4i-c8-b128-graphs", 6, 1),
+        ("steady-2t2i-c32-b128-graphs", 4, 1),
         ("steady-2t4i-c8-b32-graphs-p32", 6, 1),
         ("steady-8t8i-c16-b256-graphs", 16, 2),
     ],
