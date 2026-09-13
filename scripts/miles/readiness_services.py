@@ -8,15 +8,22 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TypedDict
 
 import requests
 
 from open_instruct.miles import code_rewards
 
 
+class ProxyState(TypedDict):
+    statuses: list[int]
+    attempts: list[int]
+    forwarded: int
+
+
 def exercise(upstream):
     """Keep all injected failures local; forward only healthy canary requests."""
-    state = {"statuses": [], "attempts": [], "forwarded": 0}
+    state: ProxyState = {"statuses": [], "attempts": [], "forwarded": 0}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -83,7 +90,11 @@ def exercise(upstream):
                 and state["attempts"] == expected_attempts
             )
             if not expected_error:
-                passed = passed and diagnostics["status"] == ("rejected" if name == "sample-rejection" else "ok")
+                passed = (
+                    passed
+                    and diagnostics is not None
+                    and diagnostics["status"] == ("rejected" if name == "sample-rejection" else "ok")
+                )
             row = {
                 "name": name,
                 "passed": passed,
