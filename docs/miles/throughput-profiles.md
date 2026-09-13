@@ -241,6 +241,11 @@ are comparisons of complete configurations, not isolated causal measurements of
 one setting. Sample backfill counts unfinished samples, whereas group submission
 retains its slot until all siblings finish.
 
+These configurations use `async_unused_samples_handler="retry"`: the generated
+responses in an expired group are discarded and counted, while its prompts are
+requeued for another attempt. Counts describe response attempts, not permanently
+removed questions. Reattempting does not recover the spent generation time.
+
 The discarded-token denominator is dropped plus delivered tokens at dequeue in
 the selected window. It excludes final shutdown leftovers and unfinished work.
 A consumed batch is not proof of equal learning, and completion order changes
