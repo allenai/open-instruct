@@ -1,6 +1,6 @@
 # Length guidance exercise — September 13, 2026
 
-Status: initial serving sweep passed (exit 0); expanded serving sweep and both RL probes are running.
+Status: both serving sweeps passed (exit 0); the 16K and 32K RL probes are running.
 
 Runtime image: `01M2CD5CH7MBVHZK50AXAPYGFB` (image C from the colleague
 readiness campaign). The standalone probe embeds its committed source; ordinary
@@ -68,7 +68,7 @@ headroom, so these admission limits are conservative test points, not maxima.
 The [expanded sweep](https://beaker.org/ex/01M2E1EC64MT0BKP4JYJD4JHEB) requests
 524,288 KV tokens, admission/graph cap 32 and 64 recurrent slots. Its largest
 groups will be 32 at 16K, 16 at 32K and eight at 64K. It uses the same pinned
-runtime and prefill chunk size. Results are pending.
+runtime and prefill chunk size. Results are below.
 
 Raw short generations and per-token scores are retained in
 [serving-small-generations.json](serving-small-generations.json); compact timings,
@@ -76,3 +76,44 @@ commands, memory and log hashes are in
 [serving-small-summary.json](serving-small-summary.json). Full logs and memory
 samples remain in the Beaker result dataset. The preparation report confirms
 8 train and 2 held-out natural math prompts with disjoint token hashes.
+
+## Expanded serving results
+
+The larger-pool sweep passed with 68 finite-scored responses, each capped at 128
+new tokens. The actual allocation was 524,288 KV tokens (4 GiB K + 4 GiB V).
+There were no logged OOMs or retractions.
+
+| Context | Submitted concurrent requests | Largest logged running count | Largest logged KV occupancy | Group time | Peak sampled device memory |
+|---|---|---|---|---|---|
+| 16K | 32 | 31 | 502,913 tokens | 21.52 s | 46.10 GiB |
+| 32K | 16 | 16 | 521,728 tokens | 21.91 s | 46.33 GiB |
+| 64K | 8 | 8 | 523,008 tokens | 22.65 s | 46.33 GiB |
+
+The running count is periodically logged, not an exact peak. Submitted concurrency
+is measured by the client barrier. Near-equal group times correspond to roughly
+equal aggregate input tokens; they do not make individual 64K requests as cheap
+as 16K requests. Warm single-request times were 1.22, 1.91 and 3.72 seconds.
+The first server took 316 s to start; subsequent servers took 62–64 s.
+
+See [serving-large-summary.json](serving-large-summary.json) for exact commands,
+artifact hashes and measurements, and [representative generations](serving-large-examples.json).
+Full per-token scores and memory samples remain in the Beaker result dataset.
+The larger test points have ample memory headroom on this B300; they are not a
+maximum-capacity search or a throughput guarantee for natural long reasoning.
+
+## RL progress and acceptance boundary
+
+The 16K run's first training batch had eight responses averaging 13,612 tokens;
+seven reached 14,336. All eight rewards were zero, so this batch cannot establish
+a nonzero policy-gradient update. It still exercises long forward/backward
+computation, including the router auxiliary objective. Rank one's first packing
+record had four samples in four packs: packing did not reduce the forward count.
+The run is not marked passed until optimizer, publication and final evaluation
+complete and retained-sample/replay checks pass.
+
+The 32K run is still generating long responses. A local follow-up monitor will
+submit an exact-source `lengths` audit on Saturn after the GPU jobs terminate,
+for workflows whose Beaker exit code is zero. Its launch receipt is retained at
+`/tmp/readiness-length-final-audit-receipt.json` on the submitting host. Audit
+results and a final training recommendation are pending; 64K training remains
+unqualified by this exercise.

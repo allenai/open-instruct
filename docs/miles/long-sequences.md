@@ -56,6 +56,33 @@ recipe. EP distributes expert parameters/work, not the token sequence itself.
 The current adapter does not offer trainer TP/PP/CP greater than one as a remedy
 for a single sequence that does not fit.
 
+## Measured long-input serving settings
+
+On one B300 with the readiness SFT MoE checkpoint, both serving sweeps completed
+with no logged OOMs or retractions. The larger pool supported these submitted
+request groups, each producing 128 tokens:
+
+| Context | Actual prompt tokens | Concurrent requests | Group completion time |
+|---|---|---|---|
+| 16,384 | 16,128 | 32 | 21.52 s |
+| 32,768 | 32,512 | 16 | 21.91 s |
+| 65,536 | 65,280 | 8 | 22.65 s |
+
+Common server settings were KV tokens 524,288, maximum running requests 32,
+recurrent slots 64, decode graph cap 32, prefill chunk 2,048, static fraction 0.6
+and radix off. Peak sampled device memory was 46.1–46.3 GiB. These are useful
+starting points for this model's **long-input, short-output serving**, with client
+concurrency reduced as context grows to keep aggregate tokens within the pool.
+They are not training or long-decode throughput qualifications. The standalone
+probe did not return router traces. Production RL additionally exercises that
+path and must keep its own trainer/serving memory budget.
+
+The [full record](measurements/length-guidance-20260913/README.md) distinguishes
+submitted requests from periodically logged engine occupancy, includes the
+smaller-pool comparison, and retains runtime pins and generations. The reasoning
+model hit the 128-token output cap throughout: finite execution passed, retrieval
+accuracy was not established.
+
 ## What has actually been exercised
 
 See the [length exercise record](measurements/length-guidance-20260913/README.md)
