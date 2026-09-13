@@ -4,6 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from scripts.miles import throughput_basket
 
@@ -223,3 +224,39 @@ def test_engine_metrics_preserve_labels_and_missing_values():
     assert [r["value"] for r in result] == [7, 2, None]
     assert result[0]["labels"] != result[1]["labels"]
     assert not any(r["name"] == "num_queue_reqs" for r in result)
+
+
+def test_engine_observer_shards_and_records_endpoint_failures(monkeypatch, tmp_path):
+    client = httpx.AsyncClient
+
+    def response(request):
+        if request.url.host == "broken":
+            return httpx.Response(503, text="unavailable")
+        return httpx.Response(200, text='sglang:num_running_reqs{rank="0"} 3\n')
+
+    monkeypatch.setattr(
+        pipeline_observer.httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(response), **kw)
+    )
+
+    async def exercise():
+        producer = SimpleNamespace(
+            args=SimpleNamespace(save=str(tmp_path), olmo_core=CoreConfig(pipeline_observation_interval=0.001))
+        )
+
+        async def urls(args):
+            return ["http://working:1", "http://broken:2"]
+
+        task = asyncio.create_task(pipeline_observer.observe_engines(producer, urls))
+        try:
+            async with asyncio.timeout(2):
+                while len(list(tmp_path.glob("engine_occupancy_*.jsonl"))) < 2:
+                    await asyncio.sleep(0.001)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        records = [json.loads(path.read_text()) for path in tmp_path.glob("engine_occupancy_*.jsonl")]
+        assert len(records) == 2
+        assert next(r for r in records if "working" in r["engine"])["series"][0]["value"] == 3
+        assert "503" in next(r for r in records if "broken" in r["engine"])["error"]
+
+    asyncio.run(exercise())
