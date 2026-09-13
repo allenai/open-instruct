@@ -1,0 +1,15 @@
+{
+  "finished_unix": 1789331284.6608996,
+  "result": {
+    "completed_rollout_ids": [
+      0,
+      1
+    ],
+    "export_hf": null,
+    "start_rollout_id": 0
+  },
+  "spec_sha256": "0dd8d12e1b5a928423d242dd05ec0726bb70143619ff8428a04916a155049b99",
+  "started_unix": 1789329927.5355918,
+  "status": "complete",
+  "training_started_unix": 1789329937.4573176
+}

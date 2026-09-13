@@ -20,8 +20,8 @@ candidate image, with each run's configuration and checkpoint identity retained.
 | `robertb/miles-throughput-profiles` | Owned by the parallel configuration/measurement work; inherits experimental refresh and is not automatically included |
 | Old gdn2 prototype worktrees | Superseded lineage, not outstanding changes to merge into the hero-HF-based adapter |
 
-The consolidation is prepared on `robertb/miles-sharing-candidate`, then promoted
-locally to `robertb/miles-olmo-core` after its checks. Source distribution and remote
+The consolidation passed its gates and is promoted locally from
+`robertb/miles-sharing-candidate` to `robertb/miles-olmo-core`. Source distribution and remote
 branch availability are separate from the Beaker image; use the exact candidate
 checkout supplied for the pilot. Do not assume a remote branch already includes
 unpublished local commits.
@@ -35,8 +35,12 @@ and documentation. No CUDA/framework upgrade or opportunistic package removal
 is included. Historical Megatron dependencies in the binary foundation are not
 selected as the trainer.
 
-The candidate image and final gate receipts are recorded here after qualification.
-Until then this page describes the candidate, not a completed release. The gate
+The immutable Beaker image is **`01M2E5QR5C60WF7H0TDEF4CD3S`**
+(`robertb/miles-core-sharing-2de5c5ba4`), built from application revision
+`2de5c5ba421d653a95981fa1bb35dcb64231aeb3`. See the
+[qualification record and provenance](measurements/sharing-20260913/README.md).
+The combined GPU gate, separate full-SFT check and independent retained-sample
+audit all passed with exit code zero. The gate
 runs runtime tests, dense synthetic save/resume, two-rank FSDP diagnostics, EP2
 packing/recomputation and live MoE replay/resume. A separate two-collection full-SFT
 [config](../../configs/miles/qualification/sharing-sft-20260913.toml) checks async
@@ -49,7 +53,7 @@ from this gate are qualification evidence, not the repository CI GPU-test receip
 
 ## Tester workflow
 
-1. Obtain the candidate image ID and matching source revision, then follow the
+1. Obtain the matching source bundle or supplied candidate checkout, then follow the
    [laptop/session setup](launching.md). Sibling development worktrees are unnecessary.
 2. Copy a [structured example](../../configs/miles/examples/README.md) outside the
    checkout; choose a supported checkpoint, accessible mounts and a fresh run root.
@@ -57,6 +61,21 @@ from this gate are qualification evidence, not the repository CI GPU-test receip
    candidate ID and invoke `python -m open_instruct.miles run /path/to/run.toml`.
 4. Retain the launch receipt, submitted TOML and [completion artifacts](operations.md).
    Report a symptom with the experiment ID, image, model and configuration.
+
+For an internal source handoff, the standalone `open-instruct-miles-sharing.bundle`
+can be cloned without publishing the integration history to the public GitHub
+repository:
+
+```bash
+git clone -b robertb/miles-olmo-core /path/to/open-instruct-miles-sharing.bundle open-instruct
+cd open-instruct
+```
+
+Then follow laptop/session setup above. The image contains the runtime dependencies;
+the submitting laptop does not need Core, MILES or SGLang sibling checkouts.
+Documentation/evidence and the host-only audit launcher added after image revision
+`2de5c5ba4` do not change its runtime code. Use the supplied source with this image;
+do not silently combine it with a different runtime branch.
 
 We have successful short lifecycle and learning-path evidence, not evidence of
 frequent unexplained failures on those supported configurations. Tonight's long

@@ -98,7 +98,8 @@ observed restored Triton groups, zero new compiler writes and faster first updat
 on all three workers. Its 174/238-second publication timings came from the old
 WEKA staging implementation. The [publication fix](measurements/cache-publication-20260912/README.md)
 qualifies local staging, shared timeout and best-effort behavior. Current run
-reports determine current end-to-end cost; warm caches do not remove HF loading,
+reports determine current end-to-end cost. The [sharing-candidate full-SFT check](measurements/sharing-20260913/README.md)
+published all three workers in 11.2 seconds total, with no timeout. Warm caches do not remove HF loading,
 optimizer setup or CUDA graph capture.
 
 The separate `python -m scripts.miles.compiler_cache_run` command is an experimental
