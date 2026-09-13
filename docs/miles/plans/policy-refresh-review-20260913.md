@@ -61,8 +61,10 @@ approach unusable.
 SGLang's stock retraction clears its route capture and re-prefill replaces those
 rows. Therefore its final route payload must not be interpreted as historical
 behavior routing for old tokens. The prototype records original routes before
-cache-slot release. Choosing which routes the RL scorer/replay forward should
-use remains an explicit trainer-integration decision.
+cache-slot release. The intended trainer contract is to replay the latest rebuilt prefix routes
+and subsequent decode routes in both the trainer scoring and gradient passes.
+Historical routes are diagnostic provenance, not replay input for that refreshed
+forward. This choice still needs end-to-end trainer qualification.
 
 ## Implementation and evidence
 
@@ -121,3 +123,60 @@ there is no optimizer in these experiments.
    do we qualify queued siblings, admission, failures, eval and shutdown?
 6. What minimal actual-RL comparison would establish that this is useful, after
    serving correctness and full-model timings are available?
+
+
+## Direction after review
+
+Proceed with retaining prefix tokens in the ordinary response loss. Do not add
+prefix masking merely because the response crossed a policy update. Preserve
+the original per-token rollout log-probabilities, including each historical
+span, and use the existing MILES token-level PPO/TIS machinery. Recomputed
+prefix scores must never overwrite the behavior denominator.
+
+The referenced `open_instruct/grpo_fast.py` belongs to the separate vLLM backend.
+The actual MILES implementation was checked in the runtime worktree at
+`bc582bc5c680b2138d50cda141322155207a34fa`:
+
+- `miles/backends/training_utils/loss_hub/losses.py` selects either original
+  rollout probabilities or detached trainer scores as the PPO denominator.
+- With `use_rollout_logprobs=false, use_tis=true`, PPO compares the gradient
+  forward with the detached trainer scoring pass; `vanilla_tis_function` in
+  `loss_hub/corrections.py` multiplies by the clipped exponent of
+  trainer-scored minus original rollout log-probability.
+- Alternatively `use_rollout_logprobs=true` uses the rollout denominator
+  directly. The wrapper rejects enabling this together with TIS; these are
+  alternative configurations, not two corrections to stack indiscriminately.
+- Before clipping, the two ratios in the trainer-scored/TIS configuration
+  multiply to the gradient-forward probability divided by the original
+  behavior probability. Clipping the factors separately is not identical to
+  clipping that product. Preserve the existing implementation for the trial.
+
+This fits the existing token-local surrogate, not an exact unbiased correction
+of the entire response or group distribution. Historical prefix visitation,
+changed future continuations/rewards, and group-relative advantage construction
+remain approximations to evaluate. Refresh reduces the age of newly sampled
+suffix tokens; it does not guarantee a smaller realized importance ratio at
+every token. None of this is a reason to reject the experiment.
+
+For replay, use the newest re-prefill routes for the prefix and the corresponding
+decode routes for the suffix. Core already uses the same replay context for
+its scoring and gradient passes (`open_instruct/miles/actor.py`). Confirm this
+on a refreshed sample, preserving next-token alignment. Compare trainer scores
+against fresh inference scores from that same rebuilt forward to assess
+numerical mismatch. Compare against original behavior scores separately to
+measure policy drift; those are no longer interchangeable diagnostics.
+
+The main remaining changes are transport and scheduling contracts:
+
+- Preserve exact token-span version boundaries through the SGLang response,
+  MILES sample conversion, batching, serialization and resume. A list of turn
+  versions is not enough. The inspected session merge path currently appends
+  a scalar `weight_version`, so serving support alone does not finish this.
+- Make staleness rules explicit for historical prefixes and repeated refreshes.
+  The existing async buffer computes age from the group's oldest version;
+  relabeling the whole response with its latest version would hide old tokens.
+- Keep group identities and normal loss masks; qualify refreshed routes and
+  ratio/clipping diagnostics separately for historical and fresh token spans.
+- Judge speed with full-model publication, re-prefill and completed-group
+  throughput, then compare actual RL learning. The queued probes contain no
+  optimizer and cannot settle the learning question.
