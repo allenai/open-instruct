@@ -190,10 +190,10 @@ The first window still spends over 80% of the awaited cycle waiting for a usable
 batch. More producer concurrency or more inference did not automatically improve
 useful throughput: stale discarded work increased substantially in several arms.
 The follow-up compares 2+6 with eight requests per engine at batches 32 and 128,
-then compares the larger batch with 2+14 if multi-node qualification and capacity
+then compares the larger batch with 2+16 if multi-node qualification and capacity
 permit. Batch 128 changes the RL optimization batch; it is not a pure scheduling
-optimization or evidence of equal learning. The 2+14 launcher currently allocates
-three eight-GPU replicas (24 allocated, 16 used), because trainer and inference
+optimization or evidence of equal learning. This fills both inference nodes. The 2+16 launcher currently allocates
+three eight-GPU replicas (24 allocated, 18 used), because trainer and inference
 nodes are separate in its multi-node layout. Report both counts.
 
 Follow-up instrumentation (`core.pipeline_observation_interval=2`) records:

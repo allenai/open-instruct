@@ -30,9 +30,9 @@ CASES = {
         "batch": 128,
         "updates": 24,
     },
-    "steady-2t14i-c8-b128": {
+    "steady-2t16i-c8-b128": {
         "profile": "small",
-        "inference": 14,
+        "inference": 16,
         "capacity": 8,
         "concurrency": 8,
         "batch": 128,
