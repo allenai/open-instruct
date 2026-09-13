@@ -75,7 +75,16 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
         # With the qualified MILES router the complete response metadata survives.
         # Ambiguous failures must not transparently resample under newer weights.
         url = f"http://{input.args.sglang_router_ip}:{input.args.sglang_router_port}/generate"
-        output = await asyncio.wait_for(post(url, payload, max_retries=1), self.args.olmo_core.engine_drain_timeout)
+        timeout = self.args.olmo_core.refresh_request_timeout
+        try:
+            output = await asyncio.wait_for(post(url, payload, max_retries=1), timeout)
+        except TimeoutError as error:
+            raise TimeoutError(
+                f"Policy refresh request {payload['rid']} exceeded core.refresh_request_timeout={timeout:g}s. "
+                "This covers serving queue time, generation and refresh pauses. Check engine progress and "
+                "admission pressure; increase the request timeout for deliberately long responses. "
+                "core.engine_drain_timeout only controls save/eval/shutdown draining."
+            ) from error
         if output.get("meta_info", {}).get("finish_reason", {}).get("type") not in ("stop", "length"):
             raise RuntimeError("Policy refresh request did not finish; refusing a partial training sample")
         await update_sample_from_response(input.args, sample, payload, output)

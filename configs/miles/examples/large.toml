@@ -100,6 +100,8 @@ row_specialization = "dynamic"
 [core]
 max_train_rollout_logprob_abs_diff = 0.05
 publication_mode = "refresh"
+refresh_request_timeout = 1800.0
+engine_drain_timeout = 900.0
 scoring_pass_required = true
 router_aux_loss_weight = 0.01
 router_z_loss_weight = 0.00001

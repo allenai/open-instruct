@@ -218,6 +218,7 @@ These are dataclass defaults for raw CoreConfig. Structured compilation and exam
 | core.publication_mode | &lt;class &#x27;str&#x27;&gt; | &quot;barrier&quot; | barrier (default) synchronously publishes the fleet; engine_drain is experimental independent TP1 publication for disaggregated async MoE. |
 | core.engine_drain_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds to wait for already-reserved engine requests to finish; expiry fails the run without reopening the engine. |
 | core.engine_update_timeout | &lt;class &#x27;float&#x27;&gt; | 180.0 | Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run. |
+| core.refresh_request_timeout | &lt;class &#x27;float&#x27;&gt; | 1800.0 | Wall-clock deadline for one mixed-policy generation HTTP request, including serving queue time and refresh pauses; independent of engine draining. |
 | core.snapshot_capacity | &lt;class &#x27;int&#x27;&gt; | 2 | Maximum retained immutable host snapshots during rolling publication; each snapshot holds a full BF16 export in the Ray object store. |
 | core.row_specialization | &lt;class &#x27;str&#x27;&gt; | &quot;static&quot; | static specializes no-gradient SwiGLU on capacity; dynamic avoids capacity-specific compilation. Independent of arithmetic flags. |
 | core.compiler_cache | &lt;class &#x27;bool&#x27;&gt; | true | Enable persistent compiler-cache lifecycle. |

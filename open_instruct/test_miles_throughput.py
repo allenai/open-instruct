@@ -143,3 +143,9 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
     write("training_contract_rank0.jsonl", [])
     with pytest.raises(ValueError, match="optimizer"):
         throughput_basket.analyze(tmp_path, warmup=1)
+
+
+@pytest.mark.parametrize("value", [0, -1, True, float("inf"), float("nan")])
+def test_refresh_request_deadline_is_finite_and_positive(value):
+    with pytest.raises(ValueError):
+        CoreConfig(refresh_request_timeout=value)

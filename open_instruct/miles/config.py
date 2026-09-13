@@ -22,6 +22,7 @@ class CoreConfig:
     publication_mode: str = "barrier"
     engine_drain_timeout: float = 180.0
     engine_update_timeout: float = 180.0
+    refresh_request_timeout: float = 1800.0
     snapshot_capacity: int = 2
     row_specialization: str = "static"
     compiler_cache: bool = True
@@ -58,7 +59,7 @@ class CoreConfig:
     def __post_init__(self):
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
-        for name in ("engine_drain_timeout", "engine_update_timeout"):
+        for name in ("engine_drain_timeout", "engine_update_timeout", "refresh_request_timeout"):
             validation.number(getattr(self, name), f"core.{name}")
             if getattr(self, name) <= 0:
                 raise InputError(f"core.{name} must be positive")

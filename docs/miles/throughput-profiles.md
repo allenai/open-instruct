@@ -141,3 +141,23 @@ The modest timing difference is not an optimization finding from three warm
 collections. Use dev as the minimal exercise, and tiny when the disaggregated
 boundary itself matters. Full-model ratio and scale qualification remains in
 progress.
+
+The first full-model 2+4 and 4+2 attempts each completed one optimizer update
+and published version 1, then failed when consuming the next collection. Refresh
+had incorrectly reused `core.engine_drain_timeout=180` as a whole generation
+request deadline. Slow responses timed out in the background while the cold
+first training step ran. These are failed qualifications, not throughput results:
+[2+4](https://beaker.org/ex/01M2DZWM5KP9V005R2BEX0ZK93),
+[4+2](https://beaker.org/ex/01M2DZWNXMG5KSDA9SSM8HQWXT).
+
+Generation now has a separate `core.refresh_request_timeout` (1800 seconds),
+covering serving queue time, decoding and refresh pauses. The examples set
+`core.engine_drain_timeout=900` for save/eval/shutdown; transfer time remains
+bounded separately. On timeout the error identifies the request and relevant
+setting. Regression tests verify that a short drain budget cannot cancel an
+ordinary request and that the generation deadline cancels its HTTP task.
+
+A separate c8 attempt was canceled because its host reported zero temporary-disk
+space. Subsequent basket submissions exclude that host. Attempts stopped for
+these known issues are excluded from performance comparisons; retries have new
+identities and keep the same model/data/optimization settings.

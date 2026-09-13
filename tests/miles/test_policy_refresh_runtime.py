@@ -11,7 +11,7 @@ from miles.ray.rollout import train_data_conversion
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
 from miles.utils.types import Sample
 
-from open_instruct.miles import policy_refresh
+from open_instruct.miles import policy_refresh, refreshing_rollout
 from open_instruct.miles.async_buffer import RefreshPolicyDataBuffer
 from open_instruct.miles.refreshing_rollout import RefreshingRolloutFn
 
@@ -275,5 +275,41 @@ def test_queue_discard_metrics_capture_generated_lengths_before_retry_reset():
         assert metrics[prefix + "delivered_samples"] == 2
         assert metrics[prefix + "dropped_samples_fraction"] == 0.5
         assert buffer.get_metrics()[prefix + "dropped_samples"] == 0
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("deadline,expires", [(0.2, False), (0.001, True)])
+def test_request_deadline_is_independent_of_drain_and_cancels_timeout(monkeypatch, deadline, expires):
+    async def scenario():
+        p = producer()
+        p.args.olmo_core.engine_drain_timeout = 0.0001
+        p.args.olmo_core.refresh_request_timeout = deadline
+        p.args.sglang_router_ip, p.args.sglang_router_port = "localhost", 1234
+        finalized = []
+
+        async def post(*args, **kwargs):
+            try:
+                await asyncio.sleep(0.02)
+                return {"meta_info": {"finish_reason": {"type": "stop"}}}
+            finally:
+                finalized.append(True)
+
+        async def update(*args):
+            pass
+
+        monkeypatch.setattr(refreshing_rollout, "post", post)
+        monkeypatch.setattr(refreshing_rollout, "compute_prompt_ids_from_sample", lambda *args: [9])
+        monkeypatch.setattr(refreshing_rollout, "compute_request_payload", lambda *args, **kwargs: ({}, None))
+        monkeypatch.setattr(refreshing_rollout, "update_sample_from_response", update)
+        monkeypatch.setattr(policy_refresh, "record_response", lambda *args: {"spans": [], "replay_version": 0})
+        request = SimpleNamespace(args=p.args, state=None, sample=sample(), sampling_params={})
+        if expires:
+            with pytest.raises(TimeoutError, match="core.refresh_request_timeout"):
+                await p._generate_response(request)
+        else:
+            result = await p._generate_response(request)
+            assert result.samples is request.sample
+        assert finalized == [True]
 
     asyncio.run(scenario())
