@@ -45,8 +45,13 @@ version before reopening. Healthy peers can reopen while another is draining.
 There is no normal-path pause, retract or abort request. Admission reserves one
 optimizer step of lag headroom; completed groups still undergo the existing actual
 consumption-time lag checks. Packing, replay, masks, TIS and reward semantics are
-unchanged. `snapshot_ready_step`, per-engine versions and fleet minimum are separate
-from the consuming optimizer step.
+unchanged. Completed, graded groups use the existing single FIFO buffer, ordered
+by insertion after completion. There is no per-version queue or newest-policy
+priority. The consumer rejects expired entries and uses the oldest queued eligible
+group; the qualification configs retry expired groups' pristine prompts. Groups
+are internally homogeneous, but an optimizer batch may contain several eligible
+policy versions. `snapshot_ready_step`, per-engine versions and fleet minimum are
+separate from the consuming optimizer step.
 
 ## Boundaries and failures
 

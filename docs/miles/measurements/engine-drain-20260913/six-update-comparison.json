@@ -377,6 +377,64 @@
       "new_version_responses_while_peer_draining": 71
     },
     "completed_not_trained_responses": 1000,
-    "completed_not_trained_tokens": 2195417
+    "completed_not_trained_tokens": 2195417,
+    "engine_load_and_latency": {
+      "0": {
+        "responses": 816,
+        "tokens": 1763124,
+        "groups": 102,
+        "max_owned_requests": 128,
+        "owned": 0,
+        "request_reservation_to_decode_seconds": {
+          "count": 816,
+          "mean": 34.674916816984904,
+          "p50": 32.554779052734375,
+          "p95": 68.94977188110352,
+          "max": 75.42015957832336
+        },
+        "group_reservation_to_graded_seconds": {
+          "count": 102,
+          "mean": 48.394862506903856,
+          "p50": 49.629780530929565,
+          "p95": 73.12811374664307,
+          "max": 75.42647624015808
+        },
+        "last_decode_to_graded_seconds": {
+          "count": 102,
+          "mean": 0.030034551433488436,
+          "p50": 0.007802605628967285,
+          "p95": 0.18343496322631836,
+          "max": 0.3550589084625244
+        }
+      },
+      "1": {
+        "responses": 568,
+        "tokens": 1234880,
+        "groups": 71,
+        "max_owned_requests": 128,
+        "owned": 0,
+        "request_reservation_to_decode_seconds": {
+          "count": 568,
+          "mean": 32.28838808981465,
+          "p50": 29.93319880962372,
+          "p95": 73.36664414405823,
+          "max": 125.33361554145813
+        },
+        "group_reservation_to_graded_seconds": {
+          "count": 71,
+          "mean": 46.343662050408376,
+          "p50": 43.78791689872742,
+          "p95": 77.33162689208984,
+          "max": 125.34586882591248
+        },
+        "last_decode_to_graded_seconds": {
+          "count": 71,
+          "mean": 0.024816738048069914,
+          "p50": 0.0068318843841552734,
+          "p95": 0.12057113647460938,
+          "max": 0.3755533695220947
+        }
+      }
+    }
   }
 }

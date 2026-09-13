@@ -181,3 +181,14 @@ documented cross-backend module excluded. Wrapper: **309 passed, one skipped**.
 Ruff and type checking passed. The additional resume audit compares final masters
 against the actual saved step-six masters, so pre-resume changes cannot certify
 an inert resumed optimizer. No primary branch or shared example has been changed.
+
+
+D's engine load/latency is included in the comparison JSON. Engine 0 completed
+816 responses / 102 groups; engine 1 completed 568 / 71. Both reached 128 owned
+requests at their busiest point (includes client/server queued work). Median
+reservation-to-decode latency was 32.6 / 29.9 s; median whole-group completion was
+49.6 / 43.8 s. The deliberate hold appears in engine 1's 125.3 s maximum. These
+latencies include queue/prefill/decode, not isolated model-kernel time. Grading after
+the final response averaged 30 / 25 ms. The buffer's reported staleness metrics
+include examined rejected entries; the bounded-consumption claim uses actual
+trainer contracts and retained samples instead.
