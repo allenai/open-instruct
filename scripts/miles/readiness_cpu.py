@@ -254,7 +254,9 @@ def lifecycle(root):
     # Resume publishes restored weights, then resets/republishes for its startup
     # equality audit. Those are two version-2 publications after the saved one.
     publications = audit_workflow.read_jsonl(directory / "publication.jsonl")
-    require([event["version"] for event in publications] == [0, 1, 2, 2, 2, 3, 4], "Publication/republish discontinuity")
+    require(
+        [event["version"] for event in publications] == [0, 1, 2, 2, 2, 3, 4], "Publication/republish discontinuity"
+    )
     return {
         "passed": True,
         "root": str(root),
@@ -316,9 +318,44 @@ def rescore(root):
     }
 
 
+def drift(root):
+    """Bounded CPU parameter probe between saved updates one and four."""
+    root = Path(root)
+    checkpoint = importlib.import_module("olmo_core.distributed.checkpoint")
+    torch = importlib.import_module("torch")
+    first = root / "checkpoints/core/rollout_0000000/model"
+    last = root / "checkpoints/core/rollout_0000003/model"
+    metadata = checkpoint.get_checkpoint_metadata(last)
+    candidates = sorted(
+        key
+        for key, value in metadata.state_dict_metadata.items()
+        if hasattr(value, "size")
+        and 0 < value.size.numel() <= 1048576
+        and ((key.startswith("model.") and key.endswith(("weight", "bias"))) or key.endswith(".main"))
+    )
+    require(len(candidates) >= 8, "Not enough bounded parameter probes")
+    keys = [candidates[i * (len(candidates) - 1) // 7] for i in range(8)]
+    before, after = list(checkpoint.load_keys(first, keys)), list(checkpoint.load_keys(last, keys))
+    rows = []
+    for key, a, b in zip(keys, before, after, strict=True):
+        require(
+            a.shape == b.shape and torch.isfinite(a).all() and torch.isfinite(b).all(), "Invalid saved parameter probe"
+        )
+        difference = (a.float() - b.float()).abs()
+        rows.append(
+            {"key": key, "elements": a.numel(), "changed": int((a != b).sum()), "max_abs": float(difference.max())}
+        )
+    return {
+        "passed": any(row["changed"] for row in rows),
+        "root": str(root),
+        "probes": rows,
+        "limits": "Eight size-bounded saved parameter probes, update one versus four. Establishes sampled parameter movement; not a full-weight equivalence or restart-determinism proof.",
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("inspect", "audit", "lifecycle", "rescore"))
+    parser.add_argument("mode", choices=("inspect", "audit", "lifecycle", "rescore", "drift"))
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--output", type=Path, default=Path("/output"))
     args = parser.parse_args()
@@ -326,7 +363,9 @@ def main():
     failed = False
     for index, path in enumerate(args.paths):
         try:
-            report = {"inspect": inspect, "audit": audit, "lifecycle": lifecycle, "rescore": rescore}[args.mode](path)
+            report = {"inspect": inspect, "audit": audit, "lifecycle": lifecycle, "rescore": rescore, "drift": drift}[
+                args.mode
+            ](path)
         except Exception as error:
             report = {"passed": False, "path": str(path), "error": f"{type(error).__name__}: {error}"}
             failed = True
