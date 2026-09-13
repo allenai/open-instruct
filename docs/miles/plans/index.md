@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Colleague exercise campaign](colleague-exercises-20260912.md) | Bounded readiness and inference-pool qualification |
 | [Engine drain and rolling publication handoff](engine-drain-handoff-20260912.md) | Independent engine updates; single-policy responses |
 | [Active MILES / Core work](active-work.md) | active-work |
 | [Core RL path: optimization targets](core-optimization-targets-20260911.md) | core-optimization-targets-20260911 |

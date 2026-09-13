@@ -6,15 +6,15 @@ Exact submitted specifications and source/image identities are in
 [launches.json](launches.json). GPU jobs use urgent Holmes, open-instruct-dev,
 one-hour minimum runtime. CPU preparation/audits use Saturn.
 
-## Current work
+## Current work (05:41 UTC)
 
 | Exercise | Evidence/status | Remaining acceptance |
 | --- | --- | --- |
-| Dense Olmo 3, two colocated FSDP GPUs | First process [passed](https://beaker.org/ex/01M2CD5M6R6WB7M8NYGZ243B8Y): updates 1–2, two committed saves, stopped intentionally, publications 0/1/2 | Fresh allocation resumes updates 3–4, final export, fresh serving reload |
-| Dense resume | [Submitted](https://beaker.org/ex/01M2CEKDXM84SBDCNFEK3FP509), identical TOML/root/horizon | Restore and export audit |
-| Packed MoE EP2, replay, async/TIS, checkpoint/restart | [Corrected attempt](https://beaker.org/ex/01M2CDZ17RQWTE2Q5W8P56BQNK) starting | Two updates, intentional stop, same-config fresh-process resume for two more |
-| Radix + packing/replay + code + named judge | [Starting](https://beaker.org/ex/01M2CDQGG7REP67CCCMPS6BN8B), five GPUs | Four updates, actual cache hits and reward observations, policy/replay checks |
-| Natural long contexts + mixed chunks | Fixture prepared; four-GPU run submitted (ID in launches.json) | Actual long training tokens, chunked prefill, packing/replay checks and final eval |
+| Dense Olmo 3, two colocated FSDP GPUs | Four updates across [first process](https://beaker.org/ex/01M2CD5M6R6WB7M8NYGZ243B8Y) and [fresh resume](https://beaker.org/ex/01M2CEKDXM84SBDCNFEK3FP509), both exit 0; final HF export and fresh reload passed | Qualified lifecycle on this B300 configuration; no bit-exact continuation claim |
+| Packed MoE EP2, replay, async/TIS, checkpoint/restart | [First process](https://beaker.org/ex/01M2CDZ17RQWTE2Q5W8P56BQNK) passed updates 1–2; [fresh resume](https://beaker.org/ex/01M2CG9Q3K3GBT8PCX7EBFMY6T) finished updates 3–4; checkpoint/cursor and saved-parameter audits passed | Qualified same-topology lifecycle; no exact-continuation claim |
+| Radix + packing/replay + code + named judge | [Four updates passed](https://beaker.org/ex/01M2CDQGG7REP67CCCMPS6BN8B); retained reward audit passed | Policy responses had zero cache hits; combined cache-use qualification remains open |
+| Forced cached-prefix replay | [Three-GPU follow-up passed](https://beaker.org/ex/01M2CH5AWXM02NF31RBA55RTXH), two updates; [retained feature audit passed](https://beaker.org/ex/01M2CMEKT2EFY46WV2BRRAJBJ8) | Qualified cached-prefix replay in this sequential-request configuration |
+| Natural long contexts + mixed chunks | [Four updates passed](https://beaker.org/ex/01M2CEX1M5BB4Q98GH8P9FHQ4Y); [feature audit passed](https://beaker.org/ex/01M2CGNGJTWPSDENXW9C55KDE1) | Qualified bounded long-token exercise, not a learning benchmark |
 | EP8 + seven engines + judge | Config 06 staged | Two full nodes available; distributed startup/rewards/ownership |
 | Corrected 8 versus 16 engine sizing | Configs staged; previous 16-engine attempt failed rendezvous before training | Matching runs with producer budget raised and periodic weight audits off |
 
@@ -28,13 +28,11 @@ still limits useful asynchronous throughput in these images.
 Intentional debug stopping previously triggered final HF export, occupying the
 exclusive export directory before a resumed process reached the run horizon.
 Commit `f958d4b6d452` defers final export until the configured horizon completes.
-Image `01M2CD5CH7MBVHZK50AXAPYGFB` contains that fix. The first dense process
-stopped correctly; resumed final export remains to be checked. Its workflow
+Image `01M2CD5CH7MBVHZK50AXAPYGFB` contains that fix. Both dense processes finished cleanly and the final export reloaded successfully. Its workflow
 result records the intended export path even when export is deferred.
 
 Local checks: 67 pinned-image lifecycle tests passed, including early-stop export
-assertions; focused host workflow/config tests and lint passed. This does not
-replace the GPU resume/export/reload exercise.
+assertions; focused host workflow/config tests and lint passed. GPU resume/export/reload evidence is recorded below.
 
 The original MoE resume attempt
 [failed before training](https://beaker.org/ex/01M2CCWWPGXG3W2C6SEYNZR704): its
@@ -68,8 +66,11 @@ which also provides no within-group policy advantage.
 
 Reports: [cold](reward-audit-0.json), [warm](reward-audit-1.json). They retain dump
 paths/hashes so generations can be recovered without checking large response
-payloads into Git. This was an accounting audit, **not independent re-execution**
-of deterministic verifiers, nor an optimizer-equivalence proof.
+payloads into Git. The full-dump audit checked accounting. A separate
+[Saturn rescoring job](https://beaker.org/ex/01M2CFFZDJMXNP3Q3ET6AVW0J5)
+then re-executed two retained responses per deterministic domain per run, selected
+at the reward extremes: all 16 matched exactly. Reports: [cold](rescore-cold.json),
+[warm](rescore-warm.json). No new stochastic judge requests were made.
 
 ## Long-context fixture
 
@@ -90,9 +91,69 @@ target is a JSON list of tests, whereas Dolci wraps aligned verifier targets.
 The preparer now preserves the former as one target; regression tests cover both
 representations. Earlier CPU attempts failed closed and created no fixture.
 
+## Completed feature evidence
+
+The long run consumed 64 training responses: eight had prompts over 4,096 tokens,
+63 had responses over 4,096 tokens, and 61 exceeded 8,192 total tokens. Maximum
+individual sequence length was 12,742. Eight packing records and 78 replay
+observations passed sample/token alignment and routed-layer recomputation checks.
+[Full feature report](long-features.json). Only one distinct long training problem
+was used; short math controls supplied one mixed-reward group. Do not infer
+long-context learning quality from this exercise.
+
+Dense [lifecycle audit](dense-lifecycle.json) verified all four committed native
+checkpoints/cursor hashes, optimizer descriptors and rank state, steps 1–4 on both
+ranks, and the scoring check again at resume. Publication versions were
+`0, 1, 2, 2, 2, 3, 4`: the extra restored-version publications include the startup
+snapshot/reset/republish equality check. The scoring checks were bit-identical.
+[Bounded CPU probes](dense-drift.json) found movement in five of eight sampled
+parameter tensors between saved updates one and four. This checks actual parameter
+movement without adding periodic full-weight audits to training.
+
+The [fresh SGLang reload](https://beaker.org/ex/01M2CFXEF3RY9ZP6YS17AAWD9C)
+loaded the committed HF export in about 136 seconds and generated finite
+log-probabilities on all four held-out prompts. Three of four greedy prefixes
+matched the retained final evaluation exactly; one differed. [Report](dense-reload.json).
+This is a load/generation check, not bit-exact inference or restart equivalence.
+
+The four-update radix/judge run passed its [reward audit](radix-rewards.json),
+including mixed rewards from math, IF, function code, and both named judge rubrics.
+Stdio scores remained zero. The stricter feature audit failed because retained
+policy samples reported **zero cached tokens**. Judge-server cache hits do not
+establish policy-cache reuse. The forced-prefix follow-up uses one policy engine,
+one request at a time and 512-token responses to make reuse observable; it is a
+smaller unjudged replay probe, not another throughput comparison.
+
+Two early dense lifecycle audit jobs failed because the new auditor assumed a
+scalar LR and omitted the startup reset/republish round trip. Those were auditor
+schema errors, not training failures; corrected audit
+[01M2CGBVYNEY3XWWWXHE2RQNVM](https://beaker.org/ex/01M2CGBVYNEY3XWWWXHE2RQNVM)
+passed. Keep this distinction when counting failed GPU exercises.
+
+The MoE async restart also passed its [lifecycle audit](moe-lifecycle.json) and
+[bounded parameter drift check](moe-drift.json). Its [352 replay observations](moe-resume-replay.json)
+covered scoring/training/recomputation across both processes with zero route or
+boundary mismatches. All three compiler workers restored matching caches.
+This is same-topology durable recovery, not automatic recovery from a killed
+engine/trainer or an exact comparison with an uninterrupted stochastic run.
+
+The forced-prefix probe completed both updates. Its first collection reported a
+0.5314 prompt cache hit rate (148 cached tokens per response). The retained-sample
+feature audit passed, including actual policy cached tokens, 12 replay observations
+and four packing records, with zero replay route/boundary mismatches.
+[Report](cache-replay-features.json). Publication took 0.46 and 0.45 seconds.
+The first training call took 362 seconds with cold compilation; the second took
+2.40 seconds. These tiny sequential-request measurements are not a pool-sizing benchmark.
+
+Local follow-up: 83 focused preparation, judging, RunSpec and readiness tests
+passed; all 183 Open Instruct Python files passed formatting and Ruff checks.
+Repository type checking also passed with the actual Core source selected explicitly;
+the unconditional missing-source-directory requirement was removed from global
+configuration and the developer override documented. All four researcher example configs rendered with consistent bridge/host-network
+and NCCL interface settings.
+
 ## Still open
 
-Fresh-process restore/export/reload qualification, independent verifier rescoring,
-positive stdio learning coverage, controlled service-failure recovery, the full
-judged topology, corrected engine-pool sizing, and the hero numerical gate remain
-open. No H100 or new hero-training claim follows from these B300 exercises.
+Establish positive stdio learning coverage; exercise controlled service-failure recovery and the
+full judged topology; finish corrected engine-pool sizing and the hero numerical
+gate. No H100 or new hero-training claim follows from these B300 exercises.

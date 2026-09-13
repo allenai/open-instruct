@@ -1,0 +1,55 @@
+{
+  "limits": "Eight size-bounded saved parameter probes, update one versus four. Establishes sampled parameter movement; not a full-weight equivalence or restart-determinism proof.",
+  "passed": true,
+  "probes": [
+    {
+      "changed": 16,
+      "elements": 16,
+      "key": "module.blocks.0.attention.A_log.main",
+      "max_abs": 2.86102294921875e-06
+    },
+    {
+      "changed": 1278,
+      "elements": 1280,
+      "key": "module.blocks.10.attention_norm.weight.main",
+      "max_abs": 3.039836883544922e-06
+    },
+    {
+      "changed": 327550,
+      "elements": 327680,
+      "key": "module.blocks.13.attention.g_proj_1.weight.main",
+      "max_abs": 2.9904767870903015e-06
+    },
+    {
+      "changed": 4096,
+      "elements": 4096,
+      "key": "module.blocks.16.attention.g_proj_2.bias.main",
+      "max_abs": 2.941116690635681e-06
+    },
+    {
+      "changed": 818927,
+      "elements": 819200,
+      "key": "module.blocks.18.latent_down_proj.weight.main",
+      "max_abs": 2.99699604511261e-06
+    },
+    {
+      "changed": 819023,
+      "elements": 819200,
+      "key": "module.blocks.3.latent_up_proj.weight.main",
+      "max_abs": 2.99699604511261e-06
+    },
+    {
+      "changed": 655146,
+      "elements": 655360,
+      "key": "module.blocks.6.routed_experts_router.weight.main",
+      "max_abs": 2.995133399963379e-06
+    },
+    {
+      "changed": 1223,
+      "elements": 1280,
+      "key": "module.lm_head.norm.weight.main",
+      "max_abs": 2.86102294921875e-06
+    }
+  ],
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-09-async-resume-20260913-r2"
+}

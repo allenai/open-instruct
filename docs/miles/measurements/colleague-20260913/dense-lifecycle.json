@@ -1,0 +1,132 @@
+{
+  "boundaries": [
+    {
+      "clock": {
+        "completed_steps": 1,
+        "next_rollout_id": 1,
+        "published_step": 0
+      },
+      "cursor_sha256": "e85786369166cf7b40d055d0ee19a18341d73289071c3eeee1ffaf20ad907874",
+      "native_entries": 5680,
+      "rollout_id": 0
+    },
+    {
+      "clock": {
+        "completed_steps": 2,
+        "next_rollout_id": 2,
+        "published_step": 1
+      },
+      "cursor_sha256": "7b053c047b4ede1e2b043cdaf74854cca04dc48952e498e2ff86d6dc980feb2e",
+      "native_entries": 5680,
+      "rollout_id": 1
+    },
+    {
+      "clock": {
+        "completed_steps": 3,
+        "next_rollout_id": 3,
+        "published_step": 2
+      },
+      "cursor_sha256": "e052cd46848033a38e926459d6eba18d262e5ce3ed0b7f2f0f538cf4fd3135fc",
+      "native_entries": 5680,
+      "rollout_id": 2
+    },
+    {
+      "clock": {
+        "completed_steps": 4,
+        "next_rollout_id": 4,
+        "published_step": 3
+      },
+      "cursor_sha256": "11977dd7a26b9fad42178a39ec8fbdab17f0d96ce0b41609c1810dd4e7e74e83",
+      "native_entries": 5680,
+      "rollout_id": 3
+    }
+  ],
+  "limitations": [
+    "Restore lifecycle and saved optimizer descriptors checked; not an uninterrupted-versus-resumed numerical-equivalence experiment."
+  ],
+  "passed": true,
+  "publication_versions": [
+    0,
+    1,
+    2,
+    2,
+    2,
+    3,
+    4
+  ],
+  "ranks": {
+    "0": {
+      "scoring_checks": [
+        {
+          "active_tokens": 62702,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 0,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        },
+        {
+          "active_tokens": 58594,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 0,
+          "rollout_id": 2,
+          "schema_version": 1,
+          "step": 2,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "steps": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "1": {
+      "scoring_checks": [
+        {
+          "active_tokens": 62702,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 1,
+          "rollout_id": 0,
+          "schema_version": 1,
+          "step": 0,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        },
+        {
+          "active_tokens": 58594,
+          "edge": 0.001,
+          "event": "scoring_check",
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "rank": 1,
+          "rollout_id": 2,
+          "schema_version": 1,
+          "step": 2,
+          "tokens_above_edge": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "steps": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  "root": "/weka/oe-training-default/robertb/open-instruct/runs/colleague-08-dense-colocated-20260913"
+}

@@ -5,6 +5,7 @@ current operating defaults; start with the [MILES guide](../index.md).
 
 | Record | Topic |
 |---|---|
+| [Colleague readiness qualification](colleague-20260913/README.md) | Dense resume/export/reload, mixed services, long contexts, replay, and remaining gates |
 | [Fixed FLA tuner choices eliminate the measured prefill divergence](autotune-pinned-controls-20260911.md) | autotune-pinned-controls-20260911 |
 | [Compiler-cache publication: local proxy, 2026-09-12](cache-publication-20260912/README.md) | README |
 | [Native checkpoint performance qualification](checkpoint-perf-20260911.md) | checkpoint-perf-20260911 |

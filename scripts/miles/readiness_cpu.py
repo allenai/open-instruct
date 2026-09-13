@@ -362,31 +362,8 @@ def drift(root):
     }
 
 
-def features(root):
-    """Require actual cache/long-token/replay coverage, beyond configured flags."""
+def replay_coverage(root, miles):
     root = Path(root)
-    report = audit(root)
-    plan = json.loads((root / "resolved-plan.json").read_text())
-    miles = plan["miles"]
-    samples = []
-    for rollout in range(miles["num_rollout"]):
-        path = Path(miles["save_debug_rollout_data"].format(rollout_id=rollout))
-        samples.extend(audit_workflow.load_rollout(path)["samples"])
-    coverage = {
-        "long_prompt_samples": sum(len(s["tokens"]) - s["response_length"] > 4096 for s in samples),
-        "long_response_samples": sum(s["response_length"] > 4096 for s in samples),
-        "over_8k_samples": sum(len(s["tokens"]) > 8192 for s in samples),
-        "max_sequence_tokens": max(len(s["tokens"]) for s in samples),
-        "cached_tokens": sum(s.get("prefix_cache_info", {}).get("cached_tokens", 0) for s in samples),
-        "prompt_tokens": sum(len(s["tokens"]) - s["response_length"] for s in samples),
-    }
-    if miles.get("sglang_enable_mixed_chunk"):
-        require(
-            all(coverage[key] > 0 for key in ("long_prompt_samples", "long_response_samples", "over_8k_samples")),
-            "Long-context flags lacked actual consumed token coverage",
-        )
-    if not miles.get("sglang_disable_radix_cache", True):
-        require(coverage["cached_tokens"] > 0, "Radix enabled but no actual cache hits")
     contracts = sorted((root / "checkpoints").glob("training_contract_rank*.jsonl"))
     require(contracts, "Missing trainer contracts")
     local_samples = miles["global_batch_size"] // len(contracts)
@@ -416,11 +393,36 @@ def features(root):
             replay_count += len(replay)
         packed_count += sum(r.get("event") == "packing" for r in rows)
     require(packed_count > 0, "Packing not observed")
-    report["feature_coverage"] = {
-        **coverage,
-        "replay_observations": replay_count,
-        "packing_observations": packed_count,
+    return {"replay_observations": replay_count, "packing_observations": packed_count}
+
+
+def features(root):
+    """Require actual cache/long-token/replay coverage, beyond configured flags."""
+    root = Path(root)
+    report = audit(root)
+    plan = json.loads((root / "resolved-plan.json").read_text())
+    miles = plan["miles"]
+    samples = []
+    for rollout in range(miles["num_rollout"]):
+        path = Path(miles["save_debug_rollout_data"].format(rollout_id=rollout))
+        samples.extend(audit_workflow.load_rollout(path)["samples"])
+    coverage = {
+        "long_prompt_samples": sum(len(s["tokens"]) - s["response_length"] > 4096 for s in samples),
+        "long_response_samples": sum(s["response_length"] > 4096 for s in samples),
+        "over_8k_samples": sum(len(s["tokens"]) > 8192 for s in samples),
+        "max_sequence_tokens": max(len(s["tokens"]) for s in samples),
+        "cached_tokens": sum(s.get("prefix_cache_info", {}).get("cached_tokens", 0) for s in samples),
+        "prompt_tokens": sum(len(s["tokens"]) - s["response_length"] for s in samples),
     }
+    if miles.get("sglang_enable_mixed_chunk"):
+        require(
+            all(coverage[key] > 0 for key in ("long_prompt_samples", "long_response_samples", "over_8k_samples")),
+            "Long-context flags lacked actual consumed token coverage",
+        )
+    if not miles.get("sglang_disable_radix_cache", True):
+        require(coverage["cached_tokens"] > 0, "Radix enabled but no actual cache hits")
+    replay = replay_coverage(root, miles)
+    report["feature_coverage"] = {**coverage, **replay}
     return report
 
 
