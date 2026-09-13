@@ -86,7 +86,8 @@ class Publisher:
         self.weights = []
         for shard in sorted(root.glob("*.safetensors")):
             with safe_open(shard, framework="pt", device="cuda:0") as handle:
-                self.weights.extend((name, handle.get_tensor(name)) for name in handle.keys())
+                names = handle.keys()
+                self.weights.extend((name, handle.get_tensor(name)) for name in names)
         if not self.weights:
             raise ValueError("No safetensors weights found")
         self.changed = []
