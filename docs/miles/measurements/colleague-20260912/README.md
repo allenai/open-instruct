@@ -135,3 +135,13 @@ Warm-cache case 3 completed with exit 0
 its detailed cache/reward audit remains pending. EP4 retry
 [01M2C5Q6FF95BFBZJBT7WRP5W1](https://beaker.org/ex/01M2C5Q6FF95BFBZJBT7WRP5W1)
 was still running at this submission check.
+
+## Latest completed/blocked outcomes (2026-09-13 UTC)
+
+EP4 retry completed 12/12 optimizer updates, both replicas exit 0, with no traceback
+in the trainer log. The corrected sixteen-engine attempt did not reach training:
+its third replica never acquired slots; another replica raised
+`TimeoutError: Cluster startup/readiness deadline expired`, propagating cancellation
+to its peers. No throughput result is available for the corrected configuration.
+The next retry is held pending capacity rather than repeating partial allocation.
+See the campaign plan's current summary for outstanding readiness coverage.

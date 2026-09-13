@@ -4,6 +4,46 @@ Candidate starts at primary Open Instruct `9403772d1`; runtime dependency revisi
 are pinned by `runtime/miles/runtime.lock.json`. Execution branch:
 `robertb/miles-colleague-exercises`. This note distinguishes planned coverage from results.
 
+## Current campaign summary (2026-09-13 UTC)
+
+The dated submission notes below are historical. Six GPU exercises completed:
+dense asymmetric allocation with KL/multiple updates; mixed MoE EP2 with packing,
+replay, code services and a managed judge (retry); matching warm-cache fresh
+allocation; EP8 with eight engines; EP8 with sixteen engines; and EP4 with eight
+engines (retry). EP4 completed all twelve updates on both nodes, exit 0. The warm
+case restored compatible caches on both trainers and both serving workers.
+Independent retained-sample reward audits and final comparative timing analysis
+remain pending; lifecycle completion is not full feature or learning qualification.
+
+The corrected sixteen-engine throughput attempt
+[01M2C867KWDKSN1XRH228A6VGM](https://beaker.org/ex/01M2C867KWDKSN1XRH228A6VGM)
+failed before training: only two nodes allocated and cluster rendezvous expired.
+Its 1024-response producer budget/sample replenishment/startup-only audit settings
+have not yet been exercised. Retry after checking capacity; compare against the
+staged eight-engine profile with the same new controls. No inference-pool optimum
+is established. Recheck after engine-drain work because cancellation currently
+confounds useful throughput. No 24-engine escalation before that evidence.
+
+Not yet exercised in this campaign: dedicated long-context/mixed-chunk case;
+radix combined with the six-domain judge fixture; full EP8 + seven engines + judge;
+packed/replayed MoE async fresh-process resume and injected failure; dense full-model
+colocated checkpoint/resume/export/reload; hero EP2/TP2 numerical qualification.
+The hero numerical gate remains a prerequisite, not a passed training result.
+
+Long-context coverage is explicitly absent. Pool runs used a 2048 prompt cap,
+4096 response cap and 6144 context/packing cap. Frequent 4096-token truncation
+exercises long decoding at that limit; it does not qualify 8K/16K prompts or
+contexts. Prepare a separate small manifest with verified real token lengths,
+compatible model context support and verifier limits, then exercise long-input
+prefill, long decoding, mixed chunks and packing/replay boundaries with two trainers
+and two engines before scaling it. Do not claim coverage from configured limits.
+
+Near-term priorities: finish retained service/reward audits; a small long-context
+exercise and packed async resume; retry the corrected 16-engine sizing case when
+three nodes can allocate, then its corrected eight-engine comparison. Independent
+engine-drain implementation is handed off in
+[the engine-drain plan](engine-drain-handoff-20260912.md), separate from this campaign.
+
 ## Synthesis and limits
 
 At most ten GPU attempts including retries, plus one shared CPU preparation job
