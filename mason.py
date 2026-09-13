@@ -11,7 +11,6 @@ import string
 import subprocess
 import sys
 import time
-from datetime import timedelta
 
 import backoff
 import beaker
@@ -606,7 +605,8 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         spec.propagate_failure = True
         spec.propagate_preemption = True
         if args.synchronized_start_timeout_minutes is not None:
-            spec.synchronized_start_timeout = timedelta(minutes=args.synchronized_start_timeout_minutes)
+            # Beaker duration string (like --min_runtime); a raw timedelta isn't JSON-serializable.
+            spec.synchronized_start_timeout = f"{args.synchronized_start_timeout_minutes}m"
     if args.no_host_networking:
         spec.host_networking = False
     else:
