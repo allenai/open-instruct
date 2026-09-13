@@ -95,12 +95,22 @@ def audit(root):
             layer = int(name.split(".")[1])
             hf_name = f"model.layers.{layer}.mlp.router.gate.weight"
             expected, actual = initial[hf_name], native[name]
-            if expected.dtype != torch.bfloat16 or expected.shape != actual.shape:
-                raise ValueError("Qualification requires an exact-shaped BF16 initial router checkpoint")
+            if expected.shape != actual.shape:
+                raise ValueError(
+                    f"Router shape mismatch for {hf_name}: initial={expected.shape}, native={actual.shape}"
+                )
             if actual.dtype != torch.float32 or not torch.isfinite(actual).all():
                 raise ValueError("Expected finite FP32 native router masters")
-            difference = actual - expected.float()
+            # models.build explicitly loads this HF model with BF16 dtype before
+            # copying into native FP32 routers/masters. The saved HF tensor can
+            # itself be FP32; compare against the actual import, not raw storage.
+            imported = expected.bfloat16().float()
+            if not torch.isfinite(imported).all():
+                raise ValueError(f"Nonfinite initial router: {hf_name}")
+            difference = actual - imported
             changes[hf_name] = {
+                "checkpoint_dtype": str(expected.dtype),
+                "import_dtype": "torch.bfloat16",
                 "changed_elements": int(torch.count_nonzero(difference)),
                 "max_abs_change": float(difference.abs().max()),
             }

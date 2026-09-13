@@ -93,3 +93,23 @@ def test_incomplete_or_misleading_evidence_fails(tmp_path, monkeypatch, fault):
         state.masters["blocks.1.routed_experts_router.weight"].fill_(1)
     with pytest.raises(ValueError):
         audit.audit(tmp_path)
+
+
+def test_import_rounding_is_not_mistaken_for_optimizer_change(tmp_path, monkeypatch):
+    state = fixture(tmp_path, monkeypatch)
+    state.masters["blocks.1.routed_experts_router.weight"].fill_(1.0)
+
+    class Initial(dict):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(
+        audit,
+        "SafeTensorState",
+        lambda path: Initial({"model.layers.1.mlp.router.gate.weight": torch.tensor([1.001], dtype=torch.float32)}),
+    )
+    with pytest.raises(ValueError, match="No measured router master change"):
+        audit.audit(tmp_path)
