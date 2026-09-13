@@ -32,6 +32,8 @@ from tqdm.asyncio import tqdm_asyncio
 from transformers import HfArgumentParser
 from transformers.hf_argparser import DataClassType
 
+from open_instruct.preference_quality import should_swap_after_shuffle
+
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
 # and that the shards might be small
@@ -152,8 +154,11 @@ def main(args: Args):
 
                     chosen = comparison_pair[0]["messages"]
                     rejected = comparison_pair[1]["messages"]
-                    # reverse the preferred choice if the responses were shuffled
-                    if preferred == "0" and shuffled_index == 1 and preferred == "1" and shuffled_index == 0:
+                    # Reverse the preferred choice if the responses were shuffled.
+                    # NOTE: the previous guard ANDed contradictory clauses
+                    # (preferred == "0" and preferred == "1"), so the swap never
+                    # ran and ~50% of preference labels were silently flipped.
+                    if should_swap_after_shuffle(preferred, shuffled_index):
                         chosen, rejected = rejected, chosen
                     messages.append({"content": r, "role": "assistant"})
                     return chosen, rejected, comparison, messages
