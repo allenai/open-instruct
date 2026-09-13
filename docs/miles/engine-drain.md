@@ -35,7 +35,8 @@ actor owns a two-rank NCCL communicator with exactly one TP1 receiver. Training
 communicators and live parameters are never used by background delivery. A pinned
 host staging bucket feeds the sender GPU. This preserves bucketed/fused transfer,
 but adds host copies and per-engine CUDA contexts compared with the synchronous
-GPU export; their cost is not yet measured. Initial capture is also delivered and
+GPU export. The first measured CPU-packing capture was too expensive (about 65 s);
+GPU bucket packing replaces it, with full-model measurement tracked below. Initial capture is also delivered and
 checked against the startup serving-weight audit before training admission opens.
 
 Publication closes admission independently, waits for owned requests, loads the
@@ -119,10 +120,13 @@ MILES_BASE_IMAGE=olmo-miles:gate-01m24e7msdgn2qfw1t8z31bcks \
 
 CPU tests have demonstrated independent progress, version checks, admission ordering,
 last-reader snapshot retention, deadlines and saturated-buffer lifecycle behavior.
-GPU transfer, useful learning, fresh-process resume, failure handling, and comparison
-against barrier-mode performance remain qualification gates. This document is not
-a claim that those gates passed. Per-update full audits remain disabled; initial
-weight equality and fixed-byte snapshot tests are separate numerical checks.
+The six-update rolling run passed weight equality, useful learning, checkpoints,
+evaluation and shutdown; the slow peer allowed 71 responses from the updated
+engine. Fresh-process resume, complete optimizer overlap, and deliberate failure
+are separate follow-up gates. See the [qualification measurements](measurements/engine-drain-20260913/README.md)
+for exact images, attempts, timings and limitations. Per-update full audits remain
+disabled; initial weight equality and fixed-byte snapshot tests are separate
+numerical checks.
 
 ## Future mixed-policy work
 

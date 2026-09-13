@@ -1,6 +1,7 @@
 """Read-only CPU audit of completed rolling-publication runs and native masters."""
 
 import argparse
+import hashlib
 import json
 import math
 from collections import Counter, defaultdict
@@ -122,9 +123,44 @@ def audit(root):
             }
     if not changes or not any(row["changed_elements"] for row in changes.values()):
         raise ValueError("No measured router master change from the initial checkpoint")
+    resumed = None
+    if miles.get("load"):
+        # Audit the exact boundary immediately preceding this run, not a mutable
+        # latest pointer. Changes from the original HF model alone could conceal
+        # an inert resumed optimizer whose first six updates were already saved.
+        previous_step = clocks[0][0] - 1
+        source_root = Path(miles["load"])
+        source = source_root / "core" / f"rollout_{previous_step - 1:07d}"
+        source_manifest = json.loads((source / "complete.json").read_text())
+        cursor = source_root / "rollout" / f"global_dataset_state_dict_{previous_step - 1}.pt"
+        if (
+            source_manifest["clock"]["completed_steps"] != previous_step
+            or hashlib.sha256(cursor.read_bytes()).hexdigest() != source_manifest["cursor_sha256"]
+            or clocks[0] != list(range(previous_step + 1, miles["num_rollout"] + 1))
+        ):
+            raise ValueError("Resume boundary, committed cursor or consecutive optimizer clocks disagree")
+        previous = CoreCheckpointState(
+            source / "model", Olmo3MoeConfig(**source_manifest["hf_config"]), category="fp32_masters"
+        )
+        drift = {}
+        for name in native:
+            if not name.endswith(".routed_experts_router.weight"):
+                continue
+            before, after = previous[name], native[name]
+            if before.shape != after.shape or before.dtype != torch.float32 or not torch.isfinite(before).all():
+                raise ValueError("Invalid resumed router master reference")
+            difference = after - before
+            drift[name] = {
+                "changed_elements": int(torch.count_nonzero(difference)),
+                "max_abs_change": float(difference.abs().max()),
+            }
+        if not drift or not any(row["changed_elements"] for row in drift.values()):
+            raise ValueError("No router master changed after resuming")
+        resumed = {"checkpoint": str(source), "completed_steps": previous_step, "router_master_changes": drift}
     report = {
         "run_root": str(root),
         "completed_steps": clocks[0],
+        "resumed_from": resumed,
         "trainer_ranks": len(ranks),
         "consumed_lag_rank_version_counts": dict(lag),
         "trained_responses": responses,

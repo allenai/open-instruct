@@ -35,9 +35,9 @@ SGLang model-loading test. See [its report](transport-probe.json).
 - Ruff and type checking pass.
 - Request IDs now distinguish repeated admissions of the same prompt group.
 
-Complete rolling-run lifecycle, slow-engine overlap, fresh-process resume, and
-bounded GPU engine failure remain unqualified. Initial SGLang weight equality
-and optimizer execution have passed in C; the old-mode control completed.
+The six-update rolling lifecycle and independent engine progress now pass (D).
+Fresh-process resume, complete optimizer overlap, and bounded real-engine failure
+remain gates for the follow-up runs listed below.
 
 ## Additional review and test findings
 
@@ -47,7 +47,7 @@ none of which remain in `_active_tasks`. Quiescent capacity now uses the full
 with no active decodes and verifies all survive the boundary without cancellation.
 This correction postdates image C. C subsequently reproduced this exact failure
 (`active_groups=0`, worker blocked) at its first save boundary and was stopped.
-The running image D includes the fix; resume fixtures now read D, not C.
+Image D includes the fix and completed; resume fixtures read D, not C.
 
 The full CPU runtime suite initially could not collect
 `test_core_policy_contract.py`: the base image lacks its cross-backend
@@ -85,15 +85,99 @@ BF16 capture and source mutation. The revised GPU transport probe passed; full-m
 
 The slow fixture now waits for admission to close before starting its delay.
 The earlier fixed-at-admission delay in image D could expire during cold backward
-compilation, before a publication drain began. Image D's running attempt remains
-recorded as that earlier fixture, not evidence for the revised one.
+compilation, before a publication drain began. Image D remains recorded as that earlier fixture, not evidence for the revised one.
 
 ## Additional attempts
 
 | Attempt | Image / source | Status |
 | --- | --- | --- |
-| [D, original slow fixture](https://beaker.org/ex/01M2CDFK13AV7WV82EX4AMAJTR) | `01M2CDFB37KCSGKJZ36M12TK48`, `3c97e913b` | Running with corrected completion ledger and original fixed delay. |
+| [D, original slow fixture](https://beaker.org/ex/01M2CDFK13AV7WV82EX4AMAJTR) | `01M2CDFB37KCSGKJZ36M12TK48`, `3c97e913b` | Passed, exit 0: six updates, two saves, initial/final evaluation and shutdown. Independent engine progress observed. |
 | [GPU bucket probe](https://beaker.org/ex/01M2CEMH82TJRT3DV4C1SV5319) | `01M2CEM9RZ5CGQ1NVMTM7PY4R0`, `019e66609` | Passed: 8,392,704 bytes in two buckets, noncontiguous FP32 source, BF16 capture, post-capture mutation, exact receipt and teardown. |
 
 The bucket probe's 2.02 s includes first-collective setup; it is not a throughput
-benchmark. The next full-model exercise reuses this immutable image.
+benchmark. The final runtime image keeps this transport and adds bounded completion
+backlog handling across repeated save boundaries: `01M2CFNVJAJ84SNR66MJ7Z90GV`,
+source `2b8845852cf225355dca0809690e15982452b642`.
+
+
+## Six-update result and control
+
+D completed from 03:40:07 to 04:21:36 UTC. The control completed from 03:27:07
+to 03:56:49. Both used the same initial checkpoint, GSM8K selection/seed, EP2/two
+TP1 topology, optimizer, packing, replay, TIS and lag budget. They share the same
+base runtime and Core/serving pins; their Open Instruct images differ as recorded
+above. D includes the rolling-only lifecycle fix and a deliberate slow request.
+Scheduling, sampled responses and compilation misses differ. This is a functional
+control, not a steady-state speed or learning-quality comparison.
+
+| Measurement | Barrier control | Rolling D (old snapshot capture) |
+| --- | ---: | ---: |
+| Optimizer updates / trained responses | 6 / 384 | 6 / 384 |
+| Active response tokens | 716,422 | 802,587 |
+| Mixed-reward groups (nonzero GRPO advantages) | 23 | 19 |
+| Gradient norm range | 0.100–0.306 | 0.105–0.229 |
+| Routers with changed FP32 master weights | 19 | 19 |
+| Consumed lag | 0–2 | 0–2 |
+| Mean training reward | 0.779 | 0.760 |
+| Held-out correct, initial → final (16 questions) | 14 → 13 | 15 → 14 |
+| Publication, mean driver-blocking seconds | 0.87 | 65.23 |
+| Independent delivery, mean seconds per engine | not separate | 4.80 |
+| Checkpoint boundary, seconds | 141 / 119 | 173 / 173 |
+| Initial training stage, including scoring/compilation | 398 s | 611 s |
+| Total allocation time | 29.7 min | 41.5 min |
+
+The small sampled held-out scores do not establish learning equivalence. Both
+runs performed useful learning work: finite nonzero gradients, mixed-reward groups,
+finite behavior log probabilities, replay covering every token and real router
+master changes. The initial router storage and import were both BF16; the audit
+compares to the actual BF16 import before measuring FP32 master changes.
+
+D reserved and completed **1,384 responses / 2,998,004 generated tokens** with no
+unknown outcomes, engine failures, mixed groups, request ownership errors or
+unreleased snapshots. Engine 0 reopened version 3 while engine 1 drained version 2;
+**71 version-3 responses completed during that interval**. The longest drain was
+58.49 s. No *entire* driver training interval fit inside that drain; the gated
+follow-up below tests that remaining criterion conservatively.
+
+Only 384 responses were trained in this deliberately short run: 1,000 completed
+responses / 2,195,417 generated tokens were not consumed before termination.
+These are completed work, not aborted partial decodes. The async buffer reported
+46 stale groups filtered and retried, versus zero for the barrier control. Lifecycle
+quiescence and slow capture allowed substantial overproduction; the latest image
+also prevents repeated saves from expanding the completion backlog indefinitely.
+Avoid treating zero cancellations as zero waste. Useful-token throughput and queue
+sizing still need longer, warmed measurement.
+
+Capture was the main regression: six frozen snapshots averaged 64.92 s, whereas
+delivery averaged 4.80 s per engine. The old capture performed many CPU tensor
+copies/concatenations. GPU bucket packing is qualified separately and is being
+measured in the resumed run. Peak retained snapshot bytes in D were 37,028,386,304;
+this is live object-store payload, not process/host peak RSS. Configured capacity is
+two versions, requiring approximately 74 GB plus staging. Sender GPU allocation
+peaks were about 1.25 GB per engine, excluding CUDA-context memory.
+
+Exact stage arrays, lag counts, gradients, queue/staleness metrics and protocol
+summary are retained in [six-update-comparison.json](six-update-comparison.json).
+CPU read-only audits passed for the [control](https://beaker.org/ex/01M2CFT4DPKJ37YH20AE0W54NF)
+and [D](https://beaker.org/ex/01M2CG5W7KFK4QKJSGT0P4CKZ5); their `audit.json` and
+provenance are Beaker results. Two earlier control-audit attempts failed because
+the checker assumed the wrong router dtype/layout; the checker now uses the
+canonical flat Core layout and explicit BF16 import. Those were checker failures,
+not altered training evidence.
+
+## Final-image gates in progress
+
+- [Fresh process, steps 7–12, gated slow engine](https://beaker.org/ex/01M2CG415X6NA0NJXDV3PCRAQR).
+  Reads D's completed step-six checkpoint, publishes before admission, tests GPU
+  bucket capture and complete optimizer overlap, then saves/evaluates/shuts down.
+- [Deliberate owned SGLang engine loss](https://beaker.org/ex/01M2CG4GZ3C2CF38C2BBN8CMCQ).
+  Independent output directory and process; reads D, then retires exactly its own
+  engine after a trained publication. Success requires bounded driver failure and
+  quarantine with no subsequent reopen. A successful harness exit means the
+  expected failure was observed, not that training finished normally.
+
+Final-image CPU runtime suite: **769 passed, 53 skipped**, with only the previously
+documented cross-backend module excluded. Wrapper: **309 passed, one skipped**.
+Ruff and type checking passed. The additional resume audit compares final masters
+against the actual saved step-six masters, so pre-resume changes cannot certify
+an inert resumed optimizer. No primary branch or shared example has been changed.

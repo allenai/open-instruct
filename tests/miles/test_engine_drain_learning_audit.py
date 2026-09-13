@@ -1,5 +1,6 @@
 """Audit must reject inert learning, malformed replay and mixed policy groups."""
 
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -115,3 +116,38 @@ def test_import_rounding_is_not_mistaken_for_optimizer_change(tmp_path, monkeypa
     )
     with pytest.raises(ValueError, match="No measured router master change"):
         audit.audit(tmp_path)
+
+
+@pytest.mark.parametrize("changed", [True, False])
+def test_resume_requires_change_since_saved_boundary(tmp_path, monkeypatch, changed):
+    state = fixture(tmp_path, monkeypatch)
+    source = tmp_path / "previous"
+    saved = source / "core/rollout_0000000"
+    saved.mkdir(parents=True)
+    (source / "rollout").mkdir()
+    cursor = source / "rollout/global_dataset_state_dict_0.pt"
+    cursor.write_bytes(b"committed cursor")
+    (saved / "complete.json").write_text(
+        json.dumps(
+            {
+                "clock": {"completed_steps": 1},
+                "hf_config": {},
+                "cursor_sha256": hashlib.sha256(cursor.read_bytes()).hexdigest(),
+            }
+        )
+    )
+    plan_path = tmp_path / "resolved-plan.json"
+    plan = json.loads(plan_path.read_text())
+    plan["miles"]["load"] = str(source)
+    plan_path.write_text(json.dumps(plan))
+    reference = {name: value - 0.0001 if changed else value.clone() for name, value in state.masters.items()}
+    monkeypatch.setattr(
+        audit, "CoreCheckpointState", lambda path, *a, **k: reference if path == saved / "model" else state.masters
+    )
+    if changed:
+        report = audit.audit(tmp_path)
+        assert report["resumed_from"]["completed_steps"] == 1
+        assert all(row["changed_elements"] for row in report["resumed_from"]["router_master_changes"].values())
+    else:
+        with pytest.raises(ValueError, match="after resuming"):
+            audit.audit(tmp_path)

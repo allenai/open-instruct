@@ -1,0 +1,382 @@
+{
+  "barrier": {
+    "run_root": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-barrier-ep2-gsm8k-20260913-a",
+    "completed_steps": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "trainer_ranks": 2,
+    "consumed_lag_rank_version_counts": {
+      "0": 2,
+      "1": 2,
+      "2": 8
+    },
+    "trained_responses": 384,
+    "response_tokens": 716422,
+    "active_response_tokens": 716422,
+    "mixed_reward_groups": 23,
+    "mean_training_reward": 0.7786458333333334,
+    "master_check_scope": "router tensors only; proves an update from initial HF weights, not backend equivalence",
+    "router_tensors_changed": 19,
+    "max_router_master_change": 6.0070306062698364e-06,
+    "source_router_dtypes": [
+      "torch.bfloat16"
+    ],
+    "stages_seconds": {
+      "startup_cache_prepare": [
+        0.20342452405020595
+      ],
+      "placement": [
+        9.660657340660691
+      ],
+      "serving_startup": [
+        393.35647970670834
+      ],
+      "trainer_startup": [
+        127.82664975710213
+      ],
+      "initial_publication": [
+        5.917065168265253
+      ],
+      "evaluation": [
+        26.50864264694974,
+        48.493882379028946
+      ],
+      "generation_wait": [
+        59.04681624798104,
+        2.115081031806767,
+        2.2119250311516225,
+        1.9112646295689046,
+        1.0593216791749,
+        1.7694305991753936
+      ],
+      "training": [
+        398.2531085591763,
+        144.77295459527522,
+        67.30907771596685,
+        104.75406806403771,
+        7.611647443845868,
+        14.025723048951477
+      ],
+      "publication": [
+        0.8014353578910232,
+        0.8422798858955503,
+        0.8385996748693287,
+        0.7357787252403796,
+        1.135228562168777,
+        0.8463744567707181
+      ],
+      "checkpoint": [
+        140.7831083983183,
+        119.36309221806005
+      ]
+    },
+    "gradient_norms": [
+      0.10009409487247467,
+      0.17380957305431366,
+      0.18275055289268494,
+      0.10256338119506836,
+      0.26422250270843506,
+      0.305923193693161
+    ],
+    "heldout": [
+      {
+        "eval/heldout": 0.875,
+        "eval/heldout/weight_version/mean": 0.0,
+        "eval/heldout/response_len/mean": 2203.375
+      },
+      {
+        "eval/heldout": 0.8125,
+        "eval/heldout/weight_version/mean": 6.0,
+        "eval/heldout/response_len/mean": 2134.6875
+      }
+    ],
+    "async_per_collection": [
+      {
+        "rollout/fully_async/queue_size": 0,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 0.0,
+        "rollout/fully_async/max_staleness": 0,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 8,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 1.0,
+        "rollout/fully_async/max_staleness": 1,
+        "rollout/fully_async/buffer_avg_staleness": 1.0,
+        "rollout/fully_async/buffer_max_staleness": 1,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 8,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 2.0,
+        "rollout/fully_async/max_staleness": 2,
+        "rollout/fully_async/buffer_avg_staleness": 1.0,
+        "rollout/fully_async/buffer_max_staleness": 1,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 8,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 2.0,
+        "rollout/fully_async/max_staleness": 2,
+        "rollout/fully_async/buffer_avg_staleness": 1.0,
+        "rollout/fully_async/buffer_max_staleness": 1,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 8,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 2.0,
+        "rollout/fully_async/max_staleness": 2,
+        "rollout/fully_async/buffer_avg_staleness": 1.0,
+        "rollout/fully_async/buffer_max_staleness": 1,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 0,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 2.0,
+        "rollout/fully_async/max_staleness": 2,
+        "rollout/fully_async/rejected_policy_groups": 0
+      }
+    ]
+  },
+  "rolling_original_capture": {
+    "run_root": "/weka/oe-training-default/robertb/open-instruct/workflow-exercise/engine-drain-ep2-slow-20260913-a",
+    "completed_steps": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "trainer_ranks": 2,
+    "consumed_lag_rank_version_counts": {
+      "0": 2,
+      "1": 2,
+      "2": 8
+    },
+    "trained_responses": 384,
+    "response_tokens": 802587,
+    "active_response_tokens": 802587,
+    "mixed_reward_groups": 19,
+    "mean_training_reward": 0.7604166666666666,
+    "master_check_scope": "router tensors only; proves an update from initial HF weights, not backend equivalence",
+    "router_tensors_changed": 19,
+    "max_router_master_change": 6.0070306062698364e-06,
+    "source_router_dtypes": [
+      "torch.bfloat16"
+    ],
+    "stages_seconds": {
+      "startup_cache_prepare": [
+        0.19761381996795535
+      ],
+      "placement": [
+        9.733878902159631
+      ],
+      "serving_startup": [
+        343.26893357140943
+      ],
+      "trainer_startup": [
+        115.24816076876596
+      ],
+      "initial_publication": [
+        16.684954410418868
+      ],
+      "engine_drain_startup": [
+        111.15248733013868
+      ],
+      "evaluation": [
+        22.430119815748185,
+        26.3833972197026
+      ],
+      "generation_wait": [
+        58.4159817523323,
+        2.075873678084463,
+        2.2711572791449726,
+        1.1790414457209408,
+        1.1691684918478131,
+        1.9813266778364778
+      ],
+      "training": [
+        610.9037191169336,
+        22.925540308002383,
+        61.082180561032146,
+        58.168043873272836,
+        60.16150451730937,
+        17.863283650018275
+      ],
+      "publication": [
+        73.25833010813221,
+        60.2852500625886,
+        66.86120913503692,
+        61.4331787712872,
+        57.20886557130143,
+        72.3500791718252
+      ],
+      "checkpoint": [
+        173.29363894602284,
+        172.74804278230295
+      ]
+    },
+    "gradient_norms": [
+      0.20885547995567322,
+      0.1357087641954422,
+      0.14018860459327698,
+      0.22947008907794952,
+      0.17719483375549316,
+      0.10539615154266357
+    ],
+    "heldout": [
+      {
+        "eval/heldout": 0.9375,
+        "eval/heldout/weight_version/mean": 0.0,
+        "eval/heldout/response_len/mean": 1681.8125
+      },
+      {
+        "eval/heldout": 0.875,
+        "eval/heldout/weight_version/mean": 6.0,
+        "eval/heldout/response_len/mean": 1998.625
+      }
+    ],
+    "async_per_collection": [
+      {
+        "rollout/fully_async/queue_size": 0,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 0.0,
+        "rollout/fully_async/max_staleness": 0,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 16,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 1.0,
+        "rollout/fully_async/max_staleness": 1,
+        "rollout/fully_async/buffer_avg_staleness": 1.0,
+        "rollout/fully_async/buffer_max_staleness": 1,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 16,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 0,
+        "rollout/fully_async/avg_staleness": 2.0,
+        "rollout/fully_async/max_staleness": 2,
+        "rollout/fully_async/buffer_avg_staleness": 2.0,
+        "rollout/fully_async/buffer_max_staleness": 2,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 16,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 24,
+        "rollout/fully_async/avg_staleness": 2.75,
+        "rollout/fully_async/max_staleness": 3,
+        "rollout/fully_async/buffer_avg_staleness": 1.5,
+        "rollout/fully_async/buffer_max_staleness": 2,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 10,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 8,
+        "rollout/fully_async/avg_staleness": 2.5,
+        "rollout/fully_async/max_staleness": 3,
+        "rollout/fully_async/buffer_avg_staleness": 2.0,
+        "rollout/fully_async/buffer_max_staleness": 2,
+        "rollout/fully_async/rejected_policy_groups": 0
+      },
+      {
+        "rollout/fully_async/queue_size": 4,
+        "rollout/fully_async/aborted_groups_filtered": 0,
+        "rollout/fully_async/stale_groups_filtered": 14,
+        "rollout/fully_async/avg_staleness": 2.6363636363636362,
+        "rollout/fully_async/max_staleness": 3,
+        "rollout/fully_async/buffer_avg_staleness": 2.0,
+        "rollout/fully_async/buffer_max_staleness": 2,
+        "rollout/fully_async/rejected_policy_groups": 0
+      }
+    ],
+    "protocol": {
+      "scope": "protocol timeline only; numerical weights, learning, lag, and resume need separate audits",
+      "event_counts": {
+        "lifecycle_quiesced": 7,
+        "group_reserved": 173,
+        "request_sent": 1384,
+        "decode_finished": 1384,
+        "group_graded": 173,
+        "snapshot_ready": 6,
+        "drain_started": 12,
+        "drain_finished": 12,
+        "update_started": 12,
+        "delivery_measured": 12,
+        "engine_reopened": 12,
+        "snapshot_released": 6,
+        "qualification_delay_started": 1,
+        "qualification_delay_finished": 1
+      },
+      "ownership_errors": [],
+      "mixed_groups": [],
+      "reserved_requests": 1384,
+      "completed_responses": 1384,
+      "generated_tokens_observed": 2998004,
+      "requests_without_terminal_decode": [],
+      "fast_reopened_while_older_peer_drained": [
+        {
+          "engine": "0",
+          "version": 3,
+          "time": 1789272634.080759,
+          "older_draining_peers": [
+            "1"
+          ]
+        }
+      ],
+      "optimizer_completions_during_publication": [],
+      "peak_retained_snapshot_bytes": 37028386304,
+      "unreleased_snapshots": [],
+      "delivered_bytes": 444340635648,
+      "phase_seconds": {
+        "snapshot_capture": {
+          "count": 6,
+          "mean": 64.92239118584742,
+          "max": 73.11842780699953
+        },
+        "draining": {
+          "count": 12,
+          "mean": 4.876998484134674,
+          "max": 58.48582696914673
+        },
+        "delivery": {
+          "count": 12,
+          "mean": 4.795007472392172,
+          "max": 5.678860642947257
+        },
+        "updating": {
+          "count": 12,
+          "mean": 4.847995599110921,
+          "max": 5.9201438426971436
+        }
+      },
+      "warning": "Phase durations overlap; do not sum them as elapsed wall time. Unknown HTTP outcomes have unknown discarded tokens.",
+      "new_version_responses_while_peer_draining": 71
+    },
+    "completed_not_trained_responses": 1000,
+    "completed_not_trained_tokens": 2195417
+  }
+}
