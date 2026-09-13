@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from datetime import timedelta
 from pathlib import Path
 
@@ -258,7 +259,7 @@ def run_case(root, publisher, prompt, label, batch, length, cut, version, refres
         output = result["output_ids"]
         assert len(output) == length and meta["finish_reason"]["type"] == "length", meta
         assert len(meta["output_token_logprobs"]) == length, "lost/duplicated behavior logprobs"
-        entry = {"rid": rid, "version_spans": meta.get("weight_versions"), "retractions": meta.get("retraction_count")}
+        entry = {"rid": rid, "version_spans": meta.get("weight_versions"), "retractions": meta.get("num_retractions")}
         if refresh:
             before = json.loads((root / "trace" / f"{rid}-0.json").read_text())
             kept = len(before["output_ids"])
@@ -338,10 +339,13 @@ def main():
     parser.add_argument("--model", type=Path)
     parser.add_argument("--output", type=Path, default=Path("/output"))
     parser.add_argument("--radix", action="store_true")
+    parser.add_argument("--long-repeats", type=int, default=0)
     parser.add_argument(
         "--local-ipc", action="store_true", help="Tiny lifecycle test on one GPU; no cross-GPU timing claim"
     )
     args = parser.parse_args()
+    if not 0 <= args.long_repeats <= 5:
+        parser.error("--long-repeats must be from 0 to 5")
     if args.local_ipc and args.model is not None:
         parser.error("--local-ipc is limited to the tiny fixture")
     root = args.output
@@ -440,6 +444,7 @@ def main():
         rpc("generate", request(prompt, "warm", 32))
         publisher.publish(1)
         reports = []
+        cache_root = Path(os.environ.get("TRITON_CACHE_DIR", str(Path.home() / ".triton/cache")))
         for i, (label, p, batch, length, cut, refresh, temperature, change) in enumerate(
             [
                 ("drain-short", prompt, 4, 256, 32, False, 0, False),
@@ -448,6 +453,10 @@ def main():
                 ("drain-long", (prompt * (1024 // len(prompt) + 1))[:1024], 4, 512, 128, False, 0, False),
                 ("refresh-long", (prompt * (1024 // len(prompt) + 1))[:1024], 4, 512, 128, True, 0, True),
                 ("refresh-sampled", prompt, 4, 512, 64, True, 1, True),
+            ]
+            + [
+                (f"refresh-long-repeat-{j}", (prompt * (1024 // len(prompt) + 1))[:1024], 4, 512, 128, True, 0, False)
+                for j in range(args.long_repeats)
             ],
             start=2,
         ):
@@ -456,7 +465,12 @@ def main():
                 if change and name in publisher.changed:
                     tensor[..., ::2].mul_(1.015625)
                     tensor[..., 1::2].mul_(0.984375)
-            reports.append(run_case(root, publisher, p, label, batch, length, cut, i, refresh, temperature))
+            cache_before = set(cache_root.rglob("*.cubin"))
+            report = run_case(root, publisher, p, label, batch, length, cut, i, refresh, temperature)
+            cache_after = set(cache_root.rglob("*.cubin"))
+            report["triton_new_binaries_including_reference_scoring"] = dict(Counter(path.name for path in cache_after - cache_before))
+            report["triton_cache_root"] = str(cache_root)
+            reports.append(report)
         (root / "summary.json").write_text(
             json.dumps(
                 {

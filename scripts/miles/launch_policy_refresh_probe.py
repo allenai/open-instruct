@@ -12,9 +12,11 @@ from pathlib import Path
 MODEL = "/weka/oe-training-default/robertb/olmo-miles/checkpoints/olmoe3-kda-1.2b-dolci-think-sft-65536-router-bf16-autocast-v2-hf"
 
 
-def make_spec(image, mode, radix=False):
+def make_spec(image, mode, radix=False, long_repeats=0):
     if mode not in ("tiny", "sft"):
         raise ValueError("Probe mode must be tiny or sft")
+    if type(long_repeats) is not int or not 0 <= long_repeats <= 5:
+        raise ValueError("long_repeats must be an integer from 0 to 5")
     files = {
         name: Path(__file__).with_name(name).read_bytes()
         for name in ("policy_refresh_probe.py", "policy_refresh_hooks.py")
@@ -43,6 +45,8 @@ def make_spec(image, mode, radix=False):
         argv += ["--model", MODEL]
     if radix:
         argv += ["--radix"]
+    if long_repeats:
+        argv += ["--long-repeats", str(long_repeats)]
     commands.append(shlex.join(argv))
     task = {
         "name": f"policy-refresh-{mode}-{'radix' if radix else 'no-radix'}",
@@ -73,7 +77,8 @@ def make_spec(image, mode, radix=False):
 def main():
     image = sys.argv[1]
     mode = sys.argv[2] if len(sys.argv) > 2 else "tiny"
-    spec = make_spec(image, mode, "--radix" in sys.argv[3:])
+    repeats = 3 if "--repeat-long" in sys.argv[3:] else 0
+    spec = make_spec(image, mode, "--radix" in sys.argv[3:], long_repeats=repeats)
     with tempfile.TemporaryDirectory(prefix="policy-refresh-") as directory:
         path = Path(directory) / "experiment.json"
         path.write_text(json.dumps(spec))

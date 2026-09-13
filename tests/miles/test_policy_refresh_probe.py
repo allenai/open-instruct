@@ -107,3 +107,11 @@ def test_transition_preserves_behavior_and_exact_version_boundary():
     response["meta_info"]["weight_versions"][1]["start"] = 1
     with pytest.raises(ValueError, match="spans"):
         check_transition(before, response)
+
+
+def test_warm_long_repeats_are_explicit_and_bounded(monkeypatch):
+    monkeypatch.setattr(launch.subprocess, "check_output", lambda *a, **k: "abc123\n")
+    task = launch.make_spec("image", "sft", radix=True, long_repeats=3)["tasks"][0]
+    assert "--radix --long-repeats 3" in task["arguments"][0]
+    with pytest.raises(ValueError, match="long_repeats"):
+        launch.make_spec("image", "sft", long_repeats=6)
