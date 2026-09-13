@@ -109,3 +109,14 @@ norm/update sampling governed by the same interval. Replay diagnostics, policy
 version/logprob gates, and scoring-pass checks retain their previous settings.
 A new timing measurement is required; the 44–51 s publication phase above remains
 the result for every-update audits. No startup-only performance result is claimed.
+
+The throughput follow-ups now explicitly supply 64 requests per TP1 engine:
+512 outstanding responses for eight engines, 1024 for sixteen, and 1536 in the
+staged 24-engine config. All use sample-level replenishment; the optimizer batch
+remains 512 responses. The previous runs inherited a producer limit of 64 prompt
+groups (512 responses), even with sixteen engines, and replenished only after a
+whole group finished. Consequently the new runs change both audit cadence and
+producer scheduling; comparison with the old runs is an overall configuration
+comparison, not an isolated measurement of any one change. Publication still
+cancels unfinished groups in this runtime; a larger producer budget can also
+increase discarded work. Retain cancellation counts alongside useful throughput.

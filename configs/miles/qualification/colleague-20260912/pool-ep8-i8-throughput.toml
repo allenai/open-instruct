@@ -126,6 +126,9 @@ expert_publication = "fused"
 scoring_check_interval = 20
 
 [miles]
+# Match the TP1 pool's aggregate 64-request admission limit; independent of
+# the 512-response optimizer batch and the completed-output buffer capacity.
+async_max_concurrent_samples = 512
 use_rollout_routing_replay = true
 use_miles_router = true
 rollout_temperature = 1.0
@@ -139,7 +142,8 @@ fully_async = true
 max_weight_staleness = 2
 async_data_buffer_capacity_factor = 2.0
 async_unused_samples_handler = "retry"
-rollout_submission_granularity = "group"
+# Replenish when individual responses finish, without waiting for a whole group.
+rollout_submission_granularity = "sample"
 # Core scores the old policy; TIS corrects the behavior-policy mismatch.
 off_policy_correction = "tis"
 
