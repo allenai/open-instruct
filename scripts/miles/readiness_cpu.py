@@ -223,8 +223,8 @@ def lifecycle(root):
         require(audit_workflow.digest(cursor) == manifest["cursor_sha256"], "Saved cursor integrity failure")
         # Read descriptors, not many gigabytes of optimizer tensors. Native restore
         # itself is exercised by the resumed GPU process and must also pass.
-        checkpoint = importlib.import_module("torch.distributed.checkpoint")
-        metadata = checkpoint.FileSystemReader(path / "model").read_metadata()
+        checkpoint = importlib.import_module("olmo_core.distributed.checkpoint")
+        metadata = checkpoint.get_checkpoint_metadata(path / "model")
         names = list(metadata.state_dict_metadata)
         require(any("optim" in name for name in names), "Native save lacks optimizer state")
         require(
