@@ -263,3 +263,15 @@ and a [combined cached-prefix feature audit](https://beaker.org/ex/01M2DSGSSZ5GW
 were submitted on Saturn after downloading the logs. At this timestamp they are
 pulling the runtime image; no audit pass is claimed yet. Full EP8/judged topology
 still awaits two whole Holmes nodes (current free GPUs are fragmented 7 + 1).
+
+
+At 16:32 UTC both independent audit jobs passed, exit zero. The
+[stdio reward audit](stdio-reward-audit.json) confirms four fully correct and 28
+zero-score training responses, two mixed-reward groups and 32 successful code
+service outcomes. The [combined reward audit](combined-reward-audit.json) confirms
+mixed groups in math, IF, function code and both named judge rubrics; its original
+stdio fixture still scored zero. The [combined feature audit](combined-feature-audit.json)
+confirms 1,792 cached prompt tokens out of 50,480, 196 replay observations and
+eight packing records. Reward identity/accounting, prompt/split hashes, group and
+policy-version checks passed. These audits reparse retained grades; they do not
+independently re-execute every code test or re-query stochastic judges.
