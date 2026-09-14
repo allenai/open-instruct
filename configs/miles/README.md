@@ -31,6 +31,6 @@ probes are disabled. Evaluation shares engine admission settings and its latency
 depends on actual response lengths. Old admission/evaluation targets are retained
 in [measurements](../../docs/miles/measurements/index.md), not promised timings.
 
-Copy personal configurations outside the clean checkout or into an ignored run
-directory. Replace account/model/output paths and select a compatible immutable
+Copy personal configurations into Git-ignored `runs/` or outside the checkout.
+Start with `examples/grpo-sharing.toml` for the tested three-GPU colleague setup. Replace account/model/output paths and select a compatible immutable
 image. Keep historical experiment TOMLs unchanged when adjusting a starter.

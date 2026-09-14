@@ -166,3 +166,6 @@ scratch/
 
 # Reconstructed pinned Core/MILES sources (scripts/miles/prepare_runtime.py).
 /runtime/miles/sources/
+
+# Personal MILES run configs and local run artifacts.
+/runs/

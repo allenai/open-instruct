@@ -9,6 +9,7 @@ Start from one of the [examples](../../configs/miles/examples):
 
 | File | Purpose |
 | --- | --- |
+| `grpo-sharing.toml` | First colleague run: supplied full-SFT checkpoint, two updates on three B300 GPUs, async/TIS, packing/replay, offline W&B. |
 | `grpo-basic.toml` | Two-update tiny-model colocated dev/test run using compact generated multiplication prompts; one shared GPU, Core resident throughout. |
 | `grpo-disaggregated.toml` | Full-SFT B300 starter: two Core trainer GPUs and one dedicated TP1 SGLang engine, 100 updates. |
 | `grpo-async-disaggregated.toml` | Production-shaped two-node EP8 trainer + eight TP1 engines, packing, bounded async, one-update staleness, buffer factor two and TIS. |

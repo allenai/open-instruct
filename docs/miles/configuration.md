@@ -301,3 +301,4 @@ Generated from the actual structured TOMLs. These are recipe choices, not univer
 | grpo-basic.toml | 1 × 1 | 1 | True | 8 × 8 | 64 | False | False | False | 2 |
 | grpo-disaggregated.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 100 |
 | grpo-multitask.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | False | False | False | 4 |
+| grpo-sharing.toml | 1 × 2 | 1 | False | 8 × 8 | 64 | True | True | True | 2 |

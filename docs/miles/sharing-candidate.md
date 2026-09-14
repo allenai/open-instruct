@@ -55,8 +55,10 @@ from this gate are qualification evidence, not the repository CI GPU-test receip
 
 1. Obtain the matching source bundle or supplied candidate checkout, then follow the
    [laptop/session setup](launching.md). Sibling development worktrees are unnecessary.
-2. Copy a [structured example](../../configs/miles/examples/README.md) outside the
-   checkout; choose a supported checkpoint, accessible mounts and a fresh run root.
+2. Copy [grpo-sharing.toml](../../configs/miles/examples/grpo-sharing.toml) to
+   Git-ignored `runs/my-grpo.toml`. Set your name and fresh output root; keep the
+   supplied checkpoint for the first three-B300-GPU check. W&B is offline, with
+   no extra HF/W&B credentials required for these inputs.
 3. Run `plan` and `validate`, then set `MILES_EXISTING_IMAGE` to the immutable
    candidate ID and invoke `python -m open_instruct.miles run /path/to/run.toml`.
 4. Retain the launch receipt, submitted TOML and [completion artifacts](operations.md).
@@ -82,3 +84,15 @@ frequent unexplained failures on those supported configurations. Tonight's long
 dense/light-SFT/broader-SFT baselines should test endurance and learning on this
 same candidate. Automatic distributed failure recovery remains a separate feature;
 its absence is not, by itself, a reason to defer a bounded internal pilot.
+
+
+## Suggested agent prompt
+
+> Read AGENTS.md, the README MILES entry point, docs/miles/sharing-candidate.md,
+> docs/miles/launching.md and configs/miles/examples/README.md. Help me run the
+> colleague starter using image 01M2E5QR5C60WF7H0TDEF4CD3S. Prepare a Python 3.12
+> submission environment and check Beaker access. Copy grpo-sharing.toml into
+> runs/my-grpo.toml, choose my run name and fresh output root, and keep the supplied
+> checkpoint and offline W&B settings. Explain its three-B300-GPU allocation,
+> run plan and validate, then launch and follow it through completion. Report the
+> experiment link, config, optimizer/evaluation outcomes and any errors.

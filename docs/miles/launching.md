@@ -7,7 +7,12 @@ for building and updating that image.
 
 ## Prepare a submitting host
 
-Use the project's `robertb/miles-olmo-core` branch. Python 3.12 is sufficient for
+Use the project's `robertb/miles-olmo-core` branch. For the internal pilot, first
+follow the [candidate source handoff](sharing-candidate.md#tester-workflow): the
+supplied bundle includes local commits that may not yet be on GitHub. The clone
+command below applies once the intended revision is available there.
+
+Python 3.12 is sufficient for
 CPU-only planning and submission from the checkout; those modules use the standard
 library. Do not install the full CUDA training environment on a laptop merely to
 submit a run. Install and authenticate the Beaker CLI using
@@ -27,16 +32,17 @@ beaker account whoami
 ```
 
 The virtual environment directory must be ignored or outside the repository so
-that it does not make the checkout dirty. Store personal run files outside the
-checkout, or in a Git-ignored directory. All paths below are shell examples;
+that it does not make the checkout dirty. Store personal run files in Git-ignored `runs/` (also excluded from Docker
+build contexts), or outside the checkout. All paths below are shell examples;
 replace checkpoint/output paths, usernames and image placeholders.
 
 ```bash
-mkdir -p "$HOME/miles-runs"
-cp configs/miles/examples/grpo-basic.toml "$HOME/miles-runs/check.toml"
-# Edit check.toml: select a compatible tiny checkpoint and a fresh output root.
-python -m open_instruct.miles plan "$HOME/miles-runs/check.toml"
-python -m open_instruct.miles validate "$HOME/miles-runs/check.toml"
+mkdir -p runs
+cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
+# Edit name/output.root to use your username and a fresh run path.
+# Keep the supplied read-only checkpoint for this three-B300-GPU first run.
+python -m open_instruct.miles plan runs/my-grpo.toml
+python -m open_instruct.miles validate runs/my-grpo.toml
 ```
 
 `plan` and structured `validate` inspect schema/options without reading model
@@ -47,13 +53,18 @@ exist on the submitting host.
 
 ## Laptop: choose or build an image
 
+The current [sharing candidate](sharing-candidate.md) uses image
+`01M2E5QR5C60WF7H0TDEF4CD3S`. Its starter retains offline W&B metrics and needs
+no extra HF/W&B secrets with the supplied inputs. Beaker resource permissions
+are still required.
+
 For an **already built compatible image**, obtain its immutable ID and source
 provenance from its maintainer or qualification record. Inspect its metadata:
 
 ```bash
 beaker image get IMMUTABLE_IMAGE_ID --format json
 export MILES_EXISTING_IMAGE=IMMUTABLE_IMAGE_ID
-python -m open_instruct.miles run "$HOME/miles-runs/check.toml"
+python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 `MILES_EXISTING_IMAGE` accepts an immutable Beaker ID, not an alias. The launcher
@@ -70,7 +81,7 @@ unset MILES_EXISTING_IMAGE
 base_id=$(python -c 'import json; print(json.load(open("runtime/miles/runtime.lock.json"))["base_image"]["beaker"])')
 beaker image pull "$base_id" miles-core-base
 export MILES_BASE_IMAGE=miles-core-base
-python -m open_instruct.miles run "$HOME/miles-runs/check.toml"
+python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 The builder checks the loaded Docker image ID against the lock, builds the source
@@ -127,7 +138,7 @@ strings. Reserved Ray/rank/CUDA environment variables belong to the launcher.
 Offline W&B examples do not require a W&B credential.
 
 ```bash
-python -m open_instruct.miles status "$HOME/miles-runs/check.toml"
+python -m open_instruct.miles status runs/my-grpo.toml
 beaker experiment get EXPERIMENT_ID --format json
 beaker job events JOB_ID
 beaker job logs JOB_ID

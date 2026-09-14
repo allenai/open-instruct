@@ -112,19 +112,22 @@ is separate from the current workflow. Their CLI flags and the general Docker im
 are not interchangeable with the pinned MILES runtime.
 
 ```bash
-# Python 3.12, from the checkout. Edit checkpoint and output paths after copying.
-mkdir -p "$HOME/miles-runs"
-cp configs/miles/examples/grpo-basic.toml "$HOME/miles-runs/check.toml"
-python -m open_instruct.miles plan "$HOME/miles-runs/check.toml"
-python -m open_instruct.miles validate "$HOME/miles-runs/check.toml"
-# After selecting/building a compatible image and authenticating Beaker:
-python -m open_instruct.miles run "$HOME/miles-runs/check.toml"
+# Python 3.12, from the candidate checkout. Edit name/output.root after copying.
+mkdir -p runs
+cp configs/miles/examples/grpo-sharing.toml runs/my-grpo.toml
+python -m open_instruct.miles plan runs/my-grpo.toml
+python -m open_instruct.miles validate runs/my-grpo.toml
+# After authenticating Beaker and checking resource access:
+export MILES_EXISTING_IMAGE=01M2E5QR5C60WF7H0TDEF4CD3S
+python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
 Use the [launch guide](docs/miles/launching.md) for laptop or Beaker-session setup.
 The [async training starter](configs/miles/examples/grpo-async-disaggregated.toml)
-requests one eight-GPU trainer node and one eight-GPU inference node. The tiny
-colocated example above is intended for development.
+requests one eight-GPU trainer node and one eight-GPU inference node. The sharing
+starter above uses three B300 GPUs and the supplied full-SFT checkpoint. `runs/`
+is Git-ignored. W&B is offline by default; optional HF/W&B credentials stay commented
+out. The separate `grpo-basic.toml` is for tiny-model colocated development.
 
 ## MILES documentation
 
