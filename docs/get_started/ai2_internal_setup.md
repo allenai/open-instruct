@@ -2,7 +2,7 @@
 
 For new GRPO work, follow the [MILES laptop/session launch guide](../miles/launching.md).
 It uses a pinned MILES/Core image; the general CUDA/vLLM installation below is not
-required on a submission-only host. See the [sharing candidate](../miles/sharing-candidate.md).
+required on a submission-only host. See the [MILES GRPO](../miles/grpo.md).
 
 This document details some best practices when working with our cluster.
 

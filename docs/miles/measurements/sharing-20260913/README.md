@@ -1,6 +1,6 @@
 # Sharing consolidation and documentation review, September 13
 
-This record covers the candidate preparation. The current [candidate page](../../sharing-candidate.md)
+This record covers the candidate preparation. The current [MILES GRPO guide](../../grpo.md)
 records image qualification and promotion; the [support matrix](../../feature-parity.md)
 is the current boundary for colleagues.
 
@@ -38,7 +38,7 @@ there are no MILES missing-file or missing-anchor warnings after this review.
 
 ## Consolidation
 
-The current [itemization](../../sharing-candidate.md#consolidation-decisions-september-13)
+The current [itemization](#consolidation-decisions-september-13)
 distinguishes merged, already incorporated, superseded and held work. The qualified
 engine-drain mode remains opt-in. Experimental mixed-policy refresh and its inherited
 throughput templates stay on their feature branches while their training gate is
@@ -123,3 +123,25 @@ The final documentation regression suite passed nine tests and MkDocs rebuilt wi
 no MILES link warnings. The primary Open Instruct branch is promoted to this
 consolidation; MILES includes its companion engine-drain hook. Core and serving
 remain at the already-qualified pins in the provenance manifest.
+
+
+## Consolidation decisions, September 13
+
+| Repository / branch | Decision |
+|---|---|
+| Open Instruct `robertb/miles-colleague-exercises` (`095e2f301`) | Incorporated: managed-judge host networking, debug-stop/export resume fix, readiness fixtures, tests and retained audits |
+| Open Instruct `robertb/miles-engine-drain` (`2afb99e41`) | Incorporated: qualified opt-in engine drain, immutable staging/transfer, resume and failure checks; barrier remains the default |
+| Open Instruct `robertb/miles-sanity-plan` (`0878b8bcd`) | Historical proposal archived under plans; it does not prescribe current defaults |
+| Cache publication, GRPO deprecation/docs, dense Olmo 3, publication profiling, sequence packing branches | Already incorporated before this consolidation; no second merge required |
+| MILES `robertb/engine-drain` (`bc582bc5c`) | Companion runtime hook pinned by this runtime; ordinary producer selection stays unchanged |
+| OLMo-core `robertb/miles-rl-adapter` (`3d35ab326`) | Current primary pin; no additional Core merge needed |
+| olmo-sglang `robertb/miles-serving` (`02ccb5d`) | Current primary pin; no additional serving merge needed |
+| Open Instruct/MILES policy-refresh feature branches | Held: serving-only checks passed, but the recorded full training gate failed; subsequent repairs require their own qualification |
+| `robertb/miles-throughput-profiles` | Owned by the parallel configuration/measurement work; inherits experimental refresh and is not automatically included |
+| Old gdn2 prototype worktrees | Superseded lineage, not outstanding changes to merge into the hero-HF-based adapter |
+
+The consolidation passed its gates and is promoted locally from
+`robertb/miles-sharing-candidate` to `robertb/miles-olmo-core`. Source distribution and remote
+branch availability are separate from the Beaker image; use the matching
+checkout supplied for this runtime. Do not assume a remote branch already includes
+unpublished local commits.

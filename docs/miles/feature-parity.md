@@ -54,5 +54,5 @@ engines cannot supply those features.
 The earlier [parity snapshot](measurements/implementation-history/feature-parity-before-sharing-20260913.md)
 is retained as development history. Its old pending-work list is superseded by
 this page. Mixed-policy refresh and throughput-profile work on separate feature
-branches is not part of the sharing candidate unless explicitly promoted after
+branches is not part of the supported MILES GRPO runtime unless explicitly promoted after
 its full training gate.

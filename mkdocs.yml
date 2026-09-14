@@ -92,7 +92,7 @@ nav:
     - slack-alerts.md
   - MILES + OLMo-core:
     - Start here: miles/index.md
-    - Sharing candidate: miles/sharing-candidate.md
+    - MILES GRPO: miles/grpo.md
     - Support and gaps: miles/feature-parity.md
     - Workflow: miles/workflow.md
     - Launching: miles/launching.md

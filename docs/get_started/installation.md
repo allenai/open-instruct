@@ -2,7 +2,7 @@
 
 For new GRPO work, follow the [MILES laptop/session launch guide](../miles/launching.md).
 It uses a pinned MILES/Core image; the general CUDA/vLLM installation below is not
-required on a submission-only host. See the [sharing candidate](../miles/sharing-candidate.md).
+required on a submission-only host. See the [MILES GRPO](../miles/grpo.md).
 # Installation
 
 Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10. *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.* We offer two installation strategies:
