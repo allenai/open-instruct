@@ -9,6 +9,7 @@ import ast
 import asyncio
 import copy
 import dataclasses
+import decimal
 import json
 import logging
 import os
@@ -217,7 +218,10 @@ class GSM8KVerifier(VerifierFunction):
         # Preserve explicit signs on both decimals and integers when extracting the final answer.
         numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", response)
         extracted = numbers[-1] if numbers else response
-        score = float(str(extracted).lower() == str(label).lower())
+        try:
+            score = float(decimal.Decimal(extracted) == decimal.Decimal(str(label)))
+        except decimal.InvalidOperation:
+            score = float(str(extracted).lower() == str(label).lower())
         return VerificationResult(score=score)
 
 
