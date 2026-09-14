@@ -60,7 +60,7 @@ def specification(image, source_dataset, stage, name):
         ],
         "result": {"path": "/output"},
         "resources": {
-            "gpuCount": 0 if stage == "prepare" else 6,
+            "gpuCount": 0 if stage == "prepare" else 8,
             "cpuCount": 16 if stage == "prepare" else 48,
             "memory": "64 GiB" if stage == "prepare" else "704 GiB",
             "sharedMemory": "200 GiB" if stage != "prepare" else "4 GiB",

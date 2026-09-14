@@ -37,6 +37,14 @@ def document(
         if stage == "prepare":
             task["resources"].update(cpuCount=24, memory="96 GiB")
             task["timeout"] = "2h"
+            if prepare_module == "scripts.miles.qualify_judge_context":
+                task["resources"].update(gpuCount=1, cpuCount=16, memory="128 GiB")
+                task["constraints"] = {"cluster": ["ai2/holmes"]}
+                task["context"].update(minRuntime="30m")
+                task["timeout"] = "1h"
+                task["arguments"][0] = task["arguments"][0].replace(
+                    "export CUDA_VISIBLE_DEVICES=", "export CUDA_VISIBLE_DEVICES=0"
+                )
         else:
             target = Path(run.output["root"]) / f"checkpoints/gpu_usage_node{index}.jsonl"
             node_overlay += f"python -m scripts.miles.sample_gpu_usage {shlex.quote(str(target))} &\n"
@@ -66,6 +74,7 @@ def main():
             "scripts.miles.prepare_baseline_basket",
             "scripts.miles.prepare_olmo3_basket",
             "scripts.miles.audit_judge_budget",
+            "scripts.miles.qualify_judge_context",
         ),
         default="scripts.miles.prepare_baseline_basket",
     )

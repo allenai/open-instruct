@@ -45,6 +45,7 @@ def parse(document):
                 "max_context_length",
                 "max_concurrent_calls",
                 "timeout",
+                "context_extension",
             },
         )
         validation.text(service.get("model"), f"judges.{name}.model")
@@ -55,6 +56,12 @@ def parse(document):
             service.setdefault(key, default)
             validation.integer(service[key], f"judges.{name}.{key}")
         if mode == "managed":
+            if service.get("context_extension", "none") not in ("none", "qwen3-yarn-128k"):
+                raise InputError("Managed judge context_extension must be none or qwen3-yarn-128k")
+            if service.get("context_extension") == "qwen3-yarn-128k" and (
+                service["model"] != "Qwen/Qwen3-32B" or service["max_context_length"] > 131072
+            ):
+                raise InputError("qwen3-yarn-128k requires Qwen/Qwen3-32B with context at most 131072")
             service.setdefault("backend", "sglang")
             service.setdefault("gpus", 1)
             service.setdefault("tensor_parallel_size", 1)
@@ -80,7 +87,15 @@ def parse(document):
                 or endpoint.password
             ):
                 raise InputError("external judge requires an HTTP(S) endpoint without credentials")
-            if set(service) & {"gpus", "tensor_parallel_size", "prepared_dir", "revision", "chat_template", "backend"}:
+            if set(service) & {
+                "gpus",
+                "tensor_parallel_size",
+                "prepared_dir",
+                "revision",
+                "chat_template",
+                "backend",
+                "context_extension",
+            }:
                 raise InputError("external judge cannot specify managed placement fields")
     for name, rubric in rubrics.items():
         validation.mapping(rubric, f"rubrics.{name}")

@@ -17,6 +17,10 @@ def audit(spec):
     snapshot = Path(prepared["snapshot"])
     tokenizer = AutoTokenizer.from_pretrained(snapshot, local_files_only=True)
     tokenizer.chat_template = Path(prepared["template"]).read_text()
+    if "audit canary" not in tokenizer.apply_chat_template(
+        [{"role": "user", "content": "audit canary"}], tokenize=False
+    ):
+        raise ValueError("Judge template discarded the input prompt")
     report = {"model_config": json.loads((snapshot / "config.json").read_text()), "files": {}}
     paths = [spec.data["prompt_data"], *spec.data["eval_prompt_data"][1::2]]
     for path in paths:
@@ -33,7 +37,10 @@ def audit(spec):
                     )
                     tokens = len(
                         tokenizer.apply_chat_template(
-                            [{"role": "user", "content": prompt}], tokenize=True, add_generation_prompt=True
+                            [{"role": "user", "content": prompt}],
+                            tokenize=True,
+                            add_generation_prompt=True,
+                            return_dict=False,
                         )
                     )
                     counts.append(

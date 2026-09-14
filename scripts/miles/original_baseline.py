@@ -229,7 +229,7 @@ def train(model, prepared, output, *, smoke):
         "max_prompt_token_length": 2048,
         "response_length": 32768,
         "pack_length": 34816,
-        "num_learners_per_node": 2,
+        "num_learners_per_node": 4,
         "vllm_num_engines": 4,
         "vllm_tensor_parallel_size": 1,
         "vllm_enforce_eager": True,

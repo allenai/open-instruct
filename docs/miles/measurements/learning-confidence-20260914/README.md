@@ -306,3 +306,30 @@ The corrected MoE run exercised the timeout fallback live at 19:53:15 and
 and evaluation continued. This confirms the fix reached the running image; it is
 not a final timeout-rate estimate. The retained per-sample diagnostics, rather
 than duplicated driver warning lines, must supply the final grading coverage.
+
+## September 14: judge-context and historical hardware repairs
+
+The MoE 32K robust run failed before training because a judge request needed
+48,181 input tokens plus 2,048 output, exceeding the configured 40,960 total.
+These are judge-tokenizer tokens, not the policy's generation tokens. The judge
+also includes the question, rubric and (for reference grading) reference answer.
+The strict context guard rejected the complete request; it did not truncate it.
+A candidate explicit `qwen3-yarn-128k` extension follows Qwen's published YaRN
+configuration. It remains opt-in and requires a standalone long-context GPU
+qualification before a broad-run restart. It changes judge numerics, so paired
+broad runs must use the same judge configuration. Original checkpoint files stay
+unchanged. The candidate reduces judge concurrency from 16 to 4 and increases
+request timeout from 120 to 600 seconds for long prefills.
+
+The original-framework B300 smoke failed in its hardware-name lookup. The first
+Jupiter H100 retry, 01M2GT3ER9V1J4VRH4D3RDZB6B, instead exhausted device memory
+while initializing Adam on two trainers: a 3.77 GiB allocation with 2.74 GiB free.
+The next candidate uses four H100 trainers and four inference GPUs, keeping the
+64-response global batch, checkpoint, frozen data, objective and LR unchanged.
+Do not compare its raw trainer timings with the two-B300 Core control as if the
+hardware/topology were equal.
+
+The first CPU budget audit (01M2GT8HMKAC4462240XBX73KT) exited successfully but
+returned invalid two-token counts because Transformers returned a dictionary.
+Those aggregate counts are rejected; the corrected audit explicitly requests
+lists of token IDs and verifies that rendering preserves its input.
