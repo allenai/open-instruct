@@ -4,10 +4,12 @@ Use the trainer size and **desired optimization batch** to choose a starting
 profile, then provision inference to keep completed-group waiting near zero.
 The September 13 exercise found that full decode CUDA graphs mattered more than
 adding serving GPUs. The initial unpacked concurrency-32 follow-up used two
-inference GPUs without warm completed-queue drops. The small example now uses
-the subsequently qualified 6144-token packing configuration; its 24-update run
-measured about 4,930 useful response tokens/s, 25% awaited collection time, and
-1% warm stale-token drops. See the [packed measurements and queue diagrams](measurements/packed-capacity-results-20260914.md).
+inference GPUs without warm completed-queue drops. The small example now combines 6144-token packing with
+no recomputation and guarded scoring skip. Its 24-update live qualification
+measured 5,089 useful response tokens/s, 58% awaited collection and 0.79% warm
+stale-token drops. The faster trainer shifted the bottleneck toward batch supply.
+See [qualification](measurements/full-sft-basket-20260914.md) and the preceding
+[packed controls](measurements/packed-capacity-results-20260914.md).
 
 These recommendations apply to the existing **18.5B-total full-SFT KDA/latent MoE**,
 GSM8K-style responses capped at 4096 tokens, and Holmes B300 GPUs. They are a
@@ -15,6 +17,24 @@ measured starting point, not a universal fit or learning-quality guarantee. The
 hero checkpoint, dense/FSDP trainer, judges, code execution and longer contexts
 need their own capacity checks. See [measurements and figures](measurements/throughput-20260913.md)
 and the [chronological campaign log](measurements/throughput-campaign-20260913.md).
+
+## Runtime image
+
+Use immutable image `01M2F1RKZFZVJYAS0XQGEC3SEJ` for these throughput profiles.
+It builds the merged source at `2c477efd5` with the locked Core/MILES/SGLang
+sources, including refresh and completed-queue instrumentation. No experimental
+source overlay is needed. The earlier sharing image predates this integration;
+do not assume a local TOML upgrades code inside an existing image.
+
+The new image passed source reconstruction/build checks; its runtime code passed
+113 packaged CPU tests. GPU evidence is the matching EP2 runtime exercised through
+the committed qualification overlay. The separate EP8 mixed-task run is ongoing;
+this image is an internal candidate, not a claim of every topology being qualified.
+
+```bash
+MILES_EXISTING_IMAGE=01M2F1RKZFZVJYAS0XQGEC3SEJ \
+  python -m open_instruct.miles run /path/to/my-small.toml
+```
 
 ## Choose a profile
 

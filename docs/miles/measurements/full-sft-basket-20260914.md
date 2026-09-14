@@ -69,3 +69,29 @@ chat-template changes require separately validated preparation, not silent reuse
 
 Pending: EP8 warm timings, per-domain rewards/lengths/caps, actual judge and code
 latency, dropped/terminal samples, native saves, final export/reload, and resume.
+
+
+## Integration status
+
+The winning EP2 settings and their supporting Open-Instruct changes are merged
+into `robertb/miles-olmo-core` (merge `917fb0a44`; later documentation removal
+`2c477efd5`). The MILES backend branch `robertb/olmo-core-backend` now includes
+refresh, metadata retention, queue decision instrumentation and transport failure
+diagnostics at `b18b71b18`. OLMo-core remains `robertb/miles-rl-adapter`,
+`3d35ab326`; this promotion requires no additional Core implementation changes.
+
+Validation: 454 host tests passed (one skipped), 171 focused runtime tests passed,
+and 113 tests passed inside the rebuilt image without source mounts or runtime
+patch injection. Ruff and compile checks passed. The initial host `ty` invocation
+resolved an unrelated installed Core and reported three missing/incompatible APIs;
+it passed against the locked Core source via `--extra-search-path`, with no rule
+suppression. The documentation build and generated-reference check passed.
+
+New immutable runtime image: `01M2F1RKZFZVJYAS0XQGEC3SEJ`, application source
+`2c477efd5`, Docker digest
+`sha256:60aa54bfdeba71c49a863e393d7715c567d70cf293512f76f3a6939a6502759f`.
+The CPU image tests used the preceding `917fb0a44` build; only documentation
+removal differs in the final build. The active 200-update run keeps its frozen
+older-image/committed-overlay provenance, avoiding changes mid-experiment.
+
+Live tracking: [W&B](https://wandb.ai/ai2-llm/olmo-rl-comparison/runs/moxmo8wg).
