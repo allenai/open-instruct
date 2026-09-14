@@ -39,4 +39,17 @@ engine-forward and completion timing; the already-running MoE baseline does not.
 Local validation: nine focused tests passed for fixed splits, duplicates,
 retokenization, changed-source rejection, overlong-prompt rejection, overlap
 rejection, immutable receipt verification and CPU/GPU placement. Ruff passed.
-GPU results and launch receipts will be added after submission.
+Another 26 dense-model, YaRN and packing tests passed inside the runtime image
+(CPU execution; these do not substitute for GPU qualification).
+
+Preparation [01M2FBAC57BPZCP48GMWYKGHR5](https://beaker.org/ex/01M2FBAC57BPZCP48GMWYKGHR5)
+finished successfully. All 101434 training rows and 512 held-out rows passed;
+counts, verifier counts and ordered held-out identities match the MoE receipt.
+All prompts have different tokenization hashes under the Olmo 3 tokenizer;
+rendered text is unchanged. Code canaries returned [1, 0, 1, 0].
+
+Training [01M2FBGGE8K8XJ7WJKCTE4KHMB](https://beaker.org/ex/01M2FBGGE8K8XJ7WJKCTE4KHMB)
+was submitted at 07:01 UTC on September 14 and both replicas were scheduled.
+Source is `59c0700e3`; immutable base image `01M2CJG5RQQ93GEYNYAS7ASCQJ`, with
+the committed runtime overlay. The full source and dataset receipts are adjacent.
+Training completion and performance remain pending.
