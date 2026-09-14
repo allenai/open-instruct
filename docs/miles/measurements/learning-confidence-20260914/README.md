@@ -366,3 +366,13 @@ if the remaining packed samples cannot fill all ranks. Its old completion marker
 incorrectly called driver iterations optimizer updates. Future launches now record
 successful training calls separately; the already-running smoke's marker must not
 be trusted as an optimizer count. No automatic full run is armed from that marker.
+
+The small H100 smoke later failed at HF export: the historical
+`get_olmo3_generation_config` supplied sampling temperature/top-p with
+`do_sample=False`, which its Transformers version rejects when saving. The
+benchmark overlay now sets `do_sample=True` on that **export-only** generation
+config; training and vLLM decoding keep their explicit sampling settings.
+The next hardware smoke draws 128 prompts x four samples from the full frozen
+training pool to exercise filtering/packing on four ranks. This larger smoke is
+not the matched 64-response learning benchmark. Full-run defaults remain separate;
+its batch/filtering difference must be resolved before arming a 200-update run.

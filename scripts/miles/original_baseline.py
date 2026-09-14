@@ -189,6 +189,13 @@ def patch_trainer(text):
                 "        if (\n            args.checkpoint_state_freq > 0\n"
             ),
         },
+        "export_generation_metadata": {
+            "before": "            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)\n",
+            "after": (
+                "            model_to_save.generation_config = get_olmo3_generation_config(tokenizer)\n"
+                "            model_to_save.generation_config.do_sample = True\n"
+            ),
+        },
         "initial_evaluation": {
             "before": "            training_step % args.local_eval_every == 0\n",
             "after": "            (training_step % args.local_eval_every == 0 or (training_step == 1 and args.eval_on_step_0))\n",
@@ -223,13 +230,16 @@ def train(model, prepared, output, *, smoke):
     trainer.write_text(patched)
     steps = 3 if smoke else 200
     prefix = "smoke-" if smoke else ""
+    # Exercise the historical filtering/packing loop with enough distinct prompts
+    # to fill four H100 ranks. Full comparisons retain their original batch size.
+    prompts_per_collection = 128 if smoke else 16
     options = {
         "exp_name": output.name,
         "model_name_or_path": str(prepared / "legacy-model"),
         "tokenizer_name_or_path": str(prepared / "tokenizer"),
         "attn_implementation": "flash_attention_2",
         "torch_dtype": "bfloat16",
-        "dataset_mixer_list": [str(prepared / f"{prefix}train.jsonl"), "1.0"],
+        "dataset_mixer_list": [str(prepared / "train.jsonl"), "1.0"],
         "dataset_mixer_eval_list": [str(prepared / f"{prefix}eval.jsonl"), "1.0"],
         "dataset_mixer_list_splits": "train",
         "dataset_mixer_eval_list_splits": "train",
@@ -246,9 +256,9 @@ def train(model, prepared, output, *, smoke):
         "deepspeed_stage": 3,
         "gradient_checkpointing": True,
         "per_device_train_batch_size": 1,
-        "num_unique_prompts_rollout": 16,
+        "num_unique_prompts_rollout": prompts_per_collection,
         "num_samples_per_prompt_rollout": 4,
-        "total_episodes": steps * 64,
+        "total_episodes": steps * prompts_per_collection * 4,
         "num_mini_batches": 1,
         "num_epochs": 1,
         "learning_rate": 1e-6,
