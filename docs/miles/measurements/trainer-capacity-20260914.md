@@ -100,8 +100,8 @@ sampled on-policy trajectories for each variant.
 4. [Optimizer compilation](https://beaker.org/ex/01M2ETY6Z989H58X34QBQXTERP)
 5. [Model compilation, rejected](https://beaker.org/ex/01M2ETY7MYN7S5RVM1YYPHTMAV)
 6. [Reduce-scatter](https://beaker.org/ex/01M2ETY8BF776ENTT7ZWQ32VXR)
-7. [Vectorized gradient accumulation, in progress](https://beaker.org/ex/01M2EWD3TREEN66GSNKXHXJX9H)
-8. [Pairwise SwiGLU backward, in progress](https://beaker.org/ex/01M2EWD4K3J997MTZGA58F0C2N)
+7. [Vectorized gradient accumulation, completed](https://beaker.org/ex/01M2EWD3TREEN66GSNKXHXJX9H)
+8. [Pairwise SwiGLU backward, completed](https://beaker.org/ex/01M2EWD4K3J997MTZGA58F0C2N)
 
 The two native-kernel follow-ups use the no-recompute control. Core's pairwise
 backward intentionally uses different intermediate rounding from eager BF16
@@ -110,3 +110,31 @@ gradients, FP8, or EMO-only behavior.
 
 [Machine-readable timing](trainer-capacity-20260914/summary.json) and
 [run provenance](trainer-capacity-20260914/runs.json).
+
+
+## Native-kernel follow-up results
+
+Both follow-ups completed all sixteen updates on both ranks. The compiler
+observer confirmed that the intended `_gradient_add` and
+`_swiglu_backward_pair` kernels actually ran. Their first scoring-skip checks
+were bit-exact over the same 182,878 active tokens. Input hashes and token
+counts match the no-recompute control.
+
+| No-recompute configuration | Mean s/update, updates 6–15 | Model tokens/s/GPU | Mean s/update on common seven batches without new cubins | Peak allocated GiB/rank |
+| --- | ---: | ---: | ---: | ---: |
+| Control | 21.97 | 6,162 | 14.59 | 197.4 |
+| Vectorized gradient accumulation | 25.46 | 5,316 | 17.34 | 197.4 |
+| Pairwise SwiGLU backward | 23.82 | 5,683 | 16.19 | 194.2 |
+
+Neither kernel flag improved throughput in this screen. They remain off.
+One run per configuration does not establish an intrinsic slowdown on every
+workload, but it gives no reason to promote them for this one. The pairwise
+backward's changed rounding still requires separate numerical qualification
+if revisited; forward agreement does not establish gradient equivalence.
+
+The next step is a [live RL validation of guarded scoring skip plus no
+recomputation](https://beaker.org/ex/01M2EXJV10NDMSQHXKETD3XSMV), holding the
+successful packed c32 inference setup and objective fixed. Source `12b5f25c0`.
+This run is in progress. The small example has adopted the packing configuration
+that already passed live qualification, while retaining standalone scoring and
+recomputation until this faster combination is exercised end to end.
