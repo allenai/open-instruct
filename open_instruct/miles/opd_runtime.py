@@ -187,6 +187,7 @@ def execute(spec):
                     "-q",
                     "/opt/core-rl/tests/miles/test_opd_hooks.py",
                     "/opt/core-rl/tests/miles/test_opd_audit.py",
+                    "/opt/core-rl/tests/miles/test_opd_attention.py",
                 ],
                 env=environment,
                 stdout=stream,
