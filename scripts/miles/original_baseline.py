@@ -49,6 +49,12 @@ def convert_row(row, tokenizer):
     return result
 
 
+def read_jsonl(path):
+    # str.splitlines() also splits valid Unicode separators inside JSON strings.
+    with path.open(encoding="utf-8") as stream:
+        return [json.loads(line) for line in stream]
+
+
 def prepare(model, source, output):
     if output.exists():
         raise ValueError("Prepared comparison directory already exists; verify or use a fresh path")
@@ -78,7 +84,7 @@ def prepare(model, source, output):
         }
         identities = []
         for split, expected_count in (("train", 6000), ("eval", 512)):
-            rows = [json.loads(line) for line in (source / f"{split}.jsonl").read_text().splitlines()]
+            rows = read_jsonl(source / f"{split}.jsonl")
             if len(rows) != expected_count:
                 raise ValueError(f"Expected {expected_count} frozen {split} rows")
             converted = [convert_row(row, tokenizer) for row in rows]

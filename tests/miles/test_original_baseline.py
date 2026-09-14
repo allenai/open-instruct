@@ -61,3 +61,10 @@ def test_cpu_weka_preparation_uses_saturn_and_training_is_the_original_backend()
     assert gpu["constraints"] == {"cluster": ["ai2/holmes"]}
     assert "original_baseline.py smoke" in gpu["arguments"][0]
     assert "open_instruct.miles train" not in gpu["arguments"][0]
+
+
+def test_jsonl_preserves_unicode_line_separators_inside_prompts(tmp_path):
+    samples = [{"input": "question\u2028continued\u0085next\u2029paragraph"}, {"input": "second"}]
+    path = tmp_path / "train.jsonl"
+    path.write_bytes(b"".join(original_baseline.encoded(sample) for sample in samples))
+    assert original_baseline.read_jsonl(path) == samples
