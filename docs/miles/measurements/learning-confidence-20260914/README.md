@@ -6,6 +6,31 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
+## Current runs — September 14, 19:24 UTC
+
+The first 32K MoE attempt stopped before training when one symbolic math grading
+request exceeded its 45-second subprocess budget. Code fallback worked at its
+own boundary, but did not cover this separate local verifier timeout. The dense
+basket was deliberately stopped during initial evaluation so both restarts use
+the same timeout policy; neither 32K basket attempt had reached an optimizer step.
+
+The corrected policy kills/replaces the stuck math worker and records a tagged
+zero reward. Unexpected worker/configuration failures and cancellation still
+propagate. Six new tests, including a real hanging subprocess followed by a
+successful request, and four existing metrics tests passed in the MILES image.
+`rollout/math_verifier/timeout_fraction` separates these ungraded answers from
+ordinary incorrect answers; `OI_MILES_MATH_TIMEOUT_POLICY=raise` restores strict
+behavior. Data, model weights, optimization, lengths and topology are unchanged.
+
+- [MoE basket restart](https://beaker.org/ex/01M2GP10EKTRDDC4MD924FGDRM).
+- [Dense basket restart](https://beaker.org/ex/01M2GP1D9Q4ZNGVJF3ATN1V9VN).
+- [Dense GSM8K control](https://beaker.org/ex/01M2GK81TBNVB6DEEAXC2Q3XTY) remains running unchanged.
+
+The two basket restarts use source `724a3baa1` over base image
+`01M2CJG5RQQ93GEYNYAS7ASCQJ`. [Immutable receipts](robust-launches.json) retain
+full resolved configurations. They are running experiments, not completed
+learning comparisons.
+
 ## Restarted broad baselines — September 14, 18:35 UTC
 
 Code-verifier failures now default to logged/tagged zero rewards rather than
@@ -215,3 +240,11 @@ Ray and model actors (19:15 UTC); source `5b9c43245`. It uses evaluation interva
 one, so it already exercises initial-policy evaluation without the interval-50
 scheduling adjustment needed by the full run. Neither failed startup performed
 an optimizer update.
+
+The original GPU retry exposed a checkpoint/model-class naming mismatch before
+training: the historical `Olmo3ForCausalLM` prototype has per-head Q/K norms, while
+the published checkpoint has global Q/K norms. The published Think recipe actually
+used `Olmo2RetrofitForCausalLM`, with global norms and mixed sliding/full attention.
+Compatibility qualification now targets that implementation in its published-run
+image `01KA3FGCMVYGVEX2NG7Q2JWZ8E`; no checkpoint tensors will be reshaped to fit
+the prototype. The original 200-update comparison is still not launched.
