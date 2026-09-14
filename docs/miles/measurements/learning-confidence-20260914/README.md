@@ -6,14 +6,14 @@ and identifies the missing matched original Open Instruct control. The current
 MILES/Core GSM8K run is one independent learning control while code-service
 reliability is investigated.
 
-## Active identities — September 14, 21:07 UTC
+## Active identities — September 14, 23:24 UTC
 
 | Run | Experiment | Status / target |
 | --- | --- | --- |
-| Fully SFT MoE, four domains | [01M2GVVKXSS2E1X1FHYNQ8P555](https://beaker.org/ex/01M2GVVKXSS2E1X1FHYNQ8P555) | Scheduled; qualified 128K judge; 200 updates |
-| Dense Think-SFT, same four domains | [01M2GVVT4CMSPS4TQSYTYSE9TG](https://beaker.org/ex/01M2GVVT4CMSPS4TQSYTYSE9TG) | Scheduled; same 128K judge; 200 updates |
-| Dense GSM8K protected control | [01M2GQK5F7T1YTVPPVD9E3S43Q](https://beaker.org/ex/01M2GQK5F7T1YTVPPVD9E3S43Q) | Running; 200 updates, eval every 50, save every 25, 48-hour ceiling |
-| Original framework hardware qualifier | [01M2GVP4SZTA36EV579ST4NDCB](https://beaker.org/ex/01M2GVP4SZTA36EV579ST4NDCB) | Scheduled; 4 H100 trainers + 4 inference; 3 driver iterations of 512 responses |
+| Fully SFT MoE, four domains | [01M2GVVKXSS2E1X1FHYNQ8P555](https://beaker.org/ex/01M2GVVKXSS2E1X1FHYNQ8P555) | Running; 5 optimizer updates observed; qualified 128K judge; target 200 |
+| Dense Think-SFT, same four domains | [01M2GVVT4CMSPS4TQSYTYSE9TG](https://beaker.org/ex/01M2GVVT4CMSPS4TQSYTYSE9TG) | Initial evaluation complete; collecting training responses; same judge; target 200 |
+| Dense GSM8K protected control | [01M2GQK5F7T1YTVPPVD9E3S43Q](https://beaker.org/ex/01M2GQK5F7T1YTVPPVD9E3S43Q) | Running; 21 optimizer updates observed; target 200, eval every 50, save every 25, 48-hour ceiling |
+| Original framework hardware qualifier | [01M2H38X7KPNQKRZD89VYF988C](https://beaker.org/ex/01M2H38X7KPNQKRZD89VYF988C) | Scheduled after allocation-limit wait; expandable allocator retry; 4 H100 trainers + 4 inference; 3 driver iterations of 512 responses |
 
 [Repair launch receipts](repair-launches.json) supersede `active-launches.json`
 for the broad benchmarks. The former MoE broad run failed the 40,960-token judge
@@ -34,8 +34,51 @@ training calls separately and fixes export-only generation metadata. Its larger
 smoke batch is a hardware/mechanics exercise, not a matched learning benchmark.
 No new 200-update endpoint exists yet.
 
-Read-only local monitor: `/tmp/learning-confidence-repairs-watch/status.json`.
+Read-only local monitor: `/tmp/learning-confidence-current-watch/status.json`.
 See the dated repair section below for all failures, fixes and qualification.
+
+
+## Comparison objective and current starting measurements
+
+The goal is infrastructure validation with these imperfect checkpoints: measure
+whatever learning signal exists and compare its direction and scale. Low starting
+reward and capped responses are recorded outcomes, not reasons to abandon a run
+or change its held-out set. All active policy runs retain the 32K response budget.
+
+| Initial held-out mean, 128 entries per domain | MoE step23607 SFT | Dense Olmo 3 Think-SFT |
+| --- | ---: | ---: |
+| Math | 0.0390625 | 0.25 |
+| Instruction following | 0.2548177083 | 0.3010416667 |
+| Code | 0.078125 | 0.140625 |
+| General judge | 0.62265625 | 0.74921875 |
+
+[Full initial metrics](broad-initial-32k.json) include lengths, truncation and
+repetition. Math/code here are binary success averages; IF and general are graded
+means. These two arms use the same frozen question identities but different
+models/tokenizers, so their absolute scores are **not** a framework parity test.
+Report per-domain changes from these starts, reward-service failure coverage,
+completed updates and training token/sample exposure. Preserve the historical
+same-checkpoint Core/Megatron GSM8K comparisons as separate evidence. The new
+same-checkpoint dense comparison is Core versus original Open Instruct on GSM8K;
+the original arm remains a mechanics qualifier until it actually trains and saves.
+
+The preceding original H100 qualifier failed in backward: a 6.46 GiB allocation
+with 4.70 GiB free and 7.47 GiB reserved but unused. The retry enables
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, preserving the model, response
+budget and loss. This is a candidate fragmentation fix, not yet a verified fix.
+Its source is `363b3fdd9`; the focused original-image tests passed (9 tests), and
+Ruff passed. Jupiter initially deferred it because the budget used 168/168 slots;
+it became scheduled at 23:22 UTC. No other user's jobs were touched.
+
+The MoE's fourth optimizer call took about 650 seconds. Do not project that as
+settled throughput yet: compilation may still taper. Its 24-hour job ceiling is a
+completion risk if this persists. Native saves occur every 50 updates. A further
+allocation must continue from a completed native checkpoint (including optimizer,
+rollout state and update clock), keep the target at 200 total updates, and record
+any discarded in-flight generations. Do not silently restart training from HF or
+claim exact uninterrupted async equivalence. Coordinated multi-node auto-resume
+is explicitly gated off; a continuation requires a fresh run identity and explicit
+checkpoint load after the preceding run is terminal.
 
 ## Current runs — September 14, 19:24 UTC
 

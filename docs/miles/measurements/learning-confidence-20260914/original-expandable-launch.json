@@ -1,0 +1,10 @@
+{
+  "experiment": "01M2H38X7KPNQKRZD89VYF988C",
+  "source_dataset": "01M2H38V35F6DSZF80NK87R85H",
+  "name": "olmo3-sft-original-h100-expandable-smoke-20260914",
+  "commit": "363b3fdd95e1fa131ba8334e6ef93e66a12e539e",
+  "base_image": "01KA3FGCMVYGVEX2NG7Q2JWZ8E",
+  "stage": "smoke",
+  "archive_sha256": "bc44b75f994ac24081c7189cb15c8997a249eca192844e2e5002bbbec8b28385",
+  "trainer": "original-open-instruct"
+}
