@@ -82,6 +82,22 @@ CASES = {
     },
 }
 
+# Keep historical cases frozen; probe packing and serving capacity independently.
+for concurrency in (32, 64, 128):
+    CASES[f"packed-2t2i-c{concurrency}-p512-b128"] = {
+        "profile": "small",
+        "inference": 2,
+        "capacity": 4,
+        "concurrency": concurrency,
+        "batch": 128,
+        "producer_samples": 512,
+        "token_pool": 786432,
+        "state_pool": 1024,
+        "decode_graphs": True,
+        "packing_tokens": 6144,
+        "updates": 24,
+    }
+
 
 def specification(case, output):
     settings = CASES[case]
@@ -142,6 +158,8 @@ def specification(case, output):
     if "concurrency" in settings:
         run["inference"]["sglang_server_concurrency"] = settings["concurrency"]
         run["inference"]["sglang_max_running_requests"] = settings["concurrency"]
+    if "packing_tokens" in settings:
+        run["trainer"].update(sequence_packing=True, packing_max_tokens=settings["packing_tokens"])
     if "token_pool" in settings:
         run["inference"]["sglang_max_total_tokens"] = settings["token_pool"]
     if "state_pool" in settings:
@@ -294,6 +312,8 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
         },
         "workflow": json.loads((root / "workflow.json").read_text()),
     }
+    inventory = root / "checkpoints/pipeline_lifecycle.jsonl"
+    result["terminal_inventory"] = rows(inventory) if inventory.exists() else None
     result["end_to_end_passed"] = result["workflow"]["status"] == "complete"
     if not result["end_to_end_passed"] and not allow_incomplete_workflow:
         raise ValueError("Workflow did not complete")

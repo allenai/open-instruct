@@ -346,3 +346,53 @@ def test_hardware_roles_follow_observed_ips_not_replica_order(tmp_path):
         (cluster / f"node-{rank}.json").write_text(json.dumps(dict(rank=rank, address=address)))
         (cluster / f"placement-{rank}.json").write_text(json.dumps(dict(address=address, layout=layout)))
     assert throughput_occupancy.node_roles(tmp_path) == {"0": nodes[1], "1": nodes[0]}
+
+
+@pytest.mark.parametrize("concurrency", [32, 64, 128])
+def test_packed_capacity_sweep_preserves_workload_and_supplies_engines(concurrency):
+    spec = throughput_basket.specification(
+        f"packed-2t2i-c{concurrency}-p512-b128", "/weka/oe-training-default/test/run"
+    )
+    config = spec.compile()
+    assert config.core.sequence_packing and config.core.packing_max_tokens == 6144
+    assert config.miles["async_max_concurrent_samples"] == 512
+    assert config.miles["sglang_server_concurrency"] == concurrency
+    assert config.miles["sglang_max_running_requests"] == concurrency
+    assert config.miles["sglang_cuda_graph_max_bs_decode"] == concurrency
+    assert config.miles["global_batch_size"] == 128
+    assert spec.plan()["allocation"]["policy_gpus"] == 4
+
+
+def test_terminal_inventory_distinguishes_buffered_ready_and_shutdown_leftovers(tmp_path):
+    async def exercise():
+        entry = SimpleNamespace(group=[SimpleNamespace(response_length=7), [SimpleNamespace(response_length=11)]])
+        ready = SimpleNamespace(group=[SimpleNamespace(response_length=13)])
+
+        async def finished():
+            return ready
+
+        task = asyncio.create_task(finished())
+        await task
+        producer = SimpleNamespace(
+            args=SimpleNamespace(
+                sglang_server_concurrency=2, rollout_num_gpus=2, rollout_num_gpus_per_engine=1, save=str(tmp_path)
+            ),
+            state=SimpleNamespace(generate_fn_semaphore=asyncio.Semaphore(4)),
+            _output=SimpleNamespace(_buffer=[entry], _capacity=1),
+            _producing_groups={1: [], 2: []},
+            _active_tasks={task},
+            _scheduler=SimpleNamespace(),
+            _producer_resumed=asyncio.Event(),
+            # A put can complete just before the worker removes its ready entry.
+            _ready_completion_counts={id(entry): pipeline_observer.completion_counts([entry])},
+            _shutdown_unqueued_counts=dict(groups=1, samples=4, response_tokens=17),
+        )
+        pipeline_observer.write_lifecycle(producer, "shutdown_start")
+        record = json.loads((tmp_path / "pipeline_lifecycle.jsonl").read_text())
+        assert record["completed_queue"] == dict(groups=1, samples=2, response_tokens=18)
+        assert record["producer_ready"] == dict(groups=1, samples=1, response_tokens=13)
+        assert record["shutdown_unqueued"]["response_tokens"] == 17
+        assert producer._output._buffer == [entry] and task.result() is ready
+        assert pipeline_observer.completion_counts([object()]) is None
+
+    asyncio.run(exercise())

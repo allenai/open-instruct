@@ -15,7 +15,7 @@ from miles.rollout.inference_rollout.inference_rollout_eval import run_eval_data
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
-from open_instruct.miles import policy_refresh
+from open_instruct.miles import pipeline_observer, policy_refresh
 from open_instruct.miles.async_rollout import ManagedFullyAsyncRolloutFn
 
 logger = logger_utils.setup_logger(__name__)
@@ -156,8 +156,11 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
     async def shutdown(self):
         if self._shutdown_complete:
             return
+        pipeline_observer.write_lifecycle(self, "shutdown_start")
+        quiesced = False
         try:
             await self.prepare_publication()
+            quiesced = True
         finally:
             # On failed publication, cancel HTTP ownership without reopening any
             # engine. Driver teardown terminates servers after transport cleanup.
@@ -167,3 +170,4 @@ class RefreshingRolloutFn(ManagedFullyAsyncRolloutFn):
                 self._worker.cancel()
                 await asyncio.gather(self._worker, return_exceptions=True)
             self._shutdown_complete = True
+            pipeline_observer.write_lifecycle(self, "shutdown_complete" if quiesced else "shutdown_incomplete")

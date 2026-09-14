@@ -16,6 +16,7 @@ from miles.rollout.inference_rollout.inference_rollout_eval import run_eval_data
 from miles.utils.http_utils import post
 
 from open_instruct import logger_utils
+from open_instruct.miles import pipeline_observer
 from open_instruct.miles.async_rollout import ManagedFullyAsyncRolloutFn
 from open_instruct.miles.engine_drain import Engine, EngineDrain
 
@@ -286,6 +287,7 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
             return await super().shutdown()
         if self._shutdown_complete:
             return
+        pipeline_observer.write_lifecycle(self, "shutdown_start")
         await self.prepare_publication()
         await self.controller.close()
         self._stopping = True
@@ -293,3 +295,4 @@ class DrainingRolloutFn(ManagedFullyAsyncRolloutFn):
             self._worker.cancel()
             await asyncio.gather(self._worker, return_exceptions=True)
         self._shutdown_complete = True
+        pipeline_observer.write_lifecycle(self, "shutdown_complete")

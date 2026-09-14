@@ -63,6 +63,10 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         self._stopping = False
         self._shutdown_complete = False
         self._producing_groups: dict[int, Any] = {}
+        self._ready_completion_counts: dict[int, dict[str, int]] = {}
+        self._shutdown_unqueued_counts = dict(groups=0, samples=0, response_tokens=0)
+        self._completed_put_wait_seconds = 0.0
+        self._completed_put_started = None
         self._draining_groups: list[Any] | None = None
         self._interrupted_groups: list[int] = []
         self._publication_paused = False
@@ -200,6 +204,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
 
     async def _put_or_stop(self, item: Any) -> bool:
         """Put one completion unless final shutdown makes the buffer unreachable."""
+        self._completed_put_started = time.monotonic()
         put_task = asyncio.create_task(self._output.put(item))
         stop_waiter = asyncio.create_task(self._stop_requested.wait())
         try:
@@ -217,6 +222,8 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                 await put_task
             return False
         finally:
+            self._completed_put_wait_seconds += time.monotonic() - self._completed_put_started
+            self._completed_put_started = None
             if not put_task.done():
                 put_task.cancel()
             await asyncio.gather(put_task, return_exceptions=True)
@@ -259,10 +266,16 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
                 except TimeoutError:
                     continue
                 self._active_tasks = active
-                for task in done:
-                    completion = task.result()
-                    if not self._stopping:
-                        await self._put_or_stop(completion)
+                completions = [task.result() for task in done]
+                self._ready_completion_counts.update(
+                    (id(completion), pipeline_observer.completion_counts([completion])) for completion in completions
+                )
+                for completion in completions:
+                    accepted = await self._put_or_stop(completion) if not self._stopping else False
+                    counts = self._ready_completion_counts.pop(id(completion))
+                    if not accepted:
+                        for key, value in counts.items():
+                            self._shutdown_unqueued_counts[key] += value
         finally:
             for observer in observers:
                 observer.cancel()
@@ -316,6 +329,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
             logger.info("Fully-async producer shutdown skipped: worker was never started")
             return
 
+        pipeline_observer.write_lifecycle(self, "shutdown_start")
         logger.info("Stopping fully-async producer: active_groups=%d", len(self._active_tasks))
         self._stopping = True
         self._stop_requested.set()
@@ -328,6 +342,7 @@ class ManagedFullyAsyncRolloutFn(FullyAsyncRolloutFn):
         else:
             self._worker.result()
         self._shutdown_complete = True
+        pipeline_observer.write_lifecycle(self, "shutdown_complete")
         logger.info("Fully-async producer shutdown complete: active_groups=0")
 
     async def _call_eval(self, input: Any) -> Any:

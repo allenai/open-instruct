@@ -20,6 +20,35 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
+def completion_counts(entries):
+    """Count retained completed data without consuming the pinned buffer."""
+    counts = {"groups": 0, "samples": 0, "response_tokens": 0}
+    for entry in entries:
+        if not hasattr(entry, "group"):
+            return None
+        counts["groups"] += 1
+        for trajectory in entry.group:
+            for sample in trajectory if isinstance(trajectory, list) else [trajectory]:
+                if not isinstance(getattr(sample, "response_length", None), int):
+                    return None
+                counts["samples"] += 1
+                counts["response_tokens"] += sample.response_length
+    return counts
+
+
+def write_lifecycle(producer, event):
+    """Persist exact lifecycle boundaries separately from periodic samples."""
+    if not getattr(producer.args, "save", None):
+        return
+    try:
+        path = Path(producer.args.save) / "pipeline_lifecycle.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as stream:
+            stream.write(json.dumps({"event": event, **snapshot(producer)}) + "\n")
+    except Exception:
+        logger.exception("Pipeline lifecycle observation unavailable: %s", event)
+
+
 def snapshot(producer):
     semaphore = getattr(producer.state, "generate_fn_semaphore", None)
     free = getattr(semaphore, "_value", None)
@@ -29,7 +58,31 @@ def snapshot(producer):
     output = producer._output
     delegate = getattr(output, "_delegate", output)
     buffer = getattr(delegate, "_buffer", None)
+    completed = completion_counts(buffer) if buffer is not None else None
+    buffered_ids = {id(entry) for entry in buffer} if buffer is not None else set()
+    ready = [
+        counts
+        for identity, counts in getattr(producer, "_ready_completion_counts", {}).items()
+        if identity not in buffered_ids
+    ]
+    for task in producer._active_tasks:
+        if task.done() and not task.cancelled() and task.exception() is None:
+            ready.append(completion_counts([task.result()]))
+    ready_counts = (
+        {key: sum(row[key] for row in ready) for key in ("groups", "samples", "response_tokens")}
+        if all(row is not None for row in ready)
+        else None
+    )
     return {
+        "completed_queue": completed,
+        "producer_ready": ready_counts,
+        "shutdown_unqueued": getattr(producer, "_shutdown_unqueued_counts", None),
+        "completed_put_wait_seconds": getattr(producer, "_completed_put_wait_seconds", None),
+        "completed_put_current_wait_seconds": (
+            time.monotonic() - producer._completed_put_started
+            if getattr(producer, "_completed_put_started", None) is not None
+            else 0.0
+        ),
         "time_unix": time.time(),
         "producer_owned_groups": len(producer._producing_groups),
         "producer_active_group_tasks": sum(not task.done() for task in producer._active_tasks),
