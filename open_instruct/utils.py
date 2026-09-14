@@ -2546,6 +2546,18 @@ def get_device_name(device_name: str) -> str:
     )
 
 
+def get_global_batch_lengths(array_metrics: list[dict]) -> tuple[list[int], list[int]]:
+    """Extract the global per-sample prompt/response lengths for a training step.
+
+    Every learner rank receives the same global metrics dict from the
+    DataPreparationActor, so the lengths are read from a single rank.
+    Concatenating them across ranks would count every sample once per rank,
+    inflating num_step_tokens, tokens-per-second, and MFU by the number of ranks.
+    """
+    first_rank_metrics = array_metrics[0]
+    return first_rank_metrics["batch/prompt_lengths"], first_rank_metrics["batch/response_lengths"]
+
+
 def calculate_utilization_metrics(
     model_dims: ModelDims,
     prompt_lengths: list[int],
