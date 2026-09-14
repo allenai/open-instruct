@@ -9,7 +9,9 @@ from transformers.models.olmoe.modeling_olmoe import OlmoeConfig, OlmoeModel, Ol
 class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
     def __init__(self, config: Olmo2Config):
         super().__init__(config)
-        self.num_labels = config.num_labels
+        if config.num_labels is None:
+            raise ValueError("config.num_labels must be set for sequence classification")
+        self.num_labels: int = config.num_labels
         self.model = Olmo2Model(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
@@ -113,7 +115,9 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
 class OlmoeForSequenceClassification(OlmoePreTrainedModel):
     def __init__(self, config: OlmoeConfig):
         super().__init__(config)
-        self.num_labels = config.num_labels
+        if config.num_labels is None:
+            raise ValueError("config.num_labels must be set for sequence classification")
+        self.num_labels: int = config.num_labels
         self.model = OlmoeModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 

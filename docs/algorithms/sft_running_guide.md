@@ -145,6 +145,15 @@ sampling variation.
   `TransformerConfig` preset; there is no fallback if it does not. Architectures
   olmo-core has no preset or HF weight conversion for need both written first —
   see the Olmo-Hybrid report above for what that costs.
+- **Torch/CUDA constraints per model family.** Dense Olmo 3 and Olmo-Hybrid train
+  on the default torch 2.10 / cu128 image, which runs on every WEKA cluster. The
+  OLMoE3 KDA MoE requires torch 2.11: on 2.10 the KDA forward dies with
+  `CUBLAS_STATUS_NOT_INITIALIZED` (an 18M-param layer at 0.36 GiB reproduces it —
+  not OOM, so no memory setting helps). The `spike/s004-moe` branch forces 2.11
+  via `override-dependencies` (breaking vllm, unused on that path), and its cu130
+  image runs only on holmes — every other cluster's 12.8 driver rejects it. The
+  rest of the cascade (torchvision 0.26.0, transformer-engine 2.16.1, the
+  13.3.1-cudnn base image, a cuBLAS symlink) is in that branch's Dockerfile commits.
 - **Other node counts.** Hold the global batch at 1,048,576 tokens:
   `per_device × grad_accum × (world_size / cp_degree) × seq_len`. Adjust
   `gradient_accumulation_steps`, not the sequence length.
