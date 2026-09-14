@@ -28,6 +28,7 @@ from open_instruct.miles import (
     engine_delivery,
     models,
     packing,
+    performance,
     policy_refresh,
     publication,
     replay_diagnostics,
@@ -429,6 +430,16 @@ class OLMoCoreTrainRayActor(TrainRayActor):
             self.train_module._trainer.global_step = self.clock.completed_steps
             losses = training_metrics.aggregate_losses(metrics)
             summary = training_metrics.step_summary(metrics, aux_metrics, time.perf_counter() - started)
+            summary.update(
+                performance.training_rates(
+                    normalization.model_tokens,
+                    normalization.active_tokens,
+                    summary["step_seconds"],
+                    normalization.world_size,
+                )
+            )
+            summary.update(model_tokens=normalization.model_tokens, active_response_tokens=normalization.active_tokens)
+
             if self.args.olmo_core.sequence_packing:
                 summary.update(
                     {

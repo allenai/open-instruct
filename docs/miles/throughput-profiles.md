@@ -59,6 +59,9 @@ GSM8K inputs and disabled eval/saves/export to isolate normal cycles. Its timing
 numbers therefore do not predict total wall time with those additional stages.
 Do not infer resume or export qualification from this basket.
 
+See the [capacity dashboard guide](capacity-dashboard.md) for rate definitions,
+trainer tuning controls and the reusable W&B report publisher.
+
 ## Read the right measurements
 
 **Completed-buffer get time** includes waiting for eligible groups and filtering
