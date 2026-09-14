@@ -27,7 +27,7 @@ def specification(image, spec, stage, prepare_module="scripts.miles.prepare_judg
         "synchronizedStartTimeout",
     ):
         task.pop(field, None)
-    task["resources"] = {"cpuCount": 8, "memory": "48 GiB"}
+    task["resources"] = {"cpuCount": 8, "memory": "48 GiB", "gpuCount": 0}
     task["constraints"] = {"cluster": ["ai2/saturn"]}
     task["context"].update(minRuntime="20m", autoResume=False)
     task["timeout"] = "30m"
