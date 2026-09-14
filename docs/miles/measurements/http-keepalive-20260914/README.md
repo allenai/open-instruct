@@ -63,3 +63,15 @@ Recipe unchanged except new identity/output and the keep-alive setting. The [lau
 [Beaker experiment](https://beaker.org/ex/01M2F7N19DQ3YJMRJAXJ1K4H59).
 Both replicas were scheduled on Holmes at 05:54 UTC. Training results are pending. This short-context basket is
 not the full 32K Dolci Think recipe.
+
+## Terminal outcome observed during dense comparison launch
+
+Experiment `01M2F7N19DQ3YJMRJAXJ1K4H59` completed 18 optimizer updates, then its
+driver failed at 06:58:57 UTC on September 14. A code-execution POST exhausted
+eight HTTP retries with 30-second read timeouts and exponential backoff.
+The final exception originated in `open_instruct/miles/code_rewards.py`, for
+`/prod/test_program`. Earlier retries are visible from approximately 06:50 UTC.
+This is a separate failure from the fleet-router header-read error motivating
+the keepalive change. The 200-update endurance criterion remains unmet.
+Cause within the code service or a specific execution payload is unmeasured.
+Logs/results were retained in `/tmp/full-sft-basket-keepalive-results` locally.

@@ -53,3 +53,15 @@ was submitted at 07:01 UTC on September 14 and both replicas were scheduled.
 Source is `59c0700e3`; immutable base image `01M2CJG5RQQ93GEYNYAS7ASCQJ`, with
 the committed runtime overlay. The full source and dataset receipts are adjacent.
 Training completion and performance remain pending.
+
+Both GPU replicas started at 07:02:55–56 UTC. FlashAttention preflight and
+frozen-data verification passed; the managed judge was loading normally.
+No optimizer result was available at this startup check.
+
+The concurrent MoE comparator stopped at 06:58:57 UTC after 18 optimizer
+updates. The immediate cause was exhausted code-verifier HTTP read-timeout
+retries (30 seconds per attempt, eight retries plus backoff), not the fleet
+router. Logs show repeated attempts beginning around 06:50. Whether a particular
+program/test payload or execution-service load caused this remains unresolved.
+The dense run uses the same service, so sustained code verification remains a
+qualification risk. No timeout-to-zero reward substitution was introduced.
