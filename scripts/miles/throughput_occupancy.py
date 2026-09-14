@@ -77,6 +77,17 @@ def analyze(root, *, warmup=6, window=None):
     end = max(r["started_unix"] + r["seconds"] for r in chosen) if window is None else window[1]
     pipeline_path = root / "checkpoints/pipeline_occupancy.jsonl"
     pipeline = records(pipeline_path) if pipeline_path.exists() else []
+    for row in pipeline:
+        for section in ("completed_queue", "producer_ready", "shutdown_unqueued"):
+            for measure in ("groups", "samples", "response_tokens"):
+                if section == "completed_queue" and measure == "groups" and "completed_queue_groups" in row:
+                    continue
+                row[f"{section}_{measure}"] = (row.get(section) or {}).get(measure)
+        groups = row.get("completed_queue_groups")
+        capacity = row.get("completed_queue_capacity_groups")
+        row["completed_queue_full"] = float(groups >= capacity) if groups is not None and capacity else None
+        wait = row.get("completed_put_current_wait_seconds")
+        row["completed_put_blocked"] = float(wait > 0) if wait is not None else None
     result = {
         "scope": "Sampled occupancy during warm normal cycles; not hardware GPU utilization or exact per-request waits.",
         "start_unix": start,
@@ -94,6 +105,14 @@ def analyze(root, *, warmup=6, window=None):
                 "http_active_requests",
                 "http_waiting_requests",
                 "http_capacity_requests",
+                "completed_queue_samples",
+                "completed_queue_response_tokens",
+                "producer_ready_groups",
+                "producer_ready_samples",
+                "producer_ready_response_tokens",
+                "completed_queue_full",
+                "completed_put_blocked",
+                "completed_put_current_wait_seconds",
             )
         },
         "engines": {},
