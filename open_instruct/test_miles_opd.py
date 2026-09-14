@@ -37,6 +37,7 @@ def test_cpu_preparation_requires_saturn():
         'trainer.backend="olmo-core"',
         "teacher.gpus=2",
         "training.resume=true",
+        "training.save_interval=2",
         "launch.auto_resume=true",
         "distillation.log_prob_top_k=10",
         'model.source="Qwen/Qwen3.5-2B"',
@@ -56,3 +57,17 @@ def test_mounts_and_credentials_checked_before_build():
     document["launch"]["env"]["HF_TOKEN"] = "placeholder"
     with pytest.raises(InputError, match="secrets"):
         launch.specification("test-image", specs.from_dict(document))
+
+
+def test_opd_rejects_data_without_gsm8k_evaluation():
+    document = specs.load(CONFIG).to_dict()
+    for tasks in ([{"task": "math", "train_count": 16, "eval_count": 8}], [{"task": "gsm8k", "train_count": 16}]):
+        document["data"]["tasks"] = tasks
+        with pytest.raises(InputError, match="GSM8K"):
+            specs.from_dict(document)
+
+
+def test_opd_honors_shared_memory_setting():
+    spec = specs.load(CONFIG, ['launch.shared_memory="48 GiB"'])
+    task = launch.specification("test-image", spec)["tasks"][0]
+    assert task["resources"]["sharedMemory"] == "48 GiB"

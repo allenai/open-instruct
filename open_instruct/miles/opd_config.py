@@ -87,6 +87,7 @@ class OPDRunSpec:
                 validation.integer(document[section][key], f"{section}.{key}")
         for section, key, expected in (
             ("training", "algorithm", "opd"),
+            ("training", "save_interval", 1),
             ("trainer", "backend", "megatron"),
             ("teacher", "gpus", 1),
             ("trainer", "gpus", 2),
@@ -111,7 +112,12 @@ class OPDRunSpec:
         if document["inference"]["max_response_length"] >= document["inference"]["max_context_length"]:
             raise InputError("max_context_length must exceed max_response_length")
         document["data"] = run_spec.RunSpec._data(document.get("data", {}), base.parent)
-        document["launch"] = run_spec.RunSpec._launch({"auto_resume": False} | document.get("launch", {}), base.parent)
+        tasks = document["data"].get("tasks", [])
+        if len(tasks) != 1 or tasks[0]["task"] != "gsm8k" or not tasks[0].get("eval_count"):
+            raise InputError("OPD prototype requires one GSM8K task with held-out eval_count")
+        document["launch"] = run_spec.RunSpec._launch(
+            {"auto_resume": False, "shared_memory": "64 GiB"} | document.get("launch", {}), base.parent
+        )
         if document["launch"]["auto_resume"]:
             raise InputError("Automatic restart is not supported for the OPD prototype")
         preparing = document["training"]["phase"] == "prepare"

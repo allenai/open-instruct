@@ -47,7 +47,7 @@ def specification(image, spec):
         "resources": {
             "gpuCount": spec.allocation()["gpus_per_replica"],
             "memory": "256 GiB",
-            "sharedMemory": "64 GiB",
+            "sharedMemory": spec.launch["shared_memory"],
         },
         "context": {
             "priority": spec.launch["priority"],
