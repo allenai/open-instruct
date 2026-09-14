@@ -126,7 +126,7 @@ def test_local_reward_learning_workflow_has_no_basket_verifier_dependency():
     assert compiled.miles["global_batch_size"] == 64
     assert compiled.miles["rollout_max_response_len"] == 32768
     assert run.plan()["allocation"]["allocated_gpus"] == 6
-    assert not run.judges
+    assert not run.judges["judges"]
     document = launch_baseline_basket.document("image", run, "workflow", "source", "a" * 64)
     assert len(document["tasks"]) == 1
     assert "prepare_baseline_basket" not in document["tasks"][0]["arguments"][0]
