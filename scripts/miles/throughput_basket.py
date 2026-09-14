@@ -314,10 +314,34 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
     }
     inventory = root / "checkpoints/pipeline_lifecycle.jsonl"
     result["terminal_inventory"] = rows(inventory) if inventory.exists() else None
+    result["terminal_unused_work"] = terminal_unused_work(
+        result["terminal_inventory"],
+        delivered_tokens=sum(row["response_tokens"] for row in flow),
+        stale_dropped_tokens=sum(row["queue_metrics"].get(prefix + "dropped_response_tokens", 0) for row in flow),
+    )
     result["end_to_end_passed"] = result["workflow"]["status"] == "complete"
     if not result["end_to_end_passed"] and not allow_incomplete_workflow:
         raise ValueError("Workflow did not complete")
     return result
+
+
+def terminal_unused_work(lifecycle, *, delivered_tokens, stale_dropped_tokens):
+    """Do not mistake unobserved final buffers for empty buffers."""
+    if not lifecycle or lifecycle[-1]["event"] != "shutdown_complete":
+        return None
+    terminal = lifecycle[-1]
+    sections = [terminal.get(key) for key in ("completed_queue", "producer_ready", "shutdown_unqueued")]
+    if any(section is None for section in sections):
+        return None
+    remaining = {key: sum(section[key] for section in sections) for key in ("groups", "samples", "response_tokens")}
+    accounted = delivered_tokens + stale_dropped_tokens + remaining["response_tokens"]
+    return {
+        **remaining,
+        "delivered_response_tokens_all_updates": delivered_tokens,
+        "stale_dropped_response_tokens_all_updates": stale_dropped_tokens,
+        "fraction_of_accounted_response_tokens": remaining["response_tokens"] / accounted if accounted else None,
+        "scope": "Final buffered, producer-ready and shutdown-unqueued completions; distinct from stale drops. Denominator excludes unobserved aborted or dynamically filtered work.",
+    }
 
 
 def main():

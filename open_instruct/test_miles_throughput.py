@@ -396,3 +396,18 @@ def test_terminal_inventory_distinguishes_buffered_ready_and_shutdown_leftovers(
         assert pipeline_observer.completion_counts([object()]) is None
 
     asyncio.run(exercise())
+
+
+def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run():
+    assert throughput_basket.terminal_unused_work(None, delivered_tokens=80, stale_dropped_tokens=10) is None
+    record = {
+        "event": "shutdown_complete",
+        "completed_queue": dict(groups=2, samples=8, response_tokens=20),
+        "producer_ready": dict(groups=0, samples=0, response_tokens=0),
+        "shutdown_unqueued": dict(groups=1, samples=4, response_tokens=10),
+    }
+    result = throughput_basket.terminal_unused_work([record], delivered_tokens=80, stale_dropped_tokens=10)
+    assert result["samples"] == 12 and result["response_tokens"] == 30
+    assert result["fraction_of_accounted_response_tokens"] == 0.25
+    record["event"] = "shutdown_incomplete"
+    assert throughput_basket.terminal_unused_work([record], delivered_tokens=80, stale_dropped_tokens=10) is None
