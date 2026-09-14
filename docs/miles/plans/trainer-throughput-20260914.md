@@ -129,3 +129,17 @@ route tensor conversion. A CPU runtime regression check covers that boundary.
 The measured total now includes the normal ingress device copies, while retained
 file loading and DP partitioning remain outside the timer. Failed attempts are
 not throughput evidence.
+
+## Native-kernel follow-up
+
+Two additional matched arms use the successful no-recompute configuration:
+`vector-grad-add` selects `OLMO_PROFILE_FP32_GRAD_ADD_VECTORIZE=1`;
+`pairwise-swiglu` selects `OLMO_PROFILE_SWIGLU_PAIRWISE=1`. Each explicitly
+clears the other flag. The first accelerates large contiguous BF16 gradient
+additions into FP32 buffers. The second replaces SwiGLU backward while retaining
+the eager forward; Core documents different intermediate rounding from eager
+BF16 autograd, so it is a numerical candidate, not a bit-exact optimization.
+Neither enables model compilation, rounded weight gradients, FP8, or EMO paths.
+The observer must show the corresponding native kernel was actually reached.
+Both kernels use runtime element counts rather than `constexpr` row counts;
+the original dynamic forward safeguard remains enabled.

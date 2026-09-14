@@ -46,3 +46,15 @@ def test_launch_is_bounded_ep2_and_preserves_reports():
     assert task["timeout"] == "2h"
     assert "trap" in task["arguments"][0]
     assert "trainer_capacity_rank.sh" in task["arguments"][0]
+
+
+@pytest.mark.parametrize("variant", trainer_capacity_config.VARIANTS)
+def test_kernel_switches_are_isolated(variant):
+    environment = trainer_capacity_config.environment(variant)
+    assert sum(value == "1" for value in environment.values()) == int(
+        variant in {"vector-grad-add", "pairwise-swiglu"}
+    )
+    if variant == "pairwise-swiglu":
+        assert environment["OLMO_PROFILE_SWIGLU_PAIRWISE"] == "1"
+    if variant == "vector-grad-add":
+        assert environment["OLMO_PROFILE_FP32_GRAD_ADD_VECTORIZE"] == "1"

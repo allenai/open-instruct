@@ -16,7 +16,17 @@ VARIANTS = {
     "optimizer-compile": {"compile_optimizer": True},
     "model-compile": {"compile_model": True},
     "reduce-scatter": {"use_reduce_scatter": True},
+    "vector-grad-add": {"activation_checkpointing": False},
+    "pairwise-swiglu": {"activation_checkpointing": False},
 }
+
+
+KERNEL_FLAGS = ("OLMO_PROFILE_FP32_GRAD_ADD_VECTORIZE", "OLMO_PROFILE_SWIGLU_PAIRWISE")
+
+
+def environment(variant):
+    enabled = {"vector-grad-add": KERNEL_FLAGS[0], "pairwise-swiglu": KERNEL_FLAGS[1]}.get(variant)
+    return {key: "1" if key == enabled else "0" for key in KERNEL_FLAGS}
 
 
 def configuration(variant, output):

@@ -66,6 +66,7 @@ def main():
         passed=False,
         batches=[],
         recipe=run.arguments(),
+        kernel_environment={key: os.environ.get(key, "0") for key in trainer_capacity_config.KERNEL_FLAGS},
         scope="Fixed retained batches and initial HF policy. No fresh sampling, reward call, Ray ingress or weight delivery. Publication clock advances logically after each optimizer update.",
     )
     destination = output / f"trainer-capacity-rank{rank}.json"
@@ -179,6 +180,10 @@ def main():
         report["passed"] = True
     except BaseException as error:
         report["error"] = f"{type(error).__name__}: {error}"
+        if "observation" in locals():
+            report["failure_compilation"] = copy.deepcopy(observation.summary())
+            report["failure_phases"] = dict(phases)
+            report["failure_update"] = update if "update" in locals() else None
         raise
     finally:
         save()

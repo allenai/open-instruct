@@ -16,6 +16,9 @@ from scripts.miles.throughput_basket import ROOT
 
 def specification(image, source, digest, variant, output, commit):
     target = shlex.quote(str(output))
+    kernel_environment = shlex.join(
+        [f"{key}={value}" for key, value in trainer_capacity_config.environment(variant).items()]
+    )
     command = f"""set -euo pipefail
 cd /opt/core-rl
 echo '{digest}  /qualification-source/source.tar' | sha256sum -c -
@@ -26,6 +29,7 @@ mkdir -p {target} /output
 cp /qualification-source/provenance.json /output/
 export PYTHONPATH=/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles:/opt/core-rl/sources/olmo-sglang/src
 export TOKENIZERS_PARALLELISM=false WANDB_MODE=disabled NCCL_CUMEM_ENABLE=1
+export {kernel_environment}
 python -m scripts.miles.sample_gpu_usage {shlex.quote(str(output / "gpu_usage.jsonl"))} &
 trap 'cp {target}/*.json* /output/ 2>/dev/null || true; cp {target}/checkpoints/*.jsonl /output/ 2>/dev/null || true' EXIT
 torchrun --standalone --nproc-per-node=2 --no-python bash scripts/miles/trainer_capacity_rank.sh --variant {shlex.quote(variant)} --output {target}
