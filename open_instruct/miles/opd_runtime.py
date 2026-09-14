@@ -281,6 +281,45 @@ def execute(spec):
             marker = root / "checkpoints/latest_checkpointed_iteration.txt"
             if not marker.exists() or not (root / "teacher-scores.jsonl").exists():
                 raise RuntimeError("Training exited without checkpoint or teacher-score evidence")
+            stop(teacher)
+            teacher = None
+            subprocess.run(
+                [sys.executable, "-m", "open_instruct.miles.opd_audit", str(root)],
+                env=environment,
+                check=True,
+                timeout=900,
+            )
+            audit = json.loads((root / "audit.json").read_text())
+            export_path = audit["export"]["path"]
+            command[command.index("--model-path") + 1] = export_path
+            with (root / "export-reload.log").open("w") as stream:
+                teacher = subprocess.Popen(
+                    command, env=teacher_env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True
+                )
+                deadline = time.monotonic() + spec.document["teacher"]["startup_timeout"]
+                while True:
+                    if teacher.poll() is not None:
+                        raise RuntimeError("Export reload failed; see export-reload.log")
+                    try:
+                        info = request(url + "/get_model_info")
+                        if info.get("model_path") != export_path:
+                            raise RuntimeError("Export server loaded an unexpected model")
+                        break
+                    except (urllib.error.URLError, TimeoutError):
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Export reload deadline exceeded") from None
+                        time.sleep(2)
+                first = json.loads((root / "teacher-scores.jsonl").read_text().splitlines()[0])
+                probe = request(
+                    url + "/generate",
+                    {
+                        "input_ids": first["tokens"][: -first["response_length"]],
+                        "sampling_params": {"max_new_tokens": 32, "temperature": 0},
+                        "return_logprob": True,
+                    },
+                    timeout=180,
+                )
+                workflow.write_json(root / "export-reload.json", {"model": info, "generation": probe})
             workflow.write_json(
                 root / "result.json",
                 {
@@ -288,7 +327,7 @@ def execute(spec):
                     "checkpoint_iteration": marker.read_text().strip(),
                     "learner": prepared["identities"]["model"],
                     "teacher": prepared["identities"]["teacher"],
-                    "note": "Lifecycle completed; inspect numerical and export evidence before qualification.",
+                    "note": "Tiny OPD mechanics and export reload passed; no learning-quality claim.",
                 },
             )
             state.update(status="complete", finished_unix=time.time())
