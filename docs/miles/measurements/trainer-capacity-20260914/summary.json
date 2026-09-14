@@ -1,0 +1,2973 @@
+{
+  "baseline": {
+    "variant": "baseline",
+    "passed": true,
+    "warmup_updates": 6,
+    "scope": "Matched retained-batch screen; max rank wall time, summed rank tokens. Phase means use rank 0 and do not partition max-rank wall time. No inference/publication; compilation activity remains visible.",
+    "initialization_seconds_per_rank": [
+      105.38568321196362,
+      105.38569646002725
+    ],
+    "measured_updates": 10,
+    "warm_seconds": 367.1550149079412,
+    "warm_model_tokens_per_second_per_gpu": 3687.095218730512,
+    "warm_response_tokens_per_second_per_gpu": 3419.992779656953,
+    "mean_seconds_per_update": 36.715501490794125,
+    "phase_mean_seconds_rank0": {
+      "forward_loss_backward": 25.462564782844858,
+      "optimizer": 0.2643419881351292,
+      "scoring": 8.73074170621112
+    },
+    "other_mean_seconds_rank0": 1.7847595772705973,
+    "per_update": [
+      {
+        "update": 0,
+        "source_sha256": "dc76492ef8eafe9d14e6f9fcf42ef37631d13aa1158dd5e36b6d7ac10cf509b1",
+        "seconds": 576.200340975076,
+        "model_tokens": 201234,
+        "response_tokens": 182878,
+        "model_tokens_per_second_per_gpu": 174.6215558111797,
+        "response_tokens_per_second_per_gpu": 158.69306818746793,
+        "phases_rank0": {
+          "scoring": 235.37049770494923,
+          "forward_loss_backward": 324.7289428720251,
+          "optimizer": 8.864806083962321
+        },
+        "other_seconds_rank0": 7.236094314139336,
+        "jit_misses_per_rank": [
+          542,
+          604
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 548,
+            ".ttir": 548,
+            ".ttgir": 548,
+            ".llir": 548,
+            ".ptx": 548,
+            ".cubin": 548,
+            ".json": 1132
+          },
+          {
+            ".source": 610,
+            ".ttir": 610,
+            ".ttgir": 610,
+            ".llir": 610,
+            ".ptx": 610,
+            ".cubin": 610,
+            ".json": 1260
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420272640,
+          178420079616
+        ]
+      },
+      {
+        "update": 1,
+        "source_sha256": "5f1b294a7f7a7bffa0711057658fe5aca82ec8d949a39657237c8550bf370c22",
+        "seconds": 31.275231622625142,
+        "model_tokens": 250847,
+        "response_tokens": 231759,
+        "model_tokens_per_second_per_gpu": 4010.314024637505,
+        "response_tokens_per_second_per_gpu": 3705.1524157592617,
+        "phases_rank0": {
+          "scoring": 7.205384340137243,
+          "forward_loss_backward": 22.102562139742076,
+          "optimizer": 0.2642168649472296
+        },
+        "other_seconds_rank0": 1.703068277798593,
+        "jit_misses_per_rank": [
+          7,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 7,
+            ".ttir": 7,
+            ".ttgir": 7,
+            ".llir": 7,
+            ".ptx": 7,
+            ".cubin": 7,
+            ".json": 14
+          },
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421054464,
+          178421273600
+        ]
+      },
+      {
+        "update": 2,
+        "source_sha256": "159a8f91dbf843b3020b59d5e753a12ed6ee120bdcc8c2881600ac41ca902925",
+        "seconds": 42.26393725397065,
+        "model_tokens": 352183,
+        "response_tokens": 331923,
+        "model_tokens_per_second_per_gpu": 4166.471735509128,
+        "response_tokens_per_second_per_gpu": 3926.787487940634,
+        "phases_rank0": {
+          "scoring": 9.943040274549276,
+          "forward_loss_backward": 29.817921191919595,
+          "optimizer": 0.2649903199635446
+        },
+        "other_seconds_rank0": 2.2379854675382376,
+        "jit_misses_per_rank": [
+          1,
+          12
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 1,
+            ".ttir": 1,
+            ".ttgir": 1,
+            ".llir": 1,
+            ".ptx": 1,
+            ".cubin": 1,
+            ".json": 2
+          },
+          {
+            ".source": 12,
+            ".ttir": 12,
+            ".ttgir": 12,
+            ".llir": 12,
+            ".ptx": 12,
+            ".cubin": 12,
+            ".json": 24
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178423237632,
+          178423183360
+        ]
+      },
+      {
+        "update": 3,
+        "source_sha256": "0f3c9ece45de5e769238b98397f70f7e9bd71016c1e6ac179218899b3ebf3dbb",
+        "seconds": 29.98433563578874,
+        "model_tokens": 257542,
+        "response_tokens": 238434,
+        "model_tokens_per_second_per_gpu": 4294.609077357757,
+        "response_tokens_per_second_per_gpu": 3975.9760378917595,
+        "phases_rank0": {
+          "scoring": 6.871982390992343,
+          "forward_loss_backward": 21.01065338170156,
+          "optimizer": 0.26456999592483044
+        },
+        "other_seconds_rank0": 1.837129867170006,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420862464,
+          178421737984
+        ]
+      },
+      {
+        "update": 4,
+        "source_sha256": "af9a8d6080d548a56cd55ce94957a50ac20f18415965f0bb58589b89b3f177ea",
+        "seconds": 35.46611775504425,
+        "model_tokens": 301198,
+        "response_tokens": 281502,
+        "model_tokens_per_second_per_gpu": 4246.278124945906,
+        "response_tokens_per_second_per_gpu": 3968.604654508072,
+        "phases_rank0": {
+          "scoring": 7.79239058168605,
+          "forward_loss_backward": 24.869159226305783,
+          "optimizer": 0.26424202090129256
+        },
+        "other_seconds_rank0": 1.939660968258977,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178422204928,
+          178422191616
+        ]
+      },
+      {
+        "update": 5,
+        "source_sha256": "559aa1771ef20428dc184b065607aab917a8870fcfb5dff204d21096c7ae3f3d",
+        "seconds": 29.84594411496073,
+        "model_tokens": 282350,
+        "response_tokens": 262394,
+        "model_tokens_per_second_per_gpu": 4730.123445122779,
+        "response_tokens_per_second_per_gpu": 4395.8066628636325,
+        "phases_rank0": {
+          "scoring": 6.323865114245564,
+          "forward_loss_backward": 20.876228077337146,
+          "optimizer": 0.2639205139130354
+        },
+        "other_seconds_rank0": 1.834595579188317,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421882368,
+          178421740544
+        ]
+      },
+      {
+        "update": 6,
+        "source_sha256": "83c2d68688920a8dc81166b1890d68c07407c6744a5eb0d6b6e3746a3368118d",
+        "seconds": 36.76318676723167,
+        "model_tokens": 321779,
+        "response_tokens": 301723,
+        "model_tokens_per_second_per_gpu": 4376.375231523903,
+        "response_tokens_per_second_per_gpu": 4103.602360567615,
+        "phases_rank0": {
+          "scoring": 7.82775558764115,
+          "forward_loss_backward": 25.98796021193266,
+          "optimizer": 0.26486535370349884
+        },
+        "other_seconds_rank0": 2.065062844660133,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178422893568,
+          178422339072
+        ]
+      },
+      {
+        "update": 7,
+        "source_sha256": "932a828bfe28dd75c5704b0b6edf5e494128cc9feff17921a7e197d4a5159331",
+        "seconds": 66.50131154898554,
+        "model_tokens": 289122,
+        "response_tokens": 269170,
+        "model_tokens_per_second_per_gpu": 2173.8067510670808,
+        "response_tokens_per_second_per_gpu": 2023.7946720924942,
+        "phases_rank0": {
+          "scoring": 18.67639152193442,
+          "forward_loss_backward": 45.30979464901611,
+          "optimizer": 0.26409335108473897
+        },
+        "other_seconds_rank0": 2.25103202695027,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421922304,
+          178421969920
+        ]
+      },
+      {
+        "update": 8,
+        "source_sha256": "063bf61f8d462b88d34aa18f71c2d676984b1e97aedf9e61ac5c3101ad330704",
+        "seconds": 31.67013436788693,
+        "model_tokens": 285763,
+        "response_tokens": 265367,
+        "model_tokens_per_second_per_gpu": 4511.55332466413,
+        "response_tokens_per_second_per_gpu": 4189.5464811964675,
+        "phases_rank0": {
+          "scoring": 6.692489427048713,
+          "forward_loss_backward": 22.54390200274065,
+          "optimizer": 0.2640579827129841
+        },
+        "other_seconds_rank0": 1.731159824412316,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421632512,
+          178422136832
+        ]
+      },
+      {
+        "update": 9,
+        "source_sha256": "b7295c499f1d6d9ac5f575e8b9f7b4406f4c5afdf670f5660ed612ddb1958048",
+        "seconds": 25.792550400830805,
+        "model_tokens": 253152,
+        "response_tokens": 233540,
+        "model_tokens_per_second_per_gpu": 4907.4635130275,
+        "response_tokens_per_second_per_gpu": 4527.2762167885,
+        "phases_rank0": {
+          "scoring": 5.774894228670746,
+          "forward_loss_backward": 17.593442630022764,
+          "optimizer": 0.2641249541193247
+        },
+        "other_seconds_rank0": 1.7067323364317417,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421568000,
+          178420888064
+        ]
+      },
+      {
+        "update": 10,
+        "source_sha256": "db16ca81c01af6f24084b945ccdc1db83055b22d312dbd1ce624cfb509f7f3d3",
+        "seconds": 26.07039403822273,
+        "model_tokens": 227383,
+        "response_tokens": 207987,
+        "model_tokens_per_second_per_gpu": 4360.942908393055,
+        "response_tokens_per_second_per_gpu": 3988.950065255302,
+        "phases_rank0": {
+          "scoring": 5.278117934707552,
+          "forward_loss_backward": 18.685673472937196,
+          "optimizer": 0.26422941498458385
+        },
+        "other_seconds_rank0": 1.5014307904057205,
+        "jit_misses_per_rank": [
+          0,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420777472,
+          178420658688
+        ]
+      },
+      {
+        "update": 11,
+        "source_sha256": "83db6a67c45a14018ee3c92c605be53e9b068fd790dd0502f0afc83b30a7c491",
+        "seconds": 29.712550519034266,
+        "model_tokens": 270465,
+        "response_tokens": 251433,
+        "model_tokens_per_second_per_gpu": 4551.359531164052,
+        "response_tokens_per_second_per_gpu": 4231.0908287548145,
+        "phases_rank0": {
+          "scoring": 6.444929965306073,
+          "forward_loss_backward": 20.82047246210277,
+          "optimizer": 0.2640629610978067
+        },
+        "other_seconds_rank0": 1.6236455901525915,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421216256,
+          178422028288
+        ]
+      },
+      {
+        "update": 12,
+        "source_sha256": "c05da1198d95fdf9e88e8b773291769432e737cf8da749432e69ff5613b2356f",
+        "seconds": 31.14007355971262,
+        "model_tokens": 283958,
+        "response_tokens": 264218,
+        "model_tokens_per_second_per_gpu": 4559.366236812136,
+        "response_tokens_per_second_per_gpu": 4242.411301523566,
+        "phases_rank0": {
+          "scoring": 6.713051911909133,
+          "forward_loss_backward": 21.669776522088796,
+          "optimizer": 0.26418562792241573
+        },
+        "other_seconds_rank0": 1.9057625061832368,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178422034432,
+          178421735936
+        ]
+      },
+      {
+        "update": 13,
+        "source_sha256": "44343473f2820e1916d9a22f424548e26e671d44a8eae388da2ad9f107954328",
+        "seconds": 26.72226003697142,
+        "model_tokens": 249214,
+        "response_tokens": 229974,
+        "model_tokens_per_second_per_gpu": 4663.0412183550625,
+        "response_tokens_per_second_per_gpu": 4303.041727792127,
+        "phases_rank0": {
+          "scoring": 5.757705520838499,
+          "forward_loss_backward": 18.55204523773864,
+          "optimizer": 0.26424416806548834
+        },
+        "other_seconds_rank0": 1.6062086103484035,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420971008,
+          178421396480
+        ]
+      },
+      {
+        "update": 14,
+        "source_sha256": "ae3788b1e3890bb4faf3b336f3351c89b71ba70ea0b2cb18728298269dcf6048",
+        "seconds": 24.94620600808412,
+        "model_tokens": 243924,
+        "response_tokens": 224544,
+        "model_tokens_per_second_per_gpu": 4888.999952957846,
+        "response_tokens_per_second_per_gpu": 4500.564132422257,
+        "phases_rank0": {
+          "scoring": 5.411865460220724,
+          "forward_loss_backward": 17.06719714589417,
+          "optimizer": 0.2648687749169767
+        },
+        "other_seconds_rank0": 1.6223239228129387,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421167104,
+          178420980224
+        ]
+      },
+      {
+        "update": 15,
+        "source_sha256": "4cafbbba092a21ff75fa9d2ccddf8d83bce7110960042ce7c2a6544ab16c1482",
+        "seconds": 67.83634766098112,
+        "model_tokens": 282711,
+        "response_tokens": 263379,
+        "model_tokens_per_second_per_gpu": 2083.7722677293614,
+        "response_tokens_per_second_per_gpu": 1941.2822850978262,
+        "phases_rank0": {
+          "scoring": 18.730215503834188,
+          "forward_loss_backward": 46.395383493974805,
+          "optimizer": 0.26468729274347425
+        },
+        "other_seconds_rank0": 1.8342373203486204,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421956096,
+          178421767168
+        ]
+      }
+    ]
+  },
+  "lean": {
+    "variant": "lean",
+    "passed": true,
+    "warmup_updates": 6,
+    "scope": "Matched retained-batch screen; max rank wall time, summed rank tokens. Phase means use rank 0 and do not partition max-rank wall time. No inference/publication; compilation activity remains visible.",
+    "initialization_seconds_per_rank": [
+      109.10068130912259,
+      109.0437736120075
+    ],
+    "measured_updates": 10,
+    "warm_seconds": 295.4685095367022,
+    "warm_model_tokens_per_second_per_gpu": 4581.6574569069035,
+    "warm_response_tokens_per_second_per_gpu": 4249.7506822940295,
+    "mean_seconds_per_update": 29.54685095367022,
+    "phase_mean_seconds_rank0": {
+      "forward_loss_backward": 27.628024119511245,
+      "optimizer": 0.2646473278757185
+    },
+    "other_mean_seconds_rank0": 1.6522552212700248,
+    "per_update": [
+      {
+        "update": 0,
+        "source_sha256": "dc76492ef8eafe9d14e6f9fcf42ef37631d13aa1158dd5e36b6d7ac10cf509b1",
+        "seconds": 613.9240401815623,
+        "model_tokens": 201234,
+        "response_tokens": 182878,
+        "model_tokens_per_second_per_gpu": 163.8916110374884,
+        "response_tokens_per_second_per_gpu": 148.94187882422355,
+        "phases_rank0": {
+          "scoring": 251.02032141108066,
+          "forward_loss_backward": 346.3417616998777,
+          "optimizer": 8.854766751173884
+        },
+        "other_seconds_rank0": 7.395560801029205,
+        "jit_misses_per_rank": [
+          542,
+          604
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 548,
+            ".ttir": 548,
+            ".ttgir": 548,
+            ".llir": 548,
+            ".ptx": 548,
+            ".cubin": 548,
+            ".json": 1132
+          },
+          {
+            ".source": 610,
+            ".ttir": 610,
+            ".ttgir": 610,
+            ".llir": 610,
+            ".ptx": 610,
+            ".cubin": 610,
+            ".json": 1260
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420666368,
+          178420452864
+        ]
+      },
+      {
+        "update": 1,
+        "source_sha256": "5f1b294a7f7a7bffa0711057658fe5aca82ec8d949a39657237c8550bf370c22",
+        "seconds": 25.765043361112475,
+        "model_tokens": 250847,
+        "response_tokens": 231759,
+        "model_tokens_per_second_per_gpu": 4867.971625046956,
+        "response_tokens_per_second_per_gpu": 4497.5472533028405,
+        "phases_rank0": {
+          "forward_loss_backward": 23.77694943267852,
+          "optimizer": 0.26531082997098565
+        },
+        "other_seconds_rank0": 1.5362790203653276,
+        "jit_misses_per_rank": [
+          7,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 7,
+            ".ttir": 7,
+            ".ttgir": 7,
+            ".llir": 7,
+            ".ptx": 7,
+            ".cubin": 7,
+            ".json": 14
+          },
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421054464,
+          178421273600
+        ]
+      },
+      {
+        "update": 2,
+        "source_sha256": "159a8f91dbf843b3020b59d5e753a12ed6ee120bdcc8c2881600ac41ca902925",
+        "seconds": 35.88211910193786,
+        "model_tokens": 352183,
+        "response_tokens": 331923,
+        "model_tokens_per_second_per_gpu": 4907.500014136287,
+        "response_tokens_per_second_per_gpu": 4625.18669893822,
+        "phases_rank0": {
+          "forward_loss_backward": 33.25874763028696,
+          "optimizer": 0.40356517117470503
+        },
+        "other_seconds_rank0": 2.030255312565714,
+        "jit_misses_per_rank": [
+          1,
+          12
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 1,
+            ".ttir": 1,
+            ".ttgir": 1,
+            ".llir": 1,
+            ".ptx": 1,
+            ".cubin": 1,
+            ".json": 2
+          },
+          {
+            ".source": 12,
+            ".ttir": 12,
+            ".ttgir": 12,
+            ".llir": 12,
+            ".ptx": 12,
+            ".cubin": 12,
+            ".json": 24
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178423237632,
+          178423183360
+        ]
+      },
+      {
+        "update": 3,
+        "source_sha256": "0f3c9ece45de5e769238b98397f70f7e9bd71016c1e6ac179218899b3ebf3dbb",
+        "seconds": 24.15691958228126,
+        "model_tokens": 257542,
+        "response_tokens": 238434,
+        "model_tokens_per_second_per_gpu": 5330.605152755138,
+        "response_tokens_per_second_per_gpu": 4935.107706673159,
+        "phases_rank0": {
+          "forward_loss_backward": 22.143853889778256,
+          "optimizer": 0.264732273761183
+        },
+        "other_seconds_rank0": 1.7483334187418222,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420862464,
+          178421737984
+        ]
+      },
+      {
+        "update": 4,
+        "source_sha256": "af9a8d6080d548a56cd55ce94957a50ac20f18415965f0bb58589b89b3f177ea",
+        "seconds": 26.28124748962,
+        "model_tokens": 301198,
+        "response_tokens": 281502,
+        "model_tokens_per_second_per_gpu": 5730.283543788412,
+        "response_tokens_per_second_per_gpu": 5355.567693489085,
+        "phases_rank0": {
+          "forward_loss_backward": 24.127890822011977,
+          "optimizer": 0.2641615690663457
+        },
+        "other_seconds_rank0": 1.888475816231221,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178422204928,
+          178422191616
+        ]
+      },
+      {
+        "update": 5,
+        "source_sha256": "559aa1771ef20428dc184b065607aab917a8870fcfb5dff204d21096c7ae3f3d",
+        "seconds": 22.881570999044925,
+        "model_tokens": 282350,
+        "response_tokens": 262394,
+        "model_tokens_per_second_per_gpu": 6169.812378961769,
+        "response_tokens_per_second_per_gpu": 5733.740922136691,
+        "phases_rank0": {
+          "forward_loss_backward": 20.76010403642431,
+          "optimizer": 0.2644402156583965
+        },
+        "other_seconds_rank0": 1.6712542017921805,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421882368,
+          178421740544
+        ]
+      },
+      {
+        "update": 6,
+        "source_sha256": "83c2d68688920a8dc81166b1890d68c07407c6744a5eb0d6b6e3746a3368118d",
+        "seconds": 27.059801744297147,
+        "model_tokens": 321779,
+        "response_tokens": 301723,
+        "model_tokens_per_second_per_gpu": 5945.701358802729,
+        "response_tokens_per_second_per_gpu": 5575.114756034533,
+        "phases_rank0": {
+          "forward_loss_backward": 24.91860637208447,
+          "optimizer": 0.26469694497063756
+        },
+        "other_seconds_rank0": 1.857255577109754,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178422893568,
+          178422339072
+        ]
+      },
+      {
+        "update": 7,
+        "source_sha256": "932a828bfe28dd75c5704b0b6edf5e494128cc9feff17921a7e197d4a5159331",
+        "seconds": 59.156463463790715,
+        "model_tokens": 289122,
+        "response_tokens": 269170,
+        "model_tokens_per_second_per_gpu": 2443.7059204609964,
+        "response_tokens_per_second_per_gpu": 2275.0683884674513,
+        "phases_rank0": {
+          "forward_loss_backward": 57.10440841503441,
+          "optimizer": 0.26488223718479276
+        },
+        "other_seconds_rank0": 1.7871728115715086,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421922304,
+          178421969920
+        ]
+      },
+      {
+        "update": 8,
+        "source_sha256": "063bf61f8d462b88d34aa18f71c2d676984b1e97aedf9e61ac5c3101ad330704",
+        "seconds": 24.73016149783507,
+        "model_tokens": 285763,
+        "response_tokens": 265367,
+        "model_tokens_per_second_per_gpu": 5777.620983692652,
+        "response_tokens_per_second_per_gpu": 5365.25004139643,
+        "phases_rank0": {
+          "forward_loss_backward": 22.52639447990805,
+          "optimizer": 0.26428069826215506
+        },
+        "other_seconds_rank0": 1.9394863196648657,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421632512,
+          178422136832
+        ]
+      },
+      {
+        "update": 9,
+        "source_sha256": "b7295c499f1d6d9ac5f575e8b9f7b4406f4c5afdf670f5660ed612ddb1958048",
+        "seconds": 19.49191529210657,
+        "model_tokens": 253152,
+        "response_tokens": 233540,
+        "model_tokens_per_second_per_gpu": 6493.769242433457,
+        "response_tokens_per_second_per_gpu": 5990.688870235707,
+        "phases_rank0": {
+          "forward_loss_backward": 17.557429413776845,
+          "optimizer": 0.26529535185545683
+        },
+        "other_seconds_rank0": 1.6691905264742672,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421568000,
+          178420888064
+        ]
+      },
+      {
+        "update": 10,
+        "source_sha256": "db16ca81c01af6f24084b945ccdc1db83055b22d312dbd1ce624cfb509f7f3d3",
+        "seconds": 20.907880269922316,
+        "model_tokens": 227383,
+        "response_tokens": 207987,
+        "model_tokens_per_second_per_gpu": 5437.734410769248,
+        "response_tokens_per_second_per_gpu": 4973.890162820719,
+        "phases_rank0": {
+          "forward_loss_backward": 19.28075124276802,
+          "optimizer": 0.2646137038245797
+        },
+        "other_seconds_rank0": 1.362515323329717,
+        "jit_misses_per_rank": [
+          0,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420777472,
+          178420658688
+        ]
+      },
+      {
+        "update": 11,
+        "source_sha256": "83db6a67c45a14018ee3c92c605be53e9b068fd790dd0502f0afc83b30a7c491",
+        "seconds": 22.21362116280943,
+        "model_tokens": 270465,
+        "response_tokens": 251433,
+        "model_tokens_per_second_per_gpu": 6087.818776094437,
+        "response_tokens_per_second_per_gpu": 5659.432970364936,
+        "phases_rank0": {
+          "forward_loss_backward": 20.277590428013355,
+          "optimizer": 0.2643702309578657
+        },
+        "other_seconds_rank0": 1.6716605038382113,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421216256,
+          178422028288
+        ]
+      },
+      {
+        "update": 12,
+        "source_sha256": "c05da1198d95fdf9e88e8b773291769432e737cf8da749432e69ff5613b2356f",
+        "seconds": 23.37171571701765,
+        "model_tokens": 283958,
+        "response_tokens": 264218,
+        "model_tokens_per_second_per_gpu": 6074.821451666931,
+        "response_tokens_per_second_per_gpu": 5652.51612673893,
+        "phases_rank0": {
+          "forward_loss_backward": 21.4586961902678,
+          "optimizer": 0.2651491351425648
+        },
+        "other_seconds_rank0": 1.6478703916072845,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178422034432,
+          178421735936
+        ]
+      },
+      {
+        "update": 13,
+        "source_sha256": "44343473f2820e1916d9a22f424548e26e671d44a8eae388da2ad9f107954328",
+        "seconds": 19.50987487612292,
+        "model_tokens": 249214,
+        "response_tokens": 229974,
+        "model_tokens_per_second_per_gpu": 6386.868229098678,
+        "response_tokens_per_second_per_gpu": 5893.7845952423995,
+        "phases_rank0": {
+          "forward_loss_backward": 17.756283222697675,
+          "optimizer": 0.2643907438032329
+        },
+        "other_seconds_rank0": 1.4892009096220136,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178420971008,
+          178421396480
+        ]
+      },
+      {
+        "update": 14,
+        "source_sha256": "ae3788b1e3890bb4faf3b336f3351c89b71ba70ea0b2cb18728298269dcf6048",
+        "seconds": 19.247035196051,
+        "model_tokens": 243924,
+        "response_tokens": 224544,
+        "model_tokens_per_second_per_gpu": 6336.66425803718,
+        "response_tokens_per_second_per_gpu": 5833.210094770094,
+        "phases_rank0": {
+          "forward_loss_backward": 17.540487348567694,
+          "optimizer": 0.26414926908910275
+        },
+        "other_seconds_rank0": 1.4423985783942044,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421167104,
+          178420980224
+        ]
+      },
+      {
+        "update": 15,
+        "source_sha256": "4cafbbba092a21ff75fa9d2ccddf8d83bce7110960042ce7c2a6544ab16c1482",
+        "seconds": 59.780040316749364,
+        "model_tokens": 282711,
+        "response_tokens": 263379,
+        "model_tokens_per_second_per_gpu": 2364.5935876091166,
+        "response_tokens_per_second_per_gpu": 2202.9008227868794,
+        "phases_rank0": {
+          "forward_loss_backward": 57.859594081994146,
+          "optimizer": 0.2646449636667967
+        },
+        "other_seconds_rank0": 1.6558012710884213,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          178421956096,
+          178421767168
+        ]
+      }
+    ]
+  },
+  "no-recompute": {
+    "variant": "no-recompute",
+    "passed": true,
+    "warmup_updates": 6,
+    "scope": "Matched retained-batch screen; max rank wall time, summed rank tokens. Phase means use rank 0 and do not partition max-rank wall time. No inference/publication; compilation activity remains visible.",
+    "initialization_seconds_per_rank": [
+      106.43470860179514,
+      106.70439177984372
+    ],
+    "measured_updates": 10,
+    "warm_seconds": 219.70093869417906,
+    "warm_model_tokens_per_second_per_gpu": 6161.719235457536,
+    "warm_response_tokens_per_second_per_gpu": 5715.348816728878,
+    "mean_seconds_per_update": 21.970093869417905,
+    "phase_mean_seconds_rank0": {
+      "forward_loss_backward": 19.9835060714744,
+      "optimizer": 0.264324459573254
+    },
+    "other_mean_seconds_rank0": 1.7219249608460814,
+    "per_update": [
+      {
+        "update": 0,
+        "source_sha256": "dc76492ef8eafe9d14e6f9fcf42ef37631d13aa1158dd5e36b6d7ac10cf509b1",
+        "seconds": 604.1242379057221,
+        "model_tokens": 201234,
+        "response_tokens": 182878,
+        "model_tokens_per_second_per_gpu": 166.55017906383355,
+        "response_tokens_per_second_per_gpu": 151.35793974594628,
+        "phases_rank0": {
+          "scoring": 247.31133292801678,
+          "forward_loss_backward": 340.26135449297726,
+          "optimizer": 9.086224202997983
+        },
+        "other_seconds_rank0": 7.465326281730086,
+        "jit_misses_per_rank": [
+          542,
+          604
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 548,
+            ".ttir": 548,
+            ".ttgir": 548,
+            ".llir": 548,
+            ".ptx": 548,
+            ".cubin": 548,
+            ".json": 1132
+          },
+          {
+            ".source": 610,
+            ".ttir": 610,
+            ".ttgir": 610,
+            ".llir": 610,
+            ".ptx": 610,
+            ".cubin": 610,
+            ".json": 1260
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          210774515712,
+          210867875840
+        ]
+      },
+      {
+        "update": 1,
+        "source_sha256": "5f1b294a7f7a7bffa0711057658fe5aca82ec8d949a39657237c8550bf370c22",
+        "seconds": 19.428710256237537,
+        "model_tokens": 250847,
+        "response_tokens": 231759,
+        "model_tokens_per_second_per_gpu": 6455.575194948059,
+        "response_tokens_per_second_per_gpu": 5964.343410947579,
+        "phases_rank0": {
+          "forward_loss_backward": 17.318129722960293,
+          "optimizer": 0.26531521137803793
+        },
+        "other_seconds_rank0": 1.8452653218992054,
+        "jit_misses_per_rank": [
+          7,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 7,
+            ".ttir": 7,
+            ".ttgir": 7,
+            ".llir": 7,
+            ".ptx": 7,
+            ".cubin": 7,
+            ".json": 14
+          },
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          210533979136,
+          210471219200
+        ]
+      },
+      {
+        "update": 2,
+        "source_sha256": "159a8f91dbf843b3020b59d5e753a12ed6ee120bdcc8c2881600ac41ca902925",
+        "seconds": 26.98595471214503,
+        "model_tokens": 352183,
+        "response_tokens": 331923,
+        "model_tokens_per_second_per_gpu": 6525.301842322814,
+        "response_tokens_per_second_per_gpu": 6149.921385783287,
+        "phases_rank0": {
+          "forward_loss_backward": 24.330516905058175,
+          "optimizer": 0.2645122352987528
+        },
+        "other_seconds_rank0": 2.3909255717881024,
+        "jit_misses_per_rank": [
+          1,
+          12
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 1,
+            ".ttir": 1,
+            ".ttgir": 1,
+            ".llir": 1,
+            ".ptx": 1,
+            ".cubin": 1,
+            ".json": 2
+          },
+          {
+            ".source": 12,
+            ".ttir": 12,
+            ".ttgir": 12,
+            ".llir": 12,
+            ".ptx": 12,
+            ".cubin": 12,
+            ".json": 24
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          209765962240,
+          210815440384
+        ]
+      },
+      {
+        "update": 3,
+        "source_sha256": "0f3c9ece45de5e769238b98397f70f7e9bd71016c1e6ac179218899b3ebf3dbb",
+        "seconds": 16.84841819712892,
+        "model_tokens": 257542,
+        "response_tokens": 238434,
+        "model_tokens_per_second_per_gpu": 7642.913328323213,
+        "response_tokens_per_second_per_gpu": 7075.857128256428,
+        "phases_rank0": {
+          "forward_loss_backward": 14.627923204097897,
+          "optimizer": 0.2646646900102496
+        },
+        "other_seconds_rank0": 1.9558303030207753,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          209878883840,
+          210925596160
+        ]
+      },
+      {
+        "update": 4,
+        "source_sha256": "af9a8d6080d548a56cd55ce94957a50ac20f18415965f0bb58589b89b3f177ea",
+        "seconds": 19.278682792093605,
+        "model_tokens": 301198,
+        "response_tokens": 281502,
+        "model_tokens_per_second_per_gpu": 7811.685145925128,
+        "response_tokens_per_second_per_gpu": 7300.861864780694,
+        "phases_rank0": {
+          "forward_loss_backward": 17.05171258468181,
+          "optimizer": 0.2647985299117863
+        },
+        "other_seconds_rank0": 1.9621716775000095,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          210978699776,
+          210085149696
+        ]
+      },
+      {
+        "update": 5,
+        "source_sha256": "559aa1771ef20428dc184b065607aab917a8870fcfb5dff204d21096c7ae3f3d",
+        "seconds": 15.202559172175825,
+        "model_tokens": 282350,
+        "response_tokens": 262394,
+        "model_tokens_per_second_per_gpu": 9286.265450515903,
+        "response_tokens_per_second_per_gpu": 8629.92858729474,
+        "phases_rank0": {
+          "forward_loss_backward": 13.067491654772311,
+          "optimizer": 0.2650875048711896
+        },
+        "other_seconds_rank0": 1.8699800125323236,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          211215729152,
+          211773375488
+        ]
+      },
+      {
+        "update": 6,
+        "source_sha256": "83c2d68688920a8dc81166b1890d68c07407c6744a5eb0d6b6e3746a3368118d",
+        "seconds": 18.345195076894015,
+        "model_tokens": 321779,
+        "response_tokens": 301723,
+        "model_tokens_per_second_per_gpu": 8770.116606862479,
+        "response_tokens_per_second_per_gpu": 8223.488459384758,
+        "phases_rank0": {
+          "forward_loss_backward": 15.95858660992235,
+          "optimizer": 0.26428602589294314
+        },
+        "other_seconds_rank0": 2.1223224410787225,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          209974927360,
+          209886679552
+        ]
+      },
+      {
+        "update": 7,
+        "source_sha256": "932a828bfe28dd75c5704b0b6edf5e494128cc9feff17921a7e197d4a5159331",
+        "seconds": 51.83752616401762,
+        "model_tokens": 289122,
+        "response_tokens": 269170,
+        "model_tokens_per_second_per_gpu": 2788.732617034978,
+        "response_tokens_per_second_per_gpu": 2596.285161721713,
+        "phases_rank0": {
+          "forward_loss_backward": 49.58176852716133,
+          "optimizer": 0.2648668303154409
+        },
+        "other_seconds_rank0": 1.9908908065408468,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          210762700800,
+          210284326912
+        ]
+      },
+      {
+        "update": 8,
+        "source_sha256": "063bf61f8d462b88d34aa18f71c2d676984b1e97aedf9e61ac5c3101ad330704",
+        "seconds": 15.518757157959044,
+        "model_tokens": 285763,
+        "response_tokens": 265367,
+        "model_tokens_per_second_per_gpu": 9207.019514879188,
+        "response_tokens_per_second_per_gpu": 8549.879262203103,
+        "phases_rank0": {
+          "forward_loss_backward": 13.506932535208762,
+          "optimizer": 0.26434291573241353
+        },
+        "other_seconds_rank0": 1.7474817070178688,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          211203548160,
+          210674584576
+        ]
+      },
+      {
+        "update": 9,
+        "source_sha256": "b7295c499f1d6d9ac5f575e8b9f7b4406f4c5afdf670f5660ed612ddb1958048",
+        "seconds": 12.92770332004875,
+        "model_tokens": 253152,
+        "response_tokens": 233540,
+        "model_tokens_per_second_per_gpu": 9791.066275763102,
+        "response_tokens_per_second_per_gpu": 9032.540205258954,
+        "phases_rank0": {
+          "forward_loss_backward": 11.089095758274198,
+          "optimizer": 0.2641564109362662
+        },
+        "other_seconds_rank0": 1.5710673755966127,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          210754831872,
+          211789787136
+        ]
+      },
+      {
+        "update": 10,
+        "source_sha256": "db16ca81c01af6f24084b945ccdc1db83055b22d312dbd1ce624cfb509f7f3d3",
+        "seconds": 14.288568606134504,
+        "model_tokens": 227383,
+        "response_tokens": 207987,
+        "model_tokens_per_second_per_gpu": 7956.815208990835,
+        "response_tokens_per_second_per_gpu": 7278.090819772704,
+        "phases_rank0": {
+          "forward_loss_backward": 12.650532686151564,
+          "optimizer": 0.2640601606108248
+        },
+        "other_seconds_rank0": 1.3739757593721151,
+        "jit_misses_per_rank": [
+          0,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          211570164736,
+          211905377280
+        ]
+      },
+      {
+        "update": 11,
+        "source_sha256": "83db6a67c45a14018ee3c92c605be53e9b068fd790dd0502f0afc83b30a7c491",
+        "seconds": 14.933661184739321,
+        "model_tokens": 270465,
+        "response_tokens": 251433,
+        "model_tokens_per_second_per_gpu": 9055.548959299667,
+        "response_tokens_per_second_per_gpu": 8418.330806143469,
+        "phases_rank0": {
+          "forward_loss_backward": 12.9667590376921,
+          "optimizer": 0.26452924963086843
+        },
+        "other_seconds_rank0": 1.7023728974163532,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          211201769472,
+          212001989632
+        ]
+      },
+      {
+        "update": 12,
+        "source_sha256": "c05da1198d95fdf9e88e8b773291769432e737cf8da749432e69ff5613b2356f",
+        "seconds": 15.0602243761532,
+        "model_tokens": 283958,
+        "response_tokens": 264218,
+        "model_tokens_per_second_per_gpu": 9427.415983576824,
+        "response_tokens_per_second_per_gpu": 8772.04726173836,
+        "phases_rank0": {
+          "forward_loss_backward": 13.0165537558496,
+          "optimizer": 0.2645052960142493
+        },
+        "other_seconds_rank0": 1.7791653242893517,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          211632276480,
+          210555939328
+        ]
+      },
+      {
+        "update": 13,
+        "source_sha256": "44343473f2820e1916d9a22f424548e26e671d44a8eae388da2ad9f107954328",
+        "seconds": 13.300556330010295,
+        "model_tokens": 249214,
+        "response_tokens": 229974,
+        "model_tokens_per_second_per_gpu": 9368.555488077358,
+        "response_tokens_per_second_per_gpu": 8645.277471631218,
+        "phases_rank0": {
+          "forward_loss_backward": 11.411482288967818,
+          "optimizer": 0.2642082963138819
+        },
+        "other_seconds_rank0": 1.624865744728595,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          211805648384,
+          210389303296
+        ]
+      },
+      {
+        "update": 14,
+        "source_sha256": "ae3788b1e3890bb4faf3b336f3351c89b71ba70ea0b2cb18728298269dcf6048",
+        "seconds": 12.06252628006041,
+        "model_tokens": 243924,
+        "response_tokens": 224544,
+        "model_tokens_per_second_per_gpu": 10110.817350226673,
+        "response_tokens_per_second_per_gpu": 9307.503038197545,
+        "phases_rank0": {
+          "forward_loss_backward": 10.260868186596781,
+          "optimizer": 0.26410769997164607
+        },
+        "other_seconds_rank0": 1.5375503934919834,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          209263518720,
+          208658899968
+        ]
+      },
+      {
+        "update": 15,
+        "source_sha256": "4cafbbba092a21ff75fa9d2ccddf8d83bce7110960042ce7c2a6544ab16c1482",
+        "seconds": 51.4262201981619,
+        "model_tokens": 282711,
+        "response_tokens": 263379,
+        "model_tokens_per_second_per_gpu": 2748.7048329686963,
+        "response_tokens_per_second_per_gpu": 2560.7462398083635,
+        "phases_rank0": {
+          "forward_loss_backward": 49.39248132891953,
+          "optimizer": 0.2641817103140056
+        },
+        "other_seconds_rank0": 1.7695571589283645,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          211524239872,
+          210823416320
+        ]
+      }
+    ]
+  },
+  "optimizer-compile": {
+    "variant": "optimizer-compile",
+    "passed": true,
+    "warmup_updates": 6,
+    "scope": "Matched retained-batch screen; max rank wall time, summed rank tokens. Phase means use rank 0 and do not partition max-rank wall time. No inference/publication; compilation activity remains visible.",
+    "initialization_seconds_per_rank": [
+      97.99123761430383,
+      98.20089013269171
+    ],
+    "measured_updates": 10,
+    "warm_seconds": 289.1720941453241,
+    "warm_model_tokens_per_second_per_gpu": 4681.41818456271,
+    "warm_response_tokens_per_second_per_gpu": 4342.284492254504,
+    "mean_seconds_per_update": 28.917209414532408,
+    "phase_mean_seconds_rank0": {
+      "forward_loss_backward": 27.132838988304137,
+      "optimizer": 0.09952688757330179
+    },
+    "other_mean_seconds_rank0": 1.6721159958280623,
+    "per_update": [
+      {
+        "update": 0,
+        "source_sha256": "dc76492ef8eafe9d14e6f9fcf42ef37631d13aa1158dd5e36b6d7ac10cf509b1",
+        "seconds": 713.375412879046,
+        "model_tokens": 201234,
+        "response_tokens": 182878,
+        "model_tokens_per_second_per_gpu": 141.04354899747543,
+        "response_tokens_per_second_per_gpu": 128.17795279903154,
+        "phases_rank0": {
+          "scoring": 208.77365626208484,
+          "forward_loss_backward": 346.3052643961273,
+          "optimizer": 150.57560921739787
+        },
+        "other_seconds_rank0": 7.720883003436029,
+        "jit_misses_per_rank": [
+          542,
+          604
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 548,
+            ".ttir": 548,
+            ".ttgir": 548,
+            ".llir": 548,
+            ".ptx": 548,
+            ".cubin": 548,
+            ".json": 1132
+          },
+          {
+            ".source": 610,
+            ".ttir": 610,
+            ".ttgir": 610,
+            ".llir": 610,
+            ".ptx": 610,
+            ".cubin": 610,
+            ".json": 1260
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175608088576,
+          175219324416
+        ]
+      },
+      {
+        "update": 1,
+        "source_sha256": "5f1b294a7f7a7bffa0711057658fe5aca82ec8d949a39657237c8550bf370c22",
+        "seconds": 26.005346093326807,
+        "model_tokens": 250847,
+        "response_tokens": 231759,
+        "model_tokens_per_second_per_gpu": 4822.989071165822,
+        "response_tokens_per_second_per_gpu": 4455.987610552726,
+        "phases_rank0": {
+          "forward_loss_backward": 24.269797922112048,
+          "optimizer": 0.10979791218414903
+        },
+        "other_seconds_rank0": 1.6257502590306103,
+        "jit_misses_per_rank": [
+          7,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 7,
+            ".ttir": 7,
+            ".ttgir": 7,
+            ".llir": 7,
+            ".ptx": 7,
+            ".cubin": 7,
+            ".json": 14
+          },
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175570745856,
+          175651670528
+        ]
+      },
+      {
+        "update": 2,
+        "source_sha256": "159a8f91dbf843b3020b59d5e753a12ed6ee120bdcc8c2881600ac41ca902925",
+        "seconds": 33.092314986046404,
+        "model_tokens": 352183,
+        "response_tokens": 331923,
+        "model_tokens_per_second_per_gpu": 5321.220352043976,
+        "response_tokens_per_second_per_gpu": 5015.106983901815,
+        "phases_rank0": {
+          "forward_loss_backward": 30.997665953822434,
+          "optimizer": 0.10194532992318273
+        },
+        "other_seconds_rank0": 1.992703702300787,
+        "jit_misses_per_rank": [
+          1,
+          12
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 1,
+            ".ttir": 1,
+            ".ttgir": 1,
+            ".llir": 1,
+            ".ptx": 1,
+            ".cubin": 1,
+            ".json": 2
+          },
+          {
+            ".source": 12,
+            ".ttir": 12,
+            ".ttgir": 12,
+            ".llir": 12,
+            ".ptx": 12,
+            ".cubin": 12,
+            ".json": 24
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175668976128,
+          175670121472
+        ]
+      },
+      {
+        "update": 3,
+        "source_sha256": "0f3c9ece45de5e769238b98397f70f7e9bd71016c1e6ac179218899b3ebf3dbb",
+        "seconds": 22.56072699278593,
+        "model_tokens": 257542,
+        "response_tokens": 238434,
+        "model_tokens_per_second_per_gpu": 5707.750465717532,
+        "response_tokens_per_second_per_gpu": 5284.271204474975,
+        "phases_rank0": {
+          "forward_loss_backward": 20.82840124471113,
+          "optimizer": 0.09628894692286849
+        },
+        "other_seconds_rank0": 1.6360368011519313,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175547540480,
+          175574538240
+        ]
+      },
+      {
+        "update": 4,
+        "source_sha256": "af9a8d6080d548a56cd55ce94957a50ac20f18415965f0bb58589b89b3f177ea",
+        "seconds": 28.869510595686734,
+        "model_tokens": 301198,
+        "response_tokens": 281502,
+        "model_tokens_per_second_per_gpu": 5216.541496290565,
+        "response_tokens_per_second_per_gpu": 4875.420368955925,
+        "phases_rank0": {
+          "forward_loss_backward": 26.823774857912213,
+          "optimizer": 0.10346417408436537
+        },
+        "other_seconds_rank0": 1.7669342588633299,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175574311424,
+          175646510592
+        ]
+      },
+      {
+        "update": 5,
+        "source_sha256": "559aa1771ef20428dc184b065607aab917a8870fcfb5dff204d21096c7ae3f3d",
+        "seconds": 23.808369351085275,
+        "model_tokens": 282350,
+        "response_tokens": 262394,
+        "model_tokens_per_second_per_gpu": 5929.637511842646,
+        "response_tokens_per_second_per_gpu": 5510.541191012712,
+        "phases_rank0": {
+          "forward_loss_backward": 21.937549585010856,
+          "optimizer": 0.0953011391684413
+        },
+        "other_seconds_rank0": 1.6431853608228266,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175631672320,
+          175714826752
+        ]
+      },
+      {
+        "update": 6,
+        "source_sha256": "83c2d68688920a8dc81166b1890d68c07407c6744a5eb0d6b6e3746a3368118d",
+        "seconds": 26.442890895996243,
+        "model_tokens": 321779,
+        "response_tokens": 301723,
+        "model_tokens_per_second_per_gpu": 6084.414167603759,
+        "response_tokens_per_second_per_gpu": 5705.181804567448,
+        "phases_rank0": {
+          "forward_loss_backward": 24.278069202788174,
+          "optimizer": 0.09650042979046702
+        },
+        "other_seconds_rank0": 1.9410458351485431,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175594966016,
+          175490898432
+        ]
+      },
+      {
+        "update": 7,
+        "source_sha256": "932a828bfe28dd75c5704b0b6edf5e494128cc9feff17921a7e197d4a5159331",
+        "seconds": 58.74193405499682,
+        "model_tokens": 289122,
+        "response_tokens": 269170,
+        "model_tokens_per_second_per_gpu": 2460.9506364679028,
+        "response_tokens_per_second_per_gpu": 2291.1230650661846,
+        "phases_rank0": {
+          "forward_loss_backward": 57.014164173044264,
+          "optimizer": 0.09329817583784461
+        },
+        "other_seconds_rank0": 1.6344717061147094,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175636800512,
+          175651222016
+        ]
+      },
+      {
+        "update": 8,
+        "source_sha256": "063bf61f8d462b88d34aa18f71c2d676984b1e97aedf9e61ac5c3101ad330704",
+        "seconds": 25.118269400671124,
+        "model_tokens": 285763,
+        "response_tokens": 265367,
+        "model_tokens_per_second_per_gpu": 5688.349691646448,
+        "response_tokens_per_second_per_gpu": 5282.350383440624,
+        "phases_rank0": {
+          "forward_loss_backward": 23.29298898112029,
+          "optimizer": 0.09440989512950182
+        },
+        "other_seconds_rank0": 1.7308705244213343,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175759809024,
+          175655634944
+        ]
+      },
+      {
+        "update": 9,
+        "source_sha256": "b7295c499f1d6d9ac5f575e8b9f7b4406f4c5afdf670f5660ed612ddb1958048",
+        "seconds": 20.987999107223004,
+        "model_tokens": 253152,
+        "response_tokens": 233540,
+        "model_tokens_per_second_per_gpu": 6030.875042130098,
+        "response_tokens_per_second_per_gpu": 5563.655658809977,
+        "phases_rank0": {
+          "forward_loss_backward": 19.33160938601941,
+          "optimizer": 0.09440344711765647
+        },
+        "other_seconds_rank0": 1.561986274085939,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175641360384,
+          175674907648
+        ]
+      },
+      {
+        "update": 10,
+        "source_sha256": "db16ca81c01af6f24084b945ccdc1db83055b22d312dbd1ce624cfb509f7f3d3",
+        "seconds": 19.412261603865772,
+        "model_tokens": 227383,
+        "response_tokens": 207987,
+        "model_tokens_per_second_per_gpu": 5856.68493038232,
+        "response_tokens_per_second_per_gpu": 5357.103779154236,
+        "phases_rank0": {
+          "forward_loss_backward": 17.9097716701217,
+          "optimizer": 0.09790323209017515
+        },
+        "other_seconds_rank0": 1.4045867016538978,
+        "jit_misses_per_rank": [
+          0,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175598806528,
+          175657669632
+        ]
+      },
+      {
+        "update": 11,
+        "source_sha256": "83db6a67c45a14018ee3c92c605be53e9b068fd790dd0502f0afc83b30a7c491",
+        "seconds": 22.26957383705303,
+        "model_tokens": 270465,
+        "response_tokens": 251433,
+        "model_tokens_per_second_per_gpu": 6072.523030278856,
+        "response_tokens_per_second_per_gpu": 5645.213551003286,
+        "phases_rank0": {
+          "forward_loss_backward": 20.486633316613734,
+          "optimizer": 0.09956148406490684
+        },
+        "other_seconds_rank0": 1.6833790363743901,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175676014080,
+          175647846400
+        ]
+      },
+      {
+        "update": 12,
+        "source_sha256": "c05da1198d95fdf9e88e8b773291769432e737cf8da749432e69ff5613b2356f",
+        "seconds": 22.327607720624655,
+        "model_tokens": 283958,
+        "response_tokens": 264218,
+        "model_tokens_per_second_per_gpu": 6358.898892193,
+        "response_tokens_per_second_per_gpu": 5916.845264079371,
+        "phases_rank0": {
+          "forward_loss_backward": 20.375185111071914,
+          "optimizer": 0.10097739286720753
+        },
+        "other_seconds_rank0": 1.8514452166855335,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175675753984,
+          175607602176
+        ]
+      },
+      {
+        "update": 13,
+        "source_sha256": "44343473f2820e1916d9a22f424548e26e671d44a8eae388da2ad9f107954328",
+        "seconds": 23.924020998179913,
+        "model_tokens": 249214,
+        "response_tokens": 229974,
+        "model_tokens_per_second_per_gpu": 5208.447192446447,
+        "response_tokens_per_second_per_gpu": 4806.340874251363,
+        "phases_rank0": {
+          "forward_loss_backward": 22.193132866639644,
+          "optimizer": 0.09792857896536589
+        },
+        "other_seconds_rank0": 1.6329595525749028,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          176013561856,
+          175538755584
+        ]
+      },
+      {
+        "update": 14,
+        "source_sha256": "ae3788b1e3890bb4faf3b336f3351c89b71ba70ea0b2cb18728298269dcf6048",
+        "seconds": 17.536821816582233,
+        "model_tokens": 243924,
+        "response_tokens": 224544,
+        "model_tokens_per_second_per_gpu": 6954.623892265177,
+        "response_tokens_per_second_per_gpu": 6402.072232600285,
+        "phases_rank0": {
+          "forward_loss_backward": 15.885041788686067,
+          "optimizer": 0.10508563183248043
+        },
+        "other_seconds_rank0": 1.5466943960636854,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175505862144,
+          175489199104
+        ]
+      },
+      {
+        "update": 15,
+        "source_sha256": "4cafbbba092a21ff75fa9d2ccddf8d83bce7110960042ce7c2a6544ab16c1482",
+        "seconds": 52.41071471013129,
+        "model_tokens": 282711,
+        "response_tokens": 263379,
+        "model_tokens_per_second_per_gpu": 2697.072550561406,
+        "response_tokens_per_second_per_gpu": 2512.6446133836766,
+        "phases_rank0": {
+          "forward_loss_backward": 50.56179338693619,
+          "optimizer": 0.11520060803741217
+        },
+        "other_seconds_rank0": 1.7337207151576877,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          3,
+          3
+        ],
+        "peak_allocated_bytes_per_rank": [
+          175538084352,
+          175650950656
+        ]
+      }
+    ]
+  },
+  "reduce-scatter": {
+    "variant": "reduce-scatter",
+    "passed": true,
+    "warmup_updates": 6,
+    "scope": "Matched retained-batch screen; max rank wall time, summed rank tokens. Phase means use rank 0 and do not partition max-rank wall time. No inference/publication; compilation activity remains visible.",
+    "initialization_seconds_per_rank": [
+      74.15316413901746,
+      74.74072324112058
+    ],
+    "measured_updates": 10,
+    "warm_seconds": 335.3100729524158,
+    "warm_model_tokens_per_second_per_gpu": 4037.264637117269,
+    "warm_response_tokens_per_second_per_gpu": 3744.7950458028536,
+    "mean_seconds_per_update": 33.53100729524158,
+    "phase_mean_seconds_rank0": {
+      "forward_loss_backward": 31.308291917899624,
+      "optimizer": 0.26363041982986035
+    },
+    "other_mean_seconds_rank0": 1.9590849575120957,
+    "per_update": [
+      {
+        "update": 0,
+        "source_sha256": "dc76492ef8eafe9d14e6f9fcf42ef37631d13aa1158dd5e36b6d7ac10cf509b1",
+        "seconds": 570.8808157662861,
+        "model_tokens": 201234,
+        "response_tokens": 182878,
+        "model_tokens_per_second_per_gpu": 176.24869713819876,
+        "response_tokens_per_second_per_gpu": 160.17178625500418,
+        "phases_rank0": {
+          "scoring": 204.26531805098057,
+          "forward_loss_backward": 349.1111964038573,
+          "optimizer": 9.231048183050007
+        },
+        "other_seconds_rank0": 8.27325312839821,
+        "jit_misses_per_rank": [
+          542,
+          604
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 548,
+            ".ttir": 548,
+            ".ttgir": 548,
+            ".llir": 548,
+            ".ptx": 548,
+            ".cubin": 548,
+            ".json": 1132
+          },
+          {
+            ".source": 610,
+            ".ttir": 610,
+            ".ttgir": 610,
+            ".llir": 610,
+            ".ptx": 610,
+            ".cubin": 610,
+            ".json": 1260
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180406437888,
+          180406224384
+        ]
+      },
+      {
+        "update": 1,
+        "source_sha256": "5f1b294a7f7a7bffa0711057658fe5aca82ec8d949a39657237c8550bf370c22",
+        "seconds": 30.03761412296444,
+        "model_tokens": 250847,
+        "response_tokens": 231759,
+        "model_tokens_per_second_per_gpu": 4175.548014118434,
+        "response_tokens_per_second_per_gpu": 3857.813058175199,
+        "phases_rank0": {
+          "forward_loss_backward": 28.0628369031474,
+          "optimizer": 0.2631063060835004
+        },
+        "other_seconds_rank0": 1.7049691826105118,
+        "jit_misses_per_rank": [
+          7,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 7,
+            ".ttir": 7,
+            ".ttgir": 7,
+            ".llir": 7,
+            ".ptx": 7,
+            ".cubin": 7,
+            ".json": 14
+          },
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180406825984,
+          180407045120
+        ]
+      },
+      {
+        "update": 2,
+        "source_sha256": "159a8f91dbf843b3020b59d5e753a12ed6ee120bdcc8c2881600ac41ca902925",
+        "seconds": 39.18465982424095,
+        "model_tokens": 352183,
+        "response_tokens": 331923,
+        "model_tokens_per_second_per_gpu": 4493.888700063791,
+        "response_tokens_per_second_per_gpu": 4235.369166005382,
+        "phases_rank0": {
+          "forward_loss_backward": 36.7094924361445,
+          "optimizer": 0.2638900759629905
+        },
+        "other_seconds_rank0": 2.2112773121334612,
+        "jit_misses_per_rank": [
+          1,
+          12
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 1,
+            ".ttir": 1,
+            ".ttgir": 1,
+            ".llir": 1,
+            ".ptx": 1,
+            ".cubin": 1,
+            ".json": 2
+          },
+          {
+            ".source": 12,
+            ".ttir": 12,
+            ".ttgir": 12,
+            ".llir": 12,
+            ".ptx": 12,
+            ".cubin": 12,
+            ".json": 24
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180409009152,
+          180408954880
+        ]
+      },
+      {
+        "update": 3,
+        "source_sha256": "0f3c9ece45de5e769238b98397f70f7e9bd71016c1e6ac179218899b3ebf3dbb",
+        "seconds": 28.55158015107736,
+        "model_tokens": 257542,
+        "response_tokens": 238434,
+        "model_tokens_per_second_per_gpu": 4510.118155234255,
+        "response_tokens_per_second_per_gpu": 4175.495694780364,
+        "phases_rank0": {
+          "forward_loss_backward": 25.987890352029353,
+          "optimizer": 0.2639031717553735
+        },
+        "other_seconds_rank0": 2.299786627292633,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180406633984,
+          180407509504
+        ]
+      },
+      {
+        "update": 4,
+        "source_sha256": "af9a8d6080d548a56cd55ce94957a50ac20f18415965f0bb58589b89b3f177ea",
+        "seconds": 31.954821991268545,
+        "model_tokens": 301198,
+        "response_tokens": 281502,
+        "model_tokens_per_second_per_gpu": 4712.872443512601,
+        "response_tokens_per_second_per_gpu": 4404.687343852497,
+        "phases_rank0": {
+          "forward_loss_backward": 29.638259348925203,
+          "optimizer": 0.26341394521296024
+        },
+        "other_seconds_rank0": 2.053148697130382,
+        "jit_misses_per_rank": [
+          6,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180407976448,
+          180407963136
+        ]
+      },
+      {
+        "update": 5,
+        "source_sha256": "559aa1771ef20428dc184b065607aab917a8870fcfb5dff204d21096c7ae3f3d",
+        "seconds": 28.161004818975925,
+        "model_tokens": 282350,
+        "response_tokens": 262394,
+        "model_tokens_per_second_per_gpu": 5013.13788011112,
+        "response_tokens_per_second_per_gpu": 4658.818136758906,
+        "phases_rank0": {
+          "forward_loss_backward": 25.695884554181248,
+          "optimizer": 0.2629673541523516
+        },
+        "other_seconds_rank0": 2.202152910642326,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180407653888,
+          180407512064
+        ]
+      },
+      {
+        "update": 6,
+        "source_sha256": "83c2d68688920a8dc81166b1890d68c07407c6744a5eb0d6b6e3746a3368118d",
+        "seconds": 33.43216415680945,
+        "model_tokens": 321779,
+        "response_tokens": 301723,
+        "model_tokens_per_second_per_gpu": 4812.416547291632,
+        "response_tokens_per_second_per_gpu": 4512.465878439778,
+        "phases_rank0": {
+          "forward_loss_backward": 30.23204433126375,
+          "optimizer": 0.26298104831948876
+        },
+        "other_seconds_rank0": 2.9371387772262096,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180408665088,
+          180408110592
+        ]
+      },
+      {
+        "update": 7,
+        "source_sha256": "932a828bfe28dd75c5704b0b6edf5e494128cc9feff17921a7e197d4a5159331",
+        "seconds": 62.40755803603679,
+        "model_tokens": 289122,
+        "response_tokens": 269170,
+        "model_tokens_per_second_per_gpu": 2316.4021241870146,
+        "response_tokens_per_second_per_gpu": 2156.549691021156,
+        "phases_rank0": {
+          "forward_loss_backward": 60.228440994396806,
+          "optimizer": 0.2635023728944361
+        },
+        "other_seconds_rank0": 1.9156146687455475,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180407693824,
+          180407741440
+        ]
+      },
+      {
+        "update": 8,
+        "source_sha256": "063bf61f8d462b88d34aa18f71c2d676984b1e97aedf9e61ac5c3101ad330704",
+        "seconds": 26.428219091612846,
+        "model_tokens": 285763,
+        "response_tokens": 265367,
+        "model_tokens_per_second_per_gpu": 5406.39910334875,
+        "response_tokens_per_second_per_gpu": 5020.5236887152905,
+        "phases_rank0": {
+          "forward_loss_backward": 24.19538672082126,
+          "optimizer": 0.2633994882926345
+        },
+        "other_seconds_rank0": 1.9694328824989498,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180407404032,
+          180407908352
+        ]
+      },
+      {
+        "update": 9,
+        "source_sha256": "b7295c499f1d6d9ac5f575e8b9f7b4406f4c5afdf670f5660ed612ddb1958048",
+        "seconds": 21.32631599297747,
+        "model_tokens": 253152,
+        "response_tokens": 233540,
+        "model_tokens_per_second_per_gpu": 5935.2023125644455,
+        "response_tokens_per_second_per_gpu": 5475.394814484186,
+        "phases_rank0": {
+          "forward_loss_backward": 19.253188334871083,
+          "optimizer": 0.2633048282004893
+        },
+        "other_seconds_rank0": 1.8098228299058974,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180407339520,
+          180406659584
+        ]
+      },
+      {
+        "update": 10,
+        "source_sha256": "db16ca81c01af6f24084b945ccdc1db83055b22d312dbd1ce624cfb509f7f3d3",
+        "seconds": 24.201029220595956,
+        "model_tokens": 227383,
+        "response_tokens": 207987,
+        "model_tokens_per_second_per_gpu": 4697.796071550725,
+        "response_tokens_per_second_per_gpu": 4297.069312717401,
+        "phases_rank0": {
+          "forward_loss_backward": 22.379821457900107,
+          "optimizer": 0.2632979988120496
+        },
+        "other_seconds_rank0": 1.5579097638837993,
+        "jit_misses_per_rank": [
+          0,
+          6
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {
+            ".source": 6,
+            ".ttir": 6,
+            ".ttgir": 6,
+            ".llir": 6,
+            ".ptx": 6,
+            ".cubin": 6,
+            ".json": 12
+          }
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180406548992,
+          180406430208
+        ]
+      },
+      {
+        "update": 11,
+        "source_sha256": "83db6a67c45a14018ee3c92c605be53e9b068fd790dd0502f0afc83b30a7c491",
+        "seconds": 27.732257508207113,
+        "model_tokens": 270465,
+        "response_tokens": 251433,
+        "model_tokens_per_second_per_gpu": 4876.361037682531,
+        "response_tokens_per_second_per_gpu": 4533.222726739622,
+        "phases_rank0": {
+          "forward_loss_backward": 25.473095909226686,
+          "optimizer": 0.26296550827100873
+        },
+        "other_seconds_rank0": 1.996196090709418,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180406987776,
+          180407799808
+        ]
+      },
+      {
+        "update": 12,
+        "source_sha256": "c05da1198d95fdf9e88e8b773291769432e737cf8da749432e69ff5613b2356f",
+        "seconds": 27.44342084787786,
+        "model_tokens": 283958,
+        "response_tokens": 264218,
+        "model_tokens_per_second_per_gpu": 5173.516843508922,
+        "response_tokens_per_second_per_gpu": 4813.867802133555,
+        "phases_rank0": {
+          "forward_loss_backward": 25.16534052696079,
+          "optimizer": 0.26314014103263617
+        },
+        "other_seconds_rank0": 2.0149401798844337,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180407805952,
+          180407507456
+        ]
+      },
+      {
+        "update": 13,
+        "source_sha256": "44343473f2820e1916d9a22f424548e26e671d44a8eae388da2ad9f107954328",
+        "seconds": 23.016471311915666,
+        "model_tokens": 249214,
+        "response_tokens": 229974,
+        "model_tokens_per_second_per_gpu": 5413.818578501681,
+        "response_tokens_per_second_per_gpu": 4995.857029590415,
+        "phases_rank0": {
+          "forward_loss_backward": 20.939226211979985,
+          "optimizer": 0.26267605600878596
+        },
+        "other_seconds_rank0": 1.8145690439268947,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180406742528,
+          180407168000
+        ]
+      },
+      {
+        "update": 14,
+        "source_sha256": "ae3788b1e3890bb4faf3b336f3351c89b71ba70ea0b2cb18728298269dcf6048",
+        "seconds": 22.563186298124492,
+        "model_tokens": 243924,
+        "response_tokens": 224544,
+        "model_tokens_per_second_per_gpu": 5405.353587411446,
+        "response_tokens_per_second_per_gpu": 4975.892966381806,
+        "phases_rank0": {
+          "forward_loss_backward": 20.62749972101301,
+          "optimizer": 0.2625708491541445
+        },
+        "other_seconds_rank0": 1.673115727957338,
+        "jit_misses_per_rank": [
+          0,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {},
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180406938624,
+          180406751744
+        ]
+      },
+      {
+        "update": 15,
+        "source_sha256": "4cafbbba092a21ff75fa9d2ccddf8d83bce7110960042ce7c2a6544ab16c1482",
+        "seconds": 66.75945048825815,
+        "model_tokens": 282711,
+        "response_tokens": 263379,
+        "model_tokens_per_second_per_gpu": 2117.385613065554,
+        "response_tokens_per_second_per_gpu": 1972.5971235063107,
+        "phases_rank0": {
+          "forward_loss_backward": 64.58887497056276,
+          "optimizer": 0.26846590731292963
+        },
+        "other_seconds_rank0": 1.9021096103824675,
+        "jit_misses_per_rank": [
+          66,
+          0
+        ],
+        "cache_artifact_writes_per_rank": [
+          {
+            ".source": 66,
+            ".ttir": 66,
+            ".ttgir": 66,
+            ".llir": 66,
+            ".ptx": 66,
+            ".cubin": 66,
+            ".json": 136
+          },
+          {}
+        ],
+        "unique_graphs_cumulative_per_rank": [
+          2,
+          2
+        ],
+        "peak_allocated_bytes_per_rank": [
+          180407727616,
+          180407538688
+        ]
+      }
+    ]
+  }
+}

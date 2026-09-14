@@ -1,0 +1,74 @@
+[
+  {
+    "variant": "baseline",
+    "experiment": "01M2ETY4NRESA8W3JF264N6DCT",
+    "source": "01M2ETY1QK85C1WM8S1TBJ73YZ",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-baseline-36274f5a6f7e",
+    "commit": "2fa37b831f28258dc19f71eb189689847aabf114",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "69fbefe440e83b975c1398e11a4b98458588d4396d228f8b5c1cc1cb487e3bb5"
+  },
+  {
+    "variant": "lean",
+    "experiment": "01M2ETY5FV9Q7P4KEZNGYK47BN",
+    "source": "01M2ETY1QK85C1WM8S1TBJ73YZ",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-lean-c6f079d56ecf",
+    "commit": "2fa37b831f28258dc19f71eb189689847aabf114",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "69fbefe440e83b975c1398e11a4b98458588d4396d228f8b5c1cc1cb487e3bb5"
+  },
+  {
+    "variant": "no-recompute",
+    "experiment": "01M2ETY6A3HJGDAB6C62Q0J048",
+    "source": "01M2ETY1QK85C1WM8S1TBJ73YZ",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-no-recompute-1da3c99a6b8f",
+    "commit": "2fa37b831f28258dc19f71eb189689847aabf114",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "69fbefe440e83b975c1398e11a4b98458588d4396d228f8b5c1cc1cb487e3bb5"
+  },
+  {
+    "variant": "optimizer-compile",
+    "experiment": "01M2ETY6Z989H58X34QBQXTERP",
+    "source": "01M2ETY1QK85C1WM8S1TBJ73YZ",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-optimizer-compile-d9218ad5d2ed",
+    "commit": "2fa37b831f28258dc19f71eb189689847aabf114",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "69fbefe440e83b975c1398e11a4b98458588d4396d228f8b5c1cc1cb487e3bb5"
+  },
+  {
+    "variant": "model-compile",
+    "experiment": "01M2ETY7MYN7S5RVM1YYPHTMAV",
+    "source": "01M2ETY1QK85C1WM8S1TBJ73YZ",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-model-compile-7f8f118625ad",
+    "commit": "2fa37b831f28258dc19f71eb189689847aabf114",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "69fbefe440e83b975c1398e11a4b98458588d4396d228f8b5c1cc1cb487e3bb5"
+  },
+  {
+    "variant": "reduce-scatter",
+    "experiment": "01M2ETY8BF776ENTT7ZWQ32VXR",
+    "source": "01M2ETY1QK85C1WM8S1TBJ73YZ",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-reduce-scatter-04031f35450e",
+    "commit": "2fa37b831f28258dc19f71eb189689847aabf114",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "69fbefe440e83b975c1398e11a4b98458588d4396d228f8b5c1cc1cb487e3bb5"
+  },
+  {
+    "variant": "vector-grad-add",
+    "experiment": "01M2EWD3TREEN66GSNKXHXJX9H",
+    "source": "01M2EWD14DY45RMDKECZN03D2N",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-vector-grad-add-fcfe09cfd67d",
+    "commit": "2782881dafcc59f65611aae507ddeecba3757b9e",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "162b8457f527cfe92be9e422fd8d7594a5844c734c93512507c62b97c0785d8a"
+  },
+  {
+    "variant": "pairwise-swiglu",
+    "experiment": "01M2EWD4K3J997MTZGA58F0C2N",
+    "source": "01M2EWD14DY45RMDKECZN03D2N",
+    "output": "/weka/oe-training-default/robertb/open-instruct/throughput-profiles/trainer-pairwise-swiglu-9ad5fc2be5de",
+    "commit": "2782881dafcc59f65611aae507ddeecba3757b9e",
+    "base_image": "01M2CJG5RQQ93GEYNYAS7ASCQJ",
+    "archive_sha256": "162b8457f527cfe92be9e422fd8d7594a5844c734c93512507c62b97c0785d8a"
+  }
+]

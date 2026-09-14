@@ -109,3 +109,15 @@ Final drain inventory is reported separately above.
 
 Warm timelines: [c32](packed-capacity-20260914/packed-2t2i-c32-steady-pipeline.png),
 [c64](packed-capacity-20260914/packed-2t2i-c64-steady-pipeline.png).
+
+The 512/1024 follow-up completed successfully. Warm throughput was 11,033 versus
+11,125 output tokens/s/GPU: less than 1% improvement for twice the concurrency.
+The two 1024 repeats spanned 10,999–11,253 tokens/s, so this is a plateau within
+the observed variation, not evidence of a useful gain. The 512 control was slower
+than the prior experiment's 13,535; pools and maximum captured batch differed,
+so use within-experiment comparisons. Both settings fit, with about 25 GiB free
+after decode graph capture in the follow-up. This supports investigating the
+plateau instead of assuming that more concurrency keeps improving throughput.
+
+The [trainer optimization screen](trainer-capacity-20260914.md) now has its
+first completed matched results and an explicit account of late compilation.
