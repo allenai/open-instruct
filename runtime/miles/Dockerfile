@@ -5,6 +5,8 @@ COPY runtime/miles /opt/core-rl/build/runtime/miles
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/verifier-requirements.txt
 RUN uv pip install --system --no-deps -r /opt/core-rl/build/runtime/miles/opd-requirements.txt
 RUN uv pip install --system --no-deps --target /opt/core-rl/verifier-deps antlr4-python3-runtime==4.11.1
+ENV CUDNN_HOME=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn \
+    CUDNN_PATH=/usr/local/lib/python3.12/dist-packages/nvidia/cudnn
 ENV OPEN_INSTRUCT_MATH_VERIFIER_PYTHONPATH=/opt/core-rl/verifier-deps
 COPY scripts/miles/prepare_runtime.py /opt/core-rl/build/scripts/miles/prepare_runtime.py
 RUN python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources

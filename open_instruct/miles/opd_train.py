@@ -13,7 +13,8 @@ def main():
     env = {
         key: value
         for key, value in os.environ.items()
-        if key.startswith(("OI_OPD_", "MILES_", "WANDB_")) or key in ("PYTHONPATH", "CUDA_DEVICE_MAX_CONNECTIONS")
+        if key.startswith(("OI_OPD_", "MILES_", "WANDB_"))
+        or key in ("PYTHONPATH", "CUDA_DEVICE_MAX_CONNECTIONS", "CUDNN_HOME", "CUDNN_PATH")
     }
     ray.init(num_gpus=3, include_dashboard=False, runtime_env={"env_vars": env})
     try:
