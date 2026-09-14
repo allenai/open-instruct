@@ -121,3 +121,12 @@ plateau instead of assuming that more concurrency keeps improving throughput.
 
 The [trainer optimization screen](trainer-capacity-20260914.md) now has its
 first completed matched results and an explicit account of late compilation.
+
+The [diagnostic c128 repeat](https://beaker.org/ex/01M2EVDZEMJJKGAQNPXSBN8986)
+reproduced the failure after four optimizer updates. It failed while the router
+was awaiting response headers from the engine on port 15000, with 112 requests
+owned by that worker. The exception was `httpcore.ReadError` mapped to
+`httpx.ReadError`, then HTTP 503. The logged chain contains no useful underlying
+socket message. This narrows the boundary to router-to-engine response transport
+but does not identify the root cause. High-concurrency live refresh remains
+unqualified; the successful fixed-policy engine capacity tests bypass this path.
